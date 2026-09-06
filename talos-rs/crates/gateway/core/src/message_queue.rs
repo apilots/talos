@@ -2,8 +2,8 @@ use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
-    MessageQueueUpdateRequest, StartTurnResponse,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
+    StartTurnResponse,
 };
 
 use crate::gateway_service::ServiceGateway;
@@ -55,13 +55,5 @@ impl ServiceGateway {
         request: MessageQueueStartRequest,
     ) -> TalosResult<StartTurnResponse> {
         self.service.start_queued_message(actor, request).await
-    }
-
-    pub(crate) async fn steer_queued_message(
-        &self,
-        actor: &Actor,
-        request: MessageQueueSteerRequest,
-    ) -> TalosResult<MessageQueue> {
-        self.service.steer_queued_message(actor, request).await
     }
 }

@@ -2,21 +2,21 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
+use talos_agent_api::{
+    AgentEvent, AgentEventPayload, AgentTurnRef, AgentTurnStarted, TimelineCursorStatus,
+    TimelineEvent, TimelineReplay,
+};
 use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR};
 use talos_app_protocol::requests::ActorCredentials;
 use talos_service::{
-    Actor, EventReplay, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed,
-    TimelineSubscriptionMessage,
-};
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, TalosTurnStartedEvent, TimelineEventEnvelope,
+    Actor, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
 };
 use talos_types::SubscribeTimelineRequest;
 use tokio::io::{duplex, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, mpsc};
 
 use super::*;
-use crate::application::{ApplicationResult, SubscriptionSource};
+use crate::application::{ApplicationResponse, ApplicationResult};
 use crate::auth::ActorCredentialValidator;
 
 #[derive(Default)]
@@ -24,11 +24,12 @@ struct MockApp {
     dispatched: Mutex<Vec<String>>,
     dispatched_actors: Mutex<Vec<String>>,
     dispatched_auth_disabled: Mutex<Vec<bool>>,
+    session_sources: Mutex<Vec<talos_types::talos::SessionSource>>,
     cancelled: Mutex<Vec<String>>,
     cancelled_turns: Mutex<Vec<String>>,
     cancelled_actors: Mutex<Vec<String>>,
     drained: Mutex<usize>,
-    live_tx: Mutex<Option<broadcast::Sender<TimelineEventEnvelope>>>,
+    live_tx: Mutex<Option<broadcast::Sender<TimelineEvent>>>,
     stream_txs: Mutex<Vec<mpsc::Sender<TimelineSubscriptionMessage>>>,
 }
 
@@ -38,7 +39,7 @@ impl AppServerApplication for MockApp {
         &self,
         actor: &Actor,
         request: talos_app_protocol::requests::ClientRequest,
-    ) -> ApplicationResult<serde_json::Value> {
+    ) -> ApplicationResult<ApplicationResponse> {
         self.dispatched
             .lock()
             .expect("dispatch lock")
@@ -51,15 +52,53 @@ impl AppServerApplication for MockApp {
             .lock()
             .expect("dispatch auth-disabled lock")
             .push(actor.auth_disabled);
-        Ok(match request.params {
-            ClientRequestParams::TurnStart(params) => json!({
-                "request_id": "req-1",
-                "message_id": "msg-1",
-                "session_id": params.session_id,
-                "turn_id": "turn-1",
+        let (body, started_turn) = match request.params {
+            ClientRequestParams::TurnStart(params) => (
+                json!({
+                    "requestId": "req-1",
+                    "messageId": "msg-1",
+                    "sessionId": params.session_id,
+                    "turnId": "turn-1",
+                    "status": "accepted",
+                }),
+                Some(AgentTurnRef::new("s1", "turn-1")),
+            ),
+            _ => (json!({ "ok": true }), None),
+        };
+        Ok(ApplicationResponse { body, started_turn })
+    }
+
+    async fn start_turn(
+        &self,
+        actor: &Actor,
+        source: talos_types::talos::SessionSource,
+        request: talos_types::StartTurnRequest,
+    ) -> ApplicationResult<ApplicationResponse> {
+        self.dispatched
+            .lock()
+            .expect("dispatch lock")
+            .push("turn/start".to_string());
+        self.dispatched_actors
+            .lock()
+            .expect("dispatch actor lock")
+            .push(actor.user_id.clone());
+        self.dispatched_auth_disabled
+            .lock()
+            .expect("dispatch auth-disabled lock")
+            .push(actor.auth_disabled);
+        self.session_sources
+            .lock()
+            .expect("session source lock")
+            .push(source);
+        Ok(ApplicationResponse {
+            body: json!({
+                "requestId": "req-1",
+                "messageId": "msg-1",
+                "sessionId": request.session_id,
+                "turnId": "turn-1",
                 "status": "accepted",
             }),
-            _ => json!({ "ok": true }),
+            started_turn: Some(AgentTurnRef::new("s1", "turn-1")),
         })
     }
 
@@ -67,7 +106,7 @@ impl AppServerApplication for MockApp {
         &self,
         _actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ApplicationResult<SubscriptionSource> {
+    ) -> ApplicationResult<talos_service::TimelineSubscription> {
         let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
         match live_tx {
             Some(_live_tx) => {
@@ -78,24 +117,19 @@ impl AppServerApplication for MockApp {
                     stream_txs.push(_tx);
                     subscription_id
                 };
-                Ok(SubscriptionSource {
-                    response: talos_types::SubscribeTimelineResponse {
-                        subscription_id,
-                        session_id: params.session_id.clone(),
+                Ok(talos_service::TimelineSubscription {
+                    subscription_id,
+                    session_id: params.session_id,
+                    high_water_mark_event_id: None,
+                    replay: TimelineReplay {
+                        events: Vec::new(),
                         high_water_mark_event_id: None,
+                        next_cursor: None,
+                        last_event_seq: 0,
+                        cursor_status: TimelineCursorStatus::FromBeginning,
                     },
-                    subscription: talos_service::TimelineSubscription {
-                        session_id: params.session_id,
-                        high_water_mark_event_id: None,
-                        replay: EventReplay {
-                            events: Vec::new(),
-                            high_water_mark_event_id: None,
-                            last_replay_seq: 0,
-                            cursor_status: talos_service::TimelineCursorStatus::FromBeginning,
-                        },
-                        events,
-                        has_live_turn: false,
-                    },
+                    events,
+                    has_live_turn: false,
                 })
             }
             None => Err(ApiError::new(ErrorCode::ResourceNotFound)),
@@ -226,7 +260,7 @@ async fn dispatches_request_after_initialize() {
     assert!(result_data(&messages[1])["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         app.dispatched.lock().expect("dispatch lock").as_slice(),
-        &["session.get"]
+        &["session/get"]
     );
 }
 
@@ -327,7 +361,7 @@ async fn auth_enabled_dispatches_with_existing_session_token_credentials() {
     assert!(result_data(&messages[1])["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         app.dispatched.lock().expect("dispatch lock").as_slice(),
-        &["session.get"]
+        &["session/get"]
     );
     assert_eq!(
         app.dispatched_actors
@@ -348,7 +382,7 @@ async fn owned_turn_shutdown_uses_business_request_actor() {
     .await;
     let messages = parse_output(&output);
 
-    assert_eq!(result_data(&messages[1])["session_id"], "s1");
+    assert_eq!(result_data(&messages[1])["sessionId"], "s1");
     assert_eq!(
         app.cancelled.lock().expect("cancel lock").as_slice(),
         &["s1"]
@@ -366,6 +400,30 @@ async fn owned_turn_shutdown_uses_business_request_actor() {
             .expect("cancel actor lock")
             .as_slice(),
         &["anonymous"]
+    );
+}
+
+#[tokio::test]
+async fn turn_start_uses_initialized_client_kind_as_session_source() {
+    let app = Arc::new(MockApp::default());
+    let output = run_with_app(
+        format!(
+            "{}{}",
+            initialize_request_for_kind("desktop"),
+            turn_start_request()
+        ),
+        app.clone(),
+    )
+    .await;
+    let messages = parse_output(&output);
+
+    assert_eq!(result_data(&messages[1])["sessionId"], "s1");
+    assert_eq!(
+        app.session_sources
+            .lock()
+            .expect("session source lock")
+            .as_slice(),
+        &[talos_types::talos::SessionSource::desktop()]
     );
 }
 
@@ -391,7 +449,7 @@ async fn idle_subscription_does_not_block_shutdown_after_background_drain() {
     .expect("run_jsonl should not hang on idle subscription");
     let messages = parse_output(&output);
 
-    assert_eq!(result_data(&messages[1])["session_id"], "s1");
+    assert_eq!(result_data(&messages[1])["sessionId"], "s1");
     assert_eq!(*app.drained.lock().expect("drain lock"), 1);
 }
 
@@ -431,14 +489,14 @@ async fn event_unsubscribe_stops_only_target_subscription() {
     let first_subscribe = read_output_line(&mut output).await;
     let second_subscribe = read_output_line(&mut output).await;
     assert_eq!(result_data(&initialize)["protocol_version"]["major"], 0);
-    assert_eq!(result_data(&first_subscribe)["session_id"], "s1");
-    assert_eq!(result_data(&second_subscribe)["session_id"], "s1");
+    assert_eq!(result_data(&first_subscribe)["sessionId"], "s1");
+    assert_eq!(result_data(&second_subscribe)["sessionId"], "s1");
 
-    let first_subscription_id = result_data(&first_subscribe)["subscription_id"]
+    let first_subscription_id = result_data(&first_subscribe)["subscriptionId"]
         .as_str()
         .expect("first subscription id")
         .to_string();
-    let second_subscription_id = result_data(&second_subscribe)["subscription_id"]
+    let second_subscription_id = result_data(&second_subscribe)["subscriptionId"]
         .as_str()
         .expect("second subscription id")
         .to_string();
@@ -447,14 +505,14 @@ async fn event_unsubscribe_stops_only_target_subscription() {
     let senders = app.stream_txs.lock().expect("stream tx lock").clone();
     assert_eq!(senders.len(), 2);
     senders[0]
-        .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-            "ev_1", 1,
+        .send(TimelineSubscriptionMessage::Event(Box::new(
+            timeline_event("ev_1", 1),
         )))
         .await
         .expect("send first subscription event");
     senders[1]
-        .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-            "ev_2", 2,
+        .send(TimelineSubscriptionMessage::Event(Box::new(
+            timeline_event("ev_2", 2),
         )))
         .await
         .expect("send second subscription event");
@@ -462,15 +520,15 @@ async fn event_unsubscribe_stops_only_target_subscription() {
     let first_notification = read_output_line(&mut output).await;
     let second_notification = read_output_line(&mut output).await;
     assert_eq!(
-        first_notification["params"]["subscription_id"],
+        first_notification["params"]["subscriptionId"],
         first_subscription_id
     );
-    assert_eq!(first_notification["params"]["event"]["event_id"], "ev_1");
+    assert_eq!(first_notification["params"]["event"]["eventId"], "ev_1");
     assert_eq!(
-        second_notification["params"]["subscription_id"],
+        second_notification["params"]["subscriptionId"],
         second_subscription_id
     );
-    assert_eq!(second_notification["params"]["event"]["event_id"], "ev_2");
+    assert_eq!(second_notification["params"]["event"]["eventId"], "ev_2");
 
     client_write
         .write_all(event_unsubscribe_request(4, &first_subscription_id).as_bytes())
@@ -478,7 +536,7 @@ async fn event_unsubscribe_stops_only_target_subscription() {
         .expect("write unsubscribe request");
     let unsubscribe = read_output_line(&mut output).await;
     assert_eq!(
-        result_data(&unsubscribe)["subscription_id"],
+        result_data(&unsubscribe)["subscriptionId"],
         first_subscription_id
     );
     assert!(result_data(&unsubscribe)["unsubscribed"]
@@ -486,26 +544,23 @@ async fn event_unsubscribe_stops_only_target_subscription() {
         .unwrap_or(false));
 
     assert!(senders[0]
-        .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-            "ev_3", 3
+        .send(TimelineSubscriptionMessage::Event(Box::new(
+            timeline_event("ev_3", 3)
         )))
         .await
         .is_err());
     senders[1]
-        .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-            "ev_4", 4,
+        .send(TimelineSubscriptionMessage::Event(Box::new(
+            timeline_event("ev_4", 4),
         )))
         .await
         .expect("second subscription should remain active");
     let remaining_notification = read_output_line(&mut output).await;
     assert_eq!(
-        remaining_notification["params"]["subscription_id"],
+        remaining_notification["params"]["subscriptionId"],
         second_subscription_id
     );
-    assert_eq!(
-        remaining_notification["params"]["event"]["event_id"],
-        "ev_4"
-    );
+    assert_eq!(remaining_notification["params"]["event"]["eventId"], "ev_4");
 
     client_write.shutdown().await.expect("shutdown input");
     server_task.await.expect("server join").expect("server run");
@@ -544,7 +599,7 @@ async fn closed_subscription_sends_completed_notification() {
 
     let _initialize = read_output_line(&mut output).await;
     let subscribe = read_output_line(&mut output).await;
-    let subscription_id = result_data(&subscribe)["subscription_id"]
+    let subscription_id = result_data(&subscribe)["subscriptionId"]
         .as_str()
         .expect("subscription id")
         .to_string();
@@ -566,9 +621,9 @@ async fn closed_subscription_sends_completed_notification() {
         .expect("send completed close");
 
     let notification = read_output_line(&mut output).await;
-    assert_eq!(notification["method"], "subscription.terminated");
-    assert_eq!(notification["params"]["subscription_id"], subscription_id);
-    assert_eq!(notification["params"]["session_id"], "s1");
+    assert_eq!(notification["method"], "subscription/terminated");
+    assert_eq!(notification["params"]["subscriptionId"], subscription_id);
+    assert_eq!(notification["params"]["sessionId"], "s1");
     assert_eq!(notification["params"]["reason"], "completed");
 
     client_write.shutdown().await.expect("shutdown input");
@@ -631,7 +686,7 @@ async fn message_queue_change_uses_live_notification_without_subscription_envelo
         notification["params"],
         json!({ "sessionId": "s1", "revision": 7 })
     );
-    assert!(notification["params"].get("subscription_id").is_none());
+    assert!(notification["params"].get("subscriptionId").is_none());
 
     client_write.shutdown().await.expect("shutdown input");
     server_task.await.expect("server join").expect("server run");
@@ -670,7 +725,7 @@ async fn lagged_subscription_close_is_not_reported_as_completed() {
 
     let _initialize = read_output_line(&mut output).await;
     let subscribe = read_output_line(&mut output).await;
-    let subscription_id = result_data(&subscribe)["subscription_id"]
+    let subscription_id = result_data(&subscribe)["subscriptionId"]
         .as_str()
         .expect("subscription id")
         .to_string();
@@ -692,8 +747,8 @@ async fn lagged_subscription_close_is_not_reported_as_completed() {
         .expect("send lagged close");
 
     let notification = read_output_line(&mut output).await;
-    assert_eq!(notification["method"], "subscription.terminated");
-    assert_eq!(notification["params"]["subscription_id"], subscription_id);
+    assert_eq!(notification["method"], "subscription/terminated");
+    assert_eq!(notification["params"]["subscriptionId"], subscription_id);
     assert_eq!(notification["params"]["reason"], "lagged");
 
     client_write.shutdown().await.expect("shutdown input");
@@ -764,6 +819,10 @@ async fn run_with_app_validator_and_frame_limit(
 }
 
 fn initialize_request(_token: &str) -> String {
+    initialize_request_for_kind("sdk")
+}
+
+fn initialize_request_for_kind(kind: &str) -> String {
     format!(
         "{}\n",
         json!({
@@ -773,7 +832,8 @@ fn initialize_request(_token: &str) -> String {
             "params": {
                 "client_info": {
                     "name": "test",
-                    "version": "0.1.5"
+                    "version": "0.1.5",
+                    "kind": kind
                 },
                 "capabilities": {
                     "protocol_version": { "major": 0, "minor": 2 },
@@ -791,8 +851,8 @@ fn session_read_request() -> String {
         json!({
             "jsonrpc": "2.0",
             "id": 2,
-            "method": "session.get",
-            "params": { "session_id": "s1" }
+            "method": "session/get",
+            "params": { "sessionId": "s1" }
         })
     )
 }
@@ -803,14 +863,14 @@ fn session_read_request_with_actor_token(token: &str) -> String {
         json!({
             "jsonrpc": "2.0",
             "id": 2,
-            "method": "session.get",
+            "method": "session/get",
             "actor_credentials": {
                 "credential": {
                     "type": "existing_session_token",
                     "token": token
                 }
             },
-            "params": { "session_id": "s1" }
+            "params": { "sessionId": "s1" }
         })
     )
 }
@@ -821,7 +881,7 @@ fn auth_session_read_request() -> String {
         json!({
             "jsonrpc": "2.0",
             "id": 2,
-            "method": "auth.session.read",
+            "method": "auth/session/read",
             "params": {}
         })
     )
@@ -833,11 +893,17 @@ fn turn_start_request() -> String {
         json!({
             "jsonrpc": "2.0",
             "id": 2,
-            "method": "turn.start",
+            "method": "turn/start",
             "params": {
-                "session_id": "s1",
-                "input": [{ "type": "text", "text": "hello" }],
-                "client_request_id": "request-1"
+                "sessionId": "s1",
+                "input": {
+                    "content": [{ "type": "text", "text": "hello" }]
+                },
+                "modelSelection": null,
+                "userPermissionMode": null,
+                "projectId": null,
+                "currentDirectory": null,
+                "clientRequestId": "request-1"
             }
         })
     )
@@ -863,11 +929,14 @@ fn event_subscribe_request_with_id(id: u64) -> String {
         json!({
             "jsonrpc": "2.0",
             "id": id,
-            "method": "event.subscribe",
+            "method": "event/subscribe",
             "params": {
-                "session_id": "s1",
-                "since_event_id": null,
-                "replay_limit": 1
+                "sessionId": "s1",
+                "turnId": null,
+                "sinceEventId": null,
+                "replayLimit": 1,
+                "closeWhenIdle": null,
+                "closeOnTerminal": null
             }
         })
     )
@@ -879,9 +948,9 @@ fn event_unsubscribe_request(id: u64, subscription_id: &str) -> String {
         json!({
             "jsonrpc": "2.0",
             "id": id,
-            "method": "event.unsubscribe",
+            "method": "event/unsubscribe",
             "params": {
-                "subscription_id": subscription_id
+                "subscriptionId": subscription_id
             }
         })
     )
@@ -899,29 +968,17 @@ where
     serde_json::from_str(&line).expect("json output line")
 }
 
-fn timeline_envelope(event_id: &str, event_seq: i64) -> TimelineEventEnvelope {
+fn timeline_event(event_id: &str, event_seq: i64) -> TimelineEvent {
     let event = AgentEvent {
-        event_seq: Some(event_seq),
-        event_id: Some(event_id.to_string()),
-        created_at_ms: Some(100 + event_seq),
-        event_type: AgentEventType::TurnStarted,
-        turn_id: "turn-1".to_string(),
-        message_id: "msg-1".to_string(),
-        session_id: "s1".to_string(),
+        identity: AgentTurnRef::new("s1", "turn-1"),
         sequence: event_seq as u64,
-        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            started_at_ms: 100 + event_seq as u64,
-        }),
+        occurred_at: 100 + event_seq,
+        payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
     };
-    TimelineEventEnvelope {
+    TimelineEvent {
         event_id: event_id.to_string(),
         event_seq,
-        created_at_ms: 100 + event_seq,
-        session_id: event.session_id.clone(),
-        turn_id: event.turn_id.clone(),
-        message_id: event.message_id.clone(),
+        persisted_at: 100 + event_seq,
         event,
     }
 }

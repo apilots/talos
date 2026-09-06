@@ -10,7 +10,7 @@ use tokio::sync::{oneshot, Notify};
 use tokio::task::AbortHandle;
 
 use crate::{
-    Cancellation, CancellationMode, RunIdentity, RunTermination, Settlement, SettlementKind,
+    Cancellation, CancellationMode, RunControlScope, RunTermination, Settlement, SettlementKind,
 };
 
 const MAX_RUN_TASKS: usize = 256;
@@ -111,7 +111,7 @@ struct RunTaskGroupState {
 }
 
 struct RunTaskGroupInner {
-    identity: RunIdentity,
+    scope: RunControlScope,
     cancellation: Cancellation,
     next_id: AtomicU64,
     state: Mutex<RunTaskGroupState>,
@@ -134,6 +134,11 @@ impl std::fmt::Debug for RunTaskGroup {
 }
 
 impl RunTaskGroup {
+    /// Return the cooperative cancellation signal shared by this task group.
+    pub fn cancellation(&self) -> Cancellation {
+        self.inner.cancellation.clone()
+    }
+
     /// Register one Run-owned task before its factory creates resources.
     pub fn spawn<T, F, Fut>(&self, factory: F) -> Result<RunTask<T>, SpawnError>
     where
@@ -173,8 +178,10 @@ impl RunTaskGroup {
             },
         );
         tracing::info!(
-            session_id = self.inner.identity.session_id,
-            turn_id = self.inner.identity.turn_id,
+            scope_kind = self.inner.scope.kind(),
+            session_id = self.inner.scope.session_id(),
+            turn_id = self.inner.scope.turn_id(),
+            operation_id = self.inner.scope.operation_id(),
             task_id = id,
             active_tasks = state.tasks.len(),
             "run_task_registered"
@@ -183,10 +190,10 @@ impl RunTaskGroup {
         Ok(RunTask { output: output_rx })
     }
 
-    pub(crate) fn new(identity: RunIdentity, cancellation: Cancellation) -> Self {
+    pub(crate) fn new(scope: RunControlScope, cancellation: Cancellation) -> Self {
         Self {
             inner: Arc::new(RunTaskGroupInner {
-                identity,
+                scope,
                 cancellation,
                 next_id: AtomicU64::new(1),
                 state: Mutex::new(RunTaskGroupState {
@@ -211,8 +218,10 @@ impl RunTaskGroup {
         }
         if cancellation_requested {
             tracing::info!(
-                session_id = self.inner.identity.session_id,
-                turn_id = self.inner.identity.turn_id,
+                scope_kind = self.inner.scope.kind(),
+                session_id = self.inner.scope.session_id(),
+                turn_id = self.inner.scope.turn_id(),
+                operation_id = self.inner.scope.operation_id(),
                 active_tasks = self.active_count(),
                 grace_ms = timeout.as_millis(),
                 "run_cancellation_requested"
@@ -221,8 +230,10 @@ impl RunTaskGroup {
         }
 
         tracing::info!(
-            session_id = self.inner.identity.session_id,
-            turn_id = self.inner.identity.turn_id,
+            scope_kind = self.inner.scope.kind(),
+            session_id = self.inner.scope.session_id(),
+            turn_id = self.inner.scope.turn_id(),
+            operation_id = self.inner.scope.operation_id(),
             termination = ?termination,
             active_tasks = self.active_count(),
             "run_settlement_started"
@@ -239,8 +250,10 @@ impl RunTaskGroup {
         }
 
         tracing::warn!(
-            session_id = self.inner.identity.session_id,
-            turn_id = self.inner.identity.turn_id,
+            scope_kind = self.inner.scope.kind(),
+            session_id = self.inner.scope.session_id(),
+            turn_id = self.inner.scope.turn_id(),
+            operation_id = self.inner.scope.operation_id(),
             termination = ?termination,
             active_tasks = self.active_count(),
             elapsed_ms = timeout.as_millis(),
@@ -292,8 +305,10 @@ impl RunTaskGroup {
             push_failure(&mut state, failure);
         }
         tracing::info!(
-            session_id = self.inner.identity.session_id,
-            turn_id = self.inner.identity.turn_id,
+            scope_kind = self.inner.scope.kind(),
+            session_id = self.inner.scope.session_id(),
+            turn_id = self.inner.scope.turn_id(),
+            operation_id = self.inner.scope.operation_id(),
             task_id = id,
             cleanup_outcome = ?cleanup_outcome,
             duration_ms = entry.started_at.elapsed().as_millis(),
@@ -310,8 +325,10 @@ impl RunTaskGroup {
         for (id, entry) in unfinished {
             entry.abort_handle.abort();
             tracing::warn!(
-                session_id = self.inner.identity.session_id,
-                turn_id = self.inner.identity.turn_id,
+                scope_kind = self.inner.scope.kind(),
+                session_id = self.inner.scope.session_id(),
+                turn_id = self.inner.scope.turn_id(),
+                operation_id = self.inner.scope.operation_id(),
                 task_id = id,
                 cleanup_outcome = ?CleanupOutcome::Unconfirmed,
                 duration_ms = entry.started_at.elapsed().as_millis(),

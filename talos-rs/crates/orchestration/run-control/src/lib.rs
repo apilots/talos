@@ -4,7 +4,7 @@ mod task_group;
 
 pub use cancellation::Cancellation;
 pub use control::{
-    ActiveRunControl, CancellationMode, CancellationPolicy, RunIdentity, RunTermination,
+    ActiveRunControl, CancellationMode, CancellationPolicy, RunControlScope, RunTermination,
     Settlement, SettlementKind,
 };
 pub use task_group::{

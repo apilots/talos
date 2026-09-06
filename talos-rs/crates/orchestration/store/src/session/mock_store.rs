@@ -1,13 +1,16 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
 use talos_error::TalosResult;
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
+use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
-use super::{SessionQuery, SessionRecord, SessionStore, SessionSummary, SessionTreeIdentity};
+use super::{
+    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord, SessionStore,
+    SessionSummary, SessionTreeIdentity,
+};
 
 pub struct MockSessionStore {
-    memory_processed_until_seq: AtomicU64,
+    memory_processed_until_event_seq: AtomicU64,
 }
 
 impl Default for MockSessionStore {
@@ -19,18 +22,22 @@ impl Default for MockSessionStore {
 impl MockSessionStore {
     pub fn new() -> Self {
         Self {
-            memory_processed_until_seq: AtomicU64::new(0),
+            memory_processed_until_event_seq: AtomicU64::new(0),
         }
     }
 }
 
 #[async_trait]
 impl SessionStore for MockSessionStore {
-    async fn insert_session_record(
+    async fn set_generated_title(
         &self,
-        _record: &SessionRecord,
-        _scope: &str,
-    ) -> TalosResult<()> {
+        _identity: &talos_agent_api::AgentTurnRef,
+        _title: &str,
+    ) -> TalosResult<bool> {
+        Ok(false)
+    }
+
+    async fn insert_session_record(&self, _record: &SessionRecord) -> TalosResult<()> {
         Ok(())
     }
 
@@ -41,23 +48,18 @@ impl SessionStore for MockSessionStore {
             tree_identity: SessionTreeIdentity::Primary,
             title: DEFAULT_SESSION_TITLE.to_string(),
             user_id: "mock-user".to_string(),
-            context: TalosContext {
-                source_type: TalosSourceType::System,
-                provider: TalosProvider::System,
-                user_id: "mock-user".to_string(),
-                message_id: "message-mock".to_string(),
-                trace_id: "trace-mock".to_string(),
-                channel_id: Some("default".to_string()),
-                thread_id: None,
-                project_root: None,
-                environment: None,
-            },
-            model: "default".to_string(),
+            source_type: SessionSourceType::System,
+            source_provider: SessionSourceProvider::System,
+            channel_id: Some("default".to_string()),
+            thread_id: None,
+            environment: None,
             created_at: 0,
             last_activity: 0,
             message_count: 0,
-            latest_turn_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
-            memory_processed_until_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
+            latest_turn_seq: 0,
+            memory_processed_until_event_seq: self
+                .memory_processed_until_event_seq
+                .load(Ordering::SeqCst),
             usage: talos_types::SessionUsage::default(),
             conf: SessionConf::default(),
             workspace_id: "default".to_string(),
@@ -90,7 +92,41 @@ impl SessionStore for MockSessionStore {
         Ok(false)
     }
 
-    async fn update_session_record(&self, _record: &SessionRecord) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+        Ok(false)
+    }
+
+    async fn patch_session(
+        &self,
+        params: PatchSessionParams,
+    ) -> TalosResult<Option<SessionRecord>> {
+        let mut record = self.get_session_record(&params.session_id).await?.unwrap();
+        record.conf = params.conf;
+        record.current_directory = params.current_directory;
+        record.last_activity = params.last_activity;
+        if params.reset_context_usage {
+            record.usage.context = None;
+        }
+        Ok(Some(record))
+    }
+
+    async fn accumulate_session_usage(
+        &self,
+        params: AccumulateSessionUsageParams,
+    ) -> TalosResult<Option<SessionRecord>> {
+        let mut record = self.get_session_record(&params.session_id).await?.unwrap();
+        record.usage.tokens.accumulate(&params.tokens);
+        record.last_activity = params.last_activity;
+        Ok(Some(record))
+    }
+
+    async fn clear_session_history(
+        &self,
+        _session_id: &str,
+        _cleared_at: u64,
+    ) -> TalosResult<bool> {
+        self.memory_processed_until_event_seq
+            .store(0, Ordering::SeqCst);
         Ok(true)
     }
 
@@ -102,13 +138,13 @@ impl SessionStore for MockSessionStore {
         Ok(true)
     }
 
-    async fn advance_memory_processed_until_seq(
+    async fn advance_memory_processed_until_event_seq(
         &self,
         _session_id: &str,
         expected_until_seq: u64,
         next_until_seq: u64,
     ) -> TalosResult<()> {
-        match self.memory_processed_until_seq.compare_exchange(
+        match self.memory_processed_until_event_seq.compare_exchange(
             expected_until_seq,
             next_until_seq,
             Ordering::SeqCst,

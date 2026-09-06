@@ -8,16 +8,16 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
         total_tokens: 5,
         ..TokenUsage::default()
     };
-    let runtime = Arc::new(TestSessionRuntime {
+    let coordinator = Arc::new(TestAgentCoordinator {
         cancel_mode: TestCancelMode::Cancelled,
         cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
         compaction_usage: compaction_usage.clone(),
     });
-    let (service, store) = test_application_with_runtime(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
+    let (service, store) = test_application_with_coordinator(
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
         }),
-        runtime,
+        coordinator,
         configured_test_config(),
     )
     .await;
@@ -27,23 +27,29 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
     service
         .create_session(
             &actor,
-            create_session_params(session_id, request_context(), None),
+            create_session_params(session_id, request_source(), None),
         )
         .await
         .unwrap();
 
     let measured_context = talos_types::ContextUsage::new(20, 100, 80, 1).unwrap();
-    let mut record = store.get_session_record(session_id).await.unwrap().unwrap();
-    record.usage = talos_types::SessionUsage {
-        tokens: TokenUsage {
-            input_tokens: 10,
-            output_tokens: 4,
-            total_tokens: 14,
-            ..TokenUsage::default()
-        },
-        context: Some(measured_context.clone()),
-    };
-    store.update_session_record(&record).await.unwrap();
+    store
+        .accumulate_session_usage(AccumulateSessionUsageParams {
+            session_id: session_id.to_string(),
+            tokens: TokenUsage {
+                input_tokens: 10,
+                output_tokens: 4,
+                total_tokens: 14,
+                ..TokenUsage::default()
+            },
+            last_activity: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_context_usage(session_id, &measured_context)
+        .await
+        .unwrap();
 
     let compacted = service.compact_session(&actor, session_id).await.unwrap();
     let reloaded = service.get_session(&actor, session_id).await.unwrap();
@@ -59,7 +65,7 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
     };
 
     assert_eq!(
-        [compacted.state.usage, reloaded.state.usage, stored.usage],
+        [compacted.usage, reloaded.usage, stored.usage],
         [expected.clone(), expected.clone(), expected]
     );
     let profile = service.profile.read_profile(&actor).await.unwrap();
@@ -69,10 +75,10 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
 }
 
 #[tokio::test]
-async fn explicit_compaction_persists_the_existing_timeline_events() {
+async fn explicit_compaction_persists_one_canonical_lifecycle() {
     let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
         }),
         configured_test_config(),
     )
@@ -81,7 +87,7 @@ async fn explicit_compaction_persists_the_existing_timeline_events() {
     service
         .create_session(
             &actor,
-            create_session_params("session-compact-events", request_context(), None),
+            create_session_params("session-compact-events", request_source(), None),
         )
         .await
         .expect("session should be created");
@@ -90,7 +96,7 @@ async fn explicit_compaction_persists_the_existing_timeline_events() {
         .compact_session(&actor, "session-compact-events")
         .await
         .expect("compaction should complete");
-    assert_eq!(session.state.message_count, 0);
+    assert_eq!(session.message_count, 0);
 
     let recovery = service
         .events
@@ -98,91 +104,37 @@ async fn explicit_compaction_persists_the_existing_timeline_events() {
         .await
         .expect("compaction timeline should be recoverable");
     let events = recovery.replay.events;
-    assert_eq!(events.len(), 5);
-    assert_eq!(
-        events
-            .iter()
-            .map(|event| event.event.event_type)
-            .collect::<Vec<_>>(),
-        vec![
-            talos_types::talos::AgentEventType::TurnStarted,
-            talos_types::talos::AgentEventType::ItemStarted,
-            talos_types::talos::AgentEventType::ItemDelta,
-            talos_types::talos::AgentEventType::ItemCompleted,
-            talos_types::talos::AgentEventType::TurnCompleted,
-        ]
-    );
-    assert!(events.iter().all(|event| {
-        event.session_id == "session-compact-events"
-            && event.turn_id.starts_with("turn_")
-            && event.message_id.starts_with("msg_")
-            && event.turn_id.strip_prefix("turn_") == event.message_id.strip_prefix("msg_")
-    }));
-    let request_id = match &events[0].event.payload {
-        AgentEventPayload::TurnStarted(payload) => payload.request_id.as_str(),
-        _ => unreachable!("first compaction event should start the maintenance turn"),
-    };
-    assert_eq!(
-        request_id.strip_prefix("req_"),
-        events[0].turn_id.strip_prefix("turn_")
-    );
-    assert_eq!(
-        recovery.active_turn.status,
-        talos_types::TimelineActiveTurnStatus::Completed
-    );
-}
-
-#[tokio::test]
-async fn explicit_compaction_records_terminal_after_an_intermediate_event_failure() {
-    let runtime = Arc::new(TestSessionRuntime {
-        cancel_mode: TestCancelMode::Cancelled,
-        cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
-        compaction_usage: TokenUsage::default(),
-    });
-    let (service, store) = test_application_with_runtime_and_event_failure(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        runtime,
-        configured_test_config(),
-        Some(2),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    let session_id = "session-compact-event-failure";
-    service
-        .create_session(
-            &actor,
-            create_session_params(session_id, request_context(), None),
-        )
-        .await
-        .expect("session should be created");
-
-    let error = service
-        .compact_session(&actor, session_id)
-        .await
-        .expect_err("the first persistence error should be returned");
-
-    assert!(error.is_internal());
-    assert_eq!(
-        error.diagnostic_message(),
-        "injected compaction event persistence failure"
-    );
-    assert_eq!(
-        store
-            .get_active_turn(session_id)
-            .await
-            .expect("active turn read")
-            .expect("compaction active turn")
-            .status,
-        ActiveTurnStatus::Completed
-    );
-    let events = store
-        .list_events_after(session_id, None, 16)
-        .await
-        .expect("persisted compaction events");
-    assert_eq!(
-        events.last().map(|event| event.event_type),
-        Some(talos_types::talos::AgentEventType::TurnCompleted)
-    );
+    assert_eq!(events.len(), 7);
+    assert!(matches!(
+        events[0].event.payload,
+        CanonicalAgentEventPayload::TurnStarted(_)
+    ));
+    assert!(matches!(
+        events[1].event.payload,
+        CanonicalAgentEventPayload::MessageStarted(_)
+    ));
+    assert!(matches!(
+        events[2].event.payload,
+        CanonicalAgentEventPayload::MessageBlockStarted(_)
+    ));
+    assert!(matches!(
+        events[3].event.payload,
+        CanonicalAgentEventPayload::MessageBlockDelta(_)
+    ));
+    assert!(matches!(
+        events[4].event.payload,
+        CanonicalAgentEventPayload::MessageBlockCompleted(_)
+    ));
+    assert!(matches!(
+        events[5].event.payload,
+        CanonicalAgentEventPayload::MessageCompleted(_)
+    ));
+    assert!(matches!(
+        events[6].event.payload,
+        CanonicalAgentEventPayload::TurnCompleted(_)
+    ));
+    let identity = &events[0].event.identity;
+    assert_eq!(identity.session_id, "session-compact-events");
+    assert!(events.iter().all(|event| event.event.identity == *identity));
+    assert_eq!(recovery.active_turn, None);
 }

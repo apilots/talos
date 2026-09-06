@@ -1,6 +1,4 @@
-use talos_sdk::{ModelRef, ModelSelection, StartTurnRequest, TalosInputItem};
-
-use super::test_talos_context;
+use talos_sdk::{AgentUserContent, AgentUserInput, ModelRef, ModelSelection, StartTurnRequest};
 
 pub(super) fn start_turn_request(
     session_id: &str,
@@ -9,10 +7,11 @@ pub(super) fn start_turn_request(
 ) -> StartTurnRequest {
     StartTurnRequest {
         session_id: session_id.to_string(),
-        input: vec![TalosInputItem::Text {
-            text: text.to_string(),
-        }],
-        context: Some(test_talos_context()),
+        input: AgentUserInput {
+            content: vec![AgentUserContent::Text {
+                text: text.to_string(),
+            }],
+        },
         model_selection: test_model_ref().map(ModelSelection::without_reasoning),
         user_permission_mode: None,
         project_id: None,

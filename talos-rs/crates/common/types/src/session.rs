@@ -1,6 +1,5 @@
 use crate::model::{ModelSelection, TalosConfig};
 use crate::talos;
-use crate::turn_api::TimelineActiveTurnSnapshot;
 use crate::user_action::UserPermissionMode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -44,38 +43,6 @@ pub fn deterministic_session_title(first_user_text: &str) -> String {
 pub fn session_title_or_fallback(generated: String, first_user_text: &str) -> String {
     normalize_session_title(&generated)
         .unwrap_or_else(|| deterministic_session_title(first_user_text))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionContext {
-    pub session_id: String,
-    pub workspace_id: String,
-    pub source_type: talos::TalosSourceType,
-    pub provider: talos::TalosProvider,
-    pub user_id: String,
-    pub message_id: String,
-    pub trace_id: String,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub current_directory: Option<PathBuf>,
-    #[serde(skip_serializing, skip_deserializing)]
-    pub project_root: Option<PathBuf>,
-    #[serde(default)]
-    pub environment: Option<talos::TalosSessionEnvironment>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionState {
-    pub created_at: u64,
-    pub last_activity: u64,
-    pub message_count: u64,
-    #[serde(default)]
-    pub usage: SessionUsage,
 }
 
 /// Session-owned usage combining cumulative token accounting with the latest context snapshot.
@@ -122,23 +89,6 @@ impl ContextUsage {
     pub fn used_percent(&self) -> f64 {
         f64::from(self.used_tokens) / f64::from(self.context_window_tokens) * 100.0
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TalosSession {
-    pub agent_id: String,
-    pub title: String,
-    pub user_id: String,
-    pub context: SessionContext,
-    #[serde(default)]
-    pub conf: SessionConf,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub current_directory: Option<PathBuf>,
-    pub config: TalosConfig,
-    pub effective_user_permission_mode: UserPermissionMode,
-    pub state: SessionState,
 }
 
 /// Applies and validates per-session configuration overrides.
@@ -225,26 +175,9 @@ impl SessionConfigOverridePolicy {
     }
 }
 
-impl TalosSession {
-    pub fn has_real_title(&self) -> bool {
-        let normalized = self.title.trim();
-        !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
-    }
-
-    pub fn apply_turn_progress(
-        &mut self,
-        assistant_model: &str,
-        message_delta: u64,
-        usage: &talos::TokenUsage,
-    ) {
-        self.state.last_activity = crate::now();
-        self.state.message_count = self.state.message_count.saturating_add(message_delta);
-        self.state.usage.tokens.accumulate(usage);
-        self.config.llm.model = assistant_model.to_string();
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionListRequest {
     #[serde(default)]
     pub project_id: Option<String>,
@@ -255,22 +188,23 @@ pub struct SessionListRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,
     pub title: String,
     pub user_id: String,
-    pub source_type: talos::TalosSourceType,
-    pub provider: talos::TalosProvider,
-    #[serde(rename = "modelSelection")]
+    pub source_type: talos::SessionSourceType,
+    pub source_provider: talos::SessionSourceProvider,
     pub model_selection: ModelSelection,
-    #[serde(rename = "configuredDefaultMode")]
     pub configured_default_mode: UserPermissionMode,
-    #[serde(rename = "effectiveMode")]
     pub effective_mode: UserPermissionMode,
     #[ts(type = "number")]
     pub created_at: u64,
@@ -281,98 +215,74 @@ pub struct SessionInfo {
     #[serde(default)]
     pub usage: SessionUsage,
     #[serde(default)]
-    #[ts(optional)]
+    #[ts(type = "string | null")]
     pub project_id: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
+    #[ts(type = "string | null")]
     pub current_directory: Option<PathBuf>,
 }
 
-impl From<&TalosSession> for SessionInfo {
-    fn from(session: &TalosSession) -> Self {
-        Self {
-            id: session.context.session_id.clone(),
-            title: session.title.clone(),
-            user_id: session.user_id.clone(),
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            model_selection: session
-                .conf
-                .model_selection
-                .clone()
-                .expect("loaded sessions must have an explicit model selection"),
-            configured_default_mode: UserPermissionMode::from(
-                &session
-                    .config
-                    .agent
-                    .kernel
-                    .tools
-                    .sandbox_policy
-                    .user_permission_mode,
-            ),
-            effective_mode: session.effective_user_permission_mode,
-            created_at: session.state.created_at,
-            last_activity: session.state.last_activity,
-            message_count: session.state.message_count,
-            usage: session.state.usage.clone(),
-            project_id: session.project_id.clone(),
-            current_directory: session.current_directory.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionGetRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionGetResponse {
     pub session: SessionInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionDeleteRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionCloseRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionCompactRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionClearRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionActiveTurnRequest {
     pub session_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
-pub struct SessionActiveTurnResponse {
-    pub active_turn: TimelineActiveTurnSnapshot,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionHistoryRequest {
     pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
-pub struct SessionHistoryResponse {
-    pub history: talos::SessionHistorySnapshot,
+    pub cursor: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionPatchRequest {
     #[serde(default)]
     pub session_id: String,
@@ -392,26 +302,36 @@ impl SessionPatchRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionUpdateResponse {
     pub session: SessionInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionDeleteResponse {
     pub success: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionCloseResponse {
     pub success: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionClearResponse {
     pub session: SessionInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct SessionCompactResponse {
     pub session: SessionInfo,
 }
@@ -564,19 +484,11 @@ pub struct ProjectPatch {
     pub name: Option<String>,
 }
 
-pub fn connection_mode_from_context(context: &talos::TalosContext) -> talos::TalosConnectionMode {
-    context
-        .environment
-        .as_ref()
-        .map(|environment| environment.connection_mode)
-        .unwrap_or_default()
-}
-
 pub fn normalize_current_directory(
-    context: &talos::TalosContext,
+    connection_mode: talos::TalosConnectionMode,
     current_directory: Option<PathBuf>,
 ) -> crate::TalosResult<Option<PathBuf>> {
-    match connection_mode_from_context(context) {
+    match connection_mode {
         talos::TalosConnectionMode::Remote => Ok(None),
         talos::TalosConnectionMode::Embedded => {
             let Some(path) = current_directory else {
@@ -590,31 +502,6 @@ pub fn normalize_current_directory(
 
 pub fn validate_project_directory(directory: &std::path::Path) -> crate::TalosResult<()> {
     validate_project_directory_with_label(directory, "project directory")
-}
-
-pub fn resolve_effective_project_root(
-    session: &TalosSession,
-    project_directory: Option<PathBuf>,
-    workspace_root: Option<PathBuf>,
-) -> Option<PathBuf> {
-    if let Some(directory) = project_directory {
-        return Some(directory);
-    }
-
-    if matches!(
-        session
-            .context
-            .environment
-            .as_ref()
-            .map(|environment| environment.connection_mode),
-        Some(talos::TalosConnectionMode::Embedded)
-    ) {
-        if let Some(current_directory) = session.current_directory.clone() {
-            return Some(current_directory);
-        }
-    }
-
-    workspace_root
 }
 
 fn validate_project_directory_with_label(

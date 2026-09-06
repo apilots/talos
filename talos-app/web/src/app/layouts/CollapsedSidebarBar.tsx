@@ -36,7 +36,7 @@ export function CollapsedSidebarBar({ onOpenSidebar }: CollapsedSidebarBarProps)
     ? location.pathname.slice("/sessions/".length)
     : null;
   const session = sessionId ? sessionsQuery.data?.find((entry) => entry.id === sessionId) : undefined;
-  const project = session?.project_id ? projects.find((entry) => entry.id === session.project_id) : undefined;
+  const project = session?.projectId ? projects.find((entry) => entry.id === session.projectId) : undefined;
   const title = session?.title ?? staticPageTitle(location.pathname);
 
   return (

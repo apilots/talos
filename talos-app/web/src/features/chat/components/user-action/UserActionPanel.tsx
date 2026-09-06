@@ -1,5 +1,5 @@
 import type {
-  TalosPendingUserAction,
+  PendingUserAction,
   UserActionResponse,
 } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
@@ -8,7 +8,7 @@ import { QuestionPanel } from "./QuestionPanel";
 import { SandboxApprovalPanel } from "./SandboxApprovalPanel";
 
 interface UserActionPanelProps {
-  action: TalosPendingUserAction;
+  action: PendingUserAction;
   disabled?: boolean;
   error?: string;
   onSubmit: (response: UserActionResponse) => void;

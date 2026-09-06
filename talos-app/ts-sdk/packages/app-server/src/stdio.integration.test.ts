@@ -35,40 +35,36 @@ describeIntegration("StdioAppServerClient integration", () => {
 
     const sessionId = crypto.randomUUID();
 
-    const events: AppProtocol.TimelineEventEnvelope[] = [];
+    const events: AppProtocol.TimelineEvent[] = [];
     const unsubscribe = client.onEvent((event) => events.push(event));
     try {
       await client.subscribeEvents({
-        session_id: sessionId,
-        turn_id: null,
-        since_event_id: null,
-        replay_limit: 50,
-        close_when_idle: null,
-        close_on_terminal: null,
+        sessionId,
+        turnId: null,
+        sinceEventId: null,
+        replayLimit: 50,
+        closeWhenIdle: null,
+        closeOnTerminal: null,
       });
       await client.startTurn({
-        session_id: sessionId,
-        input: [{ type: "text", text: "Answer exactly: ts-sdk-app-server-ok" }],
-        context: {
-          source_type: "cli",
-          provider: "cli",
-          user_id: "ts-sdk-integration",
-          channel_id: "ts-sdk-integration",
-          thread_id: null,
-          message_id: `msg_${Date.now()}`,
-          trace_id: `trace_${Date.now()}`,
-          project_root: null,
-          environment: null,
-        },
-        client_request_id: "ts-sdk-app-server-smoke",
+        sessionId,
+        input: { content: [{ type: "text", text: "Answer exactly: ts-sdk-app-server-ok" }] },
+        modelSelection: null,
+        userPermissionMode: null,
+        projectId: null,
+        currentDirectory: null,
+        clientRequestId: "ts-sdk-app-server-smoke",
       });
-      await waitFor(() => events.some((event) => event.event.event_type === "turn_completed"), 90_000);
+      await waitFor(
+        () => events.some((event) => event.event.payload.type === "turnCompleted"),
+        90_000,
+      );
     } finally {
       unsubscribe();
     }
 
-    expect(events.some((event) => event.event.event_type === "turn_started")).toBe(true);
-    expect(events.some((event) => event.event.event_type === "item_delta")).toBe(true);
+    expect(events.some((event) => event.event.payload.type === "turnStarted")).toBe(true);
+    expect(events.some((event) => event.event.payload.type === "messageBlockDelta")).toBe(true);
   }, 120_000);
 });
 

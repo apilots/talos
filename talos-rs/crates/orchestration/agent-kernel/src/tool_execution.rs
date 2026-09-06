@@ -74,8 +74,6 @@ pub struct ToolExecutionOutput {
 
 #[async_trait]
 pub trait ToolExecutor: Send + Sync {
-    fn mode(&self) -> ToolExecutionMode;
-
     async fn execute(
         &self,
         _execution_context: &ToolExecutionContext,
@@ -325,10 +323,6 @@ fn structured_tool_failure(
 
 #[async_trait]
 impl ToolExecutor for SequentialToolExecutor {
-    fn mode(&self) -> ToolExecutionMode {
-        ToolExecutionMode::Sequential
-    }
-
     async fn execute(
         &self,
         execution_context: &ToolExecutionContext,
@@ -367,10 +361,6 @@ impl ParallelToolExecutor {
 
 #[async_trait]
 impl ToolExecutor for ParallelToolExecutor {
-    fn mode(&self) -> ToolExecutionMode {
-        ToolExecutionMode::Parallel
-    }
-
     async fn execute(
         &self,
         execution_context: &ToolExecutionContext,
@@ -467,7 +457,7 @@ pub struct StreamingToolScheduler {
     max_parallelism: usize,
     execution_context: ToolExecutionContext,
     registry: Arc<dyn ToolExecutorPort>,
-    stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+    stream_tx: Option<mpsc::Sender<crate::AgentKernelEvent>>,
     pending_calls: VecDeque<ScheduledStreamingToolCall>,
     running_tasks: JoinSet<(RunningStreamingToolCall, ToolExecutionOutput)>,
     parallel_running: usize,
@@ -481,7 +471,7 @@ impl StreamingToolScheduler {
         max_parallelism: usize,
         execution_context: ToolExecutionContext,
         registry: Arc<dyn ToolExecutorPort>,
-        stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+        stream_tx: Option<mpsc::Sender<crate::AgentKernelEvent>>,
     ) -> Self {
         let max_parallelism = match execution_mode {
             ToolExecutionMode::Sequential => 1,
@@ -675,9 +665,8 @@ impl StreamingToolScheduler {
         let tool_name = scheduled.input.tool_name.clone();
         Some(ToolProgressEmitter::new(move |event: ToolProgressEvent| {
             let progress_kind = map_tool_progress_kind(event.kind);
-            let _ = stream_tx.try_send(crate::KernelStreamEvent::new(
-                crate::KernelStreamEventType::ToolProgressDelta,
-                crate::KernelStreamEventData::ToolProgressDelta(
+            let _ = stream_tx.try_send(crate::AgentKernelEvent::new(
+                crate::AgentKernelEventPayload::ToolProgressDelta(
                     crate::ToolProgressDeltaStreamData {
                         stream_key: stream_key.clone(),
                         call_id: call_id.clone(),
@@ -710,8 +699,7 @@ impl StreamingToolScheduler {
     async fn emit_queued_event(&self, scheduled: &ScheduledStreamingToolCall) {
         emit_stream_event(
             self.stream_tx.as_ref(),
-            crate::KernelStreamEventType::ToolQueued,
-            crate::KernelStreamEventData::ToolQueued(crate::ToolQueuedStreamData {
+            crate::AgentKernelEventPayload::ToolQueued(crate::ToolQueuedStreamData {
                 stream_key: scheduled.stream_key.clone(),
                 call_id: scheduled.input.call_id.clone(),
                 tool_name: scheduled.input.tool_name.clone(),
@@ -721,8 +709,7 @@ impl StreamingToolScheduler {
         if self.parallel_running > 0 || self.serial_running {
             emit_stream_event(
                 self.stream_tx.as_ref(),
-                crate::KernelStreamEventType::ToolProgressDelta,
-                crate::KernelStreamEventData::ToolProgressDelta(
+                crate::AgentKernelEventPayload::ToolProgressDelta(
                     crate::ToolProgressDeltaStreamData {
                         stream_key: scheduled.stream_key.clone(),
                         call_id: scheduled.input.call_id.clone(),
@@ -739,8 +726,7 @@ impl StreamingToolScheduler {
     async fn emit_executing_event(&self, scheduled: &ScheduledStreamingToolCall) {
         emit_stream_event(
             self.stream_tx.as_ref(),
-            crate::KernelStreamEventType::ToolExecuting,
-            crate::KernelStreamEventData::ToolExecuting(crate::ToolExecutingStreamData {
+            crate::AgentKernelEventPayload::ToolExecuting(crate::ToolExecutingStreamData {
                 stream_key: scheduled.stream_key.clone(),
                 call_id: scheduled.input.call_id.clone(),
                 tool_name: scheduled.input.tool_name.clone(),
@@ -749,8 +735,7 @@ impl StreamingToolScheduler {
         .await;
         emit_stream_event(
             self.stream_tx.as_ref(),
-            crate::KernelStreamEventType::ToolProgressDelta,
-            crate::KernelStreamEventData::ToolProgressDelta(crate::ToolProgressDeltaStreamData {
+            crate::AgentKernelEventPayload::ToolProgressDelta(crate::ToolProgressDeltaStreamData {
                 stream_key: scheduled.stream_key.clone(),
                 call_id: scheduled.input.call_id.clone(),
                 tool_name: scheduled.input.tool_name.clone(),
@@ -763,14 +748,11 @@ impl StreamingToolScheduler {
 }
 
 async fn emit_stream_event(
-    stream_tx: Option<&mpsc::Sender<crate::KernelStreamEvent>>,
-    event_type: crate::KernelStreamEventType,
-    data: crate::KernelStreamEventData,
+    stream_tx: Option<&mpsc::Sender<crate::AgentKernelEvent>>,
+    payload: crate::AgentKernelEventPayload,
 ) {
     if let Some(tx) = stream_tx {
-        let _ = tx
-            .send(crate::KernelStreamEvent::new(event_type, data))
-            .await;
+        let _ = tx.send(crate::AgentKernelEvent::new(payload)).await;
     }
 }
 

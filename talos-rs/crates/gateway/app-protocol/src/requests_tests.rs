@@ -1,22 +1,14 @@
 use super::*;
 use serde_json::json;
-use talos_types::talos::TalosInputItem;
-use talos_types::{QuestionAnswer, SubmitUserActionRequest, UserActionResponse};
-
-#[test]
-fn method_parses_dot_name() {
-    assert_eq!(
-        ClientMethod::from_str("turn.start").unwrap(),
-        ClientMethod::TurnStart
-    );
-}
+use talos_agent_api::{SubmitTurnInput, SubmitTurnInputRequest};
+use talos_types::{AgentTurnRef, QuestionAnswer, UserActionResponse};
 
 #[test]
 fn decodes_typed_request_params() {
     let request = ClientRequest::decode(
-        "session.get",
+        "session/get",
         Some(json!({
-            "session_id": "s1"
+            "sessionId": "s1"
         })),
     )
     .unwrap();
@@ -28,10 +20,10 @@ fn decodes_typed_request_params() {
 
 #[test]
 fn session_patch_rejects_immutable_binding_fields() {
-    for field in ["user_id", "workspace_id", "agent_id", "project_id"] {
-        let mut params = json!({ "session_id": "s1" });
+    for field in ["userId", "workspaceId", "agentId", "projectId"] {
+        let mut params = json!({ "sessionId": "s1" });
         params[field] = json!("forbidden");
-        let error = ClientRequest::decode("session.patch", Some(params))
+        let error = ClientRequest::decode("session/patch", Some(params))
             .expect_err("immutable Session bindings must be rejected");
 
         assert!(error.to_string().contains("unknown field"));
@@ -39,30 +31,35 @@ fn session_patch_rejects_immutable_binding_fields() {
 }
 
 #[test]
-fn decodes_canonical_user_action_submission() {
+fn decodes_canonical_turn_input() {
     let request = ClientRequest::decode(
-        "userAction/submit",
+        "turn/input",
         Some(json!({
-            "sessionId": "s1",
-            "turnId": "turn-1",
-            "actionId": "action-1",
-            "response": {
-                "type": "question",
-                "response": { "type": "selectedOption", "optionId": "continue" }
-            }
+            "identity": { "sessionId": "s1", "turnId": "turn-1" },
+            "input": {
+                "type": "userActionResponse",
+                "actionId": "action-1",
+                "response": {
+                    "type": "question",
+                    "response": { "type": "selectedOption", "optionId": "continue" }
+                }
+            },
+            "clientRequestId": null
         })),
     )
-    .expect("user action submission should decode");
+    .expect("Turn input should decode");
 
     assert_eq!(
         request.params,
-        ClientRequestParams::UserActionSubmit(SubmitUserActionRequest {
-            session_id: "s1".to_string(),
-            turn_id: "turn-1".to_string(),
-            action_id: "action-1".to_string(),
-            response: UserActionResponse::Question(QuestionAnswer::SelectedOption {
-                option_id: "continue".to_string(),
-            }),
+        ClientRequestParams::TurnInput(SubmitTurnInputRequest {
+            identity: AgentTurnRef::new("s1", "turn-1"),
+            input: SubmitTurnInput::UserActionResponse {
+                action_id: "action-1".to_string(),
+                response: UserActionResponse::Question(QuestionAnswer::SelectedOption {
+                    option_id: "continue".to_string(),
+                }),
+            },
+            client_request_id: None,
         })
     );
 }
@@ -78,43 +75,21 @@ fn decodes_profile_read_params() {
 }
 
 #[test]
-fn turn_start_input_uses_shared_talos_input_item() {
-    let value = json!({
-        "type": "skill_selection",
-        "name": "review",
-        "path": "/tmp/review/SKILL.md"
-    });
-
-    let item: TalosInputItem =
-        serde_json::from_value(value).expect("skill selection should decode");
-
+fn skills_methods_parse_canonical_paths() {
     assert_eq!(
-        item,
-        TalosInputItem::SkillSelection {
-            name: "review".to_string(),
-            path: "/tmp/review/SKILL.md".to_string(),
-        }
-    );
-}
-
-#[test]
-fn skills_methods_parse_without_legacy_skill_list_alias() {
-    assert_eq!(
-        ClientMethod::from_str("skills.list").unwrap(),
+        ClientMethod::from_str("skills/list").unwrap(),
         ClientMethod::SkillsList
     );
     assert_eq!(
-        ClientMethod::from_str("skills.refresh").unwrap(),
+        ClientMethod::from_str("skills/refresh").unwrap(),
         ClientMethod::SkillsRefresh
     );
     assert_eq!(
-        ClientMethod::from_str("skills.suggest").unwrap(),
+        ClientMethod::from_str("skills/suggest").unwrap(),
         ClientMethod::SkillsSuggest
     );
-    assert!(ClientMethod::from_str("skill.list").is_err());
-
     let request = ClientRequest::decode(
-        "skills.resolve",
+        "skills/resolve",
         Some(json!({
             "text": "Use $review",
             "selected": [{ "name": "review", "path": "/tmp/review/SKILL.md" }]
@@ -126,7 +101,7 @@ fn skills_methods_parse_without_legacy_skill_list_alias() {
         ClientRequestParams::SkillsResolve(SkillsResolveRequest { .. })
     ));
 
-    let request = ClientRequest::decode("skills.refresh", None)
+    let request = ClientRequest::decode("skills/refresh", None)
         .expect("skills refresh request should decode");
     assert!(matches!(
         request.params,
@@ -136,21 +111,16 @@ fn skills_methods_parse_without_legacy_skill_list_alias() {
 
 #[test]
 fn client_method_parser_accepts_current_methods() {
-    assert!(DEFERRED_CLIENT_METHODS.is_empty());
     assert_eq!(
-        ClientMethod::from_str("event.unsubscribe").unwrap(),
+        ClientMethod::from_str("event/unsubscribe").unwrap(),
         ClientMethod::EventUnsubscribe
     );
     assert_eq!(
-        ClientMethod::from_str("tool.dynamic_result.submit").unwrap(),
-        ClientMethod::ToolDynamicResultSubmit
+        ClientMethod::from_str("turn/input").unwrap(),
+        ClientMethod::TurnInput
     );
     assert_eq!(
-        ClientMethod::from_str("userAction/submit").unwrap(),
-        ClientMethod::UserActionSubmit
-    );
-    assert_eq!(
-        ClientMethod::from_str("session.close").unwrap(),
+        ClientMethod::from_str("session/close").unwrap(),
         ClientMethod::SessionClose
     );
     assert!(ClientMethod::from_str("unknown.method").is_err());
@@ -219,7 +189,7 @@ fn message_queue_methods_decode_shared_camel_case_requests() {
             "messageQueue/add",
             json!({
                 "sessionId": "s1",
-                "input": [{ "type": "text", "text": "first" }]
+                "input": { "content": [{ "type": "text", "text": "first" }] }
             }),
         ),
         ("messageQueue/list", json!({ "sessionId": "s1" })),
@@ -228,7 +198,7 @@ fn message_queue_methods_decode_shared_camel_case_requests() {
             json!({
                 "sessionId": "s1",
                 "messageId": "q1",
-                "input": [{ "type": "text", "text": "updated" }]
+                "input": { "content": [{ "type": "text", "text": "updated" }] }
             }),
         ),
         (
@@ -242,10 +212,6 @@ fn message_queue_methods_decode_shared_camel_case_requests() {
         (
             "messageQueue/start",
             json!({ "sessionId": "s1", "messageId": null }),
-        ),
-        (
-            "messageQueue/steer",
-            json!({ "sessionId": "s1", "messageId": "q1", "turnId": "t1" }),
         ),
     ];
 

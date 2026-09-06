@@ -5,7 +5,7 @@ export async function handleDesktopServerRequest(
   request: AppProtocol.JsonRpcRequest,
 ): Promise<unknown> {
   switch (request.method) {
-    case "client.user_input.request":
+    case "client/user_input/request":
       return requestDesktopUserInput(request.params as AppProtocol.RequestUserInputParams);
     default:
       throw new Error(`Unsupported desktop server request: ${request.method}`);

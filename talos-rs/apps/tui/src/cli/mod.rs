@@ -9,8 +9,8 @@ use std::io::Write;
 use std::sync::Arc;
 
 use talos_sdk::{
-    AgentEventPayload, ModelRef, ModelSelection, TalosContext, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
+    AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlock, AgentMessageBlockContent,
+    AgentMessageBlockDeltaContent, AgentToolCallArguments, ModelRef, ModelSelection, TimelineEvent,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::{display_tool_name, GatewayClient as TerminalGatewayClient, TerminalTurnRequest};
@@ -70,9 +70,6 @@ async fn execute_exec_command(
         message,
         skills: Vec::new(),
         file_ids: Vec::new(),
-        context: Some(default_terminal_context(
-            cmd.user.as_deref().unwrap_or("cli-user"),
-        )),
         model_selection,
         current_directory: current_terminal_directory(),
         project_id: None,
@@ -180,7 +177,7 @@ async fn execute_status_command(
 }
 
 async fn render_timeline_events(
-    mut events: mpsc::Receiver<TimelineEventEnvelope>,
+    mut events: mpsc::Receiver<TimelineEvent>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
@@ -209,8 +206,8 @@ async fn render_timeline_events(
 }
 
 fn render_event(
-    envelope: &TimelineEventEnvelope,
-    item_phases: &mut HashMap<String, TalosTimelinePhase>,
+    envelope: &TimelineEvent,
+    item_phases: &mut HashMap<String, AgentAssistantTextPhase>,
     item_texts: &mut HashMap<String, String>,
     written_final_items: &mut HashSet<String>,
     output_text: &mut String,
@@ -218,166 +215,136 @@ fn render_event(
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let event = &envelope.event;
     match &event.payload {
-        AgentEventPayload::ItemStarted(payload) => {
-            item_phases.insert(payload.item.item_id.clone(), payload.item.phase);
-            if let TalosTimelineContent::Text { text } = &payload.item.content {
-                item_texts.insert(payload.item.item_id.clone(), text.clone());
+        AgentEventPayload::MessageBlockStarted(payload) => {
+            if let AgentMessageBlockContent::AssistantText(assistant) = &payload.block.content {
+                item_phases.insert(payload.block.block_id.clone(), assistant.phase);
+                item_texts.insert(payload.block.block_id.clone(), assistant.text.clone());
             }
-            render_started_item(&payload.item);
+            render_started_block(&payload.block);
         }
-        AgentEventPayload::ItemDelta(payload) => match &payload.delta {
-            TalosTimelineDelta::Text { text } => {
+        AgentEventPayload::MessageBlockDelta(payload) => match &payload.delta {
+            AgentMessageBlockDeltaContent::Text(text) => {
                 item_texts
-                    .entry(payload.item_id.clone())
+                    .entry(payload.block_id.clone())
                     .or_default()
                     .push_str(text);
-                if item_phases.get(&payload.item_id) == Some(&TalosTimelinePhase::FinalAnswer) {
+                if item_phases.get(&payload.block_id) == Some(&AgentAssistantTextPhase::FinalAnswer)
+                {
                     output_text.push_str(text);
-                    written_final_items.insert(payload.item_id.clone());
+                    written_final_items.insert(payload.block_id.clone());
                     write!(output_stream, "{}", text)?;
                     output_stream.flush()?;
                 } else if !text.trim().is_empty() {
-                    eprintln!("TIMELINE_TEXT item={} {}", payload.item_id, text);
+                    eprintln!("TIMELINE_TEXT block={} {}", payload.block_id, text);
                 }
             }
-            TalosTimelineDelta::ToolArguments { arguments_delta } => {
-                eprintln!(
-                    "TOOL_CALL_ARGS_DELTA item={} delta={}",
-                    payload.item_id, arguments_delta
-                );
-            }
-            TalosTimelineDelta::ToolProgress {
-                progress_kind,
-                text_delta,
-            } => {
-                eprintln!(
-                    "TOOL_CALL_PROGRESS item={} kind={:?} message={}",
-                    payload.item_id, progress_kind, text_delta
-                );
-            }
-            TalosTimelineDelta::ToolResult { is_error, .. } => {
-                eprintln!(
-                    "TOOL_CALL_RESULT item={} is_error={}",
-                    payload.item_id, is_error
-                );
-            }
-            TalosTimelineDelta::UserAction { .. } => {}
-            TalosTimelineDelta::ContextCompaction {
-                stage,
-                outcome,
-                message,
-                ..
-            } => {
-                eprintln!(
-                    "CONTEXT_COMPACTION item={} stage={:?} outcome={:?} message={}",
-                    payload.item_id,
-                    stage,
-                    outcome,
-                    message.as_deref().unwrap_or("")
-                );
-            }
-            TalosTimelineDelta::Status { status } => {
-                eprintln!("ITEM_STATUS item={} status={:?}", payload.item_id, status);
-            }
-        },
-        AgentEventPayload::AssistantTextCommitted(payload) => {
-            item_phases.insert(payload.item_id.clone(), payload.phase);
-            if payload.phase == TalosTimelinePhase::FinalAnswer
-                && !written_final_items.contains(&payload.item_id)
-            {
-                if let Some(text) = item_texts.get(&payload.item_id) {
-                    written_final_items.insert(payload.item_id.clone());
-                    output_text.push_str(text);
-                    write!(output_stream, "{}", text)?;
-                    output_stream.flush()?;
-                }
-            }
-        }
-        AgentEventPayload::ItemCompleted(payload) => {
-            if let Some(TalosTimelineContent::ToolCall {
-                call_id,
-                name,
-                result,
-                ..
-            }) = &payload.final_content
-            {
-                eprintln!(
-                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
-                    call_id,
-                    display_tool_name(name),
-                    name,
-                    result.as_ref().map(|value| value.is_error).unwrap_or(false)
-                );
-            }
-            if item_phases.get(&payload.item_id) == Some(&TalosTimelinePhase::FinalAnswer) {
-                if let Some(TalosTimelineContent::Text { text }) = &payload.final_content {
-                    if !written_final_items.contains(&payload.item_id) {
-                        written_final_items.insert(payload.item_id.clone());
+            AgentMessageBlockDeltaContent::AssistantTextPhase(phase) => {
+                item_phases.insert(payload.block_id.clone(), *phase);
+                if *phase == AgentAssistantTextPhase::FinalAnswer
+                    && !written_final_items.contains(&payload.block_id)
+                {
+                    if let Some(text) = item_texts.get(&payload.block_id) {
+                        written_final_items.insert(payload.block_id.clone());
                         output_text.push_str(text);
                         write!(output_stream, "{}", text)?;
                         output_stream.flush()?;
                     }
                 }
             }
+            AgentMessageBlockDeltaContent::ToolCallArguments(arguments) => {
+                eprintln!(
+                    "TOOL_CALL_ARGS_DELTA block={} delta={}",
+                    payload.block_id, arguments.json_fragment
+                );
+            }
+            AgentMessageBlockDeltaContent::ToolProgress(progress) => {
+                eprintln!(
+                    "TOOL_CALL_PROGRESS block={} kind={:?} message={}",
+                    payload.block_id, progress.kind, progress.text
+                );
+            }
+            AgentMessageBlockDeltaContent::ContextCompaction(delta) => {
+                eprintln!(
+                    "CONTEXT_COMPACTION block={} stage={:?} outcome={:?} message={}",
+                    payload.block_id,
+                    delta.stage,
+                    delta.outcome,
+                    delta.message.as_deref().unwrap_or("")
+                );
+            }
+        },
+        AgentEventPayload::MessageBlockCompleted(payload) => {
+            if let AgentMessageBlockContent::ToolResult(result) = &payload.block.content {
+                eprintln!(
+                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
+                    result.call_id,
+                    display_tool_name(&result.tool_name),
+                    result.tool_name,
+                    result.is_error
+                );
+            }
+            if let AgentMessageBlockContent::AssistantText(assistant) = &payload.block.content {
+                if assistant.phase == AgentAssistantTextPhase::FinalAnswer
+                    && !written_final_items.contains(&payload.block.block_id)
+                {
+                    written_final_items.insert(payload.block.block_id.clone());
+                    let text = &assistant.text;
+                    output_text.push_str(text);
+                    write!(output_stream, "{}", text)?;
+                    output_stream.flush()?;
+                }
+            }
         }
-        AgentEventPayload::TurnError(payload) => {
+        AgentEventPayload::TurnFailed(payload) => {
             error!("TURN_ERROR {}", payload.error.message);
             return Err(payload.error.message.clone().into());
         }
         AgentEventPayload::TurnCompleted(_) => {
             return Ok(true);
         }
-        AgentEventPayload::TurnMetrics(_) => {}
-        AgentEventPayload::TurnStarted(_) => {}
+        AgentEventPayload::TurnStarted(_)
+        | AgentEventPayload::MessageStarted(_)
+        | AgentEventPayload::MessageCompleted(_)
+        | AgentEventPayload::WaitingForInput(_)
+        | AgentEventPayload::MetricsUpdated(_) => {}
     }
     Ok(false)
 }
 
-fn render_started_item(item: &talos_sdk::TalosTimelineItem) {
-    match (&item.kind, &item.phase, &item.content) {
-        (TalosTimelineItemKind::Reasoning, TalosTimelinePhase::Thinking, _) => {
-            eprintln!("THINKING item={}", item.item_id);
+fn render_started_block(block: &AgentMessageBlock) {
+    match &block.content {
+        AgentMessageBlockContent::Reasoning(_) => {
+            eprintln!("THINKING block={}", block.block_id);
         }
-        (
-            TalosTimelineItemKind::ExecutionSummary,
-            _,
-            TalosTimelineContent::ExecutionSummary { summary },
-        ) => {
-            if !summary.trim().is_empty() {
-                eprintln!("SUMMARY {}", summary);
+        AgentMessageBlockContent::ExecutionSummary(summary) => {
+            if !summary.text.trim().is_empty() {
+                eprintln!("SUMMARY {}", summary.text);
             }
         }
-        (
-            TalosTimelineItemKind::ContextCompaction,
-            _,
-            TalosTimelineContent::ContextCompaction { stage, message, .. },
-        ) => {
+        AgentMessageBlockContent::ContextCompaction(compaction) => {
             eprintln!(
-                "CONTEXT_COMPACTION_STARTED item={} stage={:?} message={}",
-                item.item_id,
-                stage,
-                message.as_deref().unwrap_or("")
+                "CONTEXT_COMPACTION_STARTED block={} stage={:?} message={}",
+                block.block_id,
+                compaction.stage,
+                compaction.message.as_deref().unwrap_or("")
             );
         }
-        (
-            TalosTimelineItemKind::ToolCall,
-            _,
-            TalosTimelineContent::ToolCall { call_id, name, .. },
-        ) => {
+        AgentMessageBlockContent::ToolCall(tool) => {
+            let arguments = match &tool.arguments {
+                AgentToolCallArguments::Streaming { json_fragment } => json_fragment.as_str(),
+                AgentToolCallArguments::Complete { .. } => "<complete>",
+            };
             eprintln!(
-                "TOOL_CALL_STARTED name={} internal={} call_id={} item={}",
-                display_tool_name(name),
-                name,
-                call_id,
-                item.item_id
+                "TOOL_CALL_STARTED name={} internal={} call_id={} block={} arguments={}",
+                display_tool_name(&tool.name),
+                tool.name,
+                tool.call_id,
+                block.block_id,
+                arguments
             );
         }
         _ => {}
     }
-}
-
-fn default_terminal_context(user_id: &str) -> TalosContext {
-    TalosContext::cli(user_id.to_string()).with_channel_id("cli")
 }
 
 fn current_terminal_directory() -> Option<std::path::PathBuf> {

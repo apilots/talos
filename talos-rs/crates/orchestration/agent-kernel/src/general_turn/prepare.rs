@@ -4,16 +4,11 @@ use super::prepare_load_policy::{
 };
 use super::*;
 use crate::ExecutionBranch;
-use serde::de::DeserializeOwned;
 use talos_config::SkillsRuntimeConfig;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_skills::{LocalSkillProvider, SkillPromptBudget, SkillPromptRequest};
 use talos_tools::{ToolSelectionPhase, ToolSelectionRequest};
 use talos_types::talos::{ContextCompactionOutcome, ContextCompactionStage};
-
-pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
-pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
-pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
 
 fn build_tool_selection_request(
     session_id: &str,
@@ -108,7 +103,7 @@ async fn rebuild_prompt_assembly(
     agent_description: &str,
     input: &str,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
+    session_prompt_context_source: Arc<dyn crate::SessionPromptContextSource>,
     kernel_config: &AgentKernelConfig,
     session_id: &str,
     phase: PromptPhase,
@@ -122,11 +117,8 @@ async fn rebuild_prompt_assembly(
     dynamic_trim_policy: DynamicTrimPolicy,
     skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<talos_prompt::PromptAssembly> {
-    let context = crate::build_session_prompt_context(
-        session_artifact_store.as_ref(),
-        std::path::Path::new(&kernel_config.workspace_dir),
-        session_id,
-        &SessionPromptContextConfig {
+    let context = session_prompt_context_source
+        .load(SessionPromptContextConfig {
             compact_cursor: load_policy.compact_cursor,
             recent_window: SessionPromptRecentWindow::Latest,
             recent_messages_limit: if load_policy.include_recent_messages {
@@ -149,15 +141,14 @@ async fn rebuild_prompt_assembly(
             include_summary: load_policy.include_session_summary,
             summary_recent_count: load_policy.session_summary_recent_count,
             summary_max_chars: load_policy.session_summary_max_chars,
-        },
-    )
-    .await?;
+        })
+        .await?;
     let session_prompt_context = talos_prompt::SessionPromptContext {
         summaries: context
             .summaries
             .into_iter()
             .map(|summary| talos_prompt::SessionPromptSummary {
-                id: summary.header.id,
+                id: summary.id,
                 content: summary.content,
             })
             .collect(),
@@ -167,9 +158,11 @@ async fn rebuild_prompt_assembly(
             .map(|message| talos_prompt::SessionPromptMessage {
                 id: message.header.id,
                 role: match message.role {
-                    TalosMessageRole::User => talos_prompt::TalosMessageRole::User,
-                    TalosMessageRole::Assistant => talos_prompt::TalosMessageRole::Assistant,
-                    TalosMessageRole::System => talos_prompt::TalosMessageRole::System,
+                    SessionPromptMessageRole::User => talos_prompt::TalosMessageRole::User,
+                    SessionPromptMessageRole::Assistant => {
+                        talos_prompt::TalosMessageRole::Assistant
+                    }
+                    SessionPromptMessageRole::System => talos_prompt::TalosMessageRole::System,
                 },
                 text: message.text,
             })
@@ -240,8 +233,9 @@ async fn compact_session_history_if_needed(
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     memory_scope: &MemoryScope,
-    session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
-    session_store: Arc<dyn talos_store::session::SessionStore>,
+    session_artifact_store: Arc<dyn crate::KernelSessionArtifactStore>,
+    session_prompt_context_source: Arc<dyn crate::SessionPromptContextSource>,
+    memory_progress_store: Arc<dyn crate::KernelMemoryProgressStore>,
     kernel_config: &AgentKernelConfig,
     session_id: &str,
     selected_model: &str,
@@ -266,14 +260,15 @@ async fn compact_session_history_if_needed(
         MemoryFormationParams {
             session_id,
             producer_agent_id: agent_id,
-            selected_model,
-            llm_provider,
             dream_memory_store: dream_memory_store.as_ref(),
             memory_scope,
             session_artifact_store: session_artifact_store.as_ref(),
-            session_store: session_store.as_ref(),
+            session_prompt_context_source: session_prompt_context_source.as_ref(),
+            memory_progress_store: memory_progress_store.as_ref(),
             kernel_config,
         },
+        selected_model,
+        llm_provider,
         MemoryCompactionPolicy::for_compaction().with_compaction_input_budget_tokens(
             resolve_compaction_input_budget_tokens(&selected_model_info),
         ),
@@ -319,7 +314,7 @@ async fn compact_session_history_if_needed(
         agent_description,
         input,
         tool_definition_provider,
-        session_artifact_store,
+        session_prompt_context_source,
         kernel_config,
         session_id,
         phase,
@@ -381,25 +376,12 @@ async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[Ker
             session_id: ctx.session_id.clone(),
             phase: ctx.phase.clone(),
         };
-        ctx.events.push(KernelEvent::new(
-            KernelEventType::PromptWarning,
-            KernelEventLabel::PromptWarning,
-            KernelEventData::PromptWarning(payload.clone()),
-        ));
         emit_stream_event(
             ctx.stream_tx.as_ref(),
-            KernelStreamEventType::PromptWarning,
-            KernelStreamEventData::PromptWarning(payload),
+            AgentKernelEventPayload::PromptWarning(payload),
         )
         .await;
     }
-}
-
-fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &str) -> Option<T> {
-    ctx.session
-        .state
-        .get(crate::StateNamespace::Session, key)
-        .and_then(|value| serde_json::from_value(value.clone()).ok())
 }
 
 pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
@@ -467,9 +449,7 @@ fn filter_prompt_warnings(
     ctx: &InvocationContext,
     warnings: Vec<KernelWarning>,
 ) -> (Vec<KernelWarning>, Option<PromptWarningState>) {
-    let mut warning_state =
-        load_session_state_value::<PromptWarningState>(ctx, PROMPT_WARNING_STATE_KEY)
-            .unwrap_or_default();
+    let mut warning_state = ctx.session.state.prompt_warning.clone().unwrap_or_default();
     let mut changed = false;
     let mut filtered = Vec::new();
 
@@ -502,25 +482,23 @@ pub async fn prepare_general_turn(
     run_tasks: talos_run_control::RunTaskGroup,
 ) -> TalosResult<PreparedGeneralTurn> {
     let session_id = ctx.session_id.clone();
-    let message_id = ctx.message_id.clone();
     let invocation_id = ctx.invocation_id.clone();
     let agent_id = ctx.agent_id.clone();
     let selected_model = ctx.selected_model_id().to_string();
     let (attachments, attachment_tokens) =
         super::attachments::prepare_model_attachments(ctx, llm_provider.as_ref())?;
-    let session_artifact_store = ctx.session_artifact_store()?;
-    let session_store = ctx.session_store()?;
+    let session_artifact_store = ctx.session_artifact_store();
+    let session_prompt_context_source = ctx.session_prompt_context_source();
+    let memory_progress_store = ctx.memory_progress_store();
     let stream_tx = ctx.stream_tx.clone();
-    let session_compaction_state =
-        load_session_state_value::<SessionCompactionState>(ctx, SESSION_COMPACTION_STATE_KEY);
+    let session_compaction_state = ctx.session.state.compaction.clone();
     if session_compaction_state
         .as_ref()
         .is_some_and(SessionCompactionState::is_blocked)
     {
         return Err(blocked_compaction_error(&session_id));
     }
-    let session_continuity =
-        load_session_state_value::<SessionContinuity>(ctx, SESSION_CONTINUITY_STATE_KEY);
+    let session_continuity = ctx.session.state.continuity.clone();
 
     let phase = match ctx.phase {
         crate::TurnPhase::Planning => PromptPhase::Planning,
@@ -534,7 +512,7 @@ pub async fn prepare_general_turn(
         agent_description,
         input,
         tool_definition_provider.clone(),
-        session_artifact_store.clone(),
+        session_prompt_context_source.clone(),
         kernel_config,
         &session_id,
         phase,
@@ -591,7 +569,8 @@ pub async fn prepare_general_turn(
             workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
         },
         session_artifact_store.clone(),
-        session_store,
+        session_prompt_context_source.clone(),
+        memory_progress_store,
         kernel_config,
         &session_id,
         &selected_model,
@@ -624,10 +603,7 @@ pub async fn prepare_general_turn(
                 &session_id,
                 &invocation_id,
                 ExecutionBranch::ModelThinking,
-                SESSION_COMPACTION_STATE_KEY,
-                serde_json::to_value(SessionCompactionState::normal()).map_err(|error| {
-                    TalosError::internal(format!("serialize session compaction state: {error}"))
-                })?,
+                crate::SessionStateUpdate::Compaction(SessionCompactionState::normal()),
             )
             .await?;
             return Err(error);
@@ -676,10 +652,7 @@ pub async fn prepare_general_turn(
             &session_id,
             &invocation_id,
             ExecutionBranch::ModelThinking,
-            SESSION_COMPACTION_STATE_KEY,
-            serde_json::to_value(state).map_err(|error| {
-                TalosError::internal(format!("serialize session compaction state: {error}"))
-            })?,
+            crate::SessionStateUpdate::Compaction(state),
         )
         .await?;
         session_history_compaction = Some(compaction);
@@ -721,7 +694,7 @@ pub async fn prepare_general_turn(
             agent_description,
             input,
             tool_definition_provider.clone(),
-            session_artifact_store,
+            session_prompt_context_source,
             kernel_config,
             &session_id,
             phase,
@@ -846,19 +819,16 @@ pub async fn prepare_general_turn(
 
     let tool_selection_request =
         build_tool_selection_request(&session_id, input, phase, kernel_config);
-    let tool_definitions =
-        tool_definition_provider.get_tool_definitions_for_request(&tool_selection_request);
     let maintenance_usage = token_usage_from_session_history_compaction(
         prompt_diagnostics.session_history_compaction.as_ref(),
     );
 
-    let (messages, prompt_prefix_messages) =
+    let messages =
         super::attachments::render_prompt_messages(&prompt_assembly, input, attachments)?;
 
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
         user_id: ctx.user_id.clone(),
-        message_id,
         invocation_id,
         agent_id,
         workspace_id: ctx.workspace_id.clone(),
@@ -868,13 +838,10 @@ pub async fn prepare_general_turn(
         reasoning_effort,
         speed,
         attachment_tokens,
-        prompt_prefix_messages,
         messages,
         maintenance_usage,
-        tool_definitions,
         tool_selection_request,
         prompt_diagnostics,
-        warnings,
         prompt_warning_state,
         stream_tx,
         message_rx: None,

@@ -1,14 +1,15 @@
 use std::time::Duration;
 
+use talos_agent_api::ActiveTurnState;
 use talos_error::{TalosError, TalosResult};
-use talos_store::session::{ActiveTurnStatus, SessionTreeIdentity};
-use talos_types::talos::TalosInputItem;
+use talos_store::session::SessionTreeIdentity;
 use talos_types::{
     AgentCaller, AgentPath, AgentTarget, AgentTreeNode, AgentTreeSnapshot, AgentTurnRef,
     FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest, SendMessageResult,
     SendSubagentMessageRequest, StartTurnRequest, SubagentOutcome, SubagentRef, SubagentSnapshot,
     WaitSubagentRequest,
 };
+use talos_types::{AgentUserContent, AgentUserInput};
 use tokio::sync::broadcast;
 use tokio::time::Instant;
 
@@ -40,8 +41,8 @@ impl SubagentService {
         let caller = self.authorize_caller(&request.caller).await?;
         let (child, subagent, agent_id) = self.resolve_target(&caller, &request.target).await?;
         let active = self
-            .timeline
-            .get_active_turn(&subagent.session_id)
+            .turns
+            .canonical_active_turn(&subagent.session_id)
             .await?
             .ok_or_else(|| {
                 TalosError::public(
@@ -49,7 +50,7 @@ impl SubagentService {
                     format!("subagent '{}' has no active turn", subagent.session_id),
                 )
             })?;
-        if active.status != ActiveTurnStatus::Running {
+        if active.state != ActiveTurnState::Running {
             return Err(TalosError::public(
                 talos_error::ErrorCode::Conflict,
                 format!("subagent '{}' is not running", subagent.session_id),
@@ -58,7 +59,7 @@ impl SubagentService {
         self.turns
             .submit_subagent_message(
                 child,
-                active.turn_id.clone(),
+                active.identity.turn_id.clone(),
                 agent_id.clone(),
                 request.message,
             )
@@ -68,7 +69,7 @@ impl SubagentService {
             agent_id,
             turn: AgentTurnRef {
                 session_id: subagent.session_id,
-                turn_id: active.turn_id,
+                turn_id: active.identity.turn_id,
             },
             accepted: true,
         })
@@ -93,7 +94,8 @@ impl SubagentService {
             match received {
                 Err(_) => return self.snapshot_exact(subagent, &turn_id).await,
                 Ok(Ok(event))
-                    if event.session_id == subagent.session_id && event.turn_id == turn_id =>
+                    if event.event.identity.session_id == subagent.session_id
+                        && event.event.identity.turn_id == turn_id =>
                 {
                     snapshot = self.snapshot_exact(subagent.clone(), &turn_id).await?;
                     if Self::is_terminal(&snapshot.outcome) {
@@ -126,22 +128,18 @@ impl SubagentService {
     ) -> TalosResult<SubagentSnapshot> {
         let caller = self.authorize_caller(&request.caller).await?;
         let (child, subagent, agent_id) = self.resolve_target(&caller, &request.target).await?;
-        let active = self
-            .timeline
-            .get_active_turn(&subagent.session_id)
+        let Some(active) = self
+            .turns
+            .canonical_active_turn(&subagent.session_id)
             .await?
-            .ok_or_else(|| {
-                TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    format!("subagent '{}' has no turn state", subagent.session_id),
-                )
-            })?;
-        match active.status {
-            ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => self.snapshot(subagent).await,
-            ActiveTurnStatus::Cancelling => self.snapshot(subagent).await,
-            ActiveTurnStatus::Running | ActiveTurnStatus::WaitingUserAction => {
+        else {
+            return self.snapshot(subagent).await;
+        };
+        match active.state {
+            ActiveTurnState::Cancelling => self.snapshot(subagent).await,
+            ActiveTurnState::Running | ActiveTurnState::WaitingForInput => {
                 self.turns
-                    .interrupt_subagent_turn(child, active.turn_id.clone(), agent_id)
+                    .interrupt_subagent_turn(child, active.identity.turn_id.clone(), agent_id)
                     .await?;
                 self.snapshot(subagent).await
             }
@@ -160,21 +158,19 @@ impl SubagentService {
         }
         let caller = self.authorize_caller(&request.caller).await?;
         let (child, subagent, agent_id) = self.resolve_target(&caller, &request.target).await?;
-        if let Some(active) = self.timeline.get_active_turn(&subagent.session_id).await? {
-            if matches!(
-                active.status,
-                ActiveTurnStatus::Running
-                    | ActiveTurnStatus::WaitingUserAction
-                    | ActiveTurnStatus::Cancelling
-            ) {
-                return Err(TalosError::public(
-                    talos_error::ErrorCode::ActiveTurnRunning,
-                    format!(
-                        "subagent '{}' already has an active turn",
-                        subagent.session_id
-                    ),
-                ));
-            }
+        if self
+            .turns
+            .canonical_active_turn(&subagent.session_id)
+            .await?
+            .is_some()
+        {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                format!(
+                    "subagent '{}' already has an active turn",
+                    subagent.session_id
+                ),
+            ));
         }
         let result = self
             .turns
@@ -182,10 +178,11 @@ impl SubagentService {
                 child,
                 StartTurnRequest {
                     session_id: subagent.session_id.clone(),
-                    input: vec![TalosInputItem::Text {
-                        text: request.prompt,
-                    }],
-                    context: None,
+                    input: AgentUserInput {
+                        content: vec![AgentUserContent::Text {
+                            text: request.prompt,
+                        }],
+                    },
                     model_selection: None,
                     user_permission_mode: None,
                     project_id: None,
@@ -272,7 +269,7 @@ impl SubagentService {
         }
         let record = self
             .sessions
-            .get_session_record(&caller.session_id)
+            .load_record(&caller.session_id)
             .await?
             .ok_or_else(|| {
                 TalosError::public(
@@ -281,8 +278,8 @@ impl SubagentService {
                 )
             })?;
         let active = self
-            .timeline
-            .get_active_turn(&caller.session_id)
+            .turns
+            .canonical_active_turn(&caller.session_id)
             .await?
             .ok_or_else(|| {
                 TalosError::public(
@@ -290,7 +287,7 @@ impl SubagentService {
                     format!("caller session '{}' has no active turn", caller.session_id),
                 )
             })?;
-        if active.turn_id != caller.turn_id || active.status != ActiveTurnStatus::Running {
+        if active.identity.turn_id != caller.turn_id || active.state != ActiveTurnState::Running {
             return Err(TalosError::public(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
@@ -330,7 +327,7 @@ impl SubagentService {
         &self,
         caller: &AuthorizedCaller,
         target: &AgentTarget,
-    ) -> TalosResult<(talos_types::TalosSession, SubagentRef, String)> {
+    ) -> TalosResult<(talos_store::session::SessionRecord, SubagentRef, String)> {
         let path = target.resolve_descendant(&caller.path)?.ok_or_else(|| {
             TalosError::public(
                 talos_error::ErrorCode::ResourceNotFound,
@@ -355,7 +352,7 @@ impl SubagentService {
         };
         let session = self
             .sessions
-            .get_session(&record.id)
+            .load_record(&record.id)
             .await?
             .ok_or_else(|| {
                 TalosError::public(

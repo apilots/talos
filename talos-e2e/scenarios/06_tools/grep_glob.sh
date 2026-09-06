@@ -22,8 +22,8 @@ cleanup() {
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
-GLOB_WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/tool-glob-user"
-GREP_WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/tool-grep-user"
+GLOB_WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/anonymous"
+GREP_WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/anonymous"
 DOC_DIR="${GLOB_WORKSPACE_DIR}/docs"
 SRC_DIR="${GREP_WORKSPACE_DIR}/src"
 mkdir -p "${DOC_DIR}" "${SRC_DIR}"
@@ -55,23 +55,12 @@ export PRIMARY_MODEL="${primary_model}"
 export PRIMARY_PROVIDER="${primary_provider}"
 echo "CASE grep_glob_select_model PASS model=${primary_model}"
 
-build_session_context() {
-  local channel="$1"
-  local user="$2"
-  CHANNEL_ID="${channel}" USER_ID="${user}" python3 - <<'PY'
+build_session_start_defaults() {
+  python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": os.environ["CHANNEL_ID"],
-        "user_id": os.environ["USER_ID"],
-        "thread_id": None,
-        "message_id": "msg-tool-grep-glob",
-        "trace_id": "trace-tool-grep-glob",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -85,7 +74,7 @@ import json
 import os
 
 payload = {
-    "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
+    "input": {"content": [{"type": "text", "text": os.environ["INPUT_TEXT"]}]},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -111,9 +100,9 @@ print(data.get("output_text", ""))
 PY
 }
 
-glob_session_payload="$(build_session_context "tool-glob" "tool-glob-user")"
+glob_session_payload="$(build_session_start_defaults)"
 glob_session_id="$(new_session_id)"
-remember_session_context "${glob_session_id}" "${glob_session_payload}"
+remember_session_start_defaults "${glob_session_id}" "${glob_session_payload}"
 glob_session_json="{\"id\":\"${glob_session_id}\"}"
 glob_session_id="$(session_id_from_json "${glob_session_json}")"
 if [[ -z "${glob_session_id}" ]]; then
@@ -143,9 +132,9 @@ fi
 echo "CASE tool_glob PASS"
 echo "DETAIL tool_glob_output=${glob_output}"
 
-grep_session_payload="$(build_session_context "tool-grep" "tool-grep-user")"
+grep_session_payload="$(build_session_start_defaults)"
 grep_session_id="$(new_session_id)"
-remember_session_context "${grep_session_id}" "${grep_session_payload}"
+remember_session_start_defaults "${grep_session_id}" "${grep_session_payload}"
 grep_session_json="{\"id\":\"${grep_session_id}\"}"
 grep_session_id="$(session_id_from_json "${grep_session_json}")"
 if [[ -z "${grep_session_id}" ]]; then

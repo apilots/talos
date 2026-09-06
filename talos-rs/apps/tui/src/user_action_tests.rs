@@ -1,15 +1,12 @@
 use super::*;
 use crate::test_support::{
-    completed_event, timeline_event, turn_metrics_event_with_metrics, KeyCode, KeyEvent,
-    KeyModifiers, MockGatewayClient,
+    timeline_event, turn_completed_event, KeyCode, KeyEvent, KeyModifiers, MockGatewayClient,
 };
 use crate::TuiApp;
 use ratatui::{backend::TestBackend, Terminal};
 use std::sync::Arc;
-use talos_sdk::{
-    QuestionOption, QuestionParams, SandboxApprovalParams, SandboxApprovalReason, StopReason,
-    TokenUsage, TurnExecutionMetrics,
-};
+use talos_sdk::SubmitTurnInput;
+use talos_sdk::{QuestionOption, QuestionParams, SandboxApprovalParams, SandboxApprovalReason};
 
 fn pending(params: UserActionParams) -> PendingUserAction {
     PendingUserAction {
@@ -189,7 +186,7 @@ async fn escape_never_approves_or_cancels_a_pending_action() {
         .state
         .lock()
         .unwrap()
-        .submitted_user_actions
+        .submitted_turn_inputs
         .is_empty());
     assert!(client.state.lock().unwrap().cancelled_sessions.is_empty());
 }
@@ -223,30 +220,33 @@ async fn submit_uses_the_canonical_request_once_and_disables_the_action() {
             .state
             .lock()
             .unwrap()
-            .submitted_user_actions
+            .submitted_turn_inputs
             .is_empty()
         {
             break;
         }
     }
 
-    let requests = client.state.lock().unwrap().submitted_user_actions.clone();
+    let requests = client.state.lock().unwrap().submitted_turn_inputs.clone();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].session_id, "sess-test");
-    assert_eq!(requests[0].turn_id, "turn-1");
-    assert_eq!(requests[0].action_id, "action-1");
+    assert_eq!(requests[0].identity.session_id, "sess-test");
+    assert_eq!(requests[0].identity.turn_id, "turn-1");
+    assert!(matches!(
+        &requests[0].input,
+        SubmitTurnInput::UserActionResponse { action_id, .. } if action_id == "action-1"
+    ));
     assert_eq!(
         app.pending_user_action
             .as_ref()
             .map(|state| state.action.state),
-        Some(UserActionState::ResponseAccepted)
+        Some(UserActionState::Resuming)
     );
     assert_eq!(app.last_stream_sequence, None);
     assert_eq!(app.last_stream_event_id.as_deref(), Some("ev_12"));
 }
 
 #[test]
-fn timeline_requested_and_finished_events_own_the_action_lifecycle() {
+fn waiting_and_resumed_message_events_own_the_action_lifecycle() {
     let mut app = TuiApp::build(None);
     app.session_id = Some("sess-test".to_string());
     let action = pending(UserActionParams::Question(QuestionParams {
@@ -255,41 +255,31 @@ fn timeline_requested_and_finished_events_own_the_action_lifecycle() {
         options: Vec::new(),
     }));
     let requested = timeline_event(
-        "msg-1".to_string(),
-        "sess-test".to_string(),
+        "sess-test",
         1,
-        talos_sdk::AgentEventType::ItemDelta,
-        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "item-1".to_string(),
-            delta: talos_sdk::TalosTimelineDelta::UserAction {
-                event: talos_sdk::TimelineUserActionEvent::Requested { action },
-            },
+        talos_sdk::AgentEventPayload::WaitingForInput(talos_sdk::AgentPendingInput::UserAction {
+            action,
         }),
     );
     app.handle_stream_event(requested);
     assert!(app.pending_user_action.is_some());
 
-    let finished = timeline_event(
-        "msg-1".to_string(),
-        "sess-test".to_string(),
+    let resumed = timeline_event(
+        "sess-test",
         2,
-        talos_sdk::AgentEventType::ItemDelta,
-        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "item-1".to_string(),
-            delta: talos_sdk::TalosTimelineDelta::UserAction {
-                event: talos_sdk::TimelineUserActionEvent::Finished {
-                    action_id: "action-1".to_string(),
-                    state: UserActionState::Resolved,
-                    response: None,
-                },
+        talos_sdk::AgentEventPayload::MessageStarted(talos_sdk::AgentMessageStarted {
+            message: talos_sdk::AgentMessage {
+                message_id: "message-resume".to_string(),
+                turn_id: "turn-test".to_string(),
+                role: talos_sdk::AgentMessageRole::User,
+                status: talos_sdk::AgentMessageStatus::InProgress,
+                blocks: Vec::new(),
+                created_at: 2,
+                completed_at: None,
             },
         }),
     );
-    app.handle_stream_event(finished);
+    app.handle_stream_event(resumed);
     assert!(app.pending_user_action.is_none());
 }
 
@@ -306,42 +296,10 @@ fn waiting_user_action_completion_preserves_the_reconnect_cursor() {
         })),
     ));
 
-    app.handle_stream_event(completed_event(
-        "msg-1",
-        "sess-test",
-        12,
-        talos_sdk::TokenUsage::default(),
-    ));
+    app.handle_stream_event(turn_completed_event("sess-test", 12));
 
     assert_eq!(app.last_stream_event_id.as_deref(), Some("ev_12"));
     assert_eq!(app.last_stream_sequence, None);
-}
-
-#[test]
-fn live_metrics_does_not_replace_the_durable_reconnect_cursor() {
-    let mut app = TuiApp::build(None);
-    app.session_id = Some("sess-test".to_string());
-    app.last_stream_event_id = Some("ev_11".to_string());
-
-    let mut metrics = turn_metrics_event_with_metrics(
-        "msg-1",
-        "sess-test",
-        12,
-        TurnExecutionMetrics {
-            model_rounds: 1,
-            tool_calls: 1,
-            tool_successes: 1,
-            tool_errors: 0,
-            stop_reason: StopReason::EndTurn,
-            usage: TokenUsage::default(),
-            duration_ms: Some(10),
-        },
-    );
-    metrics.event_id = "live_metrics_turn-test_12_100".to_string();
-    metrics.event.event_id = Some(metrics.event_id.clone());
-    app.handle_stream_event(metrics);
-
-    assert_eq!(app.last_stream_event_id.as_deref(), Some("ev_11"));
 }
 
 #[tokio::test]
@@ -354,24 +312,28 @@ async fn recovery_restores_the_server_owned_pending_action() {
         question: "Proceed?".to_string(),
         options: Vec::new(),
     }));
-    let response = talos_sdk::TimelineRecoveryResponse {
-        snapshot: talos_types::TimelineRecoverySnapshot {
-            replay: talos_sdk::TimelineReplay {
-                events: Vec::new(),
-                high_water_mark_event_id: None,
-                last_replay_seq: 0,
-                cursor_status: talos_sdk::TimelineCursorStatus::Current,
-            },
-            active_turn: talos_sdk::TimelineActiveTurnSnapshot {
-                session_id: "sess-test".to_string(),
-                turn_id: Some("turn-1".to_string()),
-                message_id: Some("msg-1".to_string()),
-                status: talos_sdk::TimelineActiveTurnStatus::WaitingUserAction,
-                last_event_id: None,
-                pending_user_action: Some(action),
-                updated_at: 1,
-            },
+    let waiting = timeline_event(
+        "sess-test",
+        1,
+        talos_sdk::AgentEventPayload::WaitingForInput(talos_sdk::AgentPendingInput::UserAction {
+            action,
+        }),
+    );
+    let response = talos_sdk::RecoverTimelineResponse {
+        replay: talos_sdk::TimelineReplay {
+            events: vec![waiting],
+            high_water_mark_event_id: Some("ev_1".to_string()),
+            next_cursor: None,
+            last_event_seq: 1,
+            cursor_status: talos_sdk::TimelineCursorStatus::Current,
         },
+        active_turn: Some(talos_sdk::TimelineActiveTurn {
+            identity: talos_sdk::AgentTurnRef::new("sess-test", "turn-test"),
+            initial_message_id: Some("msg-1".to_string()),
+            state: talos_sdk::ActiveTurnState::WaitingForInput,
+            last_event_id: "ev_1".to_string(),
+            updated_at: 1,
+        }),
     };
 
     app.replay_recovery_snapshot(response);

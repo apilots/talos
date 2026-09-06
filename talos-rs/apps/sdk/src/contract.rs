@@ -1,29 +1,28 @@
 use async_trait::async_trait;
 use bytes::Bytes;
-use talos_app_protocol::requests::{
-    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsRefreshRequest,
-    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
+use talos_agent_api::{
+    InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineResponse,
+    SessionActiveTurnResponse, SessionHistoryResponse, SubmitTurnInputRequest,
+    SubmitTurnInputResponse, TimelineEvent,
 };
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::TimelineEventEnvelope;
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
-    ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
-    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, EventUnsubscribeRequest,
-    EventUnsubscribeResponse, FileDeleteRequest, FileDeleteResponse, FileListRequest,
-    FileListResponse, FileReadRequest, FileReadResponse, FileUpdateRequest, FileUpdateResponse,
-    FileUploadRequest, FileUploadResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
-    FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
-    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse, MessageQueue, MessageQueueAddRequest,
-    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
-    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
+    ConfigDeleteResponse, ConfigGetRequest, ConfigReloadRequest, ConfigReloadResponse,
+    ConfigResponse, ConfigUpdateRequest, EventUnsubscribeRequest, EventUnsubscribeResponse,
+    FileDeleteRequest, FileDeleteResponse, FileListRequest, FileListResponse, FileReadRequest,
+    FileReadResponse, FileUpdateRequest, FileUpdateResponse, FileUploadRequest, FileUploadResponse,
+    FsDirectoryCreateRequest, FsDirectoryCreateResponse, FsDirectoryReadRequest,
+    FsDirectoryReadResponse, MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest,
+    MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest,
+    MemoryGetResponse, MemorySearchRequest, MemorySearchResponse, MessageQueue,
+    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
     ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
     PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
     PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
@@ -34,22 +33,22 @@ use talos_types::{
     ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
     ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
     ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
-    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
-    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
-    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
-    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
-    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
-    SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
+    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
+    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
+    SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
+    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
+    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
+    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
+    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
+    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse,
 };
 use tokio::sync::mpsc;
 
 pub struct TimelineEventStream {
-    receiver: mpsc::Receiver<TimelineEventEnvelope>,
+    receiver: mpsc::Receiver<TimelineEvent>,
 }
 
 pub struct TimelineStreamSubscription {
@@ -67,18 +66,18 @@ pub struct MessageQueueChangeStream {
 }
 
 impl TimelineEventStream {
-    pub fn new(receiver: mpsc::Receiver<TimelineEventEnvelope>) -> Self {
+    pub fn new(receiver: mpsc::Receiver<TimelineEvent>) -> Self {
         Self { receiver }
     }
 
-    pub async fn recv(&mut self) -> TalosResult<TimelineEventEnvelope> {
+    pub async fn recv(&mut self) -> TalosResult<TimelineEvent> {
         self.receiver
             .recv()
             .await
             .ok_or_else(|| TalosError::internal("timeline event stream closed".to_string()))
     }
 
-    pub fn into_inner(self) -> mpsc::Receiver<TimelineEventEnvelope> {
+    pub fn into_inner(self) -> mpsc::Receiver<TimelineEvent> {
         self.receiver
     }
 }
@@ -135,12 +134,9 @@ pub trait GatewayClient: Send {
 
     async fn list_models(&mut self, request: ModelListRequest) -> TalosResult<ModelListResponse>;
 
-    async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigGetResponse>;
+    async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigResponse>;
 
-    async fn update_config(
-        &mut self,
-        request: ConfigUpdateRequest,
-    ) -> TalosResult<ConfigUpdateResponse>;
+    async fn update_config(&mut self, request: ConfigUpdateRequest) -> TalosResult<ConfigResponse>;
 
     async fn delete_config(
         &mut self,
@@ -216,7 +212,7 @@ pub trait GatewayClient: Send {
     async fn recover_timeline(
         &mut self,
         request: RecoverTimelineRequest,
-    ) -> TalosResult<TimelineRecoveryResponse>;
+    ) -> TalosResult<RecoverTimelineResponse>;
 
     async fn subscribe_timeline(
         &mut self,
@@ -235,7 +231,7 @@ pub trait GatewayClient: Send {
 
     async fn start_turn(&mut self, request: StartTurnRequest) -> TalosResult<StartTurnResponse>;
 
-    async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<RetryTurnResponse>;
+    async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<StartTurnResponse>;
 
     async fn interrupt_turn(
         &mut self,
@@ -278,21 +274,11 @@ pub trait GatewayClient: Send {
         request: MessageQueueStartRequest,
     ) -> TalosResult<StartTurnResponse>;
 
-    /// Submits one waiting message to the exact active Turn.
-    async fn steer_queued_message(
+    /// Delivers typed input to one exact running or waiting Turn.
+    async fn submit_turn_input(
         &mut self,
-        request: MessageQueueSteerRequest,
-    ) -> TalosResult<MessageQueue>;
-
-    async fn submit_dynamic_tool_result(
-        &mut self,
-        request: SubmitDynamicToolResultRequest,
-    ) -> TalosResult<SubmitDynamicToolResultResponse>;
-
-    async fn submit_user_action(
-        &mut self,
-        request: SubmitUserActionRequest,
-    ) -> TalosResult<SubmitUserActionResponse>;
+        request: SubmitTurnInputRequest,
+    ) -> TalosResult<SubmitTurnInputResponse>;
 
     async fn list_projects(
         &mut self,

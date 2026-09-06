@@ -35,44 +35,87 @@ dump_failure_context() {
 }
 
 latest_action_json() {
-  python3 - "${DATABASE_PATH}" <<'PY'
+  python3 - "${DATABASE_PATH}" "${session_id:-}" <<'PY'
 import json
 import sqlite3
 import sys
 from pathlib import Path
 
 database = Path(sys.argv[1])
+session_id = sys.argv[2]
 if not database.exists():
     print("{}")
     raise SystemExit(0)
 
 connection = sqlite3.connect(str(database))
-row = connection.execute(
-    "SELECT action_id, state, action_json, response_json FROM user_actions ORDER BY updated_at DESC LIMIT 1"
-).fetchone()
-if not row:
-    print("{}")
-    raise SystemExit(0)
-action = json.loads(row[2])
-print(json.dumps({
-    "action_id": row[0],
-    "state": row[1],
-    "params": action["params"],
-    "response": json.loads(row[3]) if row[3] else None,
-}))
+rows = connection.execute(
+    "SELECT payload_json FROM agent_events WHERE session_id = ? ORDER BY event_seq",
+    (session_id,),
+).fetchall()
+actions = {}
+latest_action_id = None
+for row in rows:
+    payload = json.loads(row[0])
+    payload_type = payload.get("type")
+    data = payload.get("data") or {}
+    if payload_type == "waitingForInput" and data.get("type") == "userAction":
+        action = data.get("action") or {}
+        action_id = action.get("actionId")
+        if action_id:
+            actions[action_id] = {
+                "action_id": action_id,
+                "state": "pending",
+                "params": action.get("params"),
+                "response": None,
+            }
+            latest_action_id = action_id
+    elif payload_type == "messageCompleted":
+        for block in data.get("blocks") or []:
+            content = block.get("content") or {}
+            if content.get("type") != "userContent":
+                continue
+            user_content = content.get("data") or {}
+            if user_content.get("type") != "userActionResponse":
+                continue
+            action_id = user_content.get("actionId")
+            if action_id in actions:
+                actions[action_id]["state"] = "resolved"
+                actions[action_id]["response"] = user_content.get("response")
+                latest_action_id = action_id
+print(json.dumps(actions.get(latest_action_id, {})))
 PY
 }
 
 wait_for_session_completed() {
   local session_id="$1"
   for _ in $(seq 1 160); do
-    local status
-    status="$(sqlite3 -cmd ".timeout 5000" "${DATABASE_PATH}" "select status from active_turns where session_id='${session_id}';")"
-    if [[ "${status}" == "completed" ]]; then
+    local state
+    state="$(python3 - "${DATABASE_PATH}" "${session_id}" <<'PY'
+import json
+import sqlite3
+import sys
+
+connection = sqlite3.connect(sys.argv[1], timeout=5)
+active = connection.execute(
+    "SELECT state FROM agent_active_turns WHERE session_id = ?",
+    (sys.argv[2],),
+).fetchone()
+if active:
+    print(active[0])
+    raise SystemExit(0)
+terminal = connection.execute(
+    "SELECT json_extract(payload_json, '$.type') FROM agent_events "
+    "WHERE session_id = ? ORDER BY event_seq DESC LIMIT 1",
+    (sys.argv[2],),
+).fetchone()
+print(terminal[0] if terminal else "")
+PY
+)"
+    if [[ "${state}" == "turnCompleted" ]]; then
       return 0
     fi
-    if [[ "${status}" == "failed" || "${status}" == "cancelled" ]]; then
-      echo "Active turn reached terminal status ${status} while waiting for completed." >&2
+    if [[ "${state}" == "turnFailed" ]]; then
+      echo "Agent Turn failed while waiting for completion." >&2
       return 1
     fi
     sleep 0.25

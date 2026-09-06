@@ -7,6 +7,7 @@ use crate::ExecutionBranch;
 use std::sync::Arc;
 use talos_run_control::RunTaskGroup;
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub async fn run_general_turn(
     ctx: &mut InvocationContext,
@@ -53,7 +54,7 @@ pub async fn run_general_turn_with_resume(
     dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     kernel_config: &AgentKernelConfig,
-    resume: Option<GeneralTurnResume>,
+    resume: Option<AgentKernelContinuation>,
     skill_options: Option<GeneralTurnSkillOptions>,
     message_rx: Option<mpsc::Receiver<crate::ActiveTurnInputDelivery>>,
     run_tasks: RunTaskGroup,
@@ -74,32 +75,25 @@ pub async fn run_general_turn_with_resume(
     .await?;
     prepared.message_rx = message_rx.map(|receiver| Arc::new(std::sync::Mutex::new(receiver)));
     let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();
-    let warnings = prepared.warnings.clone();
     if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {
-        if let Ok(value) = serde_json::to_value(prompt_warning_state) {
-            stage_session_state_update(
-                ctx,
-                &prepared.session_id,
-                &prepared.invocation_id,
-                ExecutionBranch::ModelThinking,
-                PROMPT_WARNING_STATE_KEY,
-                value,
-            )
-            .await?;
-        }
+        stage_session_state_update(
+            ctx,
+            &prepared.session_id,
+            &prepared.invocation_id,
+            ExecutionBranch::ModelThinking,
+            crate::SessionStateUpdate::PromptWarning(prompt_warning_state.clone()),
+        )
+        .await?;
     }
     if prompt_budget_still_exhausted_from_diagnostics(&prepared.prompt_diagnostics) {
-        if let Ok(value) = serde_json::to_value(build_blocked_compaction_state()) {
-            stage_session_state_update(
-                ctx,
-                &prepared.session_id,
-                &prepared.invocation_id,
-                ExecutionBranch::ModelThinking,
-                SESSION_COMPACTION_STATE_KEY,
-                value,
-            )
-            .await?;
-        }
+        stage_session_state_update(
+            ctx,
+            &prepared.session_id,
+            &prepared.invocation_id,
+            ExecutionBranch::ModelThinking,
+            crate::SessionStateUpdate::Compaction(build_blocked_compaction_state()),
+        )
+        .await?;
         return Err(blocked_compaction_error(&prepared.session_id));
     }
     let executed = execute_general_turn_loop_with_resume(
@@ -114,9 +108,6 @@ pub async fn run_general_turn_with_resume(
         executed.usage.cache_read_input_tokens;
     prompt_diagnostics.window_usage.cache_creation_input_tokens =
         executed.usage.cache_creation_input_tokens;
-    if let Ok(value) = serde_json::to_value(&prompt_diagnostics) {
-        ctx.set_request_state(LAST_PROMPT_DIAGNOSTICS_STATE_KEY, value);
-    }
     tracing::debug!(
         session_id = %prepared.session_id,
         agent_id = %prepared.agent_id,
@@ -130,56 +121,31 @@ pub async fn run_general_turn_with_resume(
         session_history_compaction = ?prompt_diagnostics.session_history_compaction,
         "prompt governance metrics"
     );
-    if let Ok(value) = serde_json::to_value(next_session_compaction_state(&prompt_diagnostics)) {
+    stage_session_state_update(
+        ctx,
+        &prepared.session_id,
+        &prepared.invocation_id,
+        ExecutionBranch::ModelThinking,
+        crate::SessionStateUpdate::Compaction(next_session_compaction_state(&prompt_diagnostics)),
+    )
+    .await?;
+    if let Some(session_continuity) = build_session_continuity(input, &executed) {
         stage_session_state_update(
             ctx,
             &prepared.session_id,
             &prepared.invocation_id,
             ExecutionBranch::ModelThinking,
-            SESSION_COMPACTION_STATE_KEY,
-            value,
+            crate::SessionStateUpdate::Continuity(session_continuity),
         )
         .await?;
     }
-    if let Some(session_continuity) = build_session_continuity(input, &executed) {
-        if let Ok(value) = serde_json::to_value(session_continuity) {
-            stage_session_state_update(
-                ctx,
-                &prepared.session_id,
-                &prepared.invocation_id,
-                ExecutionBranch::ModelThinking,
-                SESSION_CONTINUITY_STATE_KEY,
-                value,
-            )
-            .await?;
-        }
-    }
-    let persisted_input = UserInput {
-        text: input.to_string(),
-        file_ids: ctx.input.file_ids.clone(),
-    };
-    let artifact_seq = persist_general_turn_artifacts(
-        &prepared,
-        &persisted_input,
-        &executed,
-        ctx.session_artifact_store()?,
-        ctx.transcript_service.clone(),
-        kernel_config,
-    )
-    .await?;
+    persist_general_turn_state(&prepared, &executed, ctx.transcript_service.clone()).await?;
     let outcome = general_turn_outcome_from_artifacts(&executed);
 
     Ok(GeneralTurnResult {
-        output_text: executed.output_text.clone(),
-        output_items: executed.output_items.clone(),
-        stop_reason: executed.stop_reason,
-        usage: executed.usage.clone(),
         last_model_usage: executed.last_model_usage.clone(),
-        metrics: executed.metrics.clone(),
         prompt_diagnostics,
-        warnings,
         outcome,
-        artifact_seq,
     })
 }
 
@@ -190,8 +156,7 @@ pub(crate) fn general_turn_outcome_from_artifacts(
         if let Some(pending) = executed.pending_user_action.clone() {
             return GeneralTurnOutcome::Waiting {
                 output_items: executed.output_items.clone(),
-                pending_action: PendingGeneralTurnAction::UserAction(pending),
-                stop_reason: executed.stop_reason,
+                pending_action: Box::new(pending),
                 usage: executed.usage.clone(),
                 metrics: executed.metrics.clone(),
             };
@@ -199,7 +164,6 @@ pub(crate) fn general_turn_outcome_from_artifacts(
     }
 
     GeneralTurnOutcome::Completed {
-        output_text: executed.output_text.clone(),
         output_items: executed.output_items.clone(),
         stop_reason: executed.stop_reason,
         usage: executed.usage.clone(),

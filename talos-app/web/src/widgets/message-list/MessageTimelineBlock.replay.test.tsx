@@ -31,7 +31,7 @@ describe("MessageTimelineBlock replay", () => {
       itemId: "answer-1",
       sourceItemId: "answer-1",
       kind: "assistant_text" as const,
-      phase: "unknown" as const,
+      phase: "pending" as const,
       status: "running" as const,
       text: "Streaming **answer** renders in visible chunks.",
       startedAtMs: 10,
@@ -128,7 +128,7 @@ describe("MessageTimelineBlock replay", () => {
               {
                 itemId: "commentary-1",
                 kind: "assistant_text",
-                phase: "unknown",
+                phase: "pending",
                 status: "completed",
                 text: "I will inspect the implementation.",
                 startedAtMs: 1,

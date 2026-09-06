@@ -129,14 +129,14 @@ export function ComposerProviderModelDropdowns({
               active={selectionMenu === "provider"}
               label={providerLabel}
               onHover={() => setSelectionMenu("provider")}
-              onClick={() => setSelectionMenu((value) => value === "provider" ? undefined : "provider")}
+              onClick={() => setSelectionMenu("provider")}
               value={activeProvider}
             />
             <ComposerProviderModelMenuRow
               active={selectionMenu === "model"}
               label={modelLabel}
               onHover={() => setSelectionMenu("model")}
-              onClick={() => setSelectionMenu((value) => value === "model" ? undefined : "model")}
+              onClick={() => setSelectionMenu("model")}
               value={activeModelLabel}
             />
             <ComposerProviderModelMenuRow
@@ -144,7 +144,7 @@ export function ComposerProviderModelDropdowns({
               disabled={reasoningItems.length === 1 && reasoningItems[0]?.value === "none"}
               label={effortLabel}
               onHover={() => setSelectionMenu("effort")}
-              onClick={() => setSelectionMenu((value) => value === "effort" ? undefined : "effort")}
+              onClick={() => setSelectionMenu("effort")}
               value={activeEffortLabel}
             />
           </div>

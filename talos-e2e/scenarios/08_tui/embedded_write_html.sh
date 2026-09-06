@@ -75,7 +75,7 @@ if not db_path.exists():
 
 conn = sqlite3.connect(str(db_path))
 row = conn.execute(
-    "SELECT session_key, model, current_directory, context_json, message_count FROM sessions ORDER BY created_at DESC LIMIT 1"
+    "SELECT session_key, current_directory, environment_json, conf_json, message_count FROM sessions ORDER BY created_at DESC LIMIT 1"
 ).fetchone()
 if not row:
     print("{}")
@@ -83,9 +83,9 @@ if not row:
 
 payload = {
     "session_id": row[0],
-    "model": row[1],
-    "current_directory": row[2],
-    "context": json.loads(row[3] or "{}"),
+    "current_directory": row[1],
+    "environment": json.loads(row[2] or "null") or {},
+    "model_selection": json.loads(row[3] or "{}").get("modelSelection"),
     "message_count": row[4],
 }
 out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -165,10 +165,9 @@ import json
 import sys
 
 payload = json.loads(sys.argv[1] or "{}")
-context = payload.get("context") or {}
-environment = context.get("environment") or {}
+environment = payload.get("environment") or {}
 ok = (
-    bool(payload.get("model"))
+    bool(payload.get("model_selection"))
     and payload.get("current_directory")
     and environment.get("connection_mode") == "embedded"
 )

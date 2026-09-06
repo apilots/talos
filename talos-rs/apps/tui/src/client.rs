@@ -2,17 +2,17 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AuthSessionReadRequest, AuthSessionReadResponse, FileUploadRequest, FileUploadResponse,
-    GatewayClient as SdkGatewayClient, InterruptTurnRequest, MessageQueue, MessageQueueAddRequest,
-    MessageQueueChangedNotification, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
+    AgentTurnRef, AuthSessionReadRequest, AuthSessionReadResponse, FileUploadRequest,
+    FileUploadResponse, GatewayClient as SdkGatewayClient, InterruptTurnRequest, MessageQueue,
+    MessageQueueAddRequest, MessageQueueChangedNotification, MessageQueueDeleteRequest,
+    MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
     MessageQueueUpdateRequest, ModelListRequest, ModelListResponse, ModelSelection,
-    RecoverTimelineRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
-    SessionCompactRequest, SessionConf, SessionGetRequest, SessionHistoryRequest,
-    SessionHistorySnapshot, SessionInfo, SessionListRequest, SessionPatchRequest, SkillSuggestion,
-    SkillsSuggestRequest, StartTurnRequest, StartTurnResponse, SubmitUserActionRequest,
-    SubmitUserActionResponse, SubscribeTimelineRequest, TimelineActiveTurnSnapshot,
-    TimelineEventEnvelope, TimelineRecoveryResponse, UserPermissionMode,
+    RecoverTimelineRequest, RecoverTimelineResponse, SessionActiveTurnRequest, SessionClearRequest,
+    SessionCloseRequest, SessionCompactRequest, SessionConf, SessionGetRequest,
+    SessionHistoryRequest, SessionHistoryResponse, SessionInfo, SessionListRequest,
+    SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest, StartTurnRequest,
+    StartTurnResponse, SubmitTurnInputRequest, SubmitTurnInputResponse, SubscribeTimelineRequest,
+    TimelineActiveTurn, TimelineEvent, UserPermissionMode,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -97,11 +97,11 @@ pub trait GatewayClient: Send + Sync {
         &self,
         request: MessageQueueStartRequest,
     ) -> TalosResult<StartTurnResponse>;
-    /// Submits one waiting message to the exact active Turn.
-    async fn steer_queued_message(
+    /// Delivers typed input to one exact running or waiting Turn.
+    async fn submit_turn_input(
         &self,
-        request: MessageQueueSteerRequest,
-    ) -> TalosResult<MessageQueue>;
+        request: SubmitTurnInputRequest,
+    ) -> TalosResult<SubmitTurnInputResponse>;
     /// Reuses the persistent Session event stream for queue invalidations.
     async fn subscribe_message_queue_changes(
         &self,
@@ -117,33 +117,29 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         mode: UserPermissionMode,
     ) -> TalosResult<SessionInfo>;
-    async fn submit_user_action(
-        &self,
-        request: SubmitUserActionRequest,
-    ) -> TalosResult<SubmitUserActionResponse>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
-    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot>;
-    async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot>;
+    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistoryResponse>;
+    async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<TimelineActiveTurn>>;
     async fn start_turn_stream(
         &self,
         request: StartTurnRequest,
-    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
+    ) -> TalosResult<mpsc::Receiver<TimelineEvent>>;
     async fn reconnect_active_turn_stream(
         &self,
         session_id: &str,
         since_event_id: Option<String>,
-    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
+    ) -> TalosResult<mpsc::Receiver<TimelineEvent>>;
     async fn subscribe_session_timeline(
         &self,
         session_id: &str,
         since_event_id: Option<String>,
-    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
+    ) -> TalosResult<mpsc::Receiver<TimelineEvent>>;
     async fn recover_timeline(
         &self,
         session_id: &str,
         after_event_id: Option<String>,
-    ) -> TalosResult<TimelineRecoveryResponse>;
+    ) -> TalosResult<RecoverTimelineResponse>;
     /// Shut down the gateway client. After this call, the client must not be reused.
     async fn shutdown(&self) -> TalosResult<()>;
 }
@@ -221,8 +217,7 @@ where
         SdkGatewayClient::interrupt_turn(
             &mut *client,
             InterruptTurnRequest {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.to_string(),
+                identity: AgentTurnRef::new(session_id, turn_id),
             },
         )
         .await
@@ -277,12 +272,12 @@ where
         SdkGatewayClient::start_queued_message(&mut *client, request).await
     }
 
-    async fn steer_queued_message(
+    async fn submit_turn_input(
         &self,
-        request: MessageQueueSteerRequest,
-    ) -> TalosResult<MessageQueue> {
+        request: SubmitTurnInputRequest,
+    ) -> TalosResult<SubmitTurnInputResponse> {
         let mut client = self.lock().await;
-        SdkGatewayClient::steer_queued_message(&mut *client, request).await
+        SdkGatewayClient::submit_turn_input(&mut *client, request).await
     }
 
     async fn subscribe_message_queue_changes(
@@ -371,14 +366,6 @@ where
         .map(|response| response.session)
     }
 
-    async fn submit_user_action(
-        &self,
-        request: SubmitUserActionRequest,
-    ) -> TalosResult<SubmitUserActionResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::submit_user_action(&mut *client, request).await
-    }
-
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
         let mut client = self.lock().await;
         SdkGatewayClient::compact_session(
@@ -403,19 +390,20 @@ where
         .map(|response| response.session)
     }
 
-    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
+    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistoryResponse> {
         let mut client = self.lock().await;
         SdkGatewayClient::get_session_history(
             &mut *client,
             SessionHistoryRequest {
                 session_id: session_id.to_string(),
+                cursor: None,
+                limit: Some(1000),
             },
         )
         .await
-        .map(|response| response.history)
     }
 
-    async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot> {
+    async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<TimelineActiveTurn>> {
         let mut client = self.lock().await;
         SdkGatewayClient::get_active_turn(
             &mut *client,
@@ -430,7 +418,7 @@ where
     async fn start_turn_stream(
         &self,
         mut request: StartTurnRequest,
-    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+    ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
         let session_id = request.session_id.clone();
         if request.client_request_id.is_none() {
             request.client_request_id = Some(format!("tui-{}", uuid::Uuid::new_v4().simple()));
@@ -456,7 +444,7 @@ where
         &self,
         session_id: &str,
         since_event_id: Option<String>,
-    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+    ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
         let mut client = self.lock().await;
         let active_turn = SdkGatewayClient::get_active_turn(
             &mut *client,
@@ -466,7 +454,7 @@ where
         )
         .await?
         .active_turn;
-        let Some(turn_id) = active_turn.turn_id else {
+        let Some(active_turn) = active_turn else {
             return Err(TalosError::public(
                 talos_error::ErrorCode::Conflict,
                 "No active turn stream is available for this session.".to_string(),
@@ -476,7 +464,7 @@ where
             &mut *client,
             SubscribeTimelineRequest {
                 session_id: session_id.to_string(),
-                turn_id: Some(turn_id),
+                turn_id: Some(active_turn.identity.turn_id),
                 since_event_id,
                 replay_limit: Some(256),
                 close_when_idle: Some(false),
@@ -491,7 +479,7 @@ where
         &self,
         session_id: &str,
         since_event_id: Option<String>,
-    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+    ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
         let mut client = self.lock().await;
         let subscription = SdkGatewayClient::open_timeline_stream(
             &mut *client,
@@ -512,7 +500,7 @@ where
         &self,
         session_id: &str,
         after_event_id: Option<String>,
-    ) -> TalosResult<TimelineRecoveryResponse> {
+    ) -> TalosResult<RecoverTimelineResponse> {
         let mut client = self.lock().await;
         SdkGatewayClient::recover_timeline(
             &mut *client,

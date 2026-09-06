@@ -5,8 +5,8 @@ import { activeContextCompaction, latestContextCompaction } from "../timeline-st
 import { useAppStore } from "@/shared/store/app-store";
 import {
   contextCompactionDelta,
+  contextCompactionCompleted,
   contextCompactionStarted,
-  itemCompleted,
   turnCompleted,
 } from "./streaming-fixtures";
 
@@ -46,7 +46,7 @@ describe("context compaction stream state", () => {
     ));
     expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])?.stage).toBe("trimming");
 
-    applyStreamEvent("sess-1", turnCompleted(2, 0));
+    applyStreamEvent("sess-1", turnCompleted(2));
 
     expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])).toBeUndefined();
   });
@@ -64,7 +64,12 @@ describe("context compaction stream state", () => {
       "Session history compaction finished.",
       2,
     ));
-    applyStreamEvent("sess-1", itemCompleted("compact-1", 3));
+    applyStreamEvent("sess-1", contextCompactionCompleted(
+      "compact-1",
+      3,
+      "applied",
+      "Session history compaction finished.",
+    ));
 
     const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find(
       (block) => block.kind === "timeline",

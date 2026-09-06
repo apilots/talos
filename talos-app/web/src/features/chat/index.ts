@@ -61,7 +61,6 @@ export {
   useSubmitUserActionMutation,
 } from "./hooks/useChatQueries";
 export { useSessionBlocks } from "./hooks/useSessionBlocks";
-export { useSessionMessageStream } from "./hooks/useSessionMessageStream";
 export { useSessionStreaming } from "./hooks/useSessionStreaming";
 export { createChatSlice, type ChatSlice, type ChatSliceSetter } from "./store";
 export { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "./stream-events";

@@ -2,16 +2,19 @@ use super::{Actor, CreateSessionRequest, ResourceAccessService};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use talos_coordinator::SessionRuntime;
 use talos_error::TalosResult;
-use talos_store::profile::MockProfileStore;
 use talos_store::project::{ProjectRecord, ProjectStore};
-use talos_store::session::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
+use talos_store::session::{
+    AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord, SessionStore,
+    SessionSummary,
+};
+use talos_types::talos::{SessionSource, SessionSourceProvider, SessionSourceType};
 use talos_types::{
     AgentTurnRef, ModelRef, ModelSelection, ProjectPatch, SessionConf, SessionListRequest,
-    SessionPatch, TalosConfig, DEFAULT_SESSION_TITLE,
+    TalosConfig, DEFAULT_SESSION_TITLE,
 };
+
+use crate::test_support::NoopAgentCoordinator;
 
 #[derive(Default)]
 struct RecordingSessionStore {
@@ -55,22 +58,25 @@ fn recording_session_service(
 }
 
 fn recording_access_service(
-    runtime: Arc<dyn SessionRuntime>,
+    coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
     store: Arc<RecordingSessionStore>,
 ) -> ResourceAccessService {
     let sessions = recording_session_service(store.clone());
     let projects = Arc::new(crate::project::ProjectService::new(store));
-    ResourceAccessService::with_services(
-        runtime,
-        sessions,
-        projects,
-        Arc::new(MockProfileStore::default()),
-    )
+    ResourceAccessService::with_services(coordinator, sessions, projects)
 }
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
-    async fn insert_session_record(&self, record: &SessionRecord, _scope: &str) -> TalosResult<()> {
+    async fn set_generated_title(
+        &self,
+        _identity: &talos_agent_api::AgentTurnRef,
+        _title: &str,
+    ) -> TalosResult<bool> {
+        Ok(false)
+    }
+
+    async fn insert_session_record(&self, record: &SessionRecord) -> TalosResult<()> {
         self.records.lock().unwrap().push(record.clone());
         Ok(())
     }
@@ -108,23 +114,44 @@ impl SessionStore for RecordingSessionStore {
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
         self.listed_queries.lock().unwrap().push(query.clone());
-        let records = self.records.lock().unwrap();
-        if !records.is_empty() {
-            return Ok(records.clone());
-        }
-        Ok(vec![
-            record_for(
-                query.user_id.as_deref().unwrap_or("member-user"),
-                "session-1",
-                None,
-                None,
-            ),
-            record_for("other-user", "session-2", None, None),
-        ])
+        let offset = query.offset.unwrap_or_default();
+        let limit = query.limit.unwrap_or(usize::MAX);
+        Ok(self
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|record| {
+                query
+                    .user_id
+                    .as_ref()
+                    .is_none_or(|user_id| &record.user_id == user_id)
+            })
+            .filter(|record| {
+                query
+                    .project_id
+                    .as_ref()
+                    .is_none_or(|project_id| record.project_id.as_ref() == Some(project_id))
+            })
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
-    async fn count_session_records(&self, _query: &SessionQuery) -> TalosResult<usize> {
-        Ok(2)
+    async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize> {
+        Ok(self
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|record| {
+                query
+                    .user_id
+                    .as_ref()
+                    .is_none_or(|user_id| &record.user_id == user_id)
+            })
+            .count())
     }
 
     async fn summarize_sessions(&self, user_id: &str) -> TalosResult<SessionSummary> {
@@ -145,12 +172,57 @@ impl SessionStore for RecordingSessionStore {
         Ok(false)
     }
 
-    async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+        Ok(false)
+    }
+
+    async fn patch_session(
+        &self,
+        params: PatchSessionParams,
+    ) -> TalosResult<Option<SessionRecord>> {
         let mut records = self.records.lock().unwrap();
-        let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
+        let Some(stored) = records
+            .iter_mut()
+            .find(|stored| stored.id == params.session_id)
+        else {
+            return Ok(None);
+        };
+        stored.conf = params.conf;
+        stored.current_directory = params.current_directory;
+        stored.last_activity = params.last_activity;
+        if params.reset_context_usage {
+            stored.usage.context = None;
+        }
+        Ok(Some(stored.clone()))
+    }
+
+    async fn accumulate_session_usage(
+        &self,
+        params: AccumulateSessionUsageParams,
+    ) -> TalosResult<Option<SessionRecord>> {
+        let mut records = self.records.lock().unwrap();
+        let Some(stored) = records
+            .iter_mut()
+            .find(|stored| stored.id == params.session_id)
+        else {
+            return Ok(None);
+        };
+        stored.usage.tokens.accumulate(&params.tokens);
+        stored.last_activity = params.last_activity;
+        Ok(Some(stored.clone()))
+    }
+
+    async fn clear_session_history(&self, session_id: &str, cleared_at: u64) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let Some(record) = records.iter_mut().find(|record| record.id == session_id) else {
             return Ok(false);
         };
-        *stored = record.clone();
+        record.title = DEFAULT_SESSION_TITLE.to_string();
+        record.last_activity = cleared_at;
+        record.message_count = 0;
+        record.latest_turn_seq = 0;
+        record.memory_processed_until_event_seq = 0;
+        record.usage = talos_types::SessionUsage::default();
         Ok(true)
     }
 
@@ -167,7 +239,7 @@ impl SessionStore for RecordingSessionStore {
         Ok(true)
     }
 
-    async fn advance_memory_processed_until_seq(
+    async fn advance_memory_processed_until_event_seq(
         &self,
         session_id: &str,
         _expected_until_seq: u64,
@@ -180,7 +252,7 @@ impl SessionStore for RecordingSessionStore {
             .iter_mut()
             .find(|record| record.id == session_id)
         {
-            record.memory_processed_until_seq = next_until_seq;
+            record.memory_processed_until_event_seq = next_until_seq;
         }
         Ok(())
     }
@@ -257,41 +329,6 @@ impl ProjectStore for RecordingSessionStore {
     }
 }
 
-struct NoopSessionRuntime;
-
-#[async_trait]
-impl SessionRuntime for NoopSessionRuntime {
-    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
-        Ok("default".to_string())
-    }
-
-    async fn compact_session(
-        &self,
-        _params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> TalosResult<talos_types::TokenUsage> {
-        unreachable!("not used in this test")
-    }
-
-    async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn prepare_delete_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn cancel_active_turn(
-        &self,
-        _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
-        unreachable!("not used in this test")
-    }
-}
-
 fn record_for(
     user_id: &str,
     session_id: &str,
@@ -311,23 +348,16 @@ fn record_for(
         tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
-        context: TalosContext {
-            source_type: TalosSourceType::Http,
-            provider: TalosProvider::Http,
-            user_id: user_id.to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("web".to_string()),
-            thread_id: None,
-            project_root: None,
-            environment: None,
-        },
-        model: "default".to_string(),
+        source_type: SessionSourceType::Http,
+        source_provider: SessionSourceProvider::Http,
+        channel_id: Some("web".to_string()),
+        thread_id: None,
+        environment: None,
         created_at: 0,
         last_activity: 0,
         message_count: 0,
         latest_turn_seq: 0,
-        memory_processed_until_seq: 0,
+        memory_processed_until_event_seq: 0,
         usage: talos_types::SessionUsage::default(),
         conf,
         workspace_id: "default".to_string(),
@@ -338,8 +368,11 @@ fn record_for(
 
 #[tokio::test]
 async fn list_sessions_scopes_query_to_actor() {
-    let store = Arc::new(RecordingSessionStore::default());
-    let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
+    let store = Arc::new(RecordingSessionStore::from_records(vec![
+        record_for("member-user", "session-1", None, None),
+        record_for("other-user", "session-2", None, None),
+    ]));
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store.clone());
 
     let sessions = access
         .list_sessions(
@@ -357,30 +390,20 @@ async fn list_sessions_scopes_query_to_actor() {
 }
 
 #[tokio::test]
-async fn regular_actor_cannot_read_or_patch_other_user_session() {
+async fn regular_actor_cannot_load_another_users_session() {
     let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
         "other-user",
         "session-1",
         None,
         None,
     )]));
-    let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store.clone());
 
-    let read_error = access
-        .get_session(&Actor::regular("member-user"), "session-1")
+    let error = access
+        .load_session(&Actor::regular("member-user"), "session-1")
         .await
         .expect_err("other user session should be hidden");
-    assert!(read_error.is_code(talos_error::ErrorCode::ResourceNotFound));
-
-    let patch_error = access
-        .patch_session(
-            &Actor::regular("member-user"),
-            "session-1",
-            SessionPatch::default(),
-        )
-        .await
-        .expect_err("other user session should not be patched");
-    assert!(patch_error.is_code(talos_error::ErrorCode::ResourceNotFound));
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -395,15 +418,11 @@ async fn child_session_rejects_ordinary_external_access() {
         path: "/root/child_1".parse().unwrap(),
     };
     let store = Arc::new(RecordingSessionStore::from_records(vec![child]));
-    let access = recording_access_service(Arc::new(NoopSessionRuntime), store);
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store);
     let actor = Actor::regular("member-user");
 
     assert!(access
-        .get_session(&actor, "child-1")
-        .await
-        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
-    assert!(access
-        .get_session(&actor, "child-1")
+        .load_session(&actor, "child-1")
         .await
         .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
 }
@@ -414,7 +433,7 @@ async fn open_mode_actor_only_sees_anonymous_sessions() {
         record_for("anonymous", "session-anonymous", None, None),
         record_for("member-user", "session-member", None, None),
     ]));
-    let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store.clone());
 
     let sessions = access
         .list_sessions(&Actor::regular("anonymous"), SessionListRequest::default())
@@ -422,31 +441,21 @@ async fn open_mode_actor_only_sees_anonymous_sessions() {
         .expect("list should succeed");
 
     assert_eq!(sessions.len(), 1);
-    assert_eq!(sessions[0].context.session_id, "session-anonymous");
+    assert_eq!(sessions[0].id, "session-anonymous");
 }
 
 #[tokio::test]
 async fn creating_session_uses_actor_user_id() {
     let store = Arc::new(RecordingSessionStore::default());
-    let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
-    let context = TalosContext {
-        source_type: TalosSourceType::Http,
-        provider: TalosProvider::Http,
-        user_id: "spoofed-user".to_string(),
-        message_id: "message-1".to_string(),
-        trace_id: "trace-1".to_string(),
-        channel_id: None,
-        thread_id: None,
-        project_root: None,
-        environment: None,
-    };
+    let access = recording_access_service(Arc::new(NoopAgentCoordinator), store.clone());
+    let source = SessionSource::http();
 
     let session = access
-        .get_or_create_session(
+        .create_session(
             &Actor::regular("member-user"),
             CreateSessionRequest {
                 session_id: "session-created".to_string(),
-                context,
+                source,
                 model_selection: None,
                 user_permission_mode: None,
                 project_id: None,
@@ -457,48 +466,5 @@ async fn creating_session_uses_actor_user_id() {
         .expect("session should be created");
 
     assert_eq!(session.user_id, "member-user");
-    assert_eq!(session.context.user_id, "member-user");
-    assert_eq!(
-        store.records.lock().unwrap()[0].context.user_id,
-        "member-user"
-    );
-}
-
-#[tokio::test]
-async fn existing_session_rejects_a_project_override() {
-    let store = Arc::new(RecordingSessionStore::default());
-    store
-        .records
-        .lock()
-        .unwrap()
-        .push(record_for("member-user", "session-existing", None, None));
-    let access = recording_access_service(Arc::new(NoopSessionRuntime), store);
-    let context = TalosContext {
-        source_type: TalosSourceType::Http,
-        provider: TalosProvider::Http,
-        user_id: "member-user".to_string(),
-        message_id: "message-2".to_string(),
-        trace_id: "trace-2".to_string(),
-        channel_id: None,
-        thread_id: None,
-        project_root: None,
-        environment: None,
-    };
-
-    let error = access
-        .get_or_create_session(
-            &Actor::regular("member-user"),
-            CreateSessionRequest {
-                session_id: "session-existing".to_string(),
-                context,
-                model_selection: None,
-                user_permission_mode: None,
-                project_id: Some("project-2".to_string()),
-                current_directory: None,
-            },
-        )
-        .await
-        .unwrap_err();
-
-    assert!(error.to_string().contains("project binding is immutable"));
+    assert_eq!(store.records.lock().unwrap()[0].user_id, "member-user");
 }

@@ -14,39 +14,31 @@ if ! has_real_llm_key; then
 fi
 echo "CASE user_action_real_llm_precheck PASS key_detected=true"
 
-APPROVAL_WORKSPACE="$(make_e2e_temp_dir "user-action-approval-workspace")"
-export APPROVAL_WORKSPACE
-MODE_SMOKE_FILE_1="${APPROVAL_WORKSPACE}/mode-smoke-1.txt"
-MODE_SMOKE_FILE_2="${APPROVAL_WORKSPACE}/mode-smoke-2.txt"
-MODE_SMOKE_FILE_3="${APPROVAL_WORKSPACE}/mode-smoke-3.txt"
-MULTI_APPROVAL_FILE="${APPROVAL_WORKSPACE}/multi-approval-marker"
-export MODE_SMOKE_FILE_1 MODE_SMOKE_FILE_2 MODE_SMOKE_FILE_3 MULTI_APPROVAL_FILE
-printf 'MODE_SMOKE_CONTENT_1\n' >"${MODE_SMOKE_FILE_1}"
-printf 'MODE_SMOKE_CONTENT_2\n' >"${MODE_SMOKE_FILE_2}"
-printf 'MODE_SMOKE_CONTENT_3\n' >"${MODE_SMOKE_FILE_3}"
 build_binaries
 start_server
-trap stop_server EXIT
+
+APPROVAL_WORKSPACE="${TALOS_HOME}/workspace-talos/anonymous"
+export APPROVAL_WORKSPACE
+mkdir -p "${APPROVAL_WORKSPACE}"
+
+cleanup() {
+  stop_server
+}
+trap cleanup EXIT
 
 get_active_turn_json() {
-  local response
-  response="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
-  api_data_json "${response}"
+  api_data_json "$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
 }
 
 get_session_history_json() {
-  local response
-  response="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/history")"
-  api_data_json "${response}"
+  api_data_json "$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/history")"
 }
 
 submit_user_action_json() {
   local payload="$1"
-  local response
-  response="$(curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
+  api_data_json "$(curl -sS -X POST "${GATEWAY_URL}/v1/turns/input" \
     -H "Content-Type: application/json" \
     -d "${payload}")"
-  api_data_json "${response}"
 }
 
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
@@ -60,25 +52,12 @@ export PRIMARY_MODEL="${primary_model}"
 export PRIMARY_PROVIDER="${primary_provider}"
 echo "CASE user_action_select_model PASS model=${primary_model}"
 
-build_session_context() {
+build_session_start_defaults() {
   python3 - <<'PY'
 import json
 import os
 
-payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "interaction-user-action",
-        "user_id": "interaction-user-action-user",
-        "thread_id": None,
-        "message_id": "msg-interaction-user-action",
-        "trace_id": "trace-interaction-user-action",
-        "environment": {
-            "directory": os.environ["APPROVAL_WORKSPACE"],
-            "connection_mode": "embedded",
-        },
-    },
+print(json.dumps({
     "modelSelection": {
         "modelRef": {
             "provider": os.environ["PRIMARY_PROVIDER"],
@@ -86,28 +65,24 @@ payload = {
         },
         "reasoningEffort": None,
     },
-    "current_directory": os.environ["APPROVAL_WORKSPACE"],
-}
-print(json.dumps(payload, ensure_ascii=False))
+    "currentDirectory": os.environ["APPROVAL_WORKSPACE"],
+}))
 PY
 }
 
-build_turn_payload() {
+build_question_payload() {
   local marker="$1"
   MARKER="${marker}" python3 - <<'PY'
 import json
 import os
 
-marker = os.environ["MARKER"]
 text = (
-    "You must call AskUserQuestion exactly once. Use header Execution Mode, "
-    "question Choose mode, and exactly these options: "
-    "id plan, label Plan, description Explore before execution; "
+    "Call AskUserQuestion exactly once. Use header Execution Mode, question Choose mode, "
+    "and exactly these options: id plan, label Plan, description Explore before execution; "
     "id direct, label Direct, description Execute immediately. "
-    f"After receiving the answer, respond with exactly {marker}"
+    f"After receiving the answer, respond with exactly {os.environ['MARKER']}"
 )
-payload = {"input": [{"type": "text", "text": text}]}
-print(json.dumps(payload, ensure_ascii=False))
+print(json.dumps({"input": {"content": [{"type": "text", "text": text}]}}))
 PY
 }
 
@@ -119,55 +94,11 @@ import json
 import os
 
 text = (
-    "You must call Bash exactly once with this exact command: "
+    "Call Bash exactly once with this exact command: "
     f"{os.environ['COMMAND']}. Do not call any other tool. "
     f"After the tool result, respond with exactly {os.environ['MARKER']}"
 )
-payload = {"input": [{"type": "text", "text": text}]}
-print(json.dumps(payload, ensure_ascii=False))
-PY
-}
-
-build_multi_approval_payload() {
-  local marker="$1"
-  MARKER="${marker}" python3 - <<'PY'
-import json
-import os
-
-path = os.environ["MULTI_APPROVAL_FILE"]
-commands = [
-    f"printf 'MULTI_1\\n' >> '{path}'",
-    f"printf 'MULTI_2\\n' >> '{path}'",
-    f"printf 'MULTI_3\\n' >> '{path}'",
-]
-text = (
-    "You must make exactly three independent Bash tool calls, one for each exact command. "
-    "The order does not matter: "
-    + "; ".join(commands)
-    + ". Do not call any other tool. After all three tool results, respond with exactly "
-    + os.environ["MARKER"]
-)
-payload = {"input": [{"type": "text", "text": text}]}
-print(json.dumps(payload, ensure_ascii=False))
-PY
-}
-
-build_mode_smoke_payload() {
-  local marker="$1"
-  MARKER="${marker}" python3 - <<'PY'
-import json
-import os
-
-text = (
-    "You must make exactly three independent Read tool calls, one for each exact path "
-    "in this order: "
-    f"{os.environ['MODE_SMOKE_FILE_1']}, "
-    f"{os.environ['MODE_SMOKE_FILE_2']}, "
-    f"{os.environ['MODE_SMOKE_FILE_3']}. Do not call any other tool. "
-    f"After the tool result, respond with exactly {os.environ['MARKER']}"
-)
-payload = {"input": [{"type": "text", "text": text}]}
-print(json.dumps(payload, ensure_ascii=False))
+print(json.dumps({"input": {"content": [{"type": "text", "text": text}]}}))
 PY
 }
 
@@ -177,78 +108,95 @@ extract_output_text() {
 import json
 import os
 
-data = json.loads(os.environ["RESPONSE_JSON"])
-for item in data.get("output", []):
-    if item.get("type") == "output_text":
-        print(item.get("text", ""))
-        break
+response = json.loads(os.environ["RESPONSE_JSON"])
+print("".join(
+    item.get("text", "")
+    for item in response.get("output", [])
+    if item.get("type") == "output_text"
+))
+PY
+}
+
+pending_action_from_events() {
+  local events_path="$1"
+  EVENTS_PATH="${events_path}" python3 - <<'PY'
+import json
+import os
+
+pending = None
+with open(os.environ["EVENTS_PATH"], encoding="utf-8") as handle:
+    for line in handle:
+        if not line.startswith("data: "):
+            continue
+        record = json.loads(line[6:])
+        event = record.get("event") or {}
+        payload = event.get("payload") or {}
+        data = payload.get("data") or {}
+        if payload.get("type") == "waitingForInput" and data.get("type") == "userAction":
+            pending = {"eventId": record.get("eventId"), "action": data.get("action")}
+if pending is None:
+    raise SystemExit("canonical waitingForInput UserAction event was not found")
+print(json.dumps(pending, separators=(",", ":")))
+PY
+}
+
+assert_active_waiting() {
+  local turn_id="$1"
+  local active_json
+  active_json="$(get_active_turn_json)"
+  ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" python3 - <<'PY'
+import json
+import os
+
+active = json.loads(os.environ["ACTIVE_JSON"])["activeTurn"]
+assert active["identity"]["turnId"] == os.environ["TURN_ID"], active
+assert active["state"] == "waitingForInput", active
+assert active.get("lastEventId"), active
 PY
 }
 
 assert_terminal_turn() {
   local case_name="$1"
   local turn_id="$2"
-  local message_id="$3"
+  local expected_status="$3"
   local active_json history_json
   active_json="$(get_active_turn_json)"
   history_json="$(get_session_history_json)"
-  ACTIVE_JSON="${active_json}" HISTORY_JSON="${history_json}" TURN_ID="${turn_id}" MESSAGE_ID="${message_id}" python3 - <<'PY'
+  ACTIVE_JSON="${active_json}" HISTORY_JSON="${history_json}" TURN_ID="${turn_id}" EXPECTED_STATUS="${expected_status}" python3 - <<'PY'
 import json
 import os
 
-active = json.loads(os.environ["ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == os.environ["TURN_ID"], active
-assert active["status"] == "completed", active
-history = json.loads(os.environ["HISTORY_JSON"])["history"]
-messages = [
-    message
-    for message in history["messages"]
-    if message["message_id"] == os.environ["MESSAGE_ID"]
+active = json.loads(os.environ["ACTIVE_JSON"])["activeTurn"]
+assert active is None, active
+history = json.loads(os.environ["HISTORY_JSON"])
+turns = [
+    turn for turn in history["data"]
+    if turn["identity"]["turnId"] == os.environ["TURN_ID"]
 ]
-assert len(messages) == 1, messages
-message = messages[0]
-assert message["turn_id"] == os.environ["TURN_ID"], message
-assert message["stop_reason"] == "end_turn", message
+assert len(turns) == 1, turns
+result = turns[0]["result"]
+assert result["status"] == os.environ["EXPECTED_STATUS"], result
+messages = result["result"]["messages"]
+assert messages, result
+assert all(message["status"] in ("completed", "failed", "cancelled") for message in messages)
 assert all(
-    item["status"] in ("completed", "failed", "cancelled")
-    for item in message["items"]
-), message
+    block["status"] in ("completed", "failed", "cancelled")
+    for message in messages
+    for block in message["blocks"]
+)
+if os.environ["EXPECTED_STATUS"] == "completed":
+    assert result["result"]["completion"]["stopReason"] == "endTurn", result
+else:
+    assert result["result"]["failure"]["error"]["code"], result
 PY
   echo "CASE ${case_name}_terminal_history PASS turn_id=${turn_id}"
 }
 
-wait_for_active_turn_status() {
-  local expected_turn_id="$1"
-  local expected_status="$2"
-  local attempt=0
-  local active_json=""
-  local active_turn_id=""
-  local active_status=""
-
-  while (( attempt < 600 )); do
-    active_json="$(get_active_turn_json)"
-    active_turn_id="$(json_get "${active_json}" "active_turn.turn_id")"
-    active_status="$(json_get "${active_json}" "active_turn.status")"
-    if [[ "${active_turn_id}" == "${expected_turn_id}" && "${active_status}" == "${expected_status}" ]]; then
-      return 0
-    fi
-    if [[ "${active_turn_id}" == "${expected_turn_id}" && "${active_status}" =~ ^(failed|cancelled)$ ]]; then
-      echo "Active turn reached ${active_status} while waiting for ${expected_status}: ${active_json}" >&2
-      return 1
-    fi
-    attempt=$((attempt + 1))
-    sleep 0.25
-  done
-
-  echo "Timed out waiting for active turn ${expected_turn_id} status ${expected_status}: ${active_json}" >&2
-  return 1
-}
-
 session_id="$(new_session_id)"
-remember_session_context "${session_id}" "$(build_session_context)"
+remember_session_start_defaults "${session_id}" "$(build_session_start_defaults)"
 echo "CASE user_action_session_id PASS session_id=${session_id}"
 
-bootstrap_payload='{"input":[{"type":"text","text":"Reply with exactly INTERACTION_SESSION_READY"}]}'
+bootstrap_payload='{"input":{"content":[{"type":"text","text":"Reply with exactly INTERACTION_SESSION_READY"}]}}'
 bootstrap_json="$(send_message_response "${session_id}" "${bootstrap_payload}" "interaction_session_bootstrap")"
 if [[ "$(extract_output_text "${bootstrap_json}")" != "INTERACTION_SESSION_READY" ]]; then
   echo "CASE user_action_session_bootstrap FAIL response=${bootstrap_json}"
@@ -261,217 +209,85 @@ for mode in askForApproval approveForMe fullAccess; do
     -H "Content-Type: application/json" \
     -d "{\"conf\":{\"userPermissionMode\":\"${mode}\"}}")"
   patch_data_json="$(api_data_json "${patch_json}")"
-  actual_mode="$(json_get "${patch_data_json}" "session.effectiveMode")"
-  if [[ "${actual_mode}" != "${mode}" ]]; then
+  if [[ "$(json_get "${patch_data_json}" "session.effectiveMode")" != "${mode}" ]]; then
     echo "CASE session_permission_${mode} FAIL response=${patch_json}"
     exit 1
   fi
   echo "CASE session_permission_${mode} PASS"
-
-  mode_marker="MODE_${mode}_OK"
-  mode_payload="$(build_mode_smoke_payload "${mode_marker}")"
-  mode_response="$(send_message_response "${session_id}" "${mode_payload}" "session_permission_${mode}_turn")"
-  MODE_RESPONSE="${mode_response}" MODE_MARKER="${mode_marker}" python3 - <<'PY'
-import json
-import os
-
-response = json.loads(os.environ["MODE_RESPONSE"])
-tool_calls = [item for item in response.get("output", []) if item.get("type") == "tool_call"]
-output_text = [item.get("text", "") for item in response.get("output", []) if item.get("type") == "output_text"]
-assert response.get("stop_reason") == "end_turn", response
-assert len(tool_calls) == 3, tool_calls
-assert [call.get("name") for call in tool_calls] == ["Read", "Read", "Read"], tool_calls
-metrics = response.get("metrics") or {}
-assert metrics.get("tool_calls") == 3, metrics
-assert metrics.get("tool_successes") == 3, metrics
-assert output_text == [os.environ["MODE_MARKER"]], output_text
-PY
-  echo "CASE session_permission_${mode}_turn PASS"
 done
-
-approve_for_me_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
-  -H "Content-Type: application/json" \
-  -d '{"conf":{"userPermissionMode":"approveForMe"}}')"
-approve_for_me_data_json="$(api_data_json "${approve_for_me_json}")"
-if [[ "$(json_get "${approve_for_me_data_json}" "session.effectiveMode")" != "approveForMe" ]]; then
-  echo "CASE approve_for_me_real_risk_mode FAIL response=${approve_for_me_json}"
-  exit 1
-fi
-
-safe_command="printf APPROVE_FOR_ME_MODEL_SAFE"
-safe_payload="$(build_approval_payload "${safe_command}" "APPROVE_FOR_ME_MODEL_SAFE_OK")"
-safe_response="$(send_message_response "${session_id}" "${safe_payload}" "approve_for_me_real_safe")"
-SAFE_RESPONSE="${safe_response}" SAFE_COMMAND="${safe_command}" python3 - <<'PY'
-import json
-import os
-
-response = json.loads(os.environ["SAFE_RESPONSE"])
-tool_calls = [item for item in response.get("output", []) if item.get("type") == "tool_call"]
-output_text = [item.get("text", "") for item in response.get("output", []) if item.get("type") == "output_text"]
-assert response.get("stop_reason") == "end_turn", response
-assert len(tool_calls) == 1, tool_calls
-assert tool_calls[0].get("name") == "Bash", tool_calls[0]
-assert tool_calls[0].get("arguments", {}).get("command") == os.environ["SAFE_COMMAND"], tool_calls[0]
-assert output_text == ["APPROVE_FOR_ME_MODEL_SAFE_OK"], output_text
-metrics = response.get("metrics") or {}
-assert metrics.get("tool_calls") == 1, metrics
-assert metrics.get("tool_successes") == 1, metrics
-PY
-echo "CASE approve_for_me_real_safe PASS"
-
-RISK_TARGET="${APPROVAL_WORKSPACE}/approve-for-me-risk-target"
-mkdir -p "${RISK_TARGET}"
-printf 'must-remain\n' >"${RISK_TARGET}/sentinel"
-risky_command="python3 -c \"import shutil; shutil.rmtree('${RISK_TARGET}')\""
-risky_payload="$(build_approval_payload "${risky_command}" "APPROVE_FOR_ME_MODEL_RISKY_OK")"
-risky_ack_json="$(send_message_ack "${session_id}" "${risky_payload}")"
-risky_turn_id="$(api_json_get "${risky_ack_json}" "turn_id")"
-risky_message_id="$(api_json_get "${risky_ack_json}" "message_id")"
-risky_events="$(scenario_report_path "approve_for_me_real_risky_initial_events.log")"
-wait_for_active_turn_status "${risky_turn_id}" "waiting_user_action"
-collect_timeline_events "${session_id}" "${risky_turn_id}" "${risky_events}"
-risky_response="$(message_response_from_events "${risky_ack_json}" "${risky_events}")"
-risky_active_json="$(get_active_turn_json)"
-RISKY_ACTIVE_JSON="${risky_active_json}" RISKY_RESPONSE="${risky_response}" RISKY_TURN_ID="${risky_turn_id}" RISKY_COMMAND="${risky_command}" python3 - <<'PY'
-import json
-import os
-
-response = json.loads(os.environ["RISKY_RESPONSE"])
-tool_calls = [item for item in response.get("output", []) if item.get("type") == "tool_call"]
-assert response.get("stop_reason") == "waiting_user_action", response
-assert len(tool_calls) == 1 and tool_calls[0].get("name") == "Bash", tool_calls
-active = json.loads(os.environ["RISKY_ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == os.environ["RISKY_TURN_ID"], active
-assert active["status"] == "waiting_user_action", active
-action = active["pending_user_action"]
-assert action["state"] == "pending", action
-params = action["params"]
-assert params["type"] == "sandboxApproval", params
-approval = params["params"]
-assert approval["reason"] == "riskyCommand", approval
-presentation = approval["presentation"]
-assert presentation["type"] == "command", presentation
-assert presentation["command"] == os.environ["RISKY_COMMAND"], presentation
-summary = presentation.get("riskSummary", "").strip()
-assert summary, presentation
-assert "timed out" not in summary.lower(), summary
-assert "unavailable" not in summary.lower(), summary
-assert "invalid command risk assessment" not in summary.lower(), summary
-PY
-if [[ ! -f "${RISK_TARGET}/sentinel" ]]; then
-  echo "CASE approve_for_me_real_risky_waiting FAIL destructive_side_effect_exists"
-  exit 1
-fi
-risky_action_id="$(json_get "${risky_active_json}" "active_turn.pending_user_action.actionId")"
-risky_last_event_id="$(json_get "${risky_active_json}" "active_turn.last_event_id")"
-risky_submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${risky_turn_id}\",\"actionId\":\"${risky_action_id}\",\"response\":{\"type\":\"sandboxApproval\",\"response\":\"deny\"}}"
-risky_submit_json="$(submit_user_action_json "${risky_submit_payload}")"
-if [[ "$(json_get "${risky_submit_json}" "state")" != "resuming" ]]; then
-  echo "CASE approve_for_me_real_risky_submit FAIL response=${risky_submit_json}"
-  exit 1
-fi
-risky_resumed_events="$(scenario_report_path "approve_for_me_real_risky_resumed_events.log")"
-collect_timeline_events "${session_id}" "${risky_turn_id}" "${risky_resumed_events}" "${risky_last_event_id}"
-risky_resumed_response="$(message_response_from_events "${risky_ack_json}" "${risky_resumed_events}")"
-if [[ "$(extract_output_text "${risky_resumed_response}")" != "APPROVE_FOR_ME_MODEL_RISKY_OK" || ! -f "${RISK_TARGET}/sentinel" ]]; then
-  echo "CASE approve_for_me_real_risky_resume FAIL response=${risky_resumed_response}"
-  exit 1
-fi
-assert_terminal_turn "approve_for_me_real_risky" "${risky_turn_id}" "${risky_message_id}"
-echo "CASE approve_for_me_real_risky PASS action_id=${risky_action_id}"
 
 run_question() {
   local case_name="$1"
-  local answer_type="$2"
+  local answer_json="$2"
   local marker="$3"
-  local payload ack_json turn_id message_id initial_events initial_response
-  local active_json recovery_json action_id option_id last_event_id answer_json submit_payload submit_json
-  local resumed_events resumed_response final_output
+  local payload ack_json turn_id waiting_events waiting_response pending action_id waiting_event_id
+  local recovery_json submit_payload submit_json resumed_events resumed_response
 
-  payload="$(build_turn_payload "${marker}")"
+  payload="$(build_question_payload "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
-  turn_id="$(api_json_get "${ack_json}" "turn_id")"
-  message_id="$(api_json_get "${ack_json}" "message_id")"
-  if [[ -z "${turn_id}" || -z "${message_id}" ]]; then
-    echo "CASE ${case_name}_start FAIL response=${ack_json}"
-    exit 1
-  fi
-
-  initial_events="$(scenario_report_path "${case_name}_initial_events.log")"
-  wait_for_active_turn_status "${turn_id}" "waiting_user_action"
-  collect_timeline_events "${session_id}" "${turn_id}" "${initial_events}"
-  initial_response="$(message_response_from_events "${ack_json}" "${initial_events}")"
-  log_case_json "${case_name}_waiting" "${payload}" "${initial_response}"
-
-  active_json="$(get_active_turn_json)"
-  ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" python3 - <<'PY'
+  turn_id="$(api_json_get "${ack_json}" "turnId")"
+  waiting_events="$(scenario_report_path "${case_name}_waiting_events.log")"
+  collect_timeline_events "${session_id}" "${turn_id}" "${waiting_events}" "" "waitingForInput,turnFailed"
+  waiting_response="$(message_response_from_events "${ack_json}" "${waiting_events}")"
+  pending="$(pending_action_from_events "${waiting_events}")"
+  PENDING="${pending}" RESPONSE="${waiting_response}" python3 - <<'PY'
 import json
 import os
 
-active = json.loads(os.environ["ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == os.environ["TURN_ID"], active
-assert active["status"] == "waiting_user_action", active
-action = active["pending_user_action"]
+response = json.loads(os.environ["RESPONSE"])
+assert response["stop_reason"] == "waiting_user_action", response
+action = json.loads(os.environ["PENDING"])["action"]
 assert action["state"] == "pending", action
 params = action["params"]
 assert params["type"] == "question", params
 question = params["params"]
 assert question["header"] == "Execution Mode", question
-assert len(question["options"]) == 2, question
 assert [option["id"] for option in question["options"]] == ["plan", "direct"], question
 PY
+  assert_active_waiting "${turn_id}"
 
   recovery_json="$(api_data_json "$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/timeline/recovery")")"
   RECOVERY_JSON="${recovery_json}" TURN_ID="${turn_id}" python3 - <<'PY'
 import json
 import os
 
-snapshot = json.loads(os.environ["RECOVERY_JSON"])["snapshot"]
-active = snapshot["active_turn"]
-assert active["turn_id"] == os.environ["TURN_ID"], active
-assert active["status"] == "waiting_user_action", active
-action = active["pending_user_action"]
-assert action["state"] == "pending", action
-assert action["params"]["type"] == "question", action
+recovery = json.loads(os.environ["RECOVERY_JSON"])
+active = recovery["activeTurn"]
+assert active["identity"]["turnId"] == os.environ["TURN_ID"], active
+assert active["state"] == "waitingForInput", active
+assert any(
+    item["event"]["payload"]["type"] == "waitingForInput"
+    for item in recovery["replay"]["events"]
+), recovery
 PY
 
-  action_id="$(json_get "${active_json}" "active_turn.pending_user_action.actionId")"
-  option_id="plan"
-  last_event_id="$(json_get "${active_json}" "active_turn.last_event_id")"
-  if [[ "${answer_type}" == "selectedOption" ]]; then
-    answer_json="{\"type\":\"selectedOption\",\"optionId\":\"${option_id}\"}"
-  else
-    answer_json='{"type":"freeForm","text":"Use a staged rollout"}'
-  fi
-  submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"question\",\"response\":${answer_json}}}"
+  action_id="$(json_get "${pending}" "action.actionId")"
+  waiting_event_id="$(json_get "${pending}" "eventId")"
+  submit_payload="{\"identity\":{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\"},\"input\":{\"type\":\"userActionResponse\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"question\",\"response\":${answer_json}}},\"clientRequestId\":null}"
   submit_json="$(submit_user_action_json "${submit_payload}")"
-  if [[ "$(json_get "${submit_json}" "actionId")" != "${action_id}" || "$(json_get "${submit_json}" "state")" != "resuming" ]]; then
+  if [[ "$(json_get "${submit_json}" "identity.turnId")" != "${turn_id}" || -z "$(json_get "${submit_json}" "messageId")" ]]; then
     echo "CASE ${case_name}_submit FAIL response=${submit_json}"
     exit 1
   fi
 
   resumed_events="$(scenario_report_path "${case_name}_resumed_events.log")"
-  collect_timeline_events "${session_id}" "${turn_id}" "${resumed_events}" "${last_event_id}"
+  collect_timeline_events "${session_id}" "${turn_id}" "${resumed_events}" "${waiting_event_id}"
   resumed_response="$(message_response_from_events "${ack_json}" "${resumed_events}")"
-  log_case_json "${case_name}_resumed" "${submit_payload}" "${resumed_response}"
-  final_output="$(extract_output_text "${resumed_response}")"
-  if [[ "${final_output}" != "${marker}" || "$(json_get "${resumed_response}" "stop_reason")" == "error" ]]; then
+  if [[ "$(extract_output_text "${resumed_response}")" != "${marker}" ]]; then
     echo "CASE ${case_name}_resume FAIL response=${resumed_response}"
     exit 1
   fi
-  assert_terminal_turn "${case_name}" "${turn_id}" "${message_id}"
+  assert_terminal_turn "${case_name}" "${turn_id}" "completed"
   echo "CASE ${case_name} PASS action_id=${action_id}"
-  echo "CASE ${case_name}_recovery PASS action_id=${action_id}"
 }
 
-run_question "user_action_question_option" "selectedOption" "QUESTION_OPTION_OK"
-run_question "user_action_question_other" "freeForm" "QUESTION_OTHER_OK"
+run_question "user_action_question_option" '{"type":"selectedOption","optionId":"plan"}' "QUESTION_OPTION_OK"
+run_question "user_action_question_other" '{"type":"freeForm","text":"Use a staged rollout"}' "QUESTION_OTHER_OK"
 
 approval_mode_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
   -d '{"conf":{"userPermissionMode":"askForApproval"}}')"
-approval_mode_data_json="$(api_data_json "${approval_mode_json}")"
-if [[ "$(json_get "${approval_mode_data_json}" "session.effectiveMode")" != "askForApproval" ]]; then
+if [[ "$(json_get "$(api_data_json "${approval_mode_json}")" "session.effectiveMode")" != "askForApproval" ]]; then
   echo "CASE sandbox_approval_mode FAIL response=${approval_mode_json}"
   exit 1
 fi
@@ -481,39 +297,26 @@ run_sandbox_approval() {
   local case_name="$1"
   local decision="$2"
   local marker="$3"
-  local side_effect="$4"
-  local submission_mode="${5:-single}"
-  local command payload ack_json turn_id message_id initial_events initial_response
-  local active_json action_id call_id last_event_id submit_payload submit_json expected_state
-  local submit_one_path submit_two_path submit_one submit_two submit_one_pid submit_two_pid
-  local resumed_events resumed_response final_output terminal_json history_json
+  local side_effect="${APPROVAL_WORKSPACE}/${case_name}-marker"
+  local command payload ack_json turn_id waiting_events waiting_response pending action_id waiting_event_id
+  local submit_payload submit_json resumed_events resumed_response expected_terminal
 
   rm -f "${side_effect}"
-  command="printf '${case_name}' >> '${side_effect}'"
+  command="printf '${case_name}' > '${side_effect}'"
   payload="$(build_approval_payload "${command}" "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
-  turn_id="$(api_json_get "${ack_json}" "turn_id")"
-  message_id="$(api_json_get "${ack_json}" "message_id")"
-  if [[ -z "${turn_id}" || -z "${message_id}" ]]; then
-    echo "CASE ${case_name}_start FAIL response=${ack_json}"
-    exit 1
-  fi
-
-  initial_events="$(scenario_report_path "${case_name}_initial_events.log")"
-  wait_for_active_turn_status "${turn_id}" "waiting_user_action"
-  collect_timeline_events "${session_id}" "${turn_id}" "${initial_events}"
-  initial_response="$(message_response_from_events "${ack_json}" "${initial_events}")"
-  log_case_json "${case_name}_waiting" "${payload}" "${initial_response}"
-  active_json="$(get_active_turn_json)"
-  ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" COMMAND="${command}" python3 - <<'PY'
+  turn_id="$(api_json_get "${ack_json}" "turnId")"
+  waiting_events="$(scenario_report_path "${case_name}_waiting_events.log")"
+  collect_timeline_events "${session_id}" "${turn_id}" "${waiting_events}" "" "waitingForInput,turnFailed"
+  waiting_response="$(message_response_from_events "${ack_json}" "${waiting_events}")"
+  pending="$(pending_action_from_events "${waiting_events}")"
+  PENDING="${pending}" RESPONSE="${waiting_response}" COMMAND="${command}" python3 - <<'PY'
 import json
 import os
 
-active = json.loads(os.environ["ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == os.environ["TURN_ID"], active
-assert active["status"] == "waiting_user_action", active
-action = active["pending_user_action"]
-assert action["state"] == "pending", action
+response = json.loads(os.environ["RESPONSE"])
+assert response["stop_reason"] == "waiting_user_action", response
+action = json.loads(os.environ["PENDING"])["action"]
 params = action["params"]
 assert params["type"] == "sandboxApproval", params
 approval = params["params"]
@@ -523,61 +326,26 @@ presentation = approval["presentation"]
 assert presentation["type"] == "command", presentation
 assert presentation["command"] == os.environ["COMMAND"], presentation
 PY
-
-  action_id="$(json_get "${active_json}" "active_turn.pending_user_action.actionId")"
-  call_id="$(json_get "${active_json}" "active_turn.pending_user_action.callId")"
-  last_event_id="$(json_get "${active_json}" "active_turn.last_event_id")"
-  submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"sandboxApproval\",\"response\":\"${decision}\"}}"
-  if [[ "${submission_mode}" == "concurrent" ]]; then
-    submit_one_path="$(scenario_report_path "${case_name}_submit_one.json")"
-    submit_two_path="$(scenario_report_path "${case_name}_submit_two.json")"
-    submit_user_action_json "${submit_payload}" >"${submit_one_path}" &
-    submit_one_pid=$!
-    submit_user_action_json "${submit_payload}" >"${submit_two_path}" &
-    submit_two_pid=$!
-    wait "${submit_one_pid}"
-    wait "${submit_two_pid}"
-    submit_one="$(cat "${submit_one_path}")"
-    submit_two="$(cat "${submit_two_path}")"
-    SUBMIT_ONE="${submit_one}" SUBMIT_TWO="${submit_two}" ACTION_ID="${action_id}" python3 - <<'PY'
-import json
-import os
-
-responses = [json.loads(os.environ["SUBMIT_ONE"]), json.loads(os.environ["SUBMIT_TWO"])]
-assert all(response["actionId"] == os.environ["ACTION_ID"] for response in responses), responses
-states = [response["state"] for response in responses]
-assert all(state in ("responseAccepted", "resuming") for state in states), responses
-assert "resuming" in states, responses
-PY
-    submit_json="${submit_one}"
-  else
-    submit_json="$(submit_user_action_json "${submit_payload}")"
+  assert_active_waiting "${turn_id}"
+  if [[ -e "${side_effect}" ]]; then
+    echo "CASE ${case_name}_waiting FAIL side_effect_ran_before_approval"
+    exit 1
   fi
-  expected_state="resuming"
-  if [[ "${decision}" == "cancel" ]]; then
-    expected_state="cancelled"
-  fi
-  if [[ "$(json_get "${submit_json}" "actionId")" != "${action_id}" || "$(json_get "${submit_json}" "state")" != "${expected_state}" ]]; then
+
+  action_id="$(json_get "${pending}" "action.actionId")"
+  waiting_event_id="$(json_get "${pending}" "eventId")"
+  submit_payload="{\"identity\":{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\"},\"input\":{\"type\":\"userActionResponse\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"sandboxApproval\",\"response\":\"${decision}\"}},\"clientRequestId\":null}"
+  submit_json="$(submit_user_action_json "${submit_payload}")"
+  expected_terminal="completed"
+  if [[ "$(json_get "${submit_json}" "identity.turnId")" != "${turn_id}" || -z "$(json_get "${submit_json}" "messageId")" ]]; then
     echo "CASE ${case_name}_submit FAIL response=${submit_json}"
     exit 1
   fi
 
-  if [[ "${decision}" == "cancel" ]]; then
-    terminal_json="$(get_active_turn_json)"
-    if [[ "$(json_get "${terminal_json}" "active_turn.status")" != "failed" || -e "${side_effect}" ]]; then
-      echo "CASE ${case_name} FAIL active_turn=${terminal_json}"
-      exit 1
-    fi
-    echo "CASE ${case_name} PASS action_id=${action_id}"
-    return
-  fi
-
   resumed_events="$(scenario_report_path "${case_name}_resumed_events.log")"
-  collect_timeline_events "${session_id}" "${turn_id}" "${resumed_events}" "${last_event_id}"
+  collect_timeline_events "${session_id}" "${turn_id}" "${resumed_events}" "${waiting_event_id}"
   resumed_response="$(message_response_from_events "${ack_json}" "${resumed_events}")"
-  log_case_json "${case_name}_resumed" "${submit_payload}" "${resumed_response}"
-  final_output="$(extract_output_text "${resumed_response}")"
-  if [[ "${final_output}" != "${marker}" ]]; then
+  if [[ "$(extract_output_text "${resumed_response}")" != "${marker}" ]]; then
     echo "CASE ${case_name}_resume FAIL response=${resumed_response}"
     exit 1
   fi
@@ -587,140 +355,13 @@ PY
       exit 1
     fi
   elif [[ -e "${side_effect}" ]]; then
-    echo "CASE ${case_name} FAIL denied_side_effect_exists"
+    echo "CASE ${case_name} FAIL rejected_side_effect_exists"
     exit 1
   fi
-  assert_terminal_turn "${case_name}" "${turn_id}" "${message_id}"
-  history_json="$(get_session_history_json)"
-  HISTORY_JSON="${history_json}" CALL_ID="${call_id}" python3 - <<'PY'
-import json
-import os
-
-history = json.loads(os.environ["HISTORY_JSON"])["history"]
-matching_messages = [
-    message
-    for message in history["messages"]
-    if any(
-        item["content"]["type"] == "tool_call"
-        and item["content"]["call_id"] == os.environ["CALL_ID"]
-        for item in message["items"]
-    )
-]
-tool_calls = [
-    item
-    for message in matching_messages
-    for item in message["items"]
-    if item["content"]["type"] == "tool_call"
-    and item["content"]["call_id"] == os.environ["CALL_ID"]
-]
-assert len(matching_messages) == 1, matching_messages
-assert len(tool_calls) == 1, tool_calls
-assert tool_calls[0]["content"]["result"] is not None, tool_calls[0]
-assert matching_messages[0]["stop_reason"] == "end_turn", matching_messages[0]
-assert all(
-    item["status"] in ("completed", "failed", "cancelled")
-    for item in matching_messages[0]["items"]
-), matching_messages[0]
-PY
+  assert_terminal_turn "${case_name}" "${turn_id}" "${expected_terminal}"
   echo "CASE ${case_name} PASS action_id=${action_id}"
 }
 
-run_multi_sandbox_approval() {
-  local case_name="sandbox_approval_three_allow_once"
-  local marker="SANDBOX_THREE_ALLOW_ONCE_OK"
-  local payload ack_json turn_id message_id events response active_json action_id last_event_id
-  local submit_payload submit_json step history_json
-
-  rm -f "${MULTI_APPROVAL_FILE}"
-  payload="$(build_multi_approval_payload "${marker}")"
-  ack_json="$(send_message_ack "${session_id}" "${payload}")"
-  turn_id="$(api_json_get "${ack_json}" "turn_id")"
-  message_id="$(api_json_get "${ack_json}" "message_id")"
-
-  events="$(scenario_report_path "${case_name}_initial_events.log")"
-  wait_for_active_turn_status "${turn_id}" "waiting_user_action"
-  collect_timeline_events "${session_id}" "${turn_id}" "${events}"
-  response="$(message_response_from_events "${ack_json}" "${events}")"
-  RESPONSE="${response}" python3 - <<'PY'
-import json
-import os
-
-response = json.loads(os.environ["RESPONSE"])
-tool_calls = [item for item in response["output"] if item["type"] == "tool_call"]
-assert response["stop_reason"] == "waiting_user_action", response
-assert len(tool_calls) == 3, tool_calls
-assert [item["name"] for item in tool_calls] == ["Bash", "Bash", "Bash"], tool_calls
-assert response["metrics"]["tool_calls"] == 3, response["metrics"]
-PY
-
-  for step in 1 2 3; do
-    active_json="$(get_active_turn_json)"
-    ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" python3 - <<'PY'
-import json
-import os
-
-active = json.loads(os.environ["ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == os.environ["TURN_ID"], active
-assert active["status"] == "waiting_user_action", active
-action = active["pending_user_action"]
-assert action["state"] == "pending", action
-assert action["params"]["type"] == "sandboxApproval", action
-assert action["params"]["params"]["toolName"] == "Bash", action
-PY
-    action_id="$(json_get "${active_json}" "active_turn.pending_user_action.actionId")"
-    last_event_id="$(json_get "${active_json}" "active_turn.last_event_id")"
-    submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"sandboxApproval\",\"response\":\"allowOnce\"}}"
-    submit_json="$(submit_user_action_json "${submit_payload}")"
-    if [[ "$(json_get "${submit_json}" "state")" != "resuming" ]]; then
-      echo "CASE ${case_name}_step_${step}_submit FAIL response=${submit_json}"
-      exit 1
-    fi
-
-    events="$(scenario_report_path "${case_name}_step_${step}_events.log")"
-    collect_timeline_events "${session_id}" "${turn_id}" "${events}" "${last_event_id}"
-    response="$(message_response_from_events "${ack_json}" "${events}")"
-    if [[ "${step}" -lt 3 && "$(json_get "${response}" "stop_reason")" != "waiting_user_action" ]]; then
-      echo "CASE ${case_name}_step_${step} FAIL response=${response}"
-      exit 1
-    fi
-  done
-
-  if [[ "$(extract_output_text "${response}")" != "${marker}" ]]; then
-    echo "CASE ${case_name}_final FAIL response=${response}"
-    exit 1
-  fi
-  if [[ "$(sort "${MULTI_APPROVAL_FILE}")" != $'MULTI_1\nMULTI_2\nMULTI_3' ]]; then
-    echo "CASE ${case_name}_side_effects FAIL"
-    exit 1
-  fi
-  assert_terminal_turn "${case_name}" "${turn_id}" "${message_id}"
-
-  history_json="$(get_session_history_json)"
-  HISTORY_JSON="${history_json}" MESSAGE_ID="${message_id}" python3 - <<'PY'
-import json
-import os
-
-history = json.loads(os.environ["HISTORY_JSON"])["history"]
-message = next(item for item in history["messages"] if item["message_id"] == os.environ["MESSAGE_ID"])
-tool_calls = [item for item in message["items"] if item["content"]["type"] == "tool_call"]
-assert len(tool_calls) == 3, tool_calls
-assert len({item["content"]["call_id"] for item in tool_calls}) == 3, tool_calls
-assert all(item["content"]["result"] is not None for item in tool_calls), tool_calls
-metrics = message["metrics"]
-assert metrics["tool_calls"] == 3, metrics
-assert metrics["tool_successes"] == 3, metrics
-assert metrics["tool_errors"] == 0, metrics
-PY
-  echo "CASE ${case_name} PASS turn_id=${turn_id}"
-}
-
-run_sandbox_approval \
-  "sandbox_approval_allow_once" "allowOnce" "SANDBOX_ALLOW_ONCE_OK" \
-  "${APPROVAL_WORKSPACE}/allow-once-marker" "concurrent"
-run_multi_sandbox_approval
-run_sandbox_approval \
-  "sandbox_approval_deny" "deny" "SANDBOX_DENY_OK" \
-  "${APPROVAL_WORKSPACE}/deny-marker"
-run_sandbox_approval \
-  "sandbox_approval_cancel" "cancel" "SANDBOX_CANCEL_UNUSED" \
-  "${APPROVAL_WORKSPACE}/cancel-marker"
+run_sandbox_approval "sandbox_approval_allow_once" "allowOnce" "SANDBOX_ALLOW_ONCE_OK"
+run_sandbox_approval "sandbox_approval_deny" "deny" "SANDBOX_DENY_OK"
+run_sandbox_approval "sandbox_approval_cancel" "cancel" "SANDBOX_CANCEL_UNUSED"

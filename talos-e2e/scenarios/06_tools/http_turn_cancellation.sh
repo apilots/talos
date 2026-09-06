@@ -9,6 +9,12 @@ require_command curl
 require_command python3
 require_command ps
 
+if ! has_real_llm_key; then
+  echo "CASE turn_cancel_real_llm_precheck FAIL missing provider key in .env"
+  exit 1
+fi
+echo "CASE turn_cancel_real_llm_precheck PASS key_detected=true"
+
 build_binaries
 start_server
 
@@ -32,21 +38,12 @@ fi
 export PRIMARY_MODEL="${primary_model}"
 export PRIMARY_PROVIDER="${primary_provider}"
 
-build_session_context() {
+build_session_start_defaults() {
   python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "turn-cancellation-e2e",
-        "user_id": "turn-cancellation-e2e-user",
-        "thread_id": None,
-        "message_id": "turn-cancellation-e2e-message",
-        "trace_id": "turn-cancellation-e2e-trace",
-    },
     "modelSelection": {
         "modelRef": {
             "provider": os.environ["PRIMARY_PROVIDER"],
@@ -69,7 +66,7 @@ text = (
     "Do not call any other tool and do not wait before calling Bash. "
     "After the tool result, respond with exactly TURN_CANCEL_UNEXPECTED_COMPLETION."
 )
-payload = {"input": [{"type": "text", "text": text}]}
+payload = {"input": {"content": [{"type": "text", "text": text}]}}
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
@@ -156,10 +153,10 @@ wait_for_process_cleanup() {
 }
 
 session_id="$(new_session_id)"
-remember_session_context "${session_id}" "$(build_session_context)"
+remember_session_start_defaults "${session_id}" "$(build_session_start_defaults)"
 turn_payload="$(build_turn_payload)"
 ack_json="$(send_message_ack "${session_id}" "${turn_payload}")"
-turn_id="$(api_json_get "${ack_json}" "turn_id")"
+turn_id="$(api_json_get "${ack_json}" "turnId")"
 if [[ -z "${turn_id}" ]]; then
   echo "CASE turn_cancel_start FAIL response=${ack_json}"
   exit 1
@@ -181,13 +178,13 @@ import json
 import os
 import sqlite3
 
-active = json.loads(os.environ["ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == os.environ["TURN_ID"], active
-assert active["status"] == "running", active
+active = json.loads(os.environ["ACTIVE_JSON"])["activeTurn"]
+assert active["identity"]["turnId"] == os.environ["TURN_ID"], active
+assert active["state"] == "running", active
 
 with sqlite3.connect(os.environ["DATABASE_PATH"]) as connection:
     row = connection.execute(
-        "SELECT turn_id, status FROM active_turns WHERE session_id = ?",
+        "SELECT turn_id, state FROM agent_active_turns WHERE session_id = ?",
         (os.environ["SESSION_ID"],),
     ).fetchone()
 assert row == (os.environ["TURN_ID"], "running"), row
@@ -197,13 +194,18 @@ cancel_payload="$(SESSION_ID="${session_id}" TURN_ID="${turn_id}" python3 - <<'P
 import json
 import os
 
-print(json.dumps({"session_id": os.environ["SESSION_ID"], "turn_id": os.environ["TURN_ID"]}))
+print(json.dumps({
+    "identity": {
+        "sessionId": os.environ["SESSION_ID"],
+        "turnId": os.environ["TURN_ID"],
+    },
+}))
 PY
 )"
 cancel_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/turns/interrupt" \
   -H "Content-Type: application/json" \
   -d "${cancel_payload}")"
-if [[ "$(api_json_get "${cancel_json}" "success")" != "True" ]]; then
+if [[ "$(api_json_get "${cancel_json}" "outcome.type")" != "cancelled" ]]; then
   echo "CASE turn_cancel_request FAIL response=${cancel_json}"
   exit 1
 fi
@@ -220,49 +222,40 @@ import sqlite3
 from pathlib import Path
 
 turn_id = os.environ["TURN_ID"]
-active = json.loads(os.environ["ACTIVE_JSON"])["active_turn"]
-assert active["turn_id"] == turn_id, active
-assert active["status"] == "completed", active
+active = json.loads(os.environ["ACTIVE_JSON"])["activeTurn"]
+assert active is None, active
 
 stream_events = []
 for line in Path(os.environ["EVENTS_PATH"]).read_text().splitlines():
     if not line.startswith("data: "):
         continue
     record = json.loads(line[6:])
-    stream_events.append(record.get("event", record))
+    stream_events.append(record.get("event", {}))
 
-tool_item_ids = {
-    event["payload"]["item"]["item_id"]
-    for event in stream_events
-    if event.get("event_type") == "item_started"
-    and event.get("payload", {}).get("item", {}).get("kind") == "tool_call"
-    and event.get("payload", {}).get("item", {}).get("content", {}).get("name") == "Bash"
-}
-assert len(tool_item_ids) == 1, tool_item_ids
-cancelled_indexes = [
+bash_call_indexes = [
     index
     for index, event in enumerate(stream_events)
-    if event.get("event_type") == "item_completed"
-    and event.get("payload", {}).get("item_id") in tool_item_ids
-    and event.get("payload", {}).get("status") == "cancelled"
+    if event.get("payload", {}).get("type") in {"messageBlockStarted", "messageBlockCompleted"}
+    and (event.get("payload", {}).get("data", {}).get("block", {}).get("content", {}).get("type") == "toolCall")
+    and (event.get("payload", {}).get("data", {}).get("block", {}).get("content", {}).get("data", {}).get("name") == "Bash")
 ]
-completed_indexes = [
+terminal_indexes = [
     index
     for index, event in enumerate(stream_events)
-    if event.get("event_type") == "turn_completed"
-    and event.get("payload", {}).get("stop_reason") == "cancelled"
+    if event.get("payload", {}).get("type") == "turnFailed"
+    and event.get("payload", {}).get("data", {}).get("error", {}).get("code") == "cancelled"
 ]
-assert len(cancelled_indexes) == 1, cancelled_indexes
-assert len(completed_indexes) == 1, completed_indexes
-assert cancelled_indexes[0] < completed_indexes[0], (cancelled_indexes, completed_indexes)
+assert bash_call_indexes, bash_call_indexes
+assert len(terminal_indexes) == 1, terminal_indexes
+assert bash_call_indexes[0] < terminal_indexes[0], (bash_call_indexes, terminal_indexes)
 
 with sqlite3.connect(os.environ["DATABASE_PATH"]) as connection:
     active_row = connection.execute(
-        "SELECT turn_id, status FROM active_turns WHERE session_id = ?",
+        "SELECT turn_id, state FROM agent_active_turns WHERE session_id = ?",
         (os.environ["SESSION_ID"],),
     ).fetchone()
 
-assert active_row == (turn_id, "completed"), active_row
+assert active_row is None, active_row
 PY
 
 SERVER_LOG="${SERVER_LOG}" SESSION_ID="${session_id}" TURN_ID="${turn_id}" python3 - <<'PY'
@@ -312,5 +305,5 @@ assert any(
 PY
 
 echo "CASE turn_cancel_running_bash PASS turn_id=${turn_id} bash_pids=${bash_pids}"
-echo "CASE turn_cancel_terminal_state PASS status=completed stop_reason=cancelled"
+echo "CASE turn_cancel_terminal_state PASS terminal=turnFailed code=cancelled"
 echo "CASE turn_cancel_cleanup PASS process=gone mode=Cooperative outcome=Confirmed"

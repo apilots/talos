@@ -27,21 +27,12 @@ done
 build_binaries
 trap stop_server EXIT
 
-build_session_context() {
+build_session_start_defaults() {
   python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "tool-web-search",
-        "user_id": "tool-web-search-user",
-        "thread_id": None,
-        "message_id": "msg-tool-web-search",
-        "trace_id": "trace-tool-web-search",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -55,7 +46,7 @@ import json
 import os
 
 payload = {
-    "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
+    "input": {"content": [{"type": "text", "text": os.environ["INPUT_TEXT"]}]},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -142,9 +133,9 @@ run_provider() {
   local session_payload
   local session_id
   local session_json
-  session_payload="$(build_session_context)"
+  session_payload="$(build_session_start_defaults)"
   session_id="$(new_session_id)"
-  remember_session_context "${session_id}" "${session_payload}"
+  remember_session_start_defaults "${session_id}" "${session_payload}"
   session_json="{\"id\":\"${session_id}\"}"
   session_id="$(session_id_from_json "${session_json}")"
   if [[ -z "${session_id}" ]]; then

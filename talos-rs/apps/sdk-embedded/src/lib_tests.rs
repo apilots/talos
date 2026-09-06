@@ -1,30 +1,16 @@
 use super::*;
 use std::path::PathBuf;
-use talos_types::talos::{
-    TalosConnectionMode, TalosContext, TalosInputItem, TalosProvider, TalosSessionEnvironment,
-    TalosSourceType,
-};
+use talos_types::talos::TalosConnectionMode;
+use talos_types::{AgentUserContent, AgentUserInput};
 
-fn start_turn_request(
-    current_directory: Option<PathBuf>,
-    environment: Option<TalosSessionEnvironment>,
-) -> StartTurnRequest {
+fn start_turn_request(current_directory: Option<PathBuf>) -> StartTurnRequest {
     StartTurnRequest {
         session_id: "session-1".to_string(),
-        input: vec![TalosInputItem::Text {
-            text: "hello".to_string(),
-        }],
-        context: Some(TalosContext {
-            source_type: TalosSourceType::Cli,
-            provider: TalosProvider::Cli,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: None,
-            thread_id: None,
-            project_root: None,
-            environment,
-        }),
+        input: AgentUserInput {
+            content: vec![AgentUserContent::Text {
+                text: "hello".to_string(),
+            }],
+        },
         model_selection: None,
         user_permission_mode: None,
         project_id: None,
@@ -36,28 +22,12 @@ fn start_turn_request(
 #[test]
 fn normalizes_embedded_environment_from_current_directory() {
     let directory = PathBuf::from("/tmp/talos-embedded");
-    let request = start_turn_request(Some(directory.clone()), None);
+    let request = start_turn_request(Some(directory.clone()));
 
-    let normalized = normalize_embedded_start_turn_request(request).unwrap();
+    let (normalized, source) = prepare_embedded_start_turn(request).unwrap();
 
     assert_eq!(normalized.current_directory, Some(directory.clone()));
-    let environment = normalized.context.unwrap().environment.unwrap();
+    let environment = source.environment.unwrap();
     assert_eq!(environment.directory, directory);
-    assert_eq!(environment.connection_mode, TalosConnectionMode::Embedded);
-}
-
-#[test]
-fn overrides_existing_non_embedded_environment() {
-    let environment = TalosSessionEnvironment {
-        directory: PathBuf::from("/remote"),
-        connection_mode: TalosConnectionMode::Remote,
-    };
-    let request = start_turn_request(None, Some(environment));
-
-    let normalized = normalize_embedded_start_turn_request(request).unwrap();
-
-    assert_eq!(normalized.current_directory, Some(PathBuf::from("/remote")));
-    let environment = normalized.context.unwrap().environment.unwrap();
-    assert_eq!(environment.directory, PathBuf::from("/remote"));
     assert_eq!(environment.connection_mode, TalosConnectionMode::Embedded);
 }

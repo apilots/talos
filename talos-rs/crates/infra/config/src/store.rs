@@ -670,6 +670,45 @@ fn is_redacted_api_key(value: &str) -> bool {
     value.trim() == REDACTED_API_KEY
 }
 
+/// Resolves one LLM update into runtime credentials without persisting it.
+pub fn resolve_llm_update_for_runtime(current: &LlmConfig, update: &mut LlmConfig) {
+    preserve_provider_runtime_secret(&current.anthropic, &mut update.anthropic);
+    preserve_provider_runtime_secret(&current.openai, &mut update.openai);
+    preserve_provider_runtime_secret(&current.bailian, &mut update.bailian);
+    preserve_provider_runtime_secret(&current.deepseek, &mut update.deepseek);
+    preserve_provider_runtime_secret(&current.ollama, &mut update.ollama);
+    preserve_provider_runtime_secret(&current.openrouter, &mut update.openrouter);
+}
+
+/// Resolves one Web Search update into runtime credentials without persisting it.
+pub fn resolve_web_search_update_for_runtime(
+    current: &WebSearchToolConfig,
+    update: &mut WebSearchToolConfig,
+) {
+    preserve_web_search_runtime_secret(&current.firecrawl, &mut update.firecrawl);
+    preserve_web_search_runtime_secret(&current.brave, &mut update.brave);
+    preserve_web_search_runtime_secret(&current.tavily, &mut update.tavily);
+}
+
+fn preserve_provider_runtime_secret(current: &ProviderConfig, update: &mut ProviderConfig) {
+    preserve_runtime_secret(&current.api_key, &mut update.api_key);
+}
+
+fn preserve_web_search_runtime_secret(
+    current: &WebSearchProviderRuntimeConfig,
+    update: &mut WebSearchProviderRuntimeConfig,
+) {
+    preserve_runtime_secret(&current.api_key, &mut update.api_key);
+}
+
+fn preserve_runtime_secret(current: &Option<String>, update: &mut Option<String>) {
+    match update.as_deref().map(str::trim) {
+        Some("") => *update = None,
+        Some(value) if !is_redacted_api_key(value) && !is_env_placeholder(value) => {}
+        Some(_) | None => *update = current.clone(),
+    }
+}
+
 fn rollback_status(result: TalosResult<()>) -> &'static str {
     if result.is_ok() {
         "ok"

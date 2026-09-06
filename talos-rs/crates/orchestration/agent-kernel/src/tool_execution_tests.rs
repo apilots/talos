@@ -1,5 +1,5 @@
 use super::*;
-use crate::{KernelStreamEventData, ToolProgressKind, ToolStreamKey};
+use crate::{AgentKernelEventPayload, ToolProgressKind, ToolStreamKey};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -411,7 +411,7 @@ fn test_execution_context() -> ToolExecutionContext {
 #[tokio::test]
 async fn run_cancellation_settles_a_registered_tool_task() {
     let control = Arc::new(talos_run_control::ActiveRunControl::new(
-        talos_run_control::RunIdentity::new("s1", "turn-1"),
+        talos_types::AgentTurnRef::new("s1", "turn-1"),
     ));
     let mut execution_context = test_execution_context();
     execution_context.run_tasks = control.tasks();
@@ -461,7 +461,7 @@ async fn run_cancellation_settles_a_registered_tool_task() {
 #[tokio::test]
 async fn unconfirmed_tool_cleanup_is_preserved_in_run_settlement() {
     let control = Arc::new(talos_run_control::ActiveRunControl::new(
-        talos_run_control::RunIdentity::new("s1", "turn-1"),
+        talos_types::AgentTurnRef::new("s1", "turn-1"),
     ));
     let mut execution_context = test_execution_context();
     execution_context.run_tasks = control.tasks();
@@ -761,7 +761,7 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
     assert!(!outputs[0].output.is_error);
     let mut saw_tool_progress = false;
     while let Ok(event) = stream_rx.try_recv() {
-        if let KernelStreamEventData::ToolProgressDelta(data) = event.data {
+        if let AgentKernelEventPayload::ToolProgressDelta(data) = event.payload {
             if data.call_id == "call_progress"
                 && data.progress_kind == ToolProgressKind::Stdout
                 && data.message.contains("hello from progress")

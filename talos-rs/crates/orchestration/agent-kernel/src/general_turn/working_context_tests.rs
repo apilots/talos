@@ -4,7 +4,6 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
     PreparedGeneralTurn {
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
-        message_id: "m1".to_string(),
         invocation_id: "turn-1".to_string(),
         agent_id: "talos".to_string(),
         workspace_id: "default".to_string(),
@@ -14,10 +13,8 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
-        prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current task")],
         maintenance_usage: TokenUsage::default(),
-        tool_definitions: Vec::new(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default(),
         prompt_diagnostics: PromptDiagnostics {
             mode: talos_prompt::PromptMode::Full,
@@ -35,7 +32,6 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
             },
             session_history_compaction: None,
         },
-        warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,

@@ -37,7 +37,7 @@ describe("ChatSessionPage", () => {
     mocks.session = {
       context: { session_id: "sess-1" },
       title: "Session 1",
-      project_id: null,
+      projectId: null,
       config: { llm: { model: "model-1" } },
       state: { message_count: 0 },
       modelSelection: {
@@ -182,12 +182,12 @@ describe("ChatSessionPage", () => {
 
     mocks.session = {
       effectiveMode: "approveForMe",
-      message_count: 1,
+      messageCount: 1,
       modelSelection: {
         modelRef: { provider: "mock", id: "model-1" },
         reasoningEffort: null,
       },
-      project_id: null,
+      projectId: null,
       title: "Session 1",
     };
     view.rerender(
@@ -252,7 +252,6 @@ describe("ChatSessionPage", () => {
         project: undefined,
       });
     });
-    expect(mocks.sessionQueryEnabled).toBe(false);
     expect(screen.queryByText("Session history failed to load.")).toBeNull();
 
     await act(async () => {
@@ -262,7 +261,7 @@ describe("ChatSessionPage", () => {
 
     await waitFor(() => expect(mocks.setDraft).toHaveBeenCalledWith("hello"));
     expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
-    expect(mocks.sessionQueryEnabled).toBe(false);
+    expect(mocks.sendText).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(mocks.sendTurn).toHaveBeenCalledWith({

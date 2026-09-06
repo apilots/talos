@@ -1,8 +1,7 @@
 use chrono::Utc;
 use serde_json::{json, Value};
-use talos_config::validate_session_workspace_user;
 use talos_error::{TalosError, TalosResult};
-use talos_types::{TalosConfig, TalosSession};
+use talos_types::TalosConfig;
 
 use super::types::EffectiveUserWorkspace;
 use crate::access::Actor;
@@ -23,14 +22,6 @@ impl EffectiveWorkspaceResolver {
             actor.username.clone(),
             self.base_config.default_workspace_id(),
         )
-    }
-
-    pub fn resolve_for_session(
-        &self,
-        session: &TalosSession,
-    ) -> TalosResult<EffectiveUserWorkspace> {
-        ensure_session_user_consistency(session)?;
-        self.resolve_for_user_id(&session.user_id, None, &session.context.workspace_id)
     }
 
     pub async fn write_profile_snapshot(
@@ -73,11 +64,6 @@ impl EffectiveWorkspaceResolver {
             config,
         })
     }
-}
-
-pub fn ensure_session_user_consistency(session: &TalosSession) -> TalosResult<()> {
-    validate_session_workspace_user(&session.user_id, &session.context.user_id)?;
-    Ok(())
 }
 
 async fn profile_snapshot_matches(

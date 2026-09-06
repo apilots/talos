@@ -365,34 +365,27 @@ async fn test_submit_input_sends_structured_skill_selection() {
     assert!(!should_quit);
     let state = state.lock().unwrap();
     let request = state.sent_requests.last().expect("expected sent request");
-    assert_eq!(request.input.len(), 2);
+    assert_eq!(request.input.content.len(), 2);
     assert!(matches!(
-        &request.input[0],
-        TalosInputItem::Text { text } if text == "please use $web-design-guidelines"
+        &request.input.content[0],
+        AgentUserContent::Text { text } if text == "please use $web-design-guidelines"
     ));
     assert!(matches!(
-        &request.input[1],
-        TalosInputItem::SkillSelection { name, path }
+        &request.input.content[1],
+        AgentUserContent::SkillSelection { name, path }
             if name == "web-design-guidelines"
                 && path == "/tmp/skills/web-design-guidelines/SKILL.md"
     ));
 }
 
 #[tokio::test]
-async fn test_submit_input_sends_turn_metadata_after_first_turn() {
+async fn test_submit_input_sends_model_and_directory_after_first_turn() {
     let client = Arc::new(MockGatewayClient::new());
     let state = client.state.clone();
     let gateway_client: Arc<dyn GatewayClient> = client;
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
-    app.session_usage = TokenUsage {
-        input_tokens: 10,
-        output_tokens: 5,
-        total_tokens: 15,
-        cache_creation_input_tokens: None,
-        cache_read_input_tokens: None,
-    };
     app.current_model = "qwen-plus".to_string();
     app.startup_directory = PathBuf::from("/tmp/talos-tui");
     app.input_buffer = "check current weather".to_string();
@@ -410,13 +403,6 @@ async fn test_submit_input_sends_turn_metadata_after_first_turn() {
     assert!(!should_quit);
     let state = state.lock().unwrap();
     let request = state.sent_requests.last().expect("expected sent request");
-    assert_eq!(
-        request
-            .context
-            .as_ref()
-            .map(|context| context.channel_id.as_deref()),
-        Some(Some("terminal"))
-    );
     assert_eq!(
         request.model_selection.as_ref().map(|selection| {
             (
@@ -716,14 +702,19 @@ async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
     app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(reasoning_delta_event(
+    app.handle_stream_event(reasoning_block_started_event(
         "msg-think",
         "sess-test",
         1,
         "First line",
     ));
-    app.handle_stream_event(reasoning_delta_event("msg-think", "sess-test", 2, "\n\n"));
-    app.handle_stream_event(reasoning_delta_event(
+    app.handle_stream_event(reasoning_block_started_event(
+        "msg-think",
+        "sess-test",
+        2,
+        "\n\n",
+    ));
+    app.handle_stream_event(reasoning_block_started_event(
         "msg-think",
         "sess-test",
         3,
@@ -738,49 +729,21 @@ async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
 #[test]
 fn test_history_replay_feeds_transcript_projection() {
     let mut app = create_embedded_app();
-    let snapshot = talos_sdk::SessionHistorySnapshot {
-        session_id: "sess-test".to_string(),
-        messages: vec![talos_sdk::SessionHistoryMessage {
-            message_id: "msg-history".to_string(),
-            turn_id: "turn-history".to_string(),
-            items: vec![
-                talos_sdk::TalosTimelineItem {
-                    item_id: "item-user".to_string(),
-                    parent_item_id: None,
-                    kind: talos_sdk::TalosTimelineItemKind::UserInput,
-                    phase: talos_sdk::TalosTimelinePhase::Input,
-                    status: talos_sdk::TalosTimelineItemStatus::Completed,
-                    title: None,
-                    started_at_ms: 1,
-                    completed_at_ms: Some(1),
-                    content: talos_sdk::TalosTimelineContent::Text {
-                        text: "history question".to_string(),
-                    },
-                },
-                talos_sdk::TalosTimelineItem {
-                    item_id: "item-history".to_string(),
-                    parent_item_id: None,
-                    kind: talos_sdk::TalosTimelineItemKind::AssistantText,
-                    phase: talos_sdk::TalosTimelinePhase::FinalAnswer,
-                    status: talos_sdk::TalosTimelineItemStatus::Completed,
-                    title: None,
-                    started_at_ms: 1,
-                    completed_at_ms: Some(2),
-                    content: talos_sdk::TalosTimelineContent::Text {
-                        text: "history answer".to_string(),
-                    },
-                },
-            ],
-            stop_reason: talos_sdk::StopReason::EndTurn,
-            usage: TokenUsage::default(),
-            metrics: Some(talos_sdk::TurnExecutionMetrics {
-                duration_ms: Some(12_300),
-                ..talos_sdk::TurnExecutionMetrics::default()
-            }),
-        }],
-        generated_at_ms: 3,
-        last_stable_event_id: None,
-    };
+    let snapshot = completed_history_response(
+        vec![
+            completed_text_message(
+                "message-user",
+                talos_sdk::AgentMessageRole::User,
+                "history question",
+            ),
+            completed_text_message(
+                "message-agent",
+                talos_sdk::AgentMessageRole::Agent,
+                "history answer",
+            ),
+        ],
+        Some(12_300),
+    );
 
     let item_count = app.replay_history_snapshot(snapshot);
 
@@ -808,31 +771,14 @@ fn test_history_replay_feeds_transcript_projection() {
 #[test]
 fn test_history_replay_feeds_input_history() {
     let mut app = create_embedded_app();
-    let snapshot = talos_sdk::SessionHistorySnapshot {
-        session_id: "sess-test".to_string(),
-        messages: vec![talos_sdk::SessionHistoryMessage {
-            message_id: "msg-history".to_string(),
-            turn_id: "turn-history".to_string(),
-            items: vec![talos_sdk::TalosTimelineItem {
-                item_id: "item-user-input".to_string(),
-                parent_item_id: None,
-                kind: talos_sdk::TalosTimelineItemKind::UserInput,
-                phase: talos_sdk::TalosTimelinePhase::Input,
-                status: talos_sdk::TalosTimelineItemStatus::Completed,
-                title: None,
-                started_at_ms: 1,
-                completed_at_ms: Some(2),
-                content: talos_sdk::TalosTimelineContent::Text {
-                    text: "previous question".to_string(),
-                },
-            }],
-            stop_reason: talos_sdk::StopReason::EndTurn,
-            usage: TokenUsage::default(),
-            metrics: None,
-        }],
-        generated_at_ms: 3,
-        last_stable_event_id: None,
-    };
+    let snapshot = completed_history_response(
+        vec![completed_text_message(
+            "message-user",
+            talos_sdk::AgentMessageRole::User,
+            "previous question",
+        )],
+        None,
+    );
 
     app.replay_history_snapshot(snapshot);
     app.navigate_message_history(-1);
@@ -845,20 +791,24 @@ fn test_stream_events_feed_transcript_projection() {
     let mut app = create_embedded_app();
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(output_item_started_event("msg-transcript", "sess-test", 1));
-    app.handle_stream_event(output_delta_event(
+    app.handle_stream_event(assistant_block_started_event(
+        "msg-transcript",
+        "sess-test",
+        1,
+    ));
+    app.handle_stream_event(assistant_text_delta_event(
         "msg-transcript",
         "sess-test",
         2,
         "hello",
     ));
-    app.handle_stream_event(assistant_text_committed_event(
+    app.handle_stream_event(assistant_phase_delta_event(
         "msg-transcript",
         "sess-test",
         3,
-        talos_sdk::TalosTimelinePhase::FinalAnswer,
+        talos_sdk::AgentAssistantTextPhase::FinalAnswer,
     ));
-    app.handle_stream_event(output_completed_event(
+    app.handle_stream_event(assistant_block_completed_event(
         "msg-transcript",
         "sess-test",
         4,
@@ -1000,19 +950,22 @@ async fn test_timeout_uses_status_hint_not_chat_block() {
 #[tokio::test]
 async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
     let events = vec![
-        started_event("msg-recovered", 0),
-        output_item_started_event("msg-recovered", "sess-test", 1),
-        output_delta_event("msg-recovered", "sess-test", 2, "recovered reply"),
-        output_completed_event("msg-recovered", "sess-test", 3, "recovered reply"),
-        completed_event(
-            "msg-recovered",
+        turn_started_event("sess-test", 0),
+        assistant_block_started_event("msg-recovered", "sess-test", 1),
+        assistant_text_delta_event("msg-recovered", "sess-test", 2, "recovered reply"),
+        assistant_block_completed_event("msg-recovered", "sess-test", 3, "recovered reply"),
+        metrics_updated_event(
             "sess-test",
             4,
-            TokenUsage {
-                total_tokens: 25,
-                ..TokenUsage::default()
+            talos_sdk::AgentRunMetrics {
+                usage: TokenUsage {
+                    total_tokens: 25,
+                    ..TokenUsage::default()
+                },
+                ..talos_sdk::AgentRunMetrics::default()
             },
         ),
+        turn_completed_event("sess-test", 5),
     ];
     let client = Arc::new(MockGatewayClient::with_active_reconnect_events(events));
     let mut app = TuiApp::new_with_gateway_client(client.clone());
@@ -1053,20 +1006,11 @@ async fn test_stale_timeline_events_are_ignored() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
-    app.active_stream_message_id = Some("msg-current".to_string());
+    app.active_stream_turn_id = Some("turn-test".to_string());
     app.last_stream_sequence = Some(3);
-    let stale_message_id = format!(
-        "{}-stale",
-        app.active_stream_message_id
-            .as_deref()
-            .expect("active stream message id should exist")
-    );
-    app.handle_stream_event(output_delta_event(
-        stale_message_id,
-        "sess-test",
-        4,
-        "stale",
-    ));
+    let mut stale_event = assistant_text_delta_event("msg-stale", "sess-test", 4, "stale");
+    stale_event.event.identity.turn_id = "turn-stale".to_string();
+    app.handle_stream_event(stale_event);
 
     assert!(!interactive_transcript_text(&app).contains("stale"));
     assert!(app
@@ -1081,12 +1025,12 @@ async fn test_duplicate_stream_sequence_is_ignored() {
     app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
-    app.active_stream_message_id = Some("msg-current".to_string());
+    app.active_stream_turn_id = Some("turn-test".to_string());
     app.last_stream_sequence = Some(3);
     app.last_stream_event_id = Some("ev_3".to_string());
     let before = interactive_transcript_text(&app);
 
-    app.handle_stream_event(output_delta_event(
+    app.handle_stream_event(assistant_text_delta_event(
         "msg-current",
         "sess-test",
         3,
@@ -1104,10 +1048,10 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
     app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
-    app.active_stream_message_id = Some("msg-current".to_string());
+    app.active_stream_turn_id = Some("turn-test".to_string());
     app.last_stream_sequence = Some(3);
 
-    app.handle_stream_event(tool_completed_event(
+    let mut stale_event = tool_result_block_completed_event(
         "msg-stale",
         "sess-test",
         99,
@@ -1115,18 +1059,20 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
         "bash",
         "stale",
         false,
-    ));
+    );
+    stale_event.event.identity.turn_id = "turn-stale".to_string();
+    app.handle_stream_event(stale_event);
 
     assert_eq!(app.last_stream_sequence, Some(3));
 
-    app.handle_stream_event(output_item_started_event("msg-current", "sess-test", 4));
-    app.handle_stream_event(output_delta_event(
+    app.handle_stream_event(assistant_block_started_event("msg-current", "sess-test", 4));
+    app.handle_stream_event(assistant_text_delta_event(
         "msg-current".to_string(),
         "sess-test",
         5,
         "final answer",
     ));
-    app.handle_stream_event(output_completed_event(
+    app.handle_stream_event(assistant_block_completed_event(
         "msg-current",
         "sess-test",
         6,
@@ -1137,14 +1083,14 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
 }
 
 #[tokio::test]
-async fn test_tool_updates_project_through_timeline_item_id() {
+async fn test_tool_result_updates_the_call_linked_by_call_id() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
     app.render_runtime.append_user_input("Fetch asset size");
 
-    app.handle_stream_event(tool_started_event(
+    app.handle_stream_event(tool_call_block_started_event(
         "msg-tool-merge",
         "sess-test",
         1,
@@ -1153,31 +1099,14 @@ async fn test_tool_updates_project_through_timeline_item_id() {
         serde_json::json!({"cmd": "curl -sL https://talos.love/assets/index.css | wc -c"}),
     ));
 
-    let started_item_id = "tool-call-start".to_string();
-    app.handle_stream_event(timeline_event(
-        "msg-tool-merge".to_string(),
-        "sess-test".to_string(),
+    app.handle_stream_event(tool_result_block_completed_event(
+        "msg-tool-merge",
+        "sess-test",
         2,
-        talos_sdk::AgentEventType::ItemCompleted,
-        talos_sdk::AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
-            request_id: "req-test".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: started_item_id,
-            status: talos_sdk::TalosTimelineItemStatus::Completed,
-            completed_at_ms: 2,
-            final_content: Some(talos_sdk::TalosTimelineContent::ToolCall {
-                call_id: "call-completed".to_string(),
-                name: "bash".to_string(),
-                arguments: "{}".to_string(),
-                progress: Vec::new(),
-                result: Some(talos_sdk::TalosToolResult {
-                    content: vec![talos_sdk::TalosContentItem::Text {
-                        text: "17576".to_string(),
-                    }],
-                    is_error: false,
-                }),
-            }),
-        }),
+        "call-start",
+        "bash",
+        "17576",
+        false,
     ));
 
     let transcript = interactive_transcript_text(&app);
@@ -1194,7 +1123,7 @@ async fn test_tool_progress_updates_transcript_projection() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(tool_started_event(
+    app.handle_stream_event(tool_call_block_started_event(
         "msg-tool-progress",
         "sess-test",
         1,
@@ -1202,50 +1131,38 @@ async fn test_tool_progress_updates_transcript_projection() {
         "bash",
         serde_json::json!({"cmd": "printf 'first\\nsecond\\n'"}),
     ));
-    app.handle_stream_event(timeline_event(
-        "msg-tool-progress".to_string(),
-        "sess-test".to_string(),
+    app.handle_stream_event(tool_progress_event(
+        "msg-tool-progress",
+        "sess-test",
         2,
-        talos_sdk::AgentEventType::ItemDelta,
-        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
-            request_id: "req-test".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "tool-call-bash".to_string(),
-            delta: talos_sdk::TalosTimelineDelta::ToolProgress {
-                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
-                text_delta: "first\n".to_string(),
-            },
-        }),
+        "call-bash",
+        talos_sdk::AgentToolProgress {
+            kind: talos_sdk::TalosToolProgressKind::Stdout,
+            text: "first\n".to_string(),
+            occurred_at: 2,
+        },
     ));
-    app.handle_stream_event(timeline_event(
-        "msg-tool-progress".to_string(),
-        "sess-test".to_string(),
+    app.handle_stream_event(tool_progress_event(
+        "msg-tool-progress",
+        "sess-test",
         3,
-        talos_sdk::AgentEventType::ItemDelta,
-        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
-            request_id: "req-test".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "tool-call-bash".to_string(),
-            delta: talos_sdk::TalosTimelineDelta::ToolProgress {
-                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
-                text_delta: "sec".to_string(),
-            },
-        }),
+        "call-bash",
+        talos_sdk::AgentToolProgress {
+            kind: talos_sdk::TalosToolProgressKind::Stdout,
+            text: "sec".to_string(),
+            occurred_at: 3,
+        },
     ));
-    app.handle_stream_event(timeline_event(
-        "msg-tool-progress".to_string(),
-        "sess-test".to_string(),
+    app.handle_stream_event(tool_progress_event(
+        "msg-tool-progress",
+        "sess-test",
         4,
-        talos_sdk::AgentEventType::ItemDelta,
-        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
-            request_id: "req-test".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "tool-call-bash".to_string(),
-            delta: talos_sdk::TalosTimelineDelta::ToolProgress {
-                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
-                text_delta: "ond\n".to_string(),
-            },
-        }),
+        "call-bash",
+        talos_sdk::AgentToolProgress {
+            kind: talos_sdk::TalosToolProgressKind::Stdout,
+            text: "ond\n".to_string(),
+            occurred_at: 4,
+        },
     ));
 
     let transcript = interactive_transcript_text(&app);
@@ -1262,12 +1179,7 @@ async fn test_turn_completed_finishes_stream_without_output_delta() {
     app.received_output_delta = false;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(completed_event(
-        "msg-new",
-        "sess-test",
-        1,
-        TokenUsage::default(),
-    ));
+    app.handle_stream_event(turn_completed_event("sess-test", 1));
 
     assert!(!app.in_flight);
     assert!(!app.received_output_delta);
@@ -1280,7 +1192,7 @@ async fn test_execution_summary_stays_in_right_panel_not_transcript() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(execution_summary_event(
+    app.handle_stream_event(execution_summary_completed_event(
         "msg-summary",
         "sess-test",
         1,
@@ -1300,7 +1212,7 @@ async fn test_commentary_stream_does_not_update_final_answer_block() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(commentary_item_started_event(
+    app.handle_stream_event(commentary_block_started_event(
         "msg-commentary",
         "sess-test",
         1,
@@ -1324,8 +1236,12 @@ async fn test_unknown_stream_moves_to_final_answer_when_committed_final() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(unknown_item_started_event("msg-unknown", "sess-test", 1));
-    app.handle_stream_event(unknown_delta_event(
+    app.handle_stream_event(pending_assistant_block_started_event(
+        "msg-unknown",
+        "sess-test",
+        1,
+    ));
+    app.handle_stream_event(pending_assistant_text_delta_event(
         "msg-unknown",
         "sess-test",
         2,
@@ -1334,11 +1250,11 @@ async fn test_unknown_stream_moves_to_final_answer_when_committed_final() {
 
     assert!(interactive_transcript_text(&app).contains("Final answer text."));
 
-    app.handle_stream_event(assistant_text_committed_event(
+    app.handle_stream_event(assistant_phase_delta_event(
         "msg-unknown",
         "sess-test",
         3,
-        TalosTimelinePhase::FinalAnswer,
+        AgentAssistantTextPhase::FinalAnswer,
     ));
 
     assert!(interactive_transcript_text(&app).contains("Final answer text."));
@@ -1352,42 +1268,42 @@ async fn test_interleaved_unknown_items_do_not_share_live_blocks() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(text_item_started_event(
+    app.handle_stream_event(assistant_block_started_event_with_phase(
         "msg-unknown",
         "sess-test",
         1,
         "unknown-a",
-        TalosTimelinePhase::Unknown,
+        AgentAssistantTextPhase::Pending,
         "",
     ));
-    app.handle_stream_event(text_delta_event(
+    app.handle_stream_event(block_text_delta_event(
         "msg-unknown",
         "sess-test",
         2,
         "unknown-a",
         "First commentary. ",
     ));
-    app.handle_stream_event(text_item_started_event(
+    app.handle_stream_event(assistant_block_started_event_with_phase(
         "msg-unknown",
         "sess-test",
         3,
         "unknown-b",
-        TalosTimelinePhase::Unknown,
+        AgentAssistantTextPhase::Pending,
         "",
     ));
-    app.handle_stream_event(text_delta_event(
+    app.handle_stream_event(block_text_delta_event(
         "msg-unknown",
         "sess-test",
         4,
         "unknown-b",
         "Final candidate.",
     ));
-    app.handle_stream_event(assistant_text_committed_event_for_item(
+    app.handle_stream_event(assistant_phase_delta_event_for_block(
         "msg-unknown",
         "sess-test",
         5,
         "unknown-b",
-        TalosTimelinePhase::FinalAnswer,
+        AgentAssistantTextPhase::FinalAnswer,
     ));
 
     let transcript = interactive_transcript_text(&app);
@@ -1403,29 +1319,29 @@ async fn test_completed_final_content_updates_committed_unknown_final() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(text_item_started_event(
+    app.handle_stream_event(assistant_block_started_event_with_phase(
         "msg-final",
         "sess-test",
         1,
         "unknown-final",
-        TalosTimelinePhase::Unknown,
+        AgentAssistantTextPhase::Pending,
         "",
     ));
-    app.handle_stream_event(text_delta_event(
+    app.handle_stream_event(block_text_delta_event(
         "msg-final",
         "sess-test",
         2,
         "unknown-final",
         "Partial final",
     ));
-    app.handle_stream_event(assistant_text_committed_event_for_item(
+    app.handle_stream_event(assistant_phase_delta_event_for_block(
         "msg-final",
         "sess-test",
         3,
         "unknown-final",
-        TalosTimelinePhase::FinalAnswer,
+        AgentAssistantTextPhase::FinalAnswer,
     ));
-    app.handle_stream_event(output_completed_event_for_item(
+    app.handle_stream_event(assistant_block_completed_event_for_block(
         "msg-final",
         "sess-test",
         4,
@@ -1443,18 +1359,22 @@ async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(unknown_item_started_event("msg-unknown", "sess-test", 1));
-    app.handle_stream_event(unknown_delta_event(
+    app.handle_stream_event(pending_assistant_block_started_event(
+        "msg-unknown",
+        "sess-test",
+        1,
+    ));
+    app.handle_stream_event(pending_assistant_text_delta_event(
         "msg-unknown",
         "sess-test",
         2,
         "I will inspect the workspace.",
     ));
-    app.handle_stream_event(assistant_text_committed_event(
+    app.handle_stream_event(assistant_phase_delta_event(
         "msg-unknown",
         "sess-test",
         3,
-        TalosTimelinePhase::Commentary,
+        AgentAssistantTextPhase::Commentary,
     ));
 
     assert!(interactive_transcript_text(&app).contains("I will inspect the workspace."));
@@ -1468,8 +1388,8 @@ async fn test_tool_using_stream_projects_final_answer_during_tool_activity() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(output_item_started_event("msg-tools", "sess-test", 1));
-    app.handle_stream_event(output_delta_event(
+    app.handle_stream_event(assistant_block_started_event("msg-tools", "sess-test", 1));
+    app.handle_stream_event(assistant_text_delta_event(
         "msg-tools",
         "sess-test",
         2,
@@ -1478,7 +1398,7 @@ async fn test_tool_using_stream_projects_final_answer_during_tool_activity() {
     assert!(interactive_transcript_text(&app).contains("Draft summary"));
     assert!(app.received_output_delta);
 
-    app.handle_stream_event(tool_started_event(
+    app.handle_stream_event(tool_call_block_started_event(
         "msg-tools",
         "sess-test",
         3,
@@ -1486,7 +1406,7 @@ async fn test_tool_using_stream_projects_final_answer_during_tool_activity() {
         "read",
         serde_json::json!({"path":"/tmp/example.txt"}),
     ));
-    app.handle_stream_event(output_delta_event(
+    app.handle_stream_event(assistant_text_delta_event(
         "msg-tools",
         "sess-test",
         4,
@@ -1496,19 +1416,14 @@ async fn test_tool_using_stream_projects_final_answer_during_tool_activity() {
     assert!(interactive_transcript_text(&app).contains("Draft summary\nFinal answer"));
     assert!(app.received_output_delta);
 
-    app.handle_stream_event(output_completed_event(
+    app.handle_stream_event(assistant_block_completed_event(
         "msg-tools",
         "sess-test",
         5,
         "Draft summary\nFinal answer",
     ));
 
-    app.handle_stream_event(completed_event(
-        "msg-tools",
-        "sess-test",
-        6,
-        TokenUsage::default(),
-    ));
+    app.handle_stream_event(turn_completed_event("sess-test", 6));
 
     assert!(interactive_transcript_text(&app).contains("Draft summary\nFinal answer"));
     assert!(app.received_output_delta);
@@ -1521,8 +1436,8 @@ async fn test_completed_final_text_renders_when_no_delta_arrived() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(output_item_started_event("msg-final", "sess-test", 1));
-    app.handle_stream_event(output_completed_event(
+    app.handle_stream_event(assistant_block_started_event("msg-final", "sess-test", 1));
+    app.handle_stream_event(assistant_block_completed_event(
         "msg-final",
         "sess-test",
         2,
@@ -1540,8 +1455,13 @@ async fn test_stream_event_updates_live_projection() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(output_item_started_event("msg-follow", "sess-test", 1));
-    app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 2, "hello"));
+    app.handle_stream_event(assistant_block_started_event("msg-follow", "sess-test", 1));
+    app.handle_stream_event(assistant_text_delta_event(
+        "msg-follow",
+        "sess-test",
+        2,
+        "hello",
+    ));
 
     assert!(interactive_transcript_text(&app).contains("hello"));
 }

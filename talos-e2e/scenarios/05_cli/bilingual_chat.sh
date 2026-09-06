@@ -35,33 +35,25 @@ import json
 import os
 
 payload = {
-    "input": [
-        {
-            "type": "text",
-            "text": os.environ["INPUT_TEXT"]
-        }
-    ],
+    "input": {
+        "content": [
+            {
+                "type": "text",
+                "text": os.environ["INPUT_TEXT"]
+            }
+        ]
+    },
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
 
-build_session_context() {
-  local user_id="$1"
-  USER_ID="$user_id" python3 - <<'PY'
+build_session_start_defaults() {
+  python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "bilingual-tools",
-        "user_id": os.environ["USER_ID"],
-        "thread_id": None,
-        "message_id": "msg-bilingual-tools",
-        "trace_id": "trace-bilingual-tools",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -89,9 +81,9 @@ print(data.get("output_text", ""))
 PY
 }
 
-en_session_payload="$(build_session_context "lang-user-en")"
+en_session_payload="$(build_session_start_defaults)"
 en_session_id="$(new_session_id)"
-remember_session_context "${en_session_id}" "${en_session_payload}"
+remember_session_start_defaults "${en_session_id}" "${en_session_payload}"
 en_session_json="{\"id\":\"${en_session_id}\"}"
 en_session_id="$(session_id_from_json "${en_session_json}")"
 if [[ -z "${en_session_id}" ]]; then
@@ -117,9 +109,9 @@ fi
 echo "CASE messages_english PASS"
 echo "DETAIL messages_english_output=${english_output}"
 
-zh_session_payload="$(build_session_context "lang-user-zh")"
+zh_session_payload="$(build_session_start_defaults)"
 zh_session_id="$(new_session_id)"
-remember_session_context "${zh_session_id}" "${zh_session_payload}"
+remember_session_start_defaults "${zh_session_id}" "${zh_session_payload}"
 zh_session_json="{\"id\":\"${zh_session_id}\"}"
 zh_session_id="$(session_id_from_json "${zh_session_json}")"
 if [[ -z "${zh_session_id}" ]]; then

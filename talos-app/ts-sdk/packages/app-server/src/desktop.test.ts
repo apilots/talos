@@ -28,7 +28,7 @@ describe("ElectronAppServerClient", () => {
     const models = await client.listModels();
 
     expect(models).toEqual({ models: [{ id: "model-a", name: "Model A" }] });
-    expect(calls).toEqual([{ method: "model.list", params: {} }]);
+    expect(calls).toEqual([{ method: "model/list", params: {} }]);
   });
 
   it("subscribes to app-server events through the renderer bridge", () => {

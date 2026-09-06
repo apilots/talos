@@ -1,12 +1,10 @@
-use talos_store::session::TimelineEventId;
-use talos_types::talos::TimelineEventEnvelope;
-use talos_types::{
-    MessageQueueChangedNotification, SubscribeTimelineResponse, TimelineActiveTurnSnapshot,
-};
+use talos_agent_api::{TimelineEvent, TimelineReplay};
+use talos_types::{MessageQueueChangedNotification, SubscribeTimelineResponse};
 use tokio::sync::{broadcast, mpsc};
 
-pub type ApplicationEvent = TimelineEventEnvelope;
-pub type ApplicationEventStream = broadcast::Receiver<TimelineEventEnvelope>;
+use super::TimelineEventId;
+
+pub type TimelineEventStream = broadcast::Receiver<TimelineEvent>;
 
 #[derive(Debug, Clone)]
 pub struct TimelineSubscribeCommand {
@@ -19,16 +17,25 @@ pub struct TimelineSubscribeCommand {
 }
 
 pub struct TimelineSubscription {
+    pub subscription_id: String,
     pub session_id: String,
     pub high_water_mark_event_id: Option<TimelineEventId>,
-    pub replay: EventReplay,
+    pub replay: TimelineReplay,
     pub events: mpsc::Receiver<TimelineSubscriptionMessage>,
     pub has_live_turn: bool,
 }
 
-pub struct TimelineSubscriptionSource {
-    pub response: SubscribeTimelineResponse,
-    pub subscription: TimelineSubscription,
+impl TimelineSubscription {
+    pub fn response(&self) -> SubscribeTimelineResponse {
+        SubscribeTimelineResponse {
+            subscription_id: self.subscription_id.clone(),
+            session_id: self.session_id.clone(),
+            high_water_mark_event_id: self
+                .high_water_mark_event_id
+                .as_ref()
+                .map(ToString::to_string),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,27 +53,7 @@ pub enum TimelineSubscriptionCloseReason {
 
 #[derive(Debug, Clone)]
 pub enum TimelineSubscriptionMessage {
-    Event(TimelineEventEnvelope),
+    Event(Box<TimelineEvent>),
     MessageQueueChanged(MessageQueueChangedNotification),
     Closed(TimelineSubscriptionClosed),
-}
-
-#[derive(Debug)]
-pub struct TimelineRecoveryState {
-    pub replay: EventReplay,
-    pub active_turn: TimelineActiveTurnSnapshot,
-}
-
-#[derive(Debug)]
-pub struct EventReplay {
-    pub events: Vec<TimelineEventEnvelope>,
-    pub high_water_mark_event_id: Option<TimelineEventId>,
-    pub last_replay_seq: i64,
-    pub cursor_status: TimelineCursorStatus,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimelineCursorStatus {
-    Current,
-    FromBeginning,
 }

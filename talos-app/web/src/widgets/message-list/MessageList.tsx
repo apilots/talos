@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { TalosPendingUserAction } from "@talos/sdk-browser";
+import type { PendingUserAction } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 
 import type { ChatRenderBlock } from "@/shared/types/ui";
@@ -16,8 +16,8 @@ interface MessageListProps {
   emptyTitle: string;
   emptyDetail: string;
   actions?: ReactNode;
-  pendingUserAction?: TalosPendingUserAction;
-  renderUserAction?: (action: TalosPendingUserAction) => ReactNode;
+  pendingUserAction?: PendingUserAction;
+  renderUserAction?: (action: PendingUserAction) => ReactNode;
 }
 
 export function MessageList({

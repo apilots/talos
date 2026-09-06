@@ -8,6 +8,7 @@ description = "Run-scoped task lifecycle control for Talos orchestration"
 repository.workspace = true
 
 [dependencies]
+talos-types = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

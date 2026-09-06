@@ -67,8 +67,8 @@ export function WaitingMessages({ controller }: WaitingMessagesProps) {
       <div className="space-y-0.5">
         {messages.map((message, index) => {
           const editing = editingMessageId === message.id;
-          const steerable = message.input.every(
-            (item) => item.type === "text" || item.type === "files",
+          const steerable = message.input.content.every(
+            (item) => item.type === "text" || item.type === "file",
           );
           const steering = steeringMessageIds.has(message.id);
           return (

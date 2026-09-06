@@ -7,12 +7,11 @@ use crate::{
 use std::collections::BTreeSet;
 
 pub(crate) async fn emit_stream_event(
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
-    event_type: KernelStreamEventType,
-    data: KernelStreamEventData,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
+    payload: AgentKernelEventPayload,
 ) {
     if let Some(tx) = stream_tx {
-        let _ = tx.send(KernelStreamEvent::new(event_type, data)).await;
+        let _ = tx.send(AgentKernelEvent::new(payload)).await;
     }
 }
 
@@ -52,13 +51,11 @@ pub(crate) struct StreamRound {
 fn finalize_tool_calls(
     round: u32,
     pending_calls: BTreeMap<usize, PendingToolCall>,
-) -> Vec<FunctionCall> {
+) -> TalosResult<Vec<FunctionCall>> {
     let mut calls = Vec::new();
 
     for (index, call) in pending_calls {
-        let Some(name) = call.name.filter(|value| !value.trim().is_empty()) else {
-            continue;
-        };
+        let name = required_tool_name(round, index, call.name)?;
 
         let id = normalized_tool_call_id(round, index, call.id);
         let arguments = if let Some(value) = call.final_arguments {
@@ -73,7 +70,16 @@ fn finalize_tool_calls(
         calls.push(FunctionCall::new(id, name, arguments));
     }
 
-    calls
+    Ok(calls)
+}
+
+fn required_tool_name(round: u32, index: usize, name: Option<String>) -> TalosResult<String> {
+    name.filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            provider_protocol_violation(format!(
+                "tool call {round}:{index} completed without a tool name"
+            ))
+        })
 }
 
 fn normalized_tool_call_id(round: u32, index: usize, id: Option<String>) -> String {
@@ -121,7 +127,7 @@ fn ensure_not_after_final(final_answer_started: bool, event: &str) -> TalosResul
 async fn close_active_non_final_blocks_before_final(
     active_blocks: &mut BTreeMap<String, ActiveModelBlock>,
     completed_blocks: &mut BTreeSet<String>,
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<()> {
     let active_tool = active_blocks.iter().find_map(|(id, block)| {
         matches!(block, ActiveModelBlock::ToolCall { .. }).then_some(id.clone())
@@ -145,8 +151,7 @@ async fn close_active_non_final_blocks_before_final(
         {
             emit_stream_event(
                 stream_tx,
-                KernelStreamEventType::AssistantTextCompleted,
-                KernelStreamEventData::AssistantTextCompleted(AssistantTextCompletedStreamData {
+                AgentKernelEventPayload::AssistantTextCompleted(AssistantTextCompletedStreamData {
                     item_key,
                 }),
             )
@@ -162,7 +167,7 @@ pub(crate) async fn stream_round(
     round: u32,
     call_mode: KernelModelCallMode,
     _pre_final_execution_summary: Option<String>,
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
     streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 ) -> TalosResult<StreamRound> {
     let mut stream = llm_provider.stream_model_blocks(request).await?;
@@ -302,8 +307,7 @@ pub(crate) async fn stream_round(
                     );
                     emit_stream_event(
                         stream_tx,
-                        KernelStreamEventType::AssistantTextStarted,
-                        KernelStreamEventData::AssistantTextStarted(
+                        AgentKernelEventPayload::AssistantTextStarted(
                             AssistantTextStartedStreamData {
                                 item_key,
                                 phase,
@@ -365,8 +369,7 @@ pub(crate) async fn stream_round(
                     content.push_str(&delta);
                     emit_stream_event(
                         stream_tx,
-                        KernelStreamEventType::AssistantTextDelta,
-                        KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+                        AgentKernelEventPayload::AssistantTextDelta(AssistantTextDeltaStreamData {
                             item_key: item_key.clone(),
                             delta,
                         }),
@@ -386,8 +389,7 @@ pub(crate) async fn stream_round(
                     streamed_reasoning.push_str(&delta);
                     emit_stream_event(
                         stream_tx,
-                        KernelStreamEventType::ThinkingDelta,
-                        KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
+                        AgentKernelEventPayload::ThinkingDelta(ThinkingDeltaStreamData {
                             delta,
                             source: KernelThinkingSource::Provider,
                             stage: KernelThinkingStage::ModelReasoning,
@@ -410,8 +412,7 @@ pub(crate) async fn stream_round(
                     entry.arguments_buffer.push_str(&delta);
                     emit_stream_event(
                         stream_tx,
-                        KernelStreamEventType::ToolArgsDelta,
-                        KernelStreamEventData::ToolArgsDelta(ToolArgsDeltaStreamData {
+                        AgentKernelEventPayload::ToolArgsDelta(ToolArgsDeltaStreamData {
                             stream_key: ToolStreamKey { round, index },
                             call_id: entry.id.clone(),
                             tool_name: entry.name.clone(),
@@ -433,11 +434,10 @@ pub(crate) async fn stream_round(
                     let entry = pending_calls.entry(index).or_default();
                     let call_id = normalized_tool_call_id(round, index, entry.id.clone());
                     entry.id = Some(call_id.clone());
-                    let tool_name = entry.name.clone().unwrap_or_else(|| "unknown".to_string());
+                    let tool_name = required_tool_name(round, index, entry.name.clone())?;
                     emit_stream_event(
                         stream_tx,
-                        KernelStreamEventType::ToolProgressDelta,
-                        KernelStreamEventData::ToolProgressDelta(ToolProgressDeltaStreamData {
+                        AgentKernelEventPayload::ToolProgressDelta(ToolProgressDeltaStreamData {
                             stream_key: ToolStreamKey { round, index },
                             call_id,
                             tool_name,
@@ -464,8 +464,7 @@ pub(crate) async fn stream_round(
                     ActiveModelBlock::AssistantText { item_key, .. } => {
                         emit_stream_event(
                             stream_tx,
-                            KernelStreamEventType::AssistantTextCompleted,
-                            KernelStreamEventData::AssistantTextCompleted(
+                            AgentKernelEventPayload::AssistantTextCompleted(
                                 AssistantTextCompletedStreamData { item_key },
                             ),
                         )
@@ -482,15 +481,15 @@ pub(crate) async fn stream_round(
                         };
                         let stable_call_id =
                             normalized_tool_call_id(round, index, entry.id.clone());
+                        let tool_name = required_tool_name(round, index, entry.name.clone())?;
                         entry.id = Some(stable_call_id.clone());
                         entry.final_arguments = Some(arguments.clone());
                         emit_stream_event(
                             stream_tx,
-                            KernelStreamEventType::ToolCallStart,
-                            KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
+                            AgentKernelEventPayload::ToolCallStart(ToolCallStartStreamData {
                                 index,
-                                call_id: Some(stable_call_id.clone()),
-                                tool_name: entry.name.clone(),
+                                call_id: stable_call_id,
+                                tool_name,
                                 arguments: arguments.clone(),
                                 round,
                             }),
@@ -531,6 +530,8 @@ pub(crate) async fn stream_round(
                 };
                 let call_id =
                     normalized_tool_call_id(round, next_tool_index_to_schedule, entry.id.clone());
+                let tool_name =
+                    required_tool_name(round, next_tool_index_to_schedule, entry.name.clone())?;
                 scheduler
                     .push_call(
                         ToolStreamKey {
@@ -539,7 +540,7 @@ pub(crate) async fn stream_round(
                         },
                         ToolExecutionInput {
                             call_id,
-                            tool_name: entry.name.clone().unwrap_or_else(|| "unknown".to_string()),
+                            tool_name,
                             arguments,
                         },
                     )
@@ -571,7 +572,7 @@ pub(crate) async fn stream_round(
         ));
     }
 
-    let tool_calls = finalize_tool_calls(round, pending_calls);
+    let tool_calls = finalize_tool_calls(round, pending_calls)?;
     let reasoning = match completed_reasoning {
         Some(output) => {
             if output.display_text() != streamed_reasoning {
@@ -597,8 +598,7 @@ pub(crate) async fn stream_round(
         for item_key in unknown_assistant_text_items {
             emit_stream_event(
                 stream_tx,
-                KernelStreamEventType::AssistantTextCommitted,
-                KernelStreamEventData::AssistantTextCommitted(AssistantTextCommittedStreamData {
+                AgentKernelEventPayload::AssistantTextCommitted(AssistantTextCommittedStreamData {
                     item_key,
                     phase,
                 }),
@@ -663,7 +663,7 @@ async fn chat_round(
 }
 
 pub(crate) async fn emit_assistant_text_stream_item(
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
     item_key: KernelStreamItemKey,
     phase: AssistantTextPhase,
     round: Option<u32>,
@@ -675,8 +675,7 @@ pub(crate) async fn emit_assistant_text_stream_item(
 
     emit_stream_event(
         stream_tx,
-        KernelStreamEventType::AssistantTextStarted,
-        KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+        AgentKernelEventPayload::AssistantTextStarted(AssistantTextStartedStreamData {
             item_key: item_key.clone(),
             phase,
             round,
@@ -685,8 +684,7 @@ pub(crate) async fn emit_assistant_text_stream_item(
     .await;
     emit_stream_event(
         stream_tx,
-        KernelStreamEventType::AssistantTextDelta,
-        KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+        AgentKernelEventPayload::AssistantTextDelta(AssistantTextDeltaStreamData {
             item_key: item_key.clone(),
             delta: text.to_string(),
         }),
@@ -694,8 +692,7 @@ pub(crate) async fn emit_assistant_text_stream_item(
     .await;
     emit_stream_event(
         stream_tx,
-        KernelStreamEventType::AssistantTextCompleted,
-        KernelStreamEventData::AssistantTextCompleted(AssistantTextCompletedStreamData {
+        AgentKernelEventPayload::AssistantTextCompleted(AssistantTextCompletedStreamData {
             item_key,
         }),
     )
@@ -704,7 +701,7 @@ pub(crate) async fn emit_assistant_text_stream_item(
 }
 
 async fn emit_assistant_text_for_step(
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
     round: u32,
     text: &str,
     disposition: GeneralTurnStepDisposition,
@@ -754,13 +751,13 @@ pub async fn execute_general_turn_step(
     let reasoning_text = round_response.reasoning.display_text();
     if !reasoning_text.trim().is_empty() {
         let reasoning_text = reasoning_text.trim().to_string();
-        output_items.push(RunItem::Reasoning {
+        output_items.push(KernelRunItem::Reasoning {
             text: reasoning_text,
         });
     }
 
     for call in &round_response.tool_calls {
-        output_items.push(RunItem::ToolCall {
+        output_items.push(KernelRunItem::ToolCall {
             call_id: call.id.clone(),
             name: call.name.clone(),
             arguments: call.arguments.clone().into(),

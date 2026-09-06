@@ -2,8 +2,8 @@ use talos_auth::UserRole;
 use talos_error::{TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::{
-    ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse,
-    ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse,
+    ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest, ConfigReloadRequest,
+    ConfigReloadResponse, ConfigResponse, ConfigUpdateRequest,
 };
 
 use crate::gateway_service::ServiceGateway;
@@ -13,7 +13,7 @@ impl ServiceGateway {
         &self,
         actor: &Actor,
         request: ConfigGetRequest,
-    ) -> TalosResult<ConfigGetResponse> {
+    ) -> TalosResult<ConfigResponse> {
         require_config_admin(actor)?;
         self.service.config.get_config(request)
     }
@@ -22,9 +22,9 @@ impl ServiceGateway {
         &self,
         actor: &Actor,
         request: ConfigUpdateRequest,
-    ) -> TalosResult<ConfigUpdateResponse> {
+    ) -> TalosResult<ConfigResponse> {
         require_config_admin(actor)?;
-        self.service.config.update_config(request)
+        self.service.config.update_config(request).await
     }
 
     pub(crate) async fn delete_config(
@@ -42,7 +42,7 @@ impl ServiceGateway {
         request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
         require_config_admin(actor)?;
-        self.service.config.reload_config(request)
+        self.service.config.reload_config(request).await
     }
 }
 

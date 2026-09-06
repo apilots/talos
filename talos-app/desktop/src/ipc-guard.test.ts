@@ -27,23 +27,26 @@ describe("desktop IPC guard", () => {
 
   it("allows ordinary desktop renderer methods with valid params", () => {
     expect(() =>
-      assertDesktopRendererInvoke("session.get", { session_id: "session-1" }),
+      assertDesktopRendererInvoke("session/get", { sessionId: "session-1" }),
     ).not.toThrow();
     expect(() =>
-      assertDesktopRendererInvoke("session.history", { session_id: "session-1" }),
+      assertDesktopRendererInvoke("session/history", { sessionId: "session-1" }),
     ).not.toThrow();
     expect(() =>
-      assertDesktopRendererInvoke("turn.start", {
-        session_id: "session-1",
-        input: [{ type: "text", text: "hello" }],
-        client_request_id: "request-1",
+      assertDesktopRendererInvoke("event/unsubscribe", { subscriptionId: "subscription-1" }),
+    ).not.toThrow();
+    expect(() =>
+      assertDesktopRendererInvoke("turn/start", {
+        sessionId: "session-1",
+        input: { content: [{ type: "text", text: "hello" }] },
+        clientRequestId: "request-1",
       }),
     ).not.toThrow();
     expect(() =>
-      assertDesktopRendererInvoke("fs.directory.read", { path: null }),
+      assertDesktopRendererInvoke("fs/directory/read", { path: null }),
     ).not.toThrow();
     expect(() =>
-      assertDesktopRendererInvoke("fs.directory.create", {
+      assertDesktopRendererInvoke("fs/directory/create", {
         parent: "/Users/example",
         name: "project",
       }),
@@ -52,14 +55,17 @@ describe("desktop IPC guard", () => {
       assertDesktopRendererInvoke("memory/get", { memoryId: "memory-1" }),
     ).not.toThrow();
     expect(() =>
-      assertDesktopRendererInvoke("userAction/submit", {
-        sessionId: "session-1",
-        turnId: "turn-1",
-        actionId: "action-1",
-        response: {
-          type: "question",
-          response: { type: "selectedOption", optionId: "now" },
+      assertDesktopRendererInvoke("turn/input", {
+        identity: { sessionId: "session-1", turnId: "turn-1" },
+        input: {
+          type: "userActionResponse",
+          actionId: "action-1",
+          response: {
+            type: "question",
+            response: { type: "selectedOption", optionId: "now" },
+          },
         },
+        clientRequestId: null,
       }),
     ).not.toThrow();
   });
@@ -67,7 +73,7 @@ describe("desktop IPC guard", () => {
   it("allows message queue methods with transport-level params", () => {
     expect(() => assertDesktopRendererInvoke("messageQueue/add", {
       sessionId: "session-1",
-      input: [{ type: "text", text: "queued" }],
+      input: { content: [{ type: "text", text: "queued" }] },
     })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("messageQueue/list", {
       sessionId: "session-1",
@@ -75,7 +81,7 @@ describe("desktop IPC guard", () => {
     expect(() => assertDesktopRendererInvoke("messageQueue/update", {
       sessionId: "session-1",
       messageId: "q1",
-      input: [{ type: "text", text: "updated" }],
+      input: { content: [{ type: "text", text: "updated" }] },
     })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("messageQueue/delete", {
       sessionId: "session-1",
@@ -89,33 +95,33 @@ describe("desktop IPC guard", () => {
       sessionId: "session-1",
       messageId: null,
     })).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("messageQueue/steer", {
-      sessionId: "session-1",
-      messageId: "q1",
-      turnId: "turn-1",
+    expect(() => assertDesktopRendererInvoke("turn/input", {
+      identity: { sessionId: "session-1", turnId: "turn-1" },
+      input: { type: "queuedMessage", messageId: "q1" },
+      clientRequestId: null,
     })).not.toThrow();
   });
 
   it("allows llm config methods", () => {
-    expect(isDesktopRendererMethod("config.get")).toBe(true);
-    expect(isDesktopRendererMethod("config.reload")).toBe(true);
-    expect(() => assertDesktopRendererInvoke("config.get", {
+    expect(isDesktopRendererMethod("config/get")).toBe(true);
+    expect(isDesktopRendererMethod("config/reload")).toBe(true);
+    expect(() => assertDesktopRendererInvoke("config/get", {
       path: "webSearch",
     })).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("config.update", {
+    expect(() => assertDesktopRendererInvoke("config/update", {
       value: { type: "llm", value: {} },
     })).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("config.update", {
+    expect(() => assertDesktopRendererInvoke("config/update", {
       value: { type: "webSearch", value: {} },
     })).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("config.delete", {
+    expect(() => assertDesktopRendererInvoke("config/delete", {
       path: "llm",
     })).not.toThrow();
   });
 
   it("allows shared user methods with real session credentials", () => {
     const result = assertDesktopRendererInvoke(
-      "user.current",
+      "user/current",
       {},
       {
         actorCredentials: {
@@ -127,7 +133,7 @@ describe("desktop IPC guard", () => {
       },
     );
 
-    expect(isDesktopRendererMethod("user.token.create")).toBe(false);
+    expect(isDesktopRendererMethod("user/token/create")).toBe(false);
     expect(result.actorCredentials?.credential.type).toBe("existing_session_token");
   });
 
@@ -136,14 +142,14 @@ describe("desktop IPC guard", () => {
   });
 
   it("allows desktop cloud session cache read and clear methods", () => {
-    expect(() => assertDesktopRendererInvoke("auth.session.read", {})).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("auth.session.clear", {})).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("auth/session/read", {})).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("auth/session/clear", {})).not.toThrow();
   });
 
   it("rejects renderer attempts to pass unsupported actor credentials", () => {
     expect(() =>
       assertDesktopRendererInvoke(
-        "user.current",
+        "user/current",
         {},
         {
           actorCredentials: {
@@ -159,52 +165,42 @@ describe("desktop IPC guard", () => {
 
   it("rejects initialize and unsupported config writes from renderer", () => {
     expect(isDesktopRendererMethod("initialize")).toBe(false);
-    expect(() => assertDesktopRendererInvoke("config.update", {
+    expect(() => assertDesktopRendererInvoke("config/update", {
       value: { type: "llm", value: {} },
     })).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("config.update", {
+    expect(() => assertDesktopRendererInvoke("config/update", {
       value: { type: "storage", value: {} },
-    })).toThrow("Invalid desktop renderer params for method: config.update");
+    })).toThrow("Invalid desktop renderer params for method: config/update");
   });
 
   it("rejects malformed params before they reach app-server", () => {
-    expect(isDesktopRendererMethod("workspace.info")).toBe(false);
-    expect(() => assertDesktopRendererInvoke("workspace.info", {})).toThrow(
-      "Desktop renderer method is not allowed: workspace.info",
+    expect(isDesktopRendererMethod("workspace/info")).toBe(false);
+    expect(() => assertDesktopRendererInvoke("workspace/info", {})).toThrow(
+      "Desktop renderer method is not allowed: workspace/info",
     );
-    expect(() => assertDesktopRendererInvoke("session.get", {})).toThrow(
-      "Invalid desktop renderer params for method: session.get",
+    expect(() => assertDesktopRendererInvoke("session/get", {})).toThrow(
+      "Invalid desktop renderer params for method: session/get",
     );
-    expect(isDesktopRendererMethod("unsupported.method")).toBe(false);
+    expect(isDesktopRendererMethod("unsupported/method")).toBe(false);
     expect(() =>
-      assertDesktopRendererInvoke("unsupported.method", {
-        session_id: "session-1",
-        call_id: "call-1",
-        tool_name: "bash",
+      assertDesktopRendererInvoke("unsupported/method", {
+        sessionId: "session-1",
+        callId: "call-1",
+        toolName: "bash",
         approved: true,
       }),
-    ).toThrow("Desktop renderer method is not allowed: unsupported.method");
+    ).toThrow("Desktop renderer method is not allowed: unsupported/method");
     expect(() =>
-      assertDesktopRendererInvoke("tool.dynamic_result.submit", {
-        session_id: "session-1",
-        call_id: "call-1",
-        tool_name: "bash",
-        output: "ok",
-        success: "true",
-      }),
-    ).toThrow("Invalid desktop renderer params for method: tool.dynamic_result.submit");
-    expect(() =>
-      assertDesktopRendererInvoke("fs.directory.create", {
+      assertDesktopRendererInvoke("fs/directory/create", {
         parent: "/Users/example",
       }),
-    ).toThrow("Invalid desktop renderer params for method: fs.directory.create");
+    ).toThrow("Invalid desktop renderer params for method: fs/directory/create");
     expect(() =>
-      assertDesktopRendererInvoke("userAction/submit", {
-        sessionId: "session-1",
-        turnId: "turn-1",
-        actionId: "action-1",
-        response: { type: "unknown" },
+      assertDesktopRendererInvoke("turn/input", {
+        identity: { sessionId: "session-1", turnId: "turn-1" },
+        input: { type: "userActionResponse", actionId: "action-1", response: { type: "unknown" } },
+        clientRequestId: null,
       }),
-    ).toThrow("Invalid desktop renderer params for method: userAction/submit");
+    ).toThrow("Invalid desktop renderer params for method: turn/input");
   });
 });

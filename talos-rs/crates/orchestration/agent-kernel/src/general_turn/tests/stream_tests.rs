@@ -80,6 +80,14 @@ fn block_completed(model_item_id: &str) -> ModelBlockStreamEvent {
     })
 }
 
+fn tool_started(index: usize, call_id: &str, tool_name: Option<&str>) -> ModelBlockStreamEvent {
+    ModelBlockStreamEvent::BlockStarted(ModelBlockStarted::tool_call(
+        index,
+        Some(call_id.to_string()),
+        tool_name.map(str::to_string),
+    ))
+}
+
 fn reasoning_completed(text: &str) -> ModelBlockStreamEvent {
     ModelBlockStreamEvent::ReasoningCompleted {
         output: ReasoningOutput {
@@ -352,6 +360,32 @@ async fn tool_args_delta_without_block_fails() {
 }
 
 #[tokio::test]
+async fn completed_tool_call_without_name_fails() {
+    let err = stream_round(
+        Arc::new(ScriptedModelBlockProvider::new(
+            "tool-call-without-name",
+            vec![
+                tool_started(0, "call-1", None),
+                block_completed("tool_call_0"),
+                done(),
+            ],
+        )),
+        ChatRequest::new_user("test", "test-model"),
+        0,
+        KernelModelCallMode::WorkingLoop,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("completed tool call without a name should fail");
+
+    assert!(err
+        .to_string()
+        .contains("tool call 0:0 completed without a tool name"));
+}
+
+#[tokio::test]
 async fn assistant_delta_with_wrong_model_item_id_fails() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "assistant-wrong-id",
@@ -436,11 +470,7 @@ async fn final_answer_then_tool_call_fails_in_kernel() {
                 },
             },
             block_completed("final"),
-            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted::tool_call(
-                0,
-                Some("call_after_final".to_string()),
-                Some("read".to_string()),
-            )),
+            tool_started(0, "call_after_final", Some("read")),
         ],
     ));
 
@@ -606,18 +636,18 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
     .await
     .expect("explicit final after reasoning should stream");
 
-    let mut event_types = Vec::new();
+    let mut payloads = Vec::new();
     while let Ok(event) = rx.try_recv() {
-        event_types.push(event.event_type);
+        payloads.push(event.payload);
     }
-    let final_started = event_types
+    let final_started = payloads
         .iter()
-        .rposition(|kind| matches!(kind, KernelStreamEventType::AssistantTextStarted))
+        .rposition(|payload| matches!(payload, AgentKernelEventPayload::AssistantTextStarted(_)))
         .expect("final should start");
 
-    assert!(event_types[..final_started]
+    assert!(payloads[..final_started]
         .iter()
-        .all(|kind| !matches!(kind, KernelStreamEventType::ExecutionSummary)));
+        .all(|payload| !matches!(payload, AgentKernelEventPayload::ExecutionSummary(_))));
 }
 
 #[tokio::test]
@@ -686,13 +716,13 @@ async fn repeated_completion_for_known_closed_reasoning_is_ignored() {
     let mut saw_thinking_delta = false;
     let mut saw_final_delta = false;
     while let Ok(event) = rx.try_recv() {
-        match event.data {
-            KernelStreamEventData::ThinkingDelta(data) => {
+        match event.payload {
+            AgentKernelEventPayload::ThinkingDelta(data) => {
                 if data.delta == "thinking live" {
                     saw_thinking_delta = true;
                 }
             }
-            KernelStreamEventData::AssistantTextDelta(data) if data.delta == "Final answer." => {
+            AgentKernelEventPayload::AssistantTextDelta(data) if data.delta == "Final answer." => {
                 saw_final_delta = true;
             }
             _ => {}
@@ -708,11 +738,7 @@ async fn explicit_final_with_pending_tool_args_fails_by_policy() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "pending-tool-then-final",
         vec![
-            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted::tool_call(
-                0,
-                Some("call_pending".to_string()),
-                Some("read".to_string()),
-            )),
+            tool_started(0, "call_pending", Some("read")),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "tool_call_0".to_string(),
                 delta: ModelBlockDelta::ToolArguments {
@@ -777,18 +803,18 @@ async fn explicit_final_closes_active_commentary_before_summary() {
     .await
     .expect("explicit final should stream");
 
-    let mut event_types = Vec::new();
+    let mut payloads = Vec::new();
     while let Ok(event) = rx.try_recv() {
-        event_types.push(event.event_type);
+        payloads.push(event.payload);
     }
-    let final_started = event_types
+    let final_started = payloads
         .iter()
-        .rposition(|kind| matches!(kind, KernelStreamEventType::AssistantTextStarted))
+        .rposition(|payload| matches!(payload, AgentKernelEventPayload::AssistantTextStarted(_)))
         .expect("final should start");
 
-    assert!(event_types[..final_started]
+    assert!(payloads[..final_started]
         .iter()
-        .all(|kind| !matches!(kind, KernelStreamEventType::ExecutionSummary)));
+        .all(|payload| !matches!(payload, AgentKernelEventPayload::ExecutionSummary(_))));
 }
 
 #[tokio::test]
@@ -796,11 +822,7 @@ async fn tool_progress_delta_maps_to_kernel_tool_progress() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "tool-progress",
         vec![
-            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted::tool_call(
-                0,
-                Some("call_progress".to_string()),
-                Some("read".to_string()),
-            )),
+            tool_started(0, "call_progress", Some("read")),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "tool_call_0".to_string(),
                 delta: ModelBlockDelta::ToolProgress {
@@ -836,7 +858,7 @@ async fn tool_progress_delta_maps_to_kernel_tool_progress() {
 
     let mut progress = None;
     while let Ok(event) = rx.try_recv() {
-        if let KernelStreamEventData::ToolProgressDelta(data) = event.data {
+        if let AgentKernelEventPayload::ToolProgressDelta(data) = event.payload {
             progress = Some(data);
             break;
         }
@@ -900,8 +922,8 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
 
     let mut started_call_id = None;
     while let Ok(event) = rx.try_recv() {
-        if let KernelStreamEventData::ToolCallStart(data) = event.data {
-            started_call_id = data.call_id;
+        if let AgentKernelEventPayload::ToolCallStart(data) = event.payload {
+            started_call_id = Some(data.call_id);
             break;
         }
     }
@@ -1032,13 +1054,13 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
     let mut committed_phase = None;
     let mut text_delta = String::new();
     while let Ok(event) = rx.try_recv() {
-        match event.data {
-            KernelStreamEventData::AssistantTextStarted(data) => {
+        match event.payload {
+            AgentKernelEventPayload::AssistantTextStarted(data) => {
                 started_phase = Some(data.phase);
                 assert_eq!(data.round, Some(3));
             }
-            KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
-            KernelStreamEventData::AssistantTextCommitted(data) => {
+            AgentKernelEventPayload::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
+            AgentKernelEventPayload::AssistantTextCommitted(data) => {
                 committed_phase = Some(data.phase);
             }
             _ => {}
@@ -1086,14 +1108,14 @@ async fn test_execute_step_streams_direct_answer_as_final_answer_after_round_don
     let mut text_delta = String::new();
     let mut completed = false;
     while let Ok(event) = rx.try_recv() {
-        match event.data {
-            KernelStreamEventData::AssistantTextStarted(data) => {
+        match event.payload {
+            AgentKernelEventPayload::AssistantTextStarted(data) => {
                 started_phase = Some(data.phase);
                 assert_eq!(data.round, Some(4));
             }
-            KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
-            KernelStreamEventData::AssistantTextCompleted(_) => completed = true,
-            KernelStreamEventData::AssistantTextCommitted(data) => {
+            AgentKernelEventPayload::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
+            AgentKernelEventPayload::AssistantTextCompleted(_) => completed = true,
+            AgentKernelEventPayload::AssistantTextCommitted(data) => {
                 committed_phase = Some(data.phase);
             }
             _ => {}
@@ -1141,13 +1163,13 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
     let mut text_delta = String::new();
     let mut final_answer_started = false;
     while let Ok(event) = rx.try_recv() {
-        match event.data {
-            KernelStreamEventData::AssistantTextStarted(data) => {
+        match event.payload {
+            AgentKernelEventPayload::AssistantTextStarted(data) => {
                 started_phase = Some(data.phase);
                 assert_eq!(data.round, Some(5));
                 final_answer_started = true;
             }
-            KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
+            AgentKernelEventPayload::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
             _ => {}
         }
     }
@@ -1163,7 +1185,7 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -1186,19 +1208,19 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     .await
     .expect("general turn should succeed");
 
-    assert_eq!(result.output_text, "Working answer.");
+    assert_eq!(result.output_text(), "Working answer.");
     assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
 
     let mut phases = Vec::new();
     let mut committed_phases = Vec::new();
     let mut deltas = Vec::new();
     while let Ok(event) = rx.try_recv() {
-        match event.data {
-            KernelStreamEventData::AssistantTextStarted(data) => {
+        match event.payload {
+            AgentKernelEventPayload::AssistantTextStarted(data) => {
                 phases.push(data.phase);
             }
-            KernelStreamEventData::AssistantTextDelta(data) => deltas.push(data.delta),
-            KernelStreamEventData::AssistantTextCommitted(data) => {
+            AgentKernelEventPayload::AssistantTextDelta(data) => deltas.push(data.delta),
+            AgentKernelEventPayload::AssistantTextCommitted(data) => {
                 committed_phases.push(data.phase);
             }
             _ => {}
@@ -1263,21 +1285,12 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     let mut saw_queued = false;
     let mut saw_executing = false;
     let mut saw_result = false;
-    let mut saw_complete_semantic = false;
-    let mut saw_envelope = false;
     while let Ok(event) = rx.try_recv() {
-        match event.data {
-            KernelStreamEventData::ToolArgsDelta(_) => saw_args_delta = true,
-            KernelStreamEventData::ToolQueued(_) => saw_queued = true,
-            KernelStreamEventData::ToolExecuting(_) => saw_executing = true,
-            KernelStreamEventData::ToolResult(data) => {
-                saw_result = true;
-                saw_complete_semantic = data
-                    .semantic_events
-                    .iter()
-                    .any(|item| item == "tool_use_complete");
-                saw_envelope = data.envelope.is_some();
-            }
+        match event.payload {
+            AgentKernelEventPayload::ToolArgsDelta(_) => saw_args_delta = true,
+            AgentKernelEventPayload::ToolQueued(_) => saw_queued = true,
+            AgentKernelEventPayload::ToolExecuting(_) => saw_executing = true,
+            AgentKernelEventPayload::ToolResult(_) => saw_result = true,
             _ => {}
         }
     }
@@ -1286,6 +1299,4 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     assert!(saw_queued);
     assert!(saw_executing);
     assert!(saw_result);
-    assert!(saw_complete_semantic);
-    assert!(saw_envelope);
 }

@@ -1,0 +1,32 @@
+[package]
+name = "talos-agent-provider-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos built-in Agent Provider adapter for Agent Kernel"
+repository.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+talos-agent-api = { workspace = true }
+talos-agent = { workspace = true }
+talos-agent-kernel = { workspace = true }
+talos-config = { workspace = true }
+talos-error = { workspace = true }
+talos-fs = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-memory = { workspace = true }
+talos-prompt = { workspace = true }
+talos-run-control = { workspace = true }
+talos-skills = { workspace = true }
+talos-tools = { workspace = true }
+talos-types = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3.8"

@@ -227,12 +227,25 @@ impl AgentTarget {
     }
 }
 
-/// Exact Session Turn identity constructed by a trusted application adapter.
+/// Canonical exact reference to one logical Session Turn.
+///
+/// Service, Agent execution, events, persistence, protocols, and collaboration
+/// reuse this value instead of defining boundary-specific identity objects.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTurnRef {
     pub session_id: String,
     pub turn_id: String,
+}
+
+impl AgentTurnRef {
+    /// Create an exact reference to one Session Turn.
+    pub fn new(session_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            turn_id: turn_id.into(),
+        }
+    }
 }
 
 /// Trusted identity of the Agent currently invoking a collaboration operation.

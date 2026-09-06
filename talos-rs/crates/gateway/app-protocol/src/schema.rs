@@ -6,7 +6,7 @@ use ts_rs::TS;
 use crate::errors::{AppServerErrorBody, AppServerErrorCode};
 use crate::jsonrpc::JsonRpcMessage;
 use crate::notifications::ServerNotification;
-use crate::requests::{ClientRequest, ClientRequestParams, InitializeResponse};
+use crate::requests::{ClientRequestParams, InitializeResponse};
 use crate::server_requests::ServerRequest;
 
 pub fn json_value_schema(_generator: &mut schemars::gen::SchemaGenerator) -> Schema {
@@ -16,7 +16,6 @@ pub fn json_value_schema(_generator: &mut schemars::gen::SchemaGenerator) -> Sch
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AppProtocolSchemaRoot {
     pub jsonrpc_message: JsonRpcMessage,
-    pub client_request: ClientRequest,
     pub client_request_params: ClientRequestParams,
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
@@ -26,9 +25,10 @@ pub struct AppProtocolSchemaRoot {
     pub start_turn_request: talos_types::StartTurnRequest,
     pub start_turn_response: talos_types::StartTurnResponse,
     pub retry_turn_request: talos_types::RetryTurnRequest,
-    pub retry_turn_response: talos_types::RetryTurnResponse,
-    pub interrupt_turn_request: talos_types::InterruptTurnRequest,
-    pub interrupt_turn_response: talos_types::InterruptTurnResponse,
+    pub interrupt_turn_request: talos_agent_api::InterruptTurnRequest,
+    pub interrupt_turn_response: talos_agent_api::InterruptTurnResponse,
+    pub submit_turn_input_request: talos_agent_api::SubmitTurnInputRequest,
+    pub submit_turn_input_response: talos_agent_api::SubmitTurnInputResponse,
     pub message_queue: talos_types::MessageQueue,
     pub message_queue_add_request: talos_types::MessageQueueAddRequest,
     pub message_queue_list_request: talos_types::MessageQueueListRequest,
@@ -36,23 +36,16 @@ pub struct AppProtocolSchemaRoot {
     pub message_queue_delete_request: talos_types::MessageQueueDeleteRequest,
     pub message_queue_reorder_request: talos_types::MessageQueueReorderRequest,
     pub message_queue_start_request: talos_types::MessageQueueStartRequest,
-    pub message_queue_steer_request: talos_types::MessageQueueSteerRequest,
     pub message_queue_changed_notification: talos_types::MessageQueueChangedNotification,
-    pub submit_dynamic_tool_result_request: talos_types::SubmitDynamicToolResultRequest,
-    pub submit_dynamic_tool_result_response: talos_types::SubmitDynamicToolResultResponse,
-    pub submit_user_action_request: talos_types::SubmitUserActionRequest,
-    pub submit_user_action_response: talos_types::SubmitUserActionResponse,
     pub subscribe_timeline_request: talos_types::SubscribeTimelineRequest,
     pub subscribe_timeline_response: talos_types::SubscribeTimelineResponse,
     pub recover_timeline_request: talos_types::RecoverTimelineRequest,
-    pub timeline_event: talos_types::talos::AgentEvent,
-    pub timeline_event_envelope: talos_types::talos::TimelineEventEnvelope,
+    pub timeline_event: talos_agent_api::TimelineEvent,
     pub collaboration_tool_result: talos_types::CollaborationToolResult,
     pub initialize_response: InitializeResponse,
-    pub turn_start_response: talos_types::StartTurnResponse,
-    pub session_history_response: talos_types::SessionHistoryResponse,
+    pub session_history_response: talos_agent_api::SessionHistoryResponse,
     pub pending_user_action: talos_types::PendingUserAction,
-    pub timeline_recovery_response: talos_types::TimelineRecoveryResponse,
+    pub timeline_recovery_response: talos_agent_api::RecoverTimelineResponse,
     pub event_unsubscribe_response: talos_types::EventUnsubscribeResponse,
     pub auth_logout_response: talos_types::AuthLogoutResponse,
     pub cloud_login_start_response: talos_auth::CloudLoginStartResponse,
@@ -83,10 +76,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::errors::AppServerErrorBody>());
     output.push_str(&export::<crate::requests::ClientMethod>());
     output.push_str(&export::<crate::requests::ClientRequestParams>());
-    output.push_str(&export::<crate::requests::ClientRequest>());
     output.push_str(&export::<crate::requests::InitializeParams>());
     output.push_str(&export::<crate::requests::InitializeResponse>());
     output.push_str(&export::<crate::requests::ClientInfo>());
+    output.push_str(&export::<crate::requests::ClientKind>());
     output.push_str(&export::<crate::requests::ServerInfo>());
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
@@ -130,17 +123,18 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SandboxFileOperation>());
     output.push_str(&export::<talos_types::SandboxApprovalDecision>());
     output.push_str(&export::<talos_types::SessionActiveTurnRequest>());
-    output.push_str(&export::<talos_types::SessionActiveTurnResponse>());
+    output.push_str(&export::<talos_agent_api::SessionActiveTurnResponse>());
     output.push_str(&export::<talos_types::SessionHistoryRequest>());
-    output.push_str(&export::<talos_types::SessionHistoryResponse>());
-    output.push_str(&export::<talos_types::talos::SessionHistorySnapshot>());
-    output.push_str(&export::<talos_types::talos::SessionHistoryMessage>());
-    output.push_str(&export::<talos_types::TimelineRecoverySnapshot>());
-    output.push_str(&export::<talos_types::TimelineRecoveryResponse>());
-    output.push_str(&export::<talos_types::TimelineReplay>());
-    output.push_str(&export::<talos_types::TimelineCursorStatus>());
-    output.push_str(&export::<talos_types::TimelineActiveTurnSnapshot>());
-    output.push_str(&export::<talos_types::TimelineActiveTurnStatus>());
+    output.push_str(&export::<talos_agent_api::SessionHistoryResponse>());
+    output.push_str(&export::<talos_agent_api::SessionHistoryTurn>());
+    output.push_str(&export::<talos_agent_api::AgentRunResult>());
+    output.push_str(&export::<talos_agent_api::AgentRunOutput>());
+    output.push_str(&export::<talos_agent_api::AgentRunFailure>());
+    output.push_str(&export::<talos_agent_api::RecoverTimelineResponse>());
+    output.push_str(&export::<talos_agent_api::TimelineReplay>());
+    output.push_str(&export::<talos_agent_api::TimelineCursorStatus>());
+    output.push_str(&export::<talos_agent_api::TimelineActiveTurn>());
+    output.push_str(&export::<talos_agent_api::ActiveTurnState>());
     output.push_str(&export::<talos_types::ProjectCreateRequest>());
     output.push_str(&export::<talos_types::ProjectCreateResponse>());
     output.push_str(&export::<talos_types::ProjectListRequest>());
@@ -166,9 +160,12 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::StartTurnRequest>());
     output.push_str(&export::<talos_types::StartTurnResponse>());
     output.push_str(&export::<talos_types::RetryTurnRequest>());
-    output.push_str(&export::<talos_types::RetryTurnResponse>());
-    output.push_str(&export::<talos_types::InterruptTurnRequest>());
-    output.push_str(&export::<talos_types::InterruptTurnResponse>());
+    output.push_str(&export::<talos_agent_api::InterruptTurnRequest>());
+    output.push_str(&export::<talos_agent_api::InterruptTurnResponse>());
+    output.push_str(&export::<talos_agent_api::AgentInterruptOutcome>());
+    output.push_str(&export::<talos_agent_api::SubmitTurnInput>());
+    output.push_str(&export::<talos_agent_api::SubmitTurnInputRequest>());
+    output.push_str(&export::<talos_agent_api::SubmitTurnInputResponse>());
     output.push_str(&export::<talos_types::QueuedMessage>());
     output.push_str(&export::<talos_types::MessageQueue>());
     output.push_str(&export::<talos_types::MessageQueueAddRequest>());
@@ -177,24 +174,15 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::MessageQueueDeleteRequest>());
     output.push_str(&export::<talos_types::MessageQueueReorderRequest>());
     output.push_str(&export::<talos_types::MessageQueueStartRequest>());
-    output.push_str(&export::<talos_types::MessageQueueSteerRequest>());
     output.push_str(&export::<talos_types::MessageQueueChangedNotification>());
-    output.push_str(&export::<talos_types::SubmitDynamicToolResultRequest>());
-    output.push_str(&export::<talos_types::SubmitDynamicToolResultResponse>());
-    output.push_str(&export::<talos_types::SubmitUserActionRequest>());
-    output.push_str(&export::<talos_types::SubmitUserActionResponse>());
     output.push_str(&export::<talos_types::SubscribeTimelineRequest>());
     output.push_str(&export::<talos_types::SubscribeTimelineResponse>());
     output.push_str(&export::<talos_types::RecoverTimelineRequest>());
     output.push_str(&export::<talos_types::TurnCommandStatus>());
-    output.push_str(&export::<talos_types::talos::TalosContext>());
-    output.push_str(&export::<talos_types::talos::TalosSourceType>());
-    output.push_str(&export::<talos_types::talos::TalosProvider>());
+    output.push_str(&export::<talos_types::talos::SessionSourceType>());
+    output.push_str(&export::<talos_types::talos::SessionSourceProvider>());
     output.push_str(&export::<talos_types::talos::TalosSessionEnvironment>());
     output.push_str(&export::<talos_types::talos::TalosConnectionMode>());
-    output.push_str(&export::<talos_types::talos::TalosInputItem>());
-    output.push_str(&export::<talos_types::talos::RunItem>());
-    output.push_str(&export::<talos_types::talos::TalosReasoning>());
     output.push_str(&export::<talos_types::EventUnsubscribeRequest>());
     output.push_str(&export::<talos_types::EventUnsubscribeResponse>());
     output.push_str(&export::<talos_types::ModelListRequest>());
@@ -217,8 +205,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ConfigGetRequest>());
     output.push_str(&export::<talos_types::ConfigUpdateRequest>());
     output.push_str(&export::<talos_types::ConfigResponse>());
-    output.push_str("export type ConfigGetResponse = ConfigResponse;\n\n");
-    output.push_str("export type ConfigUpdateResponse = ConfigResponse;\n\n");
     output.push_str(&export::<talos_types::ConfigDeleteRequest>());
     output.push_str(&export::<talos_types::ConfigDeleteResponse>());
     output.push_str(&export::<talos_types::ConfigReloadRequest>());
@@ -386,39 +372,53 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_auth::UserDto>());
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
     output.push_str(&export::<talos_types::SessionConf>());
-    output.push_str(&export::<talos_types::talos::AgentEvent>());
-    output.push_str(&export::<talos_types::talos::TimelineEventEnvelope>());
-    output.push_str(&export::<talos_types::talos::AgentEventType>());
-    output.push_str(&export::<talos_types::talos::AgentEventPayload>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineItem>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineItemKind>());
-    output.push_str(&export::<talos_types::talos::TalosTimelinePhase>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineItemStatus>());
+    output.push_str(&export::<talos_agent_api::TimelineEvent>());
+    output.push_str(&export::<talos_agent_api::AgentEvent>());
+    output.push_str(&export::<talos_agent_api::AgentEventPayload>());
+    output.push_str(&export::<talos_agent_api::AgentTurnStarted>());
+    output.push_str(&export::<talos_agent_api::AgentMessageStarted>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlockStarted>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlockDelta>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlockDeltaContent>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlockCompleted>());
+    output.push_str(&export::<talos_agent_api::AgentToolCallArgumentsDelta>());
+    output.push_str(&export::<talos_agent_api::AgentContextCompactionDelta>());
+    output.push_str(&export::<talos_agent_api::AgentPendingInput>());
+    output.push_str(&export::<talos_agent_api::AgentRunMetrics>());
+    output.push_str(&export::<talos_agent_api::AgentTurnCompleted>());
+    output.push_str(&export::<talos_agent_api::AgentTurnFailed>());
+    output.push_str(&export::<talos_agent_api::AgentStopReason>());
+    output.push_str(&export::<talos_agent_api::AgentErrorInfo>());
+    output.push_str(&export::<talos_agent_api::AgentMessage>());
+    output.push_str(&export::<talos_agent_api::AgentMessageRole>());
+    output.push_str(&export::<talos_agent_api::AgentMessageStatus>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlock>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlockStatus>());
+    output.push_str(&export::<talos_agent_api::AgentMessageBlockContent>());
+    output.push_str(&export::<talos_agent_api::AgentUserInput>());
+    output.push_str(&export::<talos_agent_api::AgentUserContent>());
+    output.push_str(&export::<talos_agent_api::AgentMediaSource>());
+    output.push_str(&export::<talos_agent_api::AgentReasoning>());
+    output.push_str(&export::<talos_agent_api::AgentAssistantText>());
+    output.push_str(&export::<talos_agent_api::AgentAssistantTextPhase>());
+    output.push_str(&export::<talos_agent_api::AgentToolCall>());
+    output.push_str(&export::<talos_agent_api::AgentToolCallArguments>());
+    output.push_str(&export::<talos_agent_api::AgentToolProgress>());
+    output.push_str(&export::<talos_agent_api::AgentToolResult>());
+    output.push_str(&export::<talos_agent_api::AgentExecutionSummary>());
+    output.push_str(&export::<talos_agent_api::AgentContextCompaction>());
+    output.push_str(&export::<talos_agent_api::AgentSystemNotice>());
     output.push_str(&export::<talos_types::talos::TalosTimelineNoticeLevel>());
     output.push_str(&export::<talos_types::talos::ContextCompactionTrigger>());
     output.push_str(&export::<talos_types::talos::ContextCompactionStage>());
     output.push_str(&export::<talos_types::talos::ContextCompactionOutcome>());
     output.push_str(&export::<talos_types::talos::ContextCompactionMetrics>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineContent>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineDelta>());
-    output.push_str(&export::<talos_types::talos::TalosToolProgressEntry>());
-    output.push_str(&export::<talos_types::talos::TalosToolResult>());
-    output.push_str(&export::<talos_types::talos::TalosTurnStartedEvent>());
-    output.push_str(&export::<talos_types::talos::TalosItemStartedEvent>());
-    output.push_str(&export::<talos_types::talos::TalosItemDeltaEvent>());
-    output.push_str(&export::<talos_types::talos::TalosItemCompletedEvent>());
-    output.push_str(&export::<
-        talos_types::talos::TalosAssistantTextCommittedEvent,
-    >());
-    output.push_str(&export::<talos_types::talos::TalosTurnMetricsEvent>());
-    output.push_str(&export::<talos_types::talos::TalosTurnCompletedEvent>());
     output.push_str(&export::<talos_error::ErrorCode>());
     output.push_str(&export_error_code_runtime_enum());
     output.push_str(&export::<talos_error::ApiError>());
     output.push_str(&export::<
         talos_types::ApiResponse<talos_types::UserCurrentResponse>,
     >());
-    output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
     output.push_str(&export::<talos_types::AgentPath>());
     output.push_str(&export::<talos_types::AgentTurnRef>());
     output.push_str(&export::<talos_types::SubagentRef>());
@@ -442,12 +442,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosToolDiffLine>());
     output.push_str(&export::<talos_types::talos::TalosToolSearchMatch>());
     output.push_str(&export::<talos_types::talos::TokenUsage>());
-    output.push_str(&export::<talos_types::talos::TurnExecutionMetrics>());
-    output.push_str(&export::<talos_types::talos::StopReason>());
     output.push_str(&export::<talos_types::talos::TalosToolProgressKind>());
     output.push_str(&export::<crate::events::ConfigWarningEvent>());
-    output.push_str(&export::<crate::events::SubscriptionTerminatedEnvelope>());
-    output.push_str(&export::<crate::events::TimelineSubscriptionNotification>());
+    output.push_str(&export::<crate::events::SubscriptionTerminatedNotification>());
+    output.push_str(&export::<crate::events::TimelineEventNotification>());
     output.push_str(&export::<crate::events::SubscriptionTerminatedEvent>());
     output.push_str(&export::<crate::events::SubscriptionTerminatedReason>());
     output.push_str(&export::<crate::notifications::ServerNotification>());

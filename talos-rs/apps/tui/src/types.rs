@@ -1,6 +1,6 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
-use talos_sdk::{SessionHistorySnapshot, SessionInfo, TimelineRecoveryResponse};
+use talos_sdk::{RecoverTimelineResponse, SessionHistoryResponse, SessionInfo};
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
@@ -138,8 +138,8 @@ pub(crate) enum PastedImageState {
 }
 
 pub(crate) struct SessionHistoryLoad {
-    pub(crate) history: SessionHistorySnapshot,
-    pub(crate) live_recovery: Option<TalosResult<TimelineRecoveryResponse>>,
+    pub(crate) history: SessionHistoryResponse,
+    pub(crate) live_recovery: Option<TalosResult<RecoverTimelineResponse>>,
 }
 
 pub(crate) struct StatusLoad {
@@ -176,7 +176,7 @@ pub(crate) enum CommandUpdate {
     PermissionModeSwitched(TalosResult<SessionInfo>),
     UserActionSubmitted {
         action_id: String,
-        result: TalosResult<talos_sdk::SubmitUserActionResponse>,
+        result: TalosResult<talos_sdk::SubmitTurnInputResponse>,
     },
     SessionHistoryLoaded {
         session: SessionInfo,

@@ -89,37 +89,16 @@ async fn list_rejects_an_agent_tree_beyond_the_response_limit() {
             &format!("response-child-{index}"),
         )
         .await;
-        services
-            .timeline
-            .record_talos_event(AgentEvent {
-                event_seq: None,
-                event_id: None,
-                created_at_ms: None,
-                event_type: AgentEventType::ItemStarted,
-                turn_id: turn_id.clone(),
-                message_id: format!("message-child-{index}"),
-                session_id: child.session_id,
-                sequence: 1,
-                payload: AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-                    request_id: format!("request-child-{index}"),
-                    turn_id,
-                    item: TalosTimelineItem {
-                        item_id: format!("commentary-{index}"),
-                        parent_item_id: None,
-                        kind: TalosTimelineItemKind::AssistantText,
-                        phase: TalosTimelinePhase::Commentary,
-                        status: TalosTimelineItemStatus::Running,
-                        title: None,
-                        started_at_ms: 2,
-                        completed_at_ms: None,
-                        content: TalosTimelineContent::Text {
-                            text: "x".repeat(2 * 1024),
-                        },
-                    },
-                }),
-            })
-            .await
-            .unwrap();
+        commit_agent_text(
+            services.store.as_ref(),
+            services.timeline.as_ref(),
+            &child.session_id,
+            &turn_id,
+            &format!("commentary-{index}"),
+            AgentAssistantTextPhase::Commentary,
+            "x".repeat(2 * 1024),
+        )
+        .await;
     }
 
     let error = services

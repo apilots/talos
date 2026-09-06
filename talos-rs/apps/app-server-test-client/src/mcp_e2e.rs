@@ -4,12 +4,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AgentEventPayload, AppServerClient, GatewayClient, MarketplaceSourceInput,
-    PluginDocumentMediaType, PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallId,
-    PluginInstallRequest, PluginInstallTarget, PluginKind, PluginListRequest,
-    PluginListStatusFilter, PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest,
-    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceRefreshRequest, PluginStatus,
-    PluginUninstallRequest, TalosTimelineContent, TalosTimelineItemKind, TimelineEventEnvelope,
+    AgentEventPayload, AgentMessageBlockContent, AppServerClient, GatewayClient,
+    MarketplaceSourceInput, PluginDocumentMediaType, PluginDocumentRole,
+    PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallTarget,
+    PluginKind, PluginListRequest, PluginListStatusFilter, PluginReadRequest,
+    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
+    PluginSourceAddRequest, PluginSourceRefreshRequest, PluginStatus, PluginUninstallRequest,
+    TimelineEvent,
 };
 
 const SERVER_NAME: &str = "playwright";
@@ -222,7 +223,7 @@ async fn playwright_mcp_tool_e2e(client: &mut AppServerClient) -> Result<()> {
     let session_id = format!("mcp-e2e-{}", uuid::Uuid::new_v4().simple());
     let screenshot_path = output_dir()?.join("hacker-news.png");
     let prompt = format!(
-        "You must first call tool 'ToolSearch' exactly once with query Playwright browser_navigate to activate the Playwright MCP browser tools. Then use the Playwright browser MCP tools to navigate to {HACKER_NEWS_URL}, inspect the current top stories, take a screenshot saved exactly at {}, and reply with at least five story titles plus the marker playwright-mcp-called.",
+        "Call ToolSearch for the exact query mcp__playwright__browser_navigate, then call ToolSearch for the exact query mcp__playwright__browser_take_screenshot. Use mcp__playwright__browser_navigate to open {HACKER_NEWS_URL}. Then you must call the exact tool mcp__playwright__browser_take_screenshot, not browser_snapshot, and save its PNG exactly at {}. Finally reply with at least five current story titles plus the marker playwright-mcp-called.",
         screenshot_path.display()
     );
 
@@ -246,7 +247,7 @@ async fn playwright_mcp_tool_e2e(client: &mut AppServerClient) -> Result<()> {
     ensure_tool_called(&called_tools, SCREENSHOT_TOOL_SUFFIX)?;
     let _screenshot_path = wait_for_screenshot_artifact().await?;
 
-    let assistant_text = super::assistant_text_from_events(&events);
+    let assistant_text = super::assistant_text_from_events(&events)?;
     let mut stories = extract_plain_story_lines(&assistant_text);
     if stories.len() < 5 {
         stories = extract_story_lines_from_latest_snapshot()?;
@@ -280,9 +281,7 @@ pub(super) fn prepare_mcp_fixture() -> Result<()> {
     Ok(())
 }
 
-async fn collect_until_mcp_artifact(
-    client: &mut AppServerClient,
-) -> Result<Vec<TimelineEventEnvelope>> {
+async fn collect_until_mcp_artifact(client: &mut AppServerClient) -> Result<Vec<TimelineEvent>> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
     let mut events = Vec::new();
     loop {
@@ -296,7 +295,16 @@ async fn collect_until_mcp_artifact(
             ));
         }
         match tokio::time::timeout(std::time::Duration::from_secs(5), client.next_event()).await {
-            Ok(Ok(event)) => events.push(event),
+            Ok(Ok(event)) => {
+                let terminal = super::is_terminal_event(&event);
+                events.push(event);
+                if terminal && !observed_required_mcp_artifact(&events)? {
+                    return Err(anyhow!(
+                        "Agent Turn ended before the required Playwright MCP screenshot; called={:?}",
+                        called_mcp_tools_from_events(&events)
+                    ));
+                }
+            }
             Ok(Err(error)) => return Err(error.into()),
             Err(_) => {
                 if observed_required_mcp_artifact(&events)? {
@@ -307,7 +315,7 @@ async fn collect_until_mcp_artifact(
     }
 }
 
-fn observed_required_mcp_artifact(events: &[TimelineEventEnvelope]) -> Result<bool> {
+fn observed_required_mcp_artifact(events: &[TimelineEvent]) -> Result<bool> {
     let called_tools = called_mcp_tools_from_events(events);
     Ok(called_tools
         .iter()
@@ -364,24 +372,21 @@ fn latest_playwright_artifact(extension: &str) -> Result<Option<PathBuf>> {
     Ok(artifacts.pop())
 }
 
-fn called_mcp_tools_from_events(events: &[talos_sdk::TimelineEventEnvelope]) -> BTreeSet<String> {
+fn called_mcp_tools_from_events(events: &[TimelineEvent]) -> BTreeSet<String> {
     let mut tools = BTreeSet::new();
     for event in events {
         match &event.event.payload {
-            AgentEventPayload::ItemStarted(started)
-                if started.item.kind == TalosTimelineItemKind::ToolCall =>
-            {
-                if let TalosTimelineContent::ToolCall { name, .. } = &started.item.content {
-                    if name.starts_with("mcp__") {
-                        tools.insert(name.clone());
+            AgentEventPayload::MessageBlockStarted(started) => {
+                if let AgentMessageBlockContent::ToolCall(call) = &started.block.content {
+                    if call.name.starts_with("mcp__") {
+                        tools.insert(call.name.clone());
                     }
                 }
             }
-            AgentEventPayload::ItemCompleted(completed) => {
-                if let Some(TalosTimelineContent::ToolCall { name, .. }) = &completed.final_content
-                {
-                    if name.starts_with("mcp__") {
-                        tools.insert(name.clone());
+            AgentEventPayload::MessageBlockCompleted(completed) => {
+                if let AgentMessageBlockContent::ToolCall(call) = &completed.block.content {
+                    if call.name.starts_with("mcp__") {
+                        tools.insert(call.name.clone());
                     }
                 }
             }

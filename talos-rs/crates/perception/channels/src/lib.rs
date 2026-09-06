@@ -4,7 +4,7 @@ pub mod telegram;
 pub mod traits;
 
 pub use policy::PolicyChecker;
-pub use server::ChannelServer;
+pub use server::{ChannelApplicationService, ChannelServer};
 pub use traits::*;
 
 pub use telegram::TelegramChannel;

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn reduce_tool_execution_output_includes_next_turn_failure_payload() {
+fn reduce_tool_execution_output_uses_canonical_failure_envelope() {
     let output = ToolExecutionOutput {
         call_id: "call-1".to_string(),
         tool_name: "Read".to_string(),
@@ -29,70 +29,6 @@ fn reduce_tool_execution_output_includes_next_turn_failure_payload() {
         reduced.envelope.status,
         talos_tools::ToolResultStatus::Failure
     );
-    assert!(reduced
-        .semantic_events
-        .contains(&"tool_use_error".to_string()));
-    let next_turn_failure = reduced
-        .next_turn_failure
-        .expect("next_turn_failure should be present");
-    assert_eq!(
-        next_turn_failure.get("strategy").and_then(Value::as_str),
-        Some("retry")
-    );
-    assert_eq!(
-        next_turn_failure.get("gate_source").and_then(Value::as_str),
-        Some("tool_semantic")
-    );
-}
-
-#[tokio::test]
-async fn emit_tool_result_stream_event_includes_envelope_and_semantic_events() {
-    let output = ToolExecutionOutput {
-        call_id: "call-2".to_string(),
-        tool_name: "Bash".to_string(),
-        arguments: serde_json::json!({"command": "false"}),
-        outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
-            content: String::new(),
-            success: false,
-            structured_content: Some(serde_json::json!({
-                "error": "authorization denied",
-                "error_kind": "permission_rejection",
-                "retryable": false,
-                "suggested_action": "choose a less privileged tool or provide a dynamic tool result",
-                "gate_source": "allow_list"
-            })),
-            content_items: vec![TalosContentItem::Text {
-                text: "authorization denied".to_string(),
-            }],
-        }),
-        is_error: true,
-    };
-    let (tx, mut rx) = mpsc::channel(4);
-
-    emit_tool_result_stream_event(Some(&tx), &output).await;
-    let event = rx.recv().await.expect("tool result event should exist");
-
-    match event.data {
-        KernelStreamEventData::ToolResult(data) => {
-            assert!(data.is_error);
-            assert_eq!(
-                data.semantic_events,
-                vec![
-                    "tool_use_rejected".to_string(),
-                    "tool_use_complete".to_string()
-                ]
-            );
-            assert!(data.envelope.is_some());
-            assert_eq!(
-                data.next_turn_failure
-                    .as_ref()
-                    .and_then(|value| value.get("strategy"))
-                    .and_then(Value::as_str),
-                Some("reject")
-            );
-        }
-        other => panic!("expected tool result event, got {other:?}"),
-    }
 }
 
 #[test]

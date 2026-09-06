@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
 
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_types::{MessageQueue, MessageQueueChangedNotification, QueuedMessage, TalosInputItem};
+use talos_types::{AgentUserInput, MessageQueue, MessageQueueChangedNotification, QueuedMessage};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -34,11 +34,11 @@ pub struct SessionMessageQueueService {
 pub(crate) struct MessageQueueReservation {
     session_id: String,
     message_id: String,
-    input: Vec<TalosInputItem>,
+    input: AgentUserInput,
 }
 
 impl MessageQueueReservation {
-    pub(crate) fn input(&self) -> &[TalosInputItem] {
+    pub(crate) fn input(&self) -> &AgentUserInput {
         &self.input
     }
 }
@@ -65,7 +65,7 @@ impl SessionMessageQueueService {
         self.inner.changed_tx.subscribe()
     }
 
-    pub fn add(&self, session_id: &str, input: Vec<TalosInputItem>) -> TalosResult<MessageQueue> {
+    pub fn add(&self, session_id: &str, input: AgentUserInput) -> TalosResult<MessageQueue> {
         self.with_queue(session_id, QueueAccess::Create, |queue| {
             if queue.messages.len() >= self.inner.max_messages as usize {
                 return Err(TalosError::public(
@@ -98,7 +98,7 @@ impl SessionMessageQueueService {
         &self,
         session_id: &str,
         message_id: &str,
-        input: Vec<TalosInputItem>,
+        input: AgentUserInput,
     ) -> TalosResult<MessageQueue> {
         self.with_existing_message(session_id, message_id, |queue, index| {
             ensure_not_busy(queue, message_id)?;

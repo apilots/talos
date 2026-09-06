@@ -71,6 +71,7 @@ describe("ChatComposer model menu", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /model 1.*medium/i }));
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Reasoning: Medium" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reasoning: Medium" }));
     fireEvent.click(screen.getByRole("button", { name: "High" }));
 
     expect(onReasoningLevelChange).toHaveBeenCalledWith("high");

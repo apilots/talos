@@ -1,18 +1,18 @@
-mod coordinator;
+mod agent_coordinator;
 mod registry;
 mod router;
-mod session_runtime;
 mod r#trait;
 
-pub use coordinator::CoordinatorImpl;
-pub use r#trait::Coordinator;
-pub use registry::{AgentRegistration, AgentRegistry};
-pub use router::{AgentRouter, AgentSelectionParams, AgentSelectionResult, AgentSelectionSource};
-pub use session_runtime::{
-    AgentSessionCompactionIdentity, AgentSessionCompactionParams, SessionRuntime,
-};
+#[cfg(test)]
+mod test_support;
+
+pub use agent_coordinator::CoordinatorImpl;
+pub use r#trait::AgentCoordinator;
+pub(crate) use registry::AgentRegistry;
+pub(crate) use router::AgentRouter;
+pub use router::AgentSelectionParams;
 
 // Re-export commonly used items
 pub mod prelude {
-    pub use super::{Coordinator, CoordinatorImpl, SessionRuntime};
+    pub use super::{AgentCoordinator, CoordinatorImpl};
 }

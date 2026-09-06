@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import {
-  type useActiveTurnQuery,
-  useLiveRecoveryQuery,
   type useSessionHistoryQuery,
 } from "./useChatQueries";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
-import { applyTimelineRecovery } from "../stream-events";
+import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
+import type { useSessionMessageQueue } from "./useSessionMessageQueue";
 import {
   activeContextCompaction,
   isContextCompactionRunning,
@@ -15,42 +14,35 @@ import {
 import type { StreamSessionState } from "@/shared/types/ui";
 
 interface UseChatSessionTimelineLifecycleOptions {
-  activeTurnQuery: ReturnType<typeof useActiveTurnQuery>;
   sessionHistoryQuery: ReturnType<typeof useSessionHistoryQuery>;
   sessionId: string;
   streamState?: StreamSessionState;
+  messageQueue: ReturnType<typeof useSessionMessageQueue>;
 }
 
 /** Owns Session-scoped Timeline recovery, maintenance observation, and compaction selection. */
 export function useChatSessionTimelineLifecycle({
-  activeTurnQuery,
   sessionHistoryQuery,
   sessionId,
   streamState,
+  messageQueue,
 }: UseChatSessionTimelineLifecycleOptions) {
   const [observedMaintenanceSessionId, setObservedMaintenanceSessionId] = useState<string>();
-  const shouldRecoverLiveTail =
-    !streamState?.isStreaming &&
-    isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
-  const liveRecoveryQuery = useLiveRecoveryQuery(
-    sessionId,
-    sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
-    shouldRecoverLiveTail && sessionHistoryQuery.isSuccess,
-  );
+  const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
+  // SSE owns paginated replay and live handoff. A second recovery query can
+  // overwrite newer events and stop replay on an older Turn's terminal event.
   const shouldSubscribeTimeline =
     Boolean(streamState?.isStreaming && streamState.activeMessageId) ||
-    (shouldRecoverLiveTail && sessionHistoryQuery.isSuccess) ||
+    sessionHistoryQuery.isSuccess ||
     observedMaintenanceSessionId === sessionId;
   const { retryTimeline } = useSessionTimelineEvents(
     sessionId,
-    sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
+    undefined,
     Boolean(sessionId) && shouldSubscribeTimeline,
     async () => {
-      await Promise.all([
-        sessionHistoryQuery.refetch(),
-        activeTurnQuery.refetch(),
-      ]);
+      await invalidateSessionQueries();
     },
+    messageQueue,
   );
   const latestCompaction = latestContextCompaction(streamState);
   const contextCompaction = activeContextCompaction(streamState) ??
@@ -66,12 +58,6 @@ export function useChatSessionTimelineLifecycle({
     });
   }, [sessionId]);
 
-  useEffect(() => {
-    if (liveRecoveryQuery.data) {
-      applyTimelineRecovery(sessionId, liveRecoveryQuery.data);
-    }
-  }, [sessionId, liveRecoveryQuery.data]);
-
   return {
     contextCompaction,
     retryTimeline,
@@ -80,5 +66,5 @@ export function useChatSessionTimelineLifecycle({
 }
 
 export function isLiveRecoverableActiveTurn(status: string | undefined) {
-  return status === "running" || status === "waiting_user_action" || status === "cancelling";
+  return status === "running" || status === "waitingForInput" || status === "cancelling";
 }

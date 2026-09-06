@@ -1,16 +1,15 @@
 import type {
-  ConfigGetResponse,
-  ConfigUpdateResponse,
+  ConfigResponse,
   LlmConfig,
   ProfileReadResponse,
   WebSearchToolConfig,
 } from "@talos/sdk-browser";
 import { getTalosClient } from "@/shared/api/client";
 
-export type LlmConfigResponse = Extract<ConfigGetResponse, { type: "llm" }>;
-export type WebSearchConfigResponse = Extract<ConfigGetResponse, { type: "webSearch" }>;
+export type LlmConfigResponse = Extract<ConfigResponse, { type: "llm" }>;
+export type WebSearchConfigResponse = Extract<ConfigResponse, { type: "webSearch" }>;
 
-function expectLlmConfig(response: ConfigGetResponse | ConfigUpdateResponse): LlmConfigResponse {
+function expectLlmConfig(response: ConfigResponse): LlmConfigResponse {
   if (response.type !== "llm") {
     throw new Error("Expected llm config response.");
   }
@@ -18,7 +17,7 @@ function expectLlmConfig(response: ConfigGetResponse | ConfigUpdateResponse): Ll
 }
 
 function expectWebSearchConfig(
-  response: ConfigGetResponse | ConfigUpdateResponse,
+  response: ConfigResponse,
 ): WebSearchConfigResponse {
   if (response.type !== "webSearch") {
     throw new Error("Expected web search config response.");

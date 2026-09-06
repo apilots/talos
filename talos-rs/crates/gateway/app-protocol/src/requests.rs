@@ -6,41 +6,27 @@ use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
+use talos_agent_api::{InterruptTurnRequest, SubmitTurnInputRequest};
 use talos_types::{
     AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, ConfigDeleteRequest,
     ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest, EventUnsubscribeRequest,
     FileDeleteRequest, FileListRequest, FileReadRequest, FileUpdateRequest, FileUploadRequest,
-    FsDirectoryCreateRequest, FsDirectoryReadRequest, InterruptTurnRequest, MemoryFileListRequest,
-    MemoryFileReadRequest, MemoryFileWriteRequest, MemoryGetRequest, MemorySearchRequest,
-    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
-    MessageQueueUpdateRequest, ModelListRequest, PluginDisableRequest, PluginEnableRequest,
-    PluginInstallRequest, PluginListRequest, PluginReadRequest, PluginSearchRequest,
-    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
-    PluginSourceRemoveRequest, PluginUninstallRequest, PluginUpdateRequest, ProfileReadRequest,
-    ProjectCreateRequest, ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest,
-    ProjectReadRequest, RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest,
-    SessionClearRequest, SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest,
-    SessionGetRequest, SessionHistoryRequest, SessionListRequest, SessionPatchRequest,
-    StartTurnRequest, SubmitDynamicToolResultRequest, SubmitUserActionRequest,
+    FsDirectoryCreateRequest, FsDirectoryReadRequest, MemoryFileListRequest, MemoryFileReadRequest,
+    MemoryFileWriteRequest, MemoryGetRequest, MemorySearchRequest, MessageQueueAddRequest,
+    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
+    MessageQueueStartRequest, MessageQueueUpdateRequest, ModelListRequest, PluginDisableRequest,
+    PluginEnableRequest, PluginInstallRequest, PluginListRequest, PluginReadRequest,
+    PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
+    PluginUpdateRequest, ProfileReadRequest, ProjectCreateRequest, ProjectDeleteRequest,
+    ProjectListRequest, ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest,
+    RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
+    SessionCompactRequest, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
+    SessionListRequest, SessionPatchRequest, SkillsListRequest, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
     SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
     WorkspaceDocWriteRequest,
 };
-pub use talos_types::{
-    SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
-    SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
-    SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
-    TimelineCursorStatus, TimelineRecoveryResponse, TimelineRecoverySnapshot, TimelineReplay,
-};
-
-pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DeferredClientMethod {
-    pub method: &'static str,
-    pub reason: &'static str,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub enum ClientMethod {
@@ -48,45 +34,47 @@ pub enum ClientMethod {
     Initialize,
     #[serde(rename = "profile/read")]
     ProfileRead,
-    #[serde(rename = "session.list")]
+    #[serde(rename = "session/list")]
     SessionList,
-    #[serde(rename = "session.get")]
+    #[serde(rename = "session/get")]
     SessionGet,
-    #[serde(rename = "session.patch")]
+    #[serde(rename = "session/patch")]
     SessionPatch,
-    #[serde(rename = "session.delete")]
+    #[serde(rename = "session/delete")]
     SessionDelete,
-    #[serde(rename = "session.close")]
+    #[serde(rename = "session/close")]
     SessionClose,
-    #[serde(rename = "session.compact")]
+    #[serde(rename = "session/compact")]
     SessionCompact,
-    #[serde(rename = "session.clear")]
+    #[serde(rename = "session/clear")]
     SessionClear,
-    #[serde(rename = "session.active_turn")]
+    #[serde(rename = "session/active_turn")]
     SessionActiveTurn,
-    #[serde(rename = "session.history")]
+    #[serde(rename = "session/history")]
     SessionHistory,
-    #[serde(rename = "timeline.recover")]
+    #[serde(rename = "timeline/recover")]
     TimelineRecover,
-    #[serde(rename = "project.create")]
+    #[serde(rename = "project/create")]
     ProjectCreate,
-    #[serde(rename = "project.list")]
+    #[serde(rename = "project/list")]
     ProjectList,
-    #[serde(rename = "project.read")]
+    #[serde(rename = "project/read")]
     ProjectRead,
-    #[serde(rename = "project.patch")]
+    #[serde(rename = "project/patch")]
     ProjectPatch,
-    #[serde(rename = "project.delete")]
+    #[serde(rename = "project/delete")]
     ProjectDelete,
-    #[serde(rename = "fs.directory.read")]
+    #[serde(rename = "fs/directory/read")]
     FsDirectoryRead,
-    #[serde(rename = "fs.directory.create")]
+    #[serde(rename = "fs/directory/create")]
     FsDirectoryCreate,
-    #[serde(rename = "turn.start")]
+    #[serde(rename = "turn/start")]
     TurnStart,
-    #[serde(rename = "turn.interrupt")]
+    #[serde(rename = "turn/interrupt")]
     TurnInterrupt,
-    #[serde(rename = "turn.retry")]
+    #[serde(rename = "turn/input")]
+    TurnInput,
+    #[serde(rename = "turn/retry")]
     TurnRetry,
     #[serde(rename = "messageQueue/add")]
     MessageQueueAdd,
@@ -100,25 +88,19 @@ pub enum ClientMethod {
     MessageQueueReorder,
     #[serde(rename = "messageQueue/start")]
     MessageQueueStart,
-    #[serde(rename = "messageQueue/steer")]
-    MessageQueueSteer,
-    #[serde(rename = "event.subscribe")]
+    #[serde(rename = "event/subscribe")]
     EventSubscribe,
-    #[serde(rename = "event.unsubscribe")]
+    #[serde(rename = "event/unsubscribe")]
     EventUnsubscribe,
-    #[serde(rename = "tool.dynamic_result.submit")]
-    ToolDynamicResultSubmit,
-    #[serde(rename = "userAction/submit")]
-    UserActionSubmit,
-    #[serde(rename = "model.list")]
+    #[serde(rename = "model/list")]
     ModelList,
-    #[serde(rename = "config.get")]
+    #[serde(rename = "config/get")]
     ConfigGet,
-    #[serde(rename = "config.update")]
+    #[serde(rename = "config/update")]
     ConfigUpdate,
-    #[serde(rename = "config.delete")]
+    #[serde(rename = "config/delete")]
     ConfigDelete,
-    #[serde(rename = "config.reload")]
+    #[serde(rename = "config/reload")]
     ConfigReload,
     #[serde(rename = "file/upload")]
     FileUpload,
@@ -130,65 +112,65 @@ pub enum ClientMethod {
     FileUpdate,
     #[serde(rename = "file/delete")]
     FileDelete,
-    #[serde(rename = "memory.file.list")]
+    #[serde(rename = "memory/file/list")]
     MemoryFileList,
-    #[serde(rename = "memory.file.read")]
+    #[serde(rename = "memory/file/read")]
     MemoryFileRead,
-    #[serde(rename = "memory.file.write")]
+    #[serde(rename = "memory/file/write")]
     MemoryFileWrite,
-    #[serde(rename = "workspace.doc.list")]
+    #[serde(rename = "workspace/doc/list")]
     WorkspaceDocList,
-    #[serde(rename = "workspace.doc.read")]
+    #[serde(rename = "workspace/doc/read")]
     WorkspaceDocRead,
-    #[serde(rename = "workspace.doc.write")]
+    #[serde(rename = "workspace/doc/write")]
     WorkspaceDocWrite,
-    #[serde(rename = "skills.list")]
+    #[serde(rename = "skills/list")]
     SkillsList,
-    #[serde(rename = "skills.refresh")]
+    #[serde(rename = "skills/refresh")]
     SkillsRefresh,
-    #[serde(rename = "skills.suggest")]
+    #[serde(rename = "skills/suggest")]
     SkillsSuggest,
-    #[serde(rename = "skills.read")]
+    #[serde(rename = "skills/read")]
     SkillsRead,
-    #[serde(rename = "skills.resolve")]
+    #[serde(rename = "skills/resolve")]
     SkillsResolve,
-    #[serde(rename = "plugin.source.list")]
+    #[serde(rename = "plugin/source/list")]
     PluginSourceList,
-    #[serde(rename = "plugin.source.add")]
+    #[serde(rename = "plugin/source/add")]
     PluginSourceAdd,
-    #[serde(rename = "plugin.source.refresh")]
+    #[serde(rename = "plugin/source/refresh")]
     PluginSourceRefresh,
-    #[serde(rename = "plugin.source.remove")]
+    #[serde(rename = "plugin/source/remove")]
     PluginSourceRemove,
-    #[serde(rename = "plugin.search")]
+    #[serde(rename = "plugin/search")]
     PluginSearch,
-    #[serde(rename = "plugin.list")]
+    #[serde(rename = "plugin/list")]
     PluginList,
-    #[serde(rename = "plugin.read")]
+    #[serde(rename = "plugin/read")]
     PluginRead,
-    #[serde(rename = "plugin.install")]
+    #[serde(rename = "plugin/install")]
     PluginInstall,
-    #[serde(rename = "plugin.update")]
+    #[serde(rename = "plugin/update")]
     PluginUpdate,
-    #[serde(rename = "plugin.uninstall")]
+    #[serde(rename = "plugin/uninstall")]
     PluginUninstall,
-    #[serde(rename = "plugin.enable")]
+    #[serde(rename = "plugin/enable")]
     PluginEnable,
-    #[serde(rename = "plugin.disable")]
+    #[serde(rename = "plugin/disable")]
     PluginDisable,
-    #[serde(rename = "auth.logout")]
+    #[serde(rename = "auth/logout")]
     AuthLogout,
-    #[serde(rename = "auth.login.start")]
+    #[serde(rename = "auth/login/start")]
     AuthLoginStart,
-    #[serde(rename = "auth.login.status")]
+    #[serde(rename = "auth/login/status")]
     AuthLoginStatus,
-    #[serde(rename = "auth.login.cancel")]
+    #[serde(rename = "auth/login/cancel")]
     AuthLoginCancel,
-    #[serde(rename = "auth.session.read")]
+    #[serde(rename = "auth/session/read")]
     AuthSessionRead,
-    #[serde(rename = "auth.session.clear")]
+    #[serde(rename = "auth/session/clear")]
     AuthSessionClear,
-    #[serde(rename = "user.current")]
+    #[serde(rename = "user/current")]
     UserCurrent,
     #[serde(rename = "memory/search")]
     MemorySearch,
@@ -201,77 +183,75 @@ impl ClientMethod {
         match self {
             Self::Initialize => "initialize",
             Self::ProfileRead => "profile/read",
-            Self::SessionList => "session.list",
-            Self::SessionGet => "session.get",
-            Self::SessionPatch => "session.patch",
-            Self::SessionDelete => "session.delete",
-            Self::SessionClose => "session.close",
-            Self::SessionCompact => "session.compact",
-            Self::SessionClear => "session.clear",
-            Self::SessionActiveTurn => "session.active_turn",
-            Self::SessionHistory => "session.history",
-            Self::TimelineRecover => "timeline.recover",
-            Self::ProjectCreate => "project.create",
-            Self::ProjectList => "project.list",
-            Self::ProjectRead => "project.read",
-            Self::ProjectPatch => "project.patch",
-            Self::ProjectDelete => "project.delete",
-            Self::FsDirectoryRead => "fs.directory.read",
-            Self::FsDirectoryCreate => "fs.directory.create",
-            Self::TurnStart => "turn.start",
-            Self::TurnInterrupt => "turn.interrupt",
-            Self::TurnRetry => "turn.retry",
+            Self::SessionList => "session/list",
+            Self::SessionGet => "session/get",
+            Self::SessionPatch => "session/patch",
+            Self::SessionDelete => "session/delete",
+            Self::SessionClose => "session/close",
+            Self::SessionCompact => "session/compact",
+            Self::SessionClear => "session/clear",
+            Self::SessionActiveTurn => "session/active_turn",
+            Self::SessionHistory => "session/history",
+            Self::TimelineRecover => "timeline/recover",
+            Self::ProjectCreate => "project/create",
+            Self::ProjectList => "project/list",
+            Self::ProjectRead => "project/read",
+            Self::ProjectPatch => "project/patch",
+            Self::ProjectDelete => "project/delete",
+            Self::FsDirectoryRead => "fs/directory/read",
+            Self::FsDirectoryCreate => "fs/directory/create",
+            Self::TurnStart => "turn/start",
+            Self::TurnInterrupt => "turn/interrupt",
+            Self::TurnInput => "turn/input",
+            Self::TurnRetry => "turn/retry",
             Self::MessageQueueAdd => "messageQueue/add",
             Self::MessageQueueList => "messageQueue/list",
             Self::MessageQueueUpdate => "messageQueue/update",
             Self::MessageQueueDelete => "messageQueue/delete",
             Self::MessageQueueReorder => "messageQueue/reorder",
             Self::MessageQueueStart => "messageQueue/start",
-            Self::MessageQueueSteer => "messageQueue/steer",
-            Self::EventSubscribe => "event.subscribe",
-            Self::EventUnsubscribe => "event.unsubscribe",
-            Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
-            Self::UserActionSubmit => "userAction/submit",
-            Self::ModelList => "model.list",
-            Self::ConfigGet => "config.get",
-            Self::ConfigUpdate => "config.update",
-            Self::ConfigDelete => "config.delete",
-            Self::ConfigReload => "config.reload",
+            Self::EventSubscribe => "event/subscribe",
+            Self::EventUnsubscribe => "event/unsubscribe",
+            Self::ModelList => "model/list",
+            Self::ConfigGet => "config/get",
+            Self::ConfigUpdate => "config/update",
+            Self::ConfigDelete => "config/delete",
+            Self::ConfigReload => "config/reload",
             Self::FileUpload => "file/upload",
             Self::FileList => "file/list",
             Self::FileRead => "file/read",
             Self::FileUpdate => "file/update",
             Self::FileDelete => "file/delete",
-            Self::MemoryFileList => "memory.file.list",
-            Self::MemoryFileRead => "memory.file.read",
-            Self::MemoryFileWrite => "memory.file.write",
-            Self::WorkspaceDocList => "workspace.doc.list",
-            Self::WorkspaceDocRead => "workspace.doc.read",
-            Self::WorkspaceDocWrite => "workspace.doc.write",
-            Self::SkillsList => "skills.list",
-            Self::SkillsRefresh => "skills.refresh",
-            Self::SkillsSuggest => "skills.suggest",
-            Self::SkillsRead => "skills.read",
-            Self::SkillsResolve => "skills.resolve",
-            Self::PluginSourceList => "plugin.source.list",
-            Self::PluginSourceAdd => "plugin.source.add",
-            Self::PluginSourceRefresh => "plugin.source.refresh",
-            Self::PluginSourceRemove => "plugin.source.remove",
-            Self::PluginSearch => "plugin.search",
-            Self::PluginList => "plugin.list",
-            Self::PluginRead => "plugin.read",
-            Self::PluginInstall => "plugin.install",
-            Self::PluginUpdate => "plugin.update",
-            Self::PluginUninstall => "plugin.uninstall",
-            Self::PluginEnable => "plugin.enable",
-            Self::PluginDisable => "plugin.disable",
-            Self::AuthLogout => "auth.logout",
-            Self::AuthLoginStart => "auth.login.start",
-            Self::AuthLoginStatus => "auth.login.status",
-            Self::AuthLoginCancel => "auth.login.cancel",
-            Self::AuthSessionRead => "auth.session.read",
-            Self::AuthSessionClear => "auth.session.clear",
-            Self::UserCurrent => "user.current",
+            Self::MemoryFileList => "memory/file/list",
+            Self::MemoryFileRead => "memory/file/read",
+            Self::MemoryFileWrite => "memory/file/write",
+            Self::WorkspaceDocList => "workspace/doc/list",
+            Self::WorkspaceDocRead => "workspace/doc/read",
+            Self::WorkspaceDocWrite => "workspace/doc/write",
+            Self::SkillsList => "skills/list",
+            Self::SkillsRefresh => "skills/refresh",
+            Self::SkillsSuggest => "skills/suggest",
+            Self::SkillsRead => "skills/read",
+            Self::SkillsResolve => "skills/resolve",
+            Self::PluginSourceList => "plugin/source/list",
+            Self::PluginSourceAdd => "plugin/source/add",
+            Self::PluginSourceRefresh => "plugin/source/refresh",
+            Self::PluginSourceRemove => "plugin/source/remove",
+            Self::PluginSearch => "plugin/search",
+            Self::PluginList => "plugin/list",
+            Self::PluginRead => "plugin/read",
+            Self::PluginInstall => "plugin/install",
+            Self::PluginUpdate => "plugin/update",
+            Self::PluginUninstall => "plugin/uninstall",
+            Self::PluginEnable => "plugin/enable",
+            Self::PluginDisable => "plugin/disable",
+            Self::AuthLogout => "auth/logout",
+            Self::AuthLoginStart => "auth/login/start",
+            Self::AuthLoginStatus => "auth/login/status",
+            Self::AuthLoginCancel => "auth/login/cancel",
+            Self::AuthSessionRead => "auth/session/read",
+            Self::AuthSessionClear => "auth/session/clear",
+            Self::UserCurrent => "user/current",
             Self::MemorySearch => "memory/search",
             Self::MemoryGet => "memory/get",
         }
@@ -291,77 +271,75 @@ impl FromStr for ClientMethod {
         match value {
             "initialize" => Ok(Self::Initialize),
             "profile/read" => Ok(Self::ProfileRead),
-            "session.list" => Ok(Self::SessionList),
-            "session.get" => Ok(Self::SessionGet),
-            "session.patch" => Ok(Self::SessionPatch),
-            "session.delete" => Ok(Self::SessionDelete),
-            "session.close" => Ok(Self::SessionClose),
-            "session.compact" => Ok(Self::SessionCompact),
-            "session.clear" => Ok(Self::SessionClear),
-            "session.active_turn" => Ok(Self::SessionActiveTurn),
-            "session.history" => Ok(Self::SessionHistory),
-            "timeline.recover" => Ok(Self::TimelineRecover),
-            "project.create" => Ok(Self::ProjectCreate),
-            "project.list" => Ok(Self::ProjectList),
-            "project.read" => Ok(Self::ProjectRead),
-            "project.patch" => Ok(Self::ProjectPatch),
-            "project.delete" => Ok(Self::ProjectDelete),
-            "fs.directory.read" => Ok(Self::FsDirectoryRead),
-            "fs.directory.create" => Ok(Self::FsDirectoryCreate),
-            "turn.start" => Ok(Self::TurnStart),
-            "turn.interrupt" => Ok(Self::TurnInterrupt),
-            "turn.retry" => Ok(Self::TurnRetry),
+            "session/list" => Ok(Self::SessionList),
+            "session/get" => Ok(Self::SessionGet),
+            "session/patch" => Ok(Self::SessionPatch),
+            "session/delete" => Ok(Self::SessionDelete),
+            "session/close" => Ok(Self::SessionClose),
+            "session/compact" => Ok(Self::SessionCompact),
+            "session/clear" => Ok(Self::SessionClear),
+            "session/active_turn" => Ok(Self::SessionActiveTurn),
+            "session/history" => Ok(Self::SessionHistory),
+            "timeline/recover" => Ok(Self::TimelineRecover),
+            "project/create" => Ok(Self::ProjectCreate),
+            "project/list" => Ok(Self::ProjectList),
+            "project/read" => Ok(Self::ProjectRead),
+            "project/patch" => Ok(Self::ProjectPatch),
+            "project/delete" => Ok(Self::ProjectDelete),
+            "fs/directory/read" => Ok(Self::FsDirectoryRead),
+            "fs/directory/create" => Ok(Self::FsDirectoryCreate),
+            "turn/start" => Ok(Self::TurnStart),
+            "turn/interrupt" => Ok(Self::TurnInterrupt),
+            "turn/input" => Ok(Self::TurnInput),
+            "turn/retry" => Ok(Self::TurnRetry),
             "messageQueue/add" => Ok(Self::MessageQueueAdd),
             "messageQueue/list" => Ok(Self::MessageQueueList),
             "messageQueue/update" => Ok(Self::MessageQueueUpdate),
             "messageQueue/delete" => Ok(Self::MessageQueueDelete),
             "messageQueue/reorder" => Ok(Self::MessageQueueReorder),
             "messageQueue/start" => Ok(Self::MessageQueueStart),
-            "messageQueue/steer" => Ok(Self::MessageQueueSteer),
-            "event.subscribe" => Ok(Self::EventSubscribe),
-            "event.unsubscribe" => Ok(Self::EventUnsubscribe),
-            "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
-            "userAction/submit" => Ok(Self::UserActionSubmit),
-            "model.list" => Ok(Self::ModelList),
-            "config.get" => Ok(Self::ConfigGet),
-            "config.update" => Ok(Self::ConfigUpdate),
-            "config.delete" => Ok(Self::ConfigDelete),
-            "config.reload" => Ok(Self::ConfigReload),
+            "event/subscribe" => Ok(Self::EventSubscribe),
+            "event/unsubscribe" => Ok(Self::EventUnsubscribe),
+            "model/list" => Ok(Self::ModelList),
+            "config/get" => Ok(Self::ConfigGet),
+            "config/update" => Ok(Self::ConfigUpdate),
+            "config/delete" => Ok(Self::ConfigDelete),
+            "config/reload" => Ok(Self::ConfigReload),
             "file/upload" => Ok(Self::FileUpload),
             "file/list" => Ok(Self::FileList),
             "file/read" => Ok(Self::FileRead),
             "file/update" => Ok(Self::FileUpdate),
             "file/delete" => Ok(Self::FileDelete),
-            "memory.file.list" => Ok(Self::MemoryFileList),
-            "memory.file.read" => Ok(Self::MemoryFileRead),
-            "memory.file.write" => Ok(Self::MemoryFileWrite),
-            "workspace.doc.list" => Ok(Self::WorkspaceDocList),
-            "workspace.doc.read" => Ok(Self::WorkspaceDocRead),
-            "workspace.doc.write" => Ok(Self::WorkspaceDocWrite),
-            "skills.list" => Ok(Self::SkillsList),
-            "skills.refresh" => Ok(Self::SkillsRefresh),
-            "skills.suggest" => Ok(Self::SkillsSuggest),
-            "skills.read" => Ok(Self::SkillsRead),
-            "skills.resolve" => Ok(Self::SkillsResolve),
-            "plugin.source.list" => Ok(Self::PluginSourceList),
-            "plugin.source.add" => Ok(Self::PluginSourceAdd),
-            "plugin.source.refresh" => Ok(Self::PluginSourceRefresh),
-            "plugin.source.remove" => Ok(Self::PluginSourceRemove),
-            "plugin.search" => Ok(Self::PluginSearch),
-            "plugin.list" => Ok(Self::PluginList),
-            "plugin.read" => Ok(Self::PluginRead),
-            "plugin.install" => Ok(Self::PluginInstall),
-            "plugin.update" => Ok(Self::PluginUpdate),
-            "plugin.uninstall" => Ok(Self::PluginUninstall),
-            "plugin.enable" => Ok(Self::PluginEnable),
-            "plugin.disable" => Ok(Self::PluginDisable),
-            "auth.logout" => Ok(Self::AuthLogout),
-            "auth.login.start" => Ok(Self::AuthLoginStart),
-            "auth.login.status" => Ok(Self::AuthLoginStatus),
-            "auth.login.cancel" => Ok(Self::AuthLoginCancel),
-            "auth.session.read" => Ok(Self::AuthSessionRead),
-            "auth.session.clear" => Ok(Self::AuthSessionClear),
-            "user.current" => Ok(Self::UserCurrent),
+            "memory/file/list" => Ok(Self::MemoryFileList),
+            "memory/file/read" => Ok(Self::MemoryFileRead),
+            "memory/file/write" => Ok(Self::MemoryFileWrite),
+            "workspace/doc/list" => Ok(Self::WorkspaceDocList),
+            "workspace/doc/read" => Ok(Self::WorkspaceDocRead),
+            "workspace/doc/write" => Ok(Self::WorkspaceDocWrite),
+            "skills/list" => Ok(Self::SkillsList),
+            "skills/refresh" => Ok(Self::SkillsRefresh),
+            "skills/suggest" => Ok(Self::SkillsSuggest),
+            "skills/read" => Ok(Self::SkillsRead),
+            "skills/resolve" => Ok(Self::SkillsResolve),
+            "plugin/source/list" => Ok(Self::PluginSourceList),
+            "plugin/source/add" => Ok(Self::PluginSourceAdd),
+            "plugin/source/refresh" => Ok(Self::PluginSourceRefresh),
+            "plugin/source/remove" => Ok(Self::PluginSourceRemove),
+            "plugin/search" => Ok(Self::PluginSearch),
+            "plugin/list" => Ok(Self::PluginList),
+            "plugin/read" => Ok(Self::PluginRead),
+            "plugin/install" => Ok(Self::PluginInstall),
+            "plugin/update" => Ok(Self::PluginUpdate),
+            "plugin/uninstall" => Ok(Self::PluginUninstall),
+            "plugin/enable" => Ok(Self::PluginEnable),
+            "plugin/disable" => Ok(Self::PluginDisable),
+            "auth/logout" => Ok(Self::AuthLogout),
+            "auth/login/start" => Ok(Self::AuthLoginStart),
+            "auth/login/status" => Ok(Self::AuthLoginStatus),
+            "auth/login/cancel" => Ok(Self::AuthLoginCancel),
+            "auth/session/read" => Ok(Self::AuthSessionRead),
+            "auth/session/clear" => Ok(Self::AuthSessionClear),
+            "user/current" => Ok(Self::UserCurrent),
             "memory/search" => Ok(Self::MemorySearch),
             "memory/get" => Ok(Self::MemoryGet),
             _ => Err(AppServerErrorBody::method_not_found(value)),
@@ -376,45 +354,47 @@ pub enum ClientRequestParams {
     Initialize(InitializeParams),
     #[serde(rename = "profile/read")]
     ProfileRead(ProfileReadRequest),
-    #[serde(rename = "session.list")]
+    #[serde(rename = "session/list")]
     SessionList(SessionListRequest),
-    #[serde(rename = "session.get")]
+    #[serde(rename = "session/get")]
     SessionGet(SessionGetRequest),
-    #[serde(rename = "session.patch")]
+    #[serde(rename = "session/patch")]
     SessionPatch(SessionPatchRequest),
-    #[serde(rename = "session.delete")]
+    #[serde(rename = "session/delete")]
     SessionDelete(SessionDeleteRequest),
-    #[serde(rename = "session.close")]
+    #[serde(rename = "session/close")]
     SessionClose(SessionCloseRequest),
-    #[serde(rename = "session.compact")]
+    #[serde(rename = "session/compact")]
     SessionCompact(SessionCompactRequest),
-    #[serde(rename = "session.clear")]
+    #[serde(rename = "session/clear")]
     SessionClear(SessionClearRequest),
-    #[serde(rename = "session.active_turn")]
+    #[serde(rename = "session/active_turn")]
     SessionActiveTurn(SessionActiveTurnRequest),
-    #[serde(rename = "session.history")]
+    #[serde(rename = "session/history")]
     SessionHistory(SessionHistoryRequest),
-    #[serde(rename = "timeline.recover")]
+    #[serde(rename = "timeline/recover")]
     TimelineRecover(RecoverTimelineRequest),
-    #[serde(rename = "project.create")]
+    #[serde(rename = "project/create")]
     ProjectCreate(ProjectCreateRequest),
-    #[serde(rename = "project.list")]
+    #[serde(rename = "project/list")]
     ProjectList(ProjectListRequest),
-    #[serde(rename = "project.read")]
+    #[serde(rename = "project/read")]
     ProjectRead(ProjectReadRequest),
-    #[serde(rename = "project.patch")]
+    #[serde(rename = "project/patch")]
     ProjectPatch(ProjectPatchRequest),
-    #[serde(rename = "project.delete")]
+    #[serde(rename = "project/delete")]
     ProjectDelete(ProjectDeleteRequest),
-    #[serde(rename = "fs.directory.read")]
+    #[serde(rename = "fs/directory/read")]
     FsDirectoryRead(FsDirectoryReadRequest),
-    #[serde(rename = "fs.directory.create")]
+    #[serde(rename = "fs/directory/create")]
     FsDirectoryCreate(FsDirectoryCreateRequest),
-    #[serde(rename = "turn.start")]
+    #[serde(rename = "turn/start")]
     TurnStart(StartTurnRequest),
-    #[serde(rename = "turn.interrupt")]
+    #[serde(rename = "turn/interrupt")]
     TurnInterrupt(InterruptTurnRequest),
-    #[serde(rename = "turn.retry")]
+    #[serde(rename = "turn/input")]
+    TurnInput(SubmitTurnInputRequest),
+    #[serde(rename = "turn/retry")]
     TurnRetry(RetryTurnRequest),
     #[serde(rename = "messageQueue/add")]
     MessageQueueAdd(MessageQueueAddRequest),
@@ -428,25 +408,19 @@ pub enum ClientRequestParams {
     MessageQueueReorder(MessageQueueReorderRequest),
     #[serde(rename = "messageQueue/start")]
     MessageQueueStart(MessageQueueStartRequest),
-    #[serde(rename = "messageQueue/steer")]
-    MessageQueueSteer(MessageQueueSteerRequest),
-    #[serde(rename = "event.subscribe")]
+    #[serde(rename = "event/subscribe")]
     EventSubscribe(SubscribeTimelineRequest),
-    #[serde(rename = "event.unsubscribe")]
+    #[serde(rename = "event/unsubscribe")]
     EventUnsubscribe(EventUnsubscribeRequest),
-    #[serde(rename = "tool.dynamic_result.submit")]
-    ToolDynamicResultSubmit(SubmitDynamicToolResultRequest),
-    #[serde(rename = "userAction/submit")]
-    UserActionSubmit(SubmitUserActionRequest),
-    #[serde(rename = "model.list")]
+    #[serde(rename = "model/list")]
     ModelList(ModelListRequest),
-    #[serde(rename = "config.get")]
+    #[serde(rename = "config/get")]
     ConfigGet(ConfigGetRequest),
-    #[serde(rename = "config.update")]
+    #[serde(rename = "config/update")]
     ConfigUpdate(ConfigUpdateRequest),
-    #[serde(rename = "config.delete")]
+    #[serde(rename = "config/delete")]
     ConfigDelete(ConfigDeleteRequest),
-    #[serde(rename = "config.reload")]
+    #[serde(rename = "config/reload")]
     ConfigReload(ConfigReloadRequest),
     #[serde(rename = "file/upload")]
     FileUpload(FileUploadParams),
@@ -458,65 +432,65 @@ pub enum ClientRequestParams {
     FileUpdate(FileUpdateRequest),
     #[serde(rename = "file/delete")]
     FileDelete(FileDeleteRequest),
-    #[serde(rename = "memory.file.list")]
+    #[serde(rename = "memory/file/list")]
     MemoryFileList(MemoryFileListRequest),
-    #[serde(rename = "memory.file.read")]
+    #[serde(rename = "memory/file/read")]
     MemoryFileRead(MemoryFileReadRequest),
-    #[serde(rename = "memory.file.write")]
+    #[serde(rename = "memory/file/write")]
     MemoryFileWrite(MemoryFileWriteRequest),
-    #[serde(rename = "workspace.doc.list")]
+    #[serde(rename = "workspace/doc/list")]
     WorkspaceDocList(WorkspaceDocListRequest),
-    #[serde(rename = "workspace.doc.read")]
+    #[serde(rename = "workspace/doc/read")]
     WorkspaceDocRead(WorkspaceDocReadRequest),
-    #[serde(rename = "workspace.doc.write")]
+    #[serde(rename = "workspace/doc/write")]
     WorkspaceDocWrite(WorkspaceDocWriteRequest),
-    #[serde(rename = "skills.list")]
+    #[serde(rename = "skills/list")]
     SkillsList(SkillsListRequest),
-    #[serde(rename = "skills.refresh")]
+    #[serde(rename = "skills/refresh")]
     SkillsRefresh(SkillsRefreshRequest),
-    #[serde(rename = "skills.suggest")]
+    #[serde(rename = "skills/suggest")]
     SkillsSuggest(SkillsSuggestRequest),
-    #[serde(rename = "skills.read")]
+    #[serde(rename = "skills/read")]
     SkillsRead(SkillsReadRequest),
-    #[serde(rename = "skills.resolve")]
+    #[serde(rename = "skills/resolve")]
     SkillsResolve(SkillsResolveRequest),
-    #[serde(rename = "plugin.source.list")]
+    #[serde(rename = "plugin/source/list")]
     PluginSourceList(PluginSourceListRequest),
-    #[serde(rename = "plugin.source.add")]
+    #[serde(rename = "plugin/source/add")]
     PluginSourceAdd(PluginSourceAddRequest),
-    #[serde(rename = "plugin.source.refresh")]
+    #[serde(rename = "plugin/source/refresh")]
     PluginSourceRefresh(PluginSourceRefreshRequest),
-    #[serde(rename = "plugin.source.remove")]
+    #[serde(rename = "plugin/source/remove")]
     PluginSourceRemove(PluginSourceRemoveRequest),
-    #[serde(rename = "plugin.search")]
+    #[serde(rename = "plugin/search")]
     PluginSearch(PluginSearchRequest),
-    #[serde(rename = "plugin.list")]
+    #[serde(rename = "plugin/list")]
     PluginList(PluginListRequest),
-    #[serde(rename = "plugin.read")]
+    #[serde(rename = "plugin/read")]
     PluginRead(PluginReadRequest),
-    #[serde(rename = "plugin.install")]
+    #[serde(rename = "plugin/install")]
     PluginInstall(PluginInstallRequest),
-    #[serde(rename = "plugin.update")]
+    #[serde(rename = "plugin/update")]
     PluginUpdate(PluginUpdateRequest),
-    #[serde(rename = "plugin.uninstall")]
+    #[serde(rename = "plugin/uninstall")]
     PluginUninstall(PluginUninstallRequest),
-    #[serde(rename = "plugin.enable")]
+    #[serde(rename = "plugin/enable")]
     PluginEnable(PluginEnableRequest),
-    #[serde(rename = "plugin.disable")]
+    #[serde(rename = "plugin/disable")]
     PluginDisable(PluginDisableRequest),
-    #[serde(rename = "auth.logout")]
+    #[serde(rename = "auth/logout")]
     AuthLogout(AuthLogoutRequest),
-    #[serde(rename = "auth.login.start")]
+    #[serde(rename = "auth/login/start")]
     AuthLoginStart(talos_auth::CloudLoginStartRequest),
-    #[serde(rename = "auth.login.status")]
+    #[serde(rename = "auth/login/status")]
     AuthLoginStatus(talos_auth::CloudLoginStatusRequest),
-    #[serde(rename = "auth.login.cancel")]
+    #[serde(rename = "auth/login/cancel")]
     AuthLoginCancel(talos_auth::CloudLoginCancelRequest),
-    #[serde(rename = "auth.session.read")]
+    #[serde(rename = "auth/session/read")]
     AuthSessionRead(AuthSessionReadRequest),
-    #[serde(rename = "auth.session.clear")]
+    #[serde(rename = "auth/session/clear")]
     AuthSessionClear(AuthSessionClearRequest),
-    #[serde(rename = "user.current")]
+    #[serde(rename = "user/current")]
     UserCurrent(UserCurrentRequest),
     #[serde(rename = "memory/search")]
     MemorySearch(MemorySearchRequest),
@@ -533,7 +507,7 @@ pub struct FileUploadParams {
     pub data_base64: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClientRequest {
     pub method: ClientMethod,
     pub params: ClientRequestParams,
@@ -588,6 +562,7 @@ impl ClientRequest {
             ClientMethod::TurnInterrupt => {
                 ClientRequestParams::TurnInterrupt(decode(params_value)?)
             }
+            ClientMethod::TurnInput => ClientRequestParams::TurnInput(decode(params_value)?),
             ClientMethod::TurnRetry => ClientRequestParams::TurnRetry(decode(params_value)?),
             ClientMethod::MessageQueueAdd => {
                 ClientRequestParams::MessageQueueAdd(decode(params_value)?)
@@ -607,20 +582,11 @@ impl ClientRequest {
             ClientMethod::MessageQueueStart => {
                 ClientRequestParams::MessageQueueStart(decode(params_value)?)
             }
-            ClientMethod::MessageQueueSteer => {
-                ClientRequestParams::MessageQueueSteer(decode(params_value)?)
-            }
             ClientMethod::EventSubscribe => {
                 ClientRequestParams::EventSubscribe(decode(params_value)?)
             }
             ClientMethod::EventUnsubscribe => {
                 ClientRequestParams::EventUnsubscribe(decode(params_value)?)
-            }
-            ClientMethod::ToolDynamicResultSubmit => {
-                ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
-            }
-            ClientMethod::UserActionSubmit => {
-                ClientRequestParams::UserActionSubmit(decode(params_value)?)
             }
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigGet => ClientRequestParams::ConfigGet(decode(params_value)?),
@@ -739,6 +705,15 @@ pub struct ClientInfo {
     #[serde(default)]
     pub title: Option<String>,
     pub version: String,
+    pub kind: ClientKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ClientKind {
+    Desktop,
+    Cli,
+    Sdk,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

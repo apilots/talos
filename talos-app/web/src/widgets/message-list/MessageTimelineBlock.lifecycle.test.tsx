@@ -190,7 +190,7 @@ describe("MessageTimelineBlock lifecycle", () => {
             id: "timeline-action",
             kind: "timeline",
             live: true,
-            items: [{ ...item, status: "waiting_user_action" }],
+            items: [{ ...item, status: "waitingForInput" }],
           },
         ]}
         emptyDetail=""

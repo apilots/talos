@@ -5,23 +5,13 @@ use super::*;
 use crate::migration::{run_migrations, test_migrations_dir};
 use crate::project::{ProjectStore, StorageProjectStore};
 use serde_json::Value;
+use talos_agent_api::{
+    AgentEvent, AgentEventPayload, AgentMessage, AgentMessageRole, AgentMessageStarted,
+    AgentMessageStatus, AgentStopReason, AgentTurnCompleted, AgentTurnRef, AgentTurnStarted,
+};
 use talos_storage::{Row, SqliteStorage, Storage};
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
-use talos_types::{AgentTurnRef, ModelRef, ModelSelection, SessionConf, DEFAULT_SESSION_TITLE};
-
-fn sample_context() -> TalosContext {
-    TalosContext {
-        source_type: TalosSourceType::Im,
-        provider: TalosProvider::Telegram,
-        user_id: "user-1".to_string(),
-        message_id: "message-1".to_string(),
-        trace_id: "trace-1".to_string(),
-        channel_id: Some("group-1".to_string()),
-        thread_id: Some("topic-1".to_string()),
-        project_root: None,
-        environment: None,
-    }
-}
+use talos_types::talos::{SessionSourceProvider, SessionSourceType, TokenUsage};
+use talos_types::{ModelRef, ModelSelection, SessionConf, DEFAULT_SESSION_TITLE};
 
 fn record(
     id: &str,
@@ -29,23 +19,22 @@ fn record(
     project_id: Option<String>,
     current_directory: Option<PathBuf>,
 ) -> SessionRecord {
-    let context = TalosContext {
-        user_id: user_id.to_string(),
-        ..sample_context()
-    };
     SessionRecord {
         id: id.to_string(),
         agent_id: "agent-a".to_string(),
         tree_identity: SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
-        context,
-        model: "gpt-5.3".to_string(),
+        source_type: SessionSourceType::Im,
+        source_provider: SessionSourceProvider::Telegram,
+        channel_id: Some("group-1".to_string()),
+        thread_id: Some("topic-1".to_string()),
+        environment: None,
         created_at: 1,
         last_activity: 1,
         message_count: 0,
         latest_turn_seq: 0,
-        memory_processed_until_seq: 0,
+        memory_processed_until_event_seq: 0,
         usage: talos_types::SessionUsage::default(),
         conf: SessionConf::default(),
         workspace_id: "workspace-alpha".to_string(),
@@ -60,6 +49,70 @@ async fn store() -> DatabaseSessionStore {
         .await
         .unwrap();
     DatabaseSessionStore::new(storage).await.unwrap()
+}
+
+async fn commit_completed_turn(
+    store: &DatabaseSessionStore,
+    session_id: &str,
+    turn_id: &str,
+) -> i64 {
+    let identity = AgentTurnRef::new(session_id, turn_id);
+    let started_message = AgentMessage {
+        message_id: format!("message-{turn_id}"),
+        turn_id: turn_id.to_string(),
+        role: AgentMessageRole::User,
+        status: AgentMessageStatus::InProgress,
+        blocks: Vec::new(),
+        created_at: 10,
+        completed_at: None,
+    };
+    let mut completed_message = started_message.clone();
+    completed_message.status = AgentMessageStatus::Completed;
+    completed_message.completed_at = Some(11);
+    let admission = store
+        .commit_initial_admission(CommitInitialAdmissionParams {
+            events: vec![
+                AgentEvent {
+                    identity: identity.clone(),
+                    sequence: 1,
+                    occurred_at: 10,
+                    payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+                },
+                AgentEvent {
+                    identity: identity.clone(),
+                    sequence: 2,
+                    occurred_at: 10,
+                    payload: AgentEventPayload::MessageStarted(AgentMessageStarted {
+                        message: started_message,
+                    }),
+                },
+                AgentEvent {
+                    identity: identity.clone(),
+                    sequence: 3,
+                    occurred_at: 11,
+                    payload: AgentEventPayload::MessageCompleted(completed_message),
+                },
+            ],
+            command: None,
+        })
+        .await
+        .expect("canonical Turn admission should commit");
+    store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity,
+                sequence: 4,
+                occurred_at: 12,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq: admission.active_turn.last_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .expect("canonical Turn settlement should commit")
+        .event_seq
 }
 
 #[test]
@@ -99,7 +152,7 @@ async fn test_insert_and_get_session_record_roundtrip() {
         ..SessionConf::default()
     };
 
-    store.insert_session_record(&record, "api").await.unwrap();
+    store.insert_session_record(&record).await.unwrap();
     let loaded = store
         .get_session_record("session-1")
         .await
@@ -122,7 +175,7 @@ async fn subagent_identity_roundtrips_and_rejects_duplicate_tree_path() {
         tree_root_session_id: "root-session".to_string(),
         path: "/root/reviewer".parse().unwrap(),
     };
-    store.insert_session_record(&child, "api").await.unwrap();
+    store.insert_session_record(&child).await.unwrap();
 
     let loaded = store.get_session_record("child-1").await.unwrap().unwrap();
     assert_eq!(loaded, child);
@@ -133,10 +186,7 @@ async fn subagent_identity_roundtrips_and_rejects_duplicate_tree_path() {
         tree_root_session_id: "root-session".to_string(),
         path: "/root/reviewer".parse().unwrap(),
     };
-    assert!(store
-        .insert_session_record(&duplicate, "api")
-        .await
-        .is_err());
+    assert!(store.insert_session_record(&duplicate).await.is_err());
 }
 
 #[tokio::test]
@@ -155,10 +205,10 @@ async fn active_subagent_turn_check_uses_one_tree_query() {
         tree_root_session_id: "root-session".to_string(),
         path: "/root/reviewer".parse().unwrap(),
     };
-    store.insert_session_record(&child, "api").await.unwrap();
+    store.insert_session_record(&child).await.unwrap();
     storage
         .execute(
-            "INSERT INTO active_turns (session_id, turn_id, status, updated_at) VALUES (?, 'turn-1', 'running', 1)",
+            "INSERT INTO agent_active_turns (session_id, turn_id, state, last_event_seq, updated_at) VALUES (?, 'turn-1', 'running', 1, 1)",
             &[&child.id],
         )
         .await
@@ -188,33 +238,26 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
         tree_root_session_id: root.id.clone(),
         path: "/root/reviewer".parse().unwrap(),
     };
-    store.insert_session_record(&root, "api").await.unwrap();
-    store.insert_session_record(&child, "api").await.unwrap();
+    store.insert_session_record(&root).await.unwrap();
+    store.insert_session_record(&child).await.unwrap();
     for session_id in [&root.id, &child.id] {
         storage
             .execute(
-                "INSERT INTO timeline_events (session_id, turn_id, message_id, sequence, event_type, payload_json, created_at_ms) VALUES (?, 'turn-1', 'message-1', 1, 'turn_started', '{}', 1)",
+                "INSERT INTO agent_events (session_id, turn_id, sequence, occurred_at, persisted_at, payload_json) VALUES (?, 'turn-1', 1, 1, 1, '{}')",
                 &[session_id],
             )
             .await
             .unwrap();
         storage
             .execute(
-                "INSERT INTO active_turns (session_id, turn_id, status, updated_at) VALUES (?, 'turn-1', 'running', 1)",
+                "INSERT INTO agent_active_turns (session_id, turn_id, state, last_event_seq, updated_at) VALUES (?, 'turn-1', 'running', 1, 1)",
                 &[session_id],
             )
             .await
             .unwrap();
         storage
             .execute(
-                "INSERT INTO message_idempotency_keys (session_id, idempotency_key, request_hash, turn_id, status, created_at, updated_at) VALUES (?, 'key-1', 'hash-1', 'turn-1', 'pending', 1, 1)",
-                &[session_id],
-            )
-            .await
-            .unwrap();
-        storage
-            .execute(
-                "INSERT INTO user_actions (session_id, turn_id, action_id, action_json, state, version, updated_at) VALUES (?, 'turn-1', 'action-1', '{}', 'pending', 0, 1)",
+                "INSERT INTO agent_command_idempotency (session_id, command, idempotency_key, request_hash, request_id, turn_id, message_id, status, lease_id, lease_expires_at, created_at, updated_at) VALUES (?, 'turn_submission', 'key-1', 'hash-1', 'request-1', 'turn-1', 'message-1', 'reserved', 'lease-1', 2, 1, 1)",
                 &[session_id],
             )
             .await
@@ -225,7 +268,7 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
 
     let counts = storage
         .query(
-            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM timeline_events) AS events, (SELECT COUNT(*) FROM active_turns) AS active_turns, (SELECT COUNT(*) FROM message_idempotency_keys) AS idempotency_keys, (SELECT COUNT(*) FROM user_actions) AS user_actions",
+            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM agent_events) AS events, (SELECT COUNT(*) FROM agent_active_turns) AS active_turns, (SELECT COUNT(*) FROM agent_command_idempotency) AS idempotency_keys",
             &[],
         )
         .await
@@ -236,27 +279,26 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             counts[0].get_i64("events"),
             counts[0].get_i64("active_turns"),
             counts[0].get_i64("idempotency_keys"),
-            counts[0].get_i64("user_actions"),
         ),
-        (Some(0), Some(0), Some(0), Some(0), Some(0))
+        (Some(0), Some(0), Some(0), Some(0))
     );
 }
 
 #[tokio::test]
-async fn test_get_session_record_reports_invalid_conf_json() {
+async fn incompatible_typed_conf_is_rejected_on_read() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_migrations(storage.pool(), &test_migrations_dir())
         .await
         .unwrap();
     let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
     let record = record("session-1", "user-1", None, None);
-    store.insert_session_record(&record, "api").await.unwrap();
+    store.insert_session_record(&record).await.unwrap();
     storage
         .update(
             "sessions",
             &Row::new(
                 vec!["conf_json".to_string()],
-                vec![Value::String("{invalid".to_string())],
+                vec![Value::String("\"invalid\"".to_string())],
             ),
             "session_key = ?",
             &["session-1"],
@@ -275,48 +317,61 @@ async fn test_get_session_record_reports_invalid_conf_json() {
 }
 
 #[tokio::test]
-async fn test_update_session_record_persists_mutable_fields_and_keeps_binding_immutable() {
+async fn session_patch_updates_only_settings_owned_columns() {
     let store = store().await;
-    let mut record = record("session-1", "user-1", Some("project-1".to_string()), None);
-    store.insert_session_record(&record, "api").await.unwrap();
+    let record = record("session-1", "user-1", Some("project-1".to_string()), None);
+    store.insert_session_record(&record).await.unwrap();
+    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let terminal_event_seq =
+        u64::try_from(terminal_event_seq).expect("terminal event sequence should be positive");
     store
-        .advance_memory_processed_until_seq("session-1", 0, 3)
+        .advance_memory_processed_until_event_seq("session-1", 0, terminal_event_seq)
         .await
         .unwrap();
-
-    record.title = "Custom Title".to_string();
-    record.message_count = 2;
-    record.usage.tokens = TokenUsage {
-        input_tokens: 10,
-        output_tokens: 5,
-        total_tokens: 15,
-        ..TokenUsage::default()
+    let measured_context = talos_types::ContextUsage::new(7, 100, 80, 12).unwrap();
+    store
+        .update_context_usage("session-1", &measured_context)
+        .await
+        .unwrap();
+    let conf = SessionConf {
+        model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+            provider: "openai".to_string(),
+            id: "gpt-5.4".to_string(),
+        })),
+        ..SessionConf::default()
     };
-    record.usage.context = talos_types::ContextUsage::new(7, 100, 80, 12);
-    record.model = "gpt-5.4".to_string();
-    record.user_id = "user-2".to_string();
-    record.context.user_id = "user-2".to_string();
-    record.agent_id = "agent-b".to_string();
-    record.workspace_id = "workspace-beta".to_string();
-    record.project_id = Some("project-2".to_string());
-    assert!(store.update_session_record(&record).await.unwrap());
+    let updated = store
+        .patch_session(PatchSessionParams {
+            session_id: "session-1".to_string(),
+            conf: conf.clone(),
+            current_directory: Some(PathBuf::from("/tmp/updated")),
+            reset_context_usage: true,
+            last_activity: 42,
+        })
+        .await
+        .unwrap()
+        .unwrap();
 
     let loaded = store
         .get_session_record("session-1")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(loaded.title, "Custom Title");
-    assert_eq!(loaded.message_count, 2);
-    assert_eq!(loaded.memory_processed_until_seq, 3);
-    assert_eq!(loaded.latest_turn_seq, 3);
-    assert_eq!(loaded.usage, record.usage);
-    assert_eq!(loaded.model, "gpt-5.4");
+    assert_eq!(loaded, updated);
+    assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
+    assert_eq!(loaded.message_count, 0);
+    assert_eq!(loaded.memory_processed_until_event_seq, terminal_event_seq);
+    assert_eq!(loaded.latest_turn_seq, 0);
+    assert_eq!(loaded.usage.context, None);
     assert_eq!(loaded.user_id, "user-1");
-    assert_eq!(loaded.context.user_id, "user-1");
+    assert_eq!(loaded.conf, conf);
     assert_eq!(loaded.agent_id, "agent-a");
     assert_eq!(loaded.workspace_id, "workspace-alpha");
     assert_eq!(loaded.project_id.as_deref(), Some("project-1"));
+    assert_eq!(
+        loaded.current_directory,
+        Some(PathBuf::from("/tmp/updated"))
+    );
 }
 
 #[tokio::test]
@@ -324,14 +379,17 @@ async fn context_usage_update_preserves_the_rest_of_the_session_record() {
     let store = store().await;
     let mut record = record("session-1", "user-1", None, None);
     record.title = "Concurrent title".to_string();
-    record.model = "gpt-5.4".to_string();
+    record.conf.model_selection = Some(ModelSelection::without_reasoning(ModelRef {
+        provider: "openai".to_string(),
+        id: "gpt-5.4".to_string(),
+    }));
     record.usage.tokens = TokenUsage {
         input_tokens: 10,
         output_tokens: 5,
         total_tokens: 15,
         ..TokenUsage::default()
     };
-    store.insert_session_record(&record, "api").await.unwrap();
+    store.insert_session_record(&record).await.unwrap();
 
     let context = talos_types::ContextUsage::new(17, 100, 80, 12).unwrap();
     assert!(store
@@ -345,7 +403,7 @@ async fn context_usage_update_preserves_the_rest_of_the_session_record() {
         .unwrap()
         .unwrap();
     assert_eq!(loaded.title, "Concurrent title");
-    assert_eq!(loaded.model, "gpt-5.4");
+    assert_eq!(loaded.conf, record.conf);
     assert_eq!(loaded.usage.tokens, record.usage.tokens);
     assert_eq!(loaded.usage.context, Some(context));
 }
@@ -354,16 +412,19 @@ async fn context_usage_update_preserves_the_rest_of_the_session_record() {
 async fn memory_cursor_advance_is_idempotent() {
     let store = store().await;
     store
-        .insert_session_record(&record("session-1", "user-1", None, None), "api")
+        .insert_session_record(&record("session-1", "user-1", None, None))
         .await
         .unwrap();
+    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let terminal_event_seq =
+        u64::try_from(terminal_event_seq).expect("terminal event sequence should be positive");
 
     store
-        .advance_memory_processed_until_seq("session-1", 0, 4)
+        .advance_memory_processed_until_event_seq("session-1", 0, terminal_event_seq)
         .await
         .unwrap();
     store
-        .advance_memory_processed_until_seq("session-1", 0, 4)
+        .advance_memory_processed_until_event_seq("session-1", 0, terminal_event_seq)
         .await
         .unwrap();
 
@@ -373,21 +434,24 @@ async fn memory_cursor_advance_is_idempotent() {
             .await
             .unwrap()
             .unwrap()
-            .memory_processed_until_seq,
-        4
+            .memory_processed_until_event_seq,
+        terminal_event_seq
     );
 }
 
 #[tokio::test]
-async fn memory_cursor_rejects_non_contiguous_advance() {
+async fn memory_cursor_rejects_a_stale_expected_value() {
     let store = store().await;
     store
-        .insert_session_record(&record("session-1", "user-1", None, None), "api")
+        .insert_session_record(&record("session-1", "user-1", None, None))
         .await
         .unwrap();
+    let terminal_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    let terminal_event_seq =
+        u64::try_from(terminal_event_seq).expect("terminal event sequence should be positive");
 
     let error = store
-        .advance_memory_processed_until_seq("session-1", 1, 4)
+        .advance_memory_processed_until_event_seq("session-1", 1, terminal_event_seq)
         .await
         .expect_err("stale cursor should fail");
 
@@ -398,7 +462,7 @@ async fn memory_cursor_rejects_non_contiguous_advance() {
 async fn test_delete_session_record_removes_session() {
     let store = store().await;
     let record = record("session-1", "user-1", None, None);
-    store.insert_session_record(&record, "api").await.unwrap();
+    store.insert_session_record(&record).await.unwrap();
 
     assert!(store.delete_session_record("session-1").await.unwrap());
     assert!(store
@@ -412,17 +476,21 @@ async fn test_delete_session_record_removes_session() {
 async fn test_list_session_records_filters_by_project_id() {
     let store = store().await;
     store
-        .insert_session_record(
-            &record("session-1", "user-1", Some("project-1".to_string()), None),
-            "api",
-        )
+        .insert_session_record(&record(
+            "session-1",
+            "user-1",
+            Some("project-1".to_string()),
+            None,
+        ))
         .await
         .unwrap();
     store
-        .insert_session_record(
-            &record("session-2", "user-1", Some("project-2".to_string()), None),
-            "api",
-        )
+        .insert_session_record(&record(
+            "session-2",
+            "user-1",
+            Some("project-2".to_string()),
+            None,
+        ))
         .await
         .unwrap();
 
@@ -442,15 +510,15 @@ async fn test_list_session_records_filters_by_project_id() {
 async fn test_list_session_records_respects_limit_and_offset() {
     let store = store().await;
     store
-        .insert_session_record(&record("session-1", "user-1", None, None), "api")
+        .insert_session_record(&record("session-1", "user-1", None, None))
         .await
         .unwrap();
     store
-        .insert_session_record(&record("session-2", "user-1", None, None), "api")
+        .insert_session_record(&record("session-2", "user-1", None, None))
         .await
         .unwrap();
     store
-        .insert_session_record(&record("session-3", "user-1", None, None), "api")
+        .insert_session_record(&record("session-3", "user-1", None, None))
         .await
         .unwrap();
 
@@ -471,24 +539,27 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
     let store = store().await;
     let mut processed = record("session-1", "user-1", None, None);
     processed.last_activity = 3;
-    processed.message_count = 2;
-    processed.latest_turn_seq = 1;
-    processed.memory_processed_until_seq = 1;
     let mut first_pending = record("session-2", "user-1", None, None);
     first_pending.last_activity = 2;
-    first_pending.message_count = 4;
-    first_pending.latest_turn_seq = 2;
-    first_pending.memory_processed_until_seq = 1;
     let mut second_pending = record("session-3", "user-1", None, None);
     second_pending.last_activity = 1;
-    second_pending.message_count = 2;
-    second_pending.latest_turn_seq = 1;
     for session in [&processed, &first_pending, &second_pending] {
         store
-            .insert_session_record(session, "api")
+            .insert_session_record(session)
             .await
             .expect("insert session");
     }
+    let processed_event_seq = commit_completed_turn(&store, "session-1", "turn-1").await;
+    store
+        .advance_memory_processed_until_event_seq(
+            "session-1",
+            0,
+            u64::try_from(processed_event_seq).expect("event sequence should be positive"),
+        )
+        .await
+        .expect("processed cursor should advance");
+    commit_completed_turn(&store, "session-2", "turn-2").await;
+    commit_completed_turn(&store, "session-3", "turn-3").await;
 
     let first_page = store
         .list_session_records(&SessionQuery {
@@ -516,16 +587,16 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
 }
 
 #[tokio::test]
-async fn memory_pending_uses_monotonic_turn_seq_after_message_count_reset() {
+async fn memory_pending_uses_canonical_terminal_events_after_message_count_reset() {
     let store = store().await;
     let mut cleared = record("session-1", "user-1", None, None);
     cleared.message_count = 0;
     cleared.latest_turn_seq = 101;
-    cleared.memory_processed_until_seq = 100;
     store
-        .insert_session_record(&cleared, "api")
+        .insert_session_record(&cleared)
         .await
         .expect("insert cleared session");
+    commit_completed_turn(&store, "session-1", "turn-101").await;
 
     let records = store
         .list_session_records(&SessionQuery {
@@ -557,15 +628,12 @@ async fn test_list_projects_returns_session_count() {
         .await
         .unwrap();
     store
-        .insert_session_record(
-            &record(
-                "session-1",
-                "user-1",
-                Some(project.project_id.clone()),
-                None,
-            ),
-            "api",
-        )
+        .insert_session_record(&record(
+            "session-1",
+            "user-1",
+            Some(project.project_id.clone()),
+            None,
+        ))
         .await
         .unwrap();
 

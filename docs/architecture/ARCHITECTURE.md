@@ -38,14 +38,14 @@ boundaries; `[planned]` identifies an explicit evolution target.
                                           |
                                           v
 +--------------------------------------------------------------------------------+
-| Agent orchestration and runtime                                                |
+| Agent orchestration and provider integration                                   |
 | Router / Coordinator / AgentRegistry / multiple Harnesses [current]            |
-| Selection -> AgentHarness -> AgentRuntime SPI [current, Kernel-specialized]    |
-|   +-- KernelAgent [current local default] -> Agent Kernel reasoning/tool loop  |
-|   +-- CloudAgent [planned cloud default] -> remote cloud runtime               |
-|   +-- Codex runtime [planned]                                                  |
-|   `-- Claude runtime [planned]                                                 |
-| AgentEvent / AgentRunResult / capabilities / interrupt / resume [current]      |
+| Selection -> AgentHarness -> AgentProvider -> AgentSession [current]           |
+|   +-- KernelAgentProvider [current] -> Agent Kernel reasoning/tool loop        |
+|   +-- CodexAgentProvider [planned]                                             |
+|   +-- ClaudeCodeAgentProvider [planned]                                        |
+|   `-- PiAgentProvider [planned]                                                |
+| AgentEvent / AgentRunResult / capabilities / lifecycle control [current]       |
 +--------------------------+--------------------------+--------------------------+
 | Semantic capability domains; these columns are not an execution sequence       |
 +--------------------------+--------------------------+--------------------------+
@@ -69,21 +69,21 @@ boundaries; `[planned]` identifies an explicit evolution target.
 The capability-domain rows describe semantic ownership, not a second request
 sequence or a one-to-one crate map. Channel integrations enter through their
 transport and Gateway adapters; Perception owns event/media normalization and
-outbound adaptation. The selected runtime consumes Cognition and Action
-capabilities while retaining ownership of its reasoning and tool loop.
+outbound adaptation. The selected Agent Provider consumes Cognition and Action
+capabilities while retaining ownership of its private reasoning and tool loop.
 
 ## Boundary ownership
 
 | Boundary | Owns | Must not own |
 | --- | --- | --- |
-| Products and integrations | First-party interaction plus higher-level application composition | Runtime business rules |
+| Products and integrations | First-party interaction plus higher-level application composition | Agent execution business rules |
 | Client SDKs | Language-neutral product semantics, complete capability API, shared domain objects, and transport selection | Server records or UI state |
 | Gateways | Transport, authentication, validation, protocol projection | Agent execution policy |
 | Application service | Product lifecycle and domain orchestration | Protocol envelopes or rendering |
-| Coordinator and harness | Agent binding, dispatch, and runtime lifecycle | Client-specific behavior |
-| Agent definition | Stable Agent identity, runtime family, model, and typed runtime config | Runtime-private handles |
-| Agent runtime SPI | Common run, stream, resume, capability, and event contract | Routing or product lifecycle |
-| Agent kernel | Built-in KernelAgent reasoning and tool-loop subsystem | Other runtime families or durable product lifecycle |
+| Coordinator and harness | Agent binding, dispatch, and live execution lifecycle | Client-specific behavior |
+| Agent definition | Stable Agent identity, Provider kind, model, and typed Provider config | Provider-private handles |
+| Agent Provider SPI | Provider Session factory/lifecycle plus typed Session Turn and management contract | Routing or durable product lifecycle |
+| Agent kernel | Built-in Kernel Agent reasoning and tool-loop subsystem | Other Provider implementations or durable product lifecycle |
 | Perception | External event and media normalization plus inbound/outbound Channel adaptation | Session lifecycle or Agent decisions |
 | Cognition | Memory, bounded context, model and prompt capabilities | Product lifecycle or side-effect policy |
 | Action | Tool, Skill, MCP, permission, approval, and sandbox capabilities | Agent routing or protocol projection |
@@ -107,10 +107,10 @@ Application service creates or resumes Session and Turn
 Coordinator resolves the Session's Agent binding
      |
      v
-Agent harness invokes the selected concrete runtime through AgentRuntime SPI
+Agent harness obtains an AgentSession from the selected AgentProvider
      |
      v
-Concrete runtime emits standardized events and results
+AgentSession executes Turns and emits standardized events and results
      |
      v
 SDK projects the same domain result through its selected transport
@@ -126,10 +126,11 @@ not define different Session, Turn, Timeline, Tool, or Agent semantics.
 | `Session` | Durable conversation and Agent-binding boundary containing multiple Turns |
 | `Turn` | One durable execution initiated inside a Session |
 | `Timeline` | Session-addressed ordered event stream; events identify their owning Turn |
-| `AgentDefinition` | Configured Agent identity selecting one runtime family and its typed config |
+| `AgentDefinition` | Configured Agent identity selecting one Provider kind and its typed config |
 | `AgentHarness` | Common lifecycle facade registered under one Agent id |
-| `AgentRuntime` | Internal SPI implemented by concrete runtime backends |
-| Agent Kernel | Built-in KernelAgent subsystem (`talos-agent-kernel`) for one bounded Turn reasoning and tool loop |
+| `AgentProvider` | Process-level SPI that creates Provider-owned in-memory AgentSession handles |
+| `AgentSession` | Provider-owned in-memory handle for Turn execution and Session management; it is not durable product state |
+| Agent Kernel | Built-in Kernel Agent subsystem (`talos-agent-kernel`) for one bounded Turn reasoning and tool loop |
 
 ## Dependency direction
 
@@ -146,7 +147,7 @@ Transport and Gateway adapters
 Application service and orchestration
                  |
                  v
-Agent runtime and focused capabilities
+Agent Provider and focused capabilities
                  |
                  v
 Infrastructure and shared types
@@ -157,21 +158,21 @@ upper product composition. Database records remain inside store boundaries;
 protocol envelopes remain inside gateway boundaries; rendering state remains
 inside clients.
 
-Rust is the current canonical runtime implementation. Language-neutral product
+Rust is the canonical server implementation. Language-neutral product
 contracts and generated/shared domain types enable aligned SDKs without
-requiring independent per-language copies of the runtime and domain model.
+requiring independent per-language copies of server orchestration or the domain model.
 
 ## Cross-cutting invariants
 
 - `Session` and `Turn` are the durable lifecycle boundary for agent work.
-- `Timeline` is the ordered source for user-visible runtime progress.
+- `Timeline` is the ordered source for user-visible execution progress.
 - An Agent binding is resolved by the Coordinator, not selected inside a tool or client.
-- Multiple Agent definitions may be registered; each enabled, supported definition resolves to one Harness and concrete runtime.
-- Runtime implementations emit the same Agent events and results through the AgentRuntime SPI.
-- Local composition defaults to KernelAgent; cloud composition will default to CloudAgent.
+- Multiple Agent definitions may be registered; each enabled, supported definition resolves to one Harness and configured AgentProvider.
+- AgentProvider implementations emit the same Agent events and results through their AgentSession contract.
+- Current composition registers KernelAgentProvider; additional Providers require typed config, capability tests, and an explicit composition-root branch.
 - Subagents create child Sessions and Turns and re-enter the normal dispatch path.
 - Perception, Cognition, and Action remain focused capability domains with explicit owners.
-- Metacognition may observe and evaluate the system, but cannot bypass Service, Runtime, policy, or state boundaries.
+- Metacognition may observe and evaluate the system, but cannot bypass Service, Agent Provider, policy, or state boundaries.
 - Core domain objects are strongly typed and shared across protocol projections.
 - Context, tool results, file reads, and list APIs have explicit size bounds.
 - State writes account for concurrency, partial failure, and crash recovery.
@@ -184,7 +185,7 @@ Future capabilities should extend an existing boundary:
 | Change | Extension boundary |
 | --- | --- |
 | New model provider | LLM provider implementation plus config, composition, and provider tests |
-| New Agent runtime family | Generalize the current Kernel-specialized Harness/input bridge, then add typed config, an AgentRuntime implementation, a factory branch, and capability tests |
+| New Agent implementation | Add typed config, an AgentProvider/AgentSession implementation, a composition-root branch, and capability tests |
 | New tool or external service | Tool registry, Skill, or MCP capability |
 | New execution isolation | Sandbox SPI and platform implementation |
 | New client or protocol | Extend the SDK first; place protocol differences in its transport or Gateway adapter |
@@ -199,7 +200,7 @@ for speculative future use.
 
 ## Detailed documents
 
-- [Runtime architecture](RUNTIME_ARCHITECTURE.md)
+- [Agent Provider architecture](RUNTIME_ARCHITECTURE.md)
 - [Client architecture](CLIENT_ARCHITECTURE.md)
 - [Error model](ERROR_MODEL.md)
 - [Rust workspace modules](../reference/RUST_MODULES.md)

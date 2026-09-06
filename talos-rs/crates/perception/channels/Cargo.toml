@@ -27,16 +27,15 @@ tracing = { workspace = true }
 teloxide = { version = "0.12", features = ["macros"] }
 
 # Internal
+talos-agent-api = { workspace = true }
 talos-types = { path = "../../../crates/common/types" }
 talos-error = { path = "../../../crates/infra/error" }
 talos-config = { path = "../../../crates/infra/config" }
 talos-service = { workspace = true }
-talos-gateway = { path = "../../../crates/gateway/core" }
 
 # Utils
 chrono = { version = "0.4", features = ["serde"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]
-talos-auth = { path = "../../../crates/infra/auth" }
 tokio-test = "0.4"

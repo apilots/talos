@@ -163,7 +163,7 @@ generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().rep
 content = """---
 type: UserWorkspaceMemory
 title: User Workspace Memory
-description: Durable cross-session memory scoped to one workspace and one user.
+description: Durable cross-session memory scoped to one agent and one user.
 tags:
   - talos
   - agent

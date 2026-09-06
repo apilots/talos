@@ -14,21 +14,21 @@ import {
 afterEach(resetTalosClientFactory);
 
 describe("useSessionMessageQueue", () => {
-  it("applies a successful mutation before the subscription is enabled", async () => {
+  it("applies a successful mutation before the connection opens", async () => {
     const added: MessageQueue = {
       revision: 1,
       maxMessages: 10,
-      messages: [{ id: "q1", input: [{ type: "text", text: "waiting" }] }],
+      messages: [{ id: "q1", input: { content: [{ type: "text", text: "waiting" }] } }],
     };
     const add = vi.fn().mockResolvedValue(added);
     setTalosClientFactory(() => ({
       messageQueue: { add },
     }) as unknown as TalosWebClient);
 
-    const { result } = renderHook(() => useSessionMessageQueue("sess-1", false));
+    const { result } = renderHook(() => useSessionMessageQueue("sess-1"));
 
     await act(async () => {
-      await result.current.add([{ type: "text", text: "waiting" }]);
+      await result.current.add({ content: [{ type: "text", text: "waiting" }] });
     });
 
     expect(result.current.queue).toEqual(added);
@@ -40,40 +40,23 @@ describe("useSessionMessageQueue", () => {
       {
         revision: 2,
         maxMessages: 10,
-        messages: [{ id: "q1", input: [{ type: "text", text: "from another client" }] }],
+        messages: [{ id: "q1", input: { content: [{ type: "text", text: "from another client" }] } }],
       },
     ];
     const list = vi.fn()
       .mockResolvedValueOnce(queues[0])
       .mockResolvedValueOnce(queues[1]);
     const deleteQueuedMessage = vi.fn().mockRejectedValue(new Error("busy"));
-    let streamOptions: {
-      onOpen?: () => void;
-      onMessageQueueChanged?: (change: { sessionId: string; revision: number }) => void;
-    } | undefined;
-    let rejectStream: (error: Error) => void = () => undefined;
-    const events = vi.fn((
-      _sessionId: string,
-      _afterEventId: undefined,
-      _onEvent: () => void,
-      _signal: AbortSignal,
-      options: typeof streamOptions,
-    ) => {
-      streamOptions = options;
-      return new Promise<void>((_resolve, reject) => { rejectStream = reject; });
-    });
     setTalosClientFactory(() => ({
       messageQueue: { delete: deleteQueuedMessage, list },
-      turns: { events },
     }) as unknown as TalosWebClient);
 
-    const onQueueChanged = vi.fn();
     const { result } = renderHook(() =>
-      useSessionMessageQueue("sess-1", true, onQueueChanged),
+      useSessionMessageQueue("sess-1"),
     );
     expect(list).not.toHaveBeenCalled();
 
-    act(() => streamOptions?.onOpen?.());
+    act(() => result.current.onOpen(vi.fn()));
     await waitFor(() => expect(result.current.queue?.revision).toBe(1));
 
     await act(async () => {
@@ -81,12 +64,11 @@ describe("useSessionMessageQueue", () => {
     });
     expect(result.current.error).toBe("busy");
 
-    act(() => streamOptions?.onMessageQueueChanged?.({ sessionId: "sess-1", revision: 2 }));
+    act(() => result.current.onMessageQueueChanged({ sessionId: "sess-1", revision: 2 }));
     await waitFor(() => expect(result.current.queue?.revision).toBe(2));
     expect(result.current.error).toBeUndefined();
-    expect(onQueueChanged).toHaveBeenCalledTimes(1);
 
-    act(() => rejectStream(new Error("connection lost")));
+    act(() => result.current.onDisconnect());
     await waitFor(() => expect(result.current.queue).toBeUndefined());
     expect(list).toHaveBeenCalledTimes(2);
   });

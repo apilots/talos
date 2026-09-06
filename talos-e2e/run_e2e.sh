@@ -10,6 +10,8 @@ report_file="${REPORT_ROOT}/e2e_report_${timestamp}.md"
 latest_file="${REPORT_ROOT}/latest_report.md"
 mkdir -p "${REPORT_ROOT}"
 mkdir -p "${TALOS_E2E_TMP_ROOT}"
+export npm_config_cache="${TALOS_E2E_NPM_CACHE:-${TALOS_E2E_TMP_ROOT}/npm-cache}"
+mkdir -p "${npm_config_cache}"
 
 SCENARIO_ROOT="${TALOS_E2E_DIR}/scenarios"
 

@@ -20,9 +20,8 @@ talos-memory = { workspace = true }
 talos-prompt = { workspace = true }
 talos-run-control = { workspace = true }
 talos-skills = { workspace = true }
-talos-store = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"] }
+uuid = { workspace = true, features = ["v4", "v7", "serde"] }

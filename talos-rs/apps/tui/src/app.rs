@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,8 +9,7 @@ use ratatui::text::{Line, Span};
 
 use talos_sdk::{
     ContextCompactionStage, MessageQueue, ModelInfo, ModelRef, ModelSelection, ReasoningEffort,
-    SessionInfo, TalosContext, TalosProvider, TalosSourceType, TalosTimelineContent,
-    TalosTimelineItemStatus,
+    SessionInfo,
 };
 use talos_types::talos::TokenUsage;
 
@@ -85,10 +83,10 @@ impl TuiApp {
             pending_session_usage_refresh_task: None,
             pending_close_update: None,
             pending_close_task: None,
-            active_stream_message_id: None,
+            active_stream_turn_id: None,
             last_stream_sequence: None,
             last_stream_event_id: None,
-            timeline_items: HashMap::new(),
+            context_compaction_stage: None,
             status_hint: None,
             spinner_index: 0,
             stream_started_at: None,
@@ -128,21 +126,6 @@ impl TuiApp {
 
     pub fn new_with_gateway_client(gateway_client: Arc<dyn GatewayClient>) -> Self {
         Self::build(Some(gateway_client))
-    }
-
-    pub(crate) fn build_talos_context(&self) -> TalosContext {
-        let user_id = env::var("USER").unwrap_or_else(|_| "local-user".to_string());
-        TalosContext {
-            source_type: TalosSourceType::Cli,
-            provider: TalosProvider::Cli,
-            user_id: user_id.clone(),
-            message_id: format!("msg-{}", uuid::Uuid::new_v4().simple()),
-            trace_id: format!("trace-{}", uuid::Uuid::new_v4().simple()),
-            channel_id: Some("terminal".to_string()),
-            thread_id: Some(user_id),
-            project_root: None,
-            environment: None,
-        }
     }
 
     pub(crate) fn current_model_selection(&self) -> Option<ModelSelection> {
@@ -262,21 +245,14 @@ impl TuiApp {
     }
 
     pub(crate) fn active_context_compaction_stage(&self) -> Option<ContextCompactionStage> {
-        self.timeline_items.values().find_map(|item| {
-            if item.status != TalosTimelineItemStatus::Running {
-                return None;
-            }
-            let TalosTimelineContent::ContextCompaction { stage, .. } = &item.content else {
-                return None;
-            };
+        self.context_compaction_stage.filter(|stage| {
             matches!(
-                *stage,
+                stage,
                 ContextCompactionStage::Preparing
                     | ContextCompactionStage::Summarizing
                     | ContextCompactionStage::RebuildingPrompt
                     | ContextCompactionStage::Trimming
             )
-            .then_some(*stage)
         })
     }
 
@@ -366,7 +342,3 @@ impl TuiApp {
         chat_columns[1]
     }
 }
-
-#[cfg(test)]
-#[path = "app_tests.rs"]
-mod tests;

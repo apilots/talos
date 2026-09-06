@@ -1,29 +1,27 @@
 use super::*;
 use tokio_stream::StreamExt;
 
-fn running_turn_store() -> Arc<RecordingEventStore> {
-    let store = Arc::new(RecordingEventStore::default());
-    store.active_turns.lock().unwrap().insert(
-        "mock-session".to_string(),
-        ActiveTurnRecord {
-            session_id: "mock-session".to_string(),
-            turn_id: "turn-1".to_string(),
-            message_id: Some("msg-1".to_string()),
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        },
-    );
+fn running_turn_store() -> Arc<RecordingAgentExecutionStore> {
+    let store = Arc::new(RecordingAgentExecutionStore::default());
+    store.set_active_turn(AgentActiveTurnRecord {
+        identity: AgentTurnRef::new("mock-session", "turn-1"),
+        initial_message_id: Some("msg-1".to_string()),
+        state: ActiveTurnState::Running,
+        last_event_seq: 1,
+        current_action_id: None,
+        updated_at: 1,
+    });
     store
 }
 
 fn add_request(text: &str) -> talos_types::MessageQueueAddRequest {
     talos_types::MessageQueueAddRequest {
         session_id: "mock-session".to_string(),
-        input: vec![talos_types::TalosInputItem::Text {
-            text: text.to_string(),
-        }],
+        input: talos_types::AgentUserInput {
+            content: vec![talos_types::AgentUserContent::Text {
+                text: text.to_string(),
+            }],
+        },
     }
 }
 
@@ -32,9 +30,17 @@ async fn message_queue_handlers_return_shared_queue_and_typed_full_error() {
     let store = running_turn_store();
     let mut config = test_config();
     config.agent.message_queue.max_messages_per_session = 1;
-    let state =
-        test_state_with_gateway_event_store_config(Arc::new(MockGateway), false, store, config)
-            .await;
+    let state = build_test_state_with_agent_execution_store(
+        TestStateConfig {
+            event_store: store.clone(),
+            base_config: config,
+            auth_disabled: false,
+            lifecycle: Arc::new(ServerLifecycle::new()),
+            config_store: None,
+        },
+        store,
+    )
+    .await;
 
     let added = add_queued_message_handler(
         State(state.clone()),

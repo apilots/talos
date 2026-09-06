@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 
-use talos_agent_kernel::{AttachmentReader, ResolvedAttachment, TurnFileScope};
+use talos_agent::{AttachmentReader, ResolvedAttachment, TurnFileScope};
 use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
 use talos_store::file::{FileRecord, FileStatus};
 

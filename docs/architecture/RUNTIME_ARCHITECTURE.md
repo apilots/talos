@@ -1,4 +1,4 @@
-# Runtime architecture
+# Agent Provider architecture
 
 [Chinese](RUNTIME_ARCHITECTURE_zh.md)
 
@@ -22,43 +22,46 @@ AgentRegistry
     v
 AgentHarness
     |
-    +-- applies the common runtime lifecycle and event contract
+    +-- owns common live lifecycle, admission, cancellation, and event consistency
     |
     v
-AgentRuntime SPI
+AgentProvider SPI
     |
-    +-- KernelAgent [current local default] -> Agent Kernel subsystem
-    +-- CloudAgent [planned cloud default] -> remote cloud runtime
-    +-- CodexAgent [extension] -> runtime-private backend
-    `-- ClaudeAgent [extension] -> runtime-private backend
+    +-- creates one in-memory AgentSession per Talos Session
+    |
+    +-- KernelAgentProvider [current] -> KernelAgentSession -> Agent Kernel
+    +-- CodexAgentProvider [planned]
+    +-- ClaudeCodeAgentProvider [planned]
+    `-- PiAgentProvider [planned]
     |
     v
 Standard AgentEvent / AgentRunResult -> Timeline
 ```
 
 `TalosService` is the product-facing facade. Protocol adapters call it instead
-of constructing stores, runtimes, or registries directly. The Agent Kernel
-subsystem (`talos-agent-kernel`) is the built-in `KernelAgent` engine; it is not
-the universal implementation behind every future Agent runtime.
+of constructing stores, Providers, or registries directly. The Agent Kernel
+subsystem (`talos-agent-kernel`) is the private execution engine used by
+`KernelAgentProvider`; it is not the universal implementation behind every
+future Agent Provider.
 
-## Multiple Agents and runtime SPI
+## Multiple Agents and Agent Provider SPI
 
-Multi-Agent registration and runtime implementation are separate dimensions:
+Multi-Agent registration and Provider implementation are separate dimensions:
 
 ```text
 Agent configuration
     |
-    +-- AgentDefinition: default  -> kind=kernel -> KernelAgent
-    +-- AgentDefinition: reviewer -> kind=kernel -> KernelAgent
-    +-- AgentDefinition: cloud    -> kind=cloud  -> CloudAgent [planned]
-    +-- AgentDefinition: coder    -> kind=codex  -> CodexAgent [extension]
-    `-- AgentDefinition: analyst  -> kind=claude -> ClaudeAgent [extension]
+    +-- AgentDefinition: default  -> kind=kernel -> KernelAgentProvider
+    +-- AgentDefinition: reviewer -> kind=kernel -> KernelAgentProvider
+    +-- AgentDefinition: coder    -> kind=codex  -> CodexAgentProvider [planned]
+    +-- AgentDefinition: analyst  -> kind=claude -> ClaudeCodeAgentProvider [planned]
+    `-- AgentDefinition: pi       -> kind=pi     -> PiAgentProvider [planned]
     |
     v
 AgentDefinitionLoader
     |
     v
-AgentHarnessFactory selects the runtime family from typed config
+Composition Root selects a ready AgentProvider from typed config
     |
     v
 AgentRegistry stores multiple AgentHarness registrations by Agent id
@@ -67,29 +70,24 @@ AgentRegistry stores multiple AgentHarness registrations by Agent id
 Router / Coordinator selects one registration for a Session or Turn
 ```
 
-Multiple Agent definitions may use the same runtime family with different
-identities, models, workspaces, or typed runtime configuration. A new runtime
-family targets the internal `AgentRuntime` SPI and remains behind the common
-Harness lifecycle; Coordinator must not downcast to a concrete runtime.
+Multiple Agent definitions may use the same Provider implementation with
+different identities, models, workspaces, or typed Provider configuration. A
+new implementation targets `AgentProvider` plus `AgentSession` and remains
+behind the common Harness lifecycle; Coordinator must not downcast or branch on
+a concrete Provider kind.
 
-This is the target extension boundary, not yet a fully generic plug-in point.
-The current Harness stores `KernelAgent` directly, its parameters include
-Kernel-specific config, and the SPI input-delivery type comes from
-`talos-agent-kernel`. CloudAgent and other runtime families therefore require
-generalizing that container and input bridge before adding their implementations.
-
-Current implementation status is explicit: local composition defaults to the
-implemented `KernelAgent`. Cloud composition will default to `CloudAgent`, which
-requires a new typed kind, config, runtime implementation, and factory branch.
-`AgentKind` already recognizes `Codex` and `Claude`, but their typed runtime
-configs and runtime implementations are not implemented, so the Harness factory
-fails instead of falling back to Kernel.
+This extension boundary is implemented and Provider-neutral. The Harness stores
+only the SPI; Kernel-specific request, event, continuation, and transcript types
+stay behind `KernelAgentProvider`. Current composition registers only the typed
+Kernel Provider. Codex, Claude Code, and Pi are not exposed as selectable kinds
+until their Provider implementations, typed configs, capabilities, and
+composition-root branches exist; there is no fallback to Kernel.
 
 ## Kernel-backed Turn execution
 
-The following flow is the built-in `KernelAgent` path. Other runtime families
+The following flow is the built-in `KernelAgentProvider` path. Other Providers
 may use different private backends, but must return the same standardized Agent
-events, results, capabilities, interrupt behavior, and resume behavior.
+events, results, capabilities, cancellation behavior, and continuation behavior.
 
 ```text
 Turn request
@@ -124,11 +122,11 @@ Persist final response and terminal Turn state
 
 The Timeline preserves ordering across model output, tool activity, user
 interaction, errors, and the final response. Clients render or project that
-ordered model rather than reconstructing runtime state from transport details.
+ordered model rather than reconstructing execution state from transport details.
 
 ## Subagent execution
 
-Subagent collaboration is orthogonal to Agent runtime registration.
+Subagent collaboration is orthogonal to Agent Provider registration.
 
 ```text
 Parent Session / Turn / Agent binding
@@ -143,7 +141,7 @@ Create Child Session and Child Turn
 Inherit the parent's exact Agent binding
                  |
                  v
-Re-enter Coordinator -> same AgentHarness -> same AgentRuntime implementation
+Re-enter Coordinator -> same AgentHarness -> same AgentProvider implementation
                  |
                  v
 Child Timeline and result projection
@@ -178,7 +176,7 @@ Typed result -> bounded Timeline event -> next model input
 ```
 
 Policy, sandbox, MCP initialization, and schema failures remain visible. The
-runtime must not retry through a weaker execution path without an explicit
+Provider must not retry through a weaker execution path without an explicit
 policy decision.
 
 ## Context rules

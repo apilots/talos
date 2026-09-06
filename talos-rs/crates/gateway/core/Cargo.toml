@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+talos-agent-api = { workspace = true }
 talos-service = { workspace = true }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { path = "../../infra/config" }
@@ -23,6 +24,7 @@ mockall = "0.12"
 opendal = { workspace = true, features = ["services-memory"] }
 talos-agent = { path = "../../orchestration/agent" }
 talos-agent-kernel = { workspace = true }
+talos-agent-provider-kernel = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-llm-provider = { path = "../../common/llm/provider" }
 talos-memory = { workspace = true }
@@ -31,3 +33,4 @@ talos-store = { workspace = true }
 talos-storage = { path = "../../infra/storage" }
 talos-tools = { workspace = true }
 talos-tools-policy = { workspace = true }
+tempfile = "3"

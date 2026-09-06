@@ -41,9 +41,9 @@ export function SidebarContainer() {
       label: aliases[sessionId] ?? session.title,
       status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
       model: session.modelSelection.modelRef.id,
-      projectId: session.project_id ?? null,
-      lastActivityAt: session.last_activity,
-      createdAt: session.created_at,
+      projectId: session.projectId ?? null,
+      lastActivityAt: session.lastActivity,
+      createdAt: session.createdAt,
     };
   });
   const projectIds = new Set(projects.map((project) => project.id));

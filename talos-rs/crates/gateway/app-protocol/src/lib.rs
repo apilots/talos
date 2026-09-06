@@ -8,14 +8,12 @@ pub mod server_requests;
 pub mod version;
 
 pub use errors::{AppServerErrorBody, AppServerErrorCode};
-pub use events::{ApplicationEvent, EventSubscriptionId};
+pub use events::{EventSubscriptionId, TimelineEventNotification};
 pub use jsonrpc::{
     JsonRpcErrorResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     RequestId, JSONRPC_VERSION,
 };
 pub use notifications::ServerNotification;
-pub use requests::{
-    ClientMethod, ClientRequest, ClientRequestParams, InitializeParams, InitializeResponse,
-};
+pub use requests::{ClientMethod, ClientRequestParams, InitializeParams, InitializeResponse};
 pub use server_requests::ServerRequest;
 pub use version::ProtocolVersion;

@@ -29,21 +29,12 @@ export PRIMARY_MODEL="${primary_model}"
 export PRIMARY_PROVIDER="${primary_provider}"
 echo "CASE agent_select_model PASS model=${primary_model}"
 
-build_session_context() {
+build_session_start_defaults() {
   python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "tool-agent",
-        "user_id": "tool-agent-user",
-        "thread_id": None,
-        "message_id": "msg-tool-agent",
-        "trace_id": "trace-tool-agent",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -57,7 +48,7 @@ import json
 import os
 
 payload = {
-    "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
+    "input": {"content": [{"type": "text", "text": os.environ["INPUT_TEXT"]}]},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -84,9 +75,9 @@ print(data.get("output_text", ""))
 PY
 }
 
-session_payload="$(build_session_context)"
+session_payload="$(build_session_start_defaults)"
 session_id="$(new_session_id)"
-remember_session_context "${session_id}" "${session_payload}"
+remember_session_start_defaults "${session_id}" "${session_payload}"
 session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
@@ -154,7 +145,7 @@ import os
 from pathlib import Path
 
 path = Path(os.environ["AGENT_EVENTS_LOG"])
-tool_item_ids = {}
+tool_call_ids = {}
 tool_arguments = {}
 terminal_result_ids = set()
 
@@ -162,31 +153,28 @@ for line in path.read_text(encoding="utf-8").splitlines():
     if not line.startswith("data: "):
         continue
     raw_record = json.loads(line[6:])
-    record = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else raw_record
-    payload = record.get("payload") or {}
-    if record.get("event_type") == "item_started":
-        item = payload.get("item") or {}
-        content = item.get("content") or {}
-        tool_name = content.get("name")
-        if item.get("kind") == "tool_call" and content.get("type") == "tool_call" and tool_name in {"spawn_agent", "send_message", "wait_agent"}:
-            tool_item_ids[tool_name] = item.get("item_id")
-            arguments = content.get("arguments") or ""
-            tool_arguments[tool_name] = arguments if isinstance(arguments, str) else json.dumps(arguments)
-    elif record.get("event_type") == "item_delta":
-        delta = payload.get("delta") or {}
-        item_id = payload.get("item_id")
-        if item_id in tool_item_ids.values() and delta.get("type") == "tool_arguments":
-            tool_name = next(name for name, value in tool_item_ids.items() if value == item_id)
-            tool_arguments[tool_name] += delta.get("arguments_delta") or ""
-        elif item_id in tool_item_ids.values() and delta.get("type") == "tool_result":
-            terminal_result_ids.add(payload.get("item_id"))
+    event = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else {}
+    payload = event.get("payload") or {}
+    if payload.get("type") != "messageBlockCompleted":
+        continue
+    block = (payload.get("data") or {}).get("block") or {}
+    content = block.get("content") or {}
+    content_type = content.get("type")
+    data = content.get("data") or {}
+    if content_type == "toolCall" and data.get("name") in {"spawn_agent", "send_message", "wait_agent"}:
+        tool_name = data["name"]
+        tool_call_ids[tool_name] = data.get("callId")
+        arguments = data.get("arguments") or {}
+        tool_arguments[tool_name] = arguments.get("value") or {}
+    elif content_type == "toolResult" and data.get("toolName") in {"spawn_agent", "send_message", "wait_agent"}:
+        assert data.get("isError") is False, data
+        terminal_result_ids.add(data.get("callId"))
 
-assert set(tool_item_ids) == {"spawn_agent", "send_message", "wait_agent"}, tool_item_ids
-tool_arguments = {name: json.loads(arguments) for name, arguments in tool_arguments.items()}
+assert set(tool_call_ids) == {"spawn_agent", "send_message", "wait_agent"}, tool_call_ids
 assert "agentId" not in tool_arguments["spawn_agent"], tool_arguments["spawn_agent"]
 assert "agentId" not in tool_arguments["send_message"], tool_arguments["send_message"]
 assert tool_arguments["send_message"].get("message") == "Output exactly AGENT_CHILD_OK", tool_arguments["send_message"]
-assert set(tool_item_ids.values()).issubset(terminal_result_ids), terminal_result_ids
+assert set(tool_call_ids.values()).issubset(terminal_result_ids), terminal_result_ids
 PY
 
 echo "CASE tool_agent PASS"

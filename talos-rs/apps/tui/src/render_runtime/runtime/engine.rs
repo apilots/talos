@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::render_runtime::common::style::StyledLine;
 use crate::render_runtime::render::live::{LiveProjectionBlock, LiveReducer};
 use crate::render_runtime::render::timeline::{
-    apply_assistant_text_committed, apply_item_completed, apply_item_delta, apply_item_started,
+    apply_block_completed, apply_block_delta, apply_block_started,
 };
 use crate::render_runtime::runtime::controller::RuntimeController;
 use crate::render_runtime::runtime::event_loop::TuiRuntimeEvent;
@@ -14,8 +14,8 @@ use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, Transcr
 use crate::render_runtime::transcript::store::PendingTerminalBlock;
 use crate::render_runtime::transcript::store::TranscriptStore;
 use talos_sdk::{
-    AgentEventPayload, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
-    TalosTimelinePhase,
+    AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlock, AgentMessageBlockContent,
+    AgentMessageBlockDeltaContent,
 };
 
 /// Runtime engine for the render runtime.
@@ -26,7 +26,8 @@ pub(crate) struct RenderRuntimeEngine {
     runtime: RuntimeController,
     live: LiveReducer,
     store: TranscriptStore,
-    timeline_items: HashMap<String, TalosTimelineItem>,
+    message_blocks: HashMap<String, AgentMessageBlock>,
+    tool_call_blocks: HashMap<String, String>,
     local_user_input_block: Option<TranscriptBlockId>,
 }
 
@@ -90,85 +91,85 @@ impl RenderRuntimeEngine {
         count
     }
 
-    pub(crate) fn apply_timeline_item_started(&mut self, item: &TalosTimelineItem) {
-        let blocks = apply_item_started(&mut self.live, item);
-        self.push_many_finalized(blocks);
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
-    }
-
-    pub(crate) fn apply_timeline_item_delta(
-        &mut self,
-        item: &TalosTimelineItem,
-        delta: TalosTimelineDelta,
-    ) {
-        let blocks = apply_item_delta(&mut self.live, item, delta);
-        self.push_many_finalized(blocks);
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
-    }
-
-    pub(crate) fn apply_timeline_item_completed(
-        &mut self,
-        item: &TalosTimelineItem,
-        final_content: Option<&TalosTimelineContent>,
-    ) {
-        let blocks = apply_item_completed(&mut self.live, item, final_content);
-        self.push_many_finalized(blocks);
-        self.runtime.handle_event(TuiRuntimeEvent::LiveCommitTick);
-    }
-
-    pub(crate) fn apply_assistant_text_committed(
-        &mut self,
-        item_id: &str,
-        phase: TalosTimelinePhase,
-    ) {
-        let finalized = apply_assistant_text_committed(&mut self.live, item_id, phase);
-        if let Some(item) = self.timeline_items.get_mut(item_id) {
-            item.phase = phase;
-        }
-        if let Some(block) = finalized {
-            self.push_finalized(block);
-        } else {
-            self.runtime.handle_event(TuiRuntimeEvent::Stream);
-        }
-    }
-
     pub(crate) fn apply_agent_event_payload(&mut self, payload: AgentEventPayload) {
         match payload {
             AgentEventPayload::TurnStarted(_) => {
-                self.timeline_items.clear();
+                self.message_blocks.clear();
+                self.tool_call_blocks.clear();
                 self.handle_runtime_event(TuiRuntimeEvent::Stream);
             }
-            AgentEventPayload::ItemStarted(payload) => {
-                self.timeline_items
-                    .insert(payload.item.item_id.clone(), payload.item.clone());
-                self.apply_timeline_item_started(&payload.item);
-            }
-            AgentEventPayload::ItemDelta(payload) => {
-                let Some(item) = self.timeline_items.get(&payload.item_id).cloned() else {
-                    return;
-                };
-                self.apply_timeline_item_delta(&item, payload.delta.clone());
-                self.update_stored_timeline_item_delta(&payload.item_id, payload.delta);
-            }
-            AgentEventPayload::ItemCompleted(payload) => {
-                let Some(mut item) = self.timeline_items.get(&payload.item_id).cloned() else {
-                    return;
-                };
-                item.status = payload.status;
-                item.completed_at_ms = Some(payload.completed_at_ms);
-                if let Some(content) = payload.final_content.clone() {
-                    item.content = content;
+            AgentEventPayload::MessageStarted(_) => {}
+            AgentEventPayload::MessageBlockStarted(started) => {
+                if let AgentMessageBlockContent::ToolCall(tool) = &started.block.content {
+                    self.tool_call_blocks
+                        .insert(tool.call_id.clone(), started.block.block_id.clone());
                 }
-                self.apply_timeline_item_completed(&item, payload.final_content.as_ref());
-                self.timeline_items.insert(payload.item_id, item);
+                let finalized = apply_block_started(&mut self.live, &started.block);
+                self.message_blocks
+                    .insert(started.block.block_id.clone(), started.block);
+                self.push_many_finalized(finalized);
+                self.runtime.handle_event(TuiRuntimeEvent::Stream);
             }
-            AgentEventPayload::AssistantTextCommitted(payload) => {
-                self.apply_assistant_text_committed(&payload.item_id, payload.phase);
+            AgentEventPayload::MessageBlockDelta(delta) => {
+                let Some(block) = self.message_blocks.get(&delta.block_id).cloned() else {
+                    return;
+                };
+                let finalized = apply_block_delta(&mut self.live, &block, delta.delta.clone());
+                if let Some(block) = self.message_blocks.get_mut(&delta.block_id) {
+                    match delta.delta {
+                        AgentMessageBlockDeltaContent::Text(text) => match &mut block.content {
+                            AgentMessageBlockContent::AssistantText(assistant) => {
+                                assistant.text.push_str(&text);
+                            }
+                            AgentMessageBlockContent::Reasoning(reasoning) => {
+                                reasoning.text.push_str(&text);
+                            }
+                            AgentMessageBlockContent::UserContent(_)
+                            | AgentMessageBlockContent::ToolCall(_)
+                            | AgentMessageBlockContent::ToolResult(_)
+                            | AgentMessageBlockContent::ExecutionSummary(_)
+                            | AgentMessageBlockContent::ContextCompaction(_)
+                            | AgentMessageBlockContent::SystemNotice(_) => {}
+                        },
+                        AgentMessageBlockDeltaContent::AssistantTextPhase(phase) => {
+                            if let AgentMessageBlockContent::AssistantText(assistant) =
+                                &mut block.content
+                            {
+                                assistant.phase = phase;
+                            }
+                        }
+                        AgentMessageBlockDeltaContent::ToolCallArguments(_)
+                        | AgentMessageBlockDeltaContent::ToolProgress(_)
+                        | AgentMessageBlockDeltaContent::ContextCompaction(_) => {}
+                    }
+                }
+                self.push_many_finalized(finalized);
+                self.runtime.handle_event(TuiRuntimeEvent::Stream);
             }
-            AgentEventPayload::TurnMetrics(_) | AgentEventPayload::TurnCompleted(_) => {
+            AgentEventPayload::MessageBlockCompleted(completed) => {
+                let tool_call_block_id = match &completed.block.content {
+                    AgentMessageBlockContent::ToolResult(result) => {
+                        self.tool_call_blocks.get(&result.call_id).cloned()
+                    }
+                    _ => None,
+                };
+                let finalized = apply_block_completed(
+                    &mut self.live,
+                    &completed.block,
+                    tool_call_block_id.as_deref(),
+                );
+                self.message_blocks
+                    .insert(completed.block.block_id.clone(), completed.block);
+                self.push_many_finalized(finalized);
+                self.runtime.handle_event(TuiRuntimeEvent::LiveCommitTick);
+            }
+            AgentEventPayload::MessageCompleted(_)
+            | AgentEventPayload::WaitingForInput(_)
+            | AgentEventPayload::MetricsUpdated(_)
+            | AgentEventPayload::TurnCompleted(_) => {
                 self.handle_runtime_event(TuiRuntimeEvent::LiveCommitTick);
             }
-            AgentEventPayload::TurnError(payload) => {
+            AgentEventPayload::TurnFailed(payload) => {
                 self.push_finalized(FinalizedTranscriptBlock::new(
                     TranscriptBlockKind::SystemNotice,
                     vec![StyledLine::plain(format!(
@@ -176,8 +177,16 @@ impl RenderRuntimeEngine {
                         payload.error.message
                     ))],
                 ));
-                self.timeline_items.clear();
+                self.message_blocks.clear();
+                self.tool_call_blocks.clear();
             }
+        }
+    }
+
+    pub(crate) fn assistant_text_phase(&self, block_id: &str) -> Option<AgentAssistantTextPhase> {
+        match &self.message_blocks.get(block_id)?.content {
+            AgentMessageBlockContent::AssistantText(assistant) => Some(assistant.phase),
+            _ => None,
         }
     }
 
@@ -229,7 +238,8 @@ impl RenderRuntimeEngine {
     pub(crate) fn reset_transcript(&mut self) {
         self.store.clear();
         self.live = LiveReducer::default();
-        self.timeline_items.clear();
+        self.message_blocks.clear();
+        self.tool_call_blocks.clear();
         self.local_user_input_block = None;
     }
 
@@ -256,405 +266,8 @@ impl RenderRuntimeEngine {
             self.runtime.handle_event(TuiRuntimeEvent::LiveCommitTick);
         }
     }
-
-    fn update_stored_timeline_item_delta(&mut self, item_id: &str, delta: TalosTimelineDelta) {
-        let Some(item) = self.timeline_items.get_mut(item_id) else {
-            return;
-        };
-        match delta {
-            TalosTimelineDelta::Text { text } => {
-                if let TalosTimelineContent::Text { text: existing } = &mut item.content {
-                    existing.push_str(&text);
-                }
-            }
-            TalosTimelineDelta::ToolResult { content, is_error } => {
-                if let TalosTimelineContent::ToolCall { result, .. } = &mut item.content {
-                    *result = Some(talos_sdk::TalosToolResult { content, is_error });
-                }
-            }
-            TalosTimelineDelta::ToolArguments { arguments_delta } => {
-                if let TalosTimelineContent::ToolCall { arguments, .. } = &mut item.content {
-                    arguments.push_str(&arguments_delta);
-                }
-            }
-            TalosTimelineDelta::ToolProgress { .. }
-            | TalosTimelineDelta::UserAction { .. }
-            | TalosTimelineDelta::ContextCompaction { .. }
-            | TalosTimelineDelta::Status { .. } => {}
-        }
-    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::RenderRuntimeEngine;
-    use crate::render_runtime::common::style::StyledLine;
-    use crate::render_runtime::render::live::LiveTextKind;
-    use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
-    use crate::test_support::{append_live_text, finalize_live_text, start_live_text};
-    use talos_sdk::{
-        AgentEventPayload, TalosAssistantTextCommittedEvent, TalosItemCompletedEvent,
-        TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta,
-        TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
-        TalosTurnErrorEvent,
-    };
-
-    fn pending_plain_text(engine: &RenderRuntimeEngine) -> Vec<String> {
-        engine
-            .pending_terminal_projection()
-            .into_iter()
-            .flat_map(|block| block.lines)
-            .map(|line| line.plain_text())
-            .collect()
-    }
-
-    #[test]
-    fn finalized_user_input_enters_terminal_projection() {
-        let mut engine = RenderRuntimeEngine::default();
-        engine.append_user_input("hello");
-
-        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
-    }
-
-    #[test]
-    fn live_text_flushes_only_after_finalize() {
-        let mut engine = RenderRuntimeEngine::default();
-        start_live_text(&mut engine, "item-1", LiveTextKind::Commentary, "hello");
-        append_live_text(&mut engine, "item-1", LiveTextKind::Commentary, " world");
-
-        assert!(engine.pending_terminal_projection().is_empty());
-
-        finalize_live_text(&mut engine, "item-1", LiveTextKind::Commentary);
-
-        assert_eq!(pending_plain_text(&engine), vec!["hello world"]);
-    }
-
-    #[test]
-    fn history_blocks_enter_store_and_terminal_pending_path() {
-        let mut engine = RenderRuntimeEngine::default();
-        let count = engine.append_history([FinalizedTranscriptBlock::new(
-            TranscriptBlockKind::FinalAnswer,
-            vec![StyledLine::plain("done")],
-        )]);
-
-        assert_eq!(count, 1);
-        assert_eq!(engine.store().blocks().len(), 1);
-        assert_eq!(pending_plain_text(&engine), vec!["done"]);
-    }
-
-    fn timeline_text_item(phase: TalosTimelinePhase) -> TalosTimelineItem {
-        TalosTimelineItem {
-            item_id: "item-1".to_string(),
-            parent_item_id: None,
-            kind: TalosTimelineItemKind::AssistantText,
-            phase,
-            status: TalosTimelineItemStatus::Running,
-            title: None,
-            started_at_ms: 1,
-            completed_at_ms: None,
-            content: TalosTimelineContent::Text {
-                text: String::new(),
-            },
-        }
-    }
-
-    fn timeline_user_input_item(text: &str) -> TalosTimelineItem {
-        TalosTimelineItem {
-            item_id: "user-item-1".to_string(),
-            parent_item_id: None,
-            kind: TalosTimelineItemKind::UserInput,
-            phase: TalosTimelinePhase::Input,
-            status: TalosTimelineItemStatus::Completed,
-            title: None,
-            started_at_ms: 1,
-            completed_at_ms: Some(1),
-            content: TalosTimelineContent::Text {
-                text: text.to_string(),
-            },
-        }
-    }
-
-    #[test]
-    fn agent_event_user_input_started_renders_server_user_block() {
-        let mut engine = RenderRuntimeEngine::default();
-        let item = timeline_user_input_item("hello");
-
-        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item,
-        }));
-
-        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
-    }
-
-    #[test]
-    fn agent_event_user_input_started_replaces_local_pending_user_block() {
-        let mut engine = RenderRuntimeEngine::default();
-        engine.append_user_input("local input");
-        let item = timeline_user_input_item("server input");
-
-        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item,
-        }));
-
-        let user_blocks = engine
-            .store()
-            .blocks()
-            .iter()
-            .filter(|block| block.kind == TranscriptBlockKind::UserInput)
-            .collect::<Vec<_>>();
-        assert_eq!(user_blocks.len(), 1);
-        assert_eq!(user_blocks[0].lines[0].content.plain_text(), "server input");
-    }
-
-    #[test]
-    fn agent_event_user_input_started_replaces_local_synced_user_block() {
-        let mut engine = RenderRuntimeEngine::default();
-        engine.append_user_input("local input");
-        let synced_ids = engine
-            .pending_terminal_projection()
-            .into_iter()
-            .map(|block| block.block_id)
-            .collect::<Vec<_>>();
-        engine.mark_terminal_blocks_synced(synced_ids);
-        let item = timeline_user_input_item("server input");
-
-        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item,
-        }));
-
-        let user_blocks = engine
-            .store()
-            .blocks()
-            .iter()
-            .filter(|block| block.kind == TranscriptBlockKind::UserInput)
-            .collect::<Vec<_>>();
-        assert_eq!(user_blocks.len(), 1);
-        assert_eq!(user_blocks[0].lines[0].content.plain_text(), "server input");
-    }
-
-    #[test]
-    fn agent_event_user_input_started_preserves_history_user_block() {
-        let mut engine = RenderRuntimeEngine::default();
-        engine.append_history([FinalizedTranscriptBlock::new(
-            TranscriptBlockKind::UserInput,
-            vec![StyledLine::plain("history input")],
-        )]);
-        let item = timeline_user_input_item("server input");
-
-        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item,
-        }));
-
-        let user_text = engine
-            .store()
-            .blocks()
-            .iter()
-            .filter(|block| block.kind == TranscriptBlockKind::UserInput)
-            .map(|block| block.lines[0].content.plain_text())
-            .collect::<Vec<_>>();
-        assert_eq!(user_text, vec!["history input", "server input"]);
-    }
-
-    #[test]
-    fn agent_events_interleave_same_turn_user_inputs_with_model_work() {
-        let mut engine = RenderRuntimeEngine::default();
-        let initial = timeline_user_input_item("initial");
-        let mut steer = timeline_user_input_item("steer");
-        steer.item_id = "user-item-2".to_string();
-        let mut before_steer = timeline_text_item(TalosTimelinePhase::Commentary);
-        before_steer.item_id = "assistant-item-1".to_string();
-        let mut after_steer = timeline_text_item(TalosTimelinePhase::FinalAnswer);
-        after_steer.item_id = "assistant-item-2".to_string();
-
-        engine.apply_timeline_item_started(&initial);
-        engine.apply_timeline_item_started(&before_steer);
-        engine.apply_timeline_item_delta(
-            &before_steer,
-            TalosTimelineDelta::Text {
-                text: "before steer".to_string(),
-            },
-        );
-        engine.apply_timeline_item_completed(&before_steer, None);
-        engine.apply_timeline_item_started(&steer);
-        engine.apply_timeline_item_started(&after_steer);
-        engine.apply_timeline_item_delta(
-            &after_steer,
-            TalosTimelineDelta::Text {
-                text: "after steer".to_string(),
-            },
-        );
-        engine.apply_timeline_item_completed(&after_steer, None);
-
-        let transcript = engine
-            .store()
-            .blocks()
-            .iter()
-            .map(|block| (block.kind, block.lines[0].content.plain_text()))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            transcript,
-            vec![
-                (TranscriptBlockKind::UserInput, "initial".to_string()),
-                (TranscriptBlockKind::Commentary, "before steer".to_string(),),
-                (TranscriptBlockKind::UserInput, "steer".to_string()),
-                (TranscriptBlockKind::FinalAnswer, "after steer".to_string(),),
-            ]
-        );
-    }
-
-    #[test]
-    fn engine_consumes_timeline_text_lifecycle_without_early_flush() {
-        let mut engine = RenderRuntimeEngine::default();
-        let item = timeline_text_item(TalosTimelinePhase::Unknown);
-
-        engine.apply_timeline_item_started(&item);
-        engine.apply_timeline_item_delta(
-            &item,
-            TalosTimelineDelta::Text {
-                text: "hello".to_string(),
-            },
-        );
-        engine.apply_assistant_text_committed(&item.item_id, TalosTimelinePhase::FinalAnswer);
-        assert!(engine.pending_terminal_projection().is_empty());
-
-        engine.apply_timeline_item_completed(&item, None);
-
-        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
-    }
-
-    #[test]
-    fn completed_unknown_text_waits_for_authoritative_phase_commit() {
-        let mut engine = RenderRuntimeEngine::default();
-        let item = timeline_text_item(TalosTimelinePhase::Unknown);
-
-        engine.apply_timeline_item_started(&item);
-        engine.apply_timeline_item_delta(
-            &item,
-            TalosTimelineDelta::Text {
-                text: "working update".to_string(),
-            },
-        );
-        engine.apply_timeline_item_completed(&item, None);
-
-        assert!(engine.pending_terminal_projection().is_empty());
-        assert_eq!(
-            engine
-                .live_projection_lines()
-                .iter()
-                .map(StyledLine::plain_text)
-                .collect::<Vec<_>>(),
-            vec!["working update".to_string()]
-        );
-
-        engine.apply_assistant_text_committed(&item.item_id, TalosTimelinePhase::Commentary);
-
-        let pending = engine.pending_terminal_projection();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].kind, TranscriptBlockKind::Commentary);
-        assert_eq!(pending[0].lines[0].plain_text(), "working update");
-        assert!(engine.live_projection_lines().is_empty());
-    }
-
-    #[test]
-    fn engine_consumes_agent_event_payload_lifecycle() {
-        let mut engine = RenderRuntimeEngine::default();
-        let item = timeline_text_item(TalosTimelinePhase::Unknown);
-
-        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item: item.clone(),
-        }));
-        engine.apply_agent_event_payload(AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item_id: item.item_id.clone(),
-            delta: TalosTimelineDelta::Text {
-                text: "hello".to_string(),
-            },
-        }));
-        engine.apply_agent_event_payload(AgentEventPayload::AssistantTextCommitted(
-            TalosAssistantTextCommittedEvent {
-                request_id: "request-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                item_id: item.item_id.clone(),
-                phase: TalosTimelinePhase::FinalAnswer,
-            },
-        ));
-        engine.apply_agent_event_payload(AgentEventPayload::ItemCompleted(
-            TalosItemCompletedEvent {
-                request_id: "request-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                item_id: item.item_id,
-                status: TalosTimelineItemStatus::Completed,
-                completed_at_ms: 2,
-                final_content: None,
-            },
-        ));
-
-        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
-    }
-
-    #[test]
-    fn engine_converts_turn_error_to_system_notice_projection() {
-        let mut engine = RenderRuntimeEngine::default();
-
-        engine.apply_agent_event_payload(AgentEventPayload::TurnError(TalosTurnErrorEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            error: talos_error::ApiError {
-                code: talos_error::ErrorCode::InternalError,
-                message: "boom".to_string(),
-            },
-            failed_at_ms: 2,
-        }));
-
-        assert_eq!(pending_plain_text(&engine), vec!["Stream error: boom"]);
-    }
-
-    #[test]
-    fn reset_transcript_clears_store_and_live_state() {
-        let mut engine = RenderRuntimeEngine::default();
-
-        engine.append_user_input("hello");
-        start_live_text(&mut engine, "item-1", LiveTextKind::FinalAnswer, "pending");
-        engine.reset_transcript();
-
-        assert!(engine.store().blocks().is_empty());
-        finalize_live_text(&mut engine, "item-1", LiveTextKind::FinalAnswer);
-        assert!(engine.store().blocks().is_empty());
-    }
-
-    #[test]
-    fn interactive_projection_includes_finalized_and_live_text() {
-        let mut engine = RenderRuntimeEngine::default();
-
-        engine.append_user_input("hello");
-        start_live_text(
-            &mut engine,
-            "item-1",
-            LiveTextKind::FinalAnswer,
-            "live answer",
-        );
-
-        let lines = engine.interactive_projection_lines();
-
-        assert_eq!(
-            lines.iter().map(StyledLine::plain_text).collect::<Vec<_>>(),
-            vec![
-                "hello".to_string(),
-                String::new(),
-                "live answer".to_string()
-            ]
-        );
-        assert_eq!(engine.interactive_block_count(), 2);
-    }
-}
+#[path = "engine_tests.rs"]
+mod tests;

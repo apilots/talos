@@ -1,10 +1,10 @@
 use super::*;
 
-pub(super) async fn dispatch_application_event(
+pub(super) async fn dispatch_timeline_event(
     subscription_senders: &Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    pending_subscription_events: &Arc<Mutex<HashMap<String, Vec<TimelineEventEnvelope>>>>,
+    pending_subscription_events: &Arc<Mutex<HashMap<String, Vec<TimelineEvent>>>>,
     subscription_id: &str,
-    event: TimelineEventEnvelope,
+    event: TimelineEvent,
 ) {
     let sender = {
         let streams = subscription_senders.lock().await;
@@ -17,7 +17,7 @@ pub(super) async fn dispatch_application_event(
                 .push(event);
             return;
         };
-        if event.session_id != stream.session_id {
+        if event.event.identity.session_id != stream.session_id {
             return;
         }
         stream.sender.clone()

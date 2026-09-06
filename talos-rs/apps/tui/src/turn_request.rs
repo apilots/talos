@@ -1,13 +1,14 @@
 use std::path::PathBuf;
 
-use talos_sdk::{ModelSelection, SkillSuggestion, StartTurnRequest, TalosContext, TalosInputItem};
+use talos_sdk::{
+    AgentUserContent, AgentUserInput, ModelSelection, SkillSuggestion, StartTurnRequest,
+};
 
 pub struct TerminalTurnRequest {
     pub session_id: String,
     pub message: String,
     pub skills: Vec<SkillSuggestion>,
     pub file_ids: Vec<String>,
-    pub context: Option<TalosContext>,
     pub model_selection: Option<ModelSelection>,
     pub current_directory: Option<PathBuf>,
     pub project_id: Option<String>,
@@ -21,7 +22,6 @@ impl TerminalTurnRequest {
         StartTurnRequest {
             session_id: self.session_id,
             input,
-            context: self.context,
             model_selection: self.model_selection.filter(|selection| {
                 !selection.model_ref.provider.is_empty() && !selection.model_ref.id.is_empty()
             }),
@@ -37,17 +37,19 @@ pub(crate) fn build_terminal_input(
     message: String,
     skills: &[SkillSuggestion],
     file_ids: Vec<String>,
-) -> Vec<TalosInputItem> {
-    let mut input = Vec::new();
+) -> AgentUserInput {
+    let mut content = Vec::new();
     if !message.is_empty() {
-        input.push(TalosInputItem::Text { text: message });
+        content.push(AgentUserContent::Text { text: message });
     }
-    if !file_ids.is_empty() {
-        input.push(TalosInputItem::Files { file_ids });
-    }
-    input.extend(skills.iter().map(|skill| TalosInputItem::SkillSelection {
+    content.extend(
+        file_ids
+            .into_iter()
+            .map(|file_id| AgentUserContent::File { file_id }),
+    );
+    content.extend(skills.iter().map(|skill| AgentUserContent::SkillSelection {
         name: skill.name.clone(),
         path: skill.path.to_string_lossy().to_string(),
     }));
-    input
+    AgentUserInput { content }
 }

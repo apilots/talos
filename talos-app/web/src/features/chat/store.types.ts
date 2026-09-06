@@ -1,6 +1,5 @@
-import type { TalosTimelinePhase } from "@talos/sdk-core";
-
 import type {
+  ChatTimelinePhase,
   ChatTimelineItem,
   ChatTurnMetrics,
   ChatUserInput,
@@ -20,8 +19,8 @@ export interface ChatSlice {
   resetLiveResponse: (sessionId: string) => void;
   upsertUserInputBlock: (
     sessionId: string,
+    turnId: string,
     messageId: string,
-    itemId: string,
     input: ChatUserInput,
   ) => void;
   setPendingInput: (sessionId: string, input?: PendingInput) => void;
@@ -48,35 +47,36 @@ export interface ChatSlice {
     status: "done" | "error",
     timingMs?: number | null,
   ) => void;
-  upsertTimelineItem: (sessionId: string, messageId: string, item: ChatTimelineItem) => void;
+  upsertTimelineItem: (sessionId: string, turnId: string, item: ChatTimelineItem) => void;
+  replaceTimelineItem: (sessionId: string, turnId: string, item: ChatTimelineItem) => void;
   appendTimelineItemText: (
     sessionId: string,
-    messageId: string,
+    turnId: string,
     item: ChatTimelineItem,
     chunk: string,
     sequence?: number,
   ) => void;
   commitTimelineAssistantText: (
     sessionId: string,
-    messageId: string,
+    turnId: string,
     itemId: string,
-    phase: TalosTimelinePhase,
+    phase: ChatTimelinePhase,
   ) => void;
   updateTimelineTool: (
     sessionId: string,
-    messageId: string,
+    turnId: string,
     itemId: string,
     payload: Partial<Extract<ChatTimelineItem, { kind: "tool_call" }>>,
   ) => void;
   completeTimelineItem: (
     sessionId: string,
-    messageId: string,
+    turnId: string,
     itemId: string,
     status: ChatTimelineItem["status"],
     completedAtMs: number,
   ) => void;
   setTimelineLive: (sessionId: string, live: boolean) => void;
-  setTurnMetrics: (sessionId: string, messageId: string, metrics: ChatTurnMetrics) => void;
+  setTurnMetrics: (sessionId: string, turnId: string, metrics: ChatTurnMetrics) => void;
   setPendingUserAction: (
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],

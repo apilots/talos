@@ -5,8 +5,8 @@ use axum::response::Json;
 use talos_auth::RequestIdentity;
 use talos_types::{
     MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
-    MessageQueueUpdateRequest, StartTurnResponse,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
+    StartTurnResponse,
 };
 
 use super::access::shared_actor;
@@ -86,19 +86,6 @@ pub(super) async fn start_queued_message_handler(
     state
         .gateway
         .start_queued_message(&shared_actor(&actor.0), request)
-        .await
-        .map(api_success)
-        .map_err(ApiError::from_talos_error)
-}
-
-pub(super) async fn steer_queued_message_handler(
-    State(state): State<Arc<HttpApiState>>,
-    actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<MessageQueueSteerRequest>,
-) -> Result<JsonResponse<MessageQueue>, ApiError> {
-    state
-        .gateway
-        .steer_queued_message(&shared_actor(&actor.0), request)
         .await
         .map(api_success)
         .map_err(ApiError::from_talos_error)

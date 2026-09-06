@@ -262,23 +262,10 @@ impl TuiApp {
                     return;
                 };
                 match result {
-                    Ok(response) => {
-                        action.action.state = response.state;
+                    Ok(_) => {
+                        action.action.state = talos_sdk::UserActionState::Resuming;
                         action.submitting = false;
-                        if matches!(
-                            response.state,
-                            talos_sdk::UserActionState::ResponseAccepted
-                                | talos_sdk::UserActionState::Resuming
-                        ) {
-                            self.reconnect_after_user_action();
-                        } else if matches!(
-                            response.state,
-                            talos_sdk::UserActionState::Resolved
-                                | talos_sdk::UserActionState::Cancelled
-                        ) {
-                            self.pending_user_action = None;
-                            self.in_flight = false;
-                        }
+                        self.reconnect_after_user_action();
                     }
                     Err(err) => {
                         action.submitting = false;

@@ -1,339 +1,620 @@
 use super::*;
 use crate::session::SessionService;
-use crate::test_support::run_test_migrations;
-use crate::{SessionMessageQueueService, TimelineEventRetentionConfig, TimelineEventService};
+use crate::test_support::{
+    canonical_user_admission, commit_test_running_turn, run_test_migrations, test_user_input,
+};
+use crate::{SessionMessageQueueService, TimelineEventService};
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use talos_error::ApiError;
+use talos_agent::{
+    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentInputParams, AgentInterruptParams,
+    AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunSettlementReceiver, AgentSessionContext,
+};
+use talos_agent_api::{
+    AgentContinuationRef, AgentErrorInfo, AgentEvent as CanonicalAgentEvent,
+    AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome, AgentMessage,
+    AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
+    AgentMessageBlockStarted, AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted,
+    AgentMessageStatus, AgentRunMetrics, AgentStopReason, AgentToolCall, AgentToolCallArguments,
+    AgentToolResult, AgentTurnCompleted, AgentTurnFailed, AgentUserContent, AgentUserInput,
+};
+use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_storage::SqliteStorage;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
-    ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
-    MessageIdempotencyStore, SessionStore, TimelineEventId, TimelineEventStore, UserActionRecord,
-    UserActionStore,
+    AgentExecutionStore, CommandReservation, DatabaseSessionStore, IdempotentCommand,
+    SessionRecord, SessionStore, SessionTreeIdentity,
 };
-use talos_types::agent_dispatch::AgentDispatchResumeToolCall;
-use talos_types::talos::{
-    StopReason, TalosItemDeltaEvent, TalosItemStartedEvent, TalosProvider, TalosSourceType,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent, TokenUsage,
-    TurnExecutionMetrics,
-};
+use talos_types::talos::{SessionSourceProvider, SessionSourceType, StopReason};
 use talos_types::{
-    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, DynamicToolResult,
-    DynamicToolResultParams, ModelRef, ModelSelection, PendingUserAction, SandboxApprovalDecision,
-    SandboxApprovalParams, SandboxApprovalPresentation, SandboxApprovalReason, SessionConf,
-    SessionContext, SessionState, StartTurnRequest, TalosConfig, TalosSession,
-    TimelineUserActionEvent, UserActionParams, UserActionResponse, UserActionState,
+    DynamicToolResult, DynamicToolResultParams, ModelRef, ModelSelection, PendingUserAction,
+    SandboxApprovalDecision, SandboxApprovalParams, SandboxApprovalPresentation,
+    SandboxApprovalReason, SessionConf, StartTurnRequest, TalosConfig, UserActionParams,
+    UserActionResponse, UserActionState,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 #[path = "queue_start_tests.rs"]
 mod queue_start_tests;
 
 #[test]
 fn turn_input_accepts_files_without_text() {
-    assert!(validate_user_input(&[TalosInputItem::Files {
-        file_ids: vec!["file-1".to_string()],
-    }])
+    assert!(validate_user_input(&AgentUserInput {
+        content: vec![AgentUserContent::File {
+            file_id: "file-1".to_string(),
+        }],
+    })
     .is_ok());
 }
 
+#[path = "idempotency_behavior_tests.rs"]
+mod idempotency_behavior_tests;
+#[path = "service/interrupt_tests.rs"]
+mod interrupt_lifecycle_tests;
+#[path = "queue_dispatch_tests.rs"]
+mod queue_dispatch_tests;
+#[path = "retry_tests.rs"]
+mod retry_tests;
+#[path = "running_input_tests.rs"]
+mod running_input_tests;
+#[path = "turn_progress_tests.rs"]
+mod turn_progress_tests;
+#[path = "user_action_recovery_tests.rs"]
+mod user_action_recovery_tests;
+#[path = "user_action_turn_tests.rs"]
+mod user_action_turn_tests;
+
 #[test]
-fn turn_input_rejects_ambiguous_or_duplicate_file_references() {
-    assert!(validate_user_input(&[
-        TalosInputItem::Files {
-            file_ids: vec!["file-1".to_string()],
-        },
-        TalosInputItem::Files {
-            file_ids: vec!["file-2".to_string()],
-        },
-    ])
-    .is_err());
-    assert!(validate_user_input(&[TalosInputItem::Files {
-        file_ids: vec!["file-1".to_string(), "file-1".to_string()],
-    }])
+fn turn_input_rejects_duplicate_file_references() {
+    assert!(validate_user_input(&AgentUserInput {
+        content: vec![
+            AgentUserContent::File {
+                file_id: "file-1".to_string(),
+            },
+            AgentUserContent::File {
+                file_id: "file-1".to_string(),
+            },
+        ],
+    })
     .is_err());
 }
 
-#[test]
-fn resume_context_keeps_all_nonterminal_tool_item_identities_in_event_order() {
-    let mut timeline =
-        talos_agent_kernel::TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
-    let first = timeline.start_tool_call("call-1", "Bash", "{}");
-    let second = timeline.start_tool_call("call-2", "Read", "{}");
-    let third = timeline.start_tool_call("call-3", "Read", "{}");
-    let mut events = vec![first, second, third];
-    events.push(
-        timeline
-            .append_delta(
-                "tool-1",
-                TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingUserAction,
-                },
-            )
-            .expect("first tool should wait"),
-    );
-    events.push(
-        timeline
-            .append_delta(
-                "tool-2",
-                TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::Queued,
-                },
-            )
-            .expect("second tool should queue"),
-    );
-    events.push(
-        timeline
-            .complete_item("tool-3", TalosTimelineItemStatus::Completed, None)
-            .expect("third tool should complete"),
-    );
-
-    assert_eq!(
-        service::nonterminal_resume_tool_calls(&events),
-        vec![
-            AgentDispatchResumeToolCall {
-                item_id: "tool-1".to_string(),
-                call_id: "call-1".to_string(),
-                tool_name: "Bash".to_string(),
-            },
-            AgentDispatchResumeToolCall {
-                item_id: "tool-2".to_string(),
-                call_id: "call-2".to_string(),
-                tool_name: "Read".to_string(),
-            },
-        ]
-    );
+async fn submit_test_start(
+    service: &TurnService,
+    session: SessionRecord,
+    request: StartTurnRequest,
+    idempotency_key: Option<&str>,
+) -> TalosResult<StartTurnResponse> {
+    match service
+        .reserve_start_turn(&request, idempotency_key)
+        .await?
+    {
+        StartTurnReservation::Ready(prepared) => {
+            service.submit_start_turn(session, request, prepared).await
+        }
+        StartTurnReservation::Completed(response) => Ok(response),
+    }
 }
 
-#[derive(Default)]
-struct RecordingTurnExecutor {
-    stream_request: Mutex<Option<AgentDispatchParams>>,
-    stream_requests: Mutex<Vec<AgentDispatchParams>>,
+struct RecordingAgentExecution {
+    stream_request: Mutex<Option<AgentRunParams>>,
+    stream_requests: Mutex<Vec<AgentRunParams>>,
     stream_error: Mutex<Option<TalosError>>,
     input_error: Mutex<Option<TalosError>>,
-    submitted_inputs: Mutex<Vec<AgentDispatchInputParams>>,
+    input_permit_error: Mutex<Option<talos_agent::AgentError>>,
+    start_permit_error: Mutex<Option<talos_agent::AgentError>>,
+    progress_event: Mutex<Option<CanonicalAgentEventPayload>>,
+    hold_input_permit: Mutex<bool>,
+    input_permit_started: Arc<Notify>,
+    input_permit_release: Arc<Notify>,
+    input_permit_completed: Arc<AtomicBool>,
+    submitted_inputs: Mutex<Vec<AgentInputParams>>,
     turn_errors_remaining: Mutex<usize>,
     dynamic_turn_id: Mutex<Option<String>>,
-    title_update: Mutex<Option<String>>,
     completed_stop_reason: Mutex<Option<StopReason>>,
+    hold_running_turn: Mutex<bool>,
+    hold_admission: AtomicBool,
+    admission_reached: Notify,
+    admission_release: Notify,
+    active_progress: Mutex<Option<mpsc::Sender<CanonicalAgentEvent>>>,
+    active_settlement: Mutex<
+        Option<
+            tokio::sync::oneshot::Sender<talos_agent::AgentResult<talos_agent::AgentRunSettlement>>,
+        >,
+    >,
+}
+
+impl Default for RecordingAgentExecution {
+    fn default() -> Self {
+        Self {
+            stream_request: Mutex::new(None),
+            stream_requests: Mutex::new(Vec::new()),
+            stream_error: Mutex::new(None),
+            input_error: Mutex::new(None),
+            input_permit_error: Mutex::new(None),
+            start_permit_error: Mutex::new(None),
+            progress_event: Mutex::new(None),
+            hold_input_permit: Mutex::new(false),
+            input_permit_started: Arc::new(Notify::new()),
+            input_permit_release: Arc::new(Notify::new()),
+            input_permit_completed: Arc::new(AtomicBool::new(false)),
+            submitted_inputs: Mutex::new(Vec::new()),
+            turn_errors_remaining: Mutex::new(0),
+            dynamic_turn_id: Mutex::new(None),
+            completed_stop_reason: Mutex::new(None),
+            hold_running_turn: Mutex::new(false),
+            hold_admission: AtomicBool::new(false),
+            admission_reached: Notify::new(),
+            admission_release: Notify::new(),
+            active_progress: Mutex::new(None),
+            active_settlement: Mutex::new(None),
+        }
+    }
+}
+
+struct RecordingExecutionCoordinator {
+    execution: Arc<RecordingAgentExecution>,
+    delegate: Arc<dyn AgentCoordinator>,
 }
 
 #[derive(Default)]
-struct NoopSessionRuntime {
+struct RecordingAgentCoordinator {
     cancelled_turns: Mutex<Vec<String>>,
+    interrupt_error: Mutex<Option<TalosError>>,
 }
 
 #[async_trait]
-impl SessionRuntime for NoopSessionRuntime {
-    async fn compact_session(
-        &self,
-        _params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> TalosResult<talos_types::TokenUsage> {
-        unreachable!("not used in turn service tests")
+impl AgentCoordinator for RecordingAgentCoordinator {
+    async fn resolve_agent(&self, _params: AgentSelectionParams) -> TalosResult<String> {
+        Ok("default".to_string())
     }
 
-    async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in turn service tests")
-    }
-
-    async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in turn service tests")
-    }
-
-    async fn prepare_delete_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in turn service tests")
-    }
-
-    async fn cancel_active_turn(
-        &self,
-        params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
-        self.cancelled_turns.lock().unwrap().push(params.turn_id);
-        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
-    }
-}
-
-#[async_trait]
-impl TurnExecutor for RecordingTurnExecutor {
-    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+    async fn ensure_agent(&self, _agent_id: &str) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn start_turn_stream(
-        &self,
-        request: AgentDispatchParams,
-    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
-        self.stream_request.lock().unwrap().replace(request.clone());
-        self.stream_requests.lock().unwrap().push(request.clone());
-        if let Some(error) = self.stream_error.lock().unwrap().take() {
+    async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        unreachable!("execution is delegated by the scenario Coordinator")
+    }
+
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        unreachable!("input is delegated by the scenario Coordinator")
+    }
+
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.cancelled_turns
+            .lock()
+            .unwrap()
+            .push(params.identity.turn_id);
+        if let Some(error) = self.interrupt_error.lock().unwrap().take() {
             return Err(error);
         }
-        let (tx, rx) = mpsc::channel(4);
-        if let Some(item_id) = request
-            .resume_context
+        Ok(AgentInterruptOutcome::Cancelled)
+    }
+
+    async fn compact_session(&self, _params: AgentContext) -> TalosResult<AgentRunExecution> {
+        unreachable!("not used in turn service tests")
+    }
+
+    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown(&self, _timeout: Duration) -> TalosResult<()> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl AgentCoordinator for RecordingExecutionCoordinator {
+    async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
+        self.delegate.resolve_agent(params).await
+    }
+
+    async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
+        self.delegate.ensure_agent(agent_id).await
+    }
+
+    async fn start(&self, request: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        if request.input.blocks.iter().any(|block| {
+            matches!(
+                block.content,
+                talos_agent_api::AgentMessageBlockContent::UserContent(
+                    talos_agent_api::AgentUserContent::UserActionResponse { .. }
+                )
+            )
+        }) {
+            self.execution
+                .dynamic_turn_id
+                .lock()
+                .unwrap()
+                .replace(request.context.turn_id.clone());
+        }
+        self.execution
+            .stream_request
+            .lock()
+            .unwrap()
+            .replace(request.clone());
+        self.execution
+            .stream_requests
+            .lock()
+            .unwrap()
+            .push(request.clone());
+        if let Some(error) = self.execution.stream_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        if self.execution.hold_admission.load(Ordering::SeqCst) {
+            self.execution.admission_reached.notify_one();
+            self.execution.admission_release.notified().await;
+        }
+        let identity = request.context.identity();
+        let is_continuation = request.checkpoint.is_some();
+        let start_sequence = request
+            .checkpoint
             .as_ref()
-            .and_then(|context| {
-                context
-                    .tool_calls
-                    .iter()
-                    .find(|tool_call| tool_call.call_id == context.pending_call_id)
-            })
-            .map(|tool_call| tool_call.item_id.clone())
-        {
-            tx.send(AgentEvent {
-                event_seq: None,
-                event_id: None,
-                created_at_ms: None,
-                event_type: talos_types::talos::AgentEventType::ItemDelta,
-                turn_id: request.turn_id.clone(),
-                message_id: request.session.context.message_id.clone(),
-                session_id: request.session.context.session_id.clone(),
-                sequence: 0,
-                payload: AgentEventPayload::ItemDelta(talos_types::talos::TalosItemDeltaEvent {
-                    request_id: "req-test".to_string(),
-                    turn_id: request.turn_id.clone(),
-                    item_id,
-                    delta: talos_types::talos::TalosTimelineDelta::ToolResult {
-                        content: vec![talos_types::talos::TalosContentItem::Text {
-                            text: "resumed".to_string(),
-                        }],
-                        is_error: false,
-                    },
+            .map_or(1, |checkpoint| checkpoint.last_sequence.saturating_add(1));
+        let admission = canonical_user_admission(
+            identity.clone(),
+            request.input.clone(),
+            start_sequence,
+            !is_continuation,
+        );
+        let mut next_sequence = admission
+            .last()
+            .expect("canonical test admission")
+            .sequence
+            .saturating_add(1);
+        let mut progress = Vec::new();
+        if let Some(checkpoint) = request.checkpoint.as_ref() {
+            let (original_message, original_block) = checkpoint
+                .messages
+                .iter()
+                .find_map(|message| {
+                    message
+                        .blocks
+                        .iter()
+                        .find(|block| block.status == AgentMessageBlockStatus::WaitingForInput)
+                        .map(|block| (message.clone(), block.clone()))
+                })
+                .expect("continued test Turn should contain a waiting block");
+            let tool_result = AgentToolResult {
+                call_id: "call-1".to_string(),
+                tool_name: "AskUser".to_string(),
+                content: vec![talos_types::talos::TalosContentItem::Text {
+                    text: "resumed".to_string(),
+                }],
+                is_error: false,
+            };
+            let result_message_id = "tool-result-message".to_string();
+            let started_result_message = AgentMessage {
+                message_id: result_message_id.clone(),
+                turn_id: identity.turn_id.clone(),
+                role: AgentMessageRole::Tool,
+                status: AgentMessageStatus::InProgress,
+                blocks: Vec::new(),
+                created_at: 4,
+                completed_at: None,
+            };
+            let started_result_block = AgentMessageBlock {
+                block_id: "tool-result-block".to_string(),
+                status: AgentMessageBlockStatus::Running,
+                content: AgentMessageBlockContent::ToolResult(tool_result.clone()),
+                started_at: 4,
+                completed_at: None,
+            };
+            let completed_result_block = AgentMessageBlock {
+                status: AgentMessageBlockStatus::Completed,
+                completed_at: Some(5),
+                ..started_result_block.clone()
+            };
+            let completed_result_message = AgentMessage {
+                status: AgentMessageStatus::Completed,
+                blocks: vec![completed_result_block.clone()],
+                completed_at: Some(5),
+                ..started_result_message.clone()
+            };
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 4,
+                payload: CanonicalAgentEventPayload::MessageStarted(AgentMessageStarted {
+                    message: started_result_message,
                 }),
-            })
-            .await
-            .unwrap();
+            });
+            next_sequence += 1;
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 4,
+                payload: CanonicalAgentEventPayload::MessageBlockStarted(
+                    AgentMessageBlockStarted {
+                        message_id: result_message_id.clone(),
+                        block: started_result_block,
+                    },
+                ),
+            });
+            next_sequence += 1;
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 5,
+                payload: CanonicalAgentEventPayload::MessageBlockCompleted(
+                    AgentMessageBlockCompleted {
+                        message_id: result_message_id,
+                        block: completed_result_block,
+                    },
+                ),
+            });
+            next_sequence += 1;
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 5,
+                payload: CanonicalAgentEventPayload::MessageCompleted(completed_result_message),
+            });
+            next_sequence += 1;
+            let completed_original_block = AgentMessageBlock {
+                status: AgentMessageBlockStatus::Completed,
+                completed_at: Some(6),
+                ..original_block
+            };
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 6,
+                payload: CanonicalAgentEventPayload::MessageBlockCompleted(
+                    AgentMessageBlockCompleted {
+                        message_id: original_message.message_id.clone(),
+                        block: completed_original_block.clone(),
+                    },
+                ),
+            });
+            next_sequence += 1;
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 6,
+                payload: CanonicalAgentEventPayload::MessageCompleted(AgentMessage {
+                    status: AgentMessageStatus::Completed,
+                    blocks: vec![completed_original_block],
+                    completed_at: Some(6),
+                    ..original_message
+                }),
+            });
+            next_sequence += 1;
+        }
+        if let Some(payload) = self.execution.progress_event.lock().unwrap().take() {
+            progress.push(CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: next_sequence,
+                occurred_at: 1,
+                payload,
+            });
+            next_sequence += 1;
         }
         let should_error = {
-            let mut turn_errors_remaining = self.turn_errors_remaining.lock().unwrap();
+            let mut turn_errors_remaining = self.execution.turn_errors_remaining.lock().unwrap();
             let should_error = *turn_errors_remaining > 0;
             *turn_errors_remaining = turn_errors_remaining.saturating_sub(1);
             should_error
         };
-        let (event_type, payload) = if should_error {
-            (
-                talos_types::talos::AgentEventType::TurnError,
-                AgentEventPayload::TurnError(talos_types::talos::TalosTurnErrorEvent {
-                    request_id: "req-test".to_string(),
-                    turn_id: request.turn_id.clone(),
-                    error: ApiError::new(talos_error::ErrorCode::InternalError),
-                    failed_at_ms: 1,
+        let terminal = if should_error {
+            CanonicalAgentEvent {
+                identity,
+                sequence: next_sequence,
+                occurred_at: 1,
+                payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
+                    error: AgentErrorInfo {
+                        code: talos_error::ErrorCode::InternalError,
+                        message: "injected Turn failure".to_string(),
+                        retryable: false,
+                    },
                 }),
-            )
+            }
         } else {
-            (
-                talos_types::talos::AgentEventType::TurnCompleted,
-                AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                    request_id: "req-test".to_string(),
-                    turn_id: request.turn_id.clone(),
-                    completed_at_ms: 1,
-                    stop_reason: self
-                        .completed_stop_reason
-                        .lock()
-                        .unwrap()
-                        .take()
-                        .unwrap_or(StopReason::EndTurn),
-                    usage: TokenUsage::default(),
-                    metrics: None,
-                    artifact_seq: Some(1),
-                }),
-            )
-        };
-        let event = AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type,
-            turn_id: request.turn_id.clone(),
-            message_id: request.session.context.message_id.clone(),
-            session_id: request.session.context.session_id.clone(),
-            sequence: 1,
-            payload,
-        };
-        tx.send(event).await.unwrap();
-        Ok(rx)
-    }
-
-    async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
-        if let Some(error) = self.input_error.lock().unwrap().take() {
-            return Err(error);
-        }
-        assert!(matches!(
-            params.binding,
-            talos_types::DispatchBinding::Exact { ref agent_id } if agent_id == "default"
-        ));
-        if matches!(params.input, AgentDispatchInput::UserActionResponse { .. }) {
-            self.dynamic_turn_id
+            let stop_reason = self
+                .execution
+                .completed_stop_reason
                 .lock()
                 .unwrap()
-                .replace(params.turn_id.clone());
+                .take()
+                .unwrap_or(StopReason::EndTurn);
+            if stop_reason == StopReason::Cancelled {
+                CanonicalAgentEvent {
+                    identity,
+                    sequence: next_sequence,
+                    occurred_at: 1,
+                    payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
+                        error: AgentErrorInfo {
+                            code: talos_error::ErrorCode::Cancelled,
+                            message: "injected cancellation".to_string(),
+                            retryable: false,
+                        },
+                    }),
+                }
+            } else {
+                CanonicalAgentEvent {
+                    identity,
+                    sequence: next_sequence,
+                    occurred_at: 1,
+                    payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                        stop_reason: AgentStopReason::EndTurn,
+                    }),
+                }
+            }
+        };
+        let (progress_tx, progress_rx) = mpsc::channel(progress.len().max(1));
+        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+        let mut settlement_tx = Some(settlement_tx);
+        let hold_running_turn = *self.execution.hold_running_turn.lock().unwrap();
+        let start_permit_error = self.execution.start_permit_error.lock().unwrap().take();
+        if hold_running_turn {
+            self.execution
+                .active_progress
+                .lock()
+                .unwrap()
+                .replace(progress_tx.clone());
+            self.execution
+                .active_settlement
+                .lock()
+                .unwrap()
+                .replace(settlement_tx.take().expect("test settlement sender"));
         }
-        self.submitted_inputs.lock().unwrap().push(params);
-        Ok(())
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: admission,
+                permit: AgentAdmissionPermit::new(async move {
+                    if let Some(error) = start_permit_error {
+                        return Err(error);
+                    }
+                    for event in progress {
+                        progress_tx.send(event).await.map_err(|_| {
+                            talos_agent::AgentError::provider_error("test progress receiver")
+                        })?;
+                    }
+                    if hold_running_turn {
+                        return Ok(());
+                    }
+                    drop(progress_tx);
+                    settlement_tx
+                        .expect("completed test Turn settlement sender")
+                        .send(Ok(AgentRunSettlement::Finished {
+                            event: terminal,
+                            messages: Vec::new(),
+                            metrics: AgentRunMetrics::default(),
+                        }))
+                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
     }
 
-    async fn take_generated_session_title(
-        &self,
-        _session_id: &str,
-        _turn_id: &str,
-    ) -> Option<String> {
-        self.title_update.lock().unwrap().take()
+    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        if let Some(error) = self.execution.input_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        if params.input.blocks.iter().any(|block| {
+            matches!(
+                block.content,
+                talos_agent_api::AgentMessageBlockContent::UserContent(
+                    talos_agent_api::AgentUserContent::UserActionResponse { .. }
+                )
+            )
+        }) {
+            self.execution
+                .dynamic_turn_id
+                .lock()
+                .unwrap()
+                .replace(params.identity.turn_id.clone());
+        }
+        let sequence = 6;
+        let events = canonical_user_admission(
+            params.identity.clone(),
+            params.input.clone(),
+            sequence,
+            false,
+        );
+        self.execution.submitted_inputs.lock().unwrap().push(params);
+        let permit_error = self.execution.input_permit_error.lock().unwrap().take();
+        let hold_permit = *self.execution.hold_input_permit.lock().unwrap();
+        let permit_started = self.execution.input_permit_started.clone();
+        let permit_release = self.execution.input_permit_release.clone();
+        let permit_completed = self.execution.input_permit_completed.clone();
+        Ok(AgentAdmission {
+            events,
+            permit: AgentAdmissionPermit::new(async move {
+                permit_started.notify_one();
+                if hold_permit {
+                    permit_release.notified().await;
+                }
+                permit_completed.store(true, Ordering::SeqCst);
+                permit_error.map_or(Ok(()), Err)
+            }),
+        })
+    }
+
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.delegate.interrupt(params).await
+    }
+
+    async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
+        self.delegate.compact_session(params).await
+    }
+
+    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        self.delegate.clear_session(params).await
+    }
+
+    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        self.delegate.close_session(params).await
+    }
+
+    async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
+        self.delegate.shutdown(timeout).await
     }
 }
 
 #[tokio::test]
 async fn submit_start_turn_preserves_executor_error_semantics() {
-    let turn_executor = Arc::new(RecordingTurnExecutor {
+    let agent_execution = Arc::new(RecordingAgentExecution {
         stream_error: Mutex::new(Some(TalosError::public(
             talos_error::ErrorCode::Conflict,
             "agent busy".to_string(),
         ))),
         ..Default::default()
     });
-    let (service, _event_service, store, _message_queue) = test_service(turn_executor).await;
+    let (service, _event_service, store, _message_queue) = test_service(agent_execution).await;
     create_test_session_record(store.clone()).await;
 
-    let error = service
-        .submit_start_turn(
-            test_session(),
-            StartTurnRequest {
-                session_id: "s1".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                context: None,
-                model_selection: None,
-                user_permission_mode: None,
-                project_id: None,
-                current_directory: None,
-                client_request_id: None,
-            },
-            None,
-        )
-        .await
-        .expect_err("executor conflict should propagate");
+    let error = submit_test_start(
+        &service,
+        test_session(),
+        StartTurnRequest {
+            session_id: "s1".to_string(),
+            input: test_user_input("hello"),
+            model_selection: None,
+            user_permission_mode: None,
+            project_id: None,
+            current_directory: None,
+            client_request_id: None,
+        },
+        None,
+    )
+    .await
+    .expect_err("executor conflict should propagate");
 
     assert!(error.is_code(talos_error::ErrorCode::Conflict));
 }
 
 async fn test_service(
-    turn_executor: Arc<RecordingTurnExecutor>,
+    agent_execution: Arc<RecordingAgentExecution>,
 ) -> (
     TurnService,
     Arc<TimelineEventService>,
     Arc<DatabaseSessionStore>,
     SessionMessageQueueService,
 ) {
-    test_service_with_runtime(turn_executor, Arc::new(NoopSessionRuntime::default())).await
+    test_service_with_coordinator(
+        agent_execution,
+        Arc::new(RecordingAgentCoordinator::default()),
+    )
+    .await
 }
 
-async fn test_service_with_runtime(
-    turn_executor: Arc<RecordingTurnExecutor>,
-    session_runtime: Arc<dyn SessionRuntime>,
+async fn test_service_with_coordinator(
+    agent_execution: Arc<RecordingAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
 ) -> (
     TurnService,
     Arc<TimelineEventService>,
@@ -341,19 +622,24 @@ async fn test_service_with_runtime(
     SessionMessageQueueService,
 ) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    test_service_with_storage(agent_execution, coordinator, storage).await
+}
+
+async fn test_service_with_storage(
+    agent_execution: Arc<RecordingAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
+    storage: Arc<SqliteStorage>,
+) -> (
+    TurnService,
+    Arc<TimelineEventService>,
+    Arc<DatabaseSessionStore>,
+    SessionMessageQueueService,
+) {
     run_test_migrations(storage.pool()).await;
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
-    let event_store: Arc<dyn TimelineEventStore> = store.clone();
-    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
-    let event_service = Arc::new(TimelineEventService::new(
-        event_store,
-        active_turn_store,
-        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
-        TimelineEventRetentionConfig::default(),
-    ));
-    let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let config = test_config();
     let sessions = Arc::new(SessionService::new(
         store.clone(),
@@ -362,16 +648,20 @@ async fn test_service_with_runtime(
     ));
     let message_queue =
         SessionMessageQueueService::new(10).expect("queue service should initialize");
+    let coordinator: Arc<dyn AgentCoordinator> = Arc::new(RecordingExecutionCoordinator {
+        execution: agent_execution,
+        delegate: coordinator,
+    });
     (
         TurnService::new(
-            turn_executor,
+            coordinator,
+            store.clone(),
             event_service.clone(),
-            idempotency_store,
             profile_store,
             sessions,
-            session_runtime,
             message_queue.clone(),
             config,
+            Arc::new(tokio::sync::RwLock::new(())),
         ),
         event_service,
         store,
@@ -380,169 +670,142 @@ async fn test_service_with_runtime(
 }
 
 async fn insert_pending_dynamic_action(store: &DatabaseSessionStore, item_id: Option<&str>) {
-    store
-        .create(UserActionRecord {
-            session_id: "s1".to_string(),
-            turn_id: "turn-original".to_string(),
-            action: PendingUserAction {
-                action_id: "action-1".to_string(),
-                call_id: "call-1".to_string(),
-                item_id: item_id.map(str::to_string),
-                state: UserActionState::Pending,
-                params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
-                    tool_name: "AskUser".to_string(),
+    let pending_action = PendingUserAction {
+        action_id: "action-1".to_string(),
+        call_id: "call-1".to_string(),
+        item_id: item_id.map(str::to_string),
+        state: UserActionState::Pending,
+        params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
+            tool_name: "AskUser".to_string(),
+        }),
+    };
+    insert_canonical_pending_action(
+        store,
+        pending_action,
+        item_id.unwrap_or("tool-original"),
+        "AskUser",
+    )
+    .await;
+}
+
+async fn insert_canonical_pending_action(
+    store: &DatabaseSessionStore,
+    pending_action: PendingUserAction,
+    item_id: &str,
+    tool_name: &str,
+) {
+    let identity = talos_agent_api::AgentTurnRef::new("s1", "turn-original");
+    let running_message = completed_agent_user_input(
+        "turn-original",
+        "msg-original",
+        test_user_input("running"),
+        1,
+    )
+    .unwrap();
+    let mut commit = commit_test_running_turn(store, identity.clone(), running_message).await;
+    let assistant_message = AgentMessage {
+        message_id: "agent-message-original".to_string(),
+        turn_id: identity.turn_id.clone(),
+        role: AgentMessageRole::Agent,
+        status: AgentMessageStatus::InProgress,
+        blocks: Vec::new(),
+        created_at: 2,
+        completed_at: None,
+    };
+    commit = store
+        .commit_progress_event(
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: commit.events.last().unwrap().sequence + 1,
+                occurred_at: 2,
+                payload: CanonicalAgentEventPayload::MessageStarted(AgentMessageStarted {
+                    message: assistant_message,
                 }),
             },
-            response: None,
-            version: 0,
-            updated_at: 1,
-        })
+            commit.active_turn.last_event_seq,
+        )
         .await
         .unwrap();
-    if let Some(item_id) = item_id {
-        insert_pending_tool_events(store, item_id, "call-1", "AskUser").await;
-    }
+    let tool_block = AgentMessageBlock {
+        block_id: item_id.to_string(),
+        status: AgentMessageBlockStatus::Running,
+        content: AgentMessageBlockContent::ToolCall(AgentToolCall {
+            call_id: "call-1".to_string(),
+            name: tool_name.to_string(),
+            arguments: AgentToolCallArguments::Streaming {
+                json_fragment: "{}".to_string(),
+            },
+            progress: Vec::new(),
+        }),
+        started_at: 3,
+        completed_at: None,
+    };
+    commit = store
+        .commit_progress_event(
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: commit.events.last().unwrap().sequence + 1,
+                occurred_at: 3,
+                payload: CanonicalAgentEventPayload::MessageBlockStarted(
+                    AgentMessageBlockStarted {
+                        message_id: "agent-message-original".to_string(),
+                        block: tool_block,
+                    },
+                ),
+            },
+            commit.active_turn.last_event_seq,
+        )
+        .await
+        .unwrap();
+    let waiting = CanonicalAgentEvent {
+        identity,
+        sequence: commit
+            .events
+            .last()
+            .expect("canonical admission event")
+            .sequence
+            .saturating_add(1),
+        occurred_at: 2,
+        payload: CanonicalAgentEventPayload::WaitingForInput(
+            talos_agent_api::AgentPendingInput::UserAction {
+                action: pending_action,
+            },
+        ),
+    };
     store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "s1".to_string(),
-            turn_id: "turn-original".to_string(),
-            message_id: Some("msg-original".to_string()),
-            status: ActiveTurnStatus::WaitingUserAction,
-            last_event_id: Some(TimelineEventId::from_seq(9)),
-            current_action_id: Some("action-1".to_string()),
-            updated_at: 1,
-        })
+        .commit_waiting_settlement(
+            waiting,
+            AgentContinuationRef {
+                opaque_id: "continuation-1".to_string(),
+            },
+            commit.active_turn.last_event_seq,
+        )
         .await
         .unwrap();
 }
 
 async fn insert_pending_sandbox_approval(store: &DatabaseSessionStore) {
-    store
-        .create(UserActionRecord {
-            session_id: "s1".to_string(),
-            turn_id: "turn-original".to_string(),
-            action: PendingUserAction {
-                action_id: "action-1".to_string(),
-                call_id: "call-1".to_string(),
-                item_id: Some("tool-original".to_string()),
-                state: UserActionState::Pending,
-                params: UserActionParams::SandboxApproval(SandboxApprovalParams {
-                    tool_name: "Bash".to_string(),
-                    reason: SandboxApprovalReason::RiskyCommand,
-                    presentation: SandboxApprovalPresentation::Command {
-                        command: "rm -rf build".to_string(),
-                        cwd: "/workspace".to_string(),
-                        risk_summary: None,
-                    },
-                    available_decisions: vec![
-                        SandboxApprovalDecision::AllowOnce,
-                        SandboxApprovalDecision::Deny,
-                        SandboxApprovalDecision::Cancel,
-                    ],
-                }),
+    let pending_action = PendingUserAction {
+        action_id: "action-1".to_string(),
+        call_id: "call-1".to_string(),
+        item_id: Some("tool-original".to_string()),
+        state: UserActionState::Pending,
+        params: UserActionParams::SandboxApproval(SandboxApprovalParams {
+            tool_name: "Bash".to_string(),
+            reason: SandboxApprovalReason::RiskyCommand,
+            presentation: SandboxApprovalPresentation::Command {
+                command: "rm -rf build".to_string(),
+                cwd: "/workspace".to_string(),
+                risk_summary: None,
             },
-            response: None,
-            version: 0,
-            updated_at: 1,
-        })
-        .await
-        .unwrap();
-    insert_pending_tool_events(store, "tool-original", "call-1", "Bash").await;
-    store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "s1".to_string(),
-            turn_id: "turn-original".to_string(),
-            message_id: Some("msg-original".to_string()),
-            status: ActiveTurnStatus::WaitingUserAction,
-            last_event_id: Some(TimelineEventId::from_seq(9)),
-            current_action_id: Some("action-1".to_string()),
-            updated_at: 1,
-        })
-        .await
-        .unwrap();
-}
-
-async fn insert_pending_tool_events(
-    store: &DatabaseSessionStore,
-    item_id: &str,
-    call_id: &str,
-    tool_name: &str,
-) {
-    let base_event = |sequence, event_type, payload| AgentEvent {
-        event_seq: None,
-        event_id: None,
-        created_at_ms: None,
-        event_type,
-        turn_id: "turn-original".to_string(),
-        message_id: "msg-original".to_string(),
-        session_id: "s1".to_string(),
-        sequence,
-        payload,
+            available_decisions: vec![
+                SandboxApprovalDecision::AllowOnce,
+                SandboxApprovalDecision::Deny,
+                SandboxApprovalDecision::Cancel,
+            ],
+        }),
     };
-    store
-        .append_event(base_event(
-            0,
-            talos_types::talos::AgentEventType::ItemStarted,
-            AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-                request_id: "request-original".to_string(),
-                turn_id: "turn-original".to_string(),
-                item: TalosTimelineItem {
-                    item_id: item_id.to_string(),
-                    parent_item_id: None,
-                    kind: TalosTimelineItemKind::ToolCall,
-                    phase: TalosTimelinePhase::Acting,
-                    status: TalosTimelineItemStatus::Running,
-                    title: None,
-                    started_at_ms: 1,
-                    completed_at_ms: None,
-                    content: TalosTimelineContent::ToolCall {
-                        call_id: call_id.to_string(),
-                        name: tool_name.to_string(),
-                        arguments: "{}".to_string(),
-                        progress: Vec::new(),
-                        result: None,
-                    },
-                },
-            }),
-        ))
-        .await
-        .expect("pending tool start event should persist");
-    store
-        .append_event(base_event(
-            1,
-            talos_types::talos::AgentEventType::ItemDelta,
-            AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
-                request_id: "request-original".to_string(),
-                turn_id: "turn-original".to_string(),
-                item_id: item_id.to_string(),
-                delta: TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingUserAction,
-                },
-            }),
-        ))
-        .await
-        .expect("pending tool status event should persist");
-    store
-        .append_event(base_event(
-            2,
-            talos_types::talos::AgentEventType::TurnCompleted,
-            AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                request_id: "request-original".to_string(),
-                turn_id: "turn-original".to_string(),
-                completed_at_ms: 1,
-                stop_reason: StopReason::WaitingUserAction,
-                usage: TokenUsage::default(),
-                metrics: Some(TurnExecutionMetrics {
-                    model_rounds: 1,
-                    tool_calls: 1,
-                    stop_reason: StopReason::WaitingUserAction,
-                    ..TurnExecutionMetrics::default()
-                }),
-                artifact_seq: Some(1),
-            }),
-        ))
-        .await
-        .expect("pending turn metrics should persist");
+    insert_canonical_pending_action(store, pending_action, "tool-original", "Bash").await;
 }
 
 fn test_model_selection() -> ModelSelection {
@@ -568,48 +831,43 @@ fn test_config() -> TalosConfig {
     config
 }
 
-fn test_session() -> TalosSession {
-    TalosSession {
+fn test_session() -> SessionRecord {
+    SessionRecord {
+        id: "s1".to_string(),
         agent_id: "default".to_string(),
+        tree_identity: SessionTreeIdentity::Primary,
+        workspace_id: "default".to_string(),
         title: "Untitled Session".to_string(),
         user_id: "user-1".to_string(),
-        context: SessionContext {
-            session_id: "s1".to_string(),
-            workspace_id: "default".to_string(),
-            source_type: TalosSourceType::Http,
-            provider: TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "stale-message".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: None,
-            thread_id: None,
-            project_id: None,
-            current_directory: None,
-            project_root: None,
-            environment: None,
-        },
+        source_type: SessionSourceType::Http,
+        source_provider: SessionSourceProvider::Http,
+        channel_id: None,
+        thread_id: None,
+        environment: None,
+        created_at: 0,
+        last_activity: 0,
+        message_count: 0,
+        latest_turn_seq: 0,
+        memory_processed_until_event_seq: 0,
+        usage: Default::default(),
         conf: SessionConf {
             model_selection: Some(test_model_selection()),
             ..SessionConf::default()
         },
         project_id: None,
         current_directory: None,
-        config: test_config(),
-        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
-        state: SessionState::default(),
     }
 }
 
 async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
-    let session = test_session();
-    let record = talos_store::session::SessionRecord::from_session(&session);
+    let record = test_session();
     store
-        .insert_session_record(&record, "api")
+        .insert_session_record(&record)
         .await
         .expect("session record should be created");
 }
 
-async fn wait_for_stream_requests(executor: &RecordingTurnExecutor, expected: usize) {
+async fn wait_for_stream_requests(executor: &RecordingAgentExecution, expected: usize) {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             if executor.stream_requests.lock().unwrap().len() >= expected {
@@ -622,638 +880,15 @@ async fn wait_for_stream_requests(executor: &RecordingTurnExecutor, expected: us
     .expect("queued turns should be dispatched");
 }
 
-#[tokio::test]
-async fn queued_messages_auto_dispatch_in_fifo_order_after_fast_completion() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, message_queue) = test_service(turn_executor.clone()).await;
-    create_test_session_record(store).await;
-    message_queue
-        .add(
-            "s1",
-            vec![TalosInputItem::Text {
-                text: "first".to_string(),
-            }],
-        )
-        .unwrap();
-    message_queue
-        .add(
-            "s1",
-            vec![TalosInputItem::Text {
-                text: "second".to_string(),
-            }],
-        )
-        .unwrap();
-
-    service
-        .try_dispatch_next("s1")
-        .await
-        .expect("first queued message should start")
-        .expect("queue should contain a message");
-    wait_for_stream_requests(turn_executor.as_ref(), 2).await;
-
-    let requests = turn_executor.stream_requests.lock().unwrap();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.input.clone())
-            .collect::<Vec<_>>(),
-        vec![
-            vec![TalosInputItem::Text {
-                text: "first".to_string(),
-            }],
-            vec![TalosInputItem::Text {
-                text: "second".to_string(),
-            }],
-        ]
-    );
-    assert!(message_queue.list("s1").unwrap().messages.is_empty());
-}
-
-#[tokio::test]
-async fn queued_messages_continue_after_a_failed_turn() {
-    let turn_executor = Arc::new(RecordingTurnExecutor {
-        turn_errors_remaining: Mutex::new(1),
-        ..Default::default()
-    });
-    let (service, _event_service, store, message_queue) = test_service(turn_executor.clone()).await;
-    create_test_session_record(store).await;
-    message_queue
-        .add(
-            "s1",
-            vec![TalosInputItem::Text {
-                text: "fails".to_string(),
-            }],
-        )
-        .unwrap();
-    message_queue
-        .add(
-            "s1",
-            vec![TalosInputItem::Text {
-                text: "continues".to_string(),
-            }],
-        )
-        .unwrap();
-
-    service
-        .try_dispatch_next("s1")
-        .await
-        .expect("failed queued turn should still be accepted");
-    wait_for_stream_requests(turn_executor.as_ref(), 2).await;
-
-    assert!(message_queue.list("s1").unwrap().messages.is_empty());
-}
-
-#[tokio::test]
-async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, message_queue) = test_service(turn_executor.clone()).await;
-    create_test_session_record(store.clone()).await;
-    store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "s1".to_string(),
-            turn_id: "turn-active".to_string(),
-            message_id: Some("msg-active".to_string()),
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        })
-        .await
-        .unwrap();
-    let accepted_input = vec![
-        TalosInputItem::Text {
-            text: "inspect this".to_string(),
-        },
-        TalosInputItem::Files {
-            file_ids: vec!["file-1".to_string()],
-        },
-    ];
-    let accepted = message_queue.add("s1", accepted_input.clone()).unwrap();
-
-    let stale_error = service
-        .steer_queued_message(test_session(), &accepted.messages[0].id, "turn-stale")
-        .await
-        .expect_err("stale turn id must not consume the queued message");
-    assert!(stale_error.is_code(talos_error::ErrorCode::ResourceNotFound));
-    assert_eq!(message_queue.list("s1").unwrap(), accepted);
-    assert!(turn_executor.submitted_inputs.lock().unwrap().is_empty());
-
-    service
-        .steer_queued_message(test_session(), &accepted.messages[0].id, "turn-active")
-        .await
-        .expect("text and files should be accepted for steer");
-
-    assert!(matches!(
-        &turn_executor.submitted_inputs.lock().unwrap()[0].input,
-        AgentDispatchInput::Message { input } if input == &accepted_input
-    ));
-    let rejected = message_queue
-        .add(
-            "s1",
-            vec![TalosInputItem::Text {
-                text: "too late".to_string(),
-            }],
-        )
-        .unwrap();
-    turn_executor
-        .input_error
-        .lock()
-        .unwrap()
-        .replace(TalosError::public(
-            talos_error::ErrorCode::Conflict,
-            "active turn ended before accepting the message".to_string(),
-        ));
-
-    let rejected_error = service
-        .steer_queued_message(test_session(), &rejected.messages[0].id, "turn-active")
-        .await
-        .expect_err("rejected active-turn input must remain queued");
-
-    assert!(rejected_error.is_code(talos_error::ErrorCode::Conflict));
-    assert_eq!(message_queue.list("s1").unwrap(), rejected);
-    message_queue
-        .delete("s1", &rejected.messages[0].id)
-        .unwrap();
-    let skill_queue = message_queue
-        .add(
-            "s1",
-            vec![TalosInputItem::SkillSelection {
-                name: "review".to_string(),
-                path: "/skills/review".to_string(),
-            }],
-        )
-        .unwrap();
-    let skill_id = skill_queue.messages[0].id.clone();
-
-    let error = service
-        .steer_queued_message(test_session(), &skill_id, "turn-active")
-        .await
-        .expect_err("skills are not supported by active turn steer");
-
-    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
-    assert_eq!(
-        message_queue.list("s1").unwrap().messages,
-        skill_queue.messages
-    );
-}
-
-#[tokio::test]
-async fn submit_start_turn_records_completed_turn_progress() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(turn_executor.clone()).await;
-    create_test_session_record(store.clone()).await;
-
-    service
-        .submit_start_turn(
-            test_session(),
-            StartTurnRequest {
-                session_id: "s1".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                context: None,
-                model_selection: None,
-                user_permission_mode: None,
-                project_id: None,
-                current_directory: None,
-                client_request_id: None,
-            },
-            None,
-        )
-        .await
-        .expect("message should be submitted");
-
-    assert!(matches!(
-        turn_executor
-            .stream_request
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|request| &request.binding),
-        Some(talos_types::DispatchBinding::Exact { agent_id }) if agent_id == "default"
-    ));
-    let record = store
-        .get_session_record("s1")
-        .await
-        .expect("session record should be readable")
-        .expect("session record should exist");
-    assert_eq!((record.message_count, record.latest_turn_seq), (2, 1));
-}
-
-#[tokio::test]
-async fn cancelled_turn_does_not_advance_session_progress() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    turn_executor
-        .completed_stop_reason
-        .lock()
-        .unwrap()
-        .replace(StopReason::Cancelled);
-    let (service, _event_service, store, _message_queue) = test_service(turn_executor).await;
-    create_test_session_record(store.clone()).await;
-
-    service
-        .submit_start_turn(
-            test_session(),
-            StartTurnRequest {
-                session_id: "s1".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                context: None,
-                model_selection: None,
-                user_permission_mode: None,
-                project_id: None,
-                current_directory: None,
-                client_request_id: None,
-            },
-            None,
-        )
-        .await
-        .expect("cancelled turn should complete its command lifecycle");
-
-    let record = store
-        .get_session_record("s1")
-        .await
-        .expect("session record should be readable")
-        .expect("session record should exist");
-    assert_eq!((record.message_count, record.latest_turn_seq), (0, 0));
-}
-
-#[tokio::test]
-async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(turn_executor.clone()).await;
-    create_test_session_record(store.clone()).await;
-    let request = StartTurnRequest {
-        session_id: "s1".to_string(),
-        input: vec![TalosInputItem::Text {
-            text: "hello".to_string(),
-        }],
-        context: None,
-        model_selection: None,
-        user_permission_mode: None,
-        project_id: None,
-        current_directory: None,
-        client_request_id: None,
-    };
-    let request_hash = turn_submission_hash("s1", &request.input).unwrap();
-    store
-        .reserve(
-            "s1",
-            "missing-result",
-            &request_hash,
-            "turn-existing",
-            1,
-            None,
-        )
-        .await
-        .expect("idempotency reservation should be inserted");
-
-    let error = service
-        .submit_start_turn(test_session(), request, Some("missing-result".to_string()))
-        .await
-        .expect_err("missing idempotency result should fail fast");
-
-    assert!(error.is_internal());
-    assert!(turn_executor.stream_request.lock().unwrap().is_none());
-}
-
-#[tokio::test]
-async fn submit_start_turn_persists_agent_title_update() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    turn_executor
-        .title_update
-        .lock()
-        .unwrap()
-        .replace("Meaningful Topic".to_string());
-    let (service, _event_service, store, _message_queue) = test_service(turn_executor).await;
-    create_test_session_record(store.clone()).await;
-
-    service
-        .submit_start_turn(
-            test_session(),
-            StartTurnRequest {
-                session_id: "s1".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                context: None,
-                model_selection: None,
-                user_permission_mode: None,
-                project_id: None,
-                current_directory: None,
-                client_request_id: None,
-            },
-            None,
-        )
-        .await
-        .expect("message should be submitted");
-
-    for _ in 0..20 {
-        let record = store
-            .get_session_record("s1")
-            .await
-            .expect("session record should be readable")
-            .expect("session record should exist");
-        if record.title == "Meaningful Topic" {
-            return;
+async fn wait_for_canonical_terminal(store: &DatabaseSessionStore) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if store.get_agent_active_turn("s1").await.unwrap().is_none() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let record = store
-        .get_session_record("s1")
-        .await
-        .expect("session record should be readable")
-        .expect("session record should exist");
-    assert_eq!(record.title, "Meaningful Topic");
-}
-
-#[tokio::test]
-async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(turn_executor.clone()).await;
-    create_test_session_record(store.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
-
-    service
-        .submit_dynamic_tool_result(test_session(), "call-1", "AskUser", "ok".to_string(), true)
-        .await
-        .unwrap();
-
-    let request = turn_executor
-        .stream_request
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("resume stream request should be captured");
-    assert_eq!(request.turn_id, "turn-original");
-    assert_eq!(
-        turn_executor.dynamic_turn_id.lock().unwrap().as_deref(),
-        Some("turn-original")
-    );
-    assert_eq!(request.session.context.message_id, "msg-original");
-    assert!(request.input.is_empty());
-    let resume_context = request
-        .resume_context
-        .expect("resume context should be present");
-    assert_eq!(resume_context.execution_metrics.tool_calls, 1);
-    assert_eq!(resume_context.execution_metrics.model_rounds, 1);
-    let tool_call = resume_context
-        .tool_calls
-        .into_iter()
-        .next()
-        .expect("resume tool call should be present");
-    assert_eq!(tool_call.item_id, "tool-original");
-    assert_eq!(tool_call.call_id, "call-1");
-    assert_eq!(tool_call.tool_name, "AskUser");
-
-    for _ in 0..20 {
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        if active.status == ActiveTurnStatus::Completed {
-            assert_eq!(active.current_action_id, None);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let active = store.get_active_turn("s1").await.unwrap().unwrap();
-    assert_eq!(active.status, ActiveTurnStatus::Completed);
-    assert_eq!(active.current_action_id, None);
-    let action = UserActionStore::get(store.as_ref(), "s1", "turn-original", "action-1")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(action.action.state, UserActionState::Resolved);
-    let events = store
-        .list_turn_events("s1", "turn-original", 32)
-        .await
-        .unwrap();
-    let tool_result_index = events
-        .iter()
-        .position(|event| {
-            matches!(
-                &event.payload,
-                AgentEventPayload::ItemDelta(payload)
-                    if matches!(payload.delta, TalosTimelineDelta::ToolResult { .. })
-            )
-        })
-        .expect("resumed tool result should be durable");
-    let finished_index = events
-        .iter()
-        .position(|event| {
-            matches!(
-                &event.payload,
-                AgentEventPayload::ItemDelta(payload)
-                    if matches!(
-                        payload.delta,
-                        TalosTimelineDelta::UserAction {
-                            event: TimelineUserActionEvent::Finished {
-                                state: UserActionState::Resolved,
-                                ..
-                            }
-                        }
-                    )
-            )
-        })
-        .expect("resolved user action fact should be durable");
-    assert!(tool_result_index < finished_index);
-}
-
-#[tokio::test]
-async fn sandbox_approval_cancel_finishes_the_turn_without_replaying_the_tool() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let session_runtime = Arc::new(NoopSessionRuntime::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service_with_runtime(turn_executor.clone(), session_runtime.clone()).await;
-    create_test_session_record(store.clone()).await;
-    insert_pending_sandbox_approval(store.as_ref()).await;
-
-    let state = service
-        .submit_user_action(
-            test_session(),
-            "turn-original",
-            "action-1",
-            UserActionResponse::SandboxApproval(SandboxApprovalDecision::Cancel),
-        )
-        .await
-        .expect("cancel should finish the pending approval");
-
-    assert_eq!(state, UserActionState::Cancelled);
-    assert!(session_runtime.cancelled_turns.lock().unwrap().is_empty());
-    assert!(turn_executor.dynamic_turn_id.lock().unwrap().is_none());
-    assert!(turn_executor.stream_request.lock().unwrap().is_none());
-    let record = UserActionStore::get(store.as_ref(), "s1", "turn-original", "action-1")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(record.action.state, UserActionState::Cancelled);
-    assert_eq!(
-        record.response,
-        Some(UserActionResponse::SandboxApproval(
-            SandboxApprovalDecision::Cancel
-        ))
-    );
-    let active = store.get_active_turn("s1").await.unwrap().unwrap();
-    assert_eq!(active.status, ActiveTurnStatus::Failed);
-    assert_eq!(active.current_action_id, None);
-
-    let retry_state = service
-        .submit_user_action(
-            test_session(),
-            "turn-original",
-            "action-1",
-            UserActionResponse::SandboxApproval(SandboxApprovalDecision::Cancel),
-        )
-        .await
-        .expect("same cancel response should be idempotent");
-    assert_eq!(retry_state, UserActionState::Cancelled);
-    assert!(session_runtime.cancelled_turns.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn submit_dynamic_tool_result_requires_original_tool_item_id() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(turn_executor.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), None).await;
-
-    let error = service
-        .submit_dynamic_tool_result(test_session(), "call-1", "AskUser", "ok".to_string(), true)
-        .await
-        .expect_err("missing item id should fail before runtime dispatch");
-
-    assert!(error.is_code(talos_error::ErrorCode::InternalError));
-    assert!(turn_executor.stream_request.lock().unwrap().is_none());
-    assert!(turn_executor.dynamic_turn_id.lock().unwrap().is_none());
-    let active = store.get_active_turn("s1").await.unwrap().unwrap();
-    assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-    assert_eq!(active.current_action_id.as_deref(), Some("action-1"));
-}
-
-#[tokio::test]
-async fn stale_user_action_submission_does_not_accept_the_response() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store, _message_queue) =
-        test_service(turn_executor.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
-    store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "s1".to_string(),
-            turn_id: "turn-other".to_string(),
-            message_id: Some("msg-other".to_string()),
-            status: ActiveTurnStatus::WaitingUserAction,
-            last_event_id: Some(TimelineEventId::from_seq(10)),
-            current_action_id: Some("action-other".to_string()),
-            updated_at: 2,
-        })
-        .await
-        .unwrap();
-
-    let error = service
-        .submit_user_action(
-            test_session(),
-            "turn-original",
-            "action-1",
-            UserActionResponse::DynamicToolResult(DynamicToolResult {
-                output: "ok".to_string(),
-                success: true,
-            }),
-        )
-        .await
-        .expect_err("stale action should be rejected before mutation");
-
-    assert!(error.is_code(talos_error::ErrorCode::Conflict));
-    assert!(turn_executor.stream_request.lock().unwrap().is_none());
-    let record = UserActionStore::get(store.as_ref(), "s1", "turn-original", "action-1")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(record.action.state, UserActionState::Pending);
-    assert_eq!(record.response, None);
-}
-
-#[tokio::test]
-async fn accepted_user_action_recovery_resumes_the_original_turn() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, event_service, store, _message_queue) = test_service(turn_executor.clone()).await;
-    create_test_session_record(store.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
-    accept_pending_dynamic_action(&event_service).await;
-    let active = store.get_active_turn("s1").await.unwrap().unwrap();
-
-    service
-        .recover_user_action(test_session(), active)
-        .await
-        .expect("accepted action should resume after recovery");
-
-    assert_eq!(
-        turn_executor.dynamic_turn_id.lock().unwrap().as_deref(),
-        Some("turn-original")
-    );
-}
-
-#[tokio::test]
-async fn resuming_user_action_recovery_finishes_as_execution_unknown() {
-    let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, event_service, store, _message_queue) = test_service(turn_executor.clone()).await;
-    insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
-    let accepted = accept_pending_dynamic_action(&event_service).await;
-    event_service
-        .user_actions()
-        .begin_resume(accepted)
-        .await
-        .unwrap();
-    let active = store.get_active_turn("s1").await.unwrap().unwrap();
-
-    service
-        .recover_user_action(test_session(), active)
-        .await
-        .expect("uncertain dispatch should become terminal");
-
-    assert!(turn_executor.stream_request.lock().unwrap().is_none());
-    let record = UserActionStore::get(store.as_ref(), "s1", "turn-original", "action-1")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(record.action.state, UserActionState::ExecutionUnknown);
-    let active = store.get_active_turn("s1").await.unwrap().unwrap();
-    assert_eq!(active.status, ActiveTurnStatus::Failed);
-    assert_eq!(active.current_action_id, None);
-    let events = store
-        .list_turn_events("s1", "turn-original", 32)
-        .await
-        .unwrap();
-    assert!(events.iter().any(|event| matches!(
-        &event.payload,
-        AgentEventPayload::ItemDelta(payload)
-            if matches!(
-                payload.delta,
-                TalosTimelineDelta::UserAction {
-                    event: TimelineUserActionEvent::Finished {
-                        state: UserActionState::ExecutionUnknown,
-                        ..
-                    }
-                }
-            )
-    )));
-}
-
-async fn accept_pending_dynamic_action(event_service: &TimelineEventService) -> UserActionRecord {
-    event_service
-        .user_actions()
-        .accept(
-            "s1",
-            "turn-original",
-            "action-1",
-            UserActionResponse::DynamicToolResult(DynamicToolResult {
-                output: "ok".to_string(),
-                success: true,
-            }),
-        )
-        .await
-        .unwrap()
-        .record
+    })
+    .await
+    .expect("canonical Turn should settle");
 }

@@ -5,6 +5,181 @@ use talos_storage::SqliteStorage;
 use super::{run_migrations, test_migrations_dir};
 
 #[tokio::test]
+async fn migration_normalizes_session_owned_facts_without_context_or_model_copies() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608300003)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (
+            session_key, user_id, channel, scope, peer_id, agent_id,
+            workspace_id, created_at, last_activity, context_json, model,
+            conf_json, usage_json
+        ) VALUES (
+            'session-1', 'user-1', 'legacy-channel', 'api', 'user-1', 'agent-1',
+            'workspace-1', 1, 2,
+            '{"source_type":"desktop","provider":"sdk","user_id":"user-1","message_id":"request-message","trace_id":"request-trace","channel_id":"channel-1","thread_id":"thread-1","project_root":"/derived","environment":{"directory":"/workspace","connection_mode":"embedded"}}',
+            'stale-model',
+            '{"model_selection":{"model_ref":{"provider":"openai","id":"conf-model"},"reasoning_effort":null},"user_permission_mode":null}',
+            '{"tokens":{"input_tokens":3,"output_tokens":2,"total_tokens":5},"context":null}'
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let columns = sqlx::query("PRAGMA table_info(sessions)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(!columns.contains("context_json"));
+    assert!(!columns.contains("model"));
+    assert!(!columns.contains("scope"));
+    assert!(!columns.contains("peer_id"));
+    assert!(!columns.contains("account_id"));
+    assert!(columns.contains("source_type"));
+    assert!(columns.contains("source_provider"));
+    assert!(columns.contains("environment_json"));
+
+    let normalized = sqlx::query_as::<_, (String, String, String, String, String)>(
+        r#"
+        SELECT source_type, source_provider, channel_id, thread_id, conf_json
+        FROM sessions WHERE session_key = 'session-1'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        normalized,
+        (
+            "desktop".to_string(),
+            "sdk".to_string(),
+            "channel-1".to_string(),
+            "thread-1".to_string(),
+            r#"{"model_selection":{"model_ref":{"provider":"openai","id":"conf-model"},"reasoning_effort":null},"user_permission_mode":null}"#.to_string(),
+        )
+    );
+}
+
+#[tokio::test]
+async fn migration_normalizes_turn_idempotency_without_response_blobs() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608300002)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (
+            session_key, user_id, channel, scope, peer_id, agent_id,
+            workspace_id, created_at, last_activity, context_json, conf_json, usage_json
+        ) VALUES ('session-1', 'user-1', 'http', 'api', 'user-1', 'agent-1',
+                  'default', 1, 1,
+                  '{"source_type":"http","provider":"http","user_id":"user-1","message_id":"message-1","trace_id":"trace-1"}',
+                  '{"model_selection":{"model_ref":{"provider":"anthropic","id":"default"},"reasoning_effort":null},"user_permission_mode":null}',
+                  '{"tokens":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"context":null}')
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO agent_events (
+            session_id, turn_id, sequence, occurred_at, persisted_at, payload_json
+        ) VALUES ('session-1', 'turn-1', 1, 1, 1, '{}')
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO message_idempotency_keys (
+            session_id, idempotency_key, request_hash, turn_id, message_id,
+            status, result_json, created_at, updated_at, expires_at
+        ) VALUES (
+            'session-1', 'key-1', 'hash-1', 'turn-1', 'message-1',
+            'accepted', '{"request_id":"request-1","message_id":"message-1"}',
+            10, 11, 100
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let record = sqlx::query_as::<_, (String, String, String, String, String, String, i64)>(
+        r#"
+        SELECT command, request_hash, request_id, turn_id, message_id, outcome,
+               committed_event_seq
+        FROM agent_command_idempotency
+        WHERE session_id = 'session-1' AND idempotency_key = 'key-1'
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        record,
+        (
+            "turn_submission".to_string(),
+            "hash-1".to_string(),
+            "request-1".to_string(),
+            "turn-1".to_string(),
+            "message-1".to_string(),
+            "accepted".to_string(),
+            1,
+        )
+    );
+    assert!(!sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_idempotency_keys')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap());
+}
+
+#[tokio::test]
 async fn migration_backfills_and_requires_session_workspace_binding() {
     let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
         .await
@@ -29,10 +204,16 @@ async fn migration_backfills_and_requires_session_workspace_binding() {
         r#"
         INSERT INTO sessions (
             session_key, user_id, channel, scope, peer_id, agent_id,
-            created_at, last_activity, workspace_id
+            created_at, last_activity, workspace_id, context_json, conf_json, usage_json
         ) VALUES
-            ('session-unbound', 'user-1', 'http', 'api', 'user-1', 'agent-a', 1, 1, NULL),
-            ('session-bound', 'user-1', 'http', 'api', 'user-1', 'agent-b', 1, 1, 'workspace-alpha')
+            ('session-unbound', 'user-1', 'http', 'api', 'user-1', 'agent-a', 1, 1, NULL,
+             '{"source_type":"http","provider":"http","user_id":"user-1","message_id":"message-1","trace_id":"trace-1"}',
+             '{"model_selection":{"model_ref":{"provider":"anthropic","id":"default"},"reasoning_effort":null},"user_permission_mode":null}',
+             '{"tokens":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"context":null}'),
+            ('session-bound', 'user-1', 'http', 'api', 'user-1', 'agent-b', 1, 1, 'workspace-alpha',
+             '{"source_type":"http","provider":"http","user_id":"user-1","message_id":"message-2","trace_id":"trace-2"}',
+             '{"model_selection":{"model_ref":{"provider":"anthropic","id":"default"},"reasoning_effort":null},"user_permission_mode":null}',
+             '{"tokens":{"input_tokens":0,"output_tokens":0,"total_tokens":0},"context":null}')
         "#,
     )
     .execute(&pool)
@@ -109,8 +290,8 @@ async fn migration_wraps_legacy_session_token_usage_without_losing_totals() {
         r#"
         INSERT INTO sessions (
             session_key, user_id, channel, scope, peer_id, agent_id,
-            created_at, last_activity, usage_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, last_activity, usage_json, context_json, conf_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind("session-legacy-usage")
@@ -122,6 +303,8 @@ async fn migration_wraps_legacy_session_token_usage_without_losing_totals() {
     .bind(1_i64)
     .bind(1_i64)
     .bind(r#"{"input_tokens":21,"output_tokens":8,"total_tokens":29}"#)
+    .bind(r#"{"source_type":"http","provider":"http","user_id":"user-1","message_id":"message-1","trace_id":"trace-1"}"#)
+    .bind(r#"{"model_selection":{"model_ref":{"provider":"anthropic","id":"default"},"reasoning_effort":null},"user_permission_mode":null}"#)
     .execute(&pool)
     .await
     .unwrap();
@@ -148,7 +331,7 @@ async fn migration_wraps_legacy_session_token_usage_without_losing_totals() {
 }
 
 #[tokio::test]
-async fn migration_replaces_legacy_pending_actions_with_user_action_store() {
+async fn migration_rejects_unsettled_legacy_active_turns() {
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
@@ -179,50 +362,138 @@ async fn migration_replaces_legacy_pending_actions_with_user_action_store() {
     .await
     .unwrap();
 
-    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
-
-    let columns = sqlx::query("PRAGMA table_info(active_turns)")
-        .fetch_all(&pool)
+    let error = run_migrations(&pool, &test_migrations_dir())
         .await
-        .unwrap()
-        .into_iter()
-        .map(|row| row.get::<String, _>("name"))
-        .collect::<std::collections::BTreeSet<_>>();
-    assert!(columns.contains("current_action_id"));
-    assert!(!columns.contains("pending_user_action_json"));
-    let active_sessions =
-        sqlx::query_scalar::<_, String>("SELECT session_id FROM active_turns ORDER BY session_id")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    assert_eq!(active_sessions, vec!["running-session".to_string()]);
+        .expect_err("unsettled legacy Turn must block migration");
 
-    use crate::session::{DatabaseSessionStore, UserActionRecord, UserActionStore};
-    use talos_types::{
-        DynamicToolResultParams, PendingUserAction, UserActionParams, UserActionState,
-    };
-    let store = DatabaseSessionStore::new(storage).await.unwrap();
-    let record = UserActionRecord {
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        action: PendingUserAction {
-            action_id: "action-1".to_string(),
-            call_id: "call-1".to_string(),
-            item_id: None,
-            state: UserActionState::Pending,
-            params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
-                tool_name: "external-tool".to_string(),
-            }),
-        },
-        response: None,
-        version: 0,
-        updated_at: 12,
-    };
-    assert_eq!(store.create(record.clone()).await.unwrap(), record);
-    assert_eq!(
-        store.get("session-1", "turn-1", "action-1").await.unwrap(),
-        Some(record)
+    assert!(error.to_string().contains("active_turns_must_be_settled"));
+}
+
+#[tokio::test]
+async fn migration_archives_legacy_history_without_blocking_upgrade() {
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .unwrap(),
     );
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608300003)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO active_turns (
+            session_id, turn_id, message_id, status, last_event_seq,
+            current_action_id, updated_at
+        ) VALUES ('settled-session', 'turn-1', 'message-1', 'completed', 1, NULL, 10)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO timeline_events (
+            session_id, turn_id, message_id, sequence, event_type,
+            payload_json, created_at_ms
+        ) VALUES (
+            'settled-session', 'turn-1', 'message-1', 1, 'turn_started',
+            '{}', 10
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let retained_event: (i64, String, String, String, i64, String, String, i64) = sqlx::query_as(
+        r#"
+            SELECT event_seq, session_id, turn_id, message_id, sequence,
+                   event_type, payload_json, created_at_ms
+            FROM legacy_timeline_events
+            "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        retained_event,
+        (
+            1,
+            "settled-session".to_string(),
+            "turn-1".to_string(),
+            "message-1".to_string(),
+            1,
+            "turn_started".to_string(),
+            "{}".to_string(),
+            10,
+        )
+    );
+}
+
+#[tokio::test]
+async fn migration_archives_empty_timeline_and_drops_settled_execution_state() {
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .unwrap(),
+    );
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608300003)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO active_turns (
+            session_id, turn_id, message_id, status, last_event_seq,
+            current_action_id, updated_at
+        ) VALUES ('settled-session', 'turn-1', 'message-1', 'completed', 1, NULL, 10)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let removed_tables = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('timeline_events', 'active_turns', 'user_actions') ORDER BY name",
+    )
+    .fetch_all(storage.pool())
+    .await
+    .unwrap();
+    assert!(removed_tables.is_empty());
+    let archived_events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM legacy_timeline_events")
+        .fetch_one(storage.pool())
+        .await
+        .unwrap();
+    assert_eq!(archived_events, 0);
 }
 
 #[tokio::test]
@@ -236,7 +507,7 @@ async fn migration_initializes_base_schema_once() {
     run_migrations(&pool, &test_migrations_dir()).await.unwrap();
 
     let tables = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'bindings', 'projects', 'users', 'user_tokens', 'timeline_events', 'active_turns', 'message_idempotency_keys', 'user_actions') ORDER BY name",
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'bindings', 'projects', 'users', 'user_tokens', 'timeline_events', 'active_turns', 'agent_command_idempotency', 'user_actions') ORDER BY name",
     )
     .fetch_all(&pool)
     .await
@@ -244,13 +515,10 @@ async fn migration_initializes_base_schema_once() {
     assert_eq!(
         tables,
         vec![
-            "active_turns".to_string(),
+            "agent_command_idempotency".to_string(),
             "bindings".to_string(),
-            "message_idempotency_keys".to_string(),
             "projects".to_string(),
             "sessions".to_string(),
-            "timeline_events".to_string(),
-            "user_actions".to_string(),
             "user_tokens".to_string(),
             "users".to_string(),
         ]
@@ -294,7 +562,7 @@ async fn migration_adopts_supported_unversioned_schema_without_losing_sessions()
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO sessions (session_key, user_id, channel, scope, peer_id, agent_id, created_at, last_activity, message_count, memory_processed_until_seq) VALUES ('session-1', 'user-1', 'http', 'api', 'user-1', 'talos', 1, 1, 5, 4)",
+        "INSERT INTO sessions (session_key, user_id, channel, scope, peer_id, agent_id, created_at, last_activity, message_count, memory_processed_until_seq, context_json, conf_json, usage_json) VALUES ('session-1', 'user-1', 'http', 'api', 'user-1', 'talos', 1, 1, 5, 4, '{\"source_type\":\"http\",\"provider\":\"http\",\"user_id\":\"user-1\",\"message_id\":\"message-1\",\"trace_id\":\"trace-1\"}', '{\"model_selection\":{\"model_ref\":{\"provider\":\"anthropic\",\"id\":\"default\"},\"reasoning_effort\":null},\"user_permission_mode\":null}', '{\"tokens\":{\"input_tokens\":0,\"output_tokens\":0,\"total_tokens\":0},\"context\":null}')",
     )
     .execute(&pool)
     .await

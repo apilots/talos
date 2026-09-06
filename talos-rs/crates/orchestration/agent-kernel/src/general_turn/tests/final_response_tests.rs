@@ -14,7 +14,7 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
     });
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -37,11 +37,11 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
     .expect("general turn should succeed");
 
     assert_eq!(
-        result.output_text,
+        result.output_text(),
         "Final architecture summary based on verified tool results."
     );
     assert!(
-        !result.output_text.contains("Tool execution completed."),
+        !result.output_text().contains("Tool execution completed."),
         "forced summary should replace placeholder fallback"
     );
     assert!(provider.round.load(Ordering::SeqCst) >= 3);
@@ -66,7 +66,7 @@ async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_em
     });
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -89,11 +89,11 @@ async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_em
     .expect("general turn should succeed");
 
     assert_eq!(
-        result.output_text,
+        result.output_text(),
         "Salvaged final answer from verified tool results."
     );
     assert!(
-        !result.output_text.contains("Tool execution completed."),
+        !result.output_text().contains("Tool execution completed."),
         "salvage call should replace placeholder fallback"
     );
     assert!(provider.round.load(Ordering::SeqCst) >= 4);

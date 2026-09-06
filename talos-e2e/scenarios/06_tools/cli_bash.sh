@@ -59,7 +59,7 @@ if [[ -z "${stdout_text}" ]]; then
   echo "CASE cli_chat_stream_tool_exec FAIL empty_stdout"
   exit 1
 fi
-if ! echo "${events_text}" | grep -Eq "THINKING item=|SUMMARY "; then
+if ! echo "${events_text}" | grep -Eq "THINKING block=|SUMMARY "; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event events=${events_text}"
   exit 1
 fi
@@ -67,7 +67,7 @@ if ! echo "${events_text}" | grep -q "TOOL_CALL_STARTED name=Bash internal=Bash"
   echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_started events=${events_text}"
   exit 1
 fi
-if ! echo "${events_text}" | grep -q "TOOL_CALL_RESULT item="; then
+if ! echo "${events_text}" | grep -q "TOOL_CALL_COMPLETED call_id="; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_result events=${events_text}"
   exit 1
 fi
@@ -76,21 +76,21 @@ import os
 import re
 
 events = os.environ.get("EVENTS_TEXT", "")
-started = re.search(r"TOOL_CALL_STARTED name=Bash internal=Bash call_id=([^ ]*) item=([^\n ]+)", events)
-result = re.search(r"TOOL_CALL_RESULT item=([^\n ]+) is_error=false", events)
+started = re.search(r"TOOL_CALL_STARTED name=Bash internal=Bash call_id=([^ ]*) block=([^\n ]+)", events)
+result = re.search(r"TOOL_CALL_COMPLETED call_id=([^\n ]+) tool=Bash internal=Bash is_error=false", events)
 print(f"{started.group(1) if started else ''}\t{started.group(2) if started else ''}\t{result.group(1) if result else ''}")
 PY
 )"
 exec_started_call_id="${exec_call_ids%%$'\t'*}"
 exec_remaining="${exec_call_ids#*$'\t'}"
-exec_started_item_id="${exec_remaining%%$'\t'*}"
-exec_result_item_id="${exec_remaining#*$'\t'}"
-if [[ -z "${exec_started_call_id}" || -z "${exec_started_item_id}" || -z "${exec_result_item_id}" ]]; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_identity call_id=${exec_started_call_id} started_item=${exec_started_item_id} result_item=${exec_result_item_id}"
+exec_started_block_id="${exec_remaining%%$'\t'*}"
+exec_result_call_id="${exec_remaining#*$'\t'}"
+if [[ -z "${exec_started_call_id}" || -z "${exec_started_block_id}" || -z "${exec_result_call_id}" ]]; then
+  echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_identity call_id=${exec_started_call_id} started_block=${exec_started_block_id} result_call_id=${exec_result_call_id}"
   exit 1
 fi
-if [[ "${exec_started_item_id}" != "${exec_result_item_id}" ]]; then
-  echo "CASE cli_chat_stream_tool_exec FAIL item_id_mismatch started=${exec_started_item_id} result=${exec_result_item_id}"
+if [[ "${exec_started_call_id}" != "${exec_result_call_id}" ]]; then
+  echo "CASE cli_chat_stream_tool_exec FAIL call_id_mismatch started=${exec_started_call_id} result=${exec_result_call_id}"
   exit 1
 fi
 

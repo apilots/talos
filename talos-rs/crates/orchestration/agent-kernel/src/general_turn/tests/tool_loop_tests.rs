@@ -495,7 +495,7 @@ async fn test_run_general_turn_bash_completes_directly() {
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -517,11 +517,11 @@ async fn test_run_general_turn_bash_completes_directly() {
     .await
     .expect("general turn should succeed");
 
-    assert!(result.output_text.contains("done:ok"));
-    assert_eq!(result.metrics.tool_calls, 1);
-    assert_eq!(result.metrics.tool_successes, 1);
-    assert_eq!(result.metrics.tool_errors, 0);
-    assert_eq!(result.usage.total_tokens, 180);
+    assert!(result.output_text().contains("done:ok"));
+    assert_eq!(result.metrics().tool_calls, 1);
+    assert_eq!(result.metrics().tool_successes, 1);
+    assert_eq!(result.metrics().tool_errors, 0);
+    assert_eq!(result.usage().total_tokens, 180);
     assert_eq!(
         result.last_model_usage,
         TokenUsage {
@@ -532,9 +532,9 @@ async fn test_run_general_turn_bash_completes_directly() {
         }
     );
     assert!(result
-        .output_items
+        .output_items()
         .iter()
-        .any(|item| matches!(item, talos_types::talos::RunItem::ToolResult { .. })));
+        .any(|item| matches!(item, KernelRunItem::ToolResult { .. })));
     assert_eq!(provider.round.load(Ordering::SeqCst), 2);
 }
 
@@ -546,7 +546,7 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -610,7 +610,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -633,31 +633,28 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     .await
     .expect("general turn should succeed");
 
-    assert!(result.output_text.is_empty());
-    assert_eq!(result.stop_reason, StopReason::WaitingUserAction);
-    assert_eq!(result.metrics.tool_calls, 1);
-    assert_eq!(result.metrics.tool_successes, 0);
-    assert_eq!(result.metrics.tool_errors, 0);
-    assert_eq!(result.metrics.model_rounds, 1);
+    assert!(result.output_text().is_empty());
+    assert_eq!(result.stop_reason(), StopReason::WaitingUserAction);
+    assert_eq!(result.metrics().tool_calls, 1);
+    assert_eq!(result.metrics().tool_successes, 0);
+    assert_eq!(result.metrics().tool_errors, 0);
+    assert_eq!(result.metrics().model_rounds, 1);
     let GeneralTurnOutcome::Waiting {
-        pending_action: PendingGeneralTurnAction::UserAction(pending),
-        stop_reason: StopReason::WaitingUserAction,
-        ..
+        ref pending_action, ..
     } = result.outcome
     else {
         panic!("dynamic tool result should remain pending");
     };
     assert_eq!(
-        pending.reasoning_continuation,
+        pending_action.reasoning_continuation,
         Some(ReasoningContinuation::Text(
             "dynamic provider continuation".to_string()
         ))
     );
     assert!(
-        result.output_items.iter().all(|item| !matches!(
+        result.output_items().iter().all(|item| !matches!(
             item,
-            talos_types::talos::RunItem::ToolResult { .. }
-                | talos_types::talos::RunItem::OutputText { .. }
+            KernelRunItem::ToolResult { .. } | KernelRunItem::OutputText { .. }
         )),
         "pending dynamic requests should not be emitted as terminal tool results"
     );
@@ -692,7 +689,7 @@ async fn test_run_general_turn_activates_external_tool_with_tool_search_in_same_
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -715,7 +712,7 @@ async fn test_run_general_turn_activates_external_tool_with_tool_search_in_same_
     .await
     .expect("general turn should succeed");
 
-    assert_eq!(result.output_text, "activated done");
+    assert_eq!(result.output_text(), "activated done");
     assert_eq!(provider.round.load(Ordering::SeqCst), 3);
 }
 
@@ -733,7 +730,6 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
-        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "default".to_string(),
@@ -743,10 +739,8 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
-        prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
         maintenance_usage: TokenUsage::default(),
-        tool_definitions: tool_registry.get_tool_definitions(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()
             .with_session_id("s-policy"),
         prompt_diagnostics: PromptDiagnostics {
@@ -760,7 +754,6 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
             window_usage: talos_prompt::PromptWindowUsage::default(),
             session_history_compaction: None,
         },
-        warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
@@ -817,7 +810,6 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
-        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "default".to_string(),
@@ -827,12 +819,10 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
-        prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user(
             "Continue after external dynamic tool result.",
         )],
         maintenance_usage: TokenUsage::default(),
-        tool_definitions: tool_registry.get_tool_definitions(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()
             .with_session_id("s-dynamic-resume"),
         prompt_diagnostics: PromptDiagnostics {
@@ -846,13 +836,12 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
             window_usage: talos_prompt::PromptWindowUsage::default(),
             session_history_compaction: None,
         },
-        warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
         run_tasks: crate::test_run_tasks(),
     };
-    let resume = GeneralTurnResume::UserAction(UserActionResume {
+    let resume = AgentKernelContinuation::UserAction(AgentKernelUserActionContinuation {
         call_id: "call_dynamic".to_string(),
         tool_name: "echo_test".to_string(),
         response: talos_types::UserActionResponse::DynamicToolResult(
@@ -862,7 +851,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
             },
         ),
         sandbox_request_fingerprint: None,
-        original_call: Some(ResumeToolCall {
+        original_call: Some(AgentKernelContinuationToolCall {
             item_id: None,
             call_id: "call_dynamic".to_string(),
             tool_name: "echo_test".to_string(),
@@ -905,7 +894,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     assert_eq!(result.metrics.model_rounds, 2);
     assert!(result.output_items.iter().any(|item| matches!(
         item,
-        talos_types::talos::RunItem::ToolResult { call_id, tool_name, .. }
+        KernelRunItem::ToolResult { call_id, tool_name, .. }
             if call_id == "call_dynamic" && tool_name == "echo_test"
     )));
     assert_eq!(provider.round.load(Ordering::SeqCst), 1);
@@ -917,7 +906,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
     talos_tools::register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -941,14 +930,11 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
     )
     .await
     .expect("question should suspend the turn");
-    let mut initial_metrics = initial.metrics.clone();
-    let GeneralTurnOutcome::Waiting {
-        pending_action: PendingGeneralTurnAction::UserAction(mut pending),
-        ..
-    } = initial.outcome
-    else {
+    let mut initial_metrics = initial.metrics().clone();
+    let GeneralTurnOutcome::Waiting { pending_action, .. } = initial.outcome else {
         panic!("question should produce one pending user action");
     };
+    let mut pending = *pending_action;
     assert!(matches!(
         pending.params,
         talos_types::UserActionParams::Question(ref params)
@@ -958,7 +944,6 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
     let prepared = PreparedGeneralTurn {
         session_id: "s-question".to_string(),
         user_id: "u1".to_string(),
-        message_id: "msg-question".to_string(),
         invocation_id: "turn-question".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "default".to_string(),
@@ -968,10 +953,8 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
-        prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Continue after the answer.")],
         maintenance_usage: TokenUsage::default(),
-        tool_definitions: tool_registry.get_tool_definitions(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()
             .with_session_id("s-question"),
         prompt_diagnostics: PromptDiagnostics {
@@ -985,7 +968,6 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
             window_usage: talos_prompt::PromptWindowUsage::default(),
             session_history_compaction: None,
         },
-        warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
@@ -1088,7 +1070,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
 fn question_resume(
     pending: PendingUserActionRequest,
     execution_metrics: TurnExecutionMetrics,
-) -> GeneralTurnResume {
+) -> AgentKernelContinuation {
     let PendingUserActionRequest {
         call_id,
         tool_name,
@@ -1100,7 +1082,7 @@ fn question_resume(
         deferred_tool_calls,
         ..
     } = pending;
-    GeneralTurnResume::UserAction(UserActionResume {
+    AgentKernelContinuation::UserAction(AgentKernelUserActionContinuation {
         call_id: call_id.clone(),
         tool_name: tool_name.clone(),
         response: talos_types::UserActionResponse::Question(
@@ -1109,7 +1091,7 @@ fn question_resume(
             },
         ),
         sandbox_request_fingerprint,
-        original_call: Some(ResumeToolCall {
+        original_call: Some(AgentKernelContinuationToolCall {
             item_id: None,
             call_id,
             tool_name,

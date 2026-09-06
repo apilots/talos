@@ -8,8 +8,8 @@ use tokio::signal;
 
 use talos_auth::RequestIdentity;
 use talos_types::{
-    ConfigGetRequest, ConfigGetResponse, ConfigPath, ConfigUpdateRequest, ConfigUpdateResponse,
-    ConfigValue, LlmConfig, ModelListRequest, ModelListResponse,
+    ConfigGetRequest, ConfigPath, ConfigResponse, ConfigUpdateRequest, ConfigValue, LlmConfig,
+    ModelListRequest, ModelListResponse,
 };
 
 use super::access::shared_actor;
@@ -44,7 +44,7 @@ pub(super) async fn list_models_handler(
 pub(super) async fn get_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
-) -> Result<JsonResponse<ConfigGetResponse>, ApiError> {
+) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)
         .unwrap_or_else(RequestIdentity::auth_disabled);
@@ -60,7 +60,7 @@ pub(super) async fn get_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
     Path(path): Path<String>,
-) -> Result<JsonResponse<ConfigGetResponse>, ApiError> {
+) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)
         .unwrap_or_else(RequestIdentity::auth_disabled);
@@ -81,7 +81,7 @@ pub(super) async fn put_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
     BodyJson(value): BodyJson<ConfigValue>,
-) -> Result<JsonResponse<ConfigUpdateResponse>, ApiError> {
+) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)
         .unwrap_or_else(RequestIdentity::auth_disabled);
@@ -97,7 +97,7 @@ pub(super) async fn put_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
     BodyJson(llm): BodyJson<LlmConfig>,
-) -> Result<JsonResponse<ConfigUpdateResponse>, ApiError> {
+) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)
         .unwrap_or_else(RequestIdentity::auth_disabled);

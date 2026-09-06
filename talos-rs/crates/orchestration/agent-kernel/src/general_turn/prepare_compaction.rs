@@ -5,9 +5,6 @@ use talos_types::talos::{
     ContextCompactionTrigger,
 };
 
-/// Session transcript state key controlling the next prompt's compaction policy.
-pub const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
-
 pub(super) fn count_section_kind(
     sections: &[talos_prompt::PromptSection],
     kind: PromptSectionKind,
@@ -86,7 +83,7 @@ pub(super) fn is_recoverable_compaction_parse_error(error: &talos_error::TalosEr
 }
 
 pub(super) async fn emit_context_compaction_stream_event(
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
     trigger: ContextCompactionTrigger,
     stage: ContextCompactionStage,
     outcome: Option<ContextCompactionOutcome>,
@@ -95,8 +92,7 @@ pub(super) async fn emit_context_compaction_stream_event(
 ) {
     emit_stream_event(
         stream_tx,
-        KernelStreamEventType::ContextCompaction,
-        KernelStreamEventData::ContextCompaction(crate::ContextCompactionStreamData {
+        AgentKernelEventPayload::ContextCompaction(crate::ContextCompactionStreamData {
             trigger,
             stage,
             outcome,
@@ -215,7 +211,7 @@ pub(super) fn token_usage_from_session_history_compaction(
 }
 
 pub(super) async fn latest_compact_prompt_cursor(
-    session_artifact_store: &dyn talos_store::session::SessionArtifactStore,
+    session_artifact_store: &dyn crate::KernelSessionArtifactStore,
     kernel_config: &AgentKernelConfig,
     session_id: &str,
 ) -> TalosResult<Option<talos_prompt::CompactPromptCursor>> {

@@ -35,33 +35,25 @@ import json
 import os
 
 payload = {
-    "input": [
-        {
-            "type": "text",
-            "text": os.environ["INPUT_TEXT"]
-        }
-    ],
+    "input": {
+        "content": [
+            {
+                "type": "text",
+                "text": os.environ["INPUT_TEXT"]
+            }
+        ]
+    },
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
 
-build_session_context() {
-  local user_id="$1"
-  USER_ID="$user_id" python3 - <<'PY'
+build_session_start_defaults() {
+  python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "bilingual-tools",
-        "user_id": os.environ["USER_ID"],
-        "thread_id": None,
-        "message_id": "msg-bilingual-tools",
-        "trace_id": "trace-bilingual-tools",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -89,9 +81,9 @@ print(data.get("output_text", ""))
 PY
 }
 
-tool_session_payload="$(build_session_context "tool-user")"
+tool_session_payload="$(build_session_start_defaults)"
 tool_session_id="$(new_session_id)"
-remember_session_context "${tool_session_id}" "${tool_session_payload}"
+remember_session_start_defaults "${tool_session_id}" "${tool_session_payload}"
 tool_session_json="{\"id\":\"${tool_session_id}\"}"
 tool_session_id="$(session_id_from_json "${tool_session_json}")"
 if [[ -z "${tool_session_id}" ]]; then
@@ -132,9 +124,9 @@ echo "DETAIL messages_tool_exec_tool_result_count=${tool_result_count}"
 echo "DETAIL messages_tool_exec_tool_call_name=${tool_call_name}"
 echo "DETAIL messages_tool_exec_tool_result_tool=${tool_result_tool}"
 
-stream_tool_session_payload="$(build_session_context "tool-user-stream")"
+stream_tool_session_payload="$(build_session_start_defaults)"
 stream_tool_session_id="$(new_session_id)"
-remember_session_context "${stream_tool_session_id}" "${stream_tool_session_payload}"
+remember_session_start_defaults "${stream_tool_session_id}" "${stream_tool_session_payload}"
 stream_tool_session_json="{\"id\":\"${stream_tool_session_id}\"}"
 stream_tool_session_id="$(session_id_from_json "${stream_tool_session_json}")"
 if [[ -z "${stream_tool_session_id}" ]]; then
@@ -146,12 +138,14 @@ echo "CASE messages_tool_exec_stream_session_id PASS session_id=${stream_tool_se
 stream_tool_payload="$(python3 - <<'PY'
 import json
 payload = {
-    "input": [
-        {
-            "type": "text",
-            "text": "You must call Bash tool with command ls, then summarize in one short sentence.",
-        }
-    ],
+    "input": {
+        "content": [
+            {
+                "type": "text",
+                "text": "You must call Bash tool with command ls, then summarize in one short sentence.",
+            }
+        ]
+    },
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -160,16 +154,15 @@ stream_tool_log="$(scenario_report_path tool_stream_events.log)"
 send_message_sse_log "${stream_tool_session_id}" "${stream_tool_payload}" "${stream_tool_log}"
 log_case_json "messages_tool_exec_stream" "${stream_tool_payload}" "$(cat "${stream_tool_log}")"
 
-stream_started_count="$(grep -c '^event: timeline.turn.started' "${stream_tool_log}" || true)"
-stream_reasoning_count="$(grep -c '"phase":"thinking"' "${stream_tool_log}" || true)"
-stream_summary_count="$(grep -c '"kind":"execution_summary"' "${stream_tool_log}" || true)"
-stream_tool_started_count="$(grep -c '"kind":"tool_call"' "${stream_tool_log}" || true)"
-stream_tool_progress_count="$(grep -c '"type":"tool_progress"' "${stream_tool_log}" || true)"
-stream_tool_result_count="$(grep -c '"type":"tool_result"' "${stream_tool_log}" || true)"
-stream_final_count="$(grep -c '"phase":"final_answer"' "${stream_tool_log}" || true)"
-stream_completed_count="$(grep -c '^event: timeline.turn.completed' "${stream_tool_log}" || true)"
-stream_request_id_count="$(grep -c '"request_id"' "${stream_tool_log}" || true)"
-if [[ "${stream_started_count}" -lt 1 || "${stream_tool_progress_count}" -lt 1 || "${stream_tool_started_count}" -lt 1 || "${stream_tool_result_count}" -lt 1 || "${stream_final_count}" -lt 1 || "${stream_completed_count}" -lt 1 || "${stream_request_id_count}" -lt 1 ]]; then
+stream_started_count="$(grep -c '^event: timeline/turn/started' "${stream_tool_log}" || true)"
+stream_reasoning_count="$(grep -c '"type":"reasoning"' "${stream_tool_log}" || true)"
+stream_summary_count="$(grep -c '"type":"executionSummary"' "${stream_tool_log}" || true)"
+stream_tool_started_count="$(grep -c '"type":"toolCall"' "${stream_tool_log}" || true)"
+stream_tool_progress_count="$(grep -c '"type":"toolProgress"' "${stream_tool_log}" || true)"
+stream_tool_result_count="$(grep -c '"type":"toolResult"' "${stream_tool_log}" || true)"
+stream_final_count="$(grep -c '"phase":"finalAnswer"' "${stream_tool_log}" || true)"
+stream_completed_count="$(grep -c '^event: timeline/turn/completed' "${stream_tool_log}" || true)"
+if [[ "${stream_started_count}" -lt 1 || "${stream_tool_progress_count}" -lt 1 || "${stream_tool_started_count}" -lt 1 || "${stream_tool_result_count}" -lt 1 || "${stream_final_count}" -lt 1 || "${stream_completed_count}" -lt 1 ]]; then
   echo "CASE messages_tool_exec_stream FAIL started=${stream_started_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_result=${stream_tool_result_count} final=${stream_final_count} completed=${stream_completed_count}"
   exit 1
 fi
@@ -183,27 +176,25 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-item_by_id = {}
-result_pairs = []
+call_ids = set()
+result_ids = set()
 for line in path.read_text().splitlines():
     if not line.startswith("data: "):
         continue
     raw_record = json.loads(line[6:])
-    record = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else raw_record
-    event_type = record.get("event_type")
-    event_payload = record.get("payload", {})
-    if event_type == "item_started":
-        item = event_payload.get("item", {})
-        content = item.get("content", {})
-        if item.get("kind") == "tool_call" and content.get("type") == "tool_call":
-            item_by_id[item.get("item_id")] = content.get("call_id")
-    elif event_type == "item_delta":
-        delta = event_payload.get("delta", {})
-        if delta.get("type") == "tool_result":
-            item_id = event_payload.get("item_id")
-            result_pairs.append((item_id, item_by_id.get(item_id, "")))
-started_count = sum(1 for call_id in item_by_id.values() if call_id)
-matched_result_count = sum(1 for _, call_id in result_pairs if call_id)
+    event = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else {}
+    payload = event.get("payload") or {}
+    if payload.get("type") != "messageBlockCompleted":
+        continue
+    block = (payload.get("data") or {}).get("block") or {}
+    content = block.get("content") or {}
+    data = content.get("data") or {}
+    if content.get("type") == "toolCall" and data.get("name") == "Bash":
+        call_ids.add(data.get("callId"))
+    elif content.get("type") == "toolResult" and data.get("toolName") == "Bash":
+        result_ids.add(data.get("callId"))
+started_count = len(call_ids - {None})
+matched_result_count = len((call_ids & result_ids) - {None})
 print(f"{started_count}\t{matched_result_count}")
 PY
 )"
@@ -213,4 +204,4 @@ if [[ "${stream_started_tool_items}" -lt 1 || "${stream_matched_tool_results}" -
   echo "CASE messages_tool_exec_stream FAIL missing_call_id started_items=${stream_started_tool_items} matched_results=${stream_matched_tool_results}"
   exit 1
 fi
-echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_result=${stream_tool_result_count} final=${stream_final_count} completed=${stream_completed_count} request_id=${stream_request_id_count} started_items=${stream_started_tool_items} matched_results=${stream_matched_tool_results}"
+echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_result=${stream_tool_result_count} final=${stream_final_count} completed=${stream_completed_count} started_items=${stream_started_tool_items} matched_results=${stream_matched_tool_results}"

@@ -1,59 +1,56 @@
 use std::sync::Arc;
 
+use crate::InnerModelClient;
+use talos_agent_api::{SubmitTurnInputRequest, SubmitTurnInputResponse};
 use talos_auth::{AuthService, UserService};
-use talos_config::{Config, ConfigStore};
-use talos_coordinator::{AgentSessionCompactionIdentity, SessionRuntime};
+use talos_config::ConfigStore;
+use talos_coordinator::AgentCoordinator;
 use talos_error::TalosError;
 use talos_store::profile::ProfileStore;
 use talos_store::project::ProjectStore;
-use talos_store::session::{
-    ActiveTurnStatus, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
-    SessionArtifactStore, SessionPatchAck, SessionStore, TimelineEventId,
-};
+use talos_store::session::{AgentExecutionStore, SessionRecord, SessionStore};
 use talos_types::{
-    AgentTreeSnapshot, ConfigValue, FollowUpSubagentRequest, InterruptSubagentRequest,
-    ListSubagentsRequest, MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest,
-    MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
-    MessageQueueSteerRequest, MessageQueueUpdateRequest, ModelInfo, OptionalCurrentDirectoryPatch,
-    RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse,
-    SendMessageResult, SendSubagentMessageRequest, SessionConfigOverridePolicy, SessionListRequest,
-    SessionPatch, SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
-    SubagentSpawnResult, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
-    SubscribeTimelineRequest, TalosConfig, TalosSession, TimelineActiveTurnSnapshot,
-    WaitSubagentRequest,
+    AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
+    MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest, ModelInfo,
+    OptionalCurrentDirectoryPatch, RecoverTimelineRequest,
+    RetryTurnRequest as SharedRetryTurnRequest, SendMessageResult, SendSubagentMessageRequest,
+    SessionConfigOverridePolicy, SessionInfo, SessionListRequest, SessionPatch,
+    SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
+    SubagentSpawnResult, SubscribeTimelineRequest, TalosConfig, WaitSubagentRequest,
 };
+use tokio::sync::RwLock;
 
-use super::mapping::{map_timeline_cursor_status, turn_command_status};
 use super::types::ServiceResult;
 use crate::access::{CreateSessionRequest, ResourceAccessService};
 use crate::file::FileService;
 use crate::fs::FsService;
 use crate::project::ProjectService;
+use crate::session::SessionService;
 use crate::subagent::SubagentService;
+use crate::timeline::TimelineEventId;
+use crate::turn::{StartTurnReservation, TurnRetryParams, TurnService};
 use crate::{
-    AccountService, Actor, ConfigService, MemoryService, PluginManagerService, ProfileService,
-    RuntimeConfigReloadHook, RuntimeConfigReloadTrigger, SessionHistoryService,
-    SessionMessageQueueService, SessionService, SkillsService, TimelineEventService,
-    TimelineSubscribeCommand, TimelineSubscriptionService, TimelineSubscriptionSource,
-    TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
+    AccountService, Actor, ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService,
+    MemoryService, PluginManagerService, ProfileService, SessionHistoryService,
+    SessionMessageQueueService, SkillsService, TimelineEventService, TimelineSubscribeCommand,
+    TimelineSubscription, TimelineSubscriptionService, WorkspaceDocService,
 };
 
 #[path = "interrupt.rs"]
 mod interrupt;
 #[path = "message_queue.rs"]
 mod message_queue;
-#[path = "orphan_turn_recovery.rs"]
-mod orphan_turn_recovery;
 #[path = "project_fs.rs"]
 mod project_fs;
 
 #[derive(Clone)]
 pub struct TalosService {
     access: ResourceAccessService,
+    sessions: Arc<SessionService>,
     pub account: AccountService,
     pub profile: ProfileService,
     turns: TurnService,
-    event_log: Arc<TimelineEventService>,
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
     message_queue: SessionMessageQueueService,
@@ -65,63 +62,61 @@ pub struct TalosService {
     pub plugins: PluginManagerService,
     pub skills: SkillsService,
     pub workspace_docs: WorkspaceDocService,
+    execution_gate: Arc<RwLock<()>>,
 }
 
 impl TalosService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        turn_executor: Arc<dyn TurnExecutor>,
-        session_runtime: Arc<dyn SessionRuntime>,
+        coordinator: Arc<dyn AgentCoordinator>,
         session_store: Arc<dyn SessionStore>,
-        session_artifact_store: Arc<dyn SessionArtifactStore>,
+        agent_execution_store: Arc<dyn AgentExecutionStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
         files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
-        idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
         config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
+        reload_hook: ConfigReloadHook,
     ) -> Self {
-        Self::new_with_reload_hook(
-            turn_executor,
-            session_runtime,
+        Self::assemble(
+            coordinator,
             session_store,
-            session_artifact_store,
+            agent_execution_store,
             project_store,
             profile_store,
             files,
             event_service,
-            idempotency_store,
             base_config,
             memory,
             config_store,
             models,
             auth_service,
             user_service,
-            None,
+            reload_hook,
         )
     }
 
-    pub fn new_with_reload_hook(
-        turn_executor: Arc<dyn TurnExecutor>,
-        session_runtime: Arc<dyn SessionRuntime>,
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        coordinator: Arc<dyn AgentCoordinator>,
         session_store: Arc<dyn SessionStore>,
-        session_artifact_store: Arc<dyn SessionArtifactStore>,
+        agent_execution_store: Arc<dyn AgentExecutionStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
         files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
-        idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
         config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
-        reload_hook: Option<RuntimeConfigReloadHook>,
+        reload_hook: ConfigReloadHook,
     ) -> Self {
         let sessions = SessionService::new(
             session_store.clone(),
@@ -129,31 +124,19 @@ impl TalosService {
             base_config.clone(),
         );
         let sessions = Arc::new(sessions);
+        let execution_gate = Arc::new(RwLock::new(()));
         let projects = Arc::new(ProjectService::new(project_store.clone()));
-        let reload_hook: Option<RuntimeConfigReloadHook> = {
+        let config_reload_hook: ConfigReloadHook = {
             let sessions = sessions.clone();
-            let base_config_state = Arc::new(std::sync::RwLock::new(base_config.clone()));
-            Some(Arc::new(move |trigger: RuntimeConfigReloadTrigger| {
-                let reloaded_config = if let Some(hook) = &reload_hook {
-                    hook(trigger.clone())?
-                } else {
-                    match &trigger {
-                        RuntimeConfigReloadTrigger::Updated(value) => {
-                            let mut base_config = base_config_state
-                                .write()
-                                .expect("service base config write lock");
-                            apply_config_value_to_config(&mut base_config, value);
-                            base_config.clone()
-                        }
-                        RuntimeConfigReloadTrigger::Explicit => base_config_state
-                            .read()
-                            .expect("service base config read lock")
-                            .clone(),
-                    }
-                };
-                sessions.update_base_config(reloaded_config.clone());
-                Ok(reloaded_config)
-            }))
+            Arc::new(move |trigger: ConfigReloadTrigger| {
+                let prepared = reload_hook(trigger)?;
+                let reloaded_config = prepared.config().clone();
+                let sessions = sessions.clone();
+                Ok(ConfigReloadPlan::new(reloaded_config.clone(), move || {
+                    prepared.publish();
+                    sessions.update_base_config(reloaded_config);
+                }))
+            })
         };
         let plugins = PluginManagerService::new(
             base_config.agent.kernel.plugins.clone(),
@@ -169,39 +152,37 @@ impl TalosService {
         )
         .expect("message queue config must be validated before service assembly");
         let turns = TurnService::new(
-            turn_executor,
+            coordinator.clone(),
+            agent_execution_store.clone(),
             event_service.clone(),
-            idempotency_store,
             profile_store.clone(),
             sessions.clone(),
-            session_runtime.clone(),
             message_queue.clone(),
             base_config.clone(),
+            execution_gate.clone(),
         );
-        let history = SessionHistoryService::new(session_artifact_store, event_service.clone());
+        let history = SessionHistoryService::new(event_service.clone());
         let subagents = SubagentService::new(
             sessions.clone(),
             Arc::new(turns.clone()),
             event_service.clone(),
-            history.clone(),
         );
 
         Self {
             access: ResourceAccessService::with_services(
-                session_runtime.clone(),
+                coordinator.clone(),
                 sessions.clone(),
                 projects,
-                profile_store.clone(),
             ),
+            sessions,
             account: AccountService::new(
                 auth_service,
                 user_service,
                 base_config.cloud.api_base_url.clone(),
             ),
             turns,
-            event_log: event_service.clone(),
             profile: ProfileService::new(
-                session_store,
+                session_store.clone(),
                 project_store,
                 profile_store,
                 base_config.agent.kernel.timezone.clone(),
@@ -210,13 +191,20 @@ impl TalosService {
             history,
             message_queue,
             subagents,
-            config: ConfigService::new_with_reload_hook(config_store, models, reload_hook),
+            config: ConfigService::new(
+                config_store,
+                models,
+                session_store,
+                execution_gate.clone(),
+                config_reload_hook,
+            ),
             files,
             fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory,
             plugins,
             skills,
             workspace_docs: WorkspaceDocService::new(base_config),
+            execution_gate,
         }
     }
 
@@ -225,46 +213,13 @@ impl TalosService {
     pub fn with_user_workspace_memory(
         mut self,
         memory: Arc<crate::UserWorkspaceMemoryService>,
+        inner_model: Arc<InnerModelClient>,
     ) -> Self {
+        self.turns = self
+            .turns
+            .with_user_workspace_memory_reflection(memory.clone(), inner_model);
         self.workspace_docs = self.workspace_docs.with_user_workspace_memory(memory);
         self
-    }
-
-    pub fn new_with_session_store(
-        turn_executor: Arc<dyn TurnExecutor>,
-        session_runtime: Arc<dyn SessionRuntime>,
-        session_store: Arc<dyn SessionStore>,
-        session_artifact_store: Arc<dyn SessionArtifactStore>,
-        project_store: Arc<dyn ProjectStore>,
-        profile_store: Arc<dyn ProfileStore>,
-        files: Arc<FileService>,
-        event_service: Arc<TimelineEventService>,
-        idempotency_store: Arc<dyn MessageIdempotencyStore>,
-        base_config: TalosConfig,
-        memory: MemoryService,
-        config_store: Arc<dyn ConfigStore>,
-        models: Vec<ModelInfo>,
-        auth_service: Arc<dyn AuthService>,
-        user_service: Arc<dyn UserService>,
-    ) -> Self {
-        Self::new_with_reload_hook(
-            turn_executor,
-            session_runtime,
-            session_store,
-            session_artifact_store,
-            project_store,
-            profile_store,
-            files,
-            event_service,
-            idempotency_store,
-            base_config,
-            memory,
-            config_store,
-            models,
-            auth_service,
-            user_service,
-            None,
-        )
     }
 
     pub async fn patch_session(
@@ -272,20 +227,21 @@ impl TalosService {
         actor: &Actor,
         session_id: &str,
         patch: SessionPatch,
-    ) -> ServiceResult<SessionPatchAck> {
+    ) -> ServiceResult<SessionInfo> {
+        let _execution_guard = self.execution_gate.write().await;
         if let Some(selection) = patch.model_selection()? {
             self.config.validate_model_selection_supported(&selection)?;
         }
-        let _session = self.access.get_session(actor, session_id).await?;
-        self.ensure_session_write_allowed(session_id).await?;
-        self.access.patch_session(actor, session_id, patch).await
+        let session = self.access.load_session(actor, session_id).await?;
+        let updated = self.access.patch_session(session, patch).await?;
+        self.sessions.session_info(&updated)
     }
 
     pub async fn list_sessions(
         &self,
         actor: &Actor,
         request: SessionListRequest,
-    ) -> ServiceResult<Vec<TalosSession>> {
+    ) -> ServiceResult<Vec<SessionInfo>> {
         self.access.list_sessions(actor, request).await
     }
 
@@ -297,94 +253,96 @@ impl TalosService {
         self.profile.read_profile(actor).await
     }
 
-    pub async fn get_session(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-    ) -> ServiceResult<TalosSession> {
-        self.access.get_session(actor, session_id).await
-    }
-
-    pub async fn create_session(
-        &self,
-        actor: &Actor,
-        params: CreateSessionRequest,
-    ) -> ServiceResult<TalosSession> {
-        if let Some(selection) = params.model_selection.as_ref() {
-            self.config.validate_model_selection_supported(selection)?;
-        }
-        self.access.get_or_create_session(actor, params).await
+    pub async fn get_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<SessionInfo> {
+        let record = self.access.load_session(actor, session_id).await?;
+        self.sessions.session_info(&record)
     }
 
     pub async fn get_session_history(
         &self,
         actor: &Actor,
-        session_id: &str,
-    ) -> ServiceResult<talos_types::talos::SessionHistorySnapshot> {
-        let session = self.access.get_session(actor, session_id).await?;
-        self.history.snapshot(&session).await
+        request: talos_types::SessionHistoryRequest,
+    ) -> ServiceResult<talos_agent_api::SessionHistoryResponse> {
+        let _session = self.access.load_session(actor, &request.session_id).await?;
+        self.history
+            .read(
+                &request.session_id,
+                request.cursor.as_deref(),
+                request.limit,
+            )
+            .await
     }
 
     pub async fn get_active_turn(
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ServiceResult<TimelineActiveTurnSnapshot> {
-        let _session = self.access.get_session(actor, session_id).await?;
-        self.events.get_active_turn_snapshot(session_id).await
+    ) -> ServiceResult<Option<talos_agent_api::TimelineActiveTurn>> {
+        let _session = self.access.load_session(actor, session_id).await?;
+        self.events
+            .get_active_turn(session_id)
+            .await
+            .map(|active_turn| active_turn.map(crate::timeline::map_timeline_active_turn))
     }
 
     async fn submit_start_turn(
         &self,
         actor: &Actor,
+        source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
         idempotency_key: Option<String>,
-    ) -> ServiceResult<MessageCommandResult> {
+    ) -> ServiceResult<StartTurnResponse> {
         TurnService::validate_start_turn_request(&request)?;
         if let Some(selection) = request.model_selection.as_ref() {
             self.config.validate_model_selection_supported(selection)?;
         }
         let session_id = request.session_id.clone();
-        let (session, created_session) = match self.access.get_session(actor, &session_id).await {
-            Ok(session) => {
-                let session = self
-                    .apply_existing_turn_metadata(actor, session, &request)
-                    .await?;
-                (session, false)
-            }
-            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {
-                let context = request.context.clone().ok_or_else(|| {
-                    talos_error::TalosError::public(
-                        talos_error::ErrorCode::InvalidRequest,
-                        "message context is required to create session".to_string(),
-                    )
-                })?;
-                let session = self
-                    .access
-                    .get_or_create_session(
+        let existing_session = match self.access.load_session(actor, &session_id).await {
+            Ok(session) => Some(session),
+            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => None,
+            Err(error) => return Err(error),
+        };
+        let prepared = match self
+            .turns
+            .reserve_start_turn(&request, idempotency_key.as_deref())
+            .await?
+        {
+            StartTurnReservation::Ready(prepared) => prepared,
+            StartTurnReservation::Completed(response) => return Ok(response),
+        };
+        let created_session = existing_session.is_none();
+        let session_result = match existing_session {
+            Some(session) => self.apply_existing_turn_metadata(session, &request).await,
+            None => {
+                self.access
+                    .create_session(
                         actor,
                         CreateSessionRequest {
                             session_id: session_id.clone(),
-                            context,
+                            source,
                             model_selection: request.model_selection.clone(),
                             user_permission_mode: request.user_permission_mode,
                             project_id: request.project_id.clone(),
                             current_directory: request.current_directory.clone(),
                         },
                     )
-                    .await?;
-                (session, true)
+                    .await
             }
-            Err(error) => return Err(error),
         };
+        let session = match session_result {
+            Ok(session) => session,
+            Err(error) => {
+                self.turns.release_start_turn(prepared).await;
+                return Err(error);
+            }
+        };
+        let rollback_session = created_session.then(|| session.clone());
         let result = self
             .turns
-            .submit_start_turn(session, request, idempotency_key)
+            .submit_start_turn(session, request, prepared)
             .await;
-        if created_session
-            && !matches!(&result, Ok(result) if result.status == IdempotencyStatus::Accepted)
-        {
-            if let Err(error) = self.access.discard_session_record(actor, &session_id).await {
+        if let (Some(session), Err(_)) = (rollback_session, &result) {
+            if let Err(error) = self.sessions.delete_session(session).await {
                 tracing::error!(
                     session_id = %session_id,
                     error = %error,
@@ -397,10 +355,9 @@ impl TalosService {
 
     async fn apply_existing_turn_metadata(
         &self,
-        actor: &Actor,
-        session: TalosSession,
+        session: SessionRecord,
         request: &StartTurnRequest,
-    ) -> ServiceResult<TalosSession> {
+    ) -> ServiceResult<SessionRecord> {
         if request
             .project_id
             .as_deref()
@@ -408,10 +365,7 @@ impl TalosService {
         {
             return Err(talos_error::TalosError::public(
                 talos_error::ErrorCode::InvalidRequest,
-                format!(
-                    "session '{}' project binding is immutable",
-                    session.context.session_id
-                ),
+                format!("session '{}' project binding is immutable", session.id),
             ));
         }
         let mut patch = SessionPatch::default();
@@ -427,7 +381,7 @@ impl TalosService {
                         talos_error::ErrorCode::InvalidRequest,
                         format!(
                             "session {} is bound to current_directory {}, but request used {}",
-                            session.context.session_id,
+                            session.id,
                             bound.display(),
                             current_directory.display()
                         ),
@@ -444,30 +398,18 @@ impl TalosService {
         if patch.conf.is_none() && patch.current_directory.is_none() {
             return Ok(session);
         }
-        self.access
-            .patch_session(actor, &session.context.session_id, patch)
-            .await?;
-        self.access
-            .get_session(actor, &session.context.session_id)
-            .await
+        self.access.patch_session(session, patch).await
     }
 
     pub async fn start_turn(
         &self,
         actor: &Actor,
+        source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
         idempotency_key: Option<String>,
     ) -> ServiceResult<StartTurnResponse> {
-        let result = self
-            .submit_start_turn(actor, request, idempotency_key)
-            .await?;
-        Ok(StartTurnResponse {
-            request_id: result.request_id,
-            message_id: result.message_id,
-            session_id: result.session_id,
-            turn_id: result.turn_id,
-            status: turn_command_status(result.status),
-        })
+        self.submit_start_turn(actor, source, request, idempotency_key)
+            .await
     }
 
     /// Starts one child Session owned by the caller's active parent turn.
@@ -518,13 +460,13 @@ impl TalosService {
         self.subagents.list(request).await
     }
 
-    pub async fn submit_retry(
+    async fn submit_retry(
         &self,
         actor: &Actor,
         session_id: &str,
         request: TurnRetryParams,
-    ) -> ServiceResult<MessageCommandResult> {
-        let session = self.access.get_session(actor, session_id).await?;
+    ) -> ServiceResult<StartTurnResponse> {
+        let session = self.access.load_session(actor, session_id).await?;
         self.turns.submit_retry(session, request).await
     }
 
@@ -532,111 +474,74 @@ impl TalosService {
         &self,
         actor: &Actor,
         request: SharedRetryTurnRequest,
-    ) -> ServiceResult<RetryTurnResponse> {
+    ) -> ServiceResult<StartTurnResponse> {
         let session_id = request.session_id.clone();
-        let result = self
-            .submit_retry(
-                actor,
-                &session_id,
-                TurnRetryParams {
-                    input: request.input,
-                    client_message_id: request.client_message_id,
-                    retry_of_message_id: request.retry_of_message_id,
-                },
-            )
-            .await?;
-        Ok(RetryTurnResponse {
-            request_id: result.request_id,
-            message_id: result.message_id,
-            session_id: result.session_id,
-            turn_id: result.turn_id,
-            status: turn_command_status(result.status),
-        })
+        self.submit_retry(
+            actor,
+            &session_id,
+            TurnRetryParams {
+                input: request.input,
+                client_message_id: request.client_message_id,
+                retry_of_message_id: request.retry_of_message_id,
+            },
+        )
+        .await
     }
 
     pub async fn compact_session(
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ServiceResult<TalosSession> {
-        let _session = self.access.get_session(actor, session_id).await?;
+    ) -> ServiceResult<SessionInfo> {
+        let session = self.access.load_session(actor, session_id).await?;
         self.ensure_session_write_allowed(session_id).await?;
         let operation_id = uuid::Uuid::new_v4().simple().to_string();
-        let identity = AgentSessionCompactionIdentity {
-            request_id: format!("req_{operation_id}"),
-            turn_id: format!("turn_{operation_id}"),
-            message_id: format!("msg_{operation_id}"),
-        };
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(16);
-        let event_log = self.event_log.clone();
-        let event_task = tokio::spawn(async move {
-            let mut first_error = None;
-            while let Some(event) = event_rx.recv().await {
-                if let Err(error) = event_log.record_talos_event(event).await {
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
-            }
-            if let Some(error) = first_error {
-                return Err(error);
-            }
-            Ok::<(), TalosError>(())
-        });
-        let result = self
-            .access
-            .compact_session(actor, session_id, identity, event_tx)
-            .await;
-        let event_result = event_task.await.map_err(|error| {
-            TalosError::internal(format!("session compaction event task failed: {error}"))
-        })?;
-        event_result?;
-        result
+        self.turns
+            .compact_session(
+                session,
+                format!("req_{operation_id}"),
+                talos_agent_api::AgentTurnRef::new(session_id, format!("turn_{operation_id}")),
+            )
+            .await
     }
 
     pub async fn clear_session(
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ServiceResult<TalosSession> {
-        let _session = self.access.get_session(actor, session_id).await?;
+    ) -> ServiceResult<SessionInfo> {
+        let _execution_guard = self.execution_gate.write().await;
+        let session = self.access.load_session(actor, session_id).await?;
         self.ensure_session_write_allowed(session_id).await?;
-        self.access.clear_session(actor, session_id).await
+        self.access.clear_session(session).await
     }
 
     pub async fn close_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {
-        let _session = self.access.get_session(actor, session_id).await?;
+        let _execution_guard = self.execution_gate.write().await;
+        let session = self.access.load_session(actor, session_id).await?;
         self.ensure_session_write_allowed(session_id).await?;
-        self.access.close_session(actor, session_id).await
+        self.access.close_session(session).await
     }
 
-    pub async fn delete_session(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-    ) -> ServiceResult<SessionPatchAck> {
-        let _session = self.access.get_session(actor, session_id).await?;
+    pub async fn delete_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<bool> {
+        let _execution_guard = self.execution_gate.write().await;
+        let session = self.access.load_session(actor, session_id).await?;
         self.ensure_session_write_allowed(session_id).await?;
         self.subagents.ensure_tree_inactive(session_id).await?;
-        let ack = self.access.delete_session(actor, session_id).await?;
-        if ack.success {
+        let deleted = self.access.delete_session(session).await?;
+        if deleted {
             self.message_queue.clear_session(session_id)?;
         }
-        Ok(ack)
+        Ok(deleted)
     }
 
     async fn ensure_session_write_allowed(&self, session_id: &str) -> ServiceResult<()> {
-        if matches!(
-            self.events
-                .get_active_turn(session_id)
-                .await?
-                .map(|turn| turn.status),
-            Some(
-                ActiveTurnStatus::Running
-                    | ActiveTurnStatus::WaitingUserAction
-                    | ActiveTurnStatus::Cancelling
-            )
-        ) {
+        if self
+            .turns
+            .canonical_active_turn(session_id)
+            .await?
+            .is_some()
+        {
             return Err(TalosError::public(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!("session `{session_id}` already has an active turn"),
@@ -645,57 +550,35 @@ impl TalosService {
         Ok(())
     }
 
-    pub async fn submit_dynamic_tool_result_for_session_fields(
+    /// Run one process-local maintenance operation only while the Session has no Turn owner.
+    ///
+    /// The reservation blocks new Turn admission for this Session for the operation duration.
+    /// It does not persist maintenance state or expose the execution gate to callers.
+    pub async fn run_idle_session_maintenance<T, F, Fut>(
         &self,
-        actor: &Actor,
         session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> ServiceResult<()> {
-        let session = self.access.get_session(actor, session_id).await?;
+        operation: F,
+    ) -> ServiceResult<Option<T>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ServiceResult<T>>,
+    {
         self.turns
-            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
+            .run_when_session_idle(session_id, operation)
             .await
     }
 
-    pub async fn submit_dynamic_tool_result(
+    pub async fn submit_turn_input(
         &self,
         actor: &Actor,
-        request: SubmitDynamicToolResultRequest,
-    ) -> ServiceResult<SubmitDynamicToolResultResponse> {
-        self.submit_dynamic_tool_result_for_session_fields(
-            actor,
-            &request.session_id,
-            &request.call_id,
-            &request.tool_name,
-            request.output,
-            request.success,
-        )
-        .await?;
-        Ok(SubmitDynamicToolResultResponse { success: true })
-    }
-
-    pub async fn submit_user_action(
-        &self,
-        actor: &Actor,
-        request: talos_types::SubmitUserActionRequest,
-    ) -> ServiceResult<talos_types::SubmitUserActionResponse> {
-        let session = self.access.get_session(actor, &request.session_id).await?;
-        let state = self
-            .turns
-            .submit_user_action(
-                session,
-                &request.turn_id,
-                &request.action_id,
-                request.response,
-            )
+        request: SubmitTurnInputRequest,
+    ) -> ServiceResult<SubmitTurnInputResponse> {
+        let identity = request.identity.clone();
+        let session = self
+            .access
+            .load_session(actor, &identity.session_id)
             .await?;
-        Ok(talos_types::SubmitUserActionResponse {
-            action_id: request.action_id,
-            state,
-        })
+        self.turns.submit_turn_input(session, request).await
     }
 
     pub async fn subscribe_timeline(
@@ -703,22 +586,25 @@ impl TalosService {
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> ServiceResult<talos_types::SubscribeTimelineResponse> {
-        let source = self.timeline_subscription_source(actor, request).await?;
-        Ok(source.response)
+        let subscription = self.open_timeline_subscription(actor, request).await?;
+        Ok(subscription.response())
     }
 
-    pub async fn timeline_subscription_source(
+    pub async fn open_timeline_subscription(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> ServiceResult<TimelineSubscriptionSource> {
-        let session = self.access.get_session(actor, &request.session_id).await?;
-        if !self.access.has_active_runtime_turn(&session).await? {
-            if let Some(active) = self.events.get_active_turn(&request.session_id).await? {
-                self.turns.recover_user_action(session, active).await?;
+    ) -> ServiceResult<TimelineSubscription> {
+        let session = self.access.load_session(actor, &request.session_id).await?;
+        if let Some(active) = self
+            .turns
+            .canonical_active_turn(&request.session_id)
+            .await?
+        {
+            if !self.turns.is_turn_execution_active(&active.identity) {
+                self.turns.recover_active_turn(session, active).await?;
             }
         }
-        let session_id = request.session_id.clone();
         let after_event_id = parse_timeline_event_id(request.since_event_id)?;
         let command = TimelineSubscribeCommand {
             session_id: request.session_id,
@@ -735,65 +621,32 @@ impl TalosService {
         } else {
             self.events.subscribe(command).await?
         };
-        let response = talos_types::SubscribeTimelineResponse {
-            subscription_id: format!("sub_{}", uuid::Uuid::new_v4().simple()),
-            session_id,
-            high_water_mark_event_id: subscription
-                .high_water_mark_event_id
-                .as_ref()
-                .map(|value| value.to_string()),
-        };
-        Ok(TimelineSubscriptionSource {
-            response,
-            subscription,
-        })
+        Ok(subscription)
     }
 
     pub async fn recover_timeline(
         &self,
         actor: &Actor,
         request: RecoverTimelineRequest,
-    ) -> ServiceResult<talos_types::TimelineRecoveryResponse> {
-        let session = self.access.get_session(actor, &request.session_id).await?;
-        if !self.access.has_active_runtime_turn(&session).await? {
-            if let Some(active) = self.events.get_active_turn(&request.session_id).await? {
-                self.turns.recover_user_action(session, active).await?;
+    ) -> ServiceResult<talos_agent_api::RecoverTimelineResponse> {
+        let session = self.access.load_session(actor, &request.session_id).await?;
+        if let Some(active) = self
+            .turns
+            .canonical_active_turn(&request.session_id)
+            .await?
+        {
+            if !self.turns.is_turn_execution_active(&active.identity) {
+                self.turns.recover_active_turn(session, active).await?;
             }
         }
         let after_event_id = parse_timeline_event_id(request.after_event_id)?;
-        let recovery = self
-            .events
+        self.events
             .recover_timeline(
                 &request.session_id,
                 after_event_id.as_ref(),
                 request.replay_limit.unwrap_or(1).max(1),
             )
-            .await?;
-        Ok(talos_types::TimelineRecoveryResponse {
-            snapshot: talos_types::TimelineRecoverySnapshot {
-                replay: talos_types::TimelineReplay {
-                    events: recovery.replay.events,
-                    high_water_mark_event_id: recovery
-                        .replay
-                        .high_water_mark_event_id
-                        .map(|value| value.to_string()),
-                    last_replay_seq: recovery.replay.last_replay_seq,
-                    cursor_status: map_timeline_cursor_status(recovery.replay.cursor_status),
-                },
-                active_turn: recovery.active_turn,
-            },
-        })
-    }
-}
-
-fn apply_config_value_to_config(config: &mut Config, value: &ConfigValue) {
-    match value {
-        ConfigValue::Llm(llm) => {
-            config.llm = (**llm).clone();
-        }
-        ConfigValue::WebSearch(web_search) => {
-            config.agent.kernel.tools.web_search = (**web_search).clone();
-        }
+            .await
     }
 }
 

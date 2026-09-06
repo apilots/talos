@@ -9,11 +9,10 @@ import { TurnMetricsFooter } from "./TurnMetricsFooter";
 
 const metrics: ChatTurnMetrics = {
   state: "completed",
-  model_rounds: 11,
-  tool_calls: 16,
-  tool_successes: 16,
-  tool_errors: 0,
-  stop_reason: "end_turn",
+  modelRounds: 11,
+  toolCalls: 16,
+  toolSuccesses: 16,
+  toolErrors: 0,
   usage: {
     input_tokens: 900_000,
     output_tokens: 78_200,
@@ -21,7 +20,8 @@ const metrics: ChatTurnMetrics = {
     cache_creation_input_tokens: null,
     cache_read_input_tokens: null,
   },
-  duration_ms: 30_000_000,
+  context: null,
+  durationMs: 30_000_000,
 };
 
 describe("TurnMetricsFooter", () => {
@@ -32,13 +32,13 @@ describe("TurnMetricsFooter", () => {
 
     const footer = screen.getByLabelText(/Turn average/);
     expect(footer.textContent).toBe(
-      "32.61 tokens/s·978.2k tokens·11 rounds·16 tools·0 errors",
+      "2.61 tokens/s·978.2k tokens·11 rounds·16 tools·0 errors",
     );
     expect(container.querySelectorAll("[data-metric]")).toHaveLength(5);
   });
 
   it("omits only tokens per second when duration is unavailable", () => {
-    render(<TurnMetricsFooter metrics={{ ...metrics, duration_ms: null }} />);
+    render(<TurnMetricsFooter metrics={{ ...metrics, durationMs: null }} />);
 
     expect(screen.queryByText(/tokens\/s/)).toBeNull();
     expect(screen.getByText("978.2k tokens")).not.toBeNull();
@@ -48,7 +48,7 @@ describe("TurnMetricsFooter", () => {
   it("uses singular labels for single-value metrics", () => {
     render(
       <TurnMetricsFooter
-        metrics={{ ...metrics, model_rounds: 1, tool_calls: 1, tool_errors: 1 }}
+        metrics={{ ...metrics, modelRounds: 1, toolCalls: 1, toolErrors: 1 }}
       />,
     );
 

@@ -10,14 +10,14 @@ use super::{
 /// Reads and records Profile usage without exposing database records.
 ///
 /// The Profile service uses this interface for user-scoped aggregates and the
-/// Turn service records completed execution segments. Implementations own SQL
+/// Turn service records cumulative settlement snapshots. Implementations own SQL
 /// and persistence validation; callers do not receive transactions or rows.
 #[async_trait]
 pub trait ProfileStore: Send + Sync {
     /// Persists one strongly typed Turn or completed model-call usage update.
     async fn record_usage(&self, update: ProfileUsageUpdate) -> TalosResult<()>;
 
-    /// Preserves the previous Turn-specific convenience entrypoint for existing callers.
+    /// Records the cumulative usage of one logical Turn at waiting or completion.
     async fn record_turn_usage(&self, update: TurnUsageUpdate) -> TalosResult<()> {
         self.record_usage(ProfileUsageUpdate::Turn(update)).await
     }

@@ -16,7 +16,6 @@ describe("chat api initial turn request", () => {
   it("builds first-turn metadata with the selected permission mode", () => {
     const request = createInitialTurnRequest(
       "sess-1",
-      "user-1",
       "hello",
       {
         modelSelection: {
@@ -28,42 +27,38 @@ describe("chat api initial turn request", () => {
     );
 
     expect(request).toMatchObject({
-      session_id: "sess-1",
-      input: [{ type: "text", text: "hello" }],
+      sessionId: "sess-1",
+      input: { content: [{ type: "text", text: "hello" }] },
       modelSelection: {
         modelRef: { provider: "bailian", id: "qwen-max" },
         reasoningEffort: null,
       },
       userPermissionMode: "askForApproval",
-      context: expect.objectContaining({
-        user_id: "user-1",
-        source_type: "http",
-        provider: "sdk",
-      }),
     });
   });
 
   it("keeps Skill mentions in text for backend resolution", () => {
     const request = createInitialTurnRequest(
       "sess-1",
-      "user-1",
       "use $docs",
     );
 
-    expect(request.input).toEqual([{ type: "text", text: "use $docs" }]);
+    expect(request.input).toEqual({ content: [{ type: "text", text: "use $docs" }] });
   });
 
   it("keeps ordered file ids as one structured input item", () => {
     const request = createInitialTurnRequest(
       "sess-1",
-      "user-1",
       "",
       { fileIds: ["file-2", "file-1"] },
     );
 
-    expect(request.input).toEqual([
-      { type: "files", fileIds: ["file-2", "file-1"] },
-    ]);
+    expect(request.input).toEqual({
+      content: [
+        { type: "file", fileId: "file-2" },
+        { type: "file", fileId: "file-1" },
+      ],
+    });
   });
 });
 
@@ -75,10 +70,10 @@ describe("chat message api", () => {
   it("returns the accepted message id without opening another event stream", async () => {
     const onAcceptedMessageId = vi.fn();
     const start = vi.fn(async () => ({
-      request_id: "req-1",
-      message_id: "msg-accepted",
-      session_id: "sess-1",
-      turn_id: "turn-1",
+      requestId: "req-1",
+      messageId: "msg-accepted",
+      sessionId: "sess-1",
+      turnId: "turn-1",
       status: "accepted",
     }));
     setTalosClientFactory(() => ({
@@ -88,7 +83,15 @@ describe("chat message api", () => {
     } as unknown as TalosWebClient));
 
     const messageId = await startTimelineTurn(
-      { session_id: "sess-1", input: [{ type: "text", text: "hello" }] },
+      {
+        sessionId: "sess-1",
+        input: { content: [{ type: "text", text: "hello" }] },
+        modelSelection: null,
+        userPermissionMode: null,
+        projectId: null,
+        currentDirectory: null,
+        clientRequestId: null,
+      },
       onAcceptedMessageId,
     );
 
@@ -101,10 +104,10 @@ describe("chat message api", () => {
   it("returns the accepted retry message id without opening another event stream", async () => {
     const onAcceptedMessageId = vi.fn();
     const retry = vi.fn(async () => ({
-      request_id: "req-1",
-      message_id: "msg-retry",
-      session_id: "sess-1",
-      turn_id: "turn-1",
+      requestId: "req-1",
+      messageId: "msg-retry",
+      sessionId: "sess-1",
+      turnId: "turn-1",
       status: "accepted",
     }));
     setTalosClientFactory(() => ({
@@ -115,10 +118,10 @@ describe("chat message api", () => {
 
     const messageId = await retryTimelineTurn(
       {
-        session_id: "sess-1",
-        client_message_id: "client-1",
-        retry_of_message_id: "msg-old",
-        input: [{ type: "text", text: "hello" }],
+        sessionId: "sess-1",
+        clientMessageId: "client-1",
+        retryOfMessageId: "msg-old",
+        input: { content: [{ type: "text", text: "hello" }] },
       },
       onAcceptedMessageId,
     );

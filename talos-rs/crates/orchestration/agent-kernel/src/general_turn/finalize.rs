@@ -43,7 +43,6 @@ pub fn finalize_general_turn_artifacts(
 ) -> ExecutedTurnArtifacts {
     let metrics = build_turn_execution_metrics(&state, stop_reason);
     let mut output_items = state.output_items;
-    let reasoning_log = state.reasoning_log;
     let mut final_output = final_text;
 
     if matches!(stop_reason, StopReason::WaitingUserAction) {
@@ -57,7 +56,7 @@ pub fn finalize_general_turn_artifacts(
     }
 
     if !matches!(stop_reason, StopReason::WaitingUserAction) {
-        output_items.push(RunItem::OutputText {
+        output_items.push(KernelRunItem::OutputText {
             text: final_output.clone(),
         });
     }
@@ -68,12 +67,10 @@ pub fn finalize_general_turn_artifacts(
         usage: state.usage,
         last_model_usage: state.last_model_usage,
         metrics,
-        reasoning_log,
         tool_call_log: state.tool_call_log,
         tool_result_log: state.tool_result_log,
         pending_user_action: state.pending_user_action,
         final_answer_streamed: state.final_answer_streamed,
-        execution_summary_streamed: state.execution_summary_streamed,
     }
 }
 

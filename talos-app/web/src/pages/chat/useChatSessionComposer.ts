@@ -85,7 +85,7 @@ export function useChatSessionComposer({
     draftProjectId,
     projects: projectsView.projects,
     sessionExists: Boolean(session),
-    sessionProjectId: session?.project_id,
+    sessionProjectId: session?.projectId,
   });
   const composerModels = modelPickerOptions(models);
   const currentModelLabel = composerModels.find((model) => model.id === currentModel)?.name

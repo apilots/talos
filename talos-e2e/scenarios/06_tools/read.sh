@@ -22,7 +22,7 @@ cleanup() {
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
-WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/tool-read-user"
+WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/anonymous"
 FIXTURE_DIR="${WORKSPACE_DIR}/notes"
 FIXTURE_FILE="${FIXTURE_DIR}/read_target.txt"
 READ_MARKER="read-marker-$(date '+%Y%m%d%H%M%S')-$$"
@@ -47,21 +47,12 @@ export PRIMARY_MODEL="${primary_model}"
 export PRIMARY_PROVIDER="${primary_provider}"
 echo "CASE read_select_model PASS model=${primary_model}"
 
-build_session_context() {
+build_session_start_defaults() {
   python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "tool-read",
-        "user_id": "tool-read-user",
-        "thread_id": None,
-        "message_id": "msg-tool-read",
-        "trace_id": "trace-tool-read",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -75,7 +66,7 @@ import json
 import os
 
 payload = {
-    "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
+    "input": {"content": [{"type": "text", "text": os.environ["INPUT_TEXT"]}]},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -102,9 +93,9 @@ print(data.get("output_text", ""))
 PY
 }
 
-session_payload="$(build_session_context)"
+session_payload="$(build_session_start_defaults)"
 session_id="$(new_session_id)"
-remember_session_context "${session_id}" "${session_payload}"
+remember_session_start_defaults "${session_id}" "${session_payload}"
 session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then

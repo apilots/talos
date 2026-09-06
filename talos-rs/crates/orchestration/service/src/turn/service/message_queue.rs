@@ -4,14 +4,14 @@ impl TurnService {
     pub(crate) async fn try_dispatch_next(
         &self,
         session_id: &str,
-    ) -> TalosResult<Option<MessageCommandResult>> {
+    ) -> TalosResult<Option<StartTurnResponse>> {
         if !self.can_auto_dispatch(session_id).await? {
             return Ok(None);
         }
         let Some(reservation) = self.message_queue.reserve_front(session_id)? else {
             return Ok(None);
         };
-        let session = self.sessions.get_session(session_id).await?.ok_or_else(|| {
+        let session = self.sessions.load_record(session_id).await?.ok_or_else(|| {
             TalosError::public(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("session {session_id}"),
@@ -32,47 +32,29 @@ impl TurnService {
     }
 
     async fn can_auto_dispatch(&self, session_id: &str) -> TalosResult<bool> {
-        let Some(active_turn) = self.event_service.get_active_turn(session_id).await? else {
-            return Ok(true);
-        };
-        match active_turn.status {
-            ActiveTurnStatus::Running
-            | ActiveTurnStatus::WaitingUserAction
-            | ActiveTurnStatus::Cancelling => Ok(false),
-            ActiveTurnStatus::Failed => Ok(true),
-            ActiveTurnStatus::Completed => {
-                let events = self
-                    .event_service
-                    .list_turn_events(session_id, &active_turn.turn_id, 1)
-                    .await?;
-                Ok(!events.last().is_some_and(|event| {
-                    matches!(
-                        &event.payload,
-                        AgentEventPayload::TurnCompleted(completed)
-                            if stop_reason_blocks_auto_dispatch(&completed.stop_reason)
-                    )
-                }))
-            }
+        if self.canonical_active_turn(session_id).await?.is_some() {
+            return Ok(false);
         }
+        let latest_terminal = self
+            .execution_store
+            .get_latest_agent_terminal_event(session_id)
+            .await?;
+        Ok(!latest_terminal.is_some_and(|event| {
+            matches!(
+                event.payload,
+                talos_agent_api::AgentEventPayload::TurnFailed(failed)
+                    if failed.error.code == talos_error::ErrorCode::Cancelled
+            )
+        }))
     }
 
     pub(crate) async fn start_queued_message(
         &self,
-        session: TalosSession,
+        session: talos_store::session::SessionRecord,
         message_id: Option<&str>,
-    ) -> TalosResult<MessageCommandResult> {
-        let session_id = session.context.session_id.clone();
-        if matches!(
-            self.event_service
-                .get_active_turn(&session_id)
-                .await?
-                .map(|turn| turn.status),
-            Some(
-                ActiveTurnStatus::Running
-                    | ActiveTurnStatus::WaitingUserAction
-                    | ActiveTurnStatus::Cancelling
-            )
-        ) {
+    ) -> TalosResult<StartTurnResponse> {
+        let session_id = session.id.clone();
+        if self.canonical_active_turn(&session_id).await?.is_some() {
             return Err(TalosError::public(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!("session `{session_id}` already has an active turn"),
@@ -95,23 +77,33 @@ impl TurnService {
 
     async fn submit_queue_reservation(
         &self,
-        session: TalosSession,
+        session: talos_store::session::SessionRecord,
         reservation: MessageQueueReservation,
-    ) -> TalosResult<MessageCommandResult> {
-        let session_id = session.context.session_id.clone();
-        let binding = match self.session_binding(&session_id).await {
-            Ok(binding) => binding,
-            Err(error) => {
-                self.message_queue.release(reservation)?;
-                return Err(error);
-            }
-        };
-        let input = reservation.input().to_vec();
+    ) -> TalosResult<StartTurnResponse> {
+        let service = self.clone();
+        super::await_admission(async move {
+            service
+                .submit_queue_reservation_owned(session, reservation)
+                .await
+        })
+        .await
+    }
+
+    async fn submit_queue_reservation_owned(
+        &self,
+        session: talos_store::session::SessionRecord,
+        reservation: MessageQueueReservation,
+    ) -> TalosResult<StartTurnResponse> {
+        let input = reservation.input().clone();
         let (auto_dispatch_tx, auto_dispatch_rx) = oneshot::channel();
         let result = self
-            .submit_turn(
+            .submit_turn_owned(
                 session,
-                TurnSubmission { input, binding },
+                TurnSubmission {
+                    input,
+                    retry_of_message_id: None,
+                },
+                None,
                 None,
                 Some(auto_dispatch_rx),
             )
@@ -131,21 +123,22 @@ impl TurnService {
 
     pub(crate) async fn steer_queued_message(
         &self,
-        session: TalosSession,
+        session: talos_store::session::SessionRecord,
         message_id: &str,
         turn_id: &str,
-    ) -> TalosResult<talos_types::MessageQueue> {
-        let session_id = session.context.session_id.clone();
+        command: Option<CommandLease>,
+    ) -> TalosResult<()> {
+        let session_id = session.id.clone();
         let reservation = self.message_queue.reserve(&session_id, message_id)?;
         if let Err(error) = validate_active_turn_input(reservation.input()) {
             self.message_queue.release(reservation)?;
             return Err(error);
         }
-        let active_turn = self.event_service.get_active_turn(&session_id).await?;
+        let active_turn = self.canonical_active_turn(&session_id).await?;
         if !matches!(
             active_turn,
             Some(ref active)
-                if active.turn_id == turn_id && active.status == ActiveTurnStatus::Running
+                if active.identity.turn_id == turn_id && active.state == ActiveTurnState::Running
         ) {
             self.message_queue.release(reservation)?;
             return Err(TalosError::public(
@@ -153,33 +146,30 @@ impl TurnService {
                 format!("active turn `{turn_id}` for session `{session_id}`"),
             ));
         }
-        let binding = match self.session_binding(&session_id).await {
-            Ok(binding) => binding,
-            Err(error) => {
-                self.message_queue.release(reservation)?;
-                return Err(error);
-            }
-        };
-        let input = reservation.input().to_vec();
-        let result = self
-            .executor
-            .submit_input(AgentDispatchInputParams {
-                binding,
-                session,
-                turn_id: turn_id.to_string(),
-                input: AgentDispatchInput::Message { input },
-            })
-            .await;
-        match result {
-            Ok(()) => self.message_queue.commit(reservation),
-            Err(error) => {
-                self.message_queue.release(reservation)?;
-                Err(error)
-            }
-        }
+        let input = reservation.input().clone();
+        let identity = AgentTurnRef::new(&session_id, turn_id);
+        let input = crate::turn::completed_agent_user_input(
+            turn_id,
+            message_id,
+            input,
+            chrono::Utc::now().timestamp(),
+        )?;
+        self.execution
+            .admit_queued_running_input(
+                AgentInputParams {
+                    agent_id: session.agent_id,
+                    identity,
+                    input,
+                },
+                command,
+                self.message_queue.clone(),
+                reservation,
+            )
+            .await?;
+        Ok(())
     }
 
-    pub(crate) fn validate_message_queue_input(input: &[TalosInputItem]) -> TalosResult<()> {
+    pub(crate) fn validate_message_queue_input(input: &AgentUserInput) -> TalosResult<()> {
         validate_user_input(input)
     }
 }

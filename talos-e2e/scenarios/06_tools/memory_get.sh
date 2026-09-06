@@ -68,21 +68,12 @@ parse_response() {
   RESPONSE_BODY="${raw%HTTP_STATUS:*}"
 }
 
-build_session_context() {
+build_session_start_defaults() {
   python3 - <<'PY'
 import json
 import os
 
 payload = {
-    "context": {
-        "source_type": "http",
-        "provider": "http",
-        "channel_id": "tool-memory-get",
-        "user_id": "tool-memory-get-user",
-        "thread_id": None,
-        "message_id": "msg-tool-memory-get",
-        "trace_id": "trace-tool-memory-get",
-    },
     "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoningEffort": None},
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -96,7 +87,7 @@ import json
 import os
 
 payload = {
-    "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
+    "input": {"content": [{"type": "text", "text": os.environ["INPUT_TEXT"]}]},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -193,9 +184,9 @@ if [[ -z "${memory_id}" ]]; then
 fi
 echo "CASE seed_memory_search_for_memory_get PASS memory_id=${memory_id}"
 
-session_payload="$(build_session_context)"
+session_payload="$(build_session_start_defaults)"
 session_id="$(new_session_id)"
-remember_session_context "${session_id}" "${session_payload}"
+remember_session_start_defaults "${session_id}" "${session_payload}"
 session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then

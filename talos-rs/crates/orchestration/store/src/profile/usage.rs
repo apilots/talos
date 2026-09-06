@@ -65,45 +65,8 @@ pub(super) fn usage_from_aggregate_row(row: &sqlx::sqlite::SqliteRow) -> TalosRe
     })
 }
 
-pub(super) fn accumulate_usage(left: TokenUsage, right: &TokenUsage) -> TalosResult<TokenUsage> {
-    let input_tokens = left
-        .input_tokens
-        .checked_add(right.input_tokens)
-        .ok_or_else(|| TalosError::internal("profile input token overflow".to_string()))?;
-    let output_tokens = left
-        .output_tokens
-        .checked_add(right.output_tokens)
-        .ok_or_else(|| TalosError::internal("profile output token overflow".to_string()))?;
-    let total_tokens = input_tokens
-        .checked_add(output_tokens)
-        .ok_or_else(|| TalosError::internal("profile total token overflow".to_string()))?;
-    Ok(TokenUsage {
-        input_tokens,
-        output_tokens,
-        total_tokens,
-        cache_creation_input_tokens: accumulate_optional(
-            left.cache_creation_input_tokens,
-            right.cache_creation_input_tokens,
-        )?,
-        cache_read_input_tokens: accumulate_optional(
-            left.cache_read_input_tokens,
-            right.cache_read_input_tokens,
-        )?,
-    })
-}
-
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {
     move |error| TalosError::internal(format!("{action}: {error}"))
-}
-
-fn accumulate_optional(left: Option<u32>, right: Option<u32>) -> TalosResult<Option<u32>> {
-    match (left, right) {
-        (Some(left), Some(right)) => left
-            .checked_add(right)
-            .map(Some)
-            .ok_or_else(|| TalosError::internal("profile cache token overflow".to_string())),
-        _ => Ok(None),
-    }
 }
 
 fn token_value(value: i64, name: &str) -> TalosResult<u32> {

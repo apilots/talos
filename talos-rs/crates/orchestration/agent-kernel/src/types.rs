@@ -1,20 +1,51 @@
 use crate::{
-    ExecutionBranch, InvocationSession, KernelTranscriptService, KernelWarning, ResolvedAttachment,
-    UserInput,
+    InvocationSession, KernelMemoryProgressStore, KernelSessionArtifactStore,
+    KernelTranscriptService, KernelWarning, ResolvedAttachment, UserInput,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_types::talos::{
     ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
     ContextCompactionTrigger, TalosSessionEnvironment,
 };
-use talos_types::talos::{RunItem, TalosContentItem, TokenUsage, TurnExecutionMetrics};
-use talos_types::{ModelInfo, ModelSelection};
+use talos_types::talos::{TalosContentItem, TokenUsage, TurnExecutionMetrics};
+use talos_types::{ModelInfo, ModelSelection, ToolArguments};
 use tokio::sync::mpsc;
+
+/// Kernel-private item produced while executing one reasoning loop.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum KernelRunItem {
+    UserInput {
+        text: String,
+        #[serde(default, rename = "fileIds")]
+        file_ids: Vec<String>,
+    },
+    Reasoning {
+        text: String,
+    },
+    ExecutionSummary {
+        text: String,
+    },
+    OutputText {
+        text: String,
+    },
+    ToolCall {
+        call_id: String,
+        name: String,
+        arguments: ToolArguments,
+    },
+    ToolResult {
+        call_id: String,
+        tool_name: String,
+        content: Vec<TalosContentItem>,
+        #[serde(default)]
+        is_error: bool,
+    },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -22,17 +53,6 @@ pub enum TurnPhase {
     #[default]
     Execution,
     Planning,
-}
-
-pub type PlannerKind = talos_config::PlannerMode;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum FlowProfile {
-    DirectAnswer,
-    ModelThinking,
-    #[default]
-    ReactiveLoop,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -43,126 +63,6 @@ pub enum ToolExecutionMode {
     Parallel,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskKind {
-    General,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Success,
-    Partial,
-    Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskResult {
-    pub task_id: String,
-    pub kind: TaskKind,
-    pub goal: String,
-    pub status: TaskStatus,
-    pub output: String,
-    #[serde(default)]
-    pub output_items: Vec<RunItem>,
-    #[serde(default)]
-    pub usage: TokenUsage,
-    #[serde(default)]
-    pub warnings: Vec<KernelWarning>,
-    pub tool_traces: Vec<Value>,
-    pub state_delta: HashMap<String, Value>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum KernelEventType {
-    UserInput,
-    PlanCreated,
-    PromptWarning,
-    TaskCompleted,
-    Transfer,
-    FinalResponse,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum KernelEventLabel {
-    UserInputReceived,
-    Iteration,
-    TaskCompleted,
-    TransferRequested,
-    FinalResponse,
-    PromptWarning,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KernelEvent {
-    pub event_type: KernelEventType,
-    pub label: KernelEventLabel,
-    pub data: KernelEventData,
-    pub timestamp: i64,
-}
-
-impl KernelEvent {
-    pub fn new(
-        event_type: KernelEventType,
-        label: KernelEventLabel,
-        data: KernelEventData,
-    ) -> Self {
-        Self {
-            event_type,
-            label,
-            data,
-            timestamp: Utc::now().timestamp_millis(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum KernelEventData {
-    #[default]
-    None,
-    UserInput(UserInputEventData),
-    Iteration(IterationEventData),
-    TaskCompleted(TaskCompletedEventData),
-    TransferRequested(TransferRequestedEventData),
-    FinalResponse(FinalResponseEventData),
-    PromptWarning(PromptWarningEventData),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserInputEventData {
-    pub session_id: String,
-    pub agent_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IterationEventData {
-    pub iteration: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskCompletedEventData {
-    pub task_id: String,
-    pub status: TaskStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransferRequestedEventData {
-    pub target_agent: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FinalResponseEventData {
-    pub iterations: u32,
-    pub stop_reason: StopReason,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptWarningEventData {
     pub warning: KernelWarning,
@@ -171,48 +71,29 @@ pub struct PromptWarningEventData {
     pub phase: TurnPhase,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum KernelStreamEventType {
-    UserInput,
-    ThinkingDelta,
-    AssistantTextStarted,
-    AssistantTextDelta,
-    AssistantTextCompleted,
-    AssistantTextCommitted,
-    ExecutionSummary,
-    TurnMetrics,
-    ToolCallStart,
-    ToolArgsDelta,
-    ToolQueued,
-    ToolExecuting,
-    ToolProgressDelta,
-    ToolResult,
-    PromptWarning,
-    UserActionRequest,
-    ContextCompaction,
-}
-
+/// One typed event emitted by Agent Kernel during an invocation.
+///
+/// The payload is the only discriminator; a parallel kind field would permit
+/// contradictory values and force every adapter to validate impossible pairs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KernelStreamEvent {
-    pub event_type: KernelStreamEventType,
-    pub data: KernelStreamEventData,
-    pub timestamp: i64,
+pub struct AgentKernelEvent {
+    pub payload: AgentKernelEventPayload,
+    pub occurred_at: i64,
 }
 
-impl KernelStreamEvent {
-    pub fn new(event_type: KernelStreamEventType, data: KernelStreamEventData) -> Self {
+impl AgentKernelEvent {
+    pub fn new(payload: AgentKernelEventPayload) -> Self {
         Self {
-            event_type,
-            data,
-            timestamp: Utc::now().timestamp_millis(),
+            payload,
+            occurred_at: Utc::now().timestamp_millis(),
         }
     }
 }
 
+/// Closed Kernel event union consumed only by concrete Provider adapters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum KernelStreamEventData {
+pub enum AgentKernelEventPayload {
     UserInput(UserInput),
     ThinkingDelta(ThinkingDeltaStreamData),
     AssistantTextStarted(AssistantTextStartedStreamData),
@@ -280,6 +161,8 @@ pub struct AssistantTextCommittedStreamData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnMetricsStreamData {
     pub metrics: TurnExecutionMetrics,
+    pub usage: TokenUsage,
+    pub context: Option<talos_types::ContextUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -328,8 +211,8 @@ pub struct ExecutionSummaryStreamData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallStartStreamData {
     pub index: usize,
-    pub call_id: Option<String>,
-    pub tool_name: Option<String>,
+    pub call_id: String,
+    pub tool_name: String,
     pub arguments: Value,
     pub round: u32,
 }
@@ -380,12 +263,6 @@ pub struct ToolResultStreamData {
     #[serde(default)]
     pub content: Vec<TalosContentItem>,
     pub is_error: bool,
-    #[serde(default)]
-    pub semantic_events: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub envelope: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_turn_failure: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -414,46 +291,27 @@ pub enum StopReason {
     TransferUnresolved,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct InvocationContext {
     pub session_id: String,
     pub user_id: String,
-    pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
     pub workspace_id: String,
-    #[serde(default)]
     pub project_root: Option<PathBuf>,
     pub input: UserInput,
-    #[serde(skip, default)]
     pub resolved_attachments: Vec<ResolvedAttachment>,
     pub model_selection: ModelSelection,
     pub selected_model_info: ModelInfo,
-    #[serde(default)]
     pub phase: TurnPhase,
     pub planning_instruction: Option<String>,
-    pub transfer_to: Option<String>,
-    #[serde(default)]
-    pub execution_state: InvocationExecutionState,
-    #[serde(default)]
     pub session: InvocationSession,
-    #[serde(default)]
     pub session_environment: Option<TalosSessionEnvironment>,
-    pub state: HashMap<String, Value>,
-    #[serde(default)]
-    pub state_bags: ContextStateBags,
-    #[serde(default)]
-    pub limits: InvocationLimits,
-    pub events: Vec<KernelEvent>,
-    #[serde(skip, default)]
-    pub transcript_service: Option<std::sync::Arc<dyn KernelTranscriptService>>,
-    #[serde(skip, default)]
-    pub session_artifact_store:
-        Option<std::sync::Arc<dyn talos_store::session::SessionArtifactStore>>,
-    #[serde(skip, default)]
-    pub session_store: Option<std::sync::Arc<dyn talos_store::session::SessionStore>>,
-    #[serde(skip)]
-    pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    pub transcript_service: std::sync::Arc<dyn KernelTranscriptService>,
+    pub session_artifact_store: std::sync::Arc<dyn KernelSessionArtifactStore>,
+    pub session_prompt_context_source: std::sync::Arc<dyn crate::SessionPromptContextSource>,
+    pub memory_progress_store: std::sync::Arc<dyn KernelMemoryProgressStore>,
+    pub stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
 }
 
 impl InvocationContext {
@@ -461,140 +319,31 @@ impl InvocationContext {
         self.selected_model_info.model.id.as_str()
     }
 
-    pub fn set_planning_response(&mut self, value: impl Into<String>) {
-        self.execution_state.planning_response = Some(value.into());
+    pub fn session_artifact_store(&self) -> std::sync::Arc<dyn KernelSessionArtifactStore> {
+        self.session_artifact_store.clone()
     }
 
-    pub fn mark_transfer_consumed(&mut self) {
-        self.execution_state.transfer_consumed = true;
-    }
-
-    pub fn transfer_consumed(&self) -> bool {
-        self.execution_state.transfer_consumed
-    }
-
-    pub fn set_session_state(&mut self, key: impl Into<String>, value: Value) {
-        self.state_bags.session_state.insert(key.into(), value);
-    }
-
-    pub fn set_request_state(&mut self, key: impl Into<String>, value: Value) {
-        self.state_bags.request_state.insert(key.into(), value);
-    }
-
-    pub fn set_user_state(&mut self, _key: impl Into<String>, _value: Value) -> TalosResult<()> {
-        Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "user_state is read-only by default in InvocationContext".to_string(),
-        ))
-    }
-
-    pub fn set_workspace_state(
-        &mut self,
-        _key: impl Into<String>,
-        _value: Value,
-    ) -> TalosResult<()> {
-        Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "workspace_state is read-only by default in InvocationContext".to_string(),
-        ))
-    }
-
-    pub fn current_transcript_events(
+    pub fn session_prompt_context_source(
         &self,
-        current_invocation: bool,
-        current_branch: bool,
-        branch: ExecutionBranch,
-    ) -> Vec<crate::KernelTranscriptEvent> {
-        self.session.filter_events(
-            current_invocation.then_some(self.invocation_id.as_str()),
-            current_branch.then_some(branch),
-        )
+    ) -> std::sync::Arc<dyn crate::SessionPromptContextSource> {
+        self.session_prompt_context_source.clone()
     }
 
-    pub fn transcript_service(&self) -> TalosResult<std::sync::Arc<dyn KernelTranscriptService>> {
-        self.transcript_service.clone().ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "transcript_service is not configured in InvocationContext".to_string(),
-            )
-        })
-    }
-
-    pub fn session_artifact_store(
-        &self,
-    ) -> TalosResult<std::sync::Arc<dyn talos_store::session::SessionArtifactStore>> {
-        self.session_artifact_store.clone().ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "session_artifact_store is not configured in InvocationContext".to_string(),
-            )
-        })
-    }
-
-    pub fn session_store(
-        &self,
-    ) -> TalosResult<std::sync::Arc<dyn talos_store::session::SessionStore>> {
-        self.session_store.clone().ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "session_store is not configured in InvocationContext".to_string(),
-            )
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ContextStateBags {
-    #[serde(default)]
-    pub session_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub user_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub workspace_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub request_state: HashMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct InvocationExecutionState {
-    pub planning_response: Option<String>,
-    #[serde(default)]
-    pub transfer_consumed: bool,
-}
-
-/// Runtime limits for invocation execution.
-/// This is a simplified version that directly stores limit values
-/// extracted from AgentKernelConfig.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InvocationLimits {
-    pub tool_parallelism: usize,
-    pub context_compaction_max_bytes: usize,
-    pub dynamic_tool_timeout_ms: u64,
-    pub dynamic_tool_timeout_behavior: talos_config::DynamicToolTimeoutBehavior,
-}
-
-impl Default for InvocationLimits {
-    fn default() -> Self {
-        let config = talos_config::AgentKernelConfig::default();
-        Self {
-            tool_parallelism: config.tool_parallelism,
-            context_compaction_max_bytes: config.context_compaction_max_bytes,
-            dynamic_tool_timeout_ms: config.tools.dynamic.response_timeout_ms,
-            dynamic_tool_timeout_behavior: config.tools.dynamic.on_timeout,
-        }
+    pub fn memory_progress_store(&self) -> std::sync::Arc<dyn KernelMemoryProgressStore> {
+        self.memory_progress_store.clone()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KernelExecutionSettings {
-    pub planner_kind: PlannerKind,
+    pub planner_kind: talos_config::PlannerMode,
     pub tool_execution_mode: ToolExecutionMode,
 }
 
 impl Default for KernelExecutionSettings {
     fn default() -> Self {
         Self {
-            planner_kind: PlannerKind::BuiltIn,
+            planner_kind: talos_config::PlannerMode::BuiltIn,
             tool_execution_mode: ToolExecutionMode::Parallel,
         }
     }
@@ -624,18 +373,3 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
         })
     }
 }
-
-impl From<&talos_config::AgentKernelConfig> for InvocationLimits {
-    fn from(config: &talos_config::AgentKernelConfig) -> Self {
-        Self {
-            tool_parallelism: config.tool_parallelism,
-            context_compaction_max_bytes: config.context_compaction_max_bytes,
-            dynamic_tool_timeout_ms: config.tools.dynamic.response_timeout_ms,
-            dynamic_tool_timeout_behavior: config.tools.dynamic.on_timeout,
-        }
-    }
-}
-
-#[cfg(test)]
-#[path = "types_tests.rs"]
-mod tests;

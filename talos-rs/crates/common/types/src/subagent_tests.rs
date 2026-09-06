@@ -4,7 +4,6 @@ use super::{
     AgentPath, AgentTarget, AgentTurnRef, CollaborationToolResult, SubagentOutcome, SubagentRef,
     SubagentSpawnResult,
 };
-use crate::agent_dispatch::DispatchBinding;
 use crate::talos::TalosContentItem;
 
 #[test]
@@ -154,21 +153,6 @@ fn spawn_result_contains_exact_child_turn_identity() {
             }
         })
     );
-}
-
-#[test]
-fn dispatch_binding_round_trips_exhaustive_variants() {
-    for binding in [
-        DispatchBinding::Routed,
-        DispatchBinding::Exact {
-            agent_id: "reviewer".to_string(),
-        },
-    ] {
-        let encoded = serde_json::to_string(&binding).expect("serialize dispatch binding");
-        let decoded: DispatchBinding =
-            serde_json::from_str(&encoded).expect("deserialize dispatch binding");
-        assert_eq!(decoded, binding);
-    }
 }
 
 #[test]

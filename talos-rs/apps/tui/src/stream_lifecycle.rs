@@ -50,7 +50,6 @@ impl TuiApp {
             message: user_message.clone(),
             skills: skills.clone(),
             file_ids: file_ids.clone(),
-            context: Some(self.build_talos_context()),
             model_selection: self.current_model_selection(),
             current_directory: Some(self.startup_directory.clone()),
             project_id: self.current_project_id.clone(),
@@ -72,10 +71,10 @@ impl TuiApp {
         self.last_stream_event_at = Some(Instant::now());
         self.pending_stream = None;
         self.pending_stream_connect = None;
-        self.active_stream_message_id = None;
+        self.active_stream_turn_id = None;
         self.last_stream_sequence = None;
         self.last_stream_event_id = None;
-        self.timeline_items.clear();
+        self.context_compaction_stage = None;
 
         if reset_retry_state {
             let display_message = user_input_display(&user_message, &file_ids);
@@ -118,10 +117,10 @@ impl TuiApp {
         self.pending_stream_connect = None;
         self.pending_stream = None;
         self.abort_pending_stream_task();
-        self.active_stream_message_id = None;
+        self.active_stream_turn_id = None;
         self.last_stream_sequence = None;
         self.last_stream_event_id = None;
-        self.timeline_items.clear();
+        self.context_compaction_stage = None;
         self.stream_started_at = None;
         self.last_stream_event_at = None;
         self.active_message = None;

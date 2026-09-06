@@ -22,10 +22,10 @@ fn run_not_found_maps_to_product_resource_not_found() {
 }
 
 #[test]
-fn runtime_error_maps_to_product_internal_error() {
-    let error = AgentError::runtime_error("backend failed");
+fn provider_error_maps_to_product_internal_error() {
+    let error = AgentError::provider_error("backend failed");
 
-    assert_eq!(error.kind, AgentErrorKind::RuntimeError);
+    assert_eq!(error.kind, AgentErrorKind::ProviderError);
     assert!(error.into_talos_error().is_internal());
 }
 

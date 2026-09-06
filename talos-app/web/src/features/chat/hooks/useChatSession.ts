@@ -35,7 +35,6 @@ const ACTIVE_TURN_NOT_FOUND_CODES = [
 export function useChatSession(
   sessionId: string,
   serverMessageCount?: number,
-  sessionTitle?: string,
 ) {
   const [draft, setDraft] = useState("");
   const sessionAvailable = serverMessageCount !== undefined;
@@ -45,15 +44,13 @@ export function useChatSession(
     sessionAvailable && !streamState?.isStreaming,
   );
   const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
-  const messageQueue = useSessionMessageQueue(sessionId, sessionAvailable, () => {
-    void Promise.all([sessionHistoryQuery.refetch(), activeTurnQuery.refetch()]);
-  });
+  const messageQueue = useSessionMessageQueue(sessionId);
   const {
     contextCompaction,
     retryTimeline,
     setCompactionObservationActive,
   } = useChatSessionTimelineLifecycle({
-    activeTurnQuery,
+    messageQueue,
     sessionHistoryQuery,
     sessionId,
     streamState,
@@ -69,7 +66,7 @@ export function useChatSession(
     stopResponse,
     canRetryResponse,
   } =
-    useSessionStreaming(sessionId, serverMessageCount, sessionTitle);
+    useSessionStreaming(sessionId);
   const blocks = useSessionBlocks({
     sessionId,
     streamState,
@@ -81,15 +78,16 @@ export function useChatSession(
   );
   const activeTurnId = streamState?.isStreaming
     ? streamState.activeTurnId
-    : isLiveRecoverableActiveTurn(activeTurnQuery.data?.status)
-      ? activeTurnQuery.data?.turn_id ?? undefined
+    : isLiveRecoverableActiveTurn(activeTurnQuery.data?.state)
+      ? activeTurnQuery.data?.identity.turnId
       : undefined;
 
   useEffect(() => {
-    if (
-      !activeTurnQuery.data ||
-      isLiveRecoverableActiveTurn(activeTurnQuery.data.status)
-    ) {
+    if (!activeTurnQuery.data) {
+      return;
+    }
+    // Once replay has established a Turn, only ordered events may advance it.
+    if (useAppStore.getState().streams[sessionId]?.activeTurnId) {
       return;
     }
     applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
@@ -97,6 +95,10 @@ export function useChatSession(
 
   useEffect(() => {
     const error = activeTurnQuery.error;
+    if (activeTurnQuery.data === null && !useAppStore.getState().streams[sessionId]?.isStreaming) {
+      clearInactiveTurnSnapshot(sessionId);
+      return;
+    }
     if (
       !(error instanceof TalosApiError) ||
       !ACTIVE_TURN_NOT_FOUND_CODES.some((code) => code === error.code)
@@ -104,7 +106,7 @@ export function useChatSession(
       return;
     }
     clearInactiveTurnSnapshot(sessionId);
-  }, [activeTurnQuery.error, sessionId]);
+  }, [activeTurnQuery.data, activeTurnQuery.error, sessionId]);
 
   useEffect(() => {
     const activeMessageId = streamState?.activeMessageId;
@@ -117,8 +119,8 @@ export function useChatSession(
     }
 
     const historyHasActiveMessage = Boolean(
-      sessionHistoryQuery.data?.messages.some(
-        (message) => message.message_id === activeMessageId,
+      sessionHistoryQuery.data?.data.some((turn) =>
+        turn.result.result.messages.some((message) => message.messageId === activeMessageId),
       ),
     );
     if (!historyHasActiveMessage) {
@@ -166,7 +168,6 @@ export function useChatSession(
     const request = options
       ? createInitialTurnRequest(
           sessionId,
-          useAppStore.getState().connection.userId,
           content,
           {
             fileIds,
@@ -177,15 +178,6 @@ export function useChatSession(
         )
       : undefined;
     return streamText(content, request);
-  };
-
-  const startQueuedMessage = async (messageId?: string) => {
-    const response = await messageQueue.start(messageId);
-    await Promise.all([
-      sessionHistoryQuery.refetch(),
-      activeTurnQuery.refetch(),
-    ]);
-    return response;
   };
 
   return {
@@ -212,7 +204,6 @@ export function useChatSession(
       const request = options
         ? createInitialTurnRequest(
             sessionId,
-            useAppStore.getState().connection.userId,
             text,
             {
               fileIds,
@@ -222,7 +213,7 @@ export function useChatSession(
             },
           )
         : undefined;
-      return sendMutation.mutateAsync({ text, appendUserInput: true, request }).catch((error: unknown) => {
+      return sendMutation.mutateAsync({ text, request }).catch((error: unknown) => {
         if (isActiveTurnRunningError(error)) {
           setDraft(text);
           return;
@@ -242,7 +233,6 @@ export function useChatSession(
     messageQueue: {
       ...messageQueue,
       activeTurnId,
-      start: startQueuedMessage,
     },
     pendingUserAction: streamState?.pendingUserAction,
     streamConnectionState: streamState?.connectionState ?? "idle",
@@ -259,21 +249,32 @@ export function buildSessionInputHistory(
   const committed: SessionInputHistoryItem[] = [];
 
   let itemIndex = 0;
-  (history?.messages ?? []).forEach((message) => {
-    message.items.forEach((item) => {
-      if (
-        item.phase !== "input" ||
-        (item.content.type !== "text" && item.content.type !== "user_input")
-      ) {
+  (history?.data ?? []).forEach((turn) => {
+    turn.result.result.messages.forEach((message) => {
+      if (message.role !== "user") {
         return;
       }
-      committed.push({
-        messageId: message.message_id,
-        itemIndex,
-        text: item.content.text,
-        fileIds: item.content.type === "user_input" ? item.content.fileIds : [],
+      const text: string[] = [];
+      const fileIds: string[] = [];
+      message.blocks.forEach((block) => {
+        if (block.content.type !== "userContent") {
+          return;
+        }
+        if (block.content.data.type === "text") {
+          text.push(block.content.data.text);
+        } else if (block.content.data.type === "file") {
+          fileIds.push(block.content.data.fileId);
+        }
       });
-      itemIndex += 1;
+      if (text.length > 0 || fileIds.length > 0) {
+        committed.push({
+          messageId: message.messageId,
+          itemIndex,
+          text: text.join("\n"),
+          fileIds,
+        });
+        itemIndex += 1;
+      }
     });
   });
 

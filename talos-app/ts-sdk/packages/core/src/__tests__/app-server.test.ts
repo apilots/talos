@@ -12,19 +12,19 @@ class RecordingTransport implements AppServerTransport {
 
   request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.requests.push({ method, params });
-    if (method === "model.list") {
+    if (method === "model/list") {
       return Promise.resolve({ models: [] } as T);
     }
     if (method === "memory/search") {
       return Promise.resolve({ data: [] } as T);
     }
-    if (method === "project.list") {
+    if (method === "project/list") {
       return Promise.resolve({ projects: [] } as T);
     }
-    if (method === "timeline.recover") {
-      return Promise.resolve({ snapshot: emptyRecoverySnapshot } as T);
+    if (method === "timeline/recover") {
+      return Promise.resolve(emptyRecoverySnapshot as T);
     }
-    if (method === "config.get" || method === "config.update") {
+    if (method === "config/get" || method === "config/update") {
       return Promise.resolve(testLlmConfigRead as T);
     }
     return Promise.resolve({} as T);
@@ -37,10 +37,10 @@ class RecordingTransport implements AppServerTransport {
 }
 
 describe("AppServerClient", () => {
-  it("maps every message queue operation to the canonical JSON-RPC method", async () => {
+  it("maps message queue management to the canonical JSON-RPC methods", async () => {
     const transport = new RecordingTransport();
     const client = new AppServerClient(transport);
-    const input = [{ type: "text" as const, text: "queued" }];
+    const input = { content: [{ type: "text" as const, text: "queued" }] };
 
     await client.messageQueue.add({ sessionId: "s1", input });
     await client.messageQueue.list({ sessionId: "s1" });
@@ -48,7 +48,6 @@ describe("AppServerClient", () => {
     await client.messageQueue.delete({ sessionId: "s1", messageId: "q1" });
     await client.messageQueue.reorder({ sessionId: "s1", messageIds: ["q2", "q1"] });
     await client.messageQueue.start({ sessionId: "s1", messageId: null });
-    await client.messageQueue.steer({ sessionId: "s1", messageId: "q1", turnId: "t1" });
 
     expect(transport.requests).toEqual([
       { method: "messageQueue/add", params: { sessionId: "s1", input } },
@@ -57,7 +56,6 @@ describe("AppServerClient", () => {
       { method: "messageQueue/delete", params: { sessionId: "s1", messageId: "q1" } },
       { method: "messageQueue/reorder", params: { sessionId: "s1", messageIds: ["q2", "q1"] } },
       { method: "messageQueue/start", params: { sessionId: "s1", messageId: null } },
-      { method: "messageQueue/steer", params: { sessionId: "s1", messageId: "q1", turnId: "t1" } },
     ]);
   });
 
@@ -120,7 +118,7 @@ describe("AppServerClient", () => {
     await client.listModels();
     await client.readProfile();
     await client.patchSession({
-      session_id: "session-1",
+      sessionId: "session-1",
       conf: {
         userPermissionMode: null,
         modelSelection: {
@@ -128,33 +126,30 @@ describe("AppServerClient", () => {
           reasoningEffort: null,
         },
       },
-      current_directory: null,
+      currentDirectory: null,
     });
     await client.listProjects({});
     await client.getLlmConfig();
     await client.updateLlmConfig(testLlmConfig);
+    await client.configDelete("webSearch");
     await client.createProject({ name: "Talos", directory: "/tmp/talos" });
     await client.patchProject({ project_id: "project-1", name: "Talos Core" });
     await client.recoverTimeline({
-      session_id: "session-1",
-      after_event_id: "ev_00000000000000000001",
-      replay_limit: 100,
-    });
-    await client.submitDynamicToolResult({
-      session_id: "session-1",
-      call_id: "call-1",
-      tool_name: "DynamicTool",
-      output: "done",
-      success: true,
-    });
-    await client.submitUserAction({
       sessionId: "session-1",
-      turnId: "turn-1",
-      actionId: "action-1",
-      response: {
-        type: "question",
-        response: { type: "selectedOption", optionId: "continue" },
+      afterEventId: "ev_00000000000000000001",
+      replayLimit: 100,
+    });
+    await client.submitTurnInput({
+      identity: { sessionId: "session-1", turnId: "turn-1" },
+      input: {
+        type: "userActionResponse",
+        actionId: "action-1",
+        response: {
+          type: "question",
+          response: { type: "selectedOption", optionId: "continue" },
+        },
       },
+      clientRequestId: null,
     });
     await client.startCloudLogin({ client_name: "Talos Test", client_kind: "web" });
     await client.getCloudLoginStatus({ login_id: "login-1" });
@@ -169,12 +164,12 @@ describe("AppServerClient", () => {
     await client.searchMemory({ query: "stable fact", limit: 3 });
 
     expect(transport.requests).toEqual([
-      { method: "model.list", params: {} },
+      { method: "model/list", params: {} },
       { method: "profile/read", params: {} },
       {
-        method: "session.patch",
+        method: "session/patch",
         params: {
-          session_id: "session-1",
+          sessionId: "session-1",
           conf: {
             userPermissionMode: null,
             modelSelection: {
@@ -182,59 +177,53 @@ describe("AppServerClient", () => {
               reasoningEffort: null,
             },
           },
-          current_directory: null,
+          currentDirectory: null,
         },
       },
-      { method: "project.list", params: {} },
-      { method: "config.get", params: { path: "llm" } },
+      { method: "project/list", params: {} },
+      { method: "config/get", params: { path: "llm" } },
       {
-        method: "config.update",
+        method: "config/update",
         params: {
           value: { type: "llm", value: testLlmConfig },
         },
       },
-      { method: "project.create", params: { name: "Talos", directory: "/tmp/talos" } },
-      { method: "project.patch", params: { project_id: "project-1", name: "Talos Core" } },
+      { method: "config/delete", params: { path: "webSearch" } },
+      { method: "project/create", params: { name: "Talos", directory: "/tmp/talos" } },
+      { method: "project/patch", params: { project_id: "project-1", name: "Talos Core" } },
       {
-        method: "timeline.recover",
-        params: {
-          session_id: "session-1",
-          after_event_id: "ev_00000000000000000001",
-          replay_limit: 100,
-        },
-      },
-      {
-        method: "tool.dynamic_result.submit",
-        params: {
-          session_id: "session-1",
-          call_id: "call-1",
-          tool_name: "DynamicTool",
-          output: "done",
-          success: true,
-        },
-      },
-      {
-        method: "userAction/submit",
+        method: "timeline/recover",
         params: {
           sessionId: "session-1",
-          turnId: "turn-1",
-          actionId: "action-1",
-          response: {
-            type: "question",
-            response: { type: "selectedOption", optionId: "continue" },
-          },
+          afterEventId: "ev_00000000000000000001",
+          replayLimit: 100,
         },
       },
       {
-        method: "auth.login.start",
+        method: "turn/input",
+        params: {
+          identity: { sessionId: "session-1", turnId: "turn-1" },
+          input: {
+            type: "userActionResponse",
+            actionId: "action-1",
+            response: {
+              type: "question",
+              response: { type: "selectedOption", optionId: "continue" },
+            },
+          },
+          clientRequestId: null,
+        },
+      },
+      {
+        method: "auth/login/start",
         params: { client_name: "Talos Test", client_kind: "web" },
       },
-      { method: "auth.login.status", params: { login_id: "login-1" } },
-      { method: "auth.login.cancel", params: { login_id: "login-1" } },
-      { method: "event.unsubscribe", params: { subscription_id: "sub-1" } },
-      { method: "memory.file.read", params: { date: "2026-06-24" } },
+      { method: "auth/login/status", params: { login_id: "login-1" } },
+      { method: "auth/login/cancel", params: { login_id: "login-1" } },
+      { method: "event/unsubscribe", params: { subscriptionId: "sub-1" } },
+      { method: "memory/file/read", params: { date: "2026-06-24" } },
       {
-        method: "memory.file.write",
+        method: "memory/file/write",
         params: {
           date: "2026-06-24",
           content: "# Memory",
@@ -270,19 +259,12 @@ const emptyProvider = {
 const emptyRecoverySnapshot = {
   replay: {
     events: [],
-    high_water_mark_event_id: null,
-    last_replay_seq: 0,
-    cursor_status: "from_beginning",
+    highWaterMarkEventId: null,
+    nextCursor: null,
+    lastEventSeq: 0,
+    cursorStatus: "fromBeginning",
   },
-  active_turn: {
-    session_id: "session-1",
-    turn_id: null,
-    message_id: null,
-    status: "completed",
-    last_event_id: null,
-    pending_user_action: null,
-    updated_at: 0,
-  },
+  activeTurn: null,
 };
 
 const testLlmConfig = {

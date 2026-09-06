@@ -26,11 +26,12 @@ pub struct ProfileModelUsageSummary {
     pub usage_available: bool,
 }
 
-/// Carries one execution segment from the Turn service into Profile persistence.
+/// Carries one cumulative Turn usage snapshot from Service into Profile persistence.
 ///
-/// The Turn service owns construction from a completed execution. Store
-/// implementations use the request id only to suppress immediate duplicate
-/// segments; durable replay and crash recovery are intentionally out of scope.
+/// Service reuses the Harness settlement metrics, including prior waiting invocations.
+/// Store replaces the previous snapshot; it must not add invocation totals again.
+/// The request id suppresses immediate duplicates; durable replay and crash recovery
+/// are intentionally out of scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnUsageUpdate {
     pub user_id: String,

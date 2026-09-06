@@ -180,9 +180,8 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let config_store: Arc<dyn talos_config::ConfigStore> =
         Arc::new(talos_config::InMemoryLlmConfigStore::new(Default::default()));
     let state = test_state_with_gateway_event_store_config_and_lifecycle(
-        Arc::new(MockGateway),
         true,
-        Arc::new(RecordingEventStore::default()),
+        Arc::new(RecordingAgentExecutionStore::default()),
         test_config(),
         lifecycle,
         config_store,
@@ -216,9 +215,8 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let config_store: Arc<dyn talos_config::ConfigStore> =
         Arc::new(talos_config::InMemoryLlmConfigStore::new(Default::default()));
     let state = test_state_with_gateway_event_store_config_and_lifecycle(
-        Arc::new(MockGateway),
         true,
-        Arc::new(RecordingEventStore::default()),
+        Arc::new(RecordingAgentExecutionStore::default()),
         test_config(),
         lifecycle,
         config_store,

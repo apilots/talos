@@ -1,46 +1,32 @@
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 
-use talos_agent::{AgentDescriptor, AgentError, AgentErrorKind, AgentHarness, AgentResult};
+use talos_agent::{AgentError, AgentErrorKind, AgentHarness, AgentResult};
 use tokio::sync::RwLock;
-
-/// Registered Agent entry used by Coordinator routing.
-///
-/// The registration pairs management metadata with the Harness facade.
-/// Coordinator must use the Harness API and must not downcast to concrete
-/// runtime implementations.
-#[derive(Clone)]
-pub struct AgentRegistration {
-    /// Descriptor used for routing and management surfaces.
-    pub descriptor: AgentDescriptor,
-    /// Harness facade owned by the Agent framework layer.
-    pub harness: Arc<dyn AgentHarness>,
-}
 
 /// Coordinator-owned registry of available AgentHarness instances.
 ///
 /// The registry is an orchestration index only. It does not instantiate Agents,
-/// write stores, or interpret runtime-private configuration.
+/// write stores, or interpret Provider-private configuration.
 #[derive(Clone, Default)]
-pub struct AgentRegistry {
-    registrations: Arc<RwLock<HashMap<String, AgentRegistration>>>,
+pub(crate) struct AgentRegistry {
+    registrations: Arc<RwLock<HashMap<String, Arc<dyn AgentHarness>>>>,
 }
 
 impl AgentRegistry {
     /// Create an empty Agent registry.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    /// Register a Harness under a stable Agent id.
+    /// Register a Harness under one stable Agent id.
     ///
     /// The caller is responsible for constructing the Harness through the
-    /// Harness factory before registration. The registry key must match the
-    /// Harness descriptor id; aliases belong in routing config, not registry
-    /// identity.
-    pub async fn register(
+    /// Harness factory before registration. Aliases belong in routing config,
+    /// not registry identity.
+    pub(crate) async fn register(
         &self,
-        agent_id: &str,
+        agent_id: String,
         harness: Arc<dyn AgentHarness>,
     ) -> AgentResult<()> {
         if agent_id.trim().is_empty() {
@@ -48,30 +34,20 @@ impl AgentRegistry {
                 "agent_id cannot be empty",
             ));
         }
-        let descriptor = harness.descriptor();
-        if descriptor.agent_id != agent_id {
-            return Err(AgentError::invalid_execution_context(format!(
-                "agent registry key `{agent_id}` does not match descriptor id `{}`",
-                descriptor.agent_id
-            )));
-        }
         let mut registrations = self.registrations.write().await;
-        match registrations.entry(agent_id.to_string()) {
+        match registrations.entry(agent_id.clone()) {
             Entry::Occupied(_) => Err(AgentError::run_conflict(format!(
                 "agent `{agent_id}` is already registered"
             ))),
             Entry::Vacant(entry) => {
-                entry.insert(AgentRegistration {
-                    descriptor,
-                    harness,
-                });
+                entry.insert(harness);
                 Ok(())
             }
         }
     }
 
     /// Resolve a registered Agent by id.
-    pub async fn get(&self, agent_id: &str) -> AgentResult<AgentRegistration> {
+    pub(crate) async fn get(&self, agent_id: &str) -> AgentResult<Arc<dyn AgentHarness>> {
         let registrations = self.registrations.read().await;
         registrations
             .get(agent_id)
@@ -79,15 +55,10 @@ impl AgentRegistry {
             .ok_or_else(|| AgentError::new(AgentErrorKind::AgentNotFound, agent_id.to_string()))
     }
 
-    /// List registered Agents for routing and management views.
-    pub async fn list(&self) -> Vec<AgentRegistration> {
+    /// List Harnesses for Coordinator shutdown.
+    pub(crate) async fn list(&self) -> Vec<Arc<dyn AgentHarness>> {
         let registrations = self.registrations.read().await;
         registrations.values().cloned().collect()
-    }
-
-    /// Return the current number of registered Agents.
-    pub async fn len(&self) -> usize {
-        self.registrations.read().await.len()
     }
 }
 

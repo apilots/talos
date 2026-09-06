@@ -9,7 +9,6 @@ build_app_server_binaries
 prepare_talos_home
 
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-qwen3.6-flash}"
 
 log_file="$(scenario_report_path "app_server_skills_e2e.log")"
 if timeout "${TALOS_APP_SERVER_SCENARIO_TIMEOUT_SECS:-180}" \

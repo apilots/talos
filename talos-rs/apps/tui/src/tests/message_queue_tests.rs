@@ -1,5 +1,13 @@
 use super::*;
 
+fn text_input(text: &str) -> AgentUserInput {
+    AgentUserInput {
+        content: vec![AgentUserContent::Text {
+            text: text.to_string(),
+        }],
+    }
+}
+
 fn app_with_client() -> (TuiApp, Arc<MockGatewayClient>) {
     let client = Arc::new(MockGatewayClient::new());
     let gateway_client: Arc<dyn GatewayClient> = client.clone();
@@ -75,20 +83,20 @@ async fn queue_selection_updates_reorders_and_deletes_server_messages() {
         vec![
             QueuedMessage {
                 id: "q2".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "second".to_string(),
-                }],
+                input: text_input("second"),
             },
             QueuedMessage {
                 id: "q1".to_string(),
-                input: vec![
-                    TalosInputItem::Text {
-                        text: "updated".to_string(),
-                    },
-                    TalosInputItem::Files {
-                        file_ids: vec!["file-1".to_string()],
-                    },
-                ],
+                input: AgentUserInput {
+                    content: vec![
+                        AgentUserContent::Text {
+                            text: "updated".to_string(),
+                        },
+                        AgentUserContent::File {
+                            file_id: "file-1".to_string(),
+                        },
+                    ]
+                },
             },
         ]
     );
@@ -103,14 +111,16 @@ async fn queue_selection_updates_reorders_and_deletes_server_messages() {
         app.message_queue.messages,
         vec![QueuedMessage {
             id: "q1".to_string(),
-            input: vec![
-                TalosInputItem::Text {
-                    text: "updated".to_string(),
-                },
-                TalosInputItem::Files {
-                    file_ids: vec!["file-1".to_string()],
-                },
-            ],
+            input: AgentUserInput {
+                content: vec![
+                    AgentUserContent::Text {
+                        text: "updated".to_string(),
+                    },
+                    AgentUserContent::File {
+                        file_id: "file-1".to_string(),
+                    },
+                ]
+            },
         }]
     );
 }
@@ -154,15 +164,17 @@ async fn steer_rejects_skill_and_interrupt_keeps_the_queue() {
         app.message_queue.messages,
         vec![QueuedMessage {
             id: "q2".to_string(),
-            input: vec![
-                TalosInputItem::Text {
-                    text: "skill later".to_string(),
-                },
-                TalosInputItem::SkillSelection {
-                    name: "review".to_string(),
-                    path: "/skills/review/SKILL.md".to_string(),
-                },
-            ],
+            input: AgentUserInput {
+                content: vec![
+                    AgentUserContent::Text {
+                        text: "skill later".to_string(),
+                    },
+                    AgentUserContent::SkillSelection {
+                        name: "review".to_string(),
+                        path: "/skills/review/SKILL.md".to_string(),
+                    },
+                ]
+            },
         }]
     );
 }
@@ -178,7 +190,7 @@ async fn start_removes_only_the_selected_server_message() {
         app.enqueue_message("second".to_string(), Vec::new(), Vec::new())
             .await
     );
-    client.state.lock().unwrap().reconnect_events = vec![started_event("msg-queued", 1)];
+    client.state.lock().unwrap().reconnect_events = vec![turn_started_event("msg-queued", 1)];
 
     app.select_message_queue();
     app.move_message_queue_selection(1);
@@ -188,9 +200,7 @@ async fn start_removes_only_the_selected_server_message() {
         app.message_queue.messages,
         vec![QueuedMessage {
             id: "q1".to_string(),
-            input: vec![TalosInputItem::Text {
-                text: "first".to_string(),
-            }],
+            input: text_input("first"),
         }]
     );
     assert!(app.in_flight);
@@ -202,9 +212,7 @@ async fn changed_refreshes_and_disconnect_clears_the_projection() {
     client
         .add_queued_message(talos_sdk::MessageQueueAddRequest {
             session_id: "sess-test".to_string(),
-            input: vec![TalosInputItem::Text {
-                text: "from web".to_string(),
-            }],
+            input: text_input("from web"),
         })
         .await
         .unwrap();
@@ -246,7 +254,7 @@ async fn auto_dispatched_queue_change_connects_the_new_turn_stream() {
     {
         let mut state = client.state.lock().unwrap();
         state.active_turn_id = Some("turn-auto".to_string());
-        state.reconnect_events = vec![started_event("msg-auto", 1)];
+        state.reconnect_events = vec![turn_started_event("msg-auto", 1)];
     }
     client
         .delete_queued_message(talos_sdk::MessageQueueDeleteRequest {
@@ -273,9 +281,7 @@ async fn auto_dispatched_queue_change_connects_the_new_turn_stream() {
             true,
             vec![QueuedMessage {
                 id: "q2".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "second".to_string(),
-                }],
+                input: text_input("second"),
             }],
             vec![None],
         )
@@ -294,26 +300,15 @@ async fn fast_queue_turn_reconciles_history_after_the_previous_stream_finishes()
             .await
     );
     app.in_flight = true;
-    client.state.lock().unwrap().session_history_messages = vec![SessionHistoryMessage {
-        message_id: "msg-auto".to_string(),
-        turn_id: "turn-auto".to_string(),
-        items: vec![TalosTimelineItem {
-            item_id: "item-auto-answer".to_string(),
-            parent_item_id: None,
-            kind: TalosTimelineItemKind::AssistantText,
-            phase: TalosTimelinePhase::FinalAnswer,
-            status: TalosTimelineItemStatus::Completed,
-            title: None,
-            started_at_ms: 1,
-            completed_at_ms: Some(2),
-            content: TalosTimelineContent::Text {
-                text: "fast queued answer".to_string(),
-            },
-        }],
-        stop_reason: StopReason::EndTurn,
-        usage: TokenUsage::default(),
-        metrics: None,
-    }];
+    client.state.lock().unwrap().session_history_turns = completed_history_response(
+        vec![completed_text_message(
+            "message-agent",
+            AgentMessageRole::Agent,
+            "fast queued answer",
+        )],
+        None,
+    )
+    .data;
     client
         .delete_queued_message(talos_sdk::MessageQueueDeleteRequest {
             session_id: "sess-test".to_string(),
@@ -342,7 +337,7 @@ async fn fast_queue_turn_reconciles_history_after_the_previous_stream_finishes()
     assert!(transcript.contains("fast queued answer"));
 }
 
-fn app_with_rendered_queue(input: Vec<TalosInputItem>) -> TuiApp {
+fn app_with_rendered_queue(input: AgentUserInput) -> TuiApp {
     let mut app = create_embedded_app();
     app.message_queue = MessageQueue {
         revision: 2,
@@ -357,9 +352,7 @@ fn app_with_rendered_queue(input: Vec<TalosInputItem>) -> TuiApp {
 
 #[test]
 fn waiting_messages_default_state_has_no_action_hint() {
-    let app = app_with_rendered_queue(vec![TalosInputItem::Text {
-        text: "Review the current patch".to_string(),
-    }]);
+    let app = app_with_rendered_queue(text_input("Review the current patch"));
 
     assert_eq!(
         app.queue_panel_lines(4)
@@ -375,9 +368,7 @@ fn waiting_messages_default_state_has_no_action_hint() {
 
 #[test]
 fn waiting_messages_active_selection_shows_steer_keys() {
-    let mut app = app_with_rendered_queue(vec![TalosInputItem::Text {
-        text: "Review the current patch".to_string(),
-    }]);
+    let mut app = app_with_rendered_queue(text_input("Review the current patch"));
     app.in_flight = true;
     app.selected_queue_message = Some(0);
 
@@ -396,9 +387,7 @@ fn waiting_messages_active_selection_shows_steer_keys() {
 
 #[test]
 fn waiting_messages_idle_selection_shows_start_keys() {
-    let mut app = app_with_rendered_queue(vec![TalosInputItem::Text {
-        text: "Continue from the queue".to_string(),
-    }]);
+    let mut app = app_with_rendered_queue(text_input("Continue from the queue"));
     app.selected_queue_message = Some(0);
 
     assert_eq!(
@@ -416,15 +405,17 @@ fn waiting_messages_idle_selection_shows_start_keys() {
 
 #[test]
 fn waiting_messages_skill_selection_omits_steer_key() {
-    let mut app = app_with_rendered_queue(vec![
-        TalosInputItem::Text {
-            text: "Run the review skill".to_string(),
-        },
-        TalosInputItem::SkillSelection {
-            name: "review".to_string(),
-            path: "/skills/review/SKILL.md".to_string(),
-        },
-    ]);
+    let mut app = app_with_rendered_queue(AgentUserInput {
+        content: vec![
+            AgentUserContent::Text {
+                text: "Run the review skill".to_string(),
+            },
+            AgentUserContent::SkillSelection {
+                name: "review".to_string(),
+                path: "/skills/review/SKILL.md".to_string(),
+            },
+        ],
+    });
     app.in_flight = true;
     app.selected_queue_message = Some(0);
 

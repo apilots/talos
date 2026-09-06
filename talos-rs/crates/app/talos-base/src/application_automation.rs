@@ -3,14 +3,15 @@ use std::time::Duration;
 
 use talos_automation::{Automation, AutomationJob};
 use talos_config::{DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig, TalosTimezone};
-use talos_coordinator::CoordinatorImpl;
+use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::TalosResult;
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
-use talos_service::{DreamMemoryMaintenance, ProfileUsageRetention};
+use talos_service::ProfileUsageRetention;
 use talos_store::profile::ProfileStore;
 use tokio::signal;
 use tracing::{error, info, warn};
 
+use super::dream_memory_maintenance::DreamMemoryMaintenance;
 use super::TalosApplicationRuntime;
 
 const BACKGROUND_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -44,7 +45,7 @@ impl TalosApplicationRuntime {
         let automation_result = self.automation.shutdown().await;
         let drain_result = self
             .coordinator
-            .drain_background_tasks(BACKGROUND_TASK_DRAIN_TIMEOUT)
+            .shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT)
             .await;
         match (automation_result, drain_result) {
             (Ok(()), result) => result,
@@ -124,10 +125,7 @@ pub(super) async fn shutdown_server(
         timeout_secs = BACKGROUND_TASK_DRAIN_TIMEOUT.as_secs(),
         "draining background tasks before shutdown"
     );
-    if let Err(err) = coordinator
-        .drain_background_tasks(BACKGROUND_TASK_DRAIN_TIMEOUT)
-        .await
-    {
+    if let Err(err) = coordinator.shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT).await {
         warn!(error = %err, "background task drain failed on shutdown");
     }
     automation.shutdown().await?;

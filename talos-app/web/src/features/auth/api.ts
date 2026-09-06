@@ -41,7 +41,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
       throw new Error("Desktop runtime bridge is not available.");
     }
     const response = await bridge.invoke<AppProtocol.UserCurrentResponse>(
-      "user.current",
+      "user/current",
       {},
       {
         actorCredentials: {
@@ -129,7 +129,7 @@ export async function startCloudLogin(): Promise<CloudLoginStartResponse> {
     if (!bridge) {
       throw new Error("Desktop runtime bridge is not available.");
     }
-    return bridge.invoke<CloudLoginStartResponse>("auth.login.start", {
+    return bridge.invoke<CloudLoginStartResponse>("auth/login/start", {
       client_name: "Talos Desktop",
       client_kind: "desktop",
     });
@@ -158,7 +158,7 @@ export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginSt
     if (!bridge) {
       throw new Error("Desktop runtime bridge is not available.");
     }
-    return bridge.invoke<CloudLoginStatusResponse>("auth.login.status", {
+    return bridge.invoke<CloudLoginStatusResponse>("auth/login/status", {
       login_id: loginId,
     });
   }
@@ -185,7 +185,7 @@ export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSession
     return null;
   }
   const response = await bridge.invoke<AppProtocol.AuthSessionReadResponse>(
-    "auth.session.read",
+    "auth/session/read",
     {},
   );
   return response.session ?? null;
@@ -199,5 +199,5 @@ export async function clearDesktopCloudSession(): Promise<void> {
   if (!bridge) {
     return;
   }
-  await bridge.invoke("auth.session.clear", {});
+  await bridge.invoke("auth/session/clear", {});
 }

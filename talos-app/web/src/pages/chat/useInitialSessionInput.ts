@@ -63,6 +63,8 @@ export function useInitialSessionInput({
     const project =
       locationState?.initialProject ??
       projects.find((entry) => entry.id === locationState?.initialProjectId);
+    // Consume navigation input before waiting for the Turn, including on reload.
+    navigate(locationPathname, { replace: true, state: null });
     void sendText(initialPrompt, {
       modelSelection: modelSelectionForRef(
         models,
@@ -75,11 +77,6 @@ export function useInitialSessionInput({
         ? { fileIds: initialAttachments.map((file) => file.fileId) }
         : {}),
     })
-      .then(() => {
-        if (mountedRef.current && activeSessionIdRef.current === sessionId) {
-          navigate(locationPathname, { replace: true, state: null });
-        }
-      })
       .catch(() => {
         if (mountedRef.current && activeSessionIdRef.current === sessionId) {
           setDraft(initialPrompt);

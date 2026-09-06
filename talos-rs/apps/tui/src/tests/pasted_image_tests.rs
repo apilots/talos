@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use talos_sdk::TalosInputItem;
+use talos_sdk::{AgentUserContent, AgentUserInput};
 
 use crate::client::GatewayClient;
 use crate::test_support::MockGatewayClient;
@@ -41,9 +41,11 @@ async fn pasted_image_uploads_and_sends_only_ordered_file_ids() {
     assert_eq!(state.upload_requests[0].1, Bytes::from_static(b"png-one"));
     assert_eq!(
         state.sent_requests[0].input,
-        vec![TalosInputItem::Files {
-            file_ids: vec!["uploaded-file-1".to_string()],
-        }]
+        AgentUserInput {
+            content: vec![AgentUserContent::File {
+                file_id: "uploaded-file-1".to_string(),
+            }],
+        }
     );
     assert_eq!(
         state.sent_requests[0].project_id.as_deref(),
@@ -85,9 +87,16 @@ async fn pasted_image_upload_order_follows_marker_order() {
     );
     assert_eq!(
         state.sent_requests[0].input,
-        vec![TalosInputItem::Files {
-            file_ids: vec!["uploaded-file-1".to_string(), "uploaded-file-2".to_string(),],
-        }]
+        AgentUserInput {
+            content: vec![
+                AgentUserContent::File {
+                    file_id: "uploaded-file-1".to_string(),
+                },
+                AgentUserContent::File {
+                    file_id: "uploaded-file-2".to_string(),
+                },
+            ],
+        }
     );
 }
 
@@ -164,9 +173,16 @@ async fn pasted_image_failure_keeps_draft_and_reuses_successful_uploads() {
     assert_eq!(state.upload_requests.len(), 3);
     assert_eq!(
         state.sent_requests[0].input,
-        vec![TalosInputItem::Files {
-            file_ids: vec!["uploaded-file-1".to_string(), "uploaded-file-3".to_string(),],
-        }]
+        AgentUserInput {
+            content: vec![
+                AgentUserContent::File {
+                    file_id: "uploaded-file-1".to_string(),
+                },
+                AgentUserContent::File {
+                    file_id: "uploaded-file-3".to_string(),
+                },
+            ],
+        }
     );
 }
 

@@ -28,12 +28,13 @@ describe("useInitialSessionInput", () => {
       ],
     };
     const sendText = vi.fn(() => new Promise<void>(() => undefined));
+    const navigate = vi.fn();
 
     renderHook(() =>
       useInitialSessionInput({
         locationPathname: "/sessions/sess-1",
         locationState,
-        navigate: vi.fn(),
+        navigate,
         projects: [],
         sendText,
         sessionId: "sess-1",
@@ -50,5 +51,6 @@ describe("useInitialSessionInput", () => {
       });
     });
     expect(hasInitialSessionInput(locationState)).toBe(true);
+    expect(navigate).toHaveBeenCalledWith("/sessions/sess-1", { replace: true, state: null });
   });
 });

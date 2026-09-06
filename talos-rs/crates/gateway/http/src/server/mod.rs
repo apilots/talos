@@ -51,12 +51,10 @@ use self::memory_files::{
 };
 use self::message_queue::{
     add_queued_message_handler, delete_queued_message_handler, list_message_queue_handler,
-    reorder_message_queue_handler, start_queued_message_handler, steer_queued_message_handler,
-    update_queued_message_handler,
+    reorder_message_queue_handler, start_queued_message_handler, update_queued_message_handler,
 };
 use self::messages::{
-    interrupt_turn_handler, retry_turn_handler, start_turn_handler,
-    submit_dynamic_tool_result_handler, submit_user_action_handler,
+    interrupt_turn_handler, retry_turn_handler, start_turn_handler, submit_turn_input_handler,
 };
 use self::misc::{
     get_config_handler, get_llm_handler, health_handler, list_models_handler, put_config_handler,
@@ -164,12 +162,6 @@ impl HttpServer {
 
     pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
         info!("Starting HTTP server on {}:{}", self.host, self.port);
-        let gc_shutdown = shutdown.clone();
-        let app_events_for_gc = self.service.events.clone();
-        let gc_task = tokio::spawn(async move {
-            app_events_for_gc.run_event_log_gc_loop(gc_shutdown).await;
-        });
-
         let state = Arc::new(HttpApiState::from_service(
             self.service.clone(),
             #[cfg(test)]
@@ -293,6 +285,7 @@ impl HttpServer {
             .route("/v1/turns/start", post(start_turn_handler))
             .route("/v1/turns/retry", post(retry_turn_handler))
             .route("/v1/turns/interrupt", post(interrupt_turn_handler))
+            .route("/v1/turns/input", post(submit_turn_input_handler))
             .route("/v1/message-queue/add", post(add_queued_message_handler))
             .route("/v1/message-queue/list", post(list_message_queue_handler))
             .route(
@@ -311,15 +304,6 @@ impl HttpServer {
                 "/v1/message-queue/start",
                 post(start_queued_message_handler),
             )
-            .route(
-                "/v1/message-queue/steer",
-                post(steer_queued_message_handler),
-            )
-            .route(
-                "/v1/tools/dynamic-results/submit",
-                post(submit_dynamic_tool_result_handler),
-            )
-            .route("/v1/user-actions/submit", post(submit_user_action_handler))
             .route("/v1/*path", any(api_not_found_handler))
             .method_not_allowed_fallback(api_method_not_allowed_handler)
             .with_state(state.clone())
@@ -362,7 +346,6 @@ impl HttpServer {
                 )
             });
 
-        gc_task.abort();
         serve_result
     }
 

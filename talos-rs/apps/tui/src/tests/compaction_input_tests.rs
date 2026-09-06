@@ -16,7 +16,7 @@ async fn test_context_compaction_stream_renders_right_panel_status() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(context_compaction_started_event(
+    app.handle_stream_event(context_compaction_block_started_event(
         "msg-compact",
         "sess-test",
         1,
@@ -50,7 +50,7 @@ async fn test_context_compaction_rejects_message_and_preserves_draft() {
     app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
-    app.handle_stream_event(context_compaction_started_event(
+    app.handle_stream_event(context_compaction_block_started_event(
         "msg-compact",
         "sess-test",
         1,
@@ -81,7 +81,7 @@ async fn test_context_compaction_rejects_session_command() {
     app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
-    app.handle_stream_event(context_compaction_started_event(
+    app.handle_stream_event(context_compaction_block_started_event(
         "msg-compact",
         "sess-test",
         1,
@@ -103,30 +103,27 @@ async fn test_recovery_keeps_running_context_compaction_for_follow_up_delta() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
-    let response = TimelineRecoveryResponse {
-        snapshot: TimelineRecoverySnapshot {
-            replay: TimelineReplay {
-                events: vec![context_compaction_started_event(
-                    "msg-compact",
-                    "sess-test",
-                    1,
-                    ContextCompactionStage::Preparing,
-                    "Preparing session history compaction.",
-                )],
-                high_water_mark_event_id: None,
-                last_replay_seq: 1,
-                cursor_status: TimelineCursorStatus::Current,
-            },
-            active_turn: TimelineActiveTurnSnapshot {
-                session_id: "sess-test".to_string(),
-                status: TimelineActiveTurnStatus::Running,
-                turn_id: Some("turn-test".to_string()),
-                message_id: Some("msg-compact".to_string()),
-                last_event_id: None,
-                pending_user_action: None,
-                updated_at: 1,
-            },
+    let response = RecoverTimelineResponse {
+        replay: TimelineReplay {
+            events: vec![context_compaction_block_started_event(
+                "msg-compact",
+                "sess-test",
+                1,
+                ContextCompactionStage::Preparing,
+                "Preparing session history compaction.",
+            )],
+            high_water_mark_event_id: Some("ev_1".to_string()),
+            next_cursor: None,
+            last_event_seq: 1,
+            cursor_status: TimelineCursorStatus::Current,
         },
+        active_turn: Some(TimelineActiveTurn {
+            identity: AgentTurnRef::new("sess-test", "turn-test"),
+            initial_message_id: Some("msg-compact".to_string()),
+            state: ActiveTurnState::Running,
+            last_event_id: "ev_1".to_string(),
+            updated_at: 1,
+        }),
     };
 
     app.replay_recovery_snapshot(response);
@@ -157,7 +154,7 @@ async fn test_compact_command_subscribes_to_session_timeline_before_request() {
         let mut state = client.state.lock().unwrap();
         state.timeline_high_water_mark_event_id = Some("ev_41".to_string());
         state.session_subscription_events = vec![
-            context_compaction_started_event(
+            context_compaction_block_started_event(
                 "msg-compact",
                 "sess-test",
                 42,

@@ -1,6 +1,7 @@
 import type {
+  AgentUserContent,
+  AgentUserInput,
   ModelSelection,
-  TalosInputItem,
   UserPermissionMode,
 } from "@talos/sdk-browser";
 
@@ -13,11 +14,12 @@ export interface SendTextOptions {
   fileIds?: string[];
 }
 
-export function buildQueuedInput(text: string, options?: SendTextOptions): TalosInputItem[] {
-  return [
+export function buildQueuedInput(text: string, options?: SendTextOptions): AgentUserInput {
+  const content: AgentUserContent[] = [
     ...(text ? [{ type: "text" as const, text }] : []),
     ...((options?.fileIds?.length ?? 0) > 0
-      ? [{ type: "files" as const, fileIds: options?.fileIds ?? [] }]
+      ? (options?.fileIds ?? []).map((fileId) => ({ type: "file" as const, fileId }))
       : []),
   ];
+  return { content };
 }

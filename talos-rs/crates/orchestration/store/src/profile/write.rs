@@ -1,7 +1,8 @@
 use sqlx::{Row, SqlitePool};
 use talos_error::{TalosError, TalosResult};
+use talos_storage::SqliteWriteTransaction;
 
-use super::usage::{accumulate_usage, storage_error, usage_from_row};
+use super::usage::{storage_error, usage_from_row};
 use super::{ModelCallUsageUpdate, ProfileUsageUpdate, TurnUsageUpdate};
 
 /// Routes a shared Profile usage update to its lifecycle-specific persistence path.
@@ -16,10 +17,9 @@ pub(super) async fn record_turn_usage(
     pool: &SqlitePool,
     update: TurnUsageUpdate,
 ) -> TalosResult<()> {
-    let mut transaction = pool
-        .begin()
+    let mut transaction = SqliteWriteTransaction::begin(pool)
         .await
-        .map_err(storage_error("begin profile usage update"))?;
+        .map_err(|error| TalosError::internal(format!("begin profile usage update: {error}")))?;
     let existing = sqlx::query(
         "SELECT user_id, last_request_id, model_provider, model_id, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage_available, finalized, timezone FROM profile_turn_usage WHERE usage_kind = 'turn' AND session_id = ? AND turn_id = ?",
     )
@@ -46,10 +46,9 @@ pub(super) async fn record_turn_usage(
                 .await
                 .map_err(storage_error("discard cancelled profile turn usage"))?;
         }
-        return transaction
-            .commit()
-            .await
-            .map_err(storage_error("commit cancelled profile usage discard"));
+        return transaction.commit().await.map_err(|error| {
+            TalosError::internal(format!("commit cancelled profile usage discard: {error}"))
+        });
     }
 
     if let Some(row) = existing {
@@ -59,10 +58,9 @@ pub(super) async fn record_turn_usage(
             .map_err(storage_error("read profile request id"))?
             == update.request_id
         {
-            transaction
-                .commit()
-                .await
-                .map_err(storage_error("commit duplicate profile usage"))?;
+            transaction.commit().await.map_err(|error| {
+                TalosError::internal(format!("commit duplicate profile usage: {error}"))
+            })?;
             return Ok(());
         }
         if row
@@ -70,26 +68,13 @@ pub(super) async fn record_turn_usage(
             .map_err(storage_error("read profile finalization state"))?
             != 0
         {
-            transaction
-                .commit()
-                .await
-                .map_err(storage_error("commit finalized profile replay"))?;
+            transaction.commit().await.map_err(|error| {
+                TalosError::internal(format!("commit finalized profile replay: {error}"))
+            })?;
             return Ok(());
         }
 
-        let existing_usage = usage_from_row(&row)?;
-        let existing_usage_available = row
-            .try_get::<i64, _>("usage_available")
-            .map_err(storage_error("read profile usage availability"))?
-            != 0;
-        let (usage, usage_available) = if !update.is_final() && !update.usage_available {
-            (existing_usage, existing_usage_available)
-        } else {
-            (
-                accumulate_usage(existing_usage, &update.usage)?,
-                existing_usage_available && update.usage_available,
-            )
-        };
+        let usage = &update.usage;
         sqlx::query(
             r#"
             UPDATE profile_turn_usage
@@ -107,7 +92,7 @@ pub(super) async fn record_turn_usage(
         .bind(i64::from(usage.total_tokens))
         .bind(usage.cache_creation_input_tokens.map(i64::from))
         .bind(usage.cache_read_input_tokens.map(i64::from))
-        .bind(i64::from(u8::from(usage_available)))
+        .bind(i64::from(u8::from(update.usage_available)))
         .bind(i64::from(u8::from(update.is_final())))
         .bind(update.is_final())
         .bind(&update.usage_date)
@@ -153,7 +138,7 @@ pub(super) async fn record_turn_usage(
     transaction
         .commit()
         .await
-        .map_err(storage_error("commit profile usage update"))
+        .map_err(|error| TalosError::internal(format!("commit profile usage update: {error}")))
 }
 
 pub(super) async fn discard_turn_usage(

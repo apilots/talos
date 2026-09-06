@@ -1,11 +1,11 @@
+use talos_agent_api::{SessionActiveTurnResponse, SessionHistoryResponse};
 use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
-    SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse,
-    SessionCloseRequest, SessionCloseResponse, SessionCompactRequest, SessionCompactResponse,
-    SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest, SessionGetResponse,
-    SessionHistoryRequest, SessionHistoryResponse, SessionInfo, SessionListRequest,
-    SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
+    SessionActiveTurnRequest, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
 };
 
 use crate::gateway_service::{require_non_empty, ServiceGateway};
@@ -17,9 +17,7 @@ impl ServiceGateway {
         request: SessionListRequest,
     ) -> TalosResult<SessionListResponse> {
         let sessions = self.service.list_sessions(actor, request).await?;
-        Ok(SessionListResponse {
-            sessions: sessions.iter().map(SessionInfo::from).collect(),
-        })
+        Ok(SessionListResponse { sessions })
     }
 
     pub(crate) async fn get_session(
@@ -28,9 +26,7 @@ impl ServiceGateway {
         request: SessionGetRequest,
     ) -> TalosResult<SessionGetResponse> {
         let session = self.service.get_session(actor, &request.session_id).await?;
-        Ok(SessionGetResponse {
-            session: SessionInfo::from(&session),
-        })
+        Ok(SessionGetResponse { session })
     }
 
     pub(crate) async fn get_session_history(
@@ -38,11 +34,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: SessionHistoryRequest,
     ) -> TalosResult<SessionHistoryResponse> {
-        let history = self
-            .service
-            .get_session_history(actor, &request.session_id)
-            .await?;
-        Ok(SessionHistoryResponse { history })
+        self.service.get_session_history(actor, request).await
     }
 
     pub(crate) async fn get_active_turn(
@@ -64,13 +56,11 @@ impl ServiceGateway {
     ) -> TalosResult<SessionUpdateResponse> {
         require_non_empty(&request.session_id, "session_id")?;
         let session_id = request.session_id.clone();
-        self.service
+        let session = self
+            .service
             .patch_session(actor, &session_id, request.into_patch())
             .await?;
-        let session = self.service.get_session(actor, &session_id).await?;
-        Ok(SessionUpdateResponse {
-            session: SessionInfo::from(&session),
-        })
+        Ok(SessionUpdateResponse { session })
     }
 
     pub(crate) async fn close_session(
@@ -92,9 +82,7 @@ impl ServiceGateway {
         self.service
             .delete_session(actor, &request.session_id)
             .await
-            .map(|result| SessionDeleteResponse {
-                success: result.success,
-            })
+            .map(|success| SessionDeleteResponse { success })
     }
 
     pub(crate) async fn compact_session(
@@ -106,9 +94,7 @@ impl ServiceGateway {
             .service
             .compact_session(actor, &request.session_id)
             .await?;
-        Ok(SessionCompactResponse {
-            session: SessionInfo::from(&session),
-        })
+        Ok(SessionCompactResponse { session })
     }
 
     pub(crate) async fn clear_session(
@@ -120,8 +106,6 @@ impl ServiceGateway {
             .service
             .clear_session(actor, &request.session_id)
             .await?;
-        Ok(SessionClearResponse {
-            session: SessionInfo::from(&session),
-        })
+        Ok(SessionClearResponse { session })
     }
 }

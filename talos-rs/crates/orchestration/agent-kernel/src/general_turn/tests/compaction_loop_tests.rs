@@ -1,6 +1,5 @@
 use super::*;
 use crate::general_turn::types::SessionCompactionStatus;
-use crate::StateNamespace;
 use talos_prompt::{
     CompactionTrimUnitKind, PromptSectionKind, SessionHistoryCompactionOutcome,
     SessionHistoryCompactionTrigger,
@@ -14,7 +13,7 @@ async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let skill_root = workspace_dir.join("skills").join("review");
     std::fs::create_dir_all(&skill_root).expect("skill root should exist");
     std::fs::write(
@@ -75,7 +74,7 @@ async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let skills_root = workspace_dir.join("skills");
     for name in ["review", "docs", "design", "testing"] {
         let skill_root = skills_root.join(name);
@@ -133,39 +132,22 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     for idx in 0..24 {
-        let timestamp = Utc::now();
-        memory_store
-            .append_turn(&TalosTurn {
-                turn_id: format!("turn-{idx}"),
-            message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory_store
-                    .next_turn_seq("s1")
-                    .await
-                    .expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!(
-                            "historical user message {} requesting additional repository evidence and continuity details",
-                            idx
-                        ),
-                        file_ids: Vec::new(),
-                    },
-                    RunItem::OutputText {
-                        text: format!(
-                            "historical assistant message {} with enough content to stress the prompt window and preserve a larger review trail across repeated follow-up turns",
-                            idx
-                        ),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: TalosApiStopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
+        memory_store.append_prompt_turn(
+            format!("turn-{idx}"),
+            i64::from(idx + 1),
+            vec![
+                (
+                    SessionPromptMessageRole::User,
+                    format!("historical user message {idx} requesting additional repository evidence and continuity details"),
+                ),
+                (
+                    SessionPromptMessageRole::Assistant,
+                    format!("historical assistant message {idx} with enough content to stress the prompt window and preserve a larger review trail across repeated follow-up turns"),
+                ),
+            ],
+        );
     }
 
     let mut config = AgentKernelConfig::default();
@@ -199,23 +181,17 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 
     assert_eq!(prepared.max_output_tokens, Some(1_234));
 
-    let compaction_state_value = ctx
+    let compaction_state = ctx
         .session
         .state
-        .get(StateNamespace::Session, SESSION_COMPACTION_STATE_KEY)
-        .cloned()
+        .compaction
+        .as_ref()
         .expect("compaction state should be staged during prepare");
-    let compaction_state: SessionCompactionState =
-        serde_json::from_value(compaction_state_value).expect("compaction state should parse");
     assert_eq!(compaction_state.status, SessionCompactionStatus::Recovery);
 
     assert!(
         prepared.prompt_diagnostics.dropped_sections.is_empty(),
         "history compaction should run before section drop"
-    );
-    assert!(
-        prepared.warnings.is_empty(),
-        "successful compaction should avoid prompt drop warnings"
     );
     let compaction = prepared
         .prompt_diagnostics
@@ -243,13 +219,22 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     let mut stream_stages = Vec::new();
     let mut stream_outcomes = Vec::new();
     let mut stream_metrics = Vec::new();
+    let mut saw_prompt_warning = false;
     while let Ok(event) = stream_rx.try_recv() {
-        if let KernelStreamEventData::ContextCompaction(data) = event.data {
-            stream_stages.push(data.stage);
-            stream_outcomes.push(data.outcome);
-            stream_metrics.push(data.metrics);
+        match event.payload {
+            AgentKernelEventPayload::ContextCompaction(data) => {
+                stream_stages.push(data.stage);
+                stream_outcomes.push(data.outcome);
+                stream_metrics.push(data.metrics);
+            }
+            AgentKernelEventPayload::PromptWarning(_) => saw_prompt_warning = true,
+            _ => {}
         }
     }
+    assert!(
+        !saw_prompt_warning,
+        "successful compaction should avoid prompt drop warnings"
+    );
     assert_eq!(
         stream_stages,
         vec![
@@ -285,10 +270,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         .included_sections
         .contains(&PromptSectionKind::SessionSummary));
 
-    let summaries = memory_store
-        .load_summaries("s1", 4)
-        .await
-        .expect("summary load should succeed");
+    let summaries = memory_store.load_test_summaries("s1", 4);
     assert!(
         !summaries.is_empty(),
         "compaction should persist a session summary"
@@ -307,35 +289,22 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
     register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     for idx in 0..4 {
-        let timestamp = Utc::now();
-        memory_store
-            .append_turn(&TalosTurn {
-                turn_id: format!("turn-{idx}"),
-            message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory_store
-                    .next_turn_seq("s1")
-                    .await
-                    .expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!("historical user message {idx} with continuity"),
-                        file_ids: Vec::new(),
-                    },
-                    RunItem::OutputText {
-                        text: format!(
-                            "historical assistant message {idx} with enough content to cross the preemptive compaction trigger without exhausting the full prompt budget"
-                        ),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: TalosApiStopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
+        memory_store.append_prompt_turn(
+            format!("turn-{idx}"),
+            i64::from(idx + 1),
+            vec![
+                (
+                    SessionPromptMessageRole::User,
+                    format!("historical user message {idx} with continuity"),
+                ),
+                (
+                    SessionPromptMessageRole::Assistant,
+                    format!("historical assistant message {idx} with enough content to cross the preemptive compaction trigger without exhausting the full prompt budget"),
+                ),
+            ],
+        );
     }
 
     let mut config = AgentKernelConfig::default();
@@ -394,36 +363,22 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     for idx in 0..24 {
-        let timestamp = Utc::now();
-        memory_store
-            .append_turn(&TalosTurn {
-                turn_id: format!("turn-{idx}"),
-            message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory_store
-                    .next_turn_seq("s1")
-                    .await
-                    .expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!("historical user message {}", idx),
-                        file_ids: Vec::new(),
-                    },
-                    RunItem::OutputText {
-                        text: format!(
-                            "historical assistant message {} with enough content to stress the prompt window and preserve continuity",
-                            idx
-                        ),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: TalosApiStopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
+        memory_store.append_prompt_turn(
+            format!("turn-{idx}"),
+            i64::from(idx + 1),
+            vec![
+                (
+                    SessionPromptMessageRole::User,
+                    format!("historical user message {idx}"),
+                ),
+                (
+                    SessionPromptMessageRole::Assistant,
+                    format!("historical assistant message {idx} with enough content to stress the prompt window and preserve continuity"),
+                ),
+            ],
+        );
     }
 
     let mut config = AgentKernelConfig::default();
@@ -453,21 +408,19 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     .await
     .expect("general turn should succeed");
 
-    assert_eq!(result.output_text, "ok");
-    assert_eq!(result.usage.input_tokens, 26);
-    assert_eq!(result.usage.output_tokens, 14);
-    assert_eq!(result.usage.total_tokens, 40);
-    assert_eq!(result.usage.cache_creation_input_tokens, Some(6));
-    assert_eq!(result.usage.cache_read_input_tokens, Some(22));
-    assert_eq!(result.metrics.usage, result.usage);
-    let compaction_state_value = ctx
+    assert_eq!(result.output_text(), "ok");
+    assert_eq!(result.usage().input_tokens, 26);
+    assert_eq!(result.usage().output_tokens, 14);
+    assert_eq!(result.usage().total_tokens, 40);
+    assert_eq!(result.usage().cache_creation_input_tokens, Some(6));
+    assert_eq!(result.usage().cache_read_input_tokens, Some(22));
+    assert_eq!(result.metrics().usage, *result.usage());
+    let compaction_state = ctx
         .session
         .state
-        .get(StateNamespace::Session, SESSION_COMPACTION_STATE_KEY)
-        .cloned()
+        .compaction
+        .as_ref()
         .expect("compaction state should be updated after successful run");
-    let compaction_state: SessionCompactionState =
-        serde_json::from_value(compaction_state_value).expect("compaction state should parse");
     assert!(compaction_state.is_recovery());
 }
 
@@ -484,36 +437,22 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     for idx in 0..12 {
-        let timestamp = Utc::now();
-        memory_store
-            .append_turn(&TalosTurn {
-                turn_id: format!("turn-{idx}"),
-            message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory_store
-                    .next_turn_seq("s1")
-                    .await
-                    .expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!("historical user message {}", idx),
-                        file_ids: Vec::new(),
-                    },
-                    RunItem::OutputText {
-                        text: format!(
-                            "historical assistant message {} with enough content to stress the compacted prompt window",
-                            idx
-                        ),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: TalosApiStopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
+        memory_store.append_prompt_turn(
+            format!("turn-{idx}"),
+            i64::from(idx + 1),
+            vec![
+                (
+                    SessionPromptMessageRole::User,
+                    format!("historical user message {idx}"),
+                ),
+                (
+                    SessionPromptMessageRole::Assistant,
+                    format!("historical assistant message {idx} with enough content to stress the compacted prompt window"),
+                ),
+            ],
+        );
     }
 
     let mut config = AgentKernelConfig::default();
@@ -577,36 +516,22 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     for idx in 0..12 {
-        let timestamp = Utc::now();
-        memory_store
-            .append_turn(&TalosTurn {
-                turn_id: format!("turn-{idx}"),
-            message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory_store
-                    .next_turn_seq("s1")
-                    .await
-                    .expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!("historical user message {}", idx),
-                        file_ids: Vec::new(),
-                    },
-                    RunItem::OutputText {
-                        text: format!(
-                            "historical assistant message {} with enough content to stress the compacted prompt window",
-                            idx
-                        ),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: TalosApiStopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
+        memory_store.append_prompt_turn(
+            format!("turn-{idx}"),
+            i64::from(idx + 1),
+            vec![
+                (
+                    SessionPromptMessageRole::User,
+                    format!("historical user message {idx}"),
+                ),
+                (
+                    SessionPromptMessageRole::Assistant,
+                    format!("historical assistant message {idx} with enough content to stress the compacted prompt window"),
+                ),
+            ],
+        );
     }
 
     let mut config = AgentKernelConfig::default();
@@ -650,14 +575,12 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
     );
     assert_eq!(compaction.summary_sections_after, 0);
     assert!(compaction.fallback_section_drop_applied);
-    let compaction_state_value = ctx
+    let compaction_state = ctx
         .session
         .state
-        .get(StateNamespace::Session, SESSION_COMPACTION_STATE_KEY)
-        .cloned()
+        .compaction
+        .as_ref()
         .expect("rejected compaction should leave a terminal state");
-    let compaction_state: SessionCompactionState =
-        serde_json::from_value(compaction_state_value).expect("compaction state should parse");
     assert_eq!(compaction_state.status, SessionCompactionStatus::Normal);
 }
 
@@ -667,19 +590,14 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.session.state.insert(
-        StateNamespace::Session,
-        SESSION_COMPACTION_STATE_KEY.to_string(),
-        serde_json::to_value(SessionCompactionState::blocked_prompt_budget_exhausted())
-            .expect("blocked state should serialize"),
-    );
+    ctx.session.state.compaction = Some(SessionCompactionState::blocked_prompt_budget_exhausted());
 
     let error = prepare_general_turn(
         &mut ctx,
@@ -715,7 +633,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
             .repeat(64),
     )
     .expect("soul file should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     seed_recent_user_message(memory_store.as_ref()).await;
 
     let mut config = AgentKernelConfig::default();
@@ -745,14 +663,12 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
     .expect_err("unrecoverable prompt budget should block the session");
 
     assert!(error.to_string().contains("reset_session"), "{error}");
-    let blocked_value = ctx
+    let blocked_state = ctx
         .session
         .state
-        .get(StateNamespace::Session, SESSION_COMPACTION_STATE_KEY)
-        .cloned()
+        .compaction
+        .as_ref()
         .expect("blocked state should be applied to in-memory session state");
-    let blocked_state: SessionCompactionState =
-        serde_json::from_value(blocked_value).expect("blocked state should parse");
     assert!(blocked_state.is_blocked());
 }
 
@@ -762,33 +678,22 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     for idx in 0..4 {
-        let timestamp = Utc::now();
-        memory_store
-            .append_turn(&TalosTurn {
-                turn_id: format!("turn-{idx}"),
-                message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory_store
-                    .next_turn_seq("s1")
-                    .await
-                    .expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!("historical user message {} {}", idx, "x".repeat(48)),
-                        file_ids: Vec::new(),
-                    },
-                    RunItem::OutputText {
-                        text: format!("historical assistant message {} {}", idx, "y".repeat(48)),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: TalosApiStopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
+        memory_store.append_prompt_turn(
+            format!("turn-{idx}"),
+            i64::from(idx + 1),
+            vec![
+                (
+                    SessionPromptMessageRole::User,
+                    format!("historical user message {idx} {}", "x".repeat(48)),
+                ),
+                (
+                    SessionPromptMessageRole::Assistant,
+                    format!("historical assistant message {idx} {}", "y".repeat(48)),
+                ),
+            ],
+        );
     }
 
     let mut config = AgentKernelConfig::default();
@@ -830,12 +735,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
 
     let mut recovery_ctx = build_ctx_with_stream(None);
     recovery_ctx.selected_model_info.model.context_window = 16_384;
-    recovery_ctx.session.state.insert(
-        StateNamespace::Session,
-        SESSION_COMPACTION_STATE_KEY.to_string(),
-        serde_json::to_value(SessionCompactionState::recovery())
-            .expect("recovery state should serialize"),
-    );
+    recovery_ctx.session.state.compaction = Some(SessionCompactionState::recovery());
     let recovery_prepared = prepare_general_turn(
         &mut recovery_ctx,
         "talos",

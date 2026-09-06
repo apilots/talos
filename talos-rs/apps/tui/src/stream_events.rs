@@ -1,48 +1,47 @@
 use std::time::Instant;
 
 use talos_sdk::{
-    AgentEventPayload, ContextCompactionOutcome, ContextCompactionStage, SessionHistorySnapshot,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnStatus, TimelineEventEnvelope,
-    TimelineRecoveryResponse, TimelineUserActionEvent,
+    AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlockContent,
+    AgentMessageBlockDeltaContent, AgentMessageRole, AgentPendingInput, AgentRunResult,
+    AgentUserContent, ContextCompactionOutcome, ContextCompactionStage, RecoverTimelineResponse,
+    SessionHistoryResponse, TimelineEvent,
 };
 use tokio::sync::mpsc;
 use tracing::error;
 
-use crate::render_runtime::render::history::timeline_item_to_blocks;
+use crate::render_runtime::render::history::agent_message_to_blocks;
 use crate::render_runtime::transcript::block::TranscriptBlockKind;
 use crate::TuiApp;
 
 impl TuiApp {
-    pub(crate) fn handle_stream_event(&mut self, envelope: TimelineEventEnvelope) {
+    pub(crate) fn handle_stream_event(&mut self, envelope: TimelineEvent) {
         self.trace_event_count = self.trace_event_count.saturating_add(1);
+        let identity = &envelope.event.identity;
 
         if let Some(session_id) = self.session_id.as_deref() {
-            if envelope.session_id != session_id {
+            if identity.session_id != session_id {
                 self.push_right_event(format!(
                     "ignored event from other session: {}",
-                    envelope.session_id
+                    identity.session_id
                 ));
                 return;
             }
         }
 
-        match self.active_stream_message_id.as_deref() {
-            Some(active_id) if envelope.message_id != active_id => {
+        match self.active_stream_turn_id.as_deref() {
+            Some(active_id) if identity.turn_id != active_id => {
                 self.push_right_event(format!(
                     "ignored stale event for {} (active {})",
-                    envelope.message_id, active_id
+                    identity.turn_id, active_id
                 ));
                 return;
             }
             None => {
-                self.active_stream_message_id = Some(envelope.message_id.clone());
+                self.active_stream_turn_id = Some(identity.turn_id.clone());
             }
             _ => {}
         }
 
-        let turn_id = envelope.turn_id.clone();
-        let is_live_metrics = matches!(&envelope.event.payload, AgentEventPayload::TurnMetrics(_));
         let event = envelope.event;
         if let Some(last_seq) = self.last_stream_sequence {
             if event.sequence <= last_seq {
@@ -54,9 +53,7 @@ impl TuiApp {
             }
         }
         self.last_stream_sequence = Some(event.sequence);
-        if !is_live_metrics {
-            self.last_stream_event_id = Some(envelope.event_id);
-        }
+        self.last_stream_event_id = Some(envelope.event_id);
         self.request_chat_activity();
 
         self.render_runtime
@@ -66,35 +63,43 @@ impl TuiApp {
             AgentEventPayload::TurnStarted(_) => {
                 self.turn_metrics = None;
                 self.turn_metrics_live = false;
+                self.context_compaction_stage = None;
             }
-            AgentEventPayload::ItemStarted(payload) => {
-                self.handle_item_started(payload.item);
+            AgentEventPayload::MessageStarted(started) => {
+                if started.message.role == AgentMessageRole::User {
+                    self.pending_user_action = None;
+                }
             }
-            AgentEventPayload::ItemDelta(payload) => {
-                self.handle_item_delta(&turn_id, &payload.item_id, payload.delta);
+            AgentEventPayload::MessageBlockStarted(started) => {
+                self.observe_started_block(&started.block.content, &started.block.block_id);
             }
-            AgentEventPayload::ItemCompleted(payload) => {
-                self.handle_item_completed(
-                    &payload.item_id,
-                    payload.status,
-                    payload.completed_at_ms,
-                    payload.final_content,
-                );
+            AgentEventPayload::MessageBlockDelta(delta) => {
+                self.observe_block_delta(&delta.block_id, delta.delta);
             }
-            AgentEventPayload::AssistantTextCommitted(payload) => {
-                self.handle_assistant_text_committed(&payload.item_id, payload.phase);
+            AgentEventPayload::MessageBlockCompleted(completed) => {
+                self.observe_completed_block(&completed.block.content);
             }
-            AgentEventPayload::TurnMetrics(payload) => {
-                self.turn_metrics = Some(payload.metrics);
+            AgentEventPayload::MessageCompleted(_) => {}
+            AgentEventPayload::WaitingForInput(pending) => {
+                if let AgentPendingInput::UserAction { action } = pending {
+                    self.pending_user_action = Some(crate::user_action::PendingActionState::new(
+                        event.identity.turn_id.clone(),
+                        action,
+                    ));
+                    self.in_flight = true;
+                }
+            }
+            AgentEventPayload::MetricsUpdated(metrics) => {
+                self.turn_metrics = Some(metrics);
                 self.turn_metrics_live = true;
             }
-            AgentEventPayload::TurnCompleted(payload) => {
-                self.session_usage.accumulate(&payload.usage);
-                self.schedule_session_usage_refresh();
-                if let Some(metrics) = payload.metrics {
-                    self.turn_metrics = Some(metrics);
+            AgentEventPayload::TurnCompleted(_) => {
+                if let Some(metrics) = &self.turn_metrics {
+                    self.session_usage.accumulate(&metrics.usage);
                 }
+                self.schedule_session_usage_refresh();
                 self.turn_metrics_live = false;
+                self.context_compaction_stage = None;
                 let user_action_cursor = self
                     .pending_user_action
                     .as_ref()
@@ -102,41 +107,36 @@ impl TuiApp {
                 self.finish_active_stream("stream completed", false, false);
                 self.last_stream_event_id = user_action_cursor;
             }
-            AgentEventPayload::TurnError(payload) => {
+            AgentEventPayload::TurnFailed(_) => {
                 self.turn_metrics_live = false;
-                let _ = payload;
+                self.context_compaction_stage = None;
                 self.finish_active_stream("stream error", true, false);
             }
         }
     }
 
-    pub(crate) fn replay_recovery_snapshot(&mut self, response: TimelineRecoveryResponse) -> usize {
-        let snapshot = response.snapshot;
-        let active_turn = snapshot.active_turn.clone();
-        let mut events = snapshot.replay.events;
+    pub(crate) fn replay_recovery_snapshot(&mut self, response: RecoverTimelineResponse) -> usize {
+        let active_turn = response.active_turn.clone();
+        let mut events = response.replay.events;
+        if let Some(active) = &active_turn {
+            events.retain(|event| event.event.identity.turn_id == active.identity.turn_id);
+        } else {
+            events.clear();
+        }
         events.sort_by_key(|a| a.event_seq);
         let count = events.len();
         for envelope in events {
-            if self.active_stream_message_id.as_deref() != Some(envelope.message_id.as_str()) {
-                self.active_stream_message_id = None;
+            if self.active_stream_turn_id.as_deref()
+                != Some(envelope.event.identity.turn_id.as_str())
+            {
+                self.active_stream_turn_id = None;
                 self.last_stream_sequence = None;
                 self.last_stream_event_id = None;
-                self.timeline_items.clear();
+                self.context_compaction_stage = None;
             }
             self.handle_stream_event(envelope);
         }
-        if let (Some(turn_id), Some(action)) = (
-            active_turn.turn_id.clone(),
-            active_turn.pending_user_action.clone(),
-        ) {
-            self.pending_user_action =
-                Some(crate::user_action::PendingActionState::new(turn_id, action));
-        }
-        let should_reconnect = self.active_context_compaction_stage().is_some()
-            || matches!(
-                active_turn.status,
-                TimelineActiveTurnStatus::Running | TimelineActiveTurnStatus::WaitingUserAction
-            );
+        let should_reconnect = active_turn.is_some();
         if should_reconnect {
             self.in_flight = true;
             self.stream_started_at = Some(Instant::now());
@@ -158,396 +158,158 @@ impl TuiApp {
                 self.pending_stream_task = Some(handle);
             }
         } else {
-            self.active_stream_message_id = None;
+            self.active_stream_turn_id = None;
             self.last_stream_sequence = None;
             self.last_stream_event_id = None;
-            self.timeline_items.clear();
+            self.context_compaction_stage = None;
         }
         count
     }
 
-    pub(crate) fn replay_history_snapshot(&mut self, snapshot: SessionHistorySnapshot) -> usize {
+    pub(crate) fn replay_history_snapshot(&mut self, response: SessionHistoryResponse) -> usize {
         let mut item_count = 0;
-        self.active_stream_message_id = None;
+        self.active_stream_turn_id = None;
         self.last_stream_sequence = None;
         self.last_stream_event_id = None;
-        self.timeline_items.clear();
+        self.context_compaction_stage = None;
 
-        for message in snapshot.messages {
-            let round_duration_ms = message
-                .metrics
-                .as_ref()
-                .and_then(|metrics| metrics.duration_ms);
-            for item in message.items {
-                if self.render_history_item(item, round_duration_ms) {
-                    item_count += 1;
+        for turn in response.data {
+            let (messages, round_duration_ms) = match turn.result {
+                AgentRunResult::Completed(output) => (output.messages, output.metrics.duration_ms),
+                AgentRunResult::Failed(failure) => (failure.messages, failure.metrics.duration_ms),
+            };
+            for message in messages {
+                if message.role == AgentMessageRole::User {
+                    for block in &message.blocks {
+                        if let AgentMessageBlockContent::UserContent(AgentUserContent::Text {
+                            text,
+                        }) = &block.content
+                        {
+                            self.input_history.push(text.clone());
+                        }
+                    }
                 }
+                let blocks = agent_message_to_blocks(&message)
+                    .into_iter()
+                    .map(|block| {
+                        if block.kind == TranscriptBlockKind::UserInput {
+                            return match round_duration_ms {
+                                Some(duration) => block.with_round_duration_ms(duration),
+                                None => block,
+                            };
+                        }
+                        block
+                    })
+                    .collect::<Vec<_>>();
+                item_count += self.render_runtime.append_history(blocks);
             }
         }
 
-        self.timeline_items.clear();
+        self.context_compaction_stage = None;
         item_count
     }
 
-    fn render_history_item(
-        &mut self,
-        item: TalosTimelineItem,
-        round_duration_ms: Option<u64>,
-    ) -> bool {
-        let transcript_blocks = timeline_item_to_blocks(&item)
-            .into_iter()
-            .map(|block| {
-                if block.kind == TranscriptBlockKind::UserInput {
-                    return match round_duration_ms {
-                        Some(round_duration_ms) => block.with_round_duration_ms(round_duration_ms),
-                        None => block,
-                    };
-                }
-                block
-            })
-            .collect::<Vec<_>>();
-        let rendered_to_transcript = self.render_runtime.append_history(transcript_blocks) > 0;
-
-        match (&item.kind, &item.phase, &item.content) {
-            (
-                TalosTimelineItemKind::UserInput,
-                TalosTimelinePhase::Input,
-                TalosTimelineContent::Text { text },
-            ) => {
-                self.add_message_to_history(text.clone());
-                rendered_to_transcript
+    fn observe_started_block(&mut self, content: &AgentMessageBlockContent, block_id: &str) {
+        match content {
+            AgentMessageBlockContent::AssistantText(assistant)
+                if assistant.phase == AgentAssistantTextPhase::FinalAnswer
+                    && !assistant.text.is_empty() =>
+            {
+                self.received_output_delta = true;
             }
-            (
-                TalosTimelineItemKind::UserInput,
-                TalosTimelinePhase::Input,
-                TalosTimelineContent::UserInput { text, .. },
-            ) => {
-                if !text.trim().is_empty() {
-                    self.add_message_to_history(text.clone());
-                }
-                rendered_to_transcript
+            AgentMessageBlockContent::ToolCall(tool) => {
+                self.push_right_event(format!("tool started [{block_id}]: {}", tool.name));
             }
-            (
-                TalosTimelineItemKind::ExecutionSummary,
-                TalosTimelinePhase::System,
-                TalosTimelineContent::ExecutionSummary { summary },
-            ) => {
-                if summary.trim().is_empty() {
-                    return false;
-                }
-                self.push_right_event(format!("execution summary: {}", summary.trim()));
-                true
+            AgentMessageBlockContent::ExecutionSummary(summary)
+                if !summary.text.trim().is_empty() =>
+            {
+                self.push_right_event(format!("execution summary: {}", summary.text.trim()));
             }
-            (
-                TalosTimelineItemKind::ContextCompaction,
-                TalosTimelinePhase::System,
-                TalosTimelineContent::ContextCompaction { .. },
-            ) => {
-                self.push_right_event(context_compaction_text(&item.content));
-                true
+            AgentMessageBlockContent::ContextCompaction(compaction) => {
+                self.context_compaction_stage = Some(compaction.stage);
+                self.push_right_event(context_compaction_status(
+                    compaction.stage,
+                    compaction.outcome,
+                    compaction.message.as_deref(),
+                ));
             }
-            (
-                TalosTimelineItemKind::SystemNotice,
-                TalosTimelinePhase::System,
-                TalosTimelineContent::SystemNotice { message, .. },
-            ) => {
-                if !message.trim().is_empty() {
-                    self.push_right_event(message.trim().to_string());
-                }
-                rendered_to_transcript
-            }
-            _ => rendered_to_transcript,
-        }
-    }
-
-    fn handle_item_started(&mut self, item: TalosTimelineItem) {
-        self.timeline_items
-            .insert(item.item_id.clone(), item.clone());
-        match (&item.kind, &item.phase, &item.content) {
-            (
-                TalosTimelineItemKind::UserInput,
-                TalosTimelinePhase::Input,
-                TalosTimelineContent::Text { text },
-            ) => {
-                let _ = text;
-            }
-            (
-                TalosTimelineItemKind::UserInput,
-                TalosTimelinePhase::Input,
-                TalosTimelineContent::UserInput { .. },
-            ) => {}
-            (
-                TalosTimelineItemKind::Reasoning,
-                TalosTimelinePhase::Thinking,
-                TalosTimelineContent::Text { text },
-            ) => {
-                let _ = text;
-            }
-            (
-                TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::Unknown | TalosTimelinePhase::Commentary,
-                TalosTimelineContent::Text { text },
-            ) => {
-                let _ = text;
-            }
-            (
-                TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::FinalAnswer,
-                TalosTimelineContent::Text { text },
-            ) => {
-                if !text.is_empty() {
-                    self.received_output_delta = true;
-                }
-            }
-            (
-                TalosTimelineItemKind::ToolCall,
-                TalosTimelinePhase::Acting,
-                TalosTimelineContent::ToolCall { call_id, name, .. },
-            ) => {
-                self.push_right_event(format!("tool started [{}]: {}", item.item_id, name));
-                let _ = call_id;
-            }
-            (
-                TalosTimelineItemKind::ExecutionSummary,
-                TalosTimelinePhase::System,
-                TalosTimelineContent::ExecutionSummary { summary },
-            ) => {
-                if !summary.trim().is_empty() {
-                    self.push_right_event(format!("execution summary: {}", summary.trim()));
-                }
-            }
-            (
-                TalosTimelineItemKind::ContextCompaction,
-                TalosTimelinePhase::System,
-                TalosTimelineContent::ContextCompaction { .. },
-            ) => {
-                self.push_right_event(context_compaction_text(&item.content));
-            }
-            (
-                TalosTimelineItemKind::SystemNotice,
-                TalosTimelinePhase::System,
-                TalosTimelineContent::SystemNotice { message, .. },
-            ) if !message.trim().is_empty() => {
-                self.push_right_event(message.trim().to_string());
+            AgentMessageBlockContent::SystemNotice(notice) if !notice.message.trim().is_empty() => {
+                self.push_right_event(notice.message.trim().to_string());
             }
             _ => {}
         }
     }
 
-    fn handle_item_delta(&mut self, turn_id: &str, item_id: &str, delta: TalosTimelineDelta) {
+    fn observe_block_delta(&mut self, block_id: &str, delta: AgentMessageBlockDeltaContent) {
         match delta {
-            TalosTimelineDelta::Text { text } => {
-                let Some(item) = self.timeline_items.get(item_id).cloned() else {
-                    return;
-                };
-                if let Some(stored) = self.timeline_items.get_mut(item_id) {
-                    if let TalosTimelineContent::Text { text: existing } = &mut stored.content {
-                        existing.push_str(&text);
-                    }
-                }
-                self.handle_text_delta(&item, &text);
-            }
-            TalosTimelineDelta::ToolArguments { arguments_delta } => {
-                let _ = self.update_tool_arguments(item_id, &arguments_delta);
-            }
-            TalosTimelineDelta::ToolProgress { .. } => {}
-            TalosTimelineDelta::ToolResult { content, is_error } => {
-                self.update_stored_tool_result(item_id, content, is_error);
-            }
-            TalosTimelineDelta::UserAction { event } => match event {
-                TimelineUserActionEvent::Requested { action } => {
-                    self.pending_user_action = Some(crate::user_action::PendingActionState::new(
-                        turn_id.to_string(),
-                        action,
-                    ));
-                    self.in_flight = true;
-                }
-                TimelineUserActionEvent::Finished {
-                    action_id, state, ..
-                } => {
-                    if self
-                        .pending_user_action
-                        .as_ref()
-                        .is_some_and(|action| action.action.action_id == action_id)
-                    {
-                        self.pending_user_action = None;
-                        self.push_system_notice(format!(
-                            "User action {action_id} finished: {state:?}"
-                        ));
-                    }
-                }
-            },
-            TalosTimelineDelta::ContextCompaction {
-                stage,
-                outcome,
-                metrics,
-                message,
-            } => {
-                let event_text = self.timeline_items.get_mut(item_id).and_then(|item| {
-                    if let TalosTimelineContent::ContextCompaction {
-                        stage: current_stage,
-                        outcome: current_outcome,
-                        metrics: current_metrics,
-                        message: current_message,
-                        ..
-                    } = &mut item.content
-                    {
-                        if let Some(stage) = stage {
-                            *current_stage = stage;
-                        }
-                        if outcome.is_some() {
-                            *current_outcome = outcome;
-                        }
-                        if metrics.is_some() {
-                            *current_metrics = metrics;
-                        }
-                        if message.is_some() {
-                            *current_message = message;
-                        }
-                        return Some(context_compaction_text(&item.content));
-                    }
-                    None
-                });
-                if let Some(event_text) = event_text {
-                    self.push_right_event(event_text);
-                }
-            }
-            TalosTimelineDelta::Status { .. } => {}
-        }
-    }
-
-    fn handle_item_completed(
-        &mut self,
-        item_id: &str,
-        status: TalosTimelineItemStatus,
-        completed_at_ms: u64,
-        final_content: Option<TalosTimelineContent>,
-    ) {
-        if let Some(item) = self.timeline_items.get_mut(item_id) {
-            item.status = status;
-            item.completed_at_ms = Some(completed_at_ms);
-            if let Some(content) = final_content.clone() {
-                item.content = content;
-            }
-        }
-        if let Some(content @ TalosTimelineContent::ContextCompaction { .. }) = &final_content {
-            self.push_right_event(context_compaction_text(content));
-            return;
-        }
-        if let Some(TalosTimelineContent::Text { text }) = &final_content {
-            self.render_completed_final_text(text);
-        }
-        let Some(TalosTimelineContent::ToolCall {
-            call_id,
-            name,
-            result: Some(result),
-            ..
-        }) = final_content
-        else {
-            return;
-        };
-        self.push_right_event(format!(
-            "tool completed: {} ({})",
-            call_id,
-            crate::utils::display_tool_name(&name)
-        ));
-        let _ = result;
-    }
-
-    fn handle_assistant_text_committed(&mut self, item_id: &str, phase: TalosTimelinePhase) {
-        let Some(item) = self.timeline_items.get_mut(item_id) else {
-            return;
-        };
-        let previous_phase = item.phase;
-        item.phase = phase;
-        if !matches!(
-            (previous_phase, phase),
-            (TalosTimelinePhase::Unknown, TalosTimelinePhase::FinalAnswer)
-                | (
-                    TalosTimelinePhase::FinalAnswer,
-                    TalosTimelinePhase::FinalAnswer
-                )
-        ) {
-            return;
-        }
-        let TalosTimelineContent::Text { text } = &item.content else {
-            return;
-        };
-        if text.trim().is_empty() {
-            return;
-        }
-        self.received_output_delta = true;
-    }
-
-    fn render_completed_final_text(&mut self, text: &str) {
-        if text.trim().is_empty() {
-            return;
-        }
-        self.received_output_delta = true;
-    }
-
-    fn handle_text_delta(&mut self, item: &TalosTimelineItem, text: &str) {
-        if text.is_empty() {
-            return;
-        }
-        match item.phase {
-            TalosTimelinePhase::Thinking
-            | TalosTimelinePhase::Unknown
-            | TalosTimelinePhase::Commentary => {}
-            TalosTimelinePhase::FinalAnswer => {
+            AgentMessageBlockDeltaContent::Text(text)
+                if !text.is_empty()
+                    && self.render_runtime.assistant_text_phase(block_id)
+                        == Some(AgentAssistantTextPhase::FinalAnswer) =>
+            {
                 self.received_output_delta = true;
             }
-            TalosTimelinePhase::System => {
-                self.push_right_event(text.trim().to_string());
+            AgentMessageBlockDeltaContent::AssistantTextPhase(
+                AgentAssistantTextPhase::FinalAnswer,
+            ) => {
+                self.received_output_delta = true;
             }
-            TalosTimelinePhase::Input | TalosTimelinePhase::Acting => {}
+            AgentMessageBlockDeltaContent::ContextCompaction(delta) => {
+                if let Some(stage) = delta.stage {
+                    self.context_compaction_stage = Some(stage);
+                    self.push_right_event(context_compaction_status(
+                        stage,
+                        delta.outcome,
+                        delta.message.as_deref(),
+                    ));
+                }
+            }
+            AgentMessageBlockDeltaContent::ToolCallArguments(_)
+            | AgentMessageBlockDeltaContent::ToolProgress(_)
+            | AgentMessageBlockDeltaContent::AssistantTextPhase(_)
+            | AgentMessageBlockDeltaContent::Text(_) => {}
         }
     }
 
-    fn update_tool_arguments(
-        &mut self,
-        item_id: &str,
-        arguments_delta: &str,
-    ) -> Option<(String, String, String)> {
-        let item = self.timeline_items.get_mut(item_id)?;
-        let TalosTimelineContent::ToolCall {
-            call_id,
-            name,
-            arguments,
-            ..
-        } = &mut item.content
-        else {
-            return None;
-        };
-        arguments.push_str(arguments_delta);
-        Some((call_id.clone(), name.clone(), arguments.clone()))
-    }
-
-    fn update_stored_tool_result(
-        &mut self,
-        item_id: &str,
-        content: Vec<talos_sdk::TalosContentItem>,
-        is_error: bool,
-    ) {
-        if let Some(item) = self.timeline_items.get_mut(item_id) {
-            if let TalosTimelineContent::ToolCall { result, .. } = &mut item.content {
-                *result = Some(talos_sdk::TalosToolResult { content, is_error });
+    fn observe_completed_block(&mut self, content: &AgentMessageBlockContent) {
+        match content {
+            AgentMessageBlockContent::AssistantText(assistant)
+                if assistant.phase == AgentAssistantTextPhase::FinalAnswer
+                    && !assistant.text.trim().is_empty() =>
+            {
+                self.received_output_delta = true;
             }
+            AgentMessageBlockContent::ToolResult(result) => {
+                self.push_right_event(format!(
+                    "tool completed: {} ({})",
+                    result.call_id,
+                    crate::utils::display_tool_name(&result.tool_name)
+                ));
+            }
+            AgentMessageBlockContent::ExecutionSummary(summary)
+                if !summary.text.trim().is_empty() =>
+            {
+                self.push_right_event(format!("execution summary: {}", summary.text.trim()));
+            }
+            AgentMessageBlockContent::ContextCompaction(compaction) => {
+                self.context_compaction_stage = None;
+                self.push_right_event(context_compaction_status(
+                    compaction.stage,
+                    compaction.outcome,
+                    compaction.message.as_deref(),
+                ));
+            }
+            _ => {}
         }
     }
 }
 
-fn context_compaction_text(content: &TalosTimelineContent) -> String {
-    let TalosTimelineContent::ContextCompaction {
-        stage,
-        outcome,
-        message,
-        ..
-    } = content
-    else {
-        return "context compaction".to_string();
-    };
-    if let Some(message) = message.as_ref().filter(|value| !value.trim().is_empty()) {
+fn context_compaction_status(
+    stage: ContextCompactionStage,
+    outcome: Option<ContextCompactionOutcome>,
+    message: Option<&str>,
+) -> String {
+    if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         return message.trim().to_string();
     }
     let outcome = outcome
@@ -555,7 +317,7 @@ fn context_compaction_text(content: &TalosTimelineContent) -> String {
         .unwrap_or_default();
     format!(
         "context compaction: {}{}",
-        context_compaction_stage_label(*stage),
+        context_compaction_stage_label(stage),
         outcome
     )
 }

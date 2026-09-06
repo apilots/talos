@@ -9,23 +9,25 @@ use talos_auth::{
 use talos_base::TalosApplicationRuntime;
 use talos_error::TalosResult;
 use talos_sdk::{
-    GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
+    GatewayClient, InterruptTurnRequest, InterruptTurnResponse, MessageQueueChangeStream,
+    RecoverTimelineResponse, SessionActiveTurnResponse, SessionHistoryResponse,
+    SubmitTurnInputRequest, SubmitTurnInputResponse, TimelineEventStream,
+    TimelineStreamSubscription,
 };
 use talos_service::{Actor, TimelineSubscriptionMessage};
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
-    ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
-    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, EventUnsubscribeRequest,
-    EventUnsubscribeResponse, FileDeleteRequest, FileDeleteResponse, FileListRequest,
-    FileListResponse, FileReadRequest, FileReadResponse, FileUpdateRequest, FileUpdateResponse,
-    FileUploadRequest, FileUploadResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
-    FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
-    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse, MessageQueue, MessageQueueAddRequest,
-    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
-    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
+    ConfigDeleteResponse, ConfigGetRequest, ConfigReloadRequest, ConfigReloadResponse,
+    ConfigResponse, ConfigUpdateRequest, EventUnsubscribeRequest, EventUnsubscribeResponse,
+    FileDeleteRequest, FileDeleteResponse, FileListRequest, FileListResponse, FileReadRequest,
+    FileReadResponse, FileUpdateRequest, FileUpdateResponse, FileUploadRequest, FileUploadResponse,
+    FsDirectoryCreateRequest, FsDirectoryCreateResponse, FsDirectoryReadRequest,
+    FsDirectoryReadResponse, MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest,
+    MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest,
+    MemoryGetResponse, MemorySearchRequest, MemorySearchResponse, MessageQueue,
+    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
     ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
     PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
     PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
@@ -36,24 +38,21 @@ use talos_types::{
     ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
     ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
     ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
-    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
-    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
-    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
-    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
-    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
-    SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
+    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
+    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
+    SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
+    SessionPatchRequest, SessionUpdateResponse, SkillsReadResponse, StartTurnRequest,
+    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
+    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse,
 };
 use tokio::task::JoinHandle;
 
 mod request_context;
 use request_context::{
-    authenticated_actor_from_access_token, normalize_embedded_start_turn_request,
-    resolve_cached_actor,
+    authenticated_actor_from_access_token, prepare_embedded_start_turn, resolve_cached_actor,
 };
 
 pub struct EmbeddedServerClient {
@@ -178,14 +177,11 @@ impl GatewayClient for EmbeddedServerClient {
         self.runtime.gateway.list_models(&self.actor, request).await
     }
 
-    async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigGetResponse> {
+    async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigResponse> {
         self.runtime.gateway.get_config(&self.actor, request).await
     }
 
-    async fn update_config(
-        &mut self,
-        request: ConfigUpdateRequest,
-    ) -> TalosResult<ConfigUpdateResponse> {
+    async fn update_config(&mut self, request: ConfigUpdateRequest) -> TalosResult<ConfigResponse> {
         self.runtime
             .gateway
             .update_config(&self.actor, request)
@@ -343,7 +339,7 @@ impl GatewayClient for EmbeddedServerClient {
     async fn recover_timeline(
         &mut self,
         request: RecoverTimelineRequest,
-    ) -> TalosResult<TimelineRecoveryResponse> {
+    ) -> TalosResult<RecoverTimelineResponse> {
         self.runtime
             .gateway
             .recover_timeline(&self.actor, request)
@@ -364,21 +360,21 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<TimelineStreamSubscription> {
-        let source = self
+        let subscription = self
             .runtime
             .service
-            .timeline_subscription_source(&self.actor, request)
+            .open_timeline_subscription(&self.actor, request)
             .await?;
-        let response = source.response;
+        let response = subscription.response();
         let subscription_id = response.subscription_id.clone();
-        let mut events = source.subscription.events;
+        let mut events = subscription.events;
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         let (message_queue_tx, message_queue_rx) = tokio::sync::mpsc::channel(256);
         let task = tokio::spawn(async move {
             while let Some(message) = events.recv().await {
                 match message {
                     TimelineSubscriptionMessage::Event(event) => {
-                        if tx.send(event).await.is_err() {
+                        if tx.send(*event).await.is_err() {
                             return;
                         }
                     }
@@ -420,15 +416,15 @@ impl GatewayClient for EmbeddedServerClient {
     }
 
     async fn start_turn(&mut self, request: StartTurnRequest) -> TalosResult<StartTurnResponse> {
-        let request = normalize_embedded_start_turn_request(request)?;
+        let (request, source) = prepare_embedded_start_turn(request)?;
         let idempotency_key = request.client_request_id.clone();
         self.runtime
             .gateway
-            .start_turn(&self.actor, request, idempotency_key)
+            .start_turn(&self.actor, source, request, idempotency_key)
             .await
     }
 
-    async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<RetryTurnResponse> {
+    async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<StartTurnResponse> {
         self.runtime.gateway.retry_turn(&self.actor, request).await
     }
 
@@ -502,33 +498,13 @@ impl GatewayClient for EmbeddedServerClient {
             .await
     }
 
-    async fn steer_queued_message(
+    async fn submit_turn_input(
         &mut self,
-        request: MessageQueueSteerRequest,
-    ) -> TalosResult<MessageQueue> {
+        request: SubmitTurnInputRequest,
+    ) -> TalosResult<SubmitTurnInputResponse> {
         self.runtime
             .gateway
-            .steer_queued_message(&self.actor, request)
-            .await
-    }
-
-    async fn submit_dynamic_tool_result(
-        &mut self,
-        request: SubmitDynamicToolResultRequest,
-    ) -> TalosResult<SubmitDynamicToolResultResponse> {
-        self.runtime
-            .gateway
-            .submit_dynamic_tool_result(&self.actor, request)
-            .await
-    }
-
-    async fn submit_user_action(
-        &mut self,
-        request: SubmitUserActionRequest,
-    ) -> TalosResult<SubmitUserActionResponse> {
-        self.runtime
-            .gateway
-            .submit_user_action(&self.actor, request)
+            .submit_turn_input(&self.actor, request)
             .await
     }
 

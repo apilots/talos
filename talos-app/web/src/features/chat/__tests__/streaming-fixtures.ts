@@ -1,35 +1,32 @@
 import type {
-  TalosActiveTurn,
+  AgentAssistantTextPhase,
+  AgentContextCompaction,
+  AgentEventPayload,
+  AgentMessage,
+  AgentMessageBlock,
+  AgentMessageBlockContent,
+  AgentRunMetrics,
+  AgentStopReason,
+  ContextCompactionMetrics,
+  ContextCompactionOutcome,
+  ContextCompactionStage,
+  ContextCompactionTrigger,
+  PendingUserAction,
+  SessionHistoryResponse,
   TalosContentItem,
-  TalosSessionHistorySnapshot,
-  TalosTimelineContent,
-  AgentEvent,
-  TimelineEventEnvelope,
+  TimelineActiveTurn,
+  TimelineEvent,
 } from "@talos/sdk-core";
 
-type ContextCompactionContent = Extract<TalosTimelineContent, { type: "context_compaction" }>;
-type ContextCompactionMetrics = ContextCompactionContent["metrics"];
-type ContextCompactionOutcome = NonNullable<ContextCompactionContent["outcome"]>;
-type ContextCompactionStage = ContextCompactionContent["stage"];
-type ContextCompactionTrigger = ContextCompactionContent["trigger"];
-
-export function baseEvent(payload: AgentEvent["payload"], sequence: number): TimelineEventEnvelope {
+export function baseEvent(payload: AgentEventPayload, sequence: number): TimelineEvent {
   return {
-    event_seq: sequence,
-    event_id: `ev_${sequence}`,
-    created_at_ms: sequence,
-    turn_id: "turn-1",
-    message_id: "msg-1",
-    session_id: "sess-1",
+    eventId: `ev_${sequence}`,
+    eventSeq: sequence,
+    persistedAt: sequence,
     event: {
-      event_id: `ev_${sequence}`,
-      event_seq: sequence,
-      created_at_ms: sequence,
-      event_type: payload.type,
-      turn_id: "turn-1",
-      message_id: "msg-1",
-      session_id: "sess-1",
+      identity: { sessionId: "sess-1", turnId: "turn-1" },
       sequence,
+      occurredAt: sequence,
       payload,
     },
   };
@@ -38,45 +35,54 @@ export function baseEvent(payload: AgentEvent["payload"], sequence: number): Tim
 export function itemStarted(
   itemId: string,
   kind: "assistant_text" | "tool_call" | "user_input" | "reasoning",
-  phase: "commentary" | "final_answer" | "unknown" | "acting" | "input" | "thinking",
+  phase: "commentary" | "final_answer" | "pending" | "acting" | "input" | "thinking",
   sequence: number,
-): TimelineEventEnvelope {
+): TimelineEvent {
+  const content: AgentMessageBlockContent = kind === "tool_call"
+    ? {
+        type: "toolCall",
+        data: {
+          callId: `call-${itemId}`,
+          name: "Shell",
+          arguments: { state: "streaming", jsonFragment: "{}" },
+          progress: [],
+        },
+      }
+    : kind === "reasoning"
+      ? { type: "reasoning", data: { text: "" } }
+      : kind === "user_input"
+        ? { type: "userContent", data: { type: "text", text: "" } }
+        : {
+            type: "assistantText",
+            data: { phase: assistantProtocolPhase(phase), text: "" },
+          };
   return baseEvent({
-    type: "item_started",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item: {
-      item_id: itemId,
-      parent_item_id: null,
-      kind,
-      phase,
-      status: "running",
-      title: kind === "tool_call" ? "Shell" : null,
-      started_at_ms: 1,
-      completed_at_ms: null,
-      content: kind === "tool_call"
-        ? {
-            type: "tool_call",
-            call_id: "call-1",
-            name: "Shell",
-            arguments: "{}",
-            progress: [],
-            result: null,
-          }
-        : { type: "text", text: "" },
+    type: "messageBlockStarted",
+    data: {
+      messageId: "msg-1",
+      block: block(itemId, content, "running", sequence, null),
     },
   }, sequence);
 }
 
-export function withMessage(event: TimelineEventEnvelope, messageId: string, turnId: string): TimelineEventEnvelope {
+export function withMessage(event: TimelineEvent, messageId: string, turnId: string): TimelineEvent {
+  const payload = event.event.payload;
+  if (
+    payload.type === "messageBlockStarted" ||
+    payload.type === "messageBlockDelta" ||
+    payload.type === "messageBlockCompleted"
+  ) {
+    payload.data.messageId = messageId;
+  } else if (payload.type === "messageStarted") {
+    payload.data.message.messageId = messageId;
+    payload.data.message.turnId = turnId;
+  }
   return {
     ...event,
-    turn_id: turnId,
-    message_id: messageId,
     event: {
       ...event.event,
-      turn_id: turnId,
-      message_id: messageId,
+      identity: { ...event.event.identity, turnId },
+      payload,
     },
   };
 }
@@ -85,13 +91,14 @@ export function assistantTextCommitted(
   itemId: string,
   phase: "commentary" | "final_answer",
   sequence: number,
-): TimelineEventEnvelope {
+): TimelineEvent {
   return baseEvent({
-    type: "assistant_text_committed",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item_id: itemId,
-    phase,
+    type: "messageBlockDelta",
+    data: {
+      messageId: "msg-1",
+      blockId: itemId,
+      delta: { type: "assistantTextPhase", data: assistantProtocolPhase(phase) },
+    },
   }, sequence);
 }
 
@@ -100,43 +107,103 @@ export function userInputStarted(
   text: string,
   sequence: number,
   fileIds: string[] = [],
-): TimelineEventEnvelope {
-  const event = itemStarted(itemId, "user_input", "input", sequence);
-  if (event.event.payload.type === "item_started") {
-    event.event.payload.item.content = { type: "user_input", text, fileIds };
-  }
-  return event;
-}
-
-export function itemCompleted(itemId: string, sequence: number): TimelineEventEnvelope {
+  messageId = `msg-${itemId}`,
+): TimelineEvent {
+  const blocks: AgentMessageBlock[] = [
+    block(itemId, { type: "userContent", data: { type: "text", text } }, "running", sequence, null),
+    ...fileIds.map((fileId, index) =>
+      block(
+        `${itemId}-file-${index}`,
+        { type: "userContent", data: { type: "file", fileId } },
+        "running",
+        sequence,
+        null,
+      )),
+  ];
   return baseEvent({
-    type: "item_completed",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item_id: itemId,
-    status: "completed",
-    completed_at_ms: sequence,
-    final_content: null,
+    type: "messageStarted",
+    data: {
+      message: message(messageId, "turn-1", "user", blocks, "inProgress"),
+    },
   }, sequence);
 }
 
-export function textDelta(itemId: string, text: string, sequence: number): TimelineEventEnvelope {
+export function itemCompleted(
+  itemId: string,
+  sequence: number,
+  kind: "assistant_text" | "tool_call" | "user_input" | "reasoning" = "assistant_text",
+  phase: AgentAssistantTextPhase = "pending",
+): TimelineEvent {
+  const content: AgentMessageBlockContent = kind === "tool_call"
+    ? {
+        type: "toolCall",
+        data: {
+          callId: `call-${itemId}`,
+          name: "Shell",
+          arguments: { state: "complete", value: {} },
+          progress: [],
+        },
+      }
+    : kind === "reasoning"
+      ? { type: "reasoning", data: { text: "" } }
+      : kind === "user_input"
+        ? { type: "userContent", data: { type: "text", text: "" } }
+        : { type: "assistantText", data: { phase, text: "" } };
   return baseEvent({
-    type: "item_delta",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item_id: itemId,
-    delta: { type: "text", text },
+    type: "messageBlockCompleted",
+    data: {
+      messageId: "msg-1",
+      block: block(itemId, content, "completed", sequence, sequence),
+    },
   }, sequence);
 }
 
-export function toolProgress(itemId: string, text: string, sequence: number): TimelineEventEnvelope {
+export function contextCompactionCompleted(
+  itemId: string,
+  sequence: number,
+  outcome: ContextCompactionOutcome,
+  messageText: string,
+): TimelineEvent {
   return baseEvent({
-    type: "item_delta",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item_id: itemId,
-    delta: { type: "tool_progress", progress_kind: "status", text_delta: text },
+    type: "messageBlockCompleted",
+    data: {
+      messageId: "msg-1",
+      block: block(
+        itemId,
+        {
+          type: "contextCompaction",
+          data: { ...compaction("completed", messageText), outcome },
+        },
+        "completed",
+        sequence,
+        sequence,
+      ),
+    },
+  }, sequence);
+}
+
+export function textDelta(itemId: string, text: string, sequence: number): TimelineEvent {
+  return baseEvent({
+    type: "messageBlockDelta",
+    data: {
+      messageId: "msg-1",
+      blockId: itemId,
+      delta: { type: "text", data: text },
+    },
+  }, sequence);
+}
+
+export function toolProgress(itemId: string, text: string, sequence: number): TimelineEvent {
+  return baseEvent({
+    type: "messageBlockDelta",
+    data: {
+      messageId: "msg-1",
+      blockId: itemId,
+      delta: {
+        type: "toolProgress",
+        data: { kind: "status", text, occurredAt: sequence },
+      },
+    },
   }, sequence);
 }
 
@@ -144,16 +211,27 @@ export function toolResult(
   itemId: string,
   content: string | TalosContentItem[],
   sequence: number,
-): TimelineEventEnvelope {
+): TimelineEvent {
+  const result = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   return baseEvent({
-    type: "item_delta",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item_id: itemId,
-    delta: {
-      type: "tool_result",
-      content: typeof content === "string" ? [{ type: "text", text: content }] : content,
-      is_error: false,
+    type: "messageBlockCompleted",
+    data: {
+      messageId: "tool-message-1",
+      block: block(
+        `${itemId}-result`,
+        {
+          type: "toolResult",
+          data: {
+            callId: `call-${itemId}`,
+            toolName: "Shell",
+            content: result,
+            isError: false,
+          },
+        },
+        "completed",
+        sequence,
+        sequence,
+      ),
     },
   }, sequence);
 }
@@ -161,31 +239,24 @@ export function toolResult(
 export function contextCompactionStarted(
   itemId: string,
   stage: ContextCompactionStage,
-  message: string | null,
+  messageText: string | null,
   sequence: number,
   trigger: ContextCompactionTrigger = "threshold_exceeded",
-): TimelineEventEnvelope {
+): TimelineEvent {
   return baseEvent({
-    type: "item_started",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item: {
-      item_id: itemId,
-      parent_item_id: null,
-      kind: "context_compaction",
-      phase: "system",
-      status: "running",
-      title: null,
-      started_at_ms: sequence,
-      completed_at_ms: null,
-      content: {
-        type: "context_compaction",
-        trigger,
-        stage,
-        outcome: null,
-        metrics: null,
-        message,
-      },
+    type: "messageBlockStarted",
+    data: {
+      messageId: "msg-1",
+      block: block(
+        itemId,
+        {
+          type: "contextCompaction",
+          data: { ...compaction(stage, messageText), trigger },
+        },
+        "running",
+        sequence,
+        null,
+      ),
     },
   }, sequence);
 }
@@ -194,21 +265,19 @@ export function contextCompactionDelta(
   itemId: string,
   stage: ContextCompactionStage,
   outcome: ContextCompactionOutcome | null,
-  message: string | null,
+  messageText: string | null,
   sequence: number,
   metrics: ContextCompactionMetrics | null = null,
-): TimelineEventEnvelope {
+): TimelineEvent {
   return baseEvent({
-    type: "item_delta",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    item_id: itemId,
-    delta: {
-      type: "context_compaction",
-      stage,
-      outcome,
-      metrics,
-      message,
+    type: "messageBlockDelta",
+    data: {
+      messageId: "msg-1",
+      blockId: itemId,
+      delta: {
+        type: "contextCompaction",
+        data: { stage, outcome, metrics, message: messageText },
+      },
     },
   }, sequence);
 }
@@ -216,135 +285,170 @@ export function contextCompactionDelta(
 export function turnMetrics(
   sequence: number,
   overrides: Partial<{
-    model_rounds: number;
-    tool_calls: number;
-    tool_successes: number;
-    tool_errors: number;
+    modelRounds: number;
+    toolCalls: number;
+    toolSuccesses: number;
+    toolErrors: number;
     total_tokens: number;
   }> = {},
-): TimelineEventEnvelope {
+): TimelineEvent {
   return baseEvent({
-    type: "turn_metrics",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    metrics: {
-      model_rounds: overrides.model_rounds ?? 0,
-      tool_calls: overrides.tool_calls ?? 0,
-      tool_successes: overrides.tool_successes ?? 0,
-      tool_errors: overrides.tool_errors ?? 0,
-      stop_reason: "end_turn",
-      usage: {
-        ...usage(),
-        total_tokens: overrides.total_tokens ?? 0,
-      },
-      duration_ms: null,
-    },
+    type: "metricsUpdated",
+    data: executionMetrics(overrides.total_tokens ?? 0, overrides),
   }, sequence);
 }
 
 export function turnCompleted(
   sequence: number,
-  totalTokens = 0,
-  stopReason: "end_turn" | "waiting_user_action" = "end_turn",
-): TimelineEventEnvelope {
+  stopReason: AgentStopReason = "endTurn",
+): TimelineEvent {
   return baseEvent({
-    type: "turn_completed",
-    request_id: "req-1",
-    turn_id: "turn-1",
-    completed_at_ms: sequence,
-    stop_reason: stopReason,
-    usage: { ...usage(), total_tokens: totalTokens },
-    metrics: { ...executionMetrics(totalTokens), stop_reason: stopReason },
+    type: "turnCompleted",
+    data: { stopReason },
+  }, sequence);
+}
+
+export function waitingForUserAction(
+  sequence: number,
+  action: PendingUserAction = pendingUserAction(),
+): TimelineEvent {
+  return baseEvent({
+    type: "waitingForInput",
+    data: { type: "userAction", action },
   }, sequence);
 }
 
 export function sessionHistory(
-  items: TalosSessionHistorySnapshot["messages"][number]["items"],
-  metrics: TalosSessionHistorySnapshot["messages"][number]["metrics"] = null,
-): TalosSessionHistorySnapshot {
+  blocks: AgentMessageBlock[],
+  metrics: AgentRunMetrics | null = null,
+): SessionHistoryResponse {
+  const messages: AgentMessage[] = [];
+  let agentBlocks: AgentMessageBlock[] = [];
+  let currentUserMessage: AgentMessage | undefined;
+  const flushAgentBlocks = () => {
+    if (agentBlocks.length > 0) {
+      messages.push(message(`msg-agent-${messages.length}`, "turn-1", "agent", agentBlocks));
+      agentBlocks = [];
+    }
+  };
+  for (const entry of blocks) {
+    if (entry.content.type !== "userContent") {
+      currentUserMessage = undefined;
+      agentBlocks.push(entry);
+      continue;
+    }
+    flushAgentBlocks();
+    if (entry.content.data.type === "text" || !currentUserMessage) {
+      currentUserMessage = message(
+        `msg-${entry.blockId}`,
+        "turn-1",
+        "user",
+        [entry],
+      );
+      messages.push(currentUserMessage);
+    } else {
+      currentUserMessage.blocks.push(entry);
+    }
+  }
+  flushAgentBlocks();
   return {
-    session_id: "sess-1",
-    messages: [
-      {
-        message_id: "msg-1",
-        turn_id: "turn-1",
-        items,
-        stop_reason: "end_turn",
-        usage: usage(),
-        metrics,
+    data: [{
+      identity: { sessionId: "sess-1", turnId: "turn-1" },
+      completedEventSeq: 9,
+      completedAt: 2,
+      result: {
+        status: "completed",
+        result: {
+          messages,
+          metrics: metrics ?? executionMetrics(),
+          completion: { stopReason: "endTurn" },
+        },
       },
-    ],
-    generated_at_ms: 1,
-    last_stable_event_id: "ev_12",
+    }],
+    nextCursor: null,
   };
 }
 
 export function historyTextItem(
   itemId: string,
   kind: "assistant_text" | "user_input",
-  phase: "commentary" | "final_answer" | "unknown" | "input",
+  phase: "commentary" | "final_answer" | "pending" | "input",
   text: string,
-): TalosSessionHistorySnapshot["messages"][number]["items"][number] {
-  return {
-    item_id: itemId,
-    parent_item_id: null,
-    kind,
-    phase,
-    status: "completed",
-    title: null,
-    started_at_ms: 1,
-    completed_at_ms: 2,
-    content: { type: "text", text },
-  };
+): AgentMessageBlock {
+  const content: AgentMessageBlockContent = kind === "user_input"
+    ? { type: "userContent", data: { type: "text", text } }
+    : {
+        type: "assistantText",
+        data: { phase: assistantProtocolPhase(phase), text },
+      };
+  return block(itemId, content, "completed", 1, 2);
 }
 
 export function historyUserInputItem(
   itemId: string,
   text: string,
   fileIds: string[],
-): TalosSessionHistorySnapshot["messages"][number]["items"][number] {
-  return {
-    ...historyTextItem(itemId, "user_input", "input", text),
-    content: { type: "user_input", text, fileIds },
-  };
+): AgentMessageBlock[] {
+  return [
+    historyTextItem(itemId, "user_input", "input", text),
+    ...fileIds.map((fileId, index) =>
+      block(
+        `${itemId}-file-${index}`,
+        { type: "userContent", data: { type: "file", fileId } },
+        "completed",
+        1,
+        2,
+      )),
+  ];
 }
 
-export function historyToolItem(
-  itemId: string,
-  output: string,
-): TalosSessionHistorySnapshot["messages"][number]["items"][number] {
-  return {
-    item_id: itemId,
-    parent_item_id: null,
-    kind: "tool_call",
-    phase: "acting",
-    status: "completed",
-    title: "Shell",
-    started_at_ms: 1,
-    completed_at_ms: 2,
-    content: {
-      type: "tool_call",
-      call_id: "call-1",
-      name: "Shell",
-      arguments: "{}",
-      progress: [],
-      result: {
-        content: [{ type: "text", text: output }],
-        is_error: false,
+export function historyToolItems(itemId: string, output: string): AgentMessageBlock[] {
+  return [
+    block(
+      itemId,
+      {
+        type: "toolCall",
+        data: {
+          callId: `call-${itemId}`,
+          name: "Shell",
+          arguments: { state: "complete", value: {} },
+          progress: [],
+        },
       },
-    },
-  };
+      "completed",
+      1,
+      2,
+    ),
+    block(
+      `${itemId}-result`,
+      {
+        type: "toolResult",
+        data: {
+          callId: `call-${itemId}`,
+          toolName: "Shell",
+          content: [{ type: "text", text: output }],
+          isError: false,
+        },
+      },
+      "completed",
+      1,
+      2,
+    ),
+  ];
 }
 
-export function executionMetrics(totalTokens = 0) {
+export function executionMetrics(
+  totalTokens = 0,
+  overrides: Partial<Pick<AgentRunMetrics, "modelRounds" | "toolCalls" | "toolSuccesses" | "toolErrors">> = {},
+): AgentRunMetrics {
   return {
-    model_rounds: 1,
-    tool_calls: 0,
-    tool_successes: 0,
-    tool_errors: 0,
-    stop_reason: "end_turn" as const,
+    modelRounds: overrides.modelRounds ?? 1,
+    toolCalls: overrides.toolCalls ?? 0,
+    toolSuccesses: overrides.toolSuccesses ?? 0,
+    toolErrors: overrides.toolErrors ?? 0,
     usage: { ...usage(), total_tokens: totalTokens },
-    duration_ms: null,
+    context: null,
+    durationMs: null,
   };
 }
 
@@ -358,15 +462,69 @@ export function usage() {
   };
 }
 
-export function activeTurn(overrides: Partial<TalosActiveTurn>): TalosActiveTurn {
+export function activeTurn(overrides: Partial<TimelineActiveTurn>): TimelineActiveTurn {
   return {
-    session_id: "sess-1",
-    turn_id: "turn-1",
-    message_id: "msg-1",
-    status: "running",
-    last_event_id: null,
-    pending_user_action: null,
-    updated_at: 1,
+    identity: { sessionId: "sess-1", turnId: "turn-1" },
+    initialMessageId: "msg-1",
+    state: "running",
+    lastEventId: "ev_0",
+    updatedAt: 0,
     ...overrides,
+  };
+}
+
+export function pendingUserAction(overrides: Partial<PendingUserAction> = {}): PendingUserAction {
+  return {
+    actionId: "action-1",
+    callId: "call-tool-1",
+    itemId: "tool-1",
+    state: "pending",
+    params: { type: "dynamicToolResult", params: { toolName: "Shell" } },
+    ...overrides,
+  };
+}
+
+function block(
+  blockId: string,
+  content: AgentMessageBlockContent,
+  status: AgentMessageBlock["status"],
+  startedAt: number,
+  completedAt: number | null,
+): AgentMessageBlock {
+  return { blockId, content, status, startedAt, completedAt };
+}
+
+function message(
+  messageId: string,
+  turnId: string,
+  role: AgentMessage["role"],
+  blocks: AgentMessageBlock[],
+  status: AgentMessage["status"] = "completed",
+): AgentMessage {
+  return { messageId, turnId, role, status, blocks, createdAt: 1, completedAt: 2 };
+}
+
+function assistantProtocolPhase(
+  phase: "commentary" | "final_answer" | "pending" | "acting" | "input" | "thinking",
+): AgentAssistantTextPhase {
+  if (phase === "final_answer") {
+    return "finalAnswer";
+  }
+  if (phase === "pending") {
+    return "pending";
+  }
+  return "commentary";
+}
+
+function compaction(
+  stage: ContextCompactionStage,
+  messageText: string | null,
+): AgentContextCompaction {
+  return {
+    trigger: "threshold_exceeded",
+    stage,
+    outcome: null,
+    metrics: null,
+    message: messageText,
   };
 }

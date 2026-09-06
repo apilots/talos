@@ -65,8 +65,8 @@ shape changes also require `just gen-app-protocol`.
 - Gateways map transports; `TalosService` owns product lifecycle semantics.
 - Store records do not cross service, protocol, SDK, or UI boundaries.
 - Multiple Agent definitions register separate Harnesses; Coordinator resolves one by Agent id.
-- Each Harness delegates through the `AgentRuntime` SPI to its concrete runtime family.
-- Local composition defaults to the current `KernelAgent`; cloud composition will default to `CloudAgent` behind the same SPI.
+- Each Harness delegates through the `AgentProvider` SPI to a Provider-owned `AgentSession`.
+- Local composition registers `KernelAgentProvider`; additional Providers use the same SPI without changing Service or Gateway semantics.
 - Rust `AppServerClient` and `EmbeddedServerClient` implement the same `GatewayClient` capability contract.
 - Tools, Skills, MCP, permissions, and sandbox failures remain explicit.
 

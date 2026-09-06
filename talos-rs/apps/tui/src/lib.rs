@@ -45,17 +45,16 @@ use render_runtime::runtime::engine::RenderRuntimeEngine;
 use render_runtime::transcript::block::TranscriptBlockId;
 use session_picker::SessionPickerState;
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    MessageQueue, ModelInfo, ReasoningEffort, SkillSuggestion, TalosTimelineItem,
-    TimelineEventEnvelope, UserPermissionMode,
+    AgentRunMetrics, ContextCompactionStage, MessageQueue, ModelInfo, ReasoningEffort,
+    SkillSuggestion, TimelineEvent, UserPermissionMode,
 };
-use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
+use talos_types::talos::TokenUsage;
 use tokio::sync::mpsc;
 
 pub(crate) const MAX_RIGHT_EVENTS: usize = 120;
@@ -85,7 +84,7 @@ pub struct TuiApp {
     pub(crate) current_permission_mode: UserPermissionMode,
     pub(crate) session_usage: TokenUsage,
     pub(crate) session_context_usage: Option<talos_sdk::ContextUsage>,
-    pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
+    pub(crate) turn_metrics: Option<AgentRunMetrics>,
     pub(crate) turn_metrics_live: bool,
     pub(crate) available_model_info: Vec<ModelInfo>,
     pub(crate) available_models: Vec<String>,
@@ -114,19 +113,19 @@ pub struct TuiApp {
     pub(crate) pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream_connect:
-        Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TimelineEventEnvelope>>>>,
+        Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TimelineEvent>>>>,
     pub(crate) pending_stream_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEventEnvelope>>,
+    pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEvent>>,
     pub(crate) pending_command_update: Option<mpsc::Receiver<CommandUpdate>>,
     pub(crate) pending_command_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_session_usage_refresh: Option<mpsc::Receiver<types::SessionUsageRefresh>>,
     pub(crate) pending_session_usage_refresh_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_close_update: Option<mpsc::Receiver<types::SessionCloseUpdate>>,
     pub(crate) pending_close_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) active_stream_message_id: Option<String>,
+    pub(crate) active_stream_turn_id: Option<String>,
     pub(crate) last_stream_sequence: Option<u64>,
     pub(crate) last_stream_event_id: Option<String>,
-    pub(crate) timeline_items: HashMap<String, TalosTimelineItem>,
+    pub(crate) context_compaction_stage: Option<ContextCompactionStage>,
     pub(crate) status_hint: Option<(String, Instant)>,
     pub(crate) spinner_index: usize,
     pub(crate) stream_started_at: Option<Instant>,

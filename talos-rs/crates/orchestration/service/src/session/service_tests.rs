@@ -2,15 +2,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use talos_agent::{AgentContext, AgentSessionContext};
+use talos_agent_api::AgentTurnRef;
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::{MockProjectStore, ProjectRecord};
 use talos_store::session::{
-    MockSessionStore, SessionQuery, SessionRecord, SessionStore, SessionSummary,
-    SessionTreeIdentity,
+    AccumulateSessionUsageParams, MockSessionStore, PatchSessionParams, SessionQuery,
+    SessionRecord, SessionStore, SessionSummary, SessionTreeIdentity,
 };
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
+use talos_types::talos::{SessionSource, SessionSourceProvider, SessionSourceType, TokenUsage};
 use talos_types::{
-    ContextUsage, ModelRef, ModelSelection, SessionConf, SessionInfo, SessionPatch, SessionUsage,
+    ContextUsage, ModelRef, ModelSelection, SessionConf, SessionPatch, SessionUsage,
     UserPermissionMode,
 };
 
@@ -37,7 +39,23 @@ struct RecordingSessionStore {
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
-    async fn insert_session_record(&self, record: &SessionRecord, _scope: &str) -> TalosResult<()> {
+    async fn set_generated_title(
+        &self,
+        identity: &talos_agent_api::AgentTurnRef,
+        title: &str,
+    ) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let record = records
+            .iter_mut()
+            .find(|record| record.id == identity.session_id);
+        if let Some(record) = record {
+            record.title = title.to_string();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn insert_session_record(&self, record: &SessionRecord) -> TalosResult<()> {
         self.records.lock().unwrap().push(record.clone());
         Ok(())
     }
@@ -99,7 +117,14 @@ impl SessionStore for RecordingSessionStore {
         Ok(false)
     }
 
-    async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+        Ok(false)
+    }
+
+    async fn patch_session(
+        &self,
+        params: PatchSessionParams,
+    ) -> TalosResult<Option<SessionRecord>> {
         if self
             .failing_updates
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
@@ -110,10 +135,48 @@ impl SessionStore for RecordingSessionStore {
             return Err(TalosError::internal("injected update failure".to_string()));
         }
         let mut records = self.records.lock().unwrap();
-        let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
+        let Some(stored) = records
+            .iter_mut()
+            .find(|stored| stored.id == params.session_id)
+        else {
+            return Ok(None);
+        };
+        stored.conf = params.conf;
+        stored.current_directory = params.current_directory;
+        stored.last_activity = params.last_activity;
+        if params.reset_context_usage {
+            stored.usage.context = None;
+        }
+        Ok(Some(stored.clone()))
+    }
+
+    async fn accumulate_session_usage(
+        &self,
+        params: AccumulateSessionUsageParams,
+    ) -> TalosResult<Option<SessionRecord>> {
+        let mut records = self.records.lock().unwrap();
+        let Some(stored) = records
+            .iter_mut()
+            .find(|stored| stored.id == params.session_id)
+        else {
+            return Ok(None);
+        };
+        stored.usage.tokens.accumulate(&params.tokens);
+        stored.last_activity = params.last_activity;
+        Ok(Some(stored.clone()))
+    }
+
+    async fn clear_session_history(&self, session_id: &str, cleared_at: u64) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let Some(record) = records.iter_mut().find(|record| record.id == session_id) else {
             return Ok(false);
         };
-        *stored = record.clone();
+        record.title = talos_types::DEFAULT_SESSION_TITLE.to_string();
+        record.last_activity = cleared_at;
+        record.message_count = 0;
+        record.latest_turn_seq = 0;
+        record.memory_processed_until_event_seq = 0;
+        record.usage = SessionUsage::default();
         Ok(true)
     }
 
@@ -130,7 +193,7 @@ impl SessionStore for RecordingSessionStore {
         Ok(true)
     }
 
-    async fn advance_memory_processed_until_seq(
+    async fn advance_memory_processed_until_event_seq(
         &self,
         session_id: &str,
         _expected_until_seq: u64,
@@ -143,7 +206,7 @@ impl SessionStore for RecordingSessionStore {
             .iter_mut()
             .find(|record| record.id == session_id)
         {
-            record.memory_processed_until_seq = next_until_seq;
+            record.memory_processed_until_event_seq = next_until_seq;
         }
         Ok(())
     }
@@ -198,28 +261,25 @@ fn config_with_model(provider: &str, model: &str) -> talos_types::TalosConfig {
     config
 }
 
-fn context() -> TalosContext {
-    TalosContext {
-        source_type: TalosSourceType::System,
-        provider: TalosProvider::Http,
-        user_id: "user-1".to_string(),
-        message_id: "message-1".to_string(),
-        trace_id: "trace-1".to_string(),
+fn source() -> SessionSource {
+    SessionSource {
+        source_type: SessionSourceType::System,
+        source_provider: SessionSourceProvider::Http,
         channel_id: None,
         thread_id: None,
-        project_root: None,
         environment: None,
     }
 }
 
 fn create_session_params(
-    context: TalosContext,
+    source: SessionSource,
     target_agent: &str,
     model_selection: Option<ModelSelection>,
 ) -> CreateSessionParams {
     CreateSessionParams {
         session_id: None,
-        context,
+        source,
+        user_id: "user-1".to_string(),
         target_agent: target_agent.to_string(),
         model_selection,
         conf: None,
@@ -227,6 +287,61 @@ fn create_session_params(
         project_id: None,
         current_directory: None,
     }
+}
+
+#[tokio::test]
+async fn agent_context_is_built_once_from_session_authorities() {
+    let config = config_with_model("anthropic", "global-model");
+    let expected_workspace = config.resolve_workspace("default", "user-1").unwrap();
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new().with_project(project_record("project-1", "user-1"))),
+        config,
+    );
+    let mut session = service
+        .create_session(create_session_params(source(), "agent-1", None))
+        .await
+        .unwrap();
+    session.project_id = Some("project-1".to_string());
+    session.environment = Some(talos_types::talos::TalosSessionEnvironment {
+        directory: std::path::PathBuf::from("/remote/workspace"),
+        connection_mode: talos_types::talos::TalosConnectionMode::Remote,
+    });
+    let identity = AgentTurnRef::new(session.id.clone(), "turn-1");
+    let model_selection = session.conf.model_selection.clone().unwrap();
+    let expected = AgentContext {
+        session: AgentSessionContext {
+            agent_id: "agent-1".to_string(),
+            session_id: identity.session_id.clone(),
+            workspace: expected_workspace.clone(),
+        },
+        turn_id: identity.turn_id.clone(),
+        project_id: Some("project-1".to_string()),
+        working_directory: Some(std::path::PathBuf::from("/tmp/project")),
+        environment: session.environment.clone(),
+        model: talos_types::ModelInfo::from_provider_model(
+            "anthropic".to_string(),
+            provider_model("global-model"),
+        ),
+        model_selection,
+        permission_mode: UserPermissionMode::FullAccess,
+    };
+
+    assert_eq!(
+        service
+            .build_agent_context(&session, identity)
+            .await
+            .unwrap(),
+        expected
+    );
+    assert_eq!(
+        service.build_agent_session_context(&session).unwrap(),
+        AgentSessionContext {
+            agent_id: session.agent_id.clone(),
+            session_id: session.id.clone(),
+            workspace: expected_workspace,
+        }
+    );
 }
 
 #[tokio::test]
@@ -238,12 +353,10 @@ async fn create_session_without_selection_uses_global_default() {
         base_config,
     );
     let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .expect("session should be created");
 
-    assert_eq!(session.config.llm.provider, "anthropic");
-    assert_eq!(session.config.llm.model, "global-model");
     assert_eq!(
         session.conf.model_selection,
         Some(ModelSelection::without_reasoning(ModelRef {
@@ -265,7 +378,7 @@ async fn create_session_persists_configured_default_reasoning_effort() {
     );
 
     let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .unwrap();
 
@@ -291,19 +404,14 @@ async fn create_session_resolves_configured_permission_mode() {
     );
 
     let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .expect("session should be created");
-    let info = SessionInfo::from(&session);
+    let info = service.session_info(&session).unwrap();
 
     assert_eq!(
+        (info.configured_default_mode, info.effective_mode,),
         (
-            session.effective_user_permission_mode,
-            info.configured_default_mode,
-            info.effective_mode,
-        ),
-        (
-            UserPermissionMode::ApproveForMe,
             UserPermissionMode::ApproveForMe,
             UserPermissionMode::ApproveForMe,
         )
@@ -324,7 +432,7 @@ async fn create_session_permission_override_wins_over_configured_default() {
         Arc::new(MockProjectStore::new()),
         config,
     );
-    let mut params = create_session_params(context(), "default", None);
+    let mut params = create_session_params(source(), "default", None);
     params.conf = Some(SessionConf {
         model_selection: None,
         user_permission_mode: Some(UserPermissionMode::AskForApproval),
@@ -334,18 +442,16 @@ async fn create_session_permission_override_wins_over_configured_default() {
         .create_session(params)
         .await
         .expect("session should be created");
-    let info = SessionInfo::from(&session);
+    let info = service.session_info(&session).unwrap();
 
     assert_eq!(
         (
             session.conf.user_permission_mode,
-            session.effective_user_permission_mode,
             info.configured_default_mode,
             info.effective_mode,
         ),
         (
             Some(UserPermissionMode::AskForApproval),
-            UserPermissionMode::AskForApproval,
             UserPermissionMode::ApproveForMe,
             UserPermissionMode::AskForApproval,
         )
@@ -353,7 +459,7 @@ async fn create_session_permission_override_wins_over_configured_default() {
 }
 
 #[tokio::test]
-async fn update_base_llm_changes_new_session_default_model() {
+async fn runtime_config_reload_changes_new_session_default_model() {
     let base_config = config_with_model("anthropic", "old-model");
     let service = SessionService::new(
         Arc::new(MockSessionStore::new()),
@@ -370,14 +476,21 @@ async fn update_base_llm_changes_new_session_default_model() {
         ..Default::default()
     };
 
-    service.update_base_llm(&llm);
+    let mut reloaded_config = config_with_model("openai", "new-model");
+    reloaded_config.llm = llm;
+    service.update_base_config(reloaded_config);
     let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .expect("session should be created");
 
-    assert_eq!(session.config.llm.provider, "openai");
-    assert_eq!(session.config.llm.model, "new-model");
+    assert_eq!(
+        session.conf.model_selection.unwrap().model_ref,
+        ModelRef {
+            provider: "openai".to_string(),
+            id: "new-model".to_string(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -401,10 +514,12 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
         provider_model("session-model"),
     ];
 
-    service.update_base_llm(&llm);
+    let mut reloaded_config = talos_types::TalosConfig::default();
+    reloaded_config.llm = llm;
+    service.update_base_config(reloaded_config);
     let session = service
         .create_session(create_session_params(
-            context(),
+            source(),
             "default",
             Some(ModelSelection::without_reasoning(ModelRef {
                 provider: "anthropic".to_string(),
@@ -414,12 +529,17 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
         .await
         .expect("session should be created");
 
-    assert_eq!(session.config.llm.provider, "anthropic");
-    assert_eq!(session.config.llm.model, "session-model");
+    assert_eq!(
+        session.conf.model_selection.unwrap().model_ref,
+        ModelRef {
+            provider: "anthropic".to_string(),
+            id: "session-model".to_string(),
+        }
+    );
 }
 
 #[tokio::test]
-async fn create_session_conf_model_selection_matches_stored_model() {
+async fn create_session_persists_one_model_selection_in_conf() {
     let mut base_config = config_with_model("anthropic", "default-model");
     base_config.llm.openai.models = vec![provider_model("conf-model")];
     let store = Arc::new(RecordingSessionStore::default());
@@ -428,7 +548,7 @@ async fn create_session_conf_model_selection_matches_stored_model() {
         Arc::new(MockProjectStore::new()),
         base_config,
     );
-    let mut params = create_session_params(context(), "default", None);
+    let mut params = create_session_params(source(), "default", None);
     params.conf = Some(SessionConf {
         model_selection: Some(ModelSelection::without_reasoning(ModelRef {
             provider: "openai".to_string(),
@@ -442,10 +562,15 @@ async fn create_session_conf_model_selection_matches_stored_model() {
         .await
         .expect("session should be created");
 
-    assert_eq!(session.config.llm.provider, "openai");
-    assert_eq!(session.config.llm.model, "conf-model");
+    assert_eq!(
+        session.conf.model_selection.as_ref().unwrap().model_ref,
+        ModelRef {
+            provider: "openai".to_string(),
+            id: "conf-model".to_string(),
+        }
+    );
     let records = store.records.lock().unwrap();
-    assert_eq!(records[0].model, "conf-model");
+    assert_eq!(records[0].conf, session.conf);
 }
 
 #[tokio::test]
@@ -455,11 +580,13 @@ async fn existing_session_keeps_persisted_selection_when_default_changes() {
     let service = SessionService::new(store, Arc::new(MockProjectStore::new()), base_config);
 
     let original = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .expect("session should be created");
-    assert_eq!(original.config.llm.provider, "anthropic");
-    assert_eq!(original.config.llm.model, "old-default");
+    assert_eq!(
+        original.conf.model_selection.as_ref().unwrap().model_ref.id,
+        "old-default"
+    );
 
     let mut llm = talos_config::LlmConfig {
         provider: "anthropic".to_string(),
@@ -467,16 +594,20 @@ async fn existing_session_keeps_persisted_selection_when_default_changes() {
         ..Default::default()
     };
     llm.anthropic.models = vec![provider_model("old-default"), provider_model("new-default")];
-    service.update_base_llm(&llm);
+    let mut reloaded_config = config_with_model("anthropic", "new-default");
+    reloaded_config.llm = llm;
+    service.update_base_config(reloaded_config);
 
     let reloaded = service
-        .get_session(&original.context.session_id)
+        .load_record(&original.id)
         .await
         .expect("session read should succeed")
         .expect("session should exist");
 
-    assert_eq!(reloaded.config.llm.provider, "anthropic");
-    assert_eq!(reloaded.config.llm.model, "old-default");
+    assert_eq!(
+        reloaded.conf.model_selection.as_ref().unwrap().model_ref.id,
+        "old-default"
+    );
 }
 
 #[tokio::test]
@@ -487,8 +618,8 @@ async fn session_without_explicit_model_selection_is_rejected_without_writing() 
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "current-model"),
     );
-    let created = service
-        .create_session(create_session_params(context(), "default", None))
+    service
+        .create_session(create_session_params(source(), "default", None))
         .await
         .unwrap();
     {
@@ -497,7 +628,7 @@ async fn session_without_explicit_model_selection_is_rejected_without_writing() 
     }
 
     let error = service
-        .get_session(&created.context.session_id)
+        .list_sessions(SessionQuery::default())
         .await
         .expect_err("persisted session without model selection must fail");
 
@@ -522,12 +653,12 @@ async fn create_session_preserves_required_default_workspace_binding() {
     let session = service
         .create_session(CreateSessionParams {
             workspace_id: "default".to_string(),
-            ..create_session_params(context(), "default", None)
+            ..create_session_params(source(), "default", None)
         })
         .await
         .expect("session should be created");
 
-    assert_eq!(session.context.workspace_id, "default".to_string());
+    assert_eq!(session.workspace_id, "default".to_string());
 }
 
 #[tokio::test]
@@ -549,18 +680,12 @@ async fn create_session_uses_a_non_default_configured_workspace_definition() {
     let session = service
         .create_session(CreateSessionParams {
             workspace_id: service.default_workspace_id(),
-            ..create_session_params(context(), "default", None)
+            ..create_session_params(source(), "default", None)
         })
         .await
         .unwrap();
 
-    assert_eq!(session.context.workspace_id, "team");
-    assert!(session
-        .config
-        .resolve_workspace("team", "user-1")
-        .unwrap()
-        .root
-        .ends_with("workspace-team/user-1"));
+    assert_eq!(session.workspace_id, "team");
 }
 
 #[tokio::test]
@@ -574,7 +699,7 @@ async fn create_session_rejects_an_empty_workspace_binding() {
     let error = service
         .create_session(CreateSessionParams {
             workspace_id: String::new(),
-            ..create_session_params(context(), "default", None)
+            ..create_session_params(source(), "default", None)
         })
         .await
         .expect_err("empty workspace binding must be rejected");
@@ -591,13 +716,12 @@ async fn create_session_persists_an_optional_owned_project_binding() {
         Arc::new(projects),
         config_with_model("anthropic", "claude-3-5-sonnet"),
     );
-    let mut params = create_session_params(context(), "default", None);
+    let mut params = create_session_params(source(), "default", None);
     params.project_id = Some("project-1".to_string());
 
     let session = service.create_session(params).await.unwrap();
 
     assert_eq!(session.project_id.as_deref(), Some("project-1"));
-    assert_eq!(session.context.project_id.as_deref(), Some("project-1"));
     assert_eq!(
         store.records.lock().unwrap()[0].project_id.as_deref(),
         Some("project-1")
@@ -615,7 +739,7 @@ async fn create_session_rejects_missing_or_cross_user_project_bindings() {
     );
 
     for project_id in ["missing", "project-1"] {
-        let mut params = create_session_params(context(), "default", None);
+        let mut params = create_session_params(source(), "default", None);
         params.project_id = Some(project_id.to_string());
         let error = service.create_session(params).await.unwrap_err();
         assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
@@ -624,7 +748,7 @@ async fn create_session_rejects_missing_or_cross_user_project_bindings() {
 }
 
 #[tokio::test]
-async fn reset_keeps_monotonic_turn_seq_for_the_next_completed_turn() {
+async fn reset_clears_the_complete_session_history_summary() {
     let store = Arc::new(RecordingSessionStore::default());
     let service = SessionService::new(
         store.clone(),
@@ -632,56 +756,39 @@ async fn reset_keeps_monotonic_turn_seq_for_the_next_completed_turn() {
         config_with_model("anthropic", "current-model"),
     );
     let session = service
-        .create_session(create_session_params(context(), "default", None))
-        .await
-        .expect("create session");
-    let session_id = &session.context.session_id;
-    service
-        .record_persisted_turn_progress(session_id, 1, "current-model", &TokenUsage::default())
-        .await
-        .expect("record first turn");
-    service
-        .reset_session(session_id)
-        .await
-        .expect("reset session");
-    service
-        .record_persisted_turn_progress(session_id, 2, "current-model", &TokenUsage::default())
-        .await
-        .expect("record turn after reset");
-
-    let record = store
-        .get_session_record(session_id)
-        .await
-        .expect("read session")
-        .expect("session exists");
-    assert_eq!((record.message_count, record.latest_turn_seq), (2, 2));
-}
-
-#[tokio::test]
-async fn reset_clears_session_tokens_and_context_usage() {
-    let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
-        store.clone(),
-        Arc::new(MockProjectStore::new()),
-        config_with_model("anthropic", "current-model"),
-    );
-    let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .unwrap();
     {
         let mut records = store.records.lock().unwrap();
+        records[0].title = "Previous conversation".to_string();
+        records[0].message_count = 2;
+        records[0].latest_turn_seq = 1;
+        records[0].memory_processed_until_event_seq = 3;
         records[0].usage.tokens.total_tokens = 40;
         records[0].usage.context = ContextUsage::new(20, 100, 80, 1);
     }
 
-    service
-        .reset_session(&session.context.session_id)
-        .await
-        .unwrap();
+    let session = service.load_record(&session.id).await.unwrap().unwrap();
+    service.clear_session_history(session).await.unwrap();
 
     let record = store.records.lock().unwrap()[0].clone();
-    assert_eq!(record.usage, talos_types::SessionUsage::default());
+    assert_eq!(
+        (
+            record.title,
+            record.message_count,
+            record.latest_turn_seq,
+            record.memory_processed_until_event_seq,
+            record.usage,
+        ),
+        (
+            talos_types::DEFAULT_SESSION_TITLE.to_string(),
+            0,
+            0,
+            0,
+            talos_types::SessionUsage::default(),
+        )
+    );
 }
 
 #[tokio::test]
@@ -691,7 +798,7 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
     let store = Arc::new(RecordingSessionStore::default());
     let service = SessionService::new(store.clone(), Arc::new(MockProjectStore::new()), config);
     let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .unwrap();
     {
@@ -699,10 +806,11 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
         records[0].usage.tokens.total_tokens = 40;
         records[0].usage.context = ContextUsage::new(20, 100, 80, 1);
     }
+    let session = service.load_record(&session.id).await.unwrap().unwrap();
 
     service
         .patch_session(
-            &session.context.session_id,
+            session.clone(),
             SessionPatch {
                 conf: Some(SessionConf {
                     model_selection: Some(ModelSelection::without_reasoning(ModelRef {
@@ -731,16 +839,16 @@ async fn compaction_usage_preserves_the_measured_context_snapshot() {
         config_with_model("anthropic", "current-model"),
     );
     let session = service
-        .create_session(create_session_params(context(), "default", None))
+        .create_session(create_session_params(source(), "default", None))
         .await
         .unwrap();
     let context_usage = ContextUsage::new(20, 100, 80, 1);
     store.records.lock().unwrap()[0].usage.context = context_usage.clone();
+    let session = service.load_record(&session.id).await.unwrap().unwrap();
 
     service
         .record_compaction_usage(
-            &session.context.session_id,
-            "current-model",
+            session,
             &TokenUsage {
                 input_tokens: 3,
                 output_tokens: 2,
@@ -776,7 +884,7 @@ async fn ordinary_delete_rejects_a_subagent_session() {
     );
     let child = service
         .create_subagent_session(
-            create_session_params(context(), "default", None),
+            create_session_params(source(), "default", None),
             talos_types::AgentTurnRef {
                 session_id: "root-session".to_string(),
                 turn_id: "root-turn".to_string(),
@@ -786,49 +894,17 @@ async fn ordinary_delete_rejects_a_subagent_session() {
         )
         .await
         .unwrap();
-    let child_id = &child.context.session_id;
+    let child_id = child.id.clone();
 
     assert!(service
-        .delete_session(child_id)
+        .delete_session(child.clone())
         .await
         .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
-    assert!(
-        service
-            .delete_subagent_session(child_id)
-            .await
-            .unwrap()
-            .success
-    );
-}
-
-#[tokio::test]
-async fn persisted_turn_progress_recovers_after_a_failed_session_update() {
-    let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
-        store.clone(),
-        Arc::new(MockProjectStore::new()),
-        config_with_model("anthropic", "current-model"),
-    );
-    let session = service
-        .create_session(create_session_params(context(), "default", None))
-        .await
-        .expect("create session");
-    let session_id = &session.context.session_id;
-    store.failing_updates.store(1, Ordering::SeqCst);
-
-    service
-        .record_persisted_turn_progress(session_id, 1, "current-model", &TokenUsage::default())
-        .await
-        .expect_err("first progress update should fail");
-    service
-        .record_persisted_turn_progress(session_id, 2, "current-model", &TokenUsage::default())
-        .await
-        .expect("next persisted sequence should recover progress");
-
-    let record = store
-        .get_session_record(session_id)
-        .await
-        .expect("read session")
-        .expect("session exists");
-    assert_eq!((record.message_count, record.latest_turn_seq), (4, 2));
+    assert!(service.delete_subagent_session(child).await.unwrap());
+    assert!(store
+        .records
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|record| record.id != child_id));
 }

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use talos_error::{ErrorCode, TalosError};
 use thiserror::Error;
 
-/// Agent-domain result used inside Harness, Runtime, and Coordinator adapters.
+/// Agent-domain result used inside Provider, Harness, and Coordinator adapters.
 pub type AgentResult<T> = Result<T, AgentError>;
 
 /// Stable error categories for the Agent framework.
@@ -15,7 +15,7 @@ pub enum AgentErrorKind {
     AgentNotFound,
     AgentDisabled,
     AgentUnavailable,
-    RuntimeUnavailable,
+    ProviderUnavailable,
     CapabilityUnsupported,
     InvalidExecutionContext,
     RunFailure(ErrorCode),
@@ -25,7 +25,7 @@ pub enum AgentErrorKind {
     InputRejected,
     ApprovalExpired,
     Interrupted,
-    RuntimeError,
+    ProviderError,
     Timeout,
     ContinuationUnsupported,
     ContinuationNotFound,
@@ -38,7 +38,7 @@ pub enum AgentErrorKind {
 
 /// Internal Agent-domain error object.
 ///
-/// AgentError carries framework semantics between Runtime, Harness, and
+/// AgentError carries framework semantics between Provider, Harness, and
 /// Coordinator. Service-facing boundaries must map it back to TalosError or a
 /// product error code before reaching Gateway or SDK callers.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -52,7 +52,7 @@ pub struct AgentError {
     pub retryable: bool,
     /// Structured internal diagnostics safe for logs.
     pub details: BTreeMap<String, String>,
-    /// Runtime-private source message kept inside the Agent domain.
+    /// Provider-private source message kept inside the Agent domain.
     pub source_message: Option<String>,
 }
 
@@ -80,7 +80,7 @@ impl AgentError {
         self
     }
 
-    /// Attach runtime-private source context for internal diagnostics.
+    /// Attach Provider-private source context for internal diagnostics.
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source_message = Some(source.into());
         self
@@ -116,9 +116,9 @@ impl AgentError {
         Self::new(AgentErrorKind::InputRejected, message)
     }
 
-    /// Error for unexpected runtime or backend failures.
-    pub fn runtime_error(message: impl Into<String>) -> Self {
-        Self::new(AgentErrorKind::RuntimeError, message)
+    /// Error for unexpected Provider or backend failures.
+    pub fn provider_error(message: impl Into<String>) -> Self {
+        Self::new(AgentErrorKind::ProviderError, message)
     }
 
     /// Convert the internal Agent error into the product error boundary.
@@ -155,7 +155,7 @@ impl AgentError {
                 TalosError::public(talos_error::ErrorCode::Timeout, self.message)
             }
             AgentErrorKind::AgentUnavailable
-            | AgentErrorKind::RuntimeUnavailable
+            | AgentErrorKind::ProviderUnavailable
             | AgentErrorKind::BackendTaskLost => {
                 TalosError::public(talos_error::ErrorCode::ServiceUnavailable, self.message)
             }
@@ -235,7 +235,7 @@ impl AgentError {
             | AgentErrorKind::RunFailure(ErrorCode::SessionBudgetExceeded) => {
                 TalosError::internal(self.message)
             }
-            AgentErrorKind::RuntimeError => TalosError::internal(self.message),
+            AgentErrorKind::ProviderError => TalosError::internal(self.message),
         }
     }
 }
@@ -315,7 +315,7 @@ impl From<TalosError> for AgentError {
             ErrorCode::SessionBudgetExceeded
             | ErrorCode::UsageLimitExceeded
             | ErrorCode::InternalError => {
-                Self::runtime_error(message).with_source(error.to_string())
+                Self::provider_error(message).with_source(error.to_string())
             }
         }
     }

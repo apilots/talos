@@ -35,11 +35,11 @@ class RecordingBridge implements AppServerBridge {
     return this.inner.invoke<T>(method, params);
   }
 
-  onEvent(handler: (envelope: AppProtocol.TimelineEventEnvelope) => void): () => void {
+  onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void {
     return this.inner.onEvent(handler);
   }
 
-  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void {
+  onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void {
     return this.inner.onSubscriptionTerminated(handler);
   }
 
@@ -71,8 +71,8 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
   it("restarts the stdio app-server and replays renderer subscriptions", async () => {
     const bridges: RecordingBridge[] = [];
     const lifecycle: TalosRuntimeState[] = [];
-    const rendererHandlers = new Set<(envelope: AppProtocol.TimelineEventEnvelope) => void>();
-    const rendererEvents: AppProtocol.TimelineEventEnvelope[] = [];
+    const rendererHandlers = new Set<(event: AppProtocol.TimelineEvent) => void>();
+    const rendererEvents: AppProtocol.TimelineEvent[] = [];
     const stderr: string[] = [];
 
     controller = new DesktopAppServerController({
@@ -87,10 +87,10 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
         bridges.push(bridge);
         return bridge;
       },
-      onEvent: (envelope) => {
-        rendererEvents.push(envelope);
+      onEvent: (event) => {
+        rendererEvents.push(event);
         for (const handler of rendererHandlers) {
-          handler(envelope);
+          handler(event);
         }
       },
       onRuntimeState: (state) => lifecycle.push(state),
@@ -105,40 +105,33 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       },
       onSubscriptionTerminated: () => () => undefined,
     });
-    const sdkEvents: AppProtocol.TimelineEventEnvelope[] = [];
-    const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));
+    const sdkEvents: AppProtocol.TimelineEvent[] = [];
+    const unsubscribe = rendererClient.onEvent((event) => sdkEvents.push(event));
 
     try {
       await controller.connect();
       const sessionId = crypto.randomUUID();
 
       await rendererClient.subscribeEvents({
-        session_id: sessionId,
-        turn_id: null,
-        since_event_id: null,
-        replay_limit: 50,
-        close_when_idle: null,
-        close_on_terminal: null,
+        sessionId,
+        turnId: null,
+        sinceEventId: null,
+        replayLimit: 50,
+        closeWhenIdle: null,
+        closeOnTerminal: null,
       });
       await rendererClient.startTurn({
-        session_id: sessionId,
-        input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }],
-        context: {
-          source_type: "cli",
-          provider: "cli",
-          user_id: "desktop-crash-recovery",
-          channel_id: "desktop-crash-recovery",
-          thread_id: null,
-          message_id: `msg_${Date.now()}`,
-          trace_id: `trace_${Date.now()}`,
-          project_root: null,
-          environment: null,
-        },
-        client_request_id: "desktop-crash-recovery-before",
+        sessionId,
+        input: { content: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }] },
+        modelSelection: null,
+        userPermissionMode: null,
+        projectId: null,
+        currentDirectory: null,
+        clientRequestId: "desktop-crash-recovery-before",
       });
       await waitForEvent(
         sdkEvents,
-        (event) => event.event.event_type === "turn_completed",
+        (event) => event.event.payload.type === "turnCompleted",
         120_000,
       );
       const lastEventId = requireLastEventId(sdkEvents);
@@ -147,22 +140,26 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       await waitForLifecycle(lifecycle, ["restarting", "starting", "ready"], 30_000);
 
       const replaySubscribe = bridges[1]?.requests.find(
-        (request) => request.method === "event.subscribe",
+        (request) => request.method === "event/subscribe",
       );
       expect(replaySubscribe?.params).toMatchObject({
-        session_id: sessionId,
-        since_event_id: lastEventId,
-        replay_limit: 50,
+        sessionId,
+        sinceEventId: lastEventId,
+        replayLimit: 50,
       });
 
       await rendererClient.startTurn({
-        session_id: sessionId,
-        input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-after" }],
-        client_request_id: "desktop-crash-recovery-after",
+        sessionId,
+        input: { content: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-after" }] },
+        modelSelection: null,
+        userPermissionMode: null,
+        projectId: null,
+        currentDirectory: null,
+        clientRequestId: "desktop-crash-recovery-after",
       });
       await waitForEvent(
         sdkEvents,
-        (event) => event.event_id !== lastEventId && event.event.event_type === "turn_completed",
+        (event) => event.eventId !== lastEventId && event.event.payload.type === "turnCompleted",
         120_000,
       );
 
@@ -190,8 +187,8 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
 });
 
 async function waitForEvent(
-  events: AppProtocol.TimelineEventEnvelope[],
-  predicate: (event: AppProtocol.TimelineEventEnvelope) => boolean,
+  events: AppProtocol.TimelineEvent[],
+  predicate: (event: AppProtocol.TimelineEvent) => boolean,
   timeoutMs: number,
 ): Promise<void> {
   const start = Date.now();
@@ -232,12 +229,12 @@ function containsOrdered<T>(values: T[], expected: T[]): boolean {
   return false;
 }
 
-function requireLastEventId(events: AppProtocol.TimelineEventEnvelope[]): string {
+function requireLastEventId(events: AppProtocol.TimelineEvent[]): string {
   const event = events.at(-1);
   if (!event) {
     throw new Error("No app-server events were received.");
   }
-  return event.event_id;
+  return event.eventId;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -253,8 +250,8 @@ interface DesktopSmokeArtifact {
   sdkEventIds: string[];
 }
 
-function eventIds(events: AppProtocol.TimelineEventEnvelope[]): string[] {
-  return events.map((event) => event.event_id);
+function eventIds(events: AppProtocol.TimelineEvent[]): string[] {
+  return events.map((event) => event.eventId);
 }
 
 function writeDesktopSmokeArtifact(artifact: DesktopSmokeArtifact): void {

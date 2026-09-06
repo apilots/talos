@@ -472,3 +472,33 @@ fn test_in_memory_store_roundtrip() {
     let loaded = store.load_llm_raw().unwrap();
     assert_eq!(loaded.model, "custom-model");
 }
+
+#[test]
+fn runtime_update_resolution_matches_secret_persistence_semantics() {
+    let mut current_llm = LlmConfig::default();
+    current_llm.openai.api_key = Some("openai-current".to_string());
+    current_llm.deepseek.api_key = Some("deepseek-current".to_string());
+    let mut updated_llm = current_llm.clone();
+    updated_llm.openai.api_key = Some(REDACTED_API_KEY.to_string());
+    updated_llm.deepseek.api_key = Some(String::new());
+    resolve_llm_update_for_runtime(&current_llm, &mut updated_llm);
+
+    let mut current_search = WebSearchToolConfig::default();
+    current_search.brave.api_key = Some("brave-current".to_string());
+    let mut updated_search = current_search.clone();
+    updated_search.brave.api_key = None;
+    resolve_web_search_update_for_runtime(&current_search, &mut updated_search);
+
+    assert_eq!(
+        (
+            updated_llm.openai.api_key,
+            updated_llm.deepseek.api_key,
+            updated_search.brave.api_key,
+        ),
+        (
+            Some("openai-current".to_string()),
+            None,
+            Some("brave-current".to_string()),
+        )
+    );
+}

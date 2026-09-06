@@ -5,7 +5,7 @@ use talos_base::TalosApplicationRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::{
-    talos::{TalosConnectionMode, TalosContext, TalosSessionEnvironment},
+    talos::{SessionSource, TalosConnectionMode, TalosSessionEnvironment},
     AuthSessionReadRequest, StartTurnRequest,
 };
 
@@ -47,17 +47,10 @@ pub(super) async fn authenticated_actor_from_access_token(
     Ok(actor_from_identity(&identity))
 }
 
-pub(super) fn normalize_embedded_start_turn_request(
+pub(super) fn prepare_embedded_start_turn(
     mut request: StartTurnRequest,
-) -> TalosResult<StartTurnRequest> {
-    let context = request
-        .context
-        .get_or_insert_with(|| TalosContext::cli("local"));
-    let existing_directory = context
-        .environment
-        .as_ref()
-        .map(|environment| environment.directory.clone());
-    let directory = match request.current_directory.clone().or(existing_directory) {
+) -> TalosResult<(StartTurnRequest, SessionSource)> {
+    let directory = match request.current_directory.clone() {
         Some(directory) => directory,
         None => env::current_dir().map_err(|err| {
             TalosError::public(
@@ -67,12 +60,12 @@ pub(super) fn normalize_embedded_start_turn_request(
         })?,
     };
 
-    context.environment = Some(TalosSessionEnvironment {
+    let source = SessionSource::cli().with_environment(TalosSessionEnvironment {
         directory: directory.clone(),
         connection_mode: TalosConnectionMode::Embedded,
     });
     if request.current_directory.is_none() {
         request.current_directory = Some(directory);
     }
-    Ok(request)
+    Ok((request, source))
 }

@@ -181,27 +181,19 @@ PY
 echo "CASE local_file_update PASS file_id=${file_id}"
 
 session_id="$(new_session_id)"
-create_payload='{
-  "context": {
-    "source_type": "http",
-    "provider": "http",
-    "channel_id": "files-e2e",
-    "user_id": "anonymous",
-    "thread_id": null,
-    "message_id": "files-e2e-message",
-    "trace_id": "files-e2e-trace"
-  }
-}'
-remember_session_context "${session_id}" "${create_payload}"
+create_payload='{}'
+remember_session_start_defaults "${session_id}" "${create_payload}"
 turn_payload="$(FILE_ID="${file_id}" python3 - <<'PY'
 import json
 import os
 
 print(json.dumps({
-    "input": [
-        {"type": "text", "text": "Inspect the attached image."},
-        {"type": "files", "fileIds": [os.environ["FILE_ID"]]},
-    ],
+    "input": {
+        "content": [
+            {"type": "text", "text": "Inspect the attached image."},
+            {"type": "file", "fileId": os.environ["FILE_ID"]},
+        ]
+    },
 }, separators=(",", ":")))
 PY
 )"

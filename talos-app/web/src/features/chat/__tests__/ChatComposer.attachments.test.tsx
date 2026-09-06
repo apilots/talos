@@ -60,6 +60,7 @@ describe("ChatComposer attachments", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0]?.[0].map((file: FileInfo) => file.fileId)).toEqual(["file-image"]);
+    await waitFor(() => expect(screen.queryByText("pasted.png")).not.toBeInTheDocument());
   });
 
   it("uploads multiple files with independent progress and preserves selection order", async () => {

@@ -1,56 +1,44 @@
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use talos_coordinator::SessionRuntime;
+use talos_agent_api::{AgentEvent, AgentEventPayload, AgentUserContent, AgentUserInput};
 use talos_error::{TalosError, TalosResult};
-use talos_store::session::{IdempotencyRecord, MessageCommandResult};
-use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem};
-use tracing::{error, warn};
+use talos_store::session::IdempotencyRecord;
+use talos_types::StartTurnResponse;
 
-use crate::session::SessionService;
-
+mod agent_execution;
+mod agent_message;
 mod service;
 mod types;
 
-pub use service::TurnService;
-pub use types::{AgentDispatchTurnExecutor, TurnExecutor, TurnRetryParams};
+pub(crate) use agent_execution::AgentExecutionDriver;
+pub(crate) use agent_message::{completed_agent_user_input, completed_user_action_message};
+pub(crate) use service::TurnService;
+pub(crate) use types::{PreparedTurnSubmission, StartTurnReservation, TurnRetryParams};
 
-fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
-    let has_text = input.iter().any(|item| match item {
-        TalosInputItem::Text { text } => !text.trim().is_empty(),
+fn validate_user_input(input: &AgentUserInput) -> TalosResult<()> {
+    let has_text = input.content.iter().any(|item| match item {
+        AgentUserContent::Text { text } => !text.trim().is_empty(),
         _ => false,
     });
-    let files = input
+    let file_ids = input
+        .content
         .iter()
         .filter_map(|item| match item {
-            TalosInputItem::Files { file_ids } => Some(file_ids),
+            AgentUserContent::File { file_id } => Some(file_id),
             _ => None,
         })
         .collect::<Vec<_>>();
-    if files.len() > 1 {
+    let mut unique_ids = HashSet::with_capacity(file_ids.len());
+    if file_ids
+        .iter()
+        .any(|file_id| file_id.trim().is_empty() || !unique_ids.insert(file_id.as_str()))
+    {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,
-            "input must include at most one files item".to_string(),
+            "file ids must be non-empty and unique".to_string(),
         ));
     }
-    if let Some(file_ids) = files.first() {
-        if file_ids.is_empty() {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "files input must include at least one file id".to_string(),
-            ));
-        }
-        let mut unique_ids = HashSet::with_capacity(file_ids.len());
-        if file_ids
-            .iter()
-            .any(|file_id| file_id.trim().is_empty() || !unique_ids.insert(file_id))
-        {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "file ids must be non-empty and unique".to_string(),
-            ));
-        }
-    }
-    if has_text || !files.is_empty() {
+    if has_text || !file_ids.is_empty() {
         Ok(())
     } else {
         Err(TalosError::public(
@@ -60,12 +48,12 @@ fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
     }
 }
 
-fn validate_active_turn_input(input: &[TalosInputItem]) -> TalosResult<()> {
+fn validate_active_turn_input(input: &AgentUserInput) -> TalosResult<()> {
     validate_user_input(input)?;
-    if input.iter().any(|item| {
+    if input.content.iter().any(|item| {
         !matches!(
             item,
-            TalosInputItem::Text { .. } | TalosInputItem::Files { .. }
+            AgentUserContent::Text { .. } | AgentUserContent::File { .. }
         )
     }) {
         return Err(TalosError::public(
@@ -99,125 +87,41 @@ fn retry_idempotency_key(request: &TurnRetryParams) -> String {
     )
 }
 
-fn result_from_idempotency_record(record: IdempotencyRecord) -> TalosResult<MessageCommandResult> {
-    record.result.ok_or_else(|| {
+fn start_response_from_idempotency_record(
+    record: IdempotencyRecord,
+) -> TalosResult<StartTurnResponse> {
+    let status = record.outcome.ok_or_else(|| {
         TalosError::internal(format!(
-            "idempotency record is missing result: session_id={}, key={}, status={}",
-            record.session_id,
-            record.idempotency_key,
-            record.status.as_str()
+            "completed idempotency record is missing outcome: session_id={}, key={}",
+            record.session_id, record.idempotency_key
         ))
+    })?;
+    Ok(StartTurnResponse {
+        request_id: record.request_id,
+        message_id: record.message_id,
+        session_id: record.session_id,
+        turn_id: record.turn_id,
+        status,
     })
-}
-
-fn completed_turn_from_event(event: &AgentEvent) -> Option<(String, String)> {
-    matches!(event.payload, AgentEventPayload::TurnCompleted(_))
-        .then(|| (event.session_id.clone(), event.turn_id.clone()))
 }
 
 fn auto_dispatch_session_from_event(event: &AgentEvent) -> Option<String> {
     match &event.payload {
-        AgentEventPayload::TurnCompleted(completed)
-            if !stop_reason_blocks_auto_dispatch(&completed.stop_reason) =>
+        AgentEventPayload::TurnCompleted(_) => Some(event.identity.session_id.clone()),
+        AgentEventPayload::TurnFailed(failed)
+            if failed.error.code != talos_error::ErrorCode::Cancelled =>
         {
-            Some(event.session_id.clone())
+            Some(event.identity.session_id.clone())
         }
-        AgentEventPayload::TurnError(_) => Some(event.session_id.clone()),
-        AgentEventPayload::TurnCompleted(_)
-        | AgentEventPayload::ItemStarted(_)
-        | AgentEventPayload::ItemDelta(_)
-        | AgentEventPayload::ItemCompleted(_)
-        | AgentEventPayload::AssistantTextCommitted(_)
+        AgentEventPayload::TurnFailed(_)
+        | AgentEventPayload::WaitingForInput(_)
         | AgentEventPayload::TurnStarted(_)
-        | AgentEventPayload::TurnMetrics(_) => None,
-    }
-}
-
-fn stop_reason_blocks_auto_dispatch(stop_reason: &talos_types::talos::StopReason) -> bool {
-    matches!(
-        stop_reason,
-        talos_types::talos::StopReason::Cancelled
-            | talos_types::talos::StopReason::WaitingUserAction
-    )
-}
-
-async fn record_session_title(
-    sessions: &SessionService,
-    session_runtime: &dyn SessionRuntime,
-    session_id: &str,
-    title: &str,
-) {
-    if let Err(err) = sessions.update_session_title(session_id, title).await {
-        if err.is_code(talos_error::ErrorCode::ResourceNotFound) {
-            warn!(
-                session_id = %session_id,
-                "session was deleted before its generated title could be persisted"
-            );
-        } else {
-            error!(
-                session_id = %session_id,
-                error = %err,
-                "failed to persist session title"
-            );
-        }
-        return;
-    }
-    if let Err(err) = session_runtime.invalidate_cached_session(session_id).await {
-        error!(
-            session_id = %session_id,
-            error = %err,
-            "failed to invalidate session cache after title update"
-        );
-    }
-}
-
-async fn record_completed_turn_progress(
-    sessions: &SessionService,
-    session_runtime: &dyn SessionRuntime,
-    event: &AgentEvent,
-    assistant_model: &str,
-) {
-    let AgentEventPayload::TurnCompleted(completed) = &event.payload else {
-        return;
-    };
-    if completed.stop_reason == talos_types::talos::StopReason::Cancelled {
-        return;
-    }
-    let Some(artifact_seq) = completed.artifact_seq else {
-        error!(
-            session_id = %event.session_id,
-            turn_id = %event.turn_id,
-            "completed turn is missing its persisted artifact sequence"
-        );
-        return;
-    };
-    if let Err(err) = sessions
-        .record_persisted_turn_progress(
-            &event.session_id,
-            artifact_seq,
-            assistant_model,
-            &completed.usage,
-        )
-        .await
-    {
-        error!(
-            session_id = %event.session_id,
-            turn_id = %event.turn_id,
-            error = %err,
-            "failed to persist completed turn session progress"
-        );
-        return;
-    }
-    if let Err(err) = session_runtime
-        .invalidate_cached_session(&event.session_id)
-        .await
-    {
-        error!(
-            session_id = %event.session_id,
-            turn_id = %event.turn_id,
-            error = %err,
-            "failed to invalidate session cache after turn progress"
-        );
+        | AgentEventPayload::MessageStarted(_)
+        | AgentEventPayload::MessageBlockStarted(_)
+        | AgentEventPayload::MessageBlockDelta(_)
+        | AgentEventPayload::MessageBlockCompleted(_)
+        | AgentEventPayload::MessageCompleted(_)
+        | AgentEventPayload::MetricsUpdated(_) => None,
     }
 }
 
@@ -225,13 +129,23 @@ async fn record_completed_turn_progress(
 #[path = "turn_tests.rs"]
 mod tests;
 
-pub fn turn_submission_hash(session_id: &str, input: &[TalosInputItem]) -> TalosResult<String> {
+pub(crate) fn turn_submission_hash(
+    session_id: &str,
+    input: &AgentUserInput,
+) -> TalosResult<String> {
     let canonical = serde_json::json!({
         "session_id": session_id,
         "input": input,
     });
     let bytes =
         serde_json::to_vec(&canonical).map_err(|err| TalosError::internal(err.to_string()))?;
+    let digest = Sha256::digest(bytes);
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+pub(crate) fn start_turn_hash(request: &talos_types::StartTurnRequest) -> TalosResult<String> {
+    let bytes =
+        serde_json::to_vec(request).map_err(|error| TalosError::internal(error.to_string()))?;
     let digest = Sha256::digest(bytes);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }

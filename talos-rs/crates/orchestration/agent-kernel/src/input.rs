@@ -1,9 +1,5 @@
-use std::future::Future;
-use std::pin::Pin;
-
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
 use talos_llm_provider::ChatMessage;
 use tokio::sync::oneshot;
 
@@ -17,16 +13,7 @@ pub struct UserInput {
     pub file_ids: Vec<String>,
 }
 
-/// Authorization scope used while resolving one turn's file references.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TurnFileScope {
-    /// Authenticated owner of every referenced file.
-    pub owner_user_id: String,
-    /// Project bound to the current session, when present.
-    pub project_id: Option<String>,
-}
-
-/// Ordered, authorized file content resolved for one model turn.
+/// Ordered, authorized file content prepared for one Kernel model Turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAttachment {
     pub file_id: String,
@@ -73,40 +60,6 @@ impl ActiveTurnInputDelivery {
     pub fn acknowledge(self) -> ActiveTurnInput {
         let _ = self.accepted_tx.send(());
         self.input
-    }
-}
-
-/// Resolves ordered, authorized file references for one model turn.
-///
-/// Implementations must authorize the complete input as one operation and
-/// return results in `file_ids` order without exposing storage coordinates.
-pub trait AttachmentReader: Send + Sync {
-    fn read<'a>(
-        &'a self,
-        scope: &'a TurnFileScope,
-        file_ids: &'a [String],
-    ) -> Pin<Box<dyn Future<Output = TalosResult<Vec<ResolvedAttachment>>> + Send + 'a>>;
-}
-
-/// Explicit reader for text-only Agent deployments and tests.
-pub struct RejectingAttachmentReader;
-
-impl AttachmentReader for RejectingAttachmentReader {
-    fn read<'a>(
-        &'a self,
-        _scope: &'a TurnFileScope,
-        file_ids: &'a [String],
-    ) -> Pin<Box<dyn Future<Output = TalosResult<Vec<ResolvedAttachment>>> + Send + 'a>> {
-        Box::pin(async move {
-            if file_ids.is_empty() {
-                Ok(Vec::new())
-            } else {
-                Err(TalosError::file_error(
-                    TalosFileErrorKind::UnsupportedAttachment,
-                    "file attachment reader is not configured",
-                ))
-            }
-        })
     }
 }
 

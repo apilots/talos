@@ -1,16 +1,17 @@
-use std::{collections::HashMap, process::Stdio};
+use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
+use talos_agent::AgentEventReducer;
 use talos_sdk::{
-    canonical_method, AgentEventPayload, AgentEventType, AppServerClient, AppServerClientConfig,
-    ConfigGetRequest, ExpectedFileVersion, GatewayClient, MemoryFileListRequest,
-    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest,
-    ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest,
-    SubmitDynamicToolResultRequest, SubscribeTimelineRequest, TalosContext, TalosError,
-    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineItemKind, TimelineEventEnvelope, WorkspaceDocKind, WorkspaceDocListRequest,
-    WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
+    timeline_event_method, AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlockContent,
+    AgentTurnRef, AppServerClient, AppServerClientConfig, ConfigGetRequest, DynamicToolResult,
+    ExpectedFileVersion, GatewayClient, MemoryFileListRequest, MemoryFileReadRequest,
+    MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest, ProjectListRequest,
+    ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest, SubmitTurnInput,
+    SubmitTurnInputRequest, SubscribeTimelineRequest, TalosError, TimelineEvent,
+    UserActionResponse, WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocReadRequest,
+    WorkspaceDocWriteRequest,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -69,15 +70,15 @@ async fn main() -> Result<()> {
 }
 
 async fn smoke(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("model.list");
+    eprintln!("model/list");
     list_models(client).await?;
     eprintln!("session id");
     new_session_id(client).await?;
-    eprintln!("config.get");
+    eprintln!("config/get");
     get_config(client).await?;
-    eprintln!("memory.file.list");
+    eprintln!("memory/file/list");
     list_memory_files(client).await?;
-    eprintln!("workspace.doc.list");
+    eprintln!("workspace/doc/list");
     list_workspace_docs(client).await?;
     Ok(())
 }
@@ -190,21 +191,16 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
 
     eprintln!("resource-matrix memory roundtrip");
     let memory_date = "2099-12-31";
-    let memory_content =
-        "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
+    let memory_content = memory_e2e::canonical_dream_memory_document(memory_date)?;
     let memory_expected_version = match read_memory_file(client, memory_date).await {
         Ok(existing) => Some(existing.file.version_token),
         Err(error) if error.is_code(talos_sdk::ErrorCode::ResourceNotFound) => None,
         Err(error) => return Err(error.into()),
     };
-    let written_memory = write_memory_file(
-        client,
-        memory_date,
-        memory_content.to_string(),
-        memory_expected_version,
-    )
-    .await?
-    .file;
+    let written_memory =
+        write_memory_file(client, memory_date, memory_content, memory_expected_version)
+            .await?
+            .file;
     if !written_memory
         .content
         .contains("app-server resource parity")
@@ -325,11 +321,9 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         "missing timeline recovery should map to not found",
     )?;
     expect_not_found(
-        submit_dynamic_tool_result_from_fields(
+        submit_dynamic_tool_result_for_missing_session(
             client,
             "missing-session",
-            "call-1",
-            "DynamicTool",
             "result".to_string(),
             true,
         )
@@ -353,7 +347,7 @@ async fn list_models(
 
 async fn get_config(
     client: &mut AppServerClient,
-) -> talos_sdk::TalosResult<talos_sdk::ConfigGetResponse> {
+) -> talos_sdk::TalosResult<talos_sdk::ConfigResponse> {
     GatewayClient::get_config(client, ConfigGetRequest::default()).await
 }
 
@@ -475,7 +469,7 @@ async fn recover_timeline_after(
     client: &mut AppServerClient,
     session_id: &str,
     after_event_id: Option<String>,
-) -> talos_sdk::TalosResult<talos_sdk::TimelineRecoveryResponse> {
+) -> talos_sdk::TalosResult<talos_sdk::RecoverTimelineResponse> {
     GatewayClient::recover_timeline(
         client,
         RecoverTimelineRequest {
@@ -487,22 +481,24 @@ async fn recover_timeline_after(
     .await
 }
 
-async fn submit_dynamic_tool_result_from_fields(
+async fn submit_dynamic_tool_result_for_missing_session(
     client: &mut AppServerClient,
     session_id: &str,
-    call_id: &str,
-    tool_name: &str,
     output: String,
     success: bool,
-) -> talos_sdk::TalosResult<talos_sdk::SubmitDynamicToolResultResponse> {
-    GatewayClient::submit_dynamic_tool_result(
+) -> talos_sdk::TalosResult<talos_sdk::SubmitTurnInputResponse> {
+    GatewayClient::submit_turn_input(
         client,
-        SubmitDynamicToolResultRequest {
-            session_id: session_id.to_string(),
-            call_id: call_id.to_string(),
-            tool_name: tool_name.to_string(),
-            output,
-            success,
+        SubmitTurnInputRequest {
+            identity: AgentTurnRef::new(session_id, "missing-turn"),
+            input: SubmitTurnInput::UserActionResponse {
+                action_id: "missing-action".to_string(),
+                response: UserActionResponse::DynamicToolResult(DynamicToolResult {
+                    output,
+                    success,
+                }),
+            },
+            client_request_id: None,
         },
     )
     .await
@@ -564,7 +560,7 @@ async fn start_turn(client: &mut AppServerClient, session_id: &str) -> Result<()
 async fn collect_until_terminal(
     client: &mut AppServerClient,
     _subscription_id: &str,
-) -> Result<Vec<TimelineEventEnvelope>> {
+) -> Result<Vec<TimelineEvent>> {
     let mut events = Vec::new();
     for _ in 0..1024 {
         let event = next_event_with_timeout(client).await?;
@@ -581,7 +577,7 @@ async fn collect_events(
     client: &mut AppServerClient,
     _subscription_id: &str,
     expected_count: usize,
-) -> Result<Vec<TimelineEventEnvelope>> {
+) -> Result<Vec<TimelineEvent>> {
     let mut events = Vec::new();
     for _ in 0..expected_count.saturating_add(16).max(64) {
         let event = next_event_with_timeout(client).await?;
@@ -596,7 +592,7 @@ async fn collect_events(
     ))
 }
 
-async fn next_event_with_timeout(client: &mut AppServerClient) -> Result<TimelineEventEnvelope> {
+async fn next_event_with_timeout(client: &mut AppServerClient) -> Result<TimelineEvent> {
     tokio::time::timeout(std::time::Duration::from_secs(30), client.next_event())
         .await
         .map_err(|_| anyhow!("timed out waiting for app-server event"))?
@@ -607,7 +603,7 @@ async fn collect_two_subscriptions_until_terminal(
     client: &mut AppServerClient,
     first_subscription_id: &str,
     second_subscription_id: &str,
-) -> Result<(Vec<TimelineEventEnvelope>, Vec<TimelineEventEnvelope>)> {
+) -> Result<(Vec<TimelineEvent>, Vec<TimelineEvent>)> {
     let mut first_events = Vec::new();
     let mut second_events = Vec::new();
     for _ in 0..256 {
@@ -665,7 +661,8 @@ async fn malformed(binary: &str) -> Result<()> {
         "params": {
             "client_info": {
                 "name": "talos-app-server-test-client",
-                "version": env!("CARGO_PKG_VERSION")
+                "version": env!("CARGO_PKG_VERSION"),
+                "kind": "sdk"
             },
             "capabilities": {
                 "protocol_version": { "major": 0, "minor": 2 },
@@ -709,46 +706,32 @@ fn session_id_from_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn test_talos_context() -> TalosContext {
-    TalosContext {
-        source_type: TalosSourceType::Cli,
-        provider: TalosProvider::Cli,
-        user_id: "app-server-test-client".to_string(),
-        channel_id: Some("app-server-test-client".to_string()),
-        thread_id: None,
-        message_id: format!("msg-{}", uuid::Uuid::new_v4().simple()),
-        trace_id: format!("trace-{}", uuid::Uuid::new_v4().simple()),
-        project_root: None,
-        environment: None,
-    }
-}
-
-fn is_terminal_event(event: &TimelineEventEnvelope) -> bool {
+fn is_terminal_event(event: &TimelineEvent) -> bool {
     matches!(
-        event.event.event_type,
-        AgentEventType::TurnCompleted | AgentEventType::TurnError
+        event.event.payload,
+        AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
     )
 }
 
-fn is_replayable_event(event: &TimelineEventEnvelope) -> bool {
-    event.event.event_type != AgentEventType::TurnMetrics
+fn is_replayable_event(_event: &TimelineEvent) -> bool {
+    true
 }
 
-fn ensure_turn_event_flow(events: &[TimelineEventEnvelope]) -> Result<()> {
+fn ensure_turn_event_flow(events: &[TimelineEvent]) -> Result<()> {
     if let Some(error) = events.iter().find_map(|event| match &event.event.payload {
-        AgentEventPayload::TurnError(error) => Some(&error.error),
+        AgentEventPayload::TurnFailed(error) => Some(&error.error),
         _ => None,
     }) {
         return Err(anyhow!("turn failed during app-server e2e: {error:?}"));
     }
     for required in [
-        "timeline.turn.started",
-        "timeline.item.delta",
-        "timeline.turn.completed",
+        "timeline/turn/started",
+        "timeline/message/block/delta",
+        "timeline/turn/completed",
     ] {
         if !events
             .iter()
-            .any(|event| canonical_method(&event.event.event_type) == required)
+            .any(|event| timeline_event_method(&event.event.payload) == required)
         {
             return Err(anyhow!("turn event flow missing {required}"));
         }
@@ -756,46 +739,34 @@ fn ensure_turn_event_flow(events: &[TimelineEventEnvelope]) -> Result<()> {
     Ok(())
 }
 
-fn assistant_text_from_events(events: &[TimelineEventEnvelope]) -> String {
-    let mut output = String::new();
-    let mut item_kinds = HashMap::new();
+fn assistant_text_from_events(events: &[TimelineEvent]) -> Result<String> {
+    let first = events
+        .first()
+        .ok_or_else(|| anyhow!("Agent Turn emitted no Timeline events"))?;
+    let mut reducer = AgentEventReducer::new(first.event.identity.clone());
     for event in events {
-        match &event.event.payload {
-            AgentEventPayload::ItemStarted(started) => {
-                item_kinds.insert(started.item.item_id.clone(), started.item.kind);
-                if started.item.kind == TalosTimelineItemKind::AssistantText {
-                    if let TalosTimelineContent::Text { text } = &started.item.content {
-                        output.push_str(text);
-                    }
-                }
-            }
-            AgentEventPayload::ItemDelta(delta) => {
-                if item_kinds.get(&delta.item_id) == Some(&TalosTimelineItemKind::AssistantText) {
-                    if let TalosTimelineDelta::Text { text } = &delta.delta {
-                        output.push_str(text);
-                    }
-                }
-            }
-            AgentEventPayload::ItemCompleted(completed)
-                if item_kinds.get(&completed.item_id)
-                    == Some(&TalosTimelineItemKind::AssistantText) =>
-            {
-                if let Some(TalosTimelineContent::Text { text }) = &completed.final_content {
-                    if !text.is_empty() && !output.contains(text) {
-                        output.push_str(text);
-                    }
-                }
-            }
-            _ => {}
-        }
+        reducer
+            .apply(event.event.clone())
+            .map_err(|error| anyhow!("invalid Agent event sequence: {error}"))?;
     }
-    output
+    Ok(reducer
+        .checkpoint()
+        .messages
+        .into_iter()
+        .flat_map(|message| message.blocks)
+        .filter_map(|block| match block.content {
+            AgentMessageBlockContent::AssistantText(text)
+                if text.phase == AgentAssistantTextPhase::FinalAnswer =>
+            {
+                Some(text.text)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
-fn assert_matching_event_sequence(
-    left: &[TimelineEventEnvelope],
-    right: &[TimelineEventEnvelope],
-) -> Result<()> {
+fn assert_matching_event_sequence(left: &[TimelineEvent], right: &[TimelineEvent]) -> Result<()> {
     ensure_turn_event_flow(left)?;
     ensure_turn_event_flow(right)?;
     let left_projection: Vec<_> = left.iter().map(event_projection).collect();
@@ -808,12 +779,12 @@ fn assert_matching_event_sequence(
     Ok(())
 }
 
-fn event_projection(event: &TimelineEventEnvelope) -> (&str, &str, Option<&str>, &'static str) {
+fn event_projection(event: &TimelineEvent) -> (&str, &str, Option<&str>, &'static str) {
     (
         event.event_id.as_str(),
-        event.session_id.as_str(),
-        Some(event.turn_id.as_str()),
-        canonical_method(&event.event.event_type),
+        event.event.identity.session_id.as_str(),
+        Some(event.event.identity.turn_id.as_str()),
+        timeline_event_method(&event.event.payload),
     )
 }
 

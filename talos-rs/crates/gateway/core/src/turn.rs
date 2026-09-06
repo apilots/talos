@@ -1,10 +1,12 @@
+use talos_agent_api::{
+    InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineResponse, SubmitTurnInputRequest,
+    SubmitTurnInputResponse,
+};
 use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
-    InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineRequest, RetryTurnRequest,
-    RetryTurnResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    RecoverTimelineRequest, RetryTurnRequest, StartTurnRequest, StartTurnResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse,
 };
 use tracing::info;
 
@@ -14,16 +16,17 @@ impl ServiceGateway {
     pub(crate) async fn start_turn(
         &self,
         actor: &Actor,
+        source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
         idempotency_key: Option<String>,
     ) -> TalosResult<StartTurnResponse> {
         info!(
             session_id = %request.session_id,
-            input_items = request.input.len(),
+            input_items = request.input.content.len(),
             "starting turn through gateway"
         );
         self.service
-            .start_turn(actor, request, idempotency_key)
+            .start_turn(actor, source, request, idempotency_key)
             .await
     }
 
@@ -31,7 +34,7 @@ impl ServiceGateway {
         &self,
         actor: &Actor,
         request: RetryTurnRequest,
-    ) -> TalosResult<RetryTurnResponse> {
+    ) -> TalosResult<StartTurnResponse> {
         self.service.retry_turn(actor, request).await
     }
 
@@ -43,22 +46,12 @@ impl ServiceGateway {
         self.service.interrupt_turn(actor, request).await
     }
 
-    pub(crate) async fn submit_dynamic_tool_result(
+    pub(crate) async fn submit_turn_input(
         &self,
         actor: &Actor,
-        request: SubmitDynamicToolResultRequest,
-    ) -> TalosResult<SubmitDynamicToolResultResponse> {
-        self.service
-            .submit_dynamic_tool_result(actor, request)
-            .await
-    }
-
-    pub(crate) async fn submit_user_action(
-        &self,
-        actor: &Actor,
-        request: SubmitUserActionRequest,
-    ) -> TalosResult<SubmitUserActionResponse> {
-        self.service.submit_user_action(actor, request).await
+        request: SubmitTurnInputRequest,
+    ) -> TalosResult<SubmitTurnInputResponse> {
+        self.service.submit_turn_input(actor, request).await
     }
 
     pub(crate) async fn subscribe_timeline(
@@ -73,7 +66,7 @@ impl ServiceGateway {
         &self,
         actor: &Actor,
         request: RecoverTimelineRequest,
-    ) -> TalosResult<TimelineRecoveryResponse> {
+    ) -> TalosResult<RecoverTimelineResponse> {
         self.service.recover_timeline(actor, request).await
     }
 }

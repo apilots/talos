@@ -13,7 +13,7 @@ describe("turn metrics formatting", () => {
     expect(formatMetricNumber(1_250_000)).toBe("1.3m");
   });
 
-  it("calculates a whole-turn average from total tokens and duration", () => {
+  it("calculates a whole-turn average from output tokens and duration", () => {
     expect(calculateTurnTokensPerSecond(362, 11_081)).toBeCloseTo(32.67, 2);
     expect(formatTokensPerSecond(32.67)).toBe("32.67");
     expect(formatTokensPerSecond(362)).toBe("362");

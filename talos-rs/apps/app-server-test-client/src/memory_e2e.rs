@@ -18,6 +18,45 @@ pub(super) fn canonical_memory_template() -> Result<String> {
     .map_err(|error| anyhow!("render canonical User Workspace Memory template: {error}"))
 }
 
+pub(super) fn canonical_dream_memory_document(date: &str) -> Result<String> {
+    let generated_at = 4_102_358_400;
+    let context = talos_memory::DreamMemoryDocumentContext::new(
+        talos_memory::MemoryAgentId::parse("app-server-test-client")
+            .map_err(|error| anyhow!("build test Agent id: {error}"))?,
+        talos_memory::MemoryUserId::parse("local")
+            .map_err(|error| anyhow!("build test User id: {error}"))?,
+        talos_memory::DreamMemoryDate::parse(date)
+            .map_err(|error| anyhow!("build test Memory date: {error}"))?,
+        talos_memory::MemoryTimezone::new(
+            "Asia/Shanghai"
+                .parse()
+                .map_err(|error| anyhow!("build test timezone: {error}"))?,
+        ),
+    );
+    let mut document = talos_memory::DreamMemoryDocument::new(context, generated_at)
+        .map_err(|error| anyhow!("build canonical Dream Memory document: {error}"))?;
+    document
+        .create_entry(
+            talos_memory::DreamMemoryEntry::builder()
+                .memory_id(
+                    talos_memory::MemoryId::parse("mem_00000000000000000000000000000001")
+                        .map_err(|error| anyhow!("build test Memory id: {error}"))?,
+                )
+                .title("App Server resource parity")
+                .body("app-server resource parity")
+                .occurred_at(generated_at)
+                .kind(talos_sdk::MemoryKind::Fact)
+                .importance(talos_sdk::MemoryImportance::Normal)
+                .provenance(talos_memory::DreamMemoryProvenance::UserAuthored)
+                .build()
+                .map_err(|error| anyhow!("build test Memory entry: {error}"))?,
+        )
+        .map_err(|error| anyhow!("append test Memory entry: {error}"))?;
+    document
+        .render()
+        .map_err(|error| anyhow!("render canonical Dream Memory document: {error}"))
+}
+
 pub(super) async fn run(client: &mut AppServerClient) -> Result<()> {
     let key = format!("e2e-response-marker-{}", uuid::Uuid::new_v4().simple());
     let first_marker = "Cerulean Comet";
@@ -62,7 +101,7 @@ pub(super) async fn run(client: &mut AppServerClient) -> Result<()> {
         "From User Workspace Memory, reply with only my exact two-word response marker.",
     )
     .await?;
-    let recalled = assistant_text_from_events(&read_events);
+    let recalled = assistant_text_from_events(&read_events)?;
     if !recalled
         .to_ascii_lowercase()
         .contains(&first_marker.to_ascii_lowercase())
@@ -133,7 +172,7 @@ pub(super) async fn run(client: &mut AppServerClient) -> Result<()> {
         "From User Workspace Memory, reply with only my exact two-word response marker.",
     )
     .await?;
-    let updated_recall = assistant_text_from_events(&updated_events);
+    let updated_recall = assistant_text_from_events(&updated_events)?;
     if !updated_recall
         .to_ascii_lowercase()
         .contains(&updated_marker.to_ascii_lowercase())
@@ -205,7 +244,7 @@ pub(super) async fn run(client: &mut AppServerClient) -> Result<()> {
         "From User Workspace Memory, reply with only my exact fallback response marker.",
     )
     .await?;
-    let reflected_recall = assistant_text_from_events(&reflection_read_events);
+    let reflected_recall = assistant_text_from_events(&reflection_read_events)?;
     if !reflected_recall
         .to_ascii_lowercase()
         .contains(&reflected_marker.to_ascii_lowercase())
@@ -244,7 +283,7 @@ async fn run_memory_turn(
     client: &mut AppServerClient,
     session_id: &str,
     input: &str,
-) -> Result<Vec<TimelineEventEnvelope>> {
+) -> Result<Vec<TimelineEvent>> {
     client
         .start_turn(start_turn_request(
             session_id,
@@ -318,31 +357,40 @@ fn memory_entries_containing(
         .collect())
 }
 
-fn contains_memory_tool_call(events: &[TimelineEventEnvelope]) -> bool {
+fn contains_memory_tool_call(events: &[TimelineEvent]) -> bool {
     events.iter().any(|event| match &event.event.payload {
-        AgentEventPayload::ItemStarted(started) => matches!(
-            &started.item.content,
-            TalosTimelineContent::ToolCall { name, .. }
-                if name == "UserWorkspaceMemoryUpdate"
-                    || name == "user_workspace_memory_update"
+        AgentEventPayload::MessageBlockStarted(started) => matches!(
+            &started.block.content,
+            AgentMessageBlockContent::ToolCall(call)
+                if call.name == "UserWorkspaceMemoryUpdate"
+                    || call.name == "user_workspace_memory_update"
+        ),
+        AgentEventPayload::MessageBlockCompleted(completed) => matches!(
+            &completed.block.content,
+            AgentMessageBlockContent::ToolCall(call)
+                if call.name == "UserWorkspaceMemoryUpdate"
+                    || call.name == "user_workspace_memory_update"
         ),
         _ => false,
     })
 }
 
-fn ensure_successful_memory_tool_call(events: &[TimelineEventEnvelope]) -> Result<()> {
+fn ensure_successful_memory_tool_call(events: &[TimelineEvent]) -> Result<()> {
     let memory_items: std::collections::HashSet<_> = events
         .iter()
         .filter_map(|event| match &event.event.payload {
-            AgentEventPayload::ItemStarted(started)
+            AgentEventPayload::MessageBlockStarted(started)
                 if matches!(
-                    &started.item.content,
-                    TalosTimelineContent::ToolCall { name, .. }
-                        if name == "UserWorkspaceMemoryUpdate"
-                            || name == "user_workspace_memory_update"
+                    &started.block.content,
+                    AgentMessageBlockContent::ToolCall(call)
+                        if call.name == "UserWorkspaceMemoryUpdate"
+                            || call.name == "user_workspace_memory_update"
                 ) =>
             {
-                Some(started.item.item_id.clone())
+                let AgentMessageBlockContent::ToolCall(call) = &started.block.content else {
+                    unreachable!("guard requires a Tool call");
+                };
+                Some(call.call_id.clone())
             }
             _ => None,
         })
@@ -353,26 +401,11 @@ fn ensure_successful_memory_tool_call(events: &[TimelineEventEnvelope]) -> Resul
         ));
     }
     let succeeded = events.iter().any(|event| match &event.event.payload {
-        AgentEventPayload::ItemDelta(delta) if memory_items.contains(&delta.item_id) => {
-            matches!(
-                &delta.delta,
-                TalosTimelineDelta::ToolResult {
-                    is_error: false,
-                    ..
-                }
-            )
-        }
-        AgentEventPayload::ItemCompleted(completed)
-            if memory_items.contains(&completed.item_id) =>
-        {
-            matches!(
-                &completed.final_content,
-                Some(TalosTimelineContent::ToolCall {
-                    result: Some(result),
-                    ..
-                }) if !result.is_error
-            )
-        }
+        AgentEventPayload::MessageBlockCompleted(completed) => matches!(
+            &completed.block.content,
+            AgentMessageBlockContent::ToolResult(result)
+                if memory_items.contains(&result.call_id) && !result.is_error
+        ),
         _ => false,
     });
     if !succeeded {

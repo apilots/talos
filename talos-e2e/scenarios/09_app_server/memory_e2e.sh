@@ -7,10 +7,6 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 build_app_server_binaries
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-export TALOS_APP_SERVER_TEST_PROVIDER="${TALOS_APP_SERVER_TEST_PROVIDER:-bailian}"
-export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-qwen3.6-flash}"
-export TALOS_TEST_INNER_MODEL_PROVIDER="${TALOS_TEST_INNER_MODEL_PROVIDER:-${TALOS_APP_SERVER_TEST_PROVIDER}}"
-export TALOS_TEST_INNER_MODEL_ID="${TALOS_TEST_INNER_MODEL_ID:-${TALOS_APP_SERVER_TEST_MODEL}}"
 
 prepare_talos_home
 export TALOS_CONFIG="${TALOS_HOME}/conf/talos.yaml"

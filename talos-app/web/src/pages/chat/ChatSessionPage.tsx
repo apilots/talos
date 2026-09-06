@@ -32,7 +32,7 @@ export function ChatSessionPage() {
   const { data: modelCatalog } = useModelsQuery();
   const models = modelCatalog?.models;
   const projectsView = useProjectsView();
-  const chat = useChatSession(sessionId, session?.message_count, session?.title);
+  const chat = useChatSession(sessionId, session?.messageCount);
   const {
     blocks,
     setDraft,

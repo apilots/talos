@@ -247,16 +247,21 @@ impl TuiApp {
         state.submitting = true;
         state.error = None;
         let action_id = state.action.action_id.clone();
-        let request = talos_sdk::SubmitUserActionRequest {
-            session_id: self.session_id.clone().unwrap_or_default(),
-            turn_id: state.turn_id.clone(),
-            action_id: action_id.clone(),
-            response,
+        let request = talos_sdk::SubmitTurnInputRequest {
+            identity: talos_sdk::AgentTurnRef::new(
+                self.session_id.clone().unwrap_or_default(),
+                state.turn_id.clone(),
+            ),
+            input: talos_sdk::SubmitTurnInput::UserActionResponse {
+                action_id: action_id.clone(),
+                response,
+            },
+            client_request_id: None,
         };
         let _ = self.spawn_command_task("submitting user action", async move {
             CommandUpdate::UserActionSubmitted {
                 action_id,
-                result: client.submit_user_action(request).await,
+                result: client.submit_turn_input(request).await,
             }
         });
     }

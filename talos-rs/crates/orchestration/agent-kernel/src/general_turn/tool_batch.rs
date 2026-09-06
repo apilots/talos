@@ -195,34 +195,22 @@ struct ReducedToolExecutionOutput {
     content_items: Vec<TalosContentItem>,
     is_error: bool,
     envelope: ToolResultEnvelope,
-    semantic_events: Vec<String>,
-    next_turn_failure: Option<Value>,
 }
 
 fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExecutionOutput {
     let envelope = output.outcome.envelope();
     let (payload, content_items, is_error, _) =
         build_tool_result_payload(&output.tool_name, &output.outcome);
-    let semantic_events = envelope
-        .semantic_events()
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let next_turn_failure = envelope
-        .next_turn_failure_payload()
-        .and_then(|value| serde_json::to_value(value).ok());
     ReducedToolExecutionOutput {
         payload,
         content_items,
         is_error,
         envelope,
-        semantic_events,
-        next_turn_failure,
     }
 }
 
 pub(crate) async fn emit_tool_result_stream_event(
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
     output: &ToolExecutionOutput,
 ) {
     if matches!(output.outcome, ToolDispatchOutcome::Pending { .. }) {
@@ -232,15 +220,11 @@ pub(crate) async fn emit_tool_result_stream_event(
     let reduced = reduce_tool_execution_output(output);
     emit_stream_event(
         stream_tx,
-        KernelStreamEventType::ToolResult,
-        KernelStreamEventData::ToolResult(ToolResultStreamData {
+        AgentKernelEventPayload::ToolResult(ToolResultStreamData {
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items,
             is_error: reduced.is_error,
-            semantic_events: reduced.semantic_events,
-            envelope: serde_json::to_value(&reduced.envelope).ok(),
-            next_turn_failure: reduced.next_turn_failure,
         }),
     )
     .await;
@@ -316,7 +300,7 @@ pub(crate) fn collect_general_turn_tool_batch_for_calls(
         if reduced.is_error {
             error_count += 1;
         }
-        output_items.push(RunItem::ToolResult {
+        output_items.push(KernelRunItem::ToolResult {
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items.clone(),
@@ -389,7 +373,7 @@ pub async fn execute_general_turn_tool_batch(
     user_action_responses: std::collections::HashMap<String, talos_types::UserActionResponse>,
     sandbox_approval_fingerprints: std::collections::HashMap<String, String>,
     command_risk_assessor: Arc<dyn talos_tools::CommandRiskAssessor>,
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
         session_id: prepared.session_id.clone(),
