@@ -31,7 +31,6 @@ describe("app store persistence", () => {
         authUsername: "Anonymous",
         userId: "anonymous",
         deploymentMode: "local",
-        runtimeMode: "local",
       },
       streams: {},
       transientStatuses: {},
@@ -70,9 +69,7 @@ describe("app store persistence", () => {
       state?: { connection?: Record<string, unknown> };
     };
 
-    expect(persisted.state?.connection).toEqual({
-      runtimeMode: "local",
-    });
+    expect(persisted.state?.connection).toBeUndefined();
   });
 
   it("drops previously persisted browser auth token during rehydration", async () => {
@@ -88,7 +85,6 @@ describe("app store persistence", () => {
             accountType: "Max",
             authUsername: "ada",
             userId: "user-1",
-            runtimeMode: "local",
           },
         },
         version: 0,
@@ -105,7 +101,6 @@ describe("app store persistence", () => {
       authUsername: "Anonymous",
       userId: "anonymous",
       deploymentMode: "local",
-      runtimeMode: "local",
     });
   });
 
@@ -116,7 +111,6 @@ describe("app store persistence", () => {
         state: {
           connection: {
             serverUrl: "http://localhost:8080",
-            runtimeMode: "local",
           },
         },
         version: 0,

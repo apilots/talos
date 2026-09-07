@@ -59,7 +59,6 @@ describe("SettingsProfileSection", () => {
           authUsername: "Anonymous",
           userId: "anonymous",
           deploymentMode: "local",
-          runtimeMode: "local",
         }}
       />,
     );
@@ -85,7 +84,6 @@ describe("SettingsProfileSection", () => {
           authUsername: "Anonymous",
           userId: "anonymous",
           deploymentMode: "local",
-          runtimeMode: "local",
         }}
       />,
     );

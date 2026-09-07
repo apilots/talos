@@ -2,14 +2,13 @@ import type {
   ContextCompactionOutcome,
   ContextCompactionStage,
 } from "@/shared/types/protocol";
-import type { ReasoningLevel, RuntimeMode } from "@/shared/types/ui";
+import type { ReasoningLevel } from "@/shared/types/ui";
 import type { AppProtocol } from "@talos/sdk-browser";
 
 export interface ComposerStatusSnapshot {
   model: string;
   project?: string;
   reasoningLevel?: ReasoningLevel;
-  runtimeMode: RuntimeMode;
   sessionId: string;
   state: "ready" | "running";
 }

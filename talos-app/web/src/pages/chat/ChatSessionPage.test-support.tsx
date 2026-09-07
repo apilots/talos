@@ -36,7 +36,6 @@ export async function createChatFeatureMock(
       onProjectChange: (projectId: string) => void;
       onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
       onSend: (attachments: []) => Promise<void>;
-      showRuntimeModeSelector?: boolean;
     }) => {
       mocks.composerProps = props;
       return (
@@ -144,10 +143,7 @@ export function createAppStoreMock() {
   return {
     useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
       selector({
-        connection: {
-          runtimeMode: "local",
-        },
-        setConnection: vi.fn(),
+        connection: {},
       }),
   };
 }

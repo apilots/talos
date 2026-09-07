@@ -8,10 +8,8 @@ import { FieldBlock, OverviewCard, SectionHeader } from "./SectionPrimitives";
 export function SettingsGeneralSection({
   locale,
   setLocale,
-  draft,
-  setDraft,
   uiTheme,
-}: Pick<SettingsPageState, "locale" | "setLocale" | "draft" | "setDraft" | "uiTheme">) {
+}: Pick<SettingsPageState, "locale" | "setLocale" | "uiTheme">) {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
@@ -33,9 +31,9 @@ export function SettingsGeneralSection({
         <SectionHeader
           icon={<Globe2 size={18} />}
           subtitle={t("settings:fields.languageDetail")}
-          title={t("settings:fields.languageAndRuntime")}
+          title={t("common:language")}
         />
-        <div className="mt-6 grid gap-5 md:grid-cols-2">
+        <div className="mt-6 grid gap-5">
           <FieldBlock label={t("common:language")}>
             <select
               className="form-control-focus w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm transition"
@@ -47,27 +45,8 @@ export function SettingsGeneralSection({
             </select>
             <p className="mt-2 text-xs text-muted">{t("settings:fields.languageDetail")}</p>
           </FieldBlock>
-          <FieldBlock label={t("common:runtimeMode")}>
-            <select
-              className="form-control-focus w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm transition"
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  runtimeMode: event.target.value as typeof current.runtimeMode,
-                }))
-              }
-              value={draft.runtimeMode}
-            >
-              <option value="local">{t("common:local")}</option>
-              <option disabled value="cloud">
-                {t("common:cloud")}
-              </option>
-            </select>
-            <p className="mt-2 text-xs text-muted">{t("settings:fields.runtimeDetail")}</p>
-          </FieldBlock>
         </div>
       </Panel>
-
     </div>
   );
 }

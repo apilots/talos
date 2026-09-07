@@ -17,7 +17,6 @@ vi.mock("@/features/connection", () => ({
       authToken: "",
       authUsername: "alice",
       userId: "alice",
-      runtimeMode: "local",
     },
   }),
 }));

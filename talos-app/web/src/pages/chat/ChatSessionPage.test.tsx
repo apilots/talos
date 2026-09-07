@@ -87,12 +87,6 @@ describe("ChatSessionPage", () => {
     expect(mocks.mutateModel).not.toHaveBeenCalled();
   });
 
-  it("hides runtime mode selector on the session detail composer", () => {
-    renderSessionPage();
-
-    expect((mocks.composerProps as { showRuntimeModeSelector?: boolean }).showRuntimeModeSelector).toBe(false);
-  });
-
   it("keeps permission changes local before the session exists", () => {
     mocks.session = undefined;
     mocks.sendTurn.mockResolvedValue(undefined);

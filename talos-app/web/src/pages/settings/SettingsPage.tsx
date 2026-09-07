@@ -70,9 +70,7 @@ export function SettingsPage() {
 
             {activeSection === "general" ? (
               <SettingsGeneralSection
-                draft={draft}
                 locale={locale}
-                setDraft={setDraft}
                 setLocale={setLocale}
                 uiTheme={uiTheme}
               />

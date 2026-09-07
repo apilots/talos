@@ -8,7 +8,6 @@ import type {
 import type {
   ProjectView,
   ReasoningLevel,
-  RuntimeMode,
   SessionInputHistory,
 } from "@/shared/types/ui";
 import type { ComposerSessionCommandId } from "./composer-input/composer-suggestions";
@@ -18,7 +17,7 @@ import type {
   ComposerStatusSnapshot,
 } from "./command-response";
 
-export type { ReasoningLevel, RuntimeMode };
+export type { ReasoningLevel };
 
 export interface MessageQueueController {
   activeTurnId?: string;
@@ -56,13 +55,10 @@ export interface ChatComposerProps {
   activeProjectId: string;
   onProjectChange: (projectId: string) => void;
   onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
-  runtimeMode: RuntimeMode;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
   reasoningLevel?: ReasoningLevel;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   reasoningEnabled?: boolean;
   showProjectSelector?: boolean;
-  showRuntimeModeSelector?: boolean;
   compact?: boolean;
   initialAttachments?: FileInfo[];
   supportedAttachmentKinds?: ComposerAttachmentKind[];

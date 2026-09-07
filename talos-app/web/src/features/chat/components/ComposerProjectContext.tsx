@@ -7,20 +7,15 @@ import { ProjectDirectoryDialog, type ProjectDirectoryDialogMode } from "@/featu
 import { cn } from "@/shared/lib/cn";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
-import { ComposerDropdown } from "./ComposerDropdown";
 import { filterComposerProjects } from "./ChatComposer.utils";
-import type { RuntimeMode } from "./ChatComposer.types";
 
 interface ComposerProjectContextProps {
   activeProjectId: string;
   compact: boolean;
   onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
   onProjectChange: (projectId: string) => void;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
   projects: ProjectView[];
-  runtimeMode: RuntimeMode;
   showProjectSelector: boolean;
-  showRuntimeModeSelector: boolean;
 }
 
 export function ComposerProjectContext({
@@ -28,11 +23,8 @@ export function ComposerProjectContext({
   compact,
   onCreateProject,
   onProjectChange,
-  onRuntimeModeChange,
   projects,
-  runtimeMode,
   showProjectSelector,
-  showRuntimeModeSelector,
 }: ComposerProjectContextProps) {
   const { t } = useTranslation(["chat", "common"]);
   const [open, setOpen] = useState(false);
@@ -45,7 +37,6 @@ export function ComposerProjectContext({
   const isProjectBound = activeProject && !isUnboundProject(activeProject.id);
   const filteredProjects = filterComposerProjects(projects, search);
   const collapsible = showProjectSelector && !compact;
-  const effectiveRuntimeMode: RuntimeMode = runtimeMode === "local" ? "local" : "local";
 
   const close = () => {
     setOpen(false);
@@ -76,30 +67,20 @@ export function ComposerProjectContext({
       <div className="mx-3 border-t border-border/50">
         <div className="flex flex-wrap items-center gap-1">
           {collapsible ? (
-            <>
-              <button
-                className="flex items-center gap-2 py-2.5 text-[12px] text-muted outline-none transition hover:text-ink focus:outline-none"
-                onClick={() => setOpen((value) => !value)}
-                ref={triggerRef}
-                type="button"
-              >
-                <FolderOpen className="shrink-0" size={13} />
-                <span className="max-w-[220px] truncate">
-                  {isProjectBound
-                    ? `${activeProject.name} · ${describeProjectDirectory(activeProject.directory)}`
-                    : t("chat:workInProject")}
-                </span>
-                <ChevronDown className={cn("shrink-0 transition-transform", open && "rotate-180")} size={13} />
-              </button>
-              {showRuntimeModeSelector ? (
-                <div className="border-l border-border/40 pl-1">
-                  <RuntimeModeDropdown onChange={onRuntimeModeChange} value={effectiveRuntimeMode} />
-                </div>
-              ) : null}
-            </>
-          ) : null}
-          {showRuntimeModeSelector && !collapsible && !compact ? (
-            <RuntimeModeDropdown onChange={onRuntimeModeChange} value={effectiveRuntimeMode} />
+            <button
+              className="flex items-center gap-2 py-2.5 text-[12px] text-muted outline-none transition hover:text-ink focus:outline-none"
+              onClick={() => setOpen((value) => !value)}
+              ref={triggerRef}
+              type="button"
+            >
+              <FolderOpen className="shrink-0" size={13} />
+              <span className="max-w-[220px] truncate">
+                {isProjectBound
+                  ? `${activeProject.name} · ${describeProjectDirectory(activeProject.directory)}`
+                  : t("chat:workInProject")}
+              </span>
+              <ChevronDown className={cn("shrink-0 transition-transform", open && "rotate-180")} size={13} />
+            </button>
           ) : null}
         </div>
       </div>
@@ -190,20 +171,5 @@ export function ComposerProjectContext({
         />
       ) : null}
     </>
-  );
-}
-
-function RuntimeModeDropdown({ onChange, value }: { onChange: (mode: RuntimeMode) => void; value: RuntimeMode }) {
-  const { t } = useTranslation("common");
-  return (
-    <ComposerDropdown
-      header={t("runtimeMode")}
-      items={[
-        { value: "local", label: t("local") },
-        { value: "cloud", label: t("cloud"), description: t("comingSoon"), disabled: true },
-      ]}
-      onChange={(mode) => onChange(mode as RuntimeMode)}
-      value={value}
-    />
   );
 }

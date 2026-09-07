@@ -28,7 +28,6 @@ describe("ComposerCommandResponse", () => {
           model: "DeepSeek V4 Flash",
           project: "talos / main",
           reasoningLevel: "high",
-          runtimeMode: "local",
           sessionId: "01a01fa7-eb47-7563-be54-3dffd461dc3b",
           state: "ready",
         }}

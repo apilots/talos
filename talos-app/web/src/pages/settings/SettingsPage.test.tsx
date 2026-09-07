@@ -39,16 +39,13 @@ function buildSettingsState(
       authUsername: authRole,
       userId: `${authRole}-1`,
       deploymentMode,
-      runtimeMode: "local",
     },
     setConnection: vi.fn(),
     uiTheme: "light",
     setUiTheme: vi.fn(),
     locale: "en",
     setLocale: vi.fn(),
-    draft: {
-      runtimeMode: "local",
-    },
+    draft: {},
     setDraft: vi.fn(),
     desktopNotifications: true,
     setDesktopNotifications: vi.fn(),
@@ -79,7 +76,7 @@ describe("SettingsPage", () => {
   });
 
   it("renders the routed section content", () => {
-    renderSettings("/settings/models", "authenticated", "admin");
+    renderSettings("/settings/models", "authenticated", "admin", "cloud");
 
     expect(screen.getByText("Models content")).toBeTruthy();
     expect(screen.getByText("Personalization")).toBeTruthy();
@@ -127,10 +124,17 @@ describe("SettingsPage", () => {
   });
 
   it("renders the web search settings section", () => {
-    renderSettings("/settings/web-search", "authenticated", "admin");
+    renderSettings("/settings/web-search", "authenticated", "admin", "cloud");
 
     expect(screen.getByText("Web Search content")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Web Search" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("shows config management when Cloud authentication is disabled", () => {
+    renderSettings("/settings/models", "open", "user", "cloud");
+
+    expect(screen.getByText("Models content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Models" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("redirects regular users away from config management sections", () => {

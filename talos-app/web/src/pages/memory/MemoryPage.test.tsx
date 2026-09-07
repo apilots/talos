@@ -72,7 +72,6 @@ describe("MemoryPage", () => {
         accountType: "Free",
         authToken: "",
         authUsername: "user",
-        runtimeMode: "local",
         userId: "user",
       },
     });
