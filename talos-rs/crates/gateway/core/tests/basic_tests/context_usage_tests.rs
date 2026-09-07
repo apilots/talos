@@ -54,7 +54,7 @@ impl KernelMemoryProgressStore for SessionMemoryProgress {
             .await?
             .map(|record| record.memory_processed_until_event_seq)
             .ok_or_else(|| {
-                talos_error::TalosError::public(
+                talos_error::TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     session_id.to_string(),
                 )
@@ -376,10 +376,10 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         matches!(
             recovery.replay.events.last(),
             Some(talos_agent_api::TimelineEvent {
-                event: talos_agent_api::AgentEvent {
+                event: talos_agent_api::TimelineEventPayload::Agent(talos_agent_api::AgentEvent {
                     payload: talos_agent_api::AgentEventPayload::TurnCompleted(_),
                     ..
-                },
+                }),
                 ..
             })
         ),

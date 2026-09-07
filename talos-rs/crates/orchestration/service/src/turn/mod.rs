@@ -33,7 +33,7 @@ fn validate_user_input(input: &AgentUserInput) -> TalosResult<()> {
         .iter()
         .any(|file_id| file_id.trim().is_empty() || !unique_ids.insert(file_id.as_str()))
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file ids must be non-empty and unique".to_string(),
         ));
@@ -41,7 +41,7 @@ fn validate_user_input(input: &AgentUserInput) -> TalosResult<()> {
     if has_text || !file_ids.is_empty() {
         Ok(())
     } else {
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "input must include non-empty text or files".to_string(),
         ))
@@ -56,7 +56,7 @@ fn validate_active_turn_input(input: &AgentUserInput) -> TalosResult<()> {
             AgentUserContent::Text { .. } | AgentUserContent::File { .. }
         )
     }) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "active turn input supports only text and files",
         ));
@@ -66,13 +66,13 @@ fn validate_active_turn_input(input: &AgentUserInput) -> TalosResult<()> {
 
 fn validate_retry_request(request: &TurnRetryParams) -> TalosResult<()> {
     if request.client_message_id.trim().is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "client_message_id is required".to_string(),
         ));
     }
     if request.retry_of_message_id.trim().is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "retry_of_message_id is required".to_string(),
         ));
@@ -91,10 +91,12 @@ fn start_response_from_idempotency_record(
     record: IdempotencyRecord,
 ) -> TalosResult<StartTurnResponse> {
     let status = record.outcome.ok_or_else(|| {
-        TalosError::internal(format!(
-            "completed idempotency record is missing outcome: session_id={}, key={}",
-            record.session_id, record.idempotency_key
-        ))
+        TalosError::internal("The completed idempotency record is missing its outcome.").context(
+            format!(
+                "completed idempotency record is missing outcome: session_id={}, key={}",
+                record.session_id, record.idempotency_key
+            ),
+        )
     })?;
     Ok(StartTurnResponse {
         request_id: record.request_id,
@@ -137,15 +139,23 @@ pub(crate) fn turn_submission_hash(
         "session_id": session_id,
         "input": input,
     });
-    let bytes =
-        serde_json::to_vec(&canonical).map_err(|err| TalosError::internal(err.to_string()))?;
+    let bytes = serde_json::to_vec(&canonical).map_err(|err| {
+        TalosError::internal_with_source(
+            "Failed to serialize the turn request; technical details were withheld.",
+            err,
+        )
+    })?;
     let digest = Sha256::digest(bytes);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 pub(crate) fn start_turn_hash(request: &talos_types::StartTurnRequest) -> TalosResult<String> {
-    let bytes =
-        serde_json::to_vec(request).map_err(|error| TalosError::internal(error.to_string()))?;
+    let bytes = serde_json::to_vec(request).map_err(|error| {
+        TalosError::internal_with_source(
+            "Failed to serialize the turn request; technical details were withheld.",
+            error,
+        )
+    })?;
     let digest = Sha256::digest(bytes);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }

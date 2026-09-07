@@ -106,13 +106,13 @@ fn provider_for_config(
 
 fn validate_request(request: &WebSearchRequest) -> TalosResult<()> {
     if request.query.trim().is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "query must not be empty".to_string(),
         ));
     }
     if !(1..=MAX_RESULT_LIMIT).contains(&request.limit) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("limit must be between 1 and {MAX_RESULT_LIMIT}"),
         ));
@@ -217,7 +217,7 @@ fn resolve_api_key(
             .filter(|value| !value.trim().is_empty())
             .map(|env_name| format!(" API key env `{env_name}`"))
             .unwrap_or_else(|| " an API key".to_string());
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("web search provider `{provider}` requires{requirement}"),
         )

@@ -13,3 +13,6 @@ talos-sandbox-spi.workspace = true
 
 [dev-dependencies]
 talos-sandbox-spi = { workspace = true, features = ["provider-contract-tests"] }
+
+[lints]
+workspace = true

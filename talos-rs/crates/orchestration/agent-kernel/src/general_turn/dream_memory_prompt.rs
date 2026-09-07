@@ -73,7 +73,7 @@ pub(super) fn date_for_timestamp(
 ) -> talos_error::TalosResult<talos_memory::DreamMemoryDate> {
     let timezone = talos_config::parse_timezone(timezone)?;
     let timestamp = Utc.timestamp_opt(timestamp, 0).single().ok_or_else(|| {
-        talos_error::TalosError::public(
+        talos_error::TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "invalid Dream Memory occurred_at".to_string(),
         )
@@ -85,7 +85,7 @@ pub(super) fn date_for_timestamp(
             .to_string(),
     )
     .map_err(|error| {
-        talos_error::TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+        talos_error::TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
     })
 }
 
@@ -105,9 +105,10 @@ fn render_same_day_entries(entries: &[DreamMemoryEntry]) -> talos_error::TalosRe
             occurred_at: entry.occurred_at(),
         };
         let item = serde_json::to_string(&prompt_entry).map_err(|error| {
-            talos_error::TalosError::internal(format!(
-                "serialize Dream Memory prompt entry: {error}"
-            ))
+            talos_error::TalosError::internal_with_source(
+                "serialize Dream Memory prompt entry; technical details were withheld.",
+                error,
+            )
         })?;
         let separator = if rendered.len() == 1 { "" } else { "," };
         if rendered.chars().count() + separator.len() + item.chars().count() + 1

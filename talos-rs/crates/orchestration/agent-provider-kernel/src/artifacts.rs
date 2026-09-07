@@ -126,7 +126,12 @@ async fn append_artifact(
         schema_version: ARTIFACT_SCHEMA_VERSION,
         record: record.clone(),
     })
-    .map_err(|error| TalosError::internal(format!("serialize session artifact: {error}")))?;
+    .map_err(|error| {
+        TalosError::internal_with_source(
+            "serialize session artifact; technical details were withheld.",
+            error,
+        )
+    })?;
     talos_fs::append_file(
         &day_file(workspace_root, session_id, timestamp),
         &format!("{line}\n"),
@@ -141,7 +146,8 @@ async fn load_artifacts(
     let mut records = Vec::new();
     for path in list_day_files(workspace_root, session_id).await? {
         let content = talos_fs::read_file(&path).await?.ok_or_else(|| {
-            TalosError::internal(format!("session artifact file missing: {}", path.display()))
+            TalosError::internal("session artifact file missing; technical details were withheld.")
+                .context(format!("session artifact file missing: {}", path.display()))
         })?;
         for (line_index, line) in content.lines().enumerate() {
             if line.trim().is_empty() {
@@ -175,27 +181,42 @@ fn parse_artifact_record(
     session_id: &str,
 ) -> TalosResult<SessionArtifactRecord> {
     let value = serde_json::from_str(line).map_err(|error| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "parse session artifact {} at {location}: {error}",
             path.display(),
-        ))
+        );
+        TalosError::internal_with_source(
+            "Parse session artifact; technical details were withheld.",
+            error,
+        )
+        .context(diagnostic)
     })?;
     let value = migrate_artifact_value(value).map_err(|error| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "migrate session artifact {} at {location}: {error}",
             path.display(),
-        ))
+        );
+        TalosError::internal_with_source(
+            "Migrate session artifact; technical details were withheld.",
+            error,
+        )
+        .context(diagnostic)
     })?;
     let versioned: VersionedSessionArtifactRecord =
         serde_json::from_value(value).map_err(|error| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "parse session artifact {} at {location}: {error}",
                 path.display(),
-            ))
+            );
+            TalosError::internal_with_source(
+                "Parse session artifact; technical details were withheld.",
+                error,
+            )
+            .context(diagnostic)
         })?;
     let record = versioned.record;
     if record.session_id() != session_id {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!(
                 "session artifact {} at {location} belongs to session {}, expected {session_id}",
@@ -338,7 +359,7 @@ impl KernelSessionArtifactStore for FileKernelSessionArtifactStore {
             || event.session_id.trim().is_empty()
             || event.invocation_id.trim().is_empty()
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "transcript id, session_id, and invocation_id are required".to_string(),
             ));
@@ -384,7 +405,7 @@ impl KernelSessionArtifactStore for FileKernelSessionArtifactStore {
         record: &KernelSessionSummary,
     ) -> TalosResult<()> {
         if record.header.session_id.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "summary session_id is required".to_string(),
             ));

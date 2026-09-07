@@ -6,7 +6,7 @@ use crate::server::files::{
 };
 use axum::extract::DefaultBodyLimit;
 use axum::http::header::CONTENT_TYPE;
-use talos_error::TalosFileErrorKind;
+use talos_error::ErrorCode;
 use talos_types::{FileDeleteResponse, FileListResponse, FileReadResponse, FileUploadResponse};
 
 fn file_router(state: Arc<HttpApiState>) -> Router {
@@ -146,6 +146,16 @@ async fn file_upload_rejects_transport_overflow_and_extra_parts() {
         .await
         .expect("extra part request should complete");
     assert_eq!(extra.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response_json::<Value>(extra).await,
+        serde_json::json!({
+            "status": "error", "error": {
+                "code": "invalidRequest",
+                "message": "file upload accepts exactly one metadata part and one file part",
+                "localization": null
+            }
+        })
+    );
 
     let listed = app
         .oneshot(
@@ -283,27 +293,21 @@ async fn app_server_file_methods_use_the_same_file_service() {
 }
 
 #[test]
-fn file_error_mapping_is_exhaustive_and_machine_readable() {
-    for (kind, status) in [
+fn file_error_codes_preserve_http_status() {
+    for (code, status) in [
+        (ErrorCode::UploadTooLarge, StatusCode::PAYLOAD_TOO_LARGE),
         (
-            TalosFileErrorKind::UploadTooLarge,
+            ErrorCode::AttachmentLimitExceeded,
             StatusCode::PAYLOAD_TOO_LARGE,
         ),
         (
-            TalosFileErrorKind::AttachmentLimitExceeded,
-            StatusCode::PAYLOAD_TOO_LARGE,
-        ),
-        (
-            TalosFileErrorKind::UnsupportedMediaType,
+            ErrorCode::UnsupportedMediaType,
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
         ),
-        (
-            TalosFileErrorKind::UnsupportedAttachment,
-            StatusCode::BAD_REQUEST,
-        ),
+        (ErrorCode::UnsupportedAttachment, StatusCode::BAD_REQUEST),
     ] {
-        let response = ApiError::from_talos_error(TalosError::file_error(kind, "file rejected"))
-            .into_response();
+        let response =
+            ApiError::from_talos_error(TalosError::new(code, "file rejected")).into_response();
         assert_eq!(response.status(), status);
     }
 }

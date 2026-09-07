@@ -1,5 +1,21 @@
 # Agent Engineering Guide
 
+## Unified error contract
+
+- Follow `docs/architecture/ERROR_MODEL.md`: one TalosError, Business/Internal,
+  one ApiError for requests/events/history, and one handling-owner report.
+- Preserve typed sources and capture with context; never re-wrap existing errors
+  or serialize diagnostic Display into public/model output.
+- Use the frontend error presenter and structured terminal error state. Add typed
+  localization only for a real translated scenario.
+- Error codes and typed parameters determine behavior. Never match, parse, or
+  compare public English sentences to classify errors or validate a descriptor.
+  Store operation failures as structured errors; translate only while rendering.
+- New crates inherit workspace lints. Do not silence unused Results; document
+  justified cancellation/delivery discards and report secondary cleanup failures.
+- Error changes require generated artifacts, disclosure/source tests, transport
+  and replay coverage, `pnpm check:repo`, and scoped Rust quality gates.
+
 本文件用于固化 Agent 在软件工程协作中的通用执行标准。以下原则与具体业务无关，适用于功能实现、缺陷修复、重构、测试和交付全过程。
 
 ## 0. 适用范围与优先级

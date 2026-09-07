@@ -23,7 +23,7 @@ impl KernelMemoryProgressStore for SessionMemoryProgress {
             .get_session_record(session_id)
             .await?
             .map(|record| record.memory_processed_until_event_seq)
-            .ok_or_else(|| TalosError::public(ErrorCode::ResourceNotFound, session_id.to_string()))
+            .ok_or_else(|| TalosError::new(ErrorCode::ResourceNotFound, session_id.to_string()))
     }
 
     async fn advance_processed_until_event_seq(

@@ -54,13 +54,13 @@ impl MediaTypeValidator {
 pub(super) fn filename(filename: String, limits: &FileStorageLimits) -> TalosResult<String> {
     let filename = filename.trim().to_string();
     if filename.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file name must not be empty".to_string(),
         ));
     }
     if filename.len() > limits.max_filename_bytes {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file name exceeds the configured byte limit".to_string(),
         ));
@@ -69,7 +69,7 @@ pub(super) fn filename(filename: String, limits: &FileStorageLimits) -> TalosRes
         .chars()
         .any(|character| matches!(character, '/' | '\\' | '\0') || character.is_control())
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file name contains a path separator or control character".to_string(),
         ));
@@ -79,7 +79,7 @@ pub(super) fn filename(filename: String, limits: &FileStorageLimits) -> TalosRes
 
 pub(super) fn tags(tags: Vec<String>, limits: &FileStorageLimits) -> TalosResult<Vec<String>> {
     if tags.len() > limits.max_tags {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file tags exceed the configured count limit".to_string(),
         ));
@@ -88,19 +88,19 @@ pub(super) fn tags(tags: Vec<String>, limits: &FileStorageLimits) -> TalosResult
     for tag in tags {
         let tag = tag.trim().to_string();
         if tag.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file tags must not be empty".to_string(),
             ));
         }
         if tag.len() > limits.max_tag_bytes {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file tag exceeds the configured byte limit".to_string(),
             ));
         }
         if !normalized.insert(tag) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file tags must be unique after trimming".to_string(),
             ));
@@ -114,35 +114,39 @@ pub(super) fn metadata(
     limits: &FileStorageLimits,
 ) -> TalosResult<()> {
     if metadata.len() > limits.max_metadata_entries {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file metadata exceeds the configured entry limit".to_string(),
         ));
     }
     for (key, value) in metadata {
         if key.is_empty() || key.trim() != key {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file metadata keys must be non-empty without surrounding whitespace".to_string(),
             ));
         }
         if key.len() > limits.max_metadata_key_bytes {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file metadata key exceeds the configured byte limit".to_string(),
             ));
         }
         if value.len() > limits.max_metadata_value_bytes {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file metadata value exceeds the configured byte limit".to_string(),
             ));
         }
     }
-    let encoded = serde_json::to_vec(metadata)
-        .map_err(|error| TalosError::internal(format!("serialize file metadata: {error}")))?;
+    let encoded = serde_json::to_vec(metadata).map_err(|error| {
+        TalosError::internal_with_source(
+            "serialize file metadata; technical details were withheld.",
+            error,
+        )
+    })?;
     if encoded.len() > limits.max_metadata_bytes {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file metadata exceeds the configured total byte limit".to_string(),
         ));

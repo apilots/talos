@@ -1,10 +1,11 @@
-use talos_agent::{AgentProgressEventReceiver, AgentRunSettlement, AgentRunSettlementReceiver};
-use talos_agent_api::{AgentErrorInfo, AgentEventPayload, AgentInterruptOutcome};
+use talos_agent::{
+    AgentProgressEventReceiver, AgentRunFailure, AgentRunSettlement, AgentRunSettlementReceiver,
+};
+use talos_agent_api::{AgentEventPayload, AgentInterruptOutcome};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::session::{CommitRunningInputAdmissionParams, CommitTerminalSettlementParams};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tracing::error;
 
 use super::{ActiveTimelineStream, AgentExecutionDriver, ExecutionPurpose, RunningInputCommit};
 
@@ -50,15 +51,16 @@ impl AgentExecutionDriver {
                                     Some(queued_input) => queued_input.commit(),
                                     None => Ok(()),
                                 };
-                                if let Err(error) = queue_result {
-                                    error!(
-                                        session_id = %active.identity.session_id,
-                                        turn_id = %active.identity.turn_id,
-                                        error = %error,
-                                        "failed to remove an already persisted queued Agent input"
-                                    );
-                                }
                                 self.event_service.publish_committed(commit.events);
+                                if let Err(error) = queue_result {
+                                    self.report_warning(
+                                        &active.identity,
+                                        error.context(
+                                            "remove an already persisted queued Agent input",
+                                        ),
+                                    )
+                                    .await;
+                                }
                                 deliveries.spawn(input.permit.consume());
                                 Ok(())
                             }
@@ -71,7 +73,7 @@ impl AgentExecutionDriver {
                         pending_input = Some(input);
                     }
                     _ => {
-                        let _ = input.result_tx.send(Err(TalosError::public(
+                        let _ = input.result_tx.send(Err(TalosError::new(
                             ErrorCode::Conflict,
                             "Agent input admission no longer follows the active Turn tail",
                         )));
@@ -96,12 +98,6 @@ impl AgentExecutionDriver {
                             self.event_service.publish_committed(commit.events);
                         }
                         Err(commit_error) => {
-                            error!(
-                                session_id = %active.identity.session_id,
-                                turn_id = %active.identity.turn_id,
-                                error = %commit_error,
-                                "canonical Agent progress commit failed"
-                            );
                             return self.recover_failed_execution(
                                 &active,
                                 last_event_seq,
@@ -118,30 +114,29 @@ impl AgentExecutionDriver {
                     }
                 }
                 delivery = deliveries.join_next(), if !deliveries.is_empty() => {
-                    report_delivery_result(&active, delivery);
+                    if let Some(error) = delivery_error(&active, delivery) {
+                        return self.recover_failed_execution(&active, last_event_seq, &error).await;
+                    }
                 }
             }
         }
         if let Some(input) = pending_input {
-            let _ = input.result_tx.send(Err(TalosError::public(
+            let _ = input.result_tx.send(Err(TalosError::new(
                 ErrorCode::Conflict,
                 "Agent Turn ended before input admission reached its durable position",
             )));
         }
         while let Some(delivery) = deliveries.join_next().await {
-            report_delivery_result(&active, Some(delivery));
+            if let Some(error) = delivery_error(&active, Some(delivery)) {
+                return self
+                    .recover_failed_execution(&active, last_event_seq, &error)
+                    .await;
+            }
         }
 
         let settlement = match settlement.recv().await {
             Ok(settlement) => settlement,
             Err(settlement_error) => {
-                let settlement_error = settlement_error.into_talos_error();
-                error!(
-                    session_id = %active.identity.session_id,
-                    turn_id = %active.identity.turn_id,
-                    error = %settlement_error,
-                    "Agent Harness did not settle the invocation"
-                );
                 return self
                     .recover_failed_execution(&active, last_event_seq, &settlement_error)
                     .await;
@@ -155,7 +150,7 @@ impl AgentExecutionDriver {
                 ..
             } => {
                 if purpose.is_compaction() {
-                    let error = TalosError::public(
+                    let error = TalosError::new(
                         ErrorCode::ContextCompactionFailed,
                         "Agent compaction cannot wait for User input",
                     );
@@ -176,11 +171,18 @@ impl AgentExecutionDriver {
                 event,
                 messages,
                 metrics,
+                ..
             } => {
                 if let (false, Some(reflection)) =
                     (purpose.is_compaction(), &self.memory_reflection)
                 {
-                    reflection.reflect(event, messages).await;
+                    if let Err(error) = reflection.reflect(event, messages).await {
+                        self.report_warning(
+                            &event.identity,
+                            error.context("reflect User Workspace Memory"),
+                        )
+                        .await;
+                    }
                 }
                 if let (false, Some(inner_model)) = (purpose.is_compaction(), &self.inner_model) {
                     if let Err(error) = self
@@ -188,7 +190,11 @@ impl AgentExecutionDriver {
                         .generate_title(inner_model, event, messages)
                         .await
                     {
-                        tracing::warn!(session_id = %event.identity.session_id, %error, "failed to generate Session title");
+                        self.report_warning(
+                            &event.identity,
+                            error.context("generate Session title"),
+                        )
+                        .await;
                     }
                 }
                 self.execution_store
@@ -218,12 +224,12 @@ impl AgentExecutionDriver {
                 Ok(settlement)
             }
             Err(commit_error) => {
-                error!(
-                    session_id = %active.identity.session_id,
-                    turn_id = %active.identity.turn_id,
-                    error = %commit_error,
-                    "canonical Agent settlement commit failed"
-                );
+                if let AgentRunSettlement::Finished {
+                    result: Err(error), ..
+                } = &settlement
+                {
+                    talos_logging::report_error(error);
+                }
                 self.recover_failed_execution(&active, expected_event_seq, &commit_error)
                     .await
             }
@@ -251,17 +257,16 @@ impl AgentExecutionDriver {
                 AgentInterruptOutcome::Completed
             }
             Err(interrupt_error) => {
+                talos_logging::report_error(commit_error);
                 return Err(interrupt_error);
             }
         };
-        let failure = AgentErrorInfo {
-            code: commit_error.error_code(),
-            message: format!(
-                "Agent Turn stopped before canonical settlement: {}",
-                commit_error.diagnostic_message()
-            ),
-            retryable: true,
-        };
+        let failure = AgentRunFailure::from(
+            commit_error
+                .clone()
+                .context("Agent Turn stopped before canonical settlement"),
+        )
+        .retryable();
         let settlement = self
             .settle_recovered_turn(
                 active.identity.clone(),
@@ -269,27 +274,26 @@ impl AgentExecutionDriver {
                 failure,
                 cleanup,
             )
-            .await?;
+            .await
+            .inspect_err(|_| talos_logging::report_error(commit_error))?;
         let _ = active.terminal_commit_tx.send(true);
         Ok(settlement)
     }
 }
 
-fn report_delivery_result(
+fn delivery_error(
     active: &ActiveTimelineStream,
     delivery: Option<Result<talos_agent::AgentResult<()>, tokio::task::JoinError>>,
-) {
+) -> Option<TalosError> {
     let error = match delivery {
-        Some(Ok(Ok(()))) | None => return,
-        Some(Ok(Err(error))) => error.into_talos_error(),
+        Some(Ok(Ok(()))) | None => return None,
+        Some(Ok(Err(error))) => error,
         Some(Err(error)) => {
-            TalosError::internal(format!("Agent input delivery task failed: {error}"))
+            TalosError::internal_with_source("Agent input delivery task failed", error)
         }
     };
-    error!(
-        session_id = %active.identity.session_id,
-        turn_id = %active.identity.turn_id,
-        error = %error,
-        "durable Agent input delivery failed"
-    );
+    Some(error.context(format!(
+        "deliver durable Agent input for Session {} Turn {}",
+        active.identity.session_id, active.identity.turn_id,
+    )))
 }

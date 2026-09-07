@@ -822,7 +822,7 @@ fn build_diagnostics(
 
 pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptAssembly> {
     let user_input = builder.user_input.clone().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             ErrorCode::InvalidRequest,
             "PromptBuilder requires user input".to_string(),
         )

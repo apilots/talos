@@ -100,8 +100,11 @@ The `15_tui_install` group owns installation acceptance.
   installed binary and embedded runtime.
 - `02_linux_docker.sh` runs only on a macOS host and repeats the group-level Linux path in an
   Ubuntu 24.04 container for the Docker daemon architecture.
-- CI runs `01_native_install.sh` on native Linux AMD64, Linux ARM64, macOS AMD64, and macOS
-  ARM64 runners. This is the authoritative multi-platform matrix.
+- Pull requests run the inexpensive installer syntax and contract checks only when
+  release-related files change. The release dispatch and explicit manual runs execute
+  `01_native_install.sh` on native Linux AMD64, Linux ARM64, macOS AMD64, and macOS ARM64
+  runners. This is the authoritative multi-platform matrix and must pass before release
+  publication begins.
 
 The E2E fixture uses a local `file://` release tree with the production archive naming and
 checksum format. It does not depend on GitHub or R2 availability.

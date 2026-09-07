@@ -83,7 +83,8 @@ async fn message_queue_handlers_return_shared_queue_and_typed_full_error() {
             "status": "error",
             "error": {
                 "code": "messageQueueFull",
-                "message": "Message queue is full"
+                "message": "The session message queue has reached its configured capacity; remove a queued message before adding another.",
+                "localization": null
             }
         })
     );

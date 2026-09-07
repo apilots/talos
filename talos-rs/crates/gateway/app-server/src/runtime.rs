@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED};
+use talos_app_protocol::errors::{AppServerErrorBody, AppServerErrorCode, ALREADY_INITIALIZED};
 use talos_app_protocol::events::{
     timeline_event_method, SubscriptionTerminatedNotification, SubscriptionTerminatedReason,
     TimelineEventNotification,
@@ -15,7 +15,8 @@ use talos_app_protocol::requests::{
     InitializeResponse, ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
-use talos_error::{ApiError, ErrorCode};
+use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
+use talos_logging::report_error;
 use talos_service::{
     Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
@@ -138,10 +139,17 @@ where
                         let line = match std::str::from_utf8(&line) {
                             Ok(line) => line,
                             Err(error) => {
+                                let error = TalosError::from_source(
+                                    ErrorCode::InvalidRequest,
+                                    "The app-server request is not valid UTF-8.",
+                                    error,
+                                );
+                                report_error(&error);
+                                // A disconnected receiver is already handled by the output task.
                                 let _ = outgoing_tx
                                     .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
                                         None,
-                                        AppServerErrorBody::parse_error(error.to_string()),
+                                        AppServerErrorBody::parse_error(error.to_api_error().message),
                                     )))
                                     .await;
                                 break;
@@ -163,22 +171,27 @@ where
                     }
                     Ok(BoundedLineRead::Eof) => break,
                     Ok(BoundedLineRead::LimitExceeded) => {
-                        let _ = outgoing_tx
-                            .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
-                                None,
-                                AppServerErrorBody::parse_error(format!(
-                                    "incoming JSONL frame exceeds {} bytes",
-                                    max_incoming_frame_bytes
-                                )),
-                            )))
-                            .await;
+                        // A disconnected receiver is already handled by the output task.
+                        let _ = send_error(
+                            outgoing_tx.clone(),
+                            /*id*/ None,
+                            AppServerErrorBody::parse_error(format!(
+                                "incoming JSONL frame exceeds {max_incoming_frame_bytes} bytes"
+                            )),
+                        ).await;
                         break;
                     }
                     Err(err) => {
+                        let error = TalosError::internal_with_source(
+                            "Failed to read the app-server request stream.",
+                            err,
+                        );
+                        report_error(&error);
+                        // A disconnected receiver is already handled by the output task.
                         let _ = outgoing_tx
                             .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
                                 None,
-                                AppServerErrorBody::parse_error(err.to_string()),
+                                AppServerErrorBody::parse_error(error.to_api_error().message),
                             )))
                             .await;
                         break;
@@ -188,8 +201,8 @@ where
             writer_result = &mut writer_task => {
                 match writer_result {
                     Ok(Ok(())) => {}
-                    Ok(Err(err)) => tracing::error!(error = ?err, "app-server stdout writer failed"),
-                    Err(err) => tracing::error!(error = %err, "app-server stdout writer task failed"),
+                    Ok(Err(err)) => report_error(&err),
+                    Err(err) => report_error(&TalosError::internal_with_source("The app-server output task stopped unexpectedly.", err)),
                 }
                 writer_finished = true;
                 break;
@@ -202,7 +215,7 @@ where
     const DRAIN_BACKGROUND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
     if let Err(err) = app.drain_background_tasks(DRAIN_BACKGROUND_TIMEOUT).await {
-        tracing::warn!(error = ?err, "drain_background_tasks failed during shutdown");
+        report_error(&err.context("drain background tasks during shutdown"));
     }
 
     // Keep subscriptions alive while background drains run so final turn events can still be
@@ -210,7 +223,14 @@ where
     // the TalosService stream and would otherwise keep stdio shutdown from completing.
     for (_, task) in state.subscription_tasks {
         task.abort();
-        let _ = task.await;
+        if let Err(error) = task.await {
+            if !error.is_cancelled() {
+                report_error(&TalosError::internal_with_source(
+                    "The event subscription task failed.",
+                    error,
+                ));
+            }
+        }
     }
 
     drop(outgoing_tx);
@@ -218,8 +238,11 @@ where
     if !writer_finished {
         match writer_task.await {
             Ok(Ok(())) => {}
-            Ok(Err(err)) => tracing::error!(error = ?err, "app-server stdout writer failed"),
-            Err(err) => tracing::error!(error = %err, "app-server stdout writer task failed"),
+            Ok(Err(err)) => report_error(&err),
+            Err(err) => report_error(&TalosError::internal_with_source(
+                "The app-server output task stopped unexpectedly.",
+                err,
+            )),
         }
     }
     Ok(())
@@ -291,12 +314,7 @@ async fn handle_line(
     let message = match parse_message_line(line) {
         Ok(message) => message,
         Err(error) => {
-            return outgoing_tx
-                .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
-                    None, error,
-                )))
-                .await
-                .map_err(|_| ());
+            return send_error(outgoing_tx, /*id*/ None, error).await;
         }
     };
 
@@ -325,14 +343,14 @@ async fn handle_request(
     let id = request.id.clone();
     let request_actor_credentials = request.actor_credentials.clone();
     let decoded = ClientRequest::decode(&request.method, request.params)
-        .map_err(|error| send_error(outgoing_tx.clone(), id.clone(), error));
+        .map_err(|error| send_error(outgoing_tx.clone(), Some(id.clone()), error));
     let decoded = match decoded {
         Ok(decoded) => decoded,
         Err(send) => return send.await,
     };
 
     if decoded.method != ClientMethod::Initialize && state.actor.is_none() {
-        return send_error(outgoing_tx, id, AppServerErrorBody::not_initialized()).await;
+        return send_error(outgoing_tx, Some(id), AppServerErrorBody::not_initialized()).await;
     }
 
     match decoded.params {
@@ -340,13 +358,19 @@ async fn handle_request(
             if state.actor.is_some() {
                 return send_error(
                     outgoing_tx,
-                    id,
+                    Some(id),
                     AppServerErrorBody::new(
                         ALREADY_INITIALIZED,
                         "app-server is already initialized",
                     ),
                 )
                 .await;
+            }
+            if params.capabilities.protocol_version != ProtocolVersion::CURRENT {
+                return send_error(outgoing_tx, Some(id), AppServerErrorBody::new(
+                    talos_app_protocol::errors::INVALID_PARAMS,
+                    "Unsupported app-server protocol version; update the backend and client together.",
+                )).await;
             }
             state.actor = Some(Actor::regular("anonymous"));
             state.session_source = Some(match params.client_info.kind {
@@ -368,7 +392,8 @@ async fn handle_request(
         }
         ClientRequestParams::EventSubscribe(params) => {
             if !state.initialized_notification_seen {
-                return send_error(outgoing_tx, id, AppServerErrorBody::not_initialized()).await;
+                return send_error(outgoing_tx, Some(id), AppServerErrorBody::not_initialized())
+                    .await;
             }
             let actor = match resolve_request_actor(
                 state,
@@ -408,7 +433,8 @@ async fn handle_request(
         }
         ClientRequestParams::EventUnsubscribe(params) => {
             if !state.initialized_notification_seen {
-                return send_error(outgoing_tx, id, AppServerErrorBody::not_initialized()).await;
+                return send_error(outgoing_tx, Some(id), AppServerErrorBody::not_initialized())
+                    .await;
             }
             if let Err(error) = resolve_request_actor(
                 state,
@@ -424,7 +450,14 @@ async fn handle_request(
             let unsubscribed =
                 if let Some(task) = state.subscription_tasks.remove(&params.subscription_id) {
                     task.abort();
-                    let _ = task.await;
+                    if let Err(error) = task.await {
+                        if !error.is_cancelled() {
+                            report_error(&TalosError::internal_with_source(
+                                "The event subscription task failed.",
+                                error,
+                            ));
+                        }
+                    }
                     true
                 } else {
                     false
@@ -577,7 +610,10 @@ async fn send_message_queue_changed(
     outgoing_tx: &mpsc::Sender<OutgoingMessage>,
 ) -> Result<(), ()> {
     let params = serde_json::to_value(change).map_err(|err| {
-        tracing::error!(error = %err, "failed to serialize message queue change");
+        report_error(&TalosError::internal_with_source(
+            "failed to serialize message queue change",
+            err,
+        ));
     })?;
     outgoing_tx
         .send(OutgoingMessage::Notification(JsonRpcNotification::new(
@@ -605,13 +641,16 @@ async fn send_event(
     record: talos_agent_api::TimelineEvent,
     outgoing_tx: &mpsc::Sender<OutgoingMessage>,
 ) -> Result<(), ()> {
-    let method = timeline_event_method(&record.event.payload);
+    let method = timeline_event_method(&record.event);
     let params = serde_json::to_value(TimelineEventNotification {
         subscription_id: subscription_id.to_string(),
         event: record,
     })
     .map_err(|err| {
-        tracing::error!(error = %err, "failed to serialize app-server event");
+        report_error(&TalosError::internal_with_source(
+            "failed to serialize app-server event",
+            err,
+        ));
     })?;
     outgoing_tx
         .send(OutgoingMessage::Notification(JsonRpcNotification::new(
@@ -636,7 +675,10 @@ async fn send_subscription_terminated(
         message: message.to_string(),
     })
     .map_err(|err| {
-        tracing::error!(error = %err, "failed to serialize app-server subscription termination");
+        report_error(&TalosError::internal_with_source(
+            "failed to serialize app-server subscription termination",
+            err,
+        ));
     })?;
     outgoing_tx
         .send(OutgoingMessage::Notification(JsonRpcNotification::new(
@@ -660,7 +702,7 @@ async fn send_result(
             )))
             .await
             .map_err(|_| ()),
-        Err(error) => send_error(outgoing_tx, id, error).await,
+        Err(error) => send_error(outgoing_tx, Some(id), error).await,
     }
 }
 
@@ -670,7 +712,10 @@ async fn send_application_error(
     error: ApiError,
 ) -> Result<(), ()> {
     let result = api_error_value(error).map_err(|error| {
-        tracing::error!(error = %error, "failed to serialize app-server application error");
+        report_error(&TalosError::internal_with_source(
+            "failed to serialize app-server application error",
+            error,
+        ));
     })?;
     outgoing_tx
         .send(OutgoingMessage::Response(JsonRpcResponse::new(id, result)))
@@ -680,7 +725,10 @@ async fn send_application_error(
 
 fn api_success_value(result: serde_json::Value) -> Result<serde_json::Value, ()> {
     serde_json::to_value(ApiResponse::success(result)).map_err(|error| {
-        tracing::error!(error = %error, "failed to serialize app-server API success");
+        report_error(&TalosError::internal_with_source(
+            "failed to serialize app-server API success",
+            error,
+        ));
     })
 }
 
@@ -690,19 +738,30 @@ fn api_error_value(error: ApiError) -> Result<serde_json::Value, serde_json::Err
 
 async fn send_error(
     outgoing_tx: mpsc::Sender<OutgoingMessage>,
-    id: RequestId,
+    id: Option<RequestId>,
     error: AppServerErrorBody,
 ) -> Result<(), ()> {
+    let code = match error.code {
+        AppServerErrorCode::InternalError => ErrorCode::InternalError,
+        AppServerErrorCode::ParseError
+        | AppServerErrorCode::InvalidRequest
+        | AppServerErrorCode::MethodNotFound
+        | AppServerErrorCode::InvalidParams
+        | AppServerErrorCode::NotInitialized
+        | AppServerErrorCode::AlreadyInitialized => ErrorCode::InvalidRequest,
+    };
+    report_error(&TalosError::from_source(
+        code,
+        error.message.clone(),
+        error.clone(),
+    ));
     outgoing_tx
-        .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
-            Some(id),
-            error,
-        )))
+        .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(id, error)))
         .await
         .map_err(|_| ())
 }
 
-async fn write_loop<W>(mut writer: W, mut rx: mpsc::Receiver<OutgoingMessage>) -> ProtocolResult<()>
+async fn write_loop<W>(mut writer: W, mut rx: mpsc::Receiver<OutgoingMessage>) -> TalosResult<()>
 where
     W: AsyncWrite + Unpin,
 {
@@ -712,19 +771,18 @@ where
             OutgoingMessage::Error(error) => serde_json::to_string(&error),
             OutgoingMessage::Notification(notification) => serde_json::to_string(&notification),
         }
-        .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()))?;
-        writer
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()))?;
-        writer
-            .write_all(b"\n")
-            .await
-            .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()))?;
-        writer
-            .flush()
-            .await
-            .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()))?;
+        .map_err(|error| {
+            TalosError::internal_with_source("Failed to encode the app-server response.", error)
+        })?;
+        writer.write_all(line.as_bytes()).await.map_err(|error| {
+            TalosError::internal_with_source("Failed to write the app-server response.", error)
+        })?;
+        writer.write_all(b"\n").await.map_err(|error| {
+            TalosError::internal_with_source("Failed to write the app-server response.", error)
+        })?;
+        writer.flush().await.map_err(|error| {
+            TalosError::internal_with_source("Failed to flush the app-server response.", error)
+        })?;
     }
     Ok(())
 }
@@ -734,12 +792,11 @@ async fn cancel_owned_turns(
     owned_turns: &HashMap<String, OwnedTurn>,
 ) {
     for (session_id, owned_turn) in owned_turns {
-        if let Err(error) = app
+        // The application adapter already reports cancellation failures before
+        // projecting ApiError; disconnected clients have no response receiver.
+        let _ = app
             .cancel_active_turn(&owned_turn.actor, session_id, &owned_turn.turn_id)
-            .await
-        {
-            tracing::warn!(session_id, error = ?error, "failed to cancel owned turn");
-        }
+            .await;
     }
 }
 

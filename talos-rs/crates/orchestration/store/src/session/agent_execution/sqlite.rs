@@ -15,6 +15,60 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    async fn append_timeline_notice(
+        &self,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<super::TimelineEventRecord> {
+        super::notice::append(self, notice).await
+    }
+
+    async fn list_timeline_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        limit: usize,
+    ) -> TalosResult<Vec<super::TimelineEventRecord>> {
+        let after = after_event_seq.to_string();
+        let limit = limit.clamp(1, MAX_EVENT_READ_LIMIT).to_string();
+        self.storage.query("SELECT * FROM agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq ASC LIMIT ?", &[session_id, &after, &limit]).await?
+            .iter().map(super::notice::parse).collect()
+    }
+
+    async fn get_timeline_event(
+        &self,
+        event_seq: i64,
+    ) -> TalosResult<Option<super::TimelineEventRecord>> {
+        self.storage
+            .query(
+                "SELECT * FROM agent_events WHERE event_seq = ?",
+                &[&event_seq.to_string()],
+            )
+            .await?
+            .first()
+            .map(super::notice::parse)
+            .transpose()
+    }
+
+    async fn get_latest_timeline_event_seq(&self, session_id: &str) -> TalosResult<Option<i64>> {
+        Ok(self
+            .storage
+            .query(
+                "SELECT MAX(event_seq) AS event_seq FROM agent_events WHERE session_id = ?",
+                &[session_id],
+            )
+            .await?
+            .first()
+            .and_then(|row| row.get_i64("event_seq")))
+    }
+
+    async fn list_turn_notices(
+        &self,
+        identities: &[AgentTurnRef],
+        through_event_seq: i64,
+    ) -> TalosResult<Vec<super::TimelineEventRecord>> {
+        super::notice::list(self, identities, through_event_seq).await
+    }
+
     async fn reserve_command(
         &self,
         reservation: CommandReservation,
@@ -105,7 +159,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
                 FROM agent_events
-                WHERE session_id = ? AND turn_id = ?
+                WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL
                 ORDER BY sequence ASC
                 LIMIT ?
                 "#,
@@ -134,7 +188,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
                 FROM agent_events
-                WHERE session_id = ? AND event_seq > ?
+                WHERE session_id = ? AND event_seq > ? AND sequence IS NOT NULL
                 ORDER BY event_seq ASC
                 LIMIT ?
                 "#,
@@ -153,7 +207,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
                 SELECT event_seq, session_id, turn_id, sequence,
                        occurred_at, persisted_at, payload_json
                 FROM agent_events
-                WHERE event_seq = ?
+                WHERE event_seq = ? AND sequence IS NOT NULL
                 "#,
                 &[event_seq.as_str()],
             )
@@ -165,7 +219,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT MAX(event_seq) AS event_seq FROM agent_events WHERE session_id = ?",
+                "SELECT MAX(event_seq) AS event_seq FROM agent_events WHERE session_id = ? AND sequence IS NOT NULL",
                 &[session_id],
             )
             .await?;

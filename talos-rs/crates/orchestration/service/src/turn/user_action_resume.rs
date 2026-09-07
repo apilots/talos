@@ -22,7 +22,7 @@ impl TurnService {
             .canonical_user_action_events(&identity, action_id)
             .await?;
         let action = requested_user_action(&events, Some(action_id)).ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("user action {action_id}"),
             )
@@ -31,7 +31,7 @@ impl TurnService {
 
         if let Some(existing) = submitted_user_action_response(&events, action_id) {
             if existing != &response {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     format!("user action `{action_id}` already has a different response"),
                 ));
@@ -48,12 +48,13 @@ impl TurnService {
                     && active.current_action_id.as_deref() == Some(action_id)
             })
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     "The pending user action identity does not match the active turn.",
                 )
             })?;
         let context = self
+            .execution
             .sessions
             .build_agent_context(&session, identity.clone())
             .await?;
@@ -80,7 +81,7 @@ impl TurnService {
                 return Err(error);
             }
         };
-        self.complete_resumed_turn(session, completion);
+        self.complete_resumed_turn(session, identity, completion);
         Ok(UserActionState::Resuming)
     }
 
@@ -102,6 +103,7 @@ impl TurnService {
         active: AgentActiveTurnRecord,
     ) -> TalosResult<()> {
         let binding = self
+            .execution
             .execution_store
             .get_agent_continuation_binding(&active.identity)
             .await?;
@@ -178,6 +180,7 @@ impl TurnService {
             ).await;
         }
         let context = self
+            .execution
             .sessions
             .build_agent_context(&session, active.identity.clone())
             .await?;
@@ -187,7 +190,7 @@ impl TurnService {
             .await
         {
             Ok(completion) => {
-                self.complete_resumed_turn(session.clone(), completion);
+                self.complete_resumed_turn(session.clone(), active.identity.clone(), completion);
                 Ok(())
             }
             Err(error) => Err(error),
@@ -220,16 +223,12 @@ impl TurnService {
             .recover_terminal_turn(
                 session,
                 &active.identity,
-                talos_agent_api::AgentErrorInfo {
-                    code,
-                    message: message.to_string(),
-                    retryable: false,
-                },
+                talos_agent::AgentRunFailure::from(TalosError::new(code, message)),
             )
             .await?;
         match outcome {
             AgentInterruptOutcome::Cancelled | AgentInterruptOutcome::Completed => Ok(()),
-            AgentInterruptOutcome::CleanupUnconfirmed { task_count } => Err(TalosError::public(
+            AgentInterruptOutcome::CleanupUnconfirmed { task_count } => Err(TalosError::new(
                 talos_error::ErrorCode::RunCleanupUnconfirmed,
                 format!("Agent cleanup is unconfirmed for {task_count} task(s)"),
             )),
@@ -242,24 +241,31 @@ impl TurnService {
         action_id: &str,
     ) -> TalosResult<Vec<AgentEventRecord>> {
         let tail = self
+            .execution
             .execution_store
             .get_latest_agent_event_seq(&identity.session_id)
             .await?
             .unwrap_or_default();
         let mut events = Vec::new();
-        crate::timeline::scan_turn_events(self.execution_store.as_ref(), identity, tail, |event| {
-            if matches!(
-                &event.payload,
-                CanonicalAgentEventPayload::TurnCompleted(_)
-                    | CanonicalAgentEventPayload::TurnFailed(_)
-            ) || matches!(&event.payload, CanonicalAgentEventPayload::WaitingForInput(pending)
+        crate::timeline::scan_turn_events(
+            self.execution.execution_store.as_ref(),
+            identity,
+            tail,
+            |event| {
+                if matches!(
+                    &event.payload,
+                    CanonicalAgentEventPayload::TurnCompleted(_)
+                        | CanonicalAgentEventPayload::TurnFailed(_)
+                ) || matches!(&event.payload, CanonicalAgentEventPayload::WaitingForInput(pending)
                     if pending.action_id() == action_id)
-                || submitted_user_action_response(std::slice::from_ref(&event), action_id).is_some()
-            {
-                events.push(event);
-            }
-            Ok(())
-        })
+                    || submitted_user_action_response(std::slice::from_ref(&event), action_id)
+                        .is_some()
+                {
+                    events.push(event);
+                }
+                Ok(())
+            },
+        )
         .await?;
         Ok(events)
     }
@@ -350,7 +356,7 @@ fn validate_user_action_response(
             match answer {
                 QuestionAnswer::SelectedOption { option_id } => {
                     if !params.options.iter().any(|option| option.id == *option_id) {
-                        return Err(TalosError::public(
+                        return Err(TalosError::new(
                             talos_error::ErrorCode::InvalidRequest,
                             format!("question option `{option_id}` does not exist"),
                         ));
@@ -358,7 +364,7 @@ fn validate_user_action_response(
                 }
                 QuestionAnswer::FreeForm { text } => {
                     if text.trim().is_empty() || text.len() > 4096 {
-                        return Err(TalosError::public(
+                        return Err(TalosError::new(
                             talos_error::ErrorCode::InvalidRequest,
                             "question free-form answer must contain 1 to 4096 bytes",
                         ));
@@ -372,14 +378,14 @@ fn validate_user_action_response(
             UserActionResponse::SandboxApproval(decision),
         ) => {
             if !params.available_decisions.contains(decision) {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     format!("sandbox approval decision `{decision:?}` is not available"),
                 ));
             }
             Ok(())
         }
-        _ => Err(TalosError::public(
+        _ => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "user action response variant does not match its parameters",
         )),

@@ -395,7 +395,7 @@ async fn send_message_rejects_unknown_fields() {
 #[tokio::test]
 async fn send_message_propagates_the_control_error() {
     let control = Arc::new(RecordingControl::default());
-    *control.send_error.lock().unwrap() = Some(TalosError::public(
+    *control.send_error.lock().unwrap() = Some(TalosError::new(
         talos_error::ErrorCode::Conflict,
         "message input closed".to_string(),
     ));

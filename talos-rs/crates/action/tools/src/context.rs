@@ -392,9 +392,10 @@ impl ToolContext {
 
     pub(crate) fn sandbox_file_system(&self) -> talos_error::TalosResult<ToolFileSystemHandle> {
         self.sandbox_permit()?.file_system().map_err(|error| {
-            talos_error::TalosError::internal(format!(
-                "failed to bind invocation sandbox filesystem: {error}"
-            ))
+            talos_error::TalosError::internal_with_source(
+                "failed to bind invocation sandbox filesystem; technical details were withheld.",
+                error,
+            )
         })
     }
 }

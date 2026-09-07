@@ -12,6 +12,8 @@ import {
   type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
   unwrapTalosApiResponse,
+  parseTimelineEvent,
+  parseTalosJson,
 } from "@talos/sdk-core";
 
 const PASSTHROUGH_ENV_KEYS = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "USER"]);
@@ -228,9 +230,15 @@ export class JsonRpcStdioTransport implements AppServerTransport {
 
     let message: AppProtocol.JsonRpcMessage;
     try {
-      message = JSON.parse(trimmed) as AppProtocol.JsonRpcMessage;
+      message = parseTalosJson(trimmed) as AppProtocol.JsonRpcMessage;
+      if (!message || typeof message !== "object" || Array.isArray(message) ||
+          ("method" in message && typeof message.method !== "string")) {
+        throw new Error("Invalid JSON-RPC message.");
+      }
     } catch (error) {
-      this.events.emit("transportError", error instanceof Error ? error : new Error("Invalid JSON-RPC line."));
+      const failure = error instanceof Error ? error : new Error("Invalid JSON-RPC line.");
+      this.rejectPending(failure);
+      this.events.emit("transportError", failure);
       return;
     }
 
@@ -246,13 +254,18 @@ export class JsonRpcStdioTransport implements AppServerTransport {
           this.pending.delete(message.id as AppProtocol.RequestId);
           pending.reject(decodeError);
         } else {
+          this.rejectPending(decodeError);
           this.events.emit("transportError", decodeError);
         }
         return;
       }
+      const failure = new AppServerProtocolError(protocolError);
       if (pending) {
         this.pending.delete(message.id as AppProtocol.RequestId);
-        pending.reject(new AppServerProtocolError(protocolError));
+        pending.reject(failure);
+      } else {
+        this.rejectPending(failure);
+        this.events.emit("transportError", failure);
       }
       return;
     }
@@ -271,9 +284,24 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     }
 
     if ("method" in message && !("id" in message)) {
+      if (message.method.startsWith("timeline/") && !isTimelineEventNotification(message.params)) {
+        this.events.emit("transportError", new Error("Invalid Talos timeline event."));
+        return;
+      }
       this.events.emit("notification", message);
       if (isTimelineEventNotification(message.params)) {
-        this.events.emit("event", message.params.event);
+        try {
+          this.events.emit("event", parseTimelineEvent(message.params.event));
+        } catch (error) {
+          // The renderer may receive events before its subscribe promise has settled.
+          this.events.emit("subscriptionTerminated", {
+            subscriptionId: message.params.subscriptionId,
+            sessionId: message.params.event.event.data.identity.sessionId,
+            reason: "interrupted",
+            message: "The app-server returned an invalid timeline event.",
+          } satisfies AppProtocol.SubscriptionTerminatedNotification);
+          this.events.emit("transportError", error instanceof Error ? error : new Error("Invalid Talos timeline event."));
+        }
       }
       if (isSubscriptionTerminatedNotification(message.params)) {
         this.events.emit("subscriptionTerminated", message.params);
@@ -357,6 +385,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
 
 export class StdioAppServerClient extends AppServerClient {
   readonly transport: JsonRpcStdioTransport;
+  private initialization?: Promise<AppProtocol.InitializeResponse>;
 
   constructor(private readonly options: AppServerClientOptions) {
     const transport = new JsonRpcStdioTransport({
@@ -368,9 +397,18 @@ export class StdioAppServerClient extends AppServerClient {
     });
     super(transport);
     this.transport = transport;
+    transport.onExit(() => { this.initialization = undefined; });
   }
 
-  async connect(): Promise<AppProtocol.InitializeResponse> {
+  connect(): Promise<AppProtocol.InitializeResponse> {
+    this.initialization ??= this.initialize().catch((error: unknown) => {
+      this.initialization = undefined;
+      throw error;
+    });
+    return this.initialization;
+  }
+
+  private async initialize(): Promise<AppProtocol.InitializeResponse> {
     const response = await this.transport.request<AppProtocol.InitializeResponse>("initialize", {
       client_info: {
         name: this.options.clientName ?? "talos-ts-app-server-sdk",
@@ -379,17 +417,22 @@ export class StdioAppServerClient extends AppServerClient {
         kind: this.options.clientKind ?? "sdk",
       },
       capabilities: {
-        protocol_version: { major: 0, minor: 2 },
+        protocol_version: AppProtocol.PROTOCOL_VERSION,
         supports_server_requests: true,
         supports_event_replay: true,
       },
       actor_credentials: null,
     } satisfies AppProtocol.InitializeParams);
+    if (response.protocol_version.major !== AppProtocol.PROTOCOL_VERSION.major ||
+        response.protocol_version.minor !== AppProtocol.PROTOCOL_VERSION.minor) {
+      throw new Error("Unsupported app-server protocol version; update the backend and client together.");
+    }
     this.transport.notify("initialized", null);
     return response;
   }
 
   close(): Promise<void> {
+    this.initialization = undefined;
     return this.transport.close();
   }
 
@@ -430,19 +473,17 @@ function isTimelineEventNotification(
   }
   const candidate = value as Partial<AppProtocol.TimelineEventNotification>;
   const event = candidate.event as Partial<AppProtocol.TimelineEvent> | undefined;
-  const agentEvent = event?.event as Partial<AppProtocol.AgentEvent> | undefined;
+  const payload = event?.event;
+  const identity = payload?.data?.identity;
   return (
     typeof candidate.subscriptionId === "string" &&
     !!event &&
     typeof event.eventId === "string" &&
     typeof event.eventSeq === "number" &&
     typeof event.persistedAt === "number" &&
-    !!agentEvent &&
-    typeof agentEvent.identity?.sessionId === "string" &&
-    typeof agentEvent.identity?.turnId === "string" &&
-    typeof agentEvent.sequence === "number" &&
-    typeof agentEvent.payload === "object" &&
-    agentEvent.payload !== null
+    !!identity &&
+    typeof identity.sessionId === "string" &&
+    typeof identity.turnId === "string"
   );
 }
 

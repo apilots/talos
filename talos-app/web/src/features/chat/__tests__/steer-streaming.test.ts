@@ -19,16 +19,16 @@ describe("same-turn user input streaming", () => {
     state.setStreamMeta("sess-1", { lastEventSeq: 10, isStreaming: true });
     applyStreamEvent("sess-1", userInputStarted("old", "Old question", 2));
     const started = userInputStarted("current", "Current question", 11, [], "msg-current");
-    if (started.event.payload.type !== "messageStarted") throw new Error("Invalid fixture");
-    const completedMessage = structuredClone(started.event.payload.data.message);
-    started.event.payload.data.message.blocks = [];
+    if (started.event.data.payload.type !== "messageStarted") throw new Error("Invalid fixture");
+    const completedMessage = structuredClone(started.event.data.payload.data.message);
+    started.event.data.payload.data.message.blocks = [];
     applyStreamEvent("sess-1", started);
     expect(useAppStore.getState().streams["sess-1"]?.pendingInput).toMatchObject({
       text: "Current question", serverMessageId: "msg-current", phase: "accepted",
     });
     applyStreamEvent("sess-1", {
       ...started, eventSeq: 12, eventId: "ev_12",
-      event: { ...started.event, sequence: 12, payload: { type: "messageCompleted", data: completedMessage } },
+      event: { type: "agent", data: { ...started.event.data, sequence: 12, payload: { type: "messageCompleted", data: completedMessage } } },
     });
     expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual([
       { id: "user-turn-1-msg-current", kind: "user", text: "Current question", fileIds: [], live: false },

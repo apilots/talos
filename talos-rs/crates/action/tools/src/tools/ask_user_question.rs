@@ -135,7 +135,7 @@ impl Tool for AskUserQuestionTool {
             TalosError::internal("AskUserQuestion is missing its accepted answer")
         })?;
         let UserActionResponse::Question(answer) = response else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "AskUserQuestion received a mismatched user action response",
             ));
@@ -182,13 +182,13 @@ fn question_params(request: AskUserQuestionRequest) -> QuestionParams {
 
 fn validate_question(params: &QuestionParams) -> TalosResult<()> {
     if params.header.trim().is_empty() || params.question.trim().is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "question header and text cannot be empty",
         ));
     }
     if !(2..=3).contains(&params.options.len()) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "question options must contain 2 or 3 entries",
         ));
@@ -199,13 +199,13 @@ fn validate_question(params: &QuestionParams) -> TalosResult<()> {
             || option.label.trim().is_empty()
             || option.description.trim().is_empty()
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "question option id, label, and description cannot be empty",
             ));
         }
         if !ids.insert(option.id.as_str()) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("duplicate question option id `{}`", option.id),
             ));
@@ -225,7 +225,7 @@ fn question_tool_result(
                 .iter()
                 .find(|option| option.id == option_id)
                 .ok_or_else(|| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!("question option `{option_id}` does not exist"),
                     )
@@ -238,13 +238,13 @@ fn question_tool_result(
         QuestionAnswer::FreeForm { text } => {
             let text = text.trim().to_string();
             if text.is_empty() {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "question free-form answer cannot be empty",
                 ));
             }
             if text.len() > 4096 {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "question free-form answer exceeds 4096 bytes",
                 ));

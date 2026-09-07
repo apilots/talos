@@ -3,7 +3,6 @@ use super::dream_memory_prompt::{
     DREAM_MEMORY_FORMATION_PROMPT,
 };
 use super::*;
-use talos_error::TalosMemoryErrorKind;
 use talos_llm_provider::Usage;
 
 pub(super) fn validate_memory_candidates(
@@ -17,7 +16,7 @@ pub(super) fn validate_memory_candidates(
                 || candidate.body.chars().count() > 1_000
         })
     {
-        return Err(talos_error::TalosError::public(
+        return Err(talos_error::TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "memory candidates are invalid".to_string(),
         ));
@@ -441,10 +440,8 @@ async fn request_compaction_output(
         .await?;
     let parsed = serde_json::from_str::<DreamMemoryModelOutput>(response.content.trim()).map_err(
         |error| {
-            talos_error::TalosError::memory_error(
-                TalosMemoryErrorKind::SummaryParseFailed,
-                format!("parse compaction json for session '{session_id}': {error}"),
-            )
+            compaction_summary_error(format!("parse compaction json for session '{session_id}'"))
+                .with_source(error)
         },
     )?;
     let DreamMemoryModelOutput::Compaction {
@@ -456,10 +453,9 @@ async fn request_compaction_output(
         memory_candidates,
     } = parsed
     else {
-        return Err(talos_error::TalosError::memory_error(
-            TalosMemoryErrorKind::SummaryParseFailed,
-            format!("Dream Memory mode mismatch for session '{session_id}'"),
-        ));
+        return Err(compaction_summary_error(format!(
+            "Dream Memory mode mismatch for session '{session_id}'"
+        )));
     };
     let parsed = CompactionMemoryOutput {
         title,
@@ -470,18 +466,23 @@ async fn request_compaction_output(
         memory_candidates,
     };
     if parsed.title.trim().is_empty() {
-        return Err(talos_error::TalosError::memory_error(
-            TalosMemoryErrorKind::SummaryParseFailed,
-            format!("compaction title is blank for session '{session_id}'"),
-        ));
+        return Err(compaction_summary_error(format!(
+            "compaction title is blank for session '{session_id}'"
+        )));
     }
     validate_memory_candidates(&parsed.memory_candidates).map_err(|error| {
-        talos_error::TalosError::memory_error(
-            TalosMemoryErrorKind::SummaryParseFailed,
-            format!("validate compaction for session '{session_id}': {error}"),
-        )
+        compaction_summary_error(format!("validate compaction for session '{session_id}'"))
+            .with_source(error)
     })?;
     Ok((parsed, response.usage))
+}
+
+fn compaction_summary_error(context: impl std::fmt::Display) -> TalosError {
+    TalosError::new(
+        talos_error::ErrorCode::ContextCompactionFailed,
+        "The generated memory summary was invalid.",
+    )
+    .context(context)
 }
 
 async fn latest_summary_compact_cursor(
@@ -640,7 +641,7 @@ pub async fn compact_session_memory(
         .get(&coverage.covers_until_seq)
         .copied()
         .ok_or_else(|| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "missing persisted timestamp for compacted session seq {}",
@@ -672,7 +673,12 @@ pub async fn compact_session_memory(
                 talos_memory::DreamMemoryWriteRequest::from_snapshot(
                     &snapshot,
                     talos_memory::MemoryAgentId::parse(producer_agent_id.to_string()).map_err(
-                        |error| TalosError::internal(format!("invalid producer Agent id: {error}")),
+                        |error| {
+                            TalosError::internal_with_source(
+                                "invalid producer Agent id; technical details were withheld.",
+                                error,
+                            )
+                        },
                     )?,
                     MemoryWriteBatch {
                         session_id: session_id.to_string(),

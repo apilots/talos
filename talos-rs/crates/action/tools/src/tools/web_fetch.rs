@@ -72,14 +72,14 @@ impl Tool for WebFetchTool {
         _context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let request: WebFetchRequest = serde_json::from_value(input).map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("invalid web_fetch arguments: {err}"),
             )
         })?;
         let response = run(&request).await?;
         let structured = serde_json::to_value(&response).map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("serialize web_fetch response: {err}"),
             )

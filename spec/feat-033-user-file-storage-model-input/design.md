@@ -6,6 +6,14 @@ Created: 2026-07-22
 Updated: 2026-07-23
 Related: `refactor-038-llm-model-selection`, `archive/2026/refactor-026-provider-protocol-abstraction`, `archive/2026/feat-021-user-scoped-agent-workspace`, `archive/2026/refactor-027-core-api-object-boundary`
 
+Error-model update (2026-09-06): the error types, examples, mappings, and error-test
+requirements below are historical and superseded by
+[Unified Error Contract](../refactor-044-unified-error-contract/design.md) and
+[Error Model](../../docs/architecture/ERROR_MODEL.md). Do not implement the old
+FileError/TalosFileErrorKind/ApiErrorCode::File layers or collapse file failures
+into FileInputRejected. Use TalosError with the existing ErrorCode and preserve
+the original public ApiError across requests, failed turns, and history.
+
 ## 背景与问题
 
 Talos Web 已有 Files 页面，但当前只有前端占位数据。服务端虽然已有 `TalosInputItem::Image`、`TalosInputItem::File` 和 `ModelInputKind`，文件仍会在 Agent 输入归一化时丢失，三种 LLM 协议也只能编码文本。

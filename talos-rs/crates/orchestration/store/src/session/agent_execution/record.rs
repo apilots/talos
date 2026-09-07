@@ -14,8 +14,12 @@ pub(super) async fn append_events(
     let persisted_at = chrono::Utc::now().timestamp();
     let mut records = Vec::with_capacity(events.len());
     for event in events {
-        let payload_json = serde_json::to_string(&event.payload)
-            .map_err(|error| TalosError::internal(format!("serialize Agent event: {error}")))?;
+        let payload_json = serde_json::to_string(&event.payload).map_err(|error| {
+            TalosError::internal_with_source(
+                "serialize Agent event; technical details were withheld.",
+                error,
+            )
+        })?;
         let sequence = event.sequence.to_string();
         let occurred_at = event.occurred_at.to_string();
         let persisted_at_param = persisted_at.to_string();
@@ -140,8 +144,12 @@ pub(super) fn parse_event_record(row: &Row) -> TalosResult<AgentEventRecord> {
         .get_string("payload_json")
         .ok_or_else(|| TalosError::internal("Agent event record is missing payload"))
         .and_then(|raw| {
-            serde_json::from_str(&raw)
-                .map_err(|error| TalosError::internal(format!("parse Agent event: {error}")))
+            serde_json::from_str(&raw).map_err(|error| {
+                TalosError::internal_with_source(
+                    "parse Agent event; technical details were withheld.",
+                    error,
+                )
+            })
         })?;
     Ok(AgentEventRecord {
         event_seq: required_i64(row, "event_seq")?,
@@ -164,9 +172,10 @@ pub(super) fn parse_active_turn(row: &Row) -> TalosResult<AgentActiveTurnRecord>
         "waiting_for_input" => ActiveTurnState::WaitingForInput,
         "cancelling" => ActiveTurnState::Cancelling,
         state => {
-            return Err(TalosError::internal(format!(
-                "unknown Agent Turn state: {state}"
-            )))
+            return Err(TalosError::internal(
+                "unknown Agent Turn state; technical details were withheld.",
+            )
+            .context(format!("unknown Agent Turn state: {state}")))
         }
     };
     Ok(AgentActiveTurnRecord {
@@ -194,7 +203,10 @@ pub(super) fn parse_continuation_binding(row: &Row) -> TalosResult<AgentContinua
         ("waiting", None) => AgentContinuationBindingStatus::Waiting,
         ("claimed", Some(claim_id)) => AgentContinuationBindingStatus::Claimed { claim_id },
         (status, _) => {
-            return Err(TalosError::internal(format!(
+            return Err(TalosError::internal(
+                "invalid Agent continuation binding status; technical details were withheld.",
+            )
+            .context(format!(
                 "invalid Agent continuation binding status: {status}"
             )))
         }
@@ -204,7 +216,10 @@ pub(super) fn parse_continuation_binding(row: &Row) -> TalosResult<AgentContinua
         .ok_or_else(|| TalosError::internal("Agent continuation binding is missing Provider ref"))
         .and_then(|raw| {
             serde_json::from_str::<AgentContinuationRef>(&raw).map_err(|error| {
-                TalosError::internal(format!("parse Agent continuation reference: {error}"))
+                TalosError::internal_with_source(
+                    "parse Agent continuation reference; technical details were withheld.",
+                    error,
+                )
             })
         })?;
     Ok(AgentContinuationBindingRecord {
@@ -220,11 +235,15 @@ pub(super) fn parse_continuation_binding(row: &Row) -> TalosResult<AgentContinua
 }
 
 fn required_string(row: &Row, column: &str) -> TalosResult<String> {
-    row.get_string(column)
-        .ok_or_else(|| TalosError::internal(format!("Agent execution record is missing {column}")))
+    row.get_string(column).ok_or_else(|| {
+        TalosError::internal("Agent execution record is missing; technical details were withheld.")
+            .context(format!("Agent execution record is missing {column}"))
+    })
 }
 
 fn required_i64(row: &Row, column: &str) -> TalosResult<i64> {
-    row.get_i64(column)
-        .ok_or_else(|| TalosError::internal(format!("Agent execution record is missing {column}")))
+    row.get_i64(column).ok_or_else(|| {
+        TalosError::internal("Agent execution record is missing; technical details were withheld.")
+            .context(format!("Agent execution record is missing {column}"))
+    })
 }

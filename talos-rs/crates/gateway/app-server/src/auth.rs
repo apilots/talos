@@ -49,15 +49,23 @@ impl ActorCredentialValidator for AuthServiceCredentialValidator {
                 let identity = match self.auth_service.verify_access_token(token).await {
                     Ok(identity) => identity,
                     Err(error) => {
-                        let _ = self
+                        if let Err(cleanup_error) = self
                             .account
-                            .clear_rejected_access_token(token, CloudSessionCache::now_ms());
+                            .clear_rejected_access_token(token, CloudSessionCache::now_ms())
+                        {
+                            talos_logging::report_error(&cleanup_error);
+                        }
+                        talos_logging::report_error(&error);
                         return Err(error.to_api_error());
                     }
                 };
-                let _ = self
+                if let Err(error) = self
                     .account
-                    .record_verified_access_token_use(token, CloudSessionCache::now_ms());
+                    .record_verified_access_token_use(token, CloudSessionCache::now_ms())
+                {
+                    talos_logging::report_error(&error);
+                    return Err(error.to_api_error());
+                }
                 Ok(actor_from_identity(&identity))
             }
         }

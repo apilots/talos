@@ -29,7 +29,7 @@ pub(super) async fn start_turn_handler(
             idempotency_key,
         )
         .await
-        .map_err(map_turn_submit_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success_with_status(StatusCode::ACCEPTED, ack))
 }
 
@@ -43,7 +43,7 @@ pub(super) async fn retry_turn_handler(
         .gateway
         .retry_turn(&shared_actor(&actor.0), request)
         .await
-        .map_err(map_retry_submit_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success_with_status(StatusCode::ACCEPTED, ack))
 }
 
@@ -57,16 +57,7 @@ pub(super) async fn interrupt_turn_handler(
         .interrupt_turn(&shared_actor(&actor.0), request)
         .await
         .map(api_success)
-        .map_err(map_interrupt_turn_error)
-}
-
-fn map_interrupt_turn_error(error: talos_error::TalosError) -> ApiError {
-    match error.error_code() {
-        talos_error::ErrorCode::ResourceNotFound => {
-            ApiError::new(talos_error::ErrorCode::SessionNotFound)
-        }
-        _ => ApiError::from_talos_error(error),
-    }
+        .map_err(ApiError::from_talos_error)
 }
 
 fn start_turn_idempotency_key(
@@ -97,72 +88,5 @@ pub(super) async fn submit_turn_input_handler(
         .submit_turn_input(&shared_actor(&actor.0), request)
         .await
         .map(api_success)
-        .map_err(map_turn_submit_error)
-}
-
-fn map_retry_submit_error(error: talos_error::TalosError) -> ApiError {
-    match error.error_code() {
-        talos_error::ErrorCode::InvalidRequest => {
-            ApiError::new(talos_error::ErrorCode::InvalidRetryRequest)
-        }
-        _ => map_turn_submit_error(error),
-    }
-}
-
-fn map_turn_submit_error(error: talos_error::TalosError) -> ApiError {
-    match error.error_code() {
-        talos_error::ErrorCode::ResourceNotFound => {
-            ApiError::new(talos_error::ErrorCode::SessionNotFound)
-        }
-        _ => ApiError::from_talos_error(error),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use axum::body::to_bytes;
-    use axum::http::StatusCode;
-    use axum::response::IntoResponse;
-    use serde_json::Value;
-    use talos_error::TalosError;
-
-    use super::map_interrupt_turn_error;
-
-    const ERROR_BODY_LIMIT: usize = 4096;
-
-    #[tokio::test]
-    async fn interrupt_error_maps_missing_session_to_session_not_found() {
-        let response = map_interrupt_turn_error(TalosError::public(
-            talos_error::ErrorCode::ResourceNotFound,
-            "session missing-session".to_string(),
-        ))
-        .into_response();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        let body = to_bytes(response.into_body(), ERROR_BODY_LIMIT)
-            .await
-            .expect("error body should be readable");
-        let payload: Value = serde_json::from_slice(&body).expect("error body should be json");
-        assert_eq!(payload["status"], "error");
-        assert_eq!(payload["error"]["code"], "sessionNotFound");
-        assert_eq!(payload["error"]["message"], "Session not found");
-    }
-
-    #[tokio::test]
-    async fn interrupt_error_uses_route_owned_session_not_found_semantics() {
-        let response = map_interrupt_turn_error(TalosError::public(
-            talos_error::ErrorCode::ResourceNotFound,
-            "active turn for session mock-session".to_string(),
-        ))
-        .into_response();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        let body = to_bytes(response.into_body(), ERROR_BODY_LIMIT)
-            .await
-            .expect("error body should be readable");
-        let payload: Value = serde_json::from_slice(&body).expect("error body should be json");
-        assert_eq!(payload["status"], "error");
-        assert_eq!(payload["error"]["code"], "sessionNotFound");
-        assert_eq!(payload["error"]["message"], "Session not found");
-    }
+        .map_err(ApiError::from_talos_error)
 }

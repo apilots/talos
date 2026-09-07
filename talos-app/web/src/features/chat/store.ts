@@ -78,7 +78,7 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               ...stream,
               isStreaming: false,
               connectionState: "idle",
-              blocks: [],
+              blocks: stream.blocks.filter((block) => block.kind === "notice"),
               turnMetrics: undefined,
               activeMessageId: undefined,
               pendingUserAction: undefined,
@@ -87,6 +87,10 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
+    upsertNotice: (sessionId, eventId, notice) => updateStream(set, sessionId, (stream) => ({
+      ...stream,
+      blocks: [...stream.blocks.filter((block) => block.id !== `notice-${eventId}`), { id: `notice-${eventId}`, kind: "notice", notice, live: false }],
+    })),
     upsertUserInputBlock: (sessionId, turnId, messageId, input) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);

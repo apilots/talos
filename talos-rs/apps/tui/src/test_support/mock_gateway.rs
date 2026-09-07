@@ -53,7 +53,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) message_queue: MessageQueue,
     pub(crate) session_history_turns: Vec<SessionHistoryTurn>,
     pub(crate) next_queued_message_id: u64,
-    pub(crate) message_queue_subscribers: Vec<mpsc::Sender<MessageQueueChangedNotification>>,
+    pub(crate) message_queue_subscribers: Vec<mpsc::Sender<crate::client::SessionEvent>>,
 }
 
 pub(crate) struct MockGatewayClient {
@@ -110,8 +110,11 @@ impl MockGatewayState {
             session_id: self.session_id.clone(),
             revision: self.message_queue.revision,
         };
-        self.message_queue_subscribers
-            .retain(|sender| sender.try_send(change.clone()).is_ok());
+        self.message_queue_subscribers.retain(|sender| {
+            sender
+                .try_send(crate::client::SessionEvent::QueueChanged(change.clone()))
+                .is_ok()
+        });
     }
 }
 

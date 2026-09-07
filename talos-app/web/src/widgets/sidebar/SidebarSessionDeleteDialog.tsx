@@ -1,3 +1,4 @@
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -19,7 +20,7 @@ export function SidebarSessionDeleteDialog({
   onDelete,
 }: SidebarSessionDeleteDialogProps) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReturnType<typeof userVisibleError> | null>(null);
 
   async function submitDelete() {
     if (deleting) return;
@@ -27,7 +28,7 @@ export function SidebarSessionDeleteDialog({
     try {
       await onDelete();
     } catch (submitError) {
-      setError(errorMessage(submitError));
+      setError(userVisibleError(submitError, "Failed to delete the session."));
     }
   }
 
@@ -55,7 +56,7 @@ export function SidebarSessionDeleteDialog({
         </div>
         {error ? (
           <div className="mt-4 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
-            {error}
+            {apiErrorMessage(error)}
           </div>
         ) : null}
         <div className="mt-7 flex justify-end gap-3">
@@ -75,8 +76,4 @@ export function SidebarSessionDeleteDialog({
     </div>,
     document.body,
   );
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }

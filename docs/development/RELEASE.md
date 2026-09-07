@@ -29,4 +29,8 @@ built artifacts.
 
 Use `--dry-run` to inspect the command path without creating a tag or Release.
 After release creation, verify the tag-triggered workflow and all target-specific
-assets. Installation acceptance is owned by E2E group `15_tui_install`.
+assets. The tag-triggered dispatch waits for the complete native installation
+matrix before starting the release build. Pull requests run only the inexpensive
+installer syntax and contract checks when release-related files change. The full
+matrix can also be started explicitly with `workflow_dispatch`. Installation
+acceptance is owned by E2E group `15_tui_install`.

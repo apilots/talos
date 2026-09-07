@@ -79,7 +79,7 @@ pub(super) fn determine_history_compaction_trigger(
 }
 
 pub(super) fn is_recoverable_compaction_parse_error(error: &talos_error::TalosError) -> bool {
-    error.memory_error_kind() == Some(talos_error::TalosMemoryErrorKind::SummaryParseFailed)
+    error.is_code(talos_error::ErrorCode::ContextCompactionFailed)
 }
 
 pub(super) async fn emit_context_compaction_stream_event(

@@ -62,7 +62,7 @@ impl TimelineSubscriptionService {
         if let Some(turn_id) = params.turn_id.as_deref() {
             replay
                 .events
-                .retain(|record| record.event.identity.turn_id == turn_id);
+                .retain(|record| record.event.identity().turn_id == turn_id);
         }
         let has_live_turn = self.has_live_turn(&params.session_id).await?;
         let events = spawn_subscription_stream(SubscriptionStreamParams {
@@ -155,25 +155,16 @@ fn spawn_subscription_stream(
         let mut replay_next_cursor = replay_next_cursor;
         loop {
             for record in replay_events {
-                last_sent_seq = record.event_seq;
-                if !matches_turn_filter(&record, turn_id.as_deref()) {
-                    continue;
-                }
-                let is_terminal = is_terminal_event(&record);
-                if tx
-                    .send(TimelineSubscriptionMessage::Event(Box::new(record)))
-                    .await
-                    .is_err()
+                if send_record(
+                    &tx,
+                    record,
+                    turn_id.as_deref(),
+                    close_on_terminal,
+                    &mut last_sent_seq,
+                )
+                .await
+                .is_break()
                 {
-                    return;
-                }
-                if close_on_terminal && is_terminal {
-                    let _ = send_subscription_closed(
-                        &tx,
-                        TimelineSubscriptionCloseReason::Completed,
-                        "event subscription completed",
-                    )
-                    .await;
                     return;
                 }
             }
@@ -225,33 +216,29 @@ fn spawn_subscription_stream(
             tokio::select! {
             timeline_event = live_events.recv() => match timeline_event {
                 Ok(record) => {
-                    if record.event.identity.session_id != session_id {
+                    if record.event.identity().session_id != session_id || record.event_seq <= last_sent_seq {
                         continue;
                     }
-                    if !matches_turn_filter(&record, turn_id.as_deref()) {
+                    if record.event_seq == last_sent_seq + 1 {
+                        if send_record(&tx, record, turn_id.as_deref(), close_on_terminal, &mut last_sent_seq).await.is_break() { return; }
                         continue;
                     }
-                    let event_seq = record.event_seq;
-                    if event_seq <= last_sent_seq {
-                        continue;
-                    }
-                    last_sent_seq = event_seq;
-                    let is_terminal = is_terminal_event(&record);
-                    if tx
-                        .send(TimelineSubscriptionMessage::Event(Box::new(record)))
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                    if close_on_terminal && is_terminal {
-                        let _ = send_subscription_closed(
-                            &tx,
-                            TimelineSubscriptionCloseReason::Completed,
-                            "event subscription completed",
-                        )
-                        .await;
-                        return;
+                    // Independent product writers may publish out of order; the durable log owns order.
+                    let through = TimelineEventId::from(record.event_id);
+                    loop {
+                        let after = (last_sent_seq > 0).then(|| TimelineEventId::from_seq(last_sent_seq));
+                        let page = match subscriptions.replay_after_through(&session_id, after.as_ref(), replay_limit, Some(&through)).await {
+                            Ok(page) => page,
+                            Err(error) => {
+                                talos_logging::report_error(&error);
+                                let _ = send_subscription_closed(&tx, TimelineSubscriptionCloseReason::ServerShutdown, "event subscription replay failed").await;
+                                return;
+                            }
+                        };
+                        for record in page.events {
+                            if send_record(&tx, record, turn_id.as_deref(), close_on_terminal, &mut last_sent_seq).await.is_break() { return; }
+                        }
+                        if page.next_cursor.is_none() { break; }
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
@@ -321,6 +308,41 @@ fn spawn_subscription_stream(
     rx
 }
 
+async fn send_record(
+    tx: &mpsc::Sender<TimelineSubscriptionMessage>,
+    record: TimelineEvent,
+    turn_id: Option<&str>,
+    close_on_terminal: bool,
+    last_sent_seq: &mut i64,
+) -> std::ops::ControlFlow<()> {
+    use std::ops::ControlFlow;
+    if record.event_seq <= *last_sent_seq {
+        return ControlFlow::Continue(());
+    }
+    *last_sent_seq = record.event_seq;
+    if !matches_turn_filter(&record, turn_id) {
+        return ControlFlow::Continue(());
+    }
+    let terminal = is_terminal_event(&record);
+    if tx
+        .send(TimelineSubscriptionMessage::Event(Box::new(record)))
+        .await
+        .is_err()
+    {
+        return ControlFlow::Break(());
+    }
+    if close_on_terminal && terminal {
+        let _ = send_subscription_closed(
+            tx,
+            TimelineSubscriptionCloseReason::Completed,
+            "event subscription completed",
+        )
+        .await;
+        return ControlFlow::Break(());
+    }
+    ControlFlow::Continue(())
+}
+
 async fn recv_queue_change(
     receiver: &mut Option<broadcast::Receiver<MessageQueueChangedNotification>>,
 ) -> Result<MessageQueueChangedNotification, broadcast::error::RecvError> {
@@ -332,7 +354,7 @@ async fn recv_queue_change(
 }
 
 fn matches_turn_filter(record: &TimelineEvent, turn_id: Option<&str>) -> bool {
-    turn_id.is_none_or(|turn_id| record.event.identity.turn_id == turn_id)
+    turn_id.is_none_or(|turn_id| record.event.identity().turn_id == turn_id)
 }
 
 async fn send_subscription_closed(
@@ -351,9 +373,11 @@ async fn send_subscription_closed(
 
 fn is_terminal_event(record: &TimelineEvent) -> bool {
     matches!(
-        record.event.payload,
-        talos_agent_api::AgentEventPayload::TurnCompleted(_)
-            | talos_agent_api::AgentEventPayload::TurnFailed(_)
+        record.event.agent_event().map(|event| &event.payload),
+        Some(
+            talos_agent_api::AgentEventPayload::TurnCompleted(_)
+                | talos_agent_api::AgentEventPayload::TurnFailed(_)
+        )
     )
 }
 

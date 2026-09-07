@@ -6,7 +6,9 @@ pub(crate) use mock_gateway::*;
 use async_trait::async_trait;
 pub(crate) use bytes::Bytes;
 pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-pub(crate) use render_runtime::{append_live_tool_progress, start_live_text, start_live_tool};
+pub(crate) use render_runtime::{
+    append_live_tool_progress, interactive_transcript_text, start_live_text, start_live_tool,
+};
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
@@ -117,7 +119,7 @@ impl GatewayClient for MockGatewayClient {
         let mut state = self.state.lock().unwrap();
         if state.list_models_failures_remaining > 0 {
             state.list_models_failures_remaining -= 1;
-            return Err(TalosError::internal("mock list_models failure".to_string()));
+            return Err(TalosError::internal("mock list_models failure"));
         }
         let default_model = state
             .models
@@ -176,9 +178,10 @@ impl GatewayClient for MockGatewayClient {
         state.upload_requests.push((request.clone(), data.clone()));
         let call = state.upload_requests.len();
         if state.upload_failure_calls.contains(&call) {
-            return Err(TalosError::internal(format!(
-                "mock upload failure on call {call}"
-            )));
+            return Err(TalosError::internal(
+                "mock upload failure on call; technical details were withheld.",
+            )
+            .context(format!("mock upload failure on call {call}")));
         }
         Ok(FileUploadResponse {
             file: FileInfo {
@@ -219,9 +222,7 @@ impl GatewayClient for MockGatewayClient {
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
         if should_fail {
-            return Err(TalosError::internal(
-                "mock close session failure".to_string(),
-            ));
+            return Err(TalosError::internal("mock close session failure"));
         }
         Ok(())
     }
@@ -241,7 +242,7 @@ impl GatewayClient for MockGatewayClient {
     ) -> TalosResult<MessageQueue> {
         let mut state = self.state.lock().unwrap();
         if state.message_queue.messages.len() >= state.message_queue.max_messages as usize {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::MessageQueueFull,
                 "Message queue is full".to_string(),
             ));
@@ -275,7 +276,7 @@ impl GatewayClient for MockGatewayClient {
             .iter_mut()
             .find(|message| message.id == request.message_id)
         else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 "Queued message not found".to_string(),
             ));
@@ -297,7 +298,7 @@ impl GatewayClient for MockGatewayClient {
             .messages
             .retain(|message| message.id != request.message_id);
         if state.message_queue.messages.len() == before {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 "Queued message not found".to_string(),
             ));
@@ -321,7 +322,7 @@ impl GatewayClient for MockGatewayClient {
                 .find(|message| message.id == message_id)
                 .cloned()
             else {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     "Queue order is stale".to_string(),
                 ));
@@ -329,7 +330,7 @@ impl GatewayClient for MockGatewayClient {
             reordered.push(message);
         }
         if reordered.len() != state.message_queue.messages.len() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "Queue order is incomplete".to_string(),
             ));
@@ -357,7 +358,7 @@ impl GatewayClient for MockGatewayClient {
             })
             .unwrap_or_default();
         if index >= state.message_queue.messages.len() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 "Queued message not found".to_string(),
             ));
@@ -407,17 +408,17 @@ impl GatewayClient for MockGatewayClient {
         })
     }
 
-    async fn subscribe_message_queue_changes(
+    async fn subscribe_session_events(
         &self,
         _session_id: &str,
-    ) -> TalosResult<crate::client::MessageQueueSubscription> {
+    ) -> TalosResult<crate::client::SessionSubscription> {
         let (sender, receiver) = mpsc::channel(32);
         self.state
             .lock()
             .unwrap()
             .message_queue_subscribers
             .push(sender);
-        Ok(crate::client::MessageQueueSubscription::new(receiver, None))
+        Ok(crate::client::SessionSubscription::new(receiver, None))
     }
 
     async fn update_session_model_selection(
@@ -447,9 +448,7 @@ impl GatewayClient for MockGatewayClient {
         state.compact_calls = state.compact_calls.saturating_add(1);
         if state.compact_failures_remaining > 0 {
             state.compact_failures_remaining -= 1;
-            return Err(TalosError::internal(
-                "mock session compaction failure".to_string(),
-            ));
+            return Err(TalosError::internal("mock session compaction failure"));
         }
         state.session_usage.total_tokens = state.session_usage.total_tokens.saturating_add(42);
         Ok(state.session_info(3))
@@ -501,9 +500,7 @@ impl GatewayClient for MockGatewayClient {
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
         if should_fail {
-            return Err(TalosError::internal(
-                "mock stream connect failure".to_string(),
-            ));
+            return Err(TalosError::internal("mock stream connect failure"));
         }
 
         let (tx, rx) = mpsc::channel(32);
@@ -592,7 +589,7 @@ impl GatewayClient for MockGatewayClient {
             state.reconnect_events.clone()
         };
         if events.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "No active turn stream is available for this session.".to_string(),
             ));

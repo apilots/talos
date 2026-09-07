@@ -92,7 +92,7 @@ where
         .get(&coverage.covers_until_seq)
         .copied()
         .ok_or_else(|| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "missing persisted timestamp for Dream Memory session seq {}",
@@ -113,17 +113,21 @@ where
     .await?;
     let output = serde_json::from_str::<DreamMemoryModelOutput>(response.content.trim()).map_err(
         |error| {
-            talos_error::TalosError::memory_error(
-                talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-                format!("parse Dream Memory json for session '{session_id}': {error}"),
+            TalosError::internal_with_source(
+                "The generated Dream Memory summary was invalid.",
+                error,
             )
+            .context(format!(
+                "parse Dream Memory json for session '{session_id}'"
+            ))
         },
     )?;
     let DreamMemoryModelOutput::Maintenance { memory_candidates } = output else {
-        return Err(talos_error::TalosError::memory_error(
-            talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-            format!("Dream Memory mode mismatch for session '{session_id}'"),
-        ));
+        return Err(
+            TalosError::internal("The generated Dream Memory summary was invalid.").context(
+                format!("Dream Memory mode mismatch for session '{session_id}'"),
+            ),
+        );
     };
     validate_memory_candidates(&memory_candidates)?;
     dream_memory_store
@@ -132,7 +136,12 @@ where
             talos_memory::DreamMemoryWriteRequest::from_snapshot(
                 &snapshot,
                 talos_memory::MemoryAgentId::parse(producer_agent_id.to_string()).map_err(
-                    |error| TalosError::internal(format!("invalid producer Agent id: {error}")),
+                    |error| {
+                        TalosError::internal_with_source(
+                            "invalid producer Agent id; technical details were withheld.",
+                            error,
+                        )
+                    },
                 )?,
                 MemoryWriteBatch {
                     session_id: session_id.to_string(),

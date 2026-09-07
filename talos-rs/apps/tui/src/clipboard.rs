@@ -14,7 +14,10 @@ impl TuiApp {
         match read_clipboard_png().and_then(|png_bytes| self.handle_pasted_image(png_bytes)) {
             Ok(()) => {}
             Err(error) => {
-                self.push_system_notice(format!("Failed to paste clipboard image: {error}"));
+                self.push_system_notice(format!(
+                    "Failed to paste clipboard image: {}",
+                    error.to_api_error().message
+                ));
                 self.show_status_hint(
                     "Clipboard image paste failed.",
                     std::time::Duration::from_secs(3),
@@ -28,13 +31,13 @@ impl TuiApp {
             .current_model_info()
             .is_some_and(|model| model.model.input.contains(&ModelInputKind::Image));
         if !supports_images {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "the active model does not support image attachments".to_string(),
             ));
         }
         if png_bytes.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "clipboard image data is empty".to_string(),
             ));
@@ -55,20 +58,32 @@ impl TuiApp {
 }
 
 fn read_clipboard_png() -> TalosResult<Bytes> {
-    let mut clipboard = Clipboard::new()
-        .map_err(|error| TalosError::internal(format!("clipboard unavailable: {error}")))?;
-    let image = clipboard
-        .get_image()
-        .map_err(|error| TalosError::internal(format!("clipboard has no image: {error}")))?;
+    let mut clipboard = Clipboard::new().map_err(|error| {
+        TalosError::internal_with_source(
+            "clipboard unavailable; technical details were withheld.",
+            error,
+        )
+    })?;
+    let image = clipboard.get_image().map_err(|error| {
+        TalosError::internal_with_source(
+            "clipboard has no image; technical details were withheld.",
+            error,
+        )
+    })?;
     let rgba = RgbaImage::from_raw(
         image.width as u32,
         image.height as u32,
         image.bytes.into_owned(),
     )
-    .ok_or_else(|| TalosError::internal("clipboard image dimensions are invalid".to_string()))?;
+    .ok_or_else(|| TalosError::internal("clipboard image dimensions are invalid"))?;
     let mut encoded = Cursor::new(Vec::new());
     DynamicImage::ImageRgba8(rgba)
         .write_to(&mut encoded, ImageFormat::Png)
-        .map_err(|error| TalosError::internal(format!("clipboard PNG encoding failed: {error}")))?;
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "clipboard PNG encoding failed; technical details were withheld.",
+                error,
+            )
+        })?;
     Ok(Bytes::from(encoded.into_inner()))
 }

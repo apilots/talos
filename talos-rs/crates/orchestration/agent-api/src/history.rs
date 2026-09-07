@@ -10,6 +10,8 @@ use crate::{AgentRunResult, AgentTurnRef};
 pub struct SessionHistoryTurn {
     pub identity: AgentTurnRef,
     pub result: AgentRunResult,
+    /// Product notices do not alter execution results or Provider continuation state.
+    pub notices: Vec<crate::TimelineEvent>,
     #[ts(type = "number")]
     pub completed_event_seq: i64,
     #[ts(type = "number")]

@@ -16,9 +16,7 @@ pub(crate) fn parse_retrieved_memory_items(
                     Ok(vec![response.memory])
                 }
                 Ok(_) => Ok(Vec::new()),
-                Err(error) => Err(TalosError::internal(format!(
-                    "parse MemoryGet result during context rebuild: {error}"
-                ))),
+                Err(error) => Err(TalosError::internal_with_source("parse MemoryGet result during context rebuild; technical details were withheld.", error)),
             }
         }
         _ => Ok(Vec::new()),

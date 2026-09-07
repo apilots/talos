@@ -64,6 +64,12 @@ export interface ChatUserInput {
 export type ChatRenderBlock =
   | {
       id: string;
+      kind: "notice";
+      notice: import("@talos/sdk-core").AppProtocol.AgentSystemNotice;
+      live?: false;
+    }
+  | {
+      id: string;
       kind: "user";
       text: string;
       fileIds: string[];
@@ -102,6 +108,7 @@ export type ChatRenderBlock =
       kind: "timeline";
       items: ChatTimelineItem[];
       metrics?: ChatTurnMetrics | null;
+      error?: import("@talos/sdk-browser").AppProtocol.ApiError;
       live?: boolean;
     };
 
@@ -145,6 +152,7 @@ export type ChatTimelineItem =
       title?: string | null;
       text: string;
       replayFinalAnswer?: boolean;
+      notice?: import("@talos/sdk-core").AppProtocol.AgentSystemNotice;
       startedAtMs: number;
       completedAtMs?: number | null;
     }
@@ -219,5 +227,5 @@ export interface StreamSessionState {
   pendingInput?: PendingInput;
   pendingUserAction?: PendingUserAction;
   turnMetrics?: ChatTurnMetrics;
-  error?: string;
+  error?: import("@talos/sdk-browser").AppProtocol.ApiError;
 }

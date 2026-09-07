@@ -246,7 +246,7 @@ async fn submit_channel_turn(
     loop {
         tokio::select! {
             _ = &mut timeout => {
-                return Err(TalosError::internal(format!(
+                return Err(TalosError::internal("Timed out waiting for channel turn to complete.").context(format!(
                     "timed out waiting for channel turn `{}` to complete",
                     response.turn_id
                 )));
@@ -257,10 +257,11 @@ async fn submit_channel_turn(
                 };
                 match message {
                     TimelineSubscriptionMessage::Event(record) => {
-                        if record.event.identity.turn_id != response.turn_id {
+                        if record.event.identity().turn_id != response.turn_id {
                             continue;
                         }
-                        if collector.apply(record.event) {
+                        let Some(event) = record.event.agent_event().cloned() else { continue; };
+                        if collector.apply(event) {
                             return Ok(collector.finish());
                         }
                     }

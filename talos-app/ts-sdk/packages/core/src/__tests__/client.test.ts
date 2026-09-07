@@ -125,10 +125,10 @@ describe("TalosClient", () => {
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       eventId: "ev_00000000000000000002",
-      event: expect.objectContaining({
+      event: { type: "agent", data: expect.objectContaining({
         identity: { sessionId: "session-1", turnId: "turn-1" },
         payload: { type: "turnCompleted", data: { stopReason: "endTurn" } },
-      }),
+      }) },
     }));
   });
 
@@ -365,7 +365,7 @@ function timelineEvent(event: AgentEvent): TimelineEvent {
     eventId: `ev_${String(event.sequence).padStart(20, "0")}`,
     eventSeq: event.sequence,
     persistedAt: event.occurredAt,
-    event,
+    event: { type: "agent", data: event },
   };
 }
 

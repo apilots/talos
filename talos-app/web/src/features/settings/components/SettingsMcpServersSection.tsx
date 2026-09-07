@@ -1,3 +1,4 @@
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useQuery } from "@tanstack/react-query";
 import type { Plugin } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
@@ -90,7 +91,7 @@ export function SettingsMcpServersSection() {
         <div className="text-sm text-muted">{t("mcpServers.loading")}</div>
       ) : pluginsQuery.error ? (
         <div className="rounded-[1rem] border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-          {pluginsQuery.error instanceof Error ? pluginsQuery.error.message : t("mcpServers.loadError")}
+          {userVisibleErrorMessage(pluginsQuery.error, t("mcpServers.loadError"))}
         </div>
       ) : null}
       <McpServerList

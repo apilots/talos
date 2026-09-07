@@ -2,6 +2,24 @@ use std::collections::BTreeMap;
 
 use super::*;
 
+#[test]
+fn service_error_preserves_typed_code_without_exposing_remote_payload() {
+    use std::error::Error;
+    let error = map_service_error(ServiceError::McpError(rmcp::model::ErrorData::new(
+        rmcp::model::ErrorCode(-32601),
+        "SECRET_REMOTE_MESSAGE",
+        Some(serde_json::json!({"token": "SECRET"})),
+    )));
+    assert_eq!(
+        error.to_api_error().message,
+        "The MCP server does not support this method."
+    );
+    assert!(
+        matches!(error.source().unwrap().downcast_ref::<ServiceError>(), Some(ServiceError::McpError(remote)) if remote.code.0 == -32601 && remote.data.is_none())
+    );
+    assert!(!error.to_string().contains("SECRET"));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn stdio_command_does_not_inherit_parent_environment() {

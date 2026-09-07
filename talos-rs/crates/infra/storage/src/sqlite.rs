@@ -40,18 +40,23 @@ impl SqliteStorage {
         if let Some(parent) = Self::database_parent_dir(database_path) {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).map_err(|err| {
-                    TalosError::internal(format!(
+                    let diagnostic = format!(
                         "Failed to create database directory {}: {}",
                         parent.display(),
                         err
-                    ))
+                    );
+                    TalosError::internal_with_source(
+                        "Failed to create database directory; technical details were withheld.",
+                        err,
+                    )
+                    .context(diagnostic)
                 })?;
             }
         }
 
         let connection_options = SqliteConnectOptions::from_str(&connection_string)
             .map_err(|error| {
-                TalosError::internal(format!("Invalid SQLite connection string: {error}"))
+                crate::database_error("parse the SQLite connection configuration", error)
             })?
             .busy_timeout(SQLITE_BUSY_TIMEOUT)
             .journal_mode(SqliteJournalMode::Wal);
@@ -59,7 +64,7 @@ impl SqliteStorage {
             .max_connections(max_connections)
             .connect_with(connection_options)
             .await
-            .map_err(|e| TalosError::internal(format!("Failed to connect to database: {}", e)))?;
+            .map_err(|e| crate::database_error("connect to the database", e))?;
 
         info!("SQLite connection established");
 
@@ -133,11 +138,11 @@ impl SqliteWriteTransaction {
         let mut connection = pool
             .acquire()
             .await
-            .map_err(|error| TalosError::internal(format!("acquire connection failed: {error}")))?;
+            .map_err(|error| crate::database_error("acquire a database connection", error))?;
         sqlx::query("BEGIN IMMEDIATE")
             .execute(&mut *connection)
             .await
-            .map_err(|error| TalosError::internal(format!("begin transaction failed: {error}")))?;
+            .map_err(|error| crate::database_error("begin the database transaction", error))?;
         Ok(Self {
             connection: Some(connection),
         })
@@ -148,7 +153,7 @@ impl SqliteWriteTransaction {
         sqlx::query("COMMIT")
             .execute(&mut **self.connection_mut()?)
             .await
-            .map_err(|error| TalosError::internal(format!("transaction commit failed: {error}")))?;
+            .map_err(|error| crate::database_error("commit the database transaction", error))?;
         self.connection.take();
         Ok(())
     }
@@ -158,9 +163,7 @@ impl SqliteWriteTransaction {
         sqlx::query("ROLLBACK")
             .execute(&mut **self.connection_mut()?)
             .await
-            .map_err(|error| {
-                TalosError::internal(format!("transaction rollback failed: {error}"))
-            })?;
+            .map_err(|error| crate::database_error("roll back the database transaction", error))?;
         self.connection.take();
         Ok(())
     }
@@ -213,7 +216,9 @@ impl StorageTransaction for SqliteStorageTransaction {
         let rows = query
             .fetch_all(&mut **self.transaction_mut()?)
             .await
-            .map_err(|error| TalosError::internal(format!("transaction query failed: {error}")))?;
+            .map_err(|error| {
+                crate::database_error("query within the database transaction", error)
+            })?;
         Ok(SqliteStorage::rows(rows))
     }
 
@@ -226,7 +231,7 @@ impl StorageTransaction for SqliteStorageTransaction {
             .execute(&mut **self.transaction_mut()?)
             .await
             .map(|result| result.rows_affected())
-            .map_err(|error| TalosError::internal(format!("transaction execute failed: {error}")))
+            .map_err(|error| crate::database_error("execute the database transaction", error))
     }
 
     async fn commit(mut self: Box<Self>) -> TalosResult<()> {
@@ -300,7 +305,7 @@ impl Storage for SqliteStorage {
         let rows = query
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| TalosError::internal(format!("Query failed: {}", e)))?;
+            .map_err(|e| crate::database_error("query the database", e))?;
 
         let result = Self::rows(rows);
 
@@ -320,7 +325,7 @@ impl Storage for SqliteStorage {
         let result = query
             .execute(&self.pool)
             .await
-            .map_err(|e| TalosError::internal(format!("Execute failed: {}", e)))?;
+            .map_err(|e| crate::database_error("execute the database operation", e))?;
 
         Ok(result.rows_affected())
     }

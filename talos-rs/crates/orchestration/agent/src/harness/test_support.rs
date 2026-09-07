@@ -9,7 +9,7 @@ use talos_config::{EffectiveWorkspace, ProviderModelConfig};
 use talos_types::{ModelInfo, ModelRef, ModelSelection, TokenUsage, UserPermissionMode};
 use tokio::sync::Notify;
 
-use super::{AgentError, AgentResult};
+use super::{AgentResult, TalosError};
 use crate::{
     AgentCapabilities, AgentContext, AgentOperationControl, AgentProvider, AgentRunParams,
     AgentSession, AgentSessionContext, SessionCompactionParams, SessionCompactionResult,
@@ -146,7 +146,8 @@ impl AgentProvider for FakeProvider {
                 .expect("register Session resource")
                 .await
                 .expect("finish Session resource");
-            return Err(AgentError::provider_error(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InternalError,
                 "fake Session acquisition failed",
             ));
         }
@@ -199,7 +200,10 @@ impl AgentSession for FakeSession {
                     .receive()
                     .await
                     .expect("Harness input channel remains open");
-                delivery.reject(AgentError::input_rejected("fake Provider rejected input"));
+                delivery.reject(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "fake Provider rejected input",
+                ));
                 turn.control.cancellation().requested().await;
                 interrupted()
             }
@@ -239,8 +243,10 @@ impl AgentSession for FakeSession {
                         ),
                     )
                     .await?;
-                Err(AgentError::provider_error(
+                Err(TalosError::from_source(
+                    talos_error::ErrorCode::InternalError,
                     "fake Provider failed with open output",
+                    std::io::Error::other("provider transport disconnected"),
                 ))
             }
             FakeMode::FailAcquisition | FakeMode::UnconfirmedAcquisition => {
@@ -266,7 +272,10 @@ impl AgentSession for FakeSession {
     async fn clear(&self, _control: AgentOperationControl) -> AgentResult<()> {
         self.provider.clear_called.store(true, Ordering::Release);
         if self.provider.clear_fails {
-            return Err(AgentError::provider_error("fake clear failed"));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "fake clear failed",
+            ));
         }
         Ok(())
     }
@@ -274,7 +283,10 @@ impl AgentSession for FakeSession {
     async fn close(&self, _control: AgentOperationControl) -> AgentResult<()> {
         self.provider.close_called.store(true, Ordering::Release);
         if self.provider.close_fails {
-            return Err(AgentError::provider_error("fake close failed"));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "fake close failed",
+            ));
         }
         Ok(())
     }
@@ -361,8 +373,8 @@ fn completed() -> AgentResult<SessionTurnResult> {
 }
 
 fn interrupted() -> AgentResult<SessionTurnResult> {
-    Err(AgentError::new(
-        crate::AgentErrorKind::Interrupted,
+    Err(TalosError::new(
+        talos_error::ErrorCode::Cancelled,
         "fake Provider interrupted",
     ))
 }

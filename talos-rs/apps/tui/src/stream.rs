@@ -46,9 +46,8 @@ impl TuiApp {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    connect_result = Some(Err(TalosError::internal(
-                        "stream connect channel dropped".to_string(),
-                    )));
+                    connect_result =
+                        Some(Err(TalosError::internal("stream connect channel dropped")));
                     should_clear = true;
                 }
             }
@@ -107,7 +106,10 @@ impl TuiApp {
                     self.active_message_skills.clear();
                     self.active_message_file_ids.clear();
                     self.active_retry_count = 0;
-                    self.push_system_notice(format!("Failed to start stream: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to start stream: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("stream connect failed".to_string());
                 }
             }
@@ -127,9 +129,8 @@ impl TuiApp {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    connect_result = Some(Err(TalosError::internal(
-                        "session connect channel dropped".to_string(),
-                    )));
+                    connect_result =
+                        Some(Err(TalosError::internal("session connect channel dropped")));
                     should_clear = true;
                 }
             }
@@ -148,7 +149,10 @@ impl TuiApp {
             }
             Some(Err(err)) => {
                 self.connection_status = "error".to_string();
-                self.push_system_notice(format!("Failed to create session: {}", err));
+                self.push_system_notice(format!(
+                    "Failed to create session: {}",
+                    err.to_api_error().message
+                ));
                 self.push_right_event("session create failed".to_string());
             }
             None => {}
@@ -185,8 +189,8 @@ impl TuiApp {
             }
         }
 
-        self.ensure_message_queue_subscription().await;
-        self.poll_message_queue_changes().await;
+        self.ensure_session_subscription().await;
+        self.poll_session_events().await;
     }
 
     async fn reconnect_active_stream(&mut self) -> bool {
@@ -211,7 +215,10 @@ impl TuiApp {
                 true
             }
             Err(err) => {
-                self.push_right_event(format!("active turn reconnect failed: {}", err));
+                self.push_right_event(format!(
+                    "active turn reconnect failed: {}",
+                    err.to_api_error().message
+                ));
                 false
             }
         }

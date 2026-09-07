@@ -123,7 +123,7 @@ impl Tool for UserWorkspaceMemoryUpdateTool {
             .and_then(ToolUserWorkspaceMemoryUpdate::into_domain)
             .map(|_| ())
             .map_err(|error| {
-                TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+                TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
             })
     }
 
@@ -133,13 +133,13 @@ impl Tool for UserWorkspaceMemoryUpdateTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let writer = context.user_workspace_memory_writer().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "UserWorkspaceMemoryUpdate requires memory write access".to_string(),
             )
         })?;
         let scope = context.memory_scope().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "UserWorkspaceMemoryUpdate requires a trusted memory scope".to_string(),
             )
@@ -147,7 +147,7 @@ impl Tool for UserWorkspaceMemoryUpdateTool {
         let update = serde_json::from_value::<ToolUserWorkspaceMemoryUpdate>(input)
             .and_then(ToolUserWorkspaceMemoryUpdate::into_domain)
             .map_err(|error| {
-                TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+                TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
             })?;
         let snapshot = match update {
             UserWorkspaceMemoryUpdate::CreateEntry { entry } => {

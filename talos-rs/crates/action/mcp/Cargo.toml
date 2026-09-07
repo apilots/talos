@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+talos-logging = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 rmcp = { workspace = true, features = [
@@ -26,3 +27,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

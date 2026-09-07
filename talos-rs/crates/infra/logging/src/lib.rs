@@ -5,10 +5,13 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use talos_error::TalosResult;
 use tracing::Dispatch;
-use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::writer::{BoxMakeWriter, MakeWriterExt};
 use tracing_subscriber::{fmt, EnvFilter};
+
+mod error_report;
+pub use error_report::report_error;
 
 /// 日志配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +102,7 @@ pub fn init_with_config(config: LoggingConfig) -> TalosResult<LogGuard> {
     let level = config.level.clone();
     let (dispatch, guard) = build_dispatch(&config)?;
     tracing::dispatcher::set_global_default(dispatch).map_err(|e| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("initialize logging: {}", e),
         )
@@ -180,7 +183,7 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
     use talos_error::TalosError;
 
     if !config.stdout && config.file.is_none() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "logging requires at least one output: enable logging.stdout or set logging.file"
                 .to_string(),
@@ -193,12 +196,18 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
         .filter(|s| !s.is_empty() && *s != "UTC")
         .and_then(|s| s.parse::<Tz>().ok());
 
-    let filter = EnvFilter::try_new(&config.level).map_err(|e| {
-        TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("invalid logging.level: {}", e),
-        )
-    })?;
+    let filter = EnvFilter::try_new(&config.level)
+        .map_err(|e| {
+            TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("invalid logging.level: {}", e),
+            )
+        })?
+        .add_directive(
+            "talos::diagnostic=warn"
+                .parse()
+                .expect("valid diagnostic directive"),
+        );
     let (writer, guard) = build_writer(config)?;
     let enable_ansi = config.stdout && config.file.is_none() && config.format != "json";
 
@@ -265,19 +274,28 @@ fn create_file_writer(path: &str) -> TalosResult<(NonBlocking, WorkerGuard)> {
     let file_path = PathBuf::from(path);
     if let Some(parent) = file_path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| {
-            TalosError::internal(format!("create log dir {}: {}", parent.display(), err))
+            TalosError::internal_with_source(
+                "Failed to create the log directory; technical details were withheld.",
+                err,
+            )
+            .context(format!("create log directory {}", parent.display()))
         })?;
     }
 
     let directory = file_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = file_path.file_name().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("invalid logging.file path: {}", path),
         )
     })?;
     let appender = tracing_appender::rolling::never(directory, file_name);
-    Ok(tracing_appender::non_blocking(appender))
+    Ok(file_writer_builder().finish(appender))
+}
+
+/// Keep the file sink's lossless delivery policy independent of its writer.
+fn file_writer_builder() -> NonBlockingBuilder {
+    NonBlockingBuilder::default().lossy(false)
 }
 
 #[cfg(test)]

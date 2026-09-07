@@ -1,5 +1,5 @@
 use super::*;
-use talos_error::{TalosError, TalosFileErrorKind};
+use talos_error::{ErrorCode, TalosError};
 use talos_llm_provider::{
     protocols::chat as chat_protocol, Attachment, AttachmentKind, CacheControl, CacheControlKind,
     ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
@@ -98,7 +98,7 @@ fn test_bailian_attachment_validation_accepts_images_and_rejects_files() {
                 bytes: vec![1, 2, 3].into(),
             }]
         )
-        .is_err_and(|error| error.is_file_error_kind(TalosFileErrorKind::UnsupportedAttachment)));
+        .is_err_and(|error| error.is_code(ErrorCode::UnsupportedAttachment)));
 }
 
 #[tokio::test]

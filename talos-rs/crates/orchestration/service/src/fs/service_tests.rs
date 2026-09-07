@@ -1,30 +1,43 @@
 use super::*;
-use std::sync::{Mutex, OnceLock};
-
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 fn actor() -> Actor {
     Actor::regular("user-1")
 }
 
-fn service() -> FsService {
-    FsService::new(DirectoryPickerConfig::default())
+fn service(home: &Path) -> FsService {
+    FsService::new(DirectoryPickerConfig::default(), Some(home.to_path_buf()))
+}
+
+#[tokio::test]
+async fn directory_roots_remain_isolated_between_service_instances() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let first_service = service(first.path());
+    let second_service = service(second.path());
+    let actor = actor();
+    let (first_snapshot, second_snapshot) = tokio::join!(
+        first_service.read_directory(&actor, None),
+        second_service.read_directory(&actor, None),
+    );
+    assert_eq!(
+        (first_snapshot.unwrap().path, second_snapshot.unwrap().path),
+        (
+            talos_fs::canonicalize_path(first.path()).unwrap(),
+            talos_fs::canonicalize_path(second.path()).unwrap(),
+        )
+    );
 }
 
 #[tokio::test]
 async fn read_directory_defaults_to_home_root() {
-    let _guard = env_lock();
     let temp = tempfile::tempdir().unwrap();
     let child = temp.path().join("project");
     talos_fs::create_directory(&child, false).unwrap();
-    std::env::set_var("HOME", temp.path());
 
-    let snapshot = service().read_directory(&actor(), None).await.unwrap();
+    let snapshot = service(temp.path())
+        .read_directory(&actor(), None)
+        .await
+        .unwrap();
 
     assert_eq!(
         snapshot.path,
@@ -36,26 +49,22 @@ async fn read_directory_defaults_to_home_root() {
 
 #[tokio::test]
 async fn read_directory_rejects_path_outside_home_root() {
-    let _guard = env_lock();
     let home = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", home.path());
 
-    let error = service()
+    let error = service(home.path())
         .read_directory(&actor(), Some(outside.path().to_path_buf()))
         .await
         .unwrap_err();
 
-    assert!(error.is_fs_error_kind(TalosFsErrorKind::PathOutsideRoot));
+    assert!(error.is_code(ErrorCode::PathOutsideRoot));
 }
 
 #[tokio::test]
 async fn create_directory_creates_single_child_under_home_root() {
-    let _guard = env_lock();
     let home = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", home.path());
 
-    let response = service()
+    let response = service(home.path())
         .create_directory(
             &actor(),
             home.path().to_path_buf(),
@@ -95,14 +104,15 @@ fn project_status_marks_unreadable_directory_as_permission_denied() {
 #[cfg(unix)]
 #[tokio::test]
 async fn read_directory_rejects_symlink_directory() {
-    let _guard = env_lock();
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
     let link = home.path().join("linked");
     std::os::unix::fs::symlink(target.path(), &link).unwrap();
-    std::env::set_var("HOME", home.path());
 
-    let snapshot = service().read_directory(&actor(), None).await.unwrap();
+    let snapshot = service(home.path())
+        .read_directory(&actor(), None)
+        .await
+        .unwrap();
     let linked = snapshot
         .entries
         .iter()
@@ -110,9 +120,9 @@ async fn read_directory_rejects_symlink_directory() {
         .expect("symlink directory should be visible");
     assert!(linked.is_symlink);
 
-    let error = service()
+    let error = service(home.path())
         .read_directory(&actor(), Some(link))
         .await
         .unwrap_err();
-    assert!(error.is_fs_error_kind(TalosFsErrorKind::SymlinkNotSupported));
+    assert!(error.is_code(ErrorCode::SymlinkNotSupported));
 }

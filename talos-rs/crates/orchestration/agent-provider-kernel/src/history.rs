@@ -74,8 +74,7 @@ impl SessionPromptContextSource for KernelSessionPromptContextSource {
                         window,
                         limit: turn_limit,
                     })
-                    .await
-                    .map_err(|error| error.into_talos_error())?
+                    .await?
             };
             let mut context = build_context(&turns, &config);
             context.summaries = if config.include_summary {
@@ -201,7 +200,7 @@ fn messages_from_turn(turn: &SessionHistoryTurn) -> Vec<SessionPromptMessage> {
                         Some(text.text.as_str())
                     }
                     (AgentMessageRole::System, AgentMessageBlockContent::SystemNotice(notice)) => {
-                        Some(notice.message.as_str())
+                        Some(notice.message())
                     }
                     _ => None,
                 })

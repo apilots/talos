@@ -41,14 +41,17 @@ impl StreamingAdapter for TelegramStreamingAdapter {
         let bots = self.bots.read().await;
         let bot = bots
             .get(&target.account_id)
-            .ok_or_else(|| talos_error::TalosError::internal("Bot not found".to_string()))?;
+            .ok_or_else(|| talos_error::TalosError::internal("Bot not found"))?;
 
         let chat_id = Self::parse_chat_id(&target.chat_id);
 
         bot.send_chat_action(chat_id, teloxide::types::ChatAction::Typing)
             .await
             .map_err(|e| {
-                talos_error::TalosError::internal(format!("Failed to send typing: {}", e))
+                talos_error::TalosError::internal_with_source(
+                    "Failed to send typing; technical details were withheld.",
+                    e,
+                )
             })?;
 
         Ok(())
@@ -63,7 +66,7 @@ impl StreamingAdapter for TelegramStreamingAdapter {
         let bots = self.bots.read().await;
         let bot = bots
             .get(&target.account_id)
-            .ok_or_else(|| talos_error::TalosError::internal("Bot not found".to_string()))?;
+            .ok_or_else(|| talos_error::TalosError::internal("Bot not found"))?;
 
         let chat_id = Self::parse_chat_id(&target.chat_id);
         let msg_id: i32 = message_id.parse().unwrap_or(0);
@@ -71,7 +74,10 @@ impl StreamingAdapter for TelegramStreamingAdapter {
         bot.edit_message_text(chat_id, MessageId(msg_id), text)
             .await
             .map_err(|e| {
-                talos_error::TalosError::internal(format!("Failed to edit message: {}", e))
+                talos_error::TalosError::internal_with_source(
+                    "Failed to edit message; technical details were withheld.",
+                    e,
+                )
             })?;
 
         Ok(())

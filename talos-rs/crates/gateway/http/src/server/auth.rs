@@ -57,8 +57,8 @@ pub(super) async fn auth_middleware(
 
     let auth_result = match state.auth_service.verify_access_token(&token).await {
         Ok(identity) => identity,
-        Err(_) => {
-            return Ok(ApiError::new(ErrorCode::Unauthenticated).into_response());
+        Err(error) => {
+            return Ok(ApiError::from_talos_error(error).into_response());
         }
     };
 

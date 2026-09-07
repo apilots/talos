@@ -128,14 +128,14 @@ impl Tool for GrepTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let request: GrepFilesRequest = serde_json::from_value(input).map_err(|err| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("invalid grep arguments: {}", err),
             )
         })?;
         let response = run(&request, &context).await?;
         let structured = serde_json::to_value(&response).map_err(|err| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("serialize Grep response: {}", err),
             )

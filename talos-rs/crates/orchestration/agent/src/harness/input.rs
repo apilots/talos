@@ -1,11 +1,12 @@
 use talos_agent_api::{
     AgentMessage, AgentMessageBlockContent, AgentPendingInput, AgentTurnRef, AgentUserContent,
 };
+use talos_error::TalosError;
 use talos_run_control::{RunTaskCompletion, SpawnError};
 
 use super::{ActiveInvocation, ActiveOperation, Harness};
 use crate::{
-    AgentAdmission, AgentAdmissionPermit, AgentError, AgentInputParams, AgentProvider, AgentResult,
+    AgentAdmission, AgentAdmissionPermit, AgentInputParams, AgentProvider, AgentResult,
     AgentUserActionKind, AgentUserContentKind, SessionTurnResult,
 };
 
@@ -18,7 +19,8 @@ where
         self.validate_agent_id(&params.agent_id)?;
         self.validate_running_input_capabilities(&params.input)?;
         if params.input.turn_id != params.identity.turn_id {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent input turn_id does not match Agent Turn identity",
             ));
         }
@@ -53,14 +55,16 @@ where
                 return Err(error);
             }
             delivery_tx.send(()).map_err(|()| {
-                let error = AgentError::run_not_found(
+                let error = TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
                     "Agent input delivery stopped before durable admission completed",
                 );
                 permit_failure.send_replace(Some(error.clone()));
                 error
             })?;
             delivery_result_rx.await.map_err(|_| {
-                let error = AgentError::run_not_found(
+                let error = TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
                     "Agent input delivery stopped before Provider acknowledgement",
                 );
                 permit_failure.send_replace(Some(error.clone()));
@@ -96,7 +100,8 @@ where
     fn validate_content_capabilities(&self, input: &AgentMessage) -> AgentResult<()> {
         for block in &input.blocks {
             let AgentMessageBlockContent::UserContent(content) = &block.content else {
-                return Err(AgentError::input_rejected(
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
                     "Agent input messages may contain only User content blocks",
                 ));
             };
@@ -163,9 +168,12 @@ where
         if supported {
             return Ok(());
         }
-        Err(AgentError::capability_unsupported(
-            &self.inner.agent_id,
-            capability_name,
+        Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "agent `{}` does not support capability `{capability_name}`",
+                self.inner.agent_id
+            ),
         ))
     }
 
@@ -173,9 +181,12 @@ where
         if self.inner.capabilities.rich_input.contains(&kind) {
             return Ok(());
         }
-        Err(AgentError::capability_unsupported(
-            &self.inner.agent_id,
-            "richInput",
+        Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "agent `{}` does not support capability `richInput`",
+                self.inner.agent_id
+            ),
         ))
     }
 
@@ -183,31 +194,38 @@ where
         if self.inner.capabilities.user_actions.contains(&kind) {
             return Ok(());
         }
-        Err(AgentError::capability_unsupported(
-            &self.inner.agent_id,
-            "userAction",
+        Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "agent `{}` does not support capability `userAction`",
+                self.inner.agent_id
+            ),
         ))
     }
 
     fn running_invocation(&self, identity: &AgentTurnRef) -> AgentResult<ActiveInvocation> {
         let operation = self.inner.active.get(&identity.session_id).ok_or_else(|| {
-            AgentError::run_not_found("Agent input targets no live Provider invocation")
+            TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                "Agent input targets no live Provider invocation",
+            )
         })?;
         match operation.value() {
             ActiveOperation::Running(invocation) if invocation.identity == *identity => {
                 Ok(invocation.clone())
             }
-            _ => Err(AgentError::run_not_found(
+            _ => Err(TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
                 "Agent input targets no matching live Provider invocation",
             )),
         }
     }
 }
 
-fn input_task_error(error: SpawnError) -> AgentError {
+fn input_task_error(error: SpawnError) -> TalosError {
     let message = match error {
         SpawnError::Closed => "Agent run stopped accepting input delivery",
         SpawnError::CapacityExceeded => "Agent run reached its input delivery task capacity",
     };
-    AgentError::provider_error(message)
+    TalosError::new(talos_error::ErrorCode::InternalError, message)
 }

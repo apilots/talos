@@ -2,15 +2,15 @@ use super::*;
 use crate::register_core_local_tools;
 use crate::trait_impl::EchoTestTool;
 use crate::{
-    AbsolutePathBuf, MemoryGetTool, MemorySearchTool, ToolPending, ToolSandboxEnvironment,
-    ToolSearchTool,
+    AbsolutePathBuf, MemoryGetTool, MemorySearchTool, TalosToolErrorKind, ToolDispatchFailure,
+    ToolPending, ToolSandboxEnvironment, ToolSearchTool,
 };
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use talos_config::{AgentKernelConfig, ToolSandboxModeConfig};
-use talos_error::{TalosError, TalosToolErrorKind};
+use talos_error::TalosError;
 use talos_tools_policy::ToolPolicy;
 use talos_types::{
     SandboxApprovalDecision, SandboxApprovalPresentation, SandboxFileOperation, UserActionResponse,
@@ -26,24 +26,23 @@ struct PermissionGateTool {
 struct FakeMcpHandler;
 
 fn assert_tool_failure(
-    error: TalosError,
+    failure: ToolDispatchFailure,
     expected_kind: TalosToolErrorKind,
     expected_gate_source: &str,
     expected_fragment: &str,
 ) {
-    let diagnostic = error
-        .tool_failure_diagnostic()
-        .expect("expected tool failure diagnostic");
-    assert_eq!(diagnostic.kind, expected_kind);
-    assert_eq!(
-        diagnostic.gate_source.as_deref(),
-        Some(expected_gate_source)
-    );
-    let message = error.diagnostic_message();
+    let message = failure.error().diagnostic_message();
     assert!(
         message.contains(expected_fragment),
         "missing expected fragment '{expected_fragment}': {message}"
     );
+    let error = failure
+        .into_outcome()
+        .envelope()
+        .error
+        .expect("expected structured tool failure");
+    assert_eq!(error.error_kind, expected_kind);
+    assert_eq!(error.gate_source.as_deref(), Some(expected_gate_source));
 }
 
 fn test_kernel_config_with_output_limit(limit: usize) -> Arc<AgentKernelConfig> {
@@ -118,7 +117,7 @@ impl Tool for ValidationGateTool {
     }
 
     fn validate_input(&self, _input: &Value) -> TalosResult<()> {
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "validation gate rejected input".to_string(),
         ))
@@ -755,7 +754,10 @@ async fn test_registry_approves_file_write_outside_workspace_before_side_effect(
         .execute_invocation_with_context(invocation.clone(), context.clone())
         .await
         .expect_err("cancelled outside write should stop execution");
-    assert!(cancelled.to_string().contains("approval was cancelled"));
+    assert!(cancelled
+        .error()
+        .to_string()
+        .contains("approval was cancelled"));
     assert!(!marker.exists());
 
     context.set_sandbox_approval_fingerprint(
@@ -911,7 +913,9 @@ async fn test_default_registry_allows_memory_search() {
         .await
         .expect_err("MemorySearch should fail without injected memory store");
 
-    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
+    assert!(error
+        .error()
+        .is_code(talos_error::ErrorCode::ToolExecutionFailed));
 }
 
 #[test]

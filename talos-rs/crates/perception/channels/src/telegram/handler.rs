@@ -34,14 +34,12 @@ impl TelegramMessageHandler {
     }
 
     pub async fn run(self) {
-        let ctx = self.ctx.clone();
         let policy_checker = self.policy_checker.clone();
         let event_tx = self.ctx.event_tx.clone();
         let account_id = self.config.id.clone();
         let groups = self.config.groups.clone();
 
         teloxide::repl(self.bot, move |bot: Bot, msg: Message| {
-            let ctx = ctx.clone();
             let policy_checker = policy_checker.clone();
             let event_tx = event_tx.clone();
             let account_id = account_id.clone();
@@ -52,7 +50,6 @@ impl TelegramMessageHandler {
                         bot,
                         &msg,
                         text,
-                        &ctx,
                         &policy_checker,
                         &event_tx,
                         &account_id,
@@ -73,7 +70,6 @@ impl TelegramMessageHandler {
         bot: Bot,
         msg: &Message,
         text: &str,
-        _ctx: &ChannelRuntimeContext,
         policy_checker: &PolicyChecker,
         event_tx: &tokio::sync::mpsc::Sender<ChannelEvent>,
         account_id: &str,

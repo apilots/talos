@@ -68,7 +68,7 @@ describe("useSessionStreaming", () => {
 
     expect(useAppStore.getState().streams["session-1"]).toMatchObject({
       connectionState: "idle",
-      error: "Storage error: no such column: latest_turn_seq",
+      error: { code: "internalError", localization: null, message: "Storage error: no such column: latest_turn_seq" },
       isStreaming: false,
       pendingInput: undefined,
     });

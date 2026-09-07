@@ -19,9 +19,12 @@ pub(super) fn decode_subscription_terminated(
     let Some(params) = notification.params.clone() else {
         return Ok(None);
     };
-    serde_json::from_value(params)
-        .map(Some)
-        .map_err(|error| TalosError::internal(error.to_string()))
+    serde_json::from_value(params).map(Some).map_err(|error| {
+        TalosError::internal_with_source(
+            "App-server communication failed; technical details were withheld.",
+            error,
+        )
+    })
 }
 
 pub(super) fn decode_event_notification(
@@ -33,9 +36,12 @@ pub(super) fn decode_event_notification(
     if !notification.method.starts_with("timeline/") {
         return Ok(None);
     }
-    serde_json::from_value(params)
-        .map(Some)
-        .map_err(|error| TalosError::internal(error.to_string()))
+    serde_json::from_value(params).map(Some).map_err(|error| {
+        TalosError::internal_with_source(
+            "App-server communication failed; technical details were withheld.",
+            error,
+        )
+    })
 }
 
 pub(super) fn decode_message_queue_changed(
@@ -47,20 +53,30 @@ pub(super) fn decode_message_queue_changed(
     let Some(params) = notification.params.clone() else {
         return Ok(None);
     };
-    serde_json::from_value(params)
-        .map(Some)
-        .map_err(|error| TalosError::internal(error.to_string()))
+    serde_json::from_value(params).map(Some).map_err(|error| {
+        TalosError::internal_with_source(
+            "App-server communication failed; technical details were withheld.",
+            error,
+        )
+    })
 }
 
 pub(super) fn map_app_server_error(
     error: talos_app_protocol::errors::AppServerErrorBody,
 ) -> TalosError {
-    TalosError::internal_with_source("app-server JSON-RPC protocol error", error)
+    TalosError::internal_with_source(
+        format!("App-server protocol error: {}", error.message),
+        error,
+    )
 }
 
 pub(super) fn decode_api_response(value: Value) -> TalosResult<Value> {
-    let response: ApiResponse<Value> =
-        serde_json::from_value(value).map_err(|error| TalosError::internal(error.to_string()))?;
+    let response: ApiResponse<Value> = serde_json::from_value(value).map_err(|error| {
+        TalosError::internal_with_source(
+            "App-server communication failed; technical details were withheld.",
+            error,
+        )
+    })?;
     match response {
         ApiResponse::Success { data } => Ok(data),
         ApiResponse::Error { error } => Err(map_api_error(error)),
@@ -68,7 +84,7 @@ pub(super) fn decode_api_response(value: Value) -> TalosResult<Value> {
 }
 
 fn map_api_error(error: ApiError) -> TalosError {
-    TalosError::public(error.code, error.message)
+    error.into()
 }
 
 pub(super) async fn fail_pending_responses(pending_responses: &PendingResponses, message: String) {
@@ -77,7 +93,10 @@ pub(super) async fn fail_pending_responses(pending_responses: &PendingResponses,
         std::mem::take(&mut *guard)
     };
     for (_, sender) in pending {
-        let _ = sender.send(Err(TalosError::internal(message.clone())));
+        let _ = sender.send(Err(TalosError::internal(
+            "App-server connection stopped before the request completed.",
+        )
+        .context(&message)));
     }
 }
 
@@ -97,13 +116,14 @@ mod tests {
             "status": "error",
             "error": {
                 "code": "invalidCursor",
-                "message": "Invalid event cursor"
+                "message": "Invalid event cursor",
+                "localization": null
             }
         }))
         .expect_err("application error should be rejected");
 
         assert!(error.is_code(ErrorCode::InvalidCursor));
-        assert_eq!(error.diagnostic_message(), "Invalid event cursor");
+        assert_eq!(error.to_api_error().message, "Invalid event cursor");
     }
 
     #[test]

@@ -1,25 +1,51 @@
 name: talos-tui-install
 
+concurrency:
+  group: talos-tui-install-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
+  workflow_call:
+    inputs:
+      run_native:
+        description: Run the complete native installation matrix.
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      TALOS_SOURCE_READ_TOKEN:
+        required: false
   workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/talos-tui-install.yml"
+      - ".github/workflows/dispatch-release.yml"
       - "build.sh"
       - "build/scripts/verify-release-artifacts.sh"
       - "conf/**"
       - "deploy/install/**"
-      - "talos-e2e/**"
-      - "talos-rs/**"
+      - "talos-e2e/lib/**"
+      - "talos-e2e/run_e2e.sh"
+      - "talos-e2e/scripts/tui_install.sh"
+      - "talos-e2e/scenarios/15_tui_install/**"
+      - "talos-e2e/tests/tui_install_target_test.sh"
+      - "talos-rs/Cargo.toml"
   push:
+    branches:
+      - main
     paths:
       - ".github/workflows/talos-tui-install.yml"
+      - ".github/workflows/dispatch-release.yml"
       - "build.sh"
       - "build/scripts/verify-release-artifacts.sh"
       - "conf/**"
       - "deploy/install/**"
-      - "talos-e2e/**"
-      - "talos-rs/**"
+      - "talos-e2e/lib/**"
+      - "talos-e2e/run_e2e.sh"
+      - "talos-e2e/scripts/tui_install.sh"
+      - "talos-e2e/scenarios/15_tui_install/**"
+      - "talos-e2e/tests/tui_install_target_test.sh"
+      - "talos-rs/Cargo.toml"
 
 permissions:
   contents: read
@@ -46,6 +72,7 @@ jobs:
 
   native-install-e2e:
     name: Install ${{ matrix.platform }}-${{ matrix.arch }}
+    if: ${{ inputs.run_native || github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
       matrix:

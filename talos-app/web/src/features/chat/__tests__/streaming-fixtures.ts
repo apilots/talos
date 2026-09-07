@@ -18,17 +18,19 @@ import type {
   TimelineEvent,
 } from "@talos/sdk-core";
 
-export function baseEvent(payload: AgentEventPayload, sequence: number): TimelineEvent {
+type AgentTimelineEvent = TimelineEvent & { event: Extract<TimelineEvent["event"], { type: "agent" }> };
+
+export function baseEvent(payload: AgentEventPayload, sequence: number): AgentTimelineEvent {
   return {
     eventId: `ev_${sequence}`,
     eventSeq: sequence,
     persistedAt: sequence,
-    event: {
+    event: { type: "agent", data: {
       identity: { sessionId: "sess-1", turnId: "turn-1" },
       sequence,
       occurredAt: sequence,
       payload,
-    },
+    } },
   };
 }
 
@@ -37,7 +39,7 @@ export function itemStarted(
   kind: "assistant_text" | "tool_call" | "user_input" | "reasoning",
   phase: "commentary" | "final_answer" | "pending" | "acting" | "input" | "thinking",
   sequence: number,
-): TimelineEvent {
+): AgentTimelineEvent {
   const content: AgentMessageBlockContent = kind === "tool_call"
     ? {
         type: "toolCall",
@@ -65,8 +67,8 @@ export function itemStarted(
   }, sequence);
 }
 
-export function withMessage(event: TimelineEvent, messageId: string, turnId: string): TimelineEvent {
-  const payload = event.event.payload;
+export function withMessage(event: AgentTimelineEvent, messageId: string, turnId: string): AgentTimelineEvent {
+  const payload = event.event.data.payload;
   if (
     payload.type === "messageBlockStarted" ||
     payload.type === "messageBlockDelta" ||
@@ -80,9 +82,11 @@ export function withMessage(event: TimelineEvent, messageId: string, turnId: str
   return {
     ...event,
     event: {
-      ...event.event,
-      identity: { ...event.event.identity, turnId },
+      type: "agent", data: {
+      ...event.event.data,
+      identity: { ...event.event.data.identity, turnId },
       payload,
+      },
     },
   };
 }
@@ -91,7 +95,7 @@ export function assistantTextCommitted(
   itemId: string,
   phase: "commentary" | "final_answer",
   sequence: number,
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "messageBlockDelta",
     data: {
@@ -108,7 +112,7 @@ export function userInputStarted(
   sequence: number,
   fileIds: string[] = [],
   messageId = `msg-${itemId}`,
-): TimelineEvent {
+): AgentTimelineEvent {
   const blocks: AgentMessageBlock[] = [
     block(itemId, { type: "userContent", data: { type: "text", text } }, "running", sequence, null),
     ...fileIds.map((fileId, index) =>
@@ -133,7 +137,7 @@ export function itemCompleted(
   sequence: number,
   kind: "assistant_text" | "tool_call" | "user_input" | "reasoning" = "assistant_text",
   phase: AgentAssistantTextPhase = "pending",
-): TimelineEvent {
+): AgentTimelineEvent {
   const content: AgentMessageBlockContent = kind === "tool_call"
     ? {
         type: "toolCall",
@@ -163,7 +167,7 @@ export function contextCompactionCompleted(
   sequence: number,
   outcome: ContextCompactionOutcome,
   messageText: string,
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "messageBlockCompleted",
     data: {
@@ -182,7 +186,7 @@ export function contextCompactionCompleted(
   }, sequence);
 }
 
-export function textDelta(itemId: string, text: string, sequence: number): TimelineEvent {
+export function textDelta(itemId: string, text: string, sequence: number): AgentTimelineEvent {
   return baseEvent({
     type: "messageBlockDelta",
     data: {
@@ -193,7 +197,7 @@ export function textDelta(itemId: string, text: string, sequence: number): Timel
   }, sequence);
 }
 
-export function toolProgress(itemId: string, text: string, sequence: number): TimelineEvent {
+export function toolProgress(itemId: string, text: string, sequence: number): AgentTimelineEvent {
   return baseEvent({
     type: "messageBlockDelta",
     data: {
@@ -211,7 +215,7 @@ export function toolResult(
   itemId: string,
   content: string | TalosContentItem[],
   sequence: number,
-): TimelineEvent {
+): AgentTimelineEvent {
   const result = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   return baseEvent({
     type: "messageBlockCompleted",
@@ -242,7 +246,7 @@ export function contextCompactionStarted(
   messageText: string | null,
   sequence: number,
   trigger: ContextCompactionTrigger = "threshold_exceeded",
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "messageBlockStarted",
     data: {
@@ -268,7 +272,7 @@ export function contextCompactionDelta(
   messageText: string | null,
   sequence: number,
   metrics: ContextCompactionMetrics | null = null,
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "messageBlockDelta",
     data: {
@@ -291,7 +295,7 @@ export function turnMetrics(
     toolErrors: number;
     total_tokens: number;
   }> = {},
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "metricsUpdated",
     data: executionMetrics(overrides.total_tokens ?? 0, overrides),
@@ -301,7 +305,7 @@ export function turnMetrics(
 export function turnCompleted(
   sequence: number,
   stopReason: AgentStopReason = "endTurn",
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "turnCompleted",
     data: { stopReason },
@@ -311,7 +315,7 @@ export function turnCompleted(
 export function waitingForUserAction(
   sequence: number,
   action: PendingUserAction = pendingUserAction(),
-): TimelineEvent {
+): AgentTimelineEvent {
   return baseEvent({
     type: "waitingForInput",
     data: { type: "userAction", action },
@@ -354,6 +358,7 @@ export function sessionHistory(
   return {
     data: [{
       identity: { sessionId: "sess-1", turnId: "turn-1" },
+      notices: [],
       completedEventSeq: 9,
       completedAt: 2,
       result: {

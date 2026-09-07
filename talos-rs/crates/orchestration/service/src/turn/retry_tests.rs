@@ -9,11 +9,12 @@ async fn retry_accepts_the_exact_initial_message_of_a_failed_canonical_turn() {
         store.as_ref(),
         "message-failed",
         CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
-            error: AgentErrorInfo {
+            error: talos_error::ApiError {
                 code: talos_error::ErrorCode::InternalError,
                 message: "failed".to_string(),
-                retryable: true,
+                localization: None,
             },
+            retryable: true,
         }),
     )
     .await;

@@ -1,6 +1,6 @@
 # Refactor 040：Agent Provider SPI 与全链路概念收敛
 
-状态：实现及合并验收中。本文合并原 Refactor 040 与 Refactor 044，作为本 PR 唯一设计说明；执行阶段、测试结果和未关闭事项只记录在根目录 IMPLEMENTATION_PLAN.md。
+Status: implementation complete; merge review pending. This document consolidates Refactors 040 and 044. Verification evidence and open review items are retained in PR #16.
 
 ## 1. 目标与边界
 

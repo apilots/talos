@@ -24,22 +24,15 @@ pub(super) struct ApiError {
 
 impl ApiError {
     pub(super) fn new(code: ErrorCode) -> Self {
-        Self {
-            status: status_for_error_code(code),
-            body: PublicApiError::new(code),
-        }
+        Self::from_talos_error(TalosError::new(code, code.default_message()))
     }
 
     pub(super) fn from_talos_error(error: TalosError) -> Self {
-        if error.is_internal() {
-            tracing::error!(
-                context = error.diagnostic_message(),
-                source = ?std::error::Error::source(&error),
-                location = %error.location(),
-                "internal HTTP application error"
-            );
+        talos_logging::report_error(&error);
+        Self {
+            status: status_for_error_code(error.error_code()),
+            body: error.to_api_error(),
         }
-        Self::new(error.to_api_error().code)
     }
 }
 
@@ -106,13 +99,57 @@ pub(super) async fn normalize_extractor_rejection(request: Request, next: Next) 
         return response;
     }
 
-    let code = match response.status() {
-        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => ErrorCode::InvalidRequest,
-        StatusCode::PAYLOAD_TOO_LARGE => ErrorCode::UploadTooLarge,
-        StatusCode::UNSUPPORTED_MEDIA_TYPE => ErrorCode::UnsupportedMediaType,
+    let (code, message) = match response.status() {
+        StatusCode::BAD_REQUEST => (
+            ErrorCode::InvalidRequest,
+            "The request could not be parsed. Check its JSON, query parameters, and path values.",
+        ),
+        StatusCode::UNPROCESSABLE_ENTITY => (
+            ErrorCode::InvalidRequest,
+            "The request body does not match the expected fields or types.",
+        ),
+        StatusCode::PAYLOAD_TOO_LARGE => (
+            ErrorCode::UploadTooLarge,
+            "The request body exceeds the allowed upload size.",
+        ),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => (
+            ErrorCode::UnsupportedMediaType,
+            "The request Content-Type is not supported by this endpoint.",
+        ),
+        StatusCode::NOT_FOUND => (
+            ErrorCode::ResourceNotFound,
+            "The requested API endpoint was not found.",
+        ),
+        StatusCode::METHOD_NOT_ALLOWED => (
+            ErrorCode::InvalidRequest,
+            "The HTTP method is not supported for this endpoint.",
+        ),
+        status if status.is_server_error() => (
+            ErrorCode::InternalError,
+            "The API request failed unexpectedly; technical details were withheld.",
+        ),
         _ => return response,
     };
-    ApiError::new(code).into_response()
+    let error = TalosError::new(code, message);
+    talos_logging::report_error(&error);
+    let (mut parts, _) = response.into_parts();
+    let (json_parts, body) = Json(ApiResponse::<()>::error(error.to_api_error()))
+        .into_response()
+        .into_parts();
+    // Status and transport headers belong to the framework. Only representation
+    // metadata becomes invalid when replacing its body with the shared envelope.
+    for name in [
+        header::CONTENT_LENGTH,
+        header::CONTENT_ENCODING,
+        header::CONTENT_RANGE,
+        header::ETAG,
+        header::LAST_MODIFIED,
+        header::CONTENT_DISPOSITION,
+    ] {
+        parts.headers.remove(name);
+    }
+    parts.headers.extend(json_parts.headers);
+    Response::from_parts(parts, body)
 }
 
 impl IntoResponse for ApiError {

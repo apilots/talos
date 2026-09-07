@@ -129,24 +129,27 @@ impl BailianProvider {
             .json(&bailian_req)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::internal(format!(
-                "Bailian API error: {} - {}",
-                status, error_text
-            )));
+            return Err(talos_llm_provider::http_response_error(
+                "Bailian", &response,
+            ));
         }
 
-        let bailian_resp: chat_protocol::ChatCompletionResponse = response
-            .json()
-            .await
-            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
+        let bailian_resp: chat_protocol::ChatCompletionResponse =
+            response.json().await.map_err(|e| {
+                TalosError::internal_with_source(
+                    "Failed to parse response; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         chat_protocol::chat_response(bailian_resp, "Bailian")
     }
@@ -164,18 +167,18 @@ impl BailianProvider {
             .json(&bailian_req)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::internal(format!(
-                "Bailian API error: {} - {}",
-                status, error_text
-            )));
+            return Err(talos_llm_provider::http_response_error(
+                "Bailian", &response,
+            ));
         }
 
         Ok(response)
@@ -202,8 +205,8 @@ impl LlmProvider for BailianProvider {
             .iter()
             .any(|attachment| attachment.kind == AttachmentKind::File)
         {
-            return Err(TalosError::file_error(
-                talos_error::TalosFileErrorKind::UnsupportedAttachment,
+            return Err(TalosError::new(
+                talos_error::ErrorCode::UnsupportedAttachment,
                 "Bailian Chat Completions does not support file attachments",
             ));
         }

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use dashmap::mapref::entry::Entry;
 use talos_agent_api::{AgentEventPayload, AgentStopReason, AgentTurnRef, AgentTurnStarted};
+use talos_error::TalosError;
 use talos_run_control::{
     ActiveRunControl, CancellationPolicy, RunControlScope, RunTaskCompletion, RunTermination,
 };
@@ -14,10 +15,10 @@ use super::settlement::{
 };
 use super::{ActiveOperation, Harness, SessionOperationKind, RUN_COMPLETION_TIMEOUT};
 use crate::{
-    event_sink::AgentEventPipeline, AgentAdmission, AgentAdmissionPermit, AgentContext, AgentError,
-    AgentErrorKind, AgentEventSink, AgentOperationControl, AgentProgressEventReceiver,
-    AgentProvider, AgentResult, AgentRunExecution, AgentRunSettlement, AgentRunSettlementReceiver,
-    AgentSession, AgentSessionContext, SessionCompactionParams,
+    event_sink::AgentEventPipeline, AgentAdmission, AgentAdmissionPermit, AgentContext,
+    AgentEventSink, AgentOperationControl, AgentProgressEventReceiver, AgentProvider, AgentResult,
+    AgentRunExecution, AgentRunSettlement, AgentRunSettlementReceiver, AgentSession,
+    AgentSessionContext, SessionCompactionParams,
 };
 
 struct CompactionDriver {
@@ -38,9 +39,12 @@ where
     pub async fn compact_session(&self, context: AgentContext) -> AgentResult<AgentRunExecution> {
         self.validate_agent_id(&context.session.agent_id)?;
         if !self.inner.capabilities.context_compaction {
-            return Err(AgentError::capability_unsupported(
-                &self.inner.agent_id,
-                "contextCompaction",
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "agent `{}` does not support capability `contextCompaction`",
+                    self.inner.agent_id
+                ),
             ));
         }
         let identity = context.identity();
@@ -63,7 +67,10 @@ where
         let (start_tx, start_rx) = oneshot::channel();
         let permit = AgentAdmissionPermit::new(async move {
             start_tx.send(()).map_err(|_| {
-                AgentError::run_not_found("admitted Agent compaction is no longer active")
+                TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    "admitted Agent compaction is no longer active",
+                )
             })
         });
         let (settlement_tx, settlement_rx) = oneshot::channel();
@@ -119,8 +126,8 @@ where
         for control in active {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                return Err(AgentError::new(
-                    AgentErrorKind::Timeout,
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::Timeout,
                     "Agent Harness shutdown timed out",
                 ));
             }
@@ -132,7 +139,10 @@ where
             )
             .await
             .map_err(|_| {
-                AgentError::new(AgentErrorKind::Timeout, "Agent Harness shutdown timed out")
+                TalosError::new(
+                    talos_error::ErrorCode::Timeout,
+                    "Agent Harness shutdown timed out",
+                )
             })?;
             if !cleanup_confirmed(&settlement) {
                 return Err(cleanup_error(&settlement));
@@ -150,8 +160,8 @@ where
                     .await
                     .is_err()
             {
-                return Err(AgentError::new(
-                    AgentErrorKind::Timeout,
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::Timeout,
                     "Agent Harness shutdown timed out waiting for active operations",
                 ));
             }
@@ -208,8 +218,13 @@ where
             .map_err(spawn_error)?;
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         let result = match tokio::time::timeout(remaining, task).await {
-            Ok(result) => result
-                .map_err(|_| AgentError::provider_error("Agent Provider shutdown task stopped"))?,
+            Ok(result) => result.map_err(|error| {
+                TalosError::from_source(
+                    talos_error::ErrorCode::InternalError,
+                    "Agent Provider shutdown task stopped",
+                    error,
+                )
+            })?,
             Err(_) => {
                 let settlement = control
                     .settle(RunTermination::Cancelled {
@@ -221,8 +236,8 @@ where
                 if !cleanup_confirmed(&settlement) {
                     return Err(cleanup_error(&settlement));
                 }
-                return Err(AgentError::new(
-                    AgentErrorKind::Timeout,
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::Timeout,
                     "Agent Harness shutdown timed out",
                 ));
             }
@@ -251,8 +266,8 @@ where
         tokio::select! {
             biased;
             () = control.cancellation().requested() => {
-                let _ = settlement_tx.send(Err(AgentError::new(
-                    AgentErrorKind::Interrupted,
+                let _ = settlement_tx.send(Err(TalosError::new(
+                    talos_error::ErrorCode::Cancelled,
                     "Agent compaction was cancelled before Provider start",
                 )));
                 self.remove_exact(&identity);
@@ -260,7 +275,7 @@ where
             }
             start = start_rx => {
                 if start.is_err() {
-                    let _ = settlement_tx.send(Err(AgentError::run_not_found(
+                    let _ = settlement_tx.send(Err(TalosError::new(talos_error::ErrorCode::ResourceNotFound,
                         "Agent compaction start permit was dropped",
                     )));
                     self.remove_exact(&identity);
@@ -299,6 +314,16 @@ where
             })
             .await;
         if !cleanup_confirmed(&lifecycle) {
+            match provider_result {
+                Ok(Err(error)) => talos_logging::report_error(&error),
+                Err(error) => {
+                    talos_logging::report_error(&talos_error::TalosError::internal_with_source(
+                        "Agent Provider compaction stopped before cleanup confirmation",
+                        error,
+                    ))
+                }
+                Ok(Ok(_)) => {}
+            }
             self.mark_cleanup_pending(&identity, control, &lifecycle);
             let _ = settlement_tx.send(Err(cleanup_error(&lifecycle)));
             return;
@@ -313,8 +338,10 @@ where
                 }
             }
             Ok(Err(error)) => settle_failure(&pipeline, error).await,
-            Err(_) => Err(AgentError::provider_error(
+            Err(error) => Err(TalosError::from_source(
+                talos_error::ErrorCode::InternalError,
                 "Agent Provider compaction task stopped",
+                error,
             )),
         };
         let _ = settlement_tx.send(result);
@@ -385,7 +412,10 @@ where
             .accepting
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            return Err(AgentError::provider_error("Agent Harness is shutting down"));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "Agent Harness is shutting down",
+            ));
         }
         let operation_id = format!("session_operation_{}", Uuid::new_v4().simple());
         let control = Arc::new(ActiveRunControl::new(RunControlScope::SessionOperation {
@@ -417,8 +447,8 @@ where
                 (operation_id, control, Some(previous))
             }
             Entry::Occupied(_) => {
-                return Err(AgentError::new(
-                    AgentErrorKind::ActiveTurnRunning,
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::ActiveTurnRunning,
                     format!("session `{session_id}` already has an active Agent operation"),
                 ));
             }
@@ -429,7 +459,10 @@ where
             .load(std::sync::atomic::Ordering::Acquire)
         {
             self.restore_session_operation(session_id, &reservation.0, reservation.2.clone());
-            return Err(AgentError::provider_error("Agent Harness is shutting down"));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "Agent Harness is shutting down",
+            ));
         }
         Ok(reservation)
     }

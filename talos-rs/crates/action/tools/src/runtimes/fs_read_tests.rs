@@ -2,6 +2,27 @@ use super::*;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 
+#[test]
+fn missing_path_retains_io_source_without_disclosing_absolute_path() {
+    use std::error::Error;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("private-path-sentinel");
+    let error = normalize_existing_tool_path(&path).unwrap_err();
+    assert_eq!(
+        error
+            .source()
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .map(std::io::Error::kind),
+        Some(std::io::ErrorKind::NotFound)
+    );
+    assert!(!error
+        .to_api_error()
+        .message
+        .contains("private-path-sentinel"));
+    assert!(error.diagnostic_message().contains("private-path-sentinel"));
+}
+
 #[cfg(unix)]
 #[test]
 fn requested_read_access_resolves_a_symlink_to_its_target() {

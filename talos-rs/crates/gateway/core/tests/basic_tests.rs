@@ -76,22 +76,17 @@ impl AgentCoordinator for RecordingHandler {
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         let identity = params.context.identity();
         let (pipeline, _sink, progress_rx) = AgentEventPipeline::fresh(identity);
-        let mut admission_events = vec![pipeline
-            .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
-            .await
-            .map_err(talos_agent::AgentError::into_talos_error)?];
-        admission_events.extend(
+        let mut admission_events = vec![
             pipeline
-                .record_user_message(params.input)
-                .await
-                .map_err(talos_agent::AgentError::into_talos_error)?,
-        );
+                .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+                .await?,
+        ];
+        admission_events.extend(pipeline.record_user_message(params.input).await?);
         let terminal = pipeline
             .record(AgentEventPayload::TurnCompleted(AgentTurnCompleted {
                 stop_reason: talos_agent_api::AgentStopReason::EndTurn,
             }))
-            .await
-            .map_err(talos_agent::AgentError::into_talos_error)?;
+            .await?;
         let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
         Ok(AgentRunExecution {
             admission: AgentAdmission {
@@ -99,11 +94,17 @@ impl AgentCoordinator for RecordingHandler {
                 permit: AgentAdmissionPermit::new(async move {
                     settlement_tx
                         .send(Ok(AgentRunSettlement::Finished {
+                            result: Ok(()),
                             event: terminal,
                             messages: Vec::new(),
                             metrics: AgentRunMetrics::default(),
                         }))
-                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                        .map_err(|_| {
+                            talos_error::TalosError::new(
+                                talos_error::ErrorCode::InternalError,
+                                "test receiver",
+                            )
+                        })?;
                     Ok(())
                 }),
             },

@@ -6,12 +6,14 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { AppProtocol } from "@talos/sdk-browser";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 import type { ComposerAttachmentItem } from "./useComposerAttachments";
 
 interface ComposerAttachmentTrayProps {
   disabled: boolean;
-  error: string | null;
+  error: AppProtocol.ApiError | string | null;
   items: ComposerAttachmentItem[];
   onRemove: (id: string) => void;
 }
@@ -107,6 +109,7 @@ export function ComposerAttachmentTray({
           {items.map((item) => {
             const filename = itemFilename(item);
             const mimeType = itemMimeType(item);
+            const failure = item.status === "failed" ? apiErrorMessage(item.error) : undefined;
             return (
               <div
                 className="flex min-w-0 max-w-full basis-[220px] items-center gap-2.5 rounded-xl border border-border/75 bg-background/55 p-2 pr-2.5"
@@ -127,10 +130,10 @@ export function ComposerAttachmentTray({
                     className={`block truncate text-[10px] uppercase tracking-[0.08em] ${
                       item.status === "failed" ? "text-danger" : "text-muted"
                     }`}
-                    title={item.status === "failed" ? item.error : undefined}
+                    title={failure}
                   >
                     {item.status === "failed"
-                      ? `${t("attachmentUploadFailed")}: ${item.error}`
+                      ? `${t("attachmentUploadFailed")}: ${failure}`
                       : fileTypeLabel(filename)}
                   </span>
                 </span>
@@ -169,7 +172,7 @@ export function ComposerAttachmentTray({
       ) : null}
       {error ? (
         <div className="pt-2 text-xs text-danger" role="status">
-          {error}
+          {typeof error === "string" ? error : apiErrorMessage(error)}
         </div>
       ) : null}
     </div>

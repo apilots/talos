@@ -246,9 +246,14 @@ async fn queued_input_returns_durable_acceptance_when_provider_delivery_later_fa
     let queued = message_queue
         .add("s1", test_user_input("queued steer"))
         .unwrap();
-    agent_execution.input_permit_error.lock().unwrap().replace(
-        talos_agent::AgentError::provider_error("Provider stopped before accepting live input"),
-    );
+    agent_execution
+        .input_permit_error
+        .lock()
+        .unwrap()
+        .replace(talos_error::TalosError::new(
+            talos_error::ErrorCode::InternalError,
+            "Provider stopped before accepting live input",
+        ));
 
     service
         .steer_queued_message(
@@ -348,7 +353,7 @@ async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them(
         .input_error
         .lock()
         .unwrap()
-        .replace(TalosError::public(
+        .replace(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "active turn ended before accepting the message".to_string(),
         ));

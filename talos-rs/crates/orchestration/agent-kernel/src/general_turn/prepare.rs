@@ -70,12 +70,10 @@ fn build_prompt_builder<'a>(
         .user_input(input.to_string());
 
     let skill_options = skill_options.ok_or_else(|| {
-        TalosError::internal(
-            "skill options must be provided by the orchestration layer".to_string(),
-        )
+        TalosError::internal("skill options must be provided by the orchestration layer")
     })?;
     let roots = skill_options.roots.ok_or_else(|| {
-        TalosError::internal("skill roots must be provided by the orchestration layer".to_string())
+        TalosError::internal("skill roots must be provided by the orchestration layer")
     })?;
     let provider = std::sync::Arc::new(LocalSkillProvider::new(roots));
     builder = builder.skills(
@@ -385,7 +383,7 @@ async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[Ker
 }
 
 pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
-    talos_error::TalosError::public(talos_error::ErrorCode::ContextCompactionFailed, format!(
+    talos_error::TalosError::new(talos_error::ErrorCode::ContextCompactionFailed, format!(
         "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
     ))
 }

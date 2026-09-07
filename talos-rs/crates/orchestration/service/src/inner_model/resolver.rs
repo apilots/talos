@@ -21,8 +21,10 @@ pub fn resolve_inner_model_ref(
     {
         return Ok(resolved);
     }
-    Err(TalosError::public(
-        talos_error::ErrorCode::ProviderUnavailable,
-        format!("{}:{}", resolved.provider, resolved.id),
+    Err(TalosError::localized(
+        talos_error::ErrorLocalization::ModelNotConfigured {
+            provider: resolved.provider,
+            model: resolved.id,
+        },
     ))
 }

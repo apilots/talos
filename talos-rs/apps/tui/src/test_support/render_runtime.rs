@@ -94,3 +94,11 @@ fn text_block(
         completed_at: (status == AgentMessageBlockStatus::Completed).then_some(2),
     }
 }
+pub(crate) fn interactive_transcript_text(app: &crate::TuiApp) -> String {
+    app.render_runtime
+        .interactive_projection_lines()
+        .into_iter()
+        .map(|line| line.plain_text())
+        .collect::<Vec<_>>()
+        .join("\n")
+}

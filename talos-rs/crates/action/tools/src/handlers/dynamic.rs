@@ -66,7 +66,7 @@ impl ToolHandler for DynamicToolHandler {
         context: ToolDispatchContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         let ToolCallPayload::Function { arguments } = invocation.payload else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!(
                     "Dynamic tool '{}' requires function payload",

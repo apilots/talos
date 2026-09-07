@@ -34,3 +34,9 @@ tracing = { workspace = true }
 
 # Utilities
 thiserror = { workspace = true }
+
+[dev-dependencies]
+http = "1"
+
+[lints]
+workspace = true

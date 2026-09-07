@@ -17,3 +17,6 @@ talos-error.workspace = true
 talos-knowledge-format.workspace = true
 talos-types.workspace = true
 thiserror.workspace = true
+
+[lints]
+workspace = true

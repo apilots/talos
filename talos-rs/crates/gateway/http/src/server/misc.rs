@@ -118,7 +118,7 @@ fn parse_config_path(path: &str) -> Result<ConfigPath, ApiError> {
     match path {
         "llm" => Ok(ConfigPath::Llm),
         "webSearch" | "web-search" => Ok(ConfigPath::WebSearch),
-        other => Err(ApiError::from_talos_error(talos_error::TalosError::public(
+        other => Err(ApiError::from_talos_error(talos_error::TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("unsupported config path: {}", other),
         ))),

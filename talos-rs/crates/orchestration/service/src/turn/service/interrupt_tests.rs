@@ -103,7 +103,7 @@ async fn interrupt_admits_the_exact_canonical_turn_before_harness_control() {
 async fn rejected_harness_interrupt_restores_the_canonical_running_state() {
     let agent_execution = Arc::new(RecordingAgentExecution::default());
     let coordinator = Arc::new(RecordingAgentCoordinator {
-        interrupt_error: Mutex::new(Some(TalosError::public(
+        interrupt_error: Mutex::new(Some(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "Harness rejected interruption",
         ))),

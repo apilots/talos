@@ -9,7 +9,7 @@ use talos_llm_provider::{
     validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatRequest,
     ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// OpenAI wire protocol selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,24 +191,25 @@ impl OpenAIProvider {
             .json(&openai_req)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            error!("OpenAI API error: {status} - {error_text}");
-            return Err(TalosError::internal(format!(
-                "OpenAI API error: {status} - {error_text}"
-            )));
+            return Err(talos_llm_provider::http_response_error("OpenAI", &response));
         }
 
-        let openai_resp: chat_protocol::ChatCompletionResponse = response
-            .json()
-            .await
-            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
+        let openai_resp: chat_protocol::ChatCompletionResponse =
+            response.json().await.map_err(|e| {
+                TalosError::internal_with_source(
+                    "Failed to parse response; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         chat_protocol::chat_response(openai_resp, "OpenAI")
     }
@@ -229,24 +230,25 @@ impl OpenAIProvider {
             .json(&openai_req)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            error!("OpenAI API error: {status} - {error_text}");
-            return Err(TalosError::internal(format!(
-                "OpenAI API error: {status} - {error_text}"
-            )));
+            return Err(talos_llm_provider::http_response_error("OpenAI", &response));
         }
 
-        let openai_resp: responses_protocol::ResponsesResponse = response
-            .json()
-            .await
-            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
+        let openai_resp: responses_protocol::ResponsesResponse =
+            response.json().await.map_err(|e| {
+                TalosError::internal_with_source(
+                    "Failed to parse response; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         Ok(responses_protocol::chat_response(openai_resp))
     }
@@ -257,13 +259,21 @@ impl OpenAIProvider {
             OpenAIProtocol::Chat => (
                 self.endpoint_url("chat/completions"),
                 serde_json::to_value(Self::build_request(request, true)?).map_err(|e| {
-                    TalosError::internal(format!("Failed to serialize request: {}", e))
+                    TalosError::internal_with_source(
+                        "Failed to serialize request; technical details were withheld.",
+                        e,
+                    )
                 })?,
             ),
             OpenAIProtocol::Responses => (
                 self.endpoint_url("responses"),
                 serde_json::to_value(Self::responses_request(request, Some(true))?).map_err(
-                    |e| TalosError::internal(format!("Failed to serialize request: {}", e)),
+                    |e| {
+                        TalosError::internal_with_source(
+                            "Failed to serialize request; technical details were withheld.",
+                            e,
+                        )
+                    },
                 )?,
             ),
         };
@@ -276,17 +286,16 @@ impl OpenAIProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::internal(format!(
-                "OpenAI API error: {status} - {error_text}"
-            )));
+            return Err(talos_llm_provider::http_response_error("OpenAI", &response));
         }
 
         Ok(response)

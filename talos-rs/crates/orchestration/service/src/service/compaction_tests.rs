@@ -1,6 +1,64 @@
 use super::*;
 
 #[tokio::test]
+async fn explicit_compaction_returns_original_failure_after_durable_settlement() {
+    let original = TalosError::from_source(
+        talos_error::ErrorCode::ProviderUnavailable,
+        "Compaction provider disconnected",
+        std::io::Error::other("original transport failure"),
+    );
+    let coordinator = Arc::new(TestAgentCoordinator {
+        cancel_mode: TestCancelMode::Cancelled,
+        cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+        compaction_usage: TokenUsage::default(),
+        compaction_error: Some(original.clone()),
+    });
+    let (service, _) = test_application_with_coordinator(
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
+        }),
+        coordinator,
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("compact-failed", request_source(), None),
+        )
+        .await
+        .expect("create session");
+    let error = service
+        .compact_session(&actor, "compact-failed")
+        .await
+        .expect_err("return failure");
+    assert_eq!(error.error_code(), original.error_code());
+    assert!(std::ptr::eq(error.backtrace(), original.backtrace()));
+    assert!(std::error::Error::source(&error)
+        .unwrap()
+        .is::<std::io::Error>());
+    let recovery = service
+        .events
+        .recover_timeline("compact-failed", None, 16)
+        .await
+        .unwrap();
+    assert!(matches!(
+        recovery
+            .replay
+            .events
+            .last()
+            .unwrap()
+            .event
+            .agent_event()
+            .unwrap()
+            .payload,
+        CanonicalAgentEventPayload::TurnFailed(_)
+    ));
+    assert_eq!(recovery.active_turn, None);
+}
+
+#[tokio::test]
 async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_context() {
     let compaction_usage = TokenUsage {
         input_tokens: 3,
@@ -12,6 +70,7 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
         cancel_mode: TestCancelMode::Cancelled,
         cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
         compaction_usage: compaction_usage.clone(),
+        compaction_error: None,
     });
     let (service, store) = test_application_with_coordinator(
         Arc::new(TestAgentExecution {
@@ -106,35 +165,37 @@ async fn explicit_compaction_persists_one_canonical_lifecycle() {
     let events = recovery.replay.events;
     assert_eq!(events.len(), 7);
     assert!(matches!(
-        events[0].event.payload,
+        events[0].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::TurnStarted(_)
     ));
     assert!(matches!(
-        events[1].event.payload,
+        events[1].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::MessageStarted(_)
     ));
     assert!(matches!(
-        events[2].event.payload,
+        events[2].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::MessageBlockStarted(_)
     ));
     assert!(matches!(
-        events[3].event.payload,
+        events[3].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::MessageBlockDelta(_)
     ));
     assert!(matches!(
-        events[4].event.payload,
+        events[4].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::MessageBlockCompleted(_)
     ));
     assert!(matches!(
-        events[5].event.payload,
+        events[5].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::MessageCompleted(_)
     ));
     assert!(matches!(
-        events[6].event.payload,
+        events[6].event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::TurnCompleted(_)
     ));
-    let identity = &events[0].event.identity;
+    let identity = &events[0].event.agent_event().unwrap().identity;
     assert_eq!(identity.session_id, "session-compact-events");
-    assert!(events.iter().all(|event| event.event.identity == *identity));
+    assert!(events
+        .iter()
+        .all(|event| event.event.agent_event().unwrap().identity == *identity));
     assert_eq!(recovery.active_turn, None);
 }

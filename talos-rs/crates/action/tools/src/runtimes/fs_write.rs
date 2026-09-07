@@ -3,7 +3,7 @@ use std::path::Path;
 use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::fs_read::{normalize_write_scope, resolve_tool_path};
-use crate::runtimes::map_sandbox_file_error;
+use crate::runtimes::map_sandbox_error;
 use crate::state::sha256_hex;
 use crate::ToolContext;
 use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
@@ -41,7 +41,7 @@ pub fn requested_file_system_access(
         .as_deref()
         .or(request.file_path.as_deref())
         .ok_or_else(|| {
-            TalosError::public(talos_error::ErrorCode::InvalidRequest, "path is required")
+            TalosError::new(talos_error::ErrorCode::InvalidRequest, "path is required")
         })?;
     let path = resolve_tool_path(raw_path, context)?;
     let scope = normalize_write_scope(&path)?;
@@ -50,7 +50,7 @@ pub fn requested_file_system_access(
         vec![scope],
     )
     .map_err(|error| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             error.to_string(),
         )
@@ -66,7 +66,7 @@ pub async fn run(
         .as_deref()
         .or(request.file_path.as_deref())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "path is required".to_string(),
             )
@@ -83,13 +83,13 @@ pub async fn run(
         file_system
             .create_directory_all(parent)
             .await
-            .map_err(map_sandbox_file_error)?;
+            .map_err(map_sandbox_error)?;
     }
 
     file_system
         .write(&path, request.content.as_bytes())
         .await
-        .map_err(map_sandbox_file_error)?;
+        .map_err(map_sandbox_error)?;
     context
         .read_file_state()
         .record_mutation_content(path.clone(), &request.content);
@@ -112,7 +112,7 @@ pub fn ensure_read_state_is_fresh(
     context: &ToolContext,
 ) -> TalosResult<()> {
     let entry = context.read_file_state().get(path).ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!(
                 "file `{}` must be read before write or edit",
@@ -122,7 +122,7 @@ pub fn ensure_read_state_is_fresh(
     })?;
     let current_hash = sha256_hex(current_content.as_bytes());
     if entry.content_hash != current_hash || entry.size_bytes != current_content.len() as u64 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!(
                 "file `{}` changed since last read; read it again before modifying",

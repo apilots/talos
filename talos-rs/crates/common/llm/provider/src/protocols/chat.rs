@@ -1,9 +1,8 @@
 use crate::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningBlock,
-    ReasoningContinuation, ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice,
-    Usage,
+    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningContinuation,
+    ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -21,7 +20,7 @@ mod types;
 mod tests;
 
 pub use content::content_text;
-use reasoning::reasoning_fields;
+use reasoning::{reasoning_fields, response_reasoning};
 pub use tool_definitions::tools;
 pub use types::*;
 
@@ -266,10 +265,10 @@ pub fn chat_response(
     response: ChatCompletionResponse,
     provider_name: &str,
 ) -> TalosResult<ChatResponse> {
-    let choice =
-        response.choices.into_iter().next().ok_or_else(|| {
-            TalosError::internal(format!("No choices in {provider_name} response"))
-        })?;
+    let choice = response.choices.into_iter().next().ok_or_else(|| {
+        TalosError::internal("No choices in response.")
+            .context(format!("No choices in {provider_name} response"))
+    })?;
 
     let usage_value = response.usage.unwrap_or(ChatCompletionUsage {
         prompt_tokens: 0,
@@ -288,46 +287,6 @@ pub fn chat_response(
         finish_reason: choice.finish_reason,
         tool_calls: tool_calls(choice.message.tool_calls),
     })
-}
-
-fn response_reasoning(message: &ChatCompletionResponseMessage) -> ReasoningOutput {
-    if let Some(details) = message
-        .reasoning_details
-        .as_ref()
-        .filter(|details| !details.is_empty())
-    {
-        let blocks: Vec<_> = details
-            .iter()
-            .cloned()
-            .map(ChatCompletionReasoningDetail::into_reasoning_block)
-            .collect();
-        let display_text = blocks
-            .iter()
-            .filter_map(|block| match block {
-                ReasoningBlock::Text(block) => Some(block.text.clone()),
-                ReasoningBlock::Summary(block) => Some(block.text.clone()),
-                ReasoningBlock::Encrypted(_) => None,
-            })
-            .collect();
-        return ReasoningOutput {
-            display_text,
-            continuation: Some(ReasoningContinuation::Blocks(blocks)),
-        };
-    }
-
-    let text = message
-        .reasoning_content
-        .clone()
-        .or_else(|| message.thinking.clone())
-        .or_else(|| message.reasoning.clone())
-        .filter(|text| !text.is_empty());
-    match text {
-        Some(text) => ReasoningOutput {
-            display_text: vec![text.clone()],
-            continuation: Some(ReasoningContinuation::Text(text)),
-        },
-        None => ReasoningOutput::default(),
-    }
 }
 
 pub fn reasoning_delta(delta: &Value, keys: &[&str]) -> Option<String> {
@@ -460,7 +419,7 @@ fn accumulate_reasoning_detail(
             merge_reasoning_metadata(id, incoming_id, "id", index)?;
             merge_reasoning_metadata(format, incoming_format, "format", index)
         }
-        _ => Err(TalosError::public(
+        _ => Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!("reasoning detail index {index} changed type across stream chunks"),
         )),
@@ -474,7 +433,7 @@ fn merge_reasoning_metadata(
     index: u32,
 ) -> TalosResult<()> {
     match (current.as_ref(), incoming) {
-        (Some(current), Some(incoming)) if current != &incoming => Err(TalosError::public(
+        (Some(current), Some(incoming)) if current != &incoming => Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!("reasoning detail index {index} changed {field} across stream chunks"),
         )),
@@ -529,13 +488,21 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::internal(format!(
+                                    .send(Err({ let diagnostic = format!(
                                         "{provider_name} stream invalid SSE JSON: {error}"
-                                    ))))
+                                    ); TalosError::internal_with_source("Model response stream invalid SSE JSON; technical details were withheld.", error).context(diagnostic) }))
                                     .await;
                                 return;
                             }
                         };
+                        if let Some(error) = event.get("error") {
+                            let _ = tx
+                                .send(Err(crate::error::stream_response_error(
+                                    error.get("code").and_then(Value::as_str),
+                                )))
+                                .await;
+                            return;
+                        }
                         let choice = first_choice(&event);
 
                         if let Some(delta) = choice
@@ -558,7 +525,10 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
+                        .send(Err(TalosError::internal_with_source(
+                            "Stream error; technical details were withheld.",
+                            error,
+                        )))
                         .await;
                     return;
                 }
@@ -625,15 +595,23 @@ pub fn model_blocks(
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::internal(format!(
+                                    .send(Err({ let diagnostic = format!(
                                         "{} model block stream invalid SSE JSON: {error}",
                                         options.provider_name
-                                    ))))
+                                    ); TalosError::internal_with_source("Model response model block stream invalid SSE JSON; technical details were withheld.", error).context(diagnostic) }))
                                     .await;
                                 return;
                             }
                         };
 
+                        if let Some(error) = event.get("error") {
+                            let _ = tx
+                                .send(Err(crate::error::stream_response_error(
+                                    error.get("code").and_then(Value::as_str),
+                                )))
+                                .await;
+                            return;
+                        }
                         if let Some(parsed_usage) = event.get("usage").and_then(|value| {
                             serde_json::from_value::<ChatCompletionUsage>(value.clone()).ok()
                         }) {
@@ -664,7 +642,7 @@ pub fn model_blocks(
                                         Ok(detail) => detail,
                                         Err(error) => {
                                             let _ = tx
-                                                .send(Err(TalosError::public(
+                                                .send(Err(TalosError::new(
                                                     ErrorCode::InvalidRequest,
                                                     format!(
                                                         "{} reasoning detail is invalid: {error}",
@@ -880,7 +858,10 @@ pub fn model_blocks(
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
+                        .send(Err(TalosError::internal_with_source(
+                            "Stream error; technical details were withheld.",
+                            error,
+                        )))
                         .await;
                     return;
                 }
@@ -919,7 +900,7 @@ fn cache_creation_tokens(creation: &ChatCompletionCacheCreation) -> TalosResult<
         (Some(cache_creation_input_tokens), Some(ephemeral_5m_input_tokens))
             if cache_creation_input_tokens != ephemeral_5m_input_tokens =>
         {
-            Err(TalosError::public(ErrorCode::InvalidRequest, format!(
+            Err(TalosError::new(ErrorCode::InvalidRequest, format!(
                 "Bailian cache creation token fields disagree: cache_creation_input_tokens={} ephemeral_5m_input_tokens={}",
                 cache_creation_input_tokens, ephemeral_5m_input_tokens
             )))

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { ModelInfo } from "@talos/sdk-browser";
 
 import { modelSelectionForRef, type SendTextOptions } from "@/features/chat";
@@ -12,6 +12,7 @@ type Navigate = (
 ) => void;
 
 interface InitialSessionInputParams {
+  onPendingSessionChange: Dispatch<SetStateAction<string | undefined>>;
   locationPathname: string;
   locationState: SessionLocationState | null;
   models?: ModelInfo[];
@@ -28,6 +29,7 @@ export function hasInitialSessionInput(state: SessionLocationState | null): bool
 
 /** Sends navigation-provided text and file references exactly once for a draft session. */
 export function useInitialSessionInput({
+  onPendingSessionChange,
   locationPathname,
   locationState,
   models,
@@ -64,6 +66,7 @@ export function useInitialSessionInput({
       locationState?.initialProject ??
       projects.find((entry) => entry.id === locationState?.initialProjectId);
     // Consume navigation input before waiting for the Turn, including on reload.
+    onPendingSessionChange(sessionId);
     navigate(locationPathname, { replace: true, state: null });
     void sendText(initialPrompt, {
       modelSelection: modelSelectionForRef(
@@ -81,8 +84,14 @@ export function useInitialSessionInput({
         if (mountedRef.current && activeSessionIdRef.current === sessionId) {
           setDraft(initialPrompt);
         }
+      })
+      .finally(() => {
+        if (mountedRef.current) {
+          onPendingSessionChange((pending) => pending === sessionId ? undefined : pending);
+        }
       });
   }, [
+    onPendingSessionChange,
     locationPathname,
     locationState,
     models,

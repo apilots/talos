@@ -9,7 +9,7 @@ use talos_types::talos::TalosToolSearchMatch;
 use tokio::io::AsyncReadExt;
 
 use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
-use crate::runtimes::{map_sandbox_process_error, process_environment, resolve_executable};
+use crate::runtimes::{map_sandbox_error, process_environment, resolve_executable};
 use crate::ToolContext;
 
 const DEFAULT_LIMIT: usize = 100;
@@ -85,13 +85,13 @@ pub async fn run(
 ) -> TalosResult<GrepFilesResponse> {
     let pattern = request.pattern.trim();
     if pattern.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "pattern must not be empty".to_string(),
         ));
     }
     if request.limit == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "limit must be greater than zero".to_string(),
         ));
@@ -108,7 +108,7 @@ pub async fn run(
             .and_then(|name| name.to_str())
             .is_some_and(|name| name == ".env" || name.starts_with(".env."))
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "searching dotenv files is not allowed".to_string(),
         ));
@@ -196,7 +196,7 @@ async fn run_rg(
         search_path
     } else {
         search_path.parent().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!(
                     "search path has no parent directory: {}",
@@ -217,15 +217,15 @@ async fn run_rg(
         .sandbox_permit()?
         .spawn(command)
         .await
-        .map_err(map_sandbox_process_error)?;
+        .map_err(map_sandbox_error)?;
     let mut stdout = child.take_stdout().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "failed to capture rg stdout".to_string(),
         )
     })?;
     let mut stderr = child.take_stderr().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "failed to capture rg stderr".to_string(),
         )
@@ -246,14 +246,14 @@ async fn run_rg(
     let timed_out = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(status) => {
             let status = status.map_err(|err| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ToolExecutionFailed,
                     format!("failed to wait for rg: {err}"),
                 )
             })?;
             if !status.success() && status.code() != Some(1) {
                 let stderr = stderr_task.await.unwrap_or_default();
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::ToolExecutionFailed,
                     format!("rg failed with status {status}: {}", stderr.trim()),
                 ));
@@ -280,7 +280,7 @@ fn parse_rg_json(stdout: &str) -> TalosResult<Vec<TalosToolSearchMatch>> {
 
     for raw_line in stdout.lines() {
         let event: Value = serde_json::from_str(raw_line).map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("invalid rg json output: {err}"),
             )

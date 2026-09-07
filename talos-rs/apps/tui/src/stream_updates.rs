@@ -71,7 +71,10 @@ impl TuiApp {
                 update.session_id, session.id
             )),
             Err(err) => {
-                self.push_right_event(format!("session usage refresh failed: {err}"));
+                self.push_right_event(format!(
+                    "session usage refresh failed: {}",
+                    err.to_api_error().message
+                ));
             }
         }
     }
@@ -128,12 +131,18 @@ impl TuiApp {
                         ));
                     }
                     Err(err) => {
-                        self.push_system_notice(format!("Failed to load models: {}", err));
+                        self.push_system_notice(format!(
+                            "Failed to load models: {}",
+                            err.to_api_error().message
+                        ));
                         self.push_right_event("models load failed".to_string());
                     }
                 },
                 Err(err) => {
-                    self.push_system_notice(format!("Failed to load models: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to load models: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("models load failed".to_string());
                 }
             },
@@ -152,13 +161,19 @@ impl TuiApp {
                             self.push_right_event("status loaded".to_string());
                         }
                         Err(err) => {
-                            self.push_system_notice(format!("Failed to render status: {}", err));
+                            self.push_system_notice(format!(
+                                "Failed to render status: {}",
+                                err.to_api_error().message
+                            ));
                             self.push_right_event("status render failed".to_string());
                         }
                     }
                 }
                 Err(err) => {
-                    self.push_system_notice(format!("Failed to fetch status: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to fetch status: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("status load failed".to_string());
                 }
             },
@@ -174,7 +189,10 @@ impl TuiApp {
                     if self.in_flight {
                         self.finish_active_stream("session compaction failed", true, false);
                     }
-                    self.push_system_notice(format!("Failed to compact session: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to compact session: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("session compact failed".to_string());
                 }
             },
@@ -188,7 +206,10 @@ impl TuiApp {
                     self.push_right_event("session cleared".to_string());
                 }
                 Err(err) => {
-                    self.push_system_notice(format!("Failed to clear session: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to clear session: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("session clear failed".to_string());
                 }
             },
@@ -202,7 +223,10 @@ impl TuiApp {
                     self.push_right_event(format!("session model updated: {}", requested));
                 }
                 Err(err) => {
-                    self.push_system_notice(format!("Failed to switch model: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to switch model: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("model switch failed".to_string());
                 }
             },
@@ -215,9 +239,12 @@ impl TuiApp {
                     self.push_right_event(format!("history loaded: {} sessions", count));
                 }
                 Err(err) => {
-                    self.push_right_event(format!("history load failed: {err}"));
+                    self.push_right_event(format!(
+                        "history load failed: {}",
+                        err.to_api_error().message
+                    ));
                     if let Some(picker) = self.session_picker.as_mut() {
-                        picker.set_error(err.to_string());
+                        picker.set_error(err.to_api_error().message.to_string());
                     }
                 }
             },
@@ -233,7 +260,10 @@ impl TuiApp {
                 }
                 Err(err) => {
                     self.close_model_picker();
-                    self.push_system_notice(format!("Failed to switch model: {}", err));
+                    self.push_system_notice(format!(
+                        "Failed to switch model: {}",
+                        err.to_api_error().message
+                    ));
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
@@ -250,7 +280,10 @@ impl TuiApp {
                 }
                 Err(err) => {
                     self.permission_picker = None;
-                    self.push_system_notice(format!("Failed to change permissions: {err}"));
+                    self.push_system_notice(format!(
+                        "Failed to change permissions: {}",
+                        err.to_api_error().message
+                    ));
                 }
             },
             CommandUpdate::UserActionSubmitted { action_id, result } => {
@@ -269,7 +302,8 @@ impl TuiApp {
                     }
                     Err(err) => {
                         action.submitting = false;
-                        action.error = Some(format!("Submit failed: {err}"));
+                        action.error =
+                            Some(format!("Submit failed: {}", err.to_api_error().message));
                     }
                 }
             }
@@ -328,9 +362,7 @@ impl TuiApp {
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     update = Some(crate::types::SessionCloseUpdate {
-                        result: Err(TalosError::internal(
-                            "session close channel dropped".to_string(),
-                        )),
+                        result: Err(TalosError::internal("session close channel dropped")),
                         client_shutdown_completed: false,
                     });
                     should_clear = true;
@@ -367,7 +399,10 @@ impl TuiApp {
                 self.close_started_at = None;
                 self.close_slow_notice_reported = false;
                 self.closing_session_id = None;
-                self.push_system_notice(format!("Failed to close session: {}", err));
+                self.push_system_notice(format!(
+                    "Failed to close session: {}",
+                    err.to_api_error().message
+                ));
                 self.push_right_event("session close failed".to_string());
             }
         }

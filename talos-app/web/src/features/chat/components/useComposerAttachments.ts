@@ -1,3 +1,5 @@
+import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
+import { AppProtocol } from "@talos/sdk-browser";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
@@ -28,7 +30,7 @@ export type ComposerAttachmentItem =
       id: string;
       status: "failed";
       file: File;
-      error: string;
+      error: AppProtocol.ApiError;
     };
 
 interface UseComposerAttachmentsOptions {
@@ -70,7 +72,7 @@ export function useComposerAttachments({
   const [availableNextCursor, setAvailableNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppProtocol.ApiError | null>(null);
   const controllers = useRef(new Map<string, AbortController>());
   const nextUploadId = useRef(1);
   const initialKey = initialAttachments.map((file) => file.fileId).join("\u0000");
@@ -109,7 +111,8 @@ export function useComposerAttachments({
 
   function select(file: FileInfo) {
     if (!fileMatchesScope(file, scope) || !supported.has(attachmentKind(file))) {
-      setError("The selected file is not supported by the active project and model.");
+      setError({ code: AppProtocol.ErrorCode.UnsupportedAttachment, localization: null,
+        message: "The selected file is not supported by the active project and model." });
       return;
     }
     setError(null);
@@ -134,7 +137,8 @@ export function useComposerAttachments({
           id,
           status: "failed",
           file,
-          error: "The active model does not support this attachment type.",
+          error: { code: AppProtocol.ErrorCode.UnsupportedAttachment, localization: null,
+            message: "The active model does not support this attachment type." },
         };
       }
       controllers.current.set(id, new AbortController());
@@ -186,8 +190,7 @@ export function useComposerAttachments({
           if (controller.signal.aborted) {
             return;
           }
-          const message =
-            uploadError instanceof Error ? uploadError.message : "File upload failed.";
+          const error = userVisibleError(uploadError, "File upload failed.");
           setItems((current) =>
             current.map((currentItem) =>
               currentItem.id === item.id
@@ -195,7 +198,7 @@ export function useComposerAttachments({
                     id: item.id,
                     status: "failed",
                     file: item.file,
-                    error: message,
+                    error,
                   }
                 : currentItem,
             ),
@@ -224,7 +227,7 @@ export function useComposerAttachments({
       );
       setAvailableNextCursor(response.nextCursor);
     } catch (listError) {
-      setError(listError instanceof Error ? listError.message : "Files could not be loaded.");
+      setError(userVisibleError(listError, "Files could not be loaded."));
       throw listError;
     } finally {
       setIsLoading(false);
@@ -252,7 +255,7 @@ export function useComposerAttachments({
       ]);
       setAvailableNextCursor(response.nextCursor);
     } catch (listError) {
-      setError(listError instanceof Error ? listError.message : "Files could not be loaded.");
+      setError(userVisibleError(listError, "Files could not be loaded."));
       throw listError;
     } finally {
       setIsLoadingMore(false);

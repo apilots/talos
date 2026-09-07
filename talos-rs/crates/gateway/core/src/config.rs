@@ -50,7 +50,7 @@ fn require_config_admin(actor: &Actor) -> TalosResult<()> {
     if actor.auth_disabled || actor.role == UserRole::Admin {
         return Ok(());
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::PermissionDenied,
         "configuration management requires an admin user".to_string(),
     ))

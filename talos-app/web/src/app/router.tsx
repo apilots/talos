@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { AppLayout } from "@/app/layouts/AppLayout";
 import { useConnectionSettings } from "@/features/connection";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 const ChatHomePage = lazy(() =>
   import("@/pages/chat/ChatHomePage").then((module) => ({ default: module.ChatHomePage })),
@@ -28,8 +29,15 @@ const AuthPage = lazy(() =>
 );
 
 function RequireAuth({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("common");
   const { connection } = useConnectionSettings();
   const location = useLocation();
+  if (connection.authError) {
+    return <div role="alert" className="m-8 rounded-xl border border-danger/30 p-6 text-danger">
+      {apiErrorMessage(connection.authError)}
+      <button className="ml-4 underline" onClick={() => window.location.reload()}>{t("retryNow")}</button>
+    </div>;
+  }
   if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
     return <AuthLoading />;
   }

@@ -17,6 +17,7 @@ export interface ChatSlice {
   setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
   resetStream: (sessionId: string) => void;
   resetLiveResponse: (sessionId: string) => void;
+  upsertNotice: (sessionId: string, eventId: string, notice: import("@talos/sdk-core").AppProtocol.AgentSystemNotice) => void;
   upsertUserInputBlock: (
     sessionId: string,
     turnId: string,
@@ -81,7 +82,7 @@ export interface ChatSlice {
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
   ) => void;
-  setStreamError: (sessionId: string, error?: string) => void;
+  setStreamError: (sessionId: string, error?: import("@talos/sdk-browser").AppProtocol.ApiError) => void;
   setStreamMeta: (
     sessionId: string,
     meta: Partial<

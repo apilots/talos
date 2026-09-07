@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_tools_sandbox::ToolFileSystemHandle;
 use talos_tools_sandbox::{AbsolutePathBuf, FileSystemOperation, RequestedFileSystemAccess};
 
-use crate::runtimes::{map_sandbox_file_error, resolve_base_dir};
+use crate::runtimes::{map_sandbox_error, resolve_base_dir};
 use crate::state::{sha256_hex, ReadFileStateSource};
 use crate::ToolContext;
 
@@ -54,20 +54,19 @@ pub async fn read_text_file(
     let path = resolve_requested_path(request, context)?;
     let file_system = context.sandbox_file_system()?;
     ensure_readable_regular_file(&path, &file_system).await?;
-    let bytes = file_system
-        .read(&path)
-        .await
-        .map_err(map_sandbox_file_error)?;
+    let bytes = file_system.read(&path).await.map_err(map_sandbox_error)?;
     if !looks_like_text(&bytes) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
-            format!("file `{}` is not a supported text file", path.display()),
-        ));
+            "The requested file is not a supported text file.",
+        )
+        .context(path.display()));
     }
-    let content = String::from_utf8(bytes).map_err(|_| {
-        TalosError::public(
+    let content = String::from_utf8(bytes).map_err(|error| {
+        TalosError::from_source(
             talos_error::ErrorCode::ToolExecutionFailed,
-            "file is not valid UTF-8 text".to_string(),
+            "The requested file is not valid UTF-8 text.",
+            error.utf8_error(),
         )
     })?;
     Ok((path, content))
@@ -75,14 +74,14 @@ pub async fn read_text_file(
 
 pub async fn run(request: &ReadFileRequest, context: &ToolContext) -> TalosResult<ReadFileResult> {
     if request.offset == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "offset must be a 1-indexed line number".to_string(),
         ));
     }
 
     if request.limit == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "limit must be greater than zero".to_string(),
         ));
@@ -121,7 +120,7 @@ pub fn resolve_requested_path(
         .as_deref()
         .or(request.file_path.as_deref())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "path is required".to_string(),
             )
@@ -140,47 +139,52 @@ pub fn requested_file_system_access(
         vec![path],
     )
     .map_err(|error| {
-        TalosError::public(
+        TalosError::from_source(
             talos_error::ErrorCode::ToolExecutionFailed,
-            error.to_string(),
+            "The requested filesystem access is invalid.",
+            error,
         )
     })?])
 }
 
 pub fn normalize_existing_tool_path(path: &Path) -> TalosResult<AbsolutePathBuf> {
     let path = std::fs::canonicalize(path).map_err(|error| {
-        TalosError::public(
-            talos_error::ErrorCode::ToolExecutionFailed,
-            format!("failed to resolve `{}`: {error}", path.display()),
-        )
+        let (code, message) = match error.kind() {
+            std::io::ErrorKind::NotFound => (
+                talos_error::ErrorCode::PathNotFound,
+                "The requested file path was not found.",
+            ),
+            std::io::ErrorKind::PermissionDenied => (
+                talos_error::ErrorCode::PermissionDenied,
+                "Permission was denied while resolving the requested file path.",
+            ),
+            _ => (
+                talos_error::ErrorCode::InternalError,
+                "The requested file path could not be resolved; technical details were withheld.",
+            ),
+        };
+        TalosError::from_source(code, message, error).context(path.display())
     })?;
     AbsolutePathBuf::new(path).map_err(|error| {
-        TalosError::public(
-            talos_error::ErrorCode::ToolExecutionFailed,
-            error.to_string(),
-        )
+        TalosError::internal_with_source("The resolved file path is invalid.", error)
     })
 }
 
 pub fn normalize_write_scope(path: &Path) -> TalosResult<AbsolutePathBuf> {
     let mut existing = path.parent().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
-            format!(
-                "filesystem path has no parent directory: {}",
-                path.display()
-            ),
+            "The requested filesystem path has no parent directory.",
         )
+        .context(path.display())
     })?;
     while !existing.exists() {
         existing = existing.parent().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
-                format!(
-                    "filesystem path has no existing ancestor: {}",
-                    path.display()
-                ),
+                "The requested filesystem path has no existing ancestor.",
             )
+            .context(path.display())
         })?;
     }
     normalize_existing_tool_path(existing)
@@ -200,53 +204,33 @@ async fn ensure_readable_regular_file(
     path: &Path,
     file_system: &ToolFileSystemHandle,
 ) -> TalosResult<()> {
-    let metadata = match file_system.metadata(path).await {
-        Ok(metadata) => metadata,
-        Err(error @ talos_tools_sandbox::TalosSandboxError::FileSystemAccessDenied { .. })
-        | Err(error @ talos_tools_sandbox::TalosSandboxError::SandboxBypassDenied) => {
-            return Err(map_sandbox_file_error(error));
-        }
-        Err(error) => {
-            let hint = path_hint(path, file_system).await;
-            return Err(TalosError::public(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!(
-                    "failed to inspect file `{}`: {}{}",
-                    path.display(),
-                    error,
-                    hint
-                ),
-            ));
-        }
-    };
+    let metadata = file_system
+        .metadata(path)
+        .await
+        .map_err(map_sandbox_error)?;
     if metadata.is_directory {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
-            format!(
-                "`{}` is a directory; use Glob to inspect directory contents",
-                path.display()
-            ),
-        ));
+            "The requested path is a directory; use Glob to inspect directory contents.",
+        )
+        .context(path.display()));
     }
     if !metadata.is_file {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
-            format!(
-                "`{}` is not a regular file and cannot be read by this tool",
-                path.display()
-            ),
-        ));
+            "The requested path is not a regular file and cannot be read by this tool.",
+        )
+        .context(path.display()));
     }
     if metadata.len > MAX_FILE_BYTES {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!(
-                "`{}` is too large to read inline ({} bytes, max {} bytes)",
-                path.display(),
-                metadata.len,
-                MAX_FILE_BYTES
+                "The requested file is too large to read inline ({} bytes, max {} bytes).",
+                metadata.len, MAX_FILE_BYTES
             ),
-        ));
+        )
+        .context(path.display()));
     }
     Ok(())
 }
@@ -258,29 +242,6 @@ fn is_unchanged_read(path: &Path, content: &str, context: &ToolContext) -> bool 
     entry.source == ReadFileStateSource::Read
         && entry.content_hash == sha256_hex(content.as_bytes())
         && entry.size_bytes == content.len() as u64
-}
-
-async fn path_hint(path: &Path, file_system: &ToolFileSystemHandle) -> String {
-    let Some(parent) = path.parent() else {
-        return String::new();
-    };
-    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return String::new();
-    };
-    let Ok(entries) = file_system.read_directory(parent).await else {
-        return String::new();
-    };
-    let suggestions = entries
-        .into_iter()
-        .filter_map(|entry| entry.file_name.into_string().ok())
-        .filter(|candidate| candidate.contains(name) || name.contains(candidate))
-        .take(3)
-        .collect::<Vec<_>>();
-    if suggestions.is_empty() {
-        String::new()
-    } else {
-        format!("; similar path(s): {}", suggestions.join(", "))
-    }
 }
 
 pub fn render_numbered_lines(
@@ -302,10 +263,11 @@ pub fn render_numbered_lines(
 fn select_lines(path: &Path, content: &str, offset: usize, limit: usize) -> TalosResult<String> {
     let lines = content.lines().collect::<Vec<_>>();
     if offset > lines.len() && !lines.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
-            format!("offset exceeds file length for `{}`", path.display()),
-        ));
+            "The requested offset exceeds the file length.",
+        )
+        .context(path.display()));
     }
     let start = offset.saturating_sub(1);
     Ok(lines

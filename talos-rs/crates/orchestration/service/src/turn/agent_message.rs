@@ -41,7 +41,7 @@ fn completed_message(
     occurred_at: i64,
 ) -> TalosResult<AgentMessage> {
     if turn_id.trim().is_empty() || message_id.trim().is_empty() || content.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "canonical Agent User message requires identity and content",
         ));

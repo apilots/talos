@@ -192,38 +192,136 @@ impl ActorCredentialValidator for ExistingTokenValidator {
 }
 
 #[tokio::test]
+async fn incompatible_protocol_is_rejected_before_business_dispatch() {
+    let mut request: serde_json::Value =
+        serde_json::from_str(&initialize_request("secret")).unwrap();
+    request["params"]["capabilities"]["protocol_version"] = json!({"major": 0, "minor": 3});
+    let output = run_with_input(format!("{request}\n{}", session_read_request())).await;
+    let messages = parse_output(&output);
+    assert_eq!(
+        messages[0]["error"]["code"],
+        talos_app_protocol::errors::INVALID_PARAMS.as_i32()
+    );
+    assert_eq!(messages[1]["error"]["code"], NOT_INITIALIZED.as_i32());
+}
+
+#[tokio::test]
 async fn request_before_initialize_returns_not_initialized() {
-    let output = run_with_input(session_read_request()).await;
+    let (output, log) = capture_runtime_logs(run_with_input(session_read_request())).await;
     let messages = parse_output(&output);
 
     assert_eq!(messages[0]["error"]["code"], NOT_INITIALIZED.as_i32());
+    assert_eq!(log.matches("application failure").count(), 1);
+    assert!(log.contains("backtrace_status=Captured"));
 }
 
 #[tokio::test]
 async fn malformed_line_returns_parse_error_and_keeps_running() {
-    let output = run_with_input(format!("{{\n{}", initialize_request("secret"))).await;
+    let (output, log) = capture_runtime_logs(run_with_input(format!(
+        "{{\n{}",
+        initialize_request("secret")
+    )))
+    .await;
     let messages = parse_output(&output);
 
     assert_eq!(messages[0]["error"]["code"], PARSE_ERROR.as_i32());
     assert_eq!(result_data(&messages[1])["protocol_version"]["major"], 0);
+    assert_eq!(log.matches("application failure").count(), 1);
+    assert!(log.contains("backtrace_status=Captured"));
+}
+
+async fn capture_runtime_logs<T>(operation: impl std::future::Future<Output = T>) -> (T, String) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("runtime.log");
+    // Nextest runs each test in its own process, matching the production logger lifetime.
+    let guard = talos_logging::init_with_config(talos_logging::LoggingConfig {
+        file: Some(path.to_string_lossy().into_owned()),
+        stdout: false,
+        ..Default::default()
+    })
+    .unwrap();
+    let result = operation.await;
+    drop(guard);
+    (result, std::fs::read_to_string(path).unwrap())
 }
 
 #[tokio::test]
 async fn incoming_jsonl_frame_respects_the_configured_byte_limit() {
     let initialize = initialize_request("secret");
     let max_incoming_frame_bytes = initialize.len();
-    let output = run_with_app_validator_and_frame_limit(
+    let (output, log) = capture_runtime_logs(run_with_app_validator_and_frame_limit(
         format!("{initialize}{}\n", "x".repeat(max_incoming_frame_bytes + 1)),
         Arc::new(MockApp::default()),
         Arc::new(ExistingTokenValidator),
         AppServerConfig::default(),
         max_incoming_frame_bytes,
-    )
+    ))
     .await;
     let messages = parse_output(&output);
 
     assert_eq!(result_data(&messages[0])["protocol_version"]["major"], 0);
     assert_eq!(messages[1]["error"]["code"], PARSE_ERROR.as_i32());
+    assert_eq!(log.matches("application failure").count(), 1);
+    assert!(log.contains("backtrace_status=Captured"));
+}
+
+#[tokio::test]
+async fn invalid_utf8_is_reported_once_and_keeps_the_numeric_protocol_envelope() {
+    let (output, log) = capture_runtime_logs(run_with_reader(&b"\xff\n"[..])).await;
+    assert_eq!(
+        parse_output(&output),
+        vec![json!({
+            "jsonrpc": "2.0", "id": null,
+            "error": { "code": PARSE_ERROR.as_i32(), "message": "The app-server request is not valid UTF-8." }
+        })]
+    );
+    assert_eq!(log.matches("application failure").count(), 1);
+    assert!(log.contains("backtrace_status=Captured"));
+    assert!(log.contains("sources=0: invalid utf-8"));
+}
+
+#[tokio::test]
+async fn input_io_failure_retains_its_private_source_without_disclosing_it() {
+    struct FailedReader;
+    impl AsyncRead for FailedReader {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Err(std::io::Error::other("private-input-sentinel")))
+        }
+    }
+    let (output, log) = capture_runtime_logs(run_with_reader(FailedReader)).await;
+    assert_eq!(
+        parse_output(&output),
+        vec![json!({
+            "jsonrpc": "2.0", "id": null,
+            "error": { "code": PARSE_ERROR.as_i32(), "message": "Failed to read the app-server request stream." }
+        })]
+    );
+    assert_eq!(log.matches("application failure").count(), 1);
+    assert!(log.contains("backtrace_status=Captured"));
+    assert!(log.contains("sources=0: private-input-sentinel"));
+    assert!(log.contains("Internal"));
+}
+
+async fn run_with_reader(reader: impl AsyncRead + Unpin) -> String {
+    let (mut client, writer) = duplex(16 * 1024);
+    let mut output = String::new();
+    let (result, read) = tokio::join!(
+        run_jsonl(
+            reader,
+            writer,
+            Arc::new(MockApp::default()),
+            Arc::new(ExistingTokenValidator),
+            AppServerConfig::default()
+        ),
+        client.read_to_string(&mut output),
+    );
+    result.unwrap();
+    read.unwrap();
+    output
 }
 
 #[tokio::test]
@@ -836,7 +934,7 @@ fn initialize_request_for_kind(kind: &str) -> String {
                     "kind": kind
                 },
                 "capabilities": {
-                    "protocol_version": { "major": 0, "minor": 2 },
+                    "protocol_version": ProtocolVersion::CURRENT,
                     "supports_server_requests": false,
                     "supports_event_replay": true
                 }
@@ -979,7 +1077,7 @@ fn timeline_event(event_id: &str, event_seq: i64) -> TimelineEvent {
         event_id: event_id.to_string(),
         event_seq,
         persisted_at: 100 + event_seq,
-        event,
+        event: talos_agent_api::TimelineEventPayload::Agent(event),
     }
 }
 
@@ -998,4 +1096,21 @@ fn result_data(message: &serde_json::Value) -> &serde_json::Value {
 fn result_error(message: &serde_json::Value) -> &serde_json::Value {
     assert_eq!(message["result"]["status"], "error");
     &message["result"]["error"]
+}
+#[tokio::test]
+async fn disconnected_output_retains_the_io_source_as_an_internal_failure() {
+    let (writer, reader) = tokio::io::duplex(64);
+    drop(reader);
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    tx.send(super::OutgoingMessage::Notification(
+        talos_app_protocol::jsonrpc::JsonRpcNotification::new("fixture", None),
+    ))
+    .await
+    .unwrap();
+    drop(tx);
+    let error = super::write_loop(writer, rx).await.unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InternalError);
+    assert!(std::error::Error::source(&error)
+        .unwrap()
+        .is::<std::io::Error>());
 }

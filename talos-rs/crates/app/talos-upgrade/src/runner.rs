@@ -205,7 +205,7 @@ async fn run_with_paths(
     }
     let installed_version = state.product_version.clone();
     if &installed_version > current_version {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!(
                 "Talos product downgrade is not supported: installed {}, current {}",
@@ -293,7 +293,10 @@ async fn run_with_paths(
         );
         if let Err(error) = task.execute(&context).await {
             let task_state = state.tasks.get_mut(definition.id).ok_or_else(|| {
-                TalosError::internal(format!(
+                TalosError::internal(
+                    "missing running upgrade task state; technical details were withheld.",
+                )
+                .context(format!(
                     "missing running upgrade task state: {}",
                     definition.id
                 ))
@@ -320,7 +323,10 @@ async fn run_with_paths(
             return Err(error);
         }
         let task_state = state.tasks.get_mut(definition.id).ok_or_else(|| {
-            TalosError::internal(format!(
+            TalosError::internal(
+                "missing running upgrade task state; technical details were withheld.",
+            )
+            .context(format!(
                 "missing running upgrade task state: {}",
                 definition.id
             ))
@@ -380,14 +386,14 @@ fn validate_and_order_tasks(tasks: &[Box<dyn UpgradeTask>]) -> TalosResult<Vec<&
         let definition = task.definition();
         if definition.id.trim().is_empty() || definition.revision == 0 {
             return Err(TalosError::internal(
-                "upgrade IDs must be non-empty and revisions must be positive".to_string(),
+                "upgrade IDs must be non-empty and revisions must be positive",
             ));
         }
         if !ids.insert(definition.id) {
-            return Err(TalosError::internal(format!(
-                "duplicate upgrade ID: {}",
-                definition.id
-            )));
+            return Err(TalosError::internal(
+                "duplicate upgrade ID; technical details were withheld.",
+            )
+            .context(format!("duplicate upgrade ID: {}", definition.id)));
         }
     }
     let mut ordered = tasks.iter().map(Box::as_ref).collect::<Vec<_>>();
@@ -410,7 +416,7 @@ fn validate_task_states(tasks: &[Box<dyn UpgradeTask>], state: &UpgradeState) ->
         if task_state.revision != definition.revision
             || task_state.target_version != definition.target_version
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 format!(
                     "upgrade task '{}' changed from revision {} target {} to revision {} target {}",
@@ -448,13 +454,13 @@ fn load_state(path: &Path) -> TalosResult<Option<UpgradeState>> {
     }
     let raw = fs::read(path).map_err(|error| io_error("read upgrade state", path, error))?;
     let state: UpgradeState = serde_json::from_slice(&raw).map_err(|error| {
-        TalosError::public(
+        TalosError::new(
             ErrorCode::InvalidRequest,
             format!("invalid upgrade state at {}: {error}", path.display()),
         )
     })?;
     if state.schema_version != STATE_SCHEMA_VERSION {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!(
                 "unsupported upgrade state schema version {} at {}",
@@ -472,7 +478,7 @@ fn write_state(target: &Path, state: &UpgradeState) -> TalosResult<()> {
 
 fn parse_version(value: &str, label: &str) -> TalosResult<Version> {
     Version::parse(value).map_err(|error| {
-        TalosError::public(
+        TalosError::new(
             ErrorCode::InvalidRequest,
             format!("invalid {label} '{value}': {error}"),
         )
@@ -483,14 +489,24 @@ fn unix_seconds() -> TalosResult<i64> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| {
-            TalosError::internal(format!("system clock is before Unix epoch: {error}"))
+            TalosError::internal_with_source(
+                "system clock is before Unix epoch; technical details were withheld.",
+                error,
+            )
         })?;
     i64::try_from(duration.as_secs())
-        .map_err(|_| TalosError::internal("upgrade completion timestamp overflow".to_string()))
+        .map_err(|_| TalosError::internal("upgrade completion timestamp overflow"))
 }
 
 fn io_error(operation: &str, path: &Path, error: std::io::Error) -> TalosError {
-    TalosError::internal(format!("{operation} {}: {error}", path.display()))
+    {
+        let diagnostic = format!("{operation} {}: {error}", path.display());
+        TalosError::internal_with_source(
+            "Upgrade filesystem operation failed; technical details were withheld.",
+            error,
+        )
+        .context(diagnostic)
+    }
 }
 
 #[cfg(test)]

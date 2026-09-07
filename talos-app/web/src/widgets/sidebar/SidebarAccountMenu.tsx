@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { LogOut, Settings2, UserCircle } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import type { AccountType } from "@/shared/types/account";
+import type { AccountType, AuthStatus } from "@/shared/types/account";
 
 interface SidebarAccountMenuProps {
   accountType: AccountType;
-  authStatus: "unknown" | "loading" | "authenticated" | "unauthenticated" | "logged_out" | "open";
+  authStatus: AuthStatus;
   authUsername: string;
   onLogout: () => Promise<void> | void;
 }

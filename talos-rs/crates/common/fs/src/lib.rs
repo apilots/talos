@@ -243,19 +243,27 @@ impl FileSystem for StdFileSystem {
         match fs::read_to_string(path) {
             Ok(content) => Ok(Some(content)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(storage_error(format!(
-                "read file `{}`: {err}",
-                path.display()
-            ))),
+            Err(err) => Err({
+                let diagnostic = format!("read file `{}`: {err}", path.display());
+                storage_error("read file", err).context(diagnostic)
+            }),
         }
     }
 
     fn read_json<T: DeserializeOwned>(&self, path: &Path) -> TalosResult<T> {
-        let content = self
-            .read_file(path)?
-            .ok_or_else(|| storage_error(format!("read file `{}`: not found", path.display())))?;
+        let content = self.read_file(path)?.ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::PathNotFound,
+                "The requested JSON file was not found.",
+            )
+            .context(path.display())
+        })?;
         serde_json::from_str(&content).map_err(|err| {
-            TalosError::internal(format!("parse json file `{}`: {err}", path.display()))
+            TalosError::internal_with_source(
+                "Failed to parse the JSON file; technical details were withheld.",
+                err,
+            )
+            .context(format!("parse JSON file {}", path.display()))
         })
     }
 
@@ -264,7 +272,11 @@ impl FileSystem for StdFileSystem {
             return Ok(T::default());
         };
         serde_json::from_str(&content).map_err(|err| {
-            TalosError::internal(format!("parse json file `{}`: {err}", path.display()))
+            TalosError::internal_with_source(
+                "Failed to parse the JSON file; technical details were withheld.",
+                err,
+            )
+            .context(format!("parse JSON file {}", path.display()))
         })
     }
 
@@ -314,7 +326,11 @@ impl FileSystem for StdFileSystem {
         options: WriteOptions,
     ) -> TalosResult<()> {
         let payload = serde_json::to_vec_pretty(value).map_err(|err| {
-            TalosError::internal(format!("serialize json file `{}`: {err}", path.display()))
+            TalosError::internal_with_source(
+                "Failed to serialize the JSON file; technical details were withheld.",
+                err,
+            )
+            .context(format!("serialize JSON file {}", path.display()))
         })?;
         self.write_bytes_with(path, &payload, options)
     }
@@ -322,11 +338,12 @@ impl FileSystem for StdFileSystem {
     fn copy_file(&self, source: &Path, target: &Path) -> TalosResult<u64> {
         create_parent_dir(target)?;
         fs::copy(source, target).map_err(|err| {
-            storage_error(format!(
+            let diagnostic = format!(
                 "copy file `{}` to `{}`: {err}",
                 source.display(),
                 target.display()
-            ))
+            );
+            storage_error("copy file", err).context(diagnostic)
         })
     }
 
@@ -351,10 +368,13 @@ impl FileSystem for StdFileSystem {
             open_options.mode(permissions.unix_mode);
         }
         let mut file = open_options.open(path).map_err(|err| {
-            storage_error(format!("open file `{}` for append: {err}", path.display()))
+            let diagnostic = format!("open file `{}` for append: {err}", path.display());
+            storage_error("open file", err).context(diagnostic)
         })?;
-        file.write_all(bytes)
-            .map_err(|err| storage_error(format!("append file `{}`: {err}", path.display())))?;
+        file.write_all(bytes).map_err(|err| {
+            let diagnostic = format!("append file `{}`: {err}", path.display());
+            storage_error("append file", err).context(diagnostic)
+        })?;
         sync_file_if_needed(&file, options.durability, path)?;
         if !existed {
             apply_permissions(path, options.permissions)?;
@@ -382,17 +402,20 @@ impl FileSystem for StdFileSystem {
         } else {
             fs::create_dir(path)
         };
-        result.map_err(|err| storage_error(format!("create directory `{}`: {err}", path.display())))
+        result.map_err(|err| {
+            let diagnostic = format!("create directory `{}`: {err}", path.display());
+            storage_error("create directory", err).context(diagnostic)
+        })
     }
 
     fn remove_file(&self, path: &Path) -> TalosResult<()> {
         match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(storage_error(format!(
-                "remove file `{}`: {err}",
-                path.display()
-            ))),
+            Err(err) => Err({
+                let diagnostic = format!("remove file `{}`: {err}", path.display());
+                storage_error("remove file", err).context(diagnostic)
+            }),
         }
     }
 
@@ -400,10 +423,10 @@ impl FileSystem for StdFileSystem {
         match fs::remove_dir_all(path) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(storage_error(format!(
-                "remove directory `{}`: {err}",
-                path.display()
-            ))),
+            Err(err) => Err({
+                let diagnostic = format!("remove directory `{}`: {err}", path.display());
+                storage_error("remove directory", err).context(diagnostic)
+            }),
         }
     }
 
@@ -411,20 +434,21 @@ impl FileSystem for StdFileSystem {
         match fs::symlink_metadata(path) {
             Ok(metadata) => Ok(Some(file_metadata_from_std(metadata))),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(storage_error(format!(
-                "read file metadata `{}`: {err}",
-                path.display()
-            ))),
+            Err(err) => Err({
+                let diagnostic = format!("read file metadata `{}`: {err}", path.display());
+                storage_error("read file metadata", err).context(diagnostic)
+            }),
         }
     }
 
     fn rename(&self, source: &Path, target: &Path) -> TalosResult<()> {
         fs::rename(source, target).map_err(|err| {
-            storage_error(format!(
+            let diagnostic = format!(
                 "rename `{}` to `{}`: {err}",
                 source.display(),
                 target.display()
-            ))
+            );
+            storage_error("rename", err).context(diagnostic)
         })
     }
 
@@ -432,7 +456,8 @@ impl FileSystem for StdFileSystem {
         create_parent_dir(path)?;
         let file = open_lock_file(path)?;
         FileExt::lock(&file).map_err(|err| {
-            storage_error(format!("lock file `{}` exclusively: {err}", path.display()))
+            let diagnostic = format!("lock file `{}` exclusively: {err}", path.display());
+            storage_error("lock file", err).context(diagnostic)
         })?;
         Ok(FileLock {
             path: path.to_path_buf(),
@@ -449,10 +474,10 @@ impl FileSystem for StdFileSystem {
                 file: Some(file),
             })),
             Err(TryLockError::WouldBlock) => Ok(None),
-            Err(TryLockError::Error(err)) => Err(storage_error(format!(
-                "try lock file `{}` exclusively: {err}",
-                path.display()
-            ))),
+            Err(TryLockError::Error(err)) => Err({
+                let diagnostic = format!("try lock file `{}` exclusively: {err}", path.display());
+                storage_error("try lock file", err).context(diagnostic)
+            }),
         }
     }
 }
@@ -470,8 +495,10 @@ impl FileLock {
         let Some(file) = self.file.take() else {
             return Ok(());
         };
-        FileExt::unlock(&file)
-            .map_err(|err| storage_error(format!("unlock file `{}`: {err}", self.path.display())))
+        FileExt::unlock(&file).map_err(|err| {
+            let diagnostic = format!("unlock file `{}`: {err}", self.path.display());
+            storage_error("unlock file", err).context(diagnostic)
+        })
     }
 }
 
@@ -488,7 +515,10 @@ pub async fn read_file(path: &Path) -> TalosResult<Option<String>> {
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || std_fs().read_file(&path))
         .await
-        .map_err(|err| storage_error(format!("join file read task: {err}")))?
+        .map_err(|err| {
+            let diagnostic = format!("join file read task: {err}");
+            storage_error("join file read task", err).context(diagnostic)
+        })?
 }
 
 /// Read and parse a required JSON file synchronously.
@@ -517,7 +547,10 @@ pub async fn write_file(path: &Path, content: &str) -> TalosResult<()> {
     let content = content.to_string();
     tokio::task::spawn_blocking(move || std_fs().write_file(&path, &content))
         .await
-        .map_err(|err| storage_error(format!("join file write task: {err}")))?
+        .map_err(|err| {
+            let diagnostic = format!("join file write task: {err}");
+            storage_error("join file write task", err).context(diagnostic)
+        })?
 }
 
 /// Serialize a value as pretty JSON synchronously using default safe replace options.
@@ -545,7 +578,10 @@ pub async fn append_file(path: &Path, content: &str) -> TalosResult<()> {
     let content = content.to_string();
     tokio::task::spawn_blocking(move || std_fs().append_file(&path, &content))
         .await
-        .map_err(|err| storage_error(format!("join file append task: {err}")))?
+        .map_err(|err| {
+            let diagnostic = format!("join file append task: {err}");
+            storage_error("join file append task", err).context(diagnostic)
+        })?
 }
 
 /// Create a directory, optionally creating every missing parent directory.
@@ -563,7 +599,10 @@ pub async fn remove_directory(path: &Path) -> TalosResult<()> {
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || std_fs().remove_directory(&path))
         .await
-        .map_err(|err| storage_error(format!("join directory remove task: {err}")))?
+        .map_err(|err| {
+            let diagnostic = format!("join directory remove task: {err}");
+            storage_error("join directory remove task", err).context(diagnostic)
+        })?
 }
 
 /// Read generic file metadata, returning `None` when the file does not exist.
@@ -571,7 +610,10 @@ pub async fn get_file_metadata(path: &Path) -> TalosResult<Option<FileMetadata>>
     let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || std_fs().get_file_metadata(&path))
         .await
-        .map_err(|err| storage_error(format!("join file metadata task: {err}")))?
+        .map_err(|err| {
+            let diagnostic = format!("join file metadata task: {err}");
+            storage_error("join file metadata task", err).context(diagnostic)
+        })?
 }
 
 /// Rename or move a path synchronously.
@@ -581,8 +623,10 @@ pub fn rename(source: &Path, target: &Path) -> TalosResult<()> {
 
 /// Resolve a path to its canonical filesystem location.
 pub fn canonicalize_path(path: &Path) -> TalosResult<PathBuf> {
-    fs::canonicalize(path)
-        .map_err(|err| storage_error(format!("canonicalize path `{}`: {err}", path.display())))
+    fs::canonicalize(path).map_err(|err| {
+        let diagnostic = format!("canonicalize path `{}`: {err}", path.display());
+        storage_error("canonicalize path", err).context(diagnostic)
+    })
 }
 
 /// List direct children of a directory, returning `None` when it does not exist.
@@ -591,23 +635,22 @@ pub fn read_directory(path: &Path) -> TalosResult<Option<Vec<DirectoryEntry>>> {
         Ok(dir) => dir,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => {
-            return Err(storage_error(format!(
-                "read directory `{}`: {err}",
-                path.display()
-            )));
+            return Err({
+                let diagnostic = format!("read directory `{}`: {err}", path.display());
+                storage_error("read directory", err).context(diagnostic)
+            });
         }
     };
     let mut entries = Vec::new();
     for entry in dir {
         let entry = entry.map_err(|err| {
-            storage_error(format!("read directory entry `{}`: {err}", path.display()))
+            let diagnostic = format!("read directory entry `{}`: {err}", path.display());
+            storage_error("read directory entry", err).context(diagnostic)
         })?;
         let entry_path = entry.path();
         let metadata = fs::symlink_metadata(&entry_path).map_err(|err| {
-            storage_error(format!(
-                "read path metadata `{}`: {err}",
-                entry_path.display()
-            ))
+            let diagnostic = format!("read path metadata `{}`: {err}", entry_path.display());
+            storage_error("read path metadata", err).context(diagnostic)
         })?;
         entries.push(DirectoryEntry {
             path: entry_path,
@@ -626,7 +669,10 @@ where
     let lock_path = sidecar_lock_path(path);
     let file_lock = tokio::task::spawn_blocking(move || std_fs().with_file_lock(&lock_path))
         .await
-        .map_err(|err| storage_error(format!("join file lock task: {err}")))??;
+        .map_err(|err| {
+            let diagnostic = format!("join file lock task: {err}");
+            storage_error("join file lock task", err).context(diagnostic)
+        })??;
     let result = operation().await;
     let unlock_result = file_lock.unlock();
     match (result, unlock_result) {
@@ -644,12 +690,17 @@ fn write_replace(path: &Path, bytes: &[u8], options: WriteOptions) -> TalosResul
         open_options.mode(permissions.unix_mode);
     }
     let mut file = open_options.open(path).map_err(|err| {
-        storage_error(format!("open file `{}` for replace: {err}", path.display()))
+        let diagnostic = format!("open file `{}` for replace: {err}", path.display());
+        storage_error("open file", err).context(diagnostic)
     })?;
-    file.write_all(bytes)
-        .map_err(|err| storage_error(format!("write file `{}`: {err}", path.display())))?;
-    file.commit()
-        .map_err(|err| storage_error(format!("commit file `{}`: {err}", path.display())))?;
+    file.write_all(bytes).map_err(|err| {
+        let diagnostic = format!("write file `{}`: {err}", path.display());
+        storage_error("write file", err).context(diagnostic)
+    })?;
+    file.commit().map_err(|err| {
+        let diagnostic = format!("commit file `{}`: {err}", path.display());
+        storage_error("commit file", err).context(diagnostic)
+    })?;
     apply_permissions(path, options.permissions)?;
     sync_parent_if_needed(path, options.durability)?;
     Ok(())
@@ -664,16 +715,21 @@ fn write_create_new(path: &Path, bytes: &[u8], options: WriteOptions) -> TalosRe
     }
     let mut file = open_options.open(path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::AlreadyExists {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("file already exists `{}`", path.display()),
             )
         } else {
-            storage_error(format!("create file `{}`: {err}", path.display()))
+            {
+                let diagnostic = format!("create file `{}`: {err}", path.display());
+                storage_error("create file", err).context(diagnostic)
+            }
         }
     })?;
-    file.write_all(bytes)
-        .map_err(|err| storage_error(format!("write file `{}`: {err}", path.display())))?;
+    file.write_all(bytes).map_err(|err| {
+        let diagnostic = format!("write file `{}`: {err}", path.display());
+        storage_error("write file", err).context(diagnostic)
+    })?;
     sync_file_if_needed(&file, options.durability, path)?;
     apply_permissions(path, options.permissions)?;
     sync_parent_if_needed(path, options.durability)?;
@@ -683,10 +739,8 @@ fn write_create_new(path: &Path, bytes: &[u8], options: WriteOptions) -> TalosRe
 fn create_parent_dir(path: &Path) -> TalosResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| {
-            storage_error(format!(
-                "create parent directory `{}`: {err}",
-                parent.display()
-            ))
+            let diagnostic = format!("create parent directory `{}`: {err}", parent.display());
+            storage_error("create parent directory", err).context(diagnostic)
         })?;
     }
     Ok(())
@@ -699,15 +753,21 @@ fn open_lock_file(path: &Path) -> TalosResult<File> {
         .read(true)
         .write(true)
         .open(path)
-        .map_err(|err| storage_error(format!("open lock file `{}`: {err}", path.display())))
+        .map_err(|err| {
+            let diagnostic = format!("open lock file `{}`: {err}", path.display());
+            storage_error("open lock file", err).context(diagnostic)
+        })
 }
 
 fn sync_file_if_needed(file: &File, durability: WriteDurability, path: &Path) -> TalosResult<()> {
     match durability {
         WriteDurability::Buffered => Ok(()),
-        WriteDurability::File | WriteDurability::FileAndDirectory => file
-            .sync_all()
-            .map_err(|err| storage_error(format!("sync file `{}`: {err}", path.display()))),
+        WriteDurability::File | WriteDurability::FileAndDirectory => {
+            file.sync_all().map_err(|err| {
+                let diagnostic = format!("sync file `{}`: {err}", path.display());
+                storage_error("sync file", err).context(diagnostic)
+            })
+        }
     }
 }
 
@@ -720,14 +780,20 @@ fn sync_parent_if_needed(path: &Path, durability: WriteDurability) -> TalosResul
     };
     File::open(parent)
         .and_then(|file| file.sync_all())
-        .map_err(|err| storage_error(format!("sync directory `{}`: {err}", parent.display())))
+        .map_err(|err| {
+            let diagnostic = format!("sync directory `{}`: {err}", parent.display());
+            storage_error("sync directory", err).context(diagnostic)
+        })
 }
 
 fn apply_permissions(path: &Path, permissions: Option<FilePermissions>) -> TalosResult<()> {
     #[cfg(unix)]
     if let Some(permissions) = permissions {
         fs::set_permissions(path, fs::Permissions::from_mode(permissions.unix_mode)).map_err(
-            |err| storage_error(format!("set file permissions `{}`: {err}", path.display())),
+            |err| {
+                let diagnostic = format!("set file permissions `{}`: {err}", path.display());
+                storage_error("set file permissions", err).context(diagnostic)
+            },
         )?;
     }
     #[cfg(not(unix))]
@@ -760,8 +826,17 @@ fn sidecar_lock_path(path: &Path) -> PathBuf {
     path.with_extension(extension)
 }
 
-fn storage_error(message: String) -> TalosError {
-    TalosError::internal(message)
+fn storage_error(
+    operation: &str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> TalosError {
+    let reason = (&source as &dyn std::error::Error)
+        .downcast_ref::<std::io::Error>()
+        .map(|error| error.kind().to_string())
+        .unwrap_or_else(|| {
+            "the filesystem task failed; technical details were withheld".to_string()
+        });
+    TalosError::internal_with_source(format!("Failed to {operation}: {reason}."), source)
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use talos_agent::{
-    AgentContext, AgentError, AgentErrorKind, AgentResult, SessionTurnInputDelivery,
-    SessionTurnParams, SessionTurnResult, TurnFileScope,
+    AgentContext, AgentResult, SessionTurnInputDelivery, SessionTurnParams, SessionTurnResult,
+    TurnFileScope,
 };
 use talos_agent_api::{AgentPendingInput, AgentStopReason};
 use talos_agent_kernel::{
@@ -8,6 +8,7 @@ use talos_agent_kernel::{
     AgentKernelExecution, AgentKernelIo, AgentKernelPendingInput, AgentKernelRequest,
     AgentKernelResult, GeneralTurnSkillOptions,
 };
+use talos_error::TalosError;
 use talos_memory::{MemoryScope, UserWorkspaceMemorySnapshot};
 use talos_prompt::{UserWorkspaceMemoryPromptContext, UserWorkspaceMemoryPromptFileState};
 use talos_types::{PendingUserAction, UserActionState};
@@ -105,7 +106,7 @@ async fn execute_mapped(
                             .await
                             .is_err()
                         {
-                            delivery.reject(AgentError::input_rejected(
+                            delivery.reject(TalosError::new(talos_error::ErrorCode::InvalidRequest,
                                 "Kernel input receiver is closed",
                             ));
                             continue;
@@ -125,7 +126,7 @@ async fn execute_mapped(
                 let (delivery, _) = pending_input.take().expect("pending input exists");
                 match accepted {
                     Ok(()) => delivery.accept(),
-                    Err(_) => delivery.reject(AgentError::input_rejected(
+                    Err(_) => delivery.reject(TalosError::new(talos_error::ErrorCode::InvalidRequest,
                         "Kernel stopped before accepting live input",
                     )),
                 }
@@ -135,7 +136,8 @@ async fn execute_mapped(
     if let Some((delivery, accepted_rx)) = pending_input {
         match accepted_rx.await {
             Ok(()) => delivery.accept(),
-            Err(_) => delivery.reject(AgentError::input_rejected(
+            Err(_) => delivery.reject(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Kernel stopped before accepting live input",
             )),
         }
@@ -156,10 +158,7 @@ async fn build_request(
     let resolved_attachments =
         resolve_attachments(provider, context, &projection.input.file_ids).await?;
     let user_workspace_memory = load_user_workspace_memory(provider, invocation).await?;
-    let skill_roots = provider
-        .skill_roots_resolver
-        .skill_roots(&kernel_config)
-        .map_err(AgentError::from)?;
+    let skill_roots = provider.skill_roots_resolver.skill_roots(&kernel_config)?;
 
     Ok(AgentKernelRequest {
         session_id: context.session.session_id.clone(),
@@ -192,16 +191,16 @@ async fn prepare_continuation(
 ) -> AgentResult<Option<AgentKernelContinuation>> {
     let Some(reference) = reference else {
         if projection.user_action.is_some() {
-            return Err(AgentError::new(
-                AgentErrorKind::ContinuationInvalid,
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "UserAction response requires a Kernel continuation",
             ));
         }
         return Ok(None);
     };
     let (action_id, response) = projection.user_action.clone().ok_or_else(|| {
-        AgentError::new(
-            AgentErrorKind::ContinuationInvalid,
+        TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel continuation requires one UserAction response",
         )
     })?;
@@ -225,7 +224,8 @@ async fn prepare_live_input(
 ) -> AgentResult<talos_agent_kernel::ActiveTurnInput> {
     let projection = project_input(message)?;
     if projection.user_action.is_some() || !projection.skills.is_empty() {
-        return Err(AgentError::input_rejected(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "live Kernel input supports only text and files",
         ));
     }
@@ -233,15 +233,13 @@ async fn prepare_live_input(
     let resolved = resolve_attachments(provider, context, &projection.input.file_ids).await?;
     let llm_provider = provider
         .llm_provider_router
-        .provider_for(&context.model_selection.model_ref)
-        .map_err(AgentError::from)?;
+        .provider_for(&context.model_selection.model_ref)?;
     build_active_turn_input(
         projection.input,
         resolved,
         &context.model,
         llm_provider.as_ref(),
     )
-    .map_err(AgentError::from)
 }
 
 async fn resolve_attachments(
@@ -258,8 +256,7 @@ async fn resolve_attachments(
             },
             file_ids,
         )
-        .await
-        .map_err(AgentError::from)?;
+        .await?;
     Ok(resolved
         .into_iter()
         .map(|attachment| talos_agent_kernel::ResolvedAttachment {
@@ -284,15 +281,17 @@ async fn load_user_workspace_memory(
             user_id: context.session.workspace.user_id.clone(),
             workspace_root: context.session.workspace.root.clone(),
         })
-        .await
-        .map_err(AgentError::from)?;
+        .await?;
     let (file_state, version_token, content) = match snapshot {
         UserWorkspaceMemorySnapshot::Missing { template } => (
             UserWorkspaceMemoryPromptFileState::Missing,
             None,
             template.prompt_view().map_err(|error| {
-                AgentError::provider_error("render missing User Workspace Memory")
-                    .with_source(error.to_string())
+                TalosError::from_source(
+                    talos_error::ErrorCode::InternalError,
+                    "render missing User Workspace Memory",
+                    error,
+                )
             })?,
         ),
         UserWorkspaceMemorySnapshot::Valid {
@@ -303,8 +302,11 @@ async fn load_user_workspace_memory(
             UserWorkspaceMemoryPromptFileState::Valid,
             Some(version_token),
             document.prompt_view().map_err(|error| {
-                AgentError::provider_error("render User Workspace Memory")
-                    .with_source(error.to_string())
+                TalosError::from_source(
+                    talos_error::ErrorCode::InternalError,
+                    "render User Workspace Memory",
+                    error,
+                )
             })?,
         ),
         UserWorkspaceMemorySnapshot::Invalid {
@@ -325,11 +327,13 @@ async fn load_user_workspace_memory(
 }
 
 async fn await_kernel_result(execution: AgentKernelExecution) -> AgentResult<AgentKernelResult> {
-    execution
-        .result
-        .await
-        .map_err(|_| AgentError::new(AgentErrorKind::BackendTaskLost, "Kernel task stopped"))?
-        .map_err(AgentError::from)
+    execution.result.await.map_err(|error| {
+        TalosError::from_source(
+            talos_error::ErrorCode::InternalError,
+            "Kernel task stopped",
+            error,
+        )
+    })?
 }
 
 async fn map_result(
@@ -388,7 +392,8 @@ fn map_stop_reason(reason: talos_agent_kernel::StopReason) -> AgentResult<AgentS
         talos_agent_kernel::StopReason::TransferUnresolved => {
             Ok(AgentStopReason::TransferUnresolved)
         }
-        talos_agent_kernel::StopReason::WaitingUserAction => Err(AgentError::provider_error(
+        talos_agent_kernel::StopReason::WaitingUserAction => Err(TalosError::new(
+            talos_error::ErrorCode::InternalError,
             "Kernel completed result cannot use waiting stop reason",
         )),
     }

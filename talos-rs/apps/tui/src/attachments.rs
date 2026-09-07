@@ -29,7 +29,7 @@ impl TuiApp {
                 .map(|(position, _)| position)
                 .collect::<Vec<_>>();
             if positions.len() != 1 {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     format!(
                         "pasted image marker `{}` is missing or duplicated",
@@ -126,7 +126,7 @@ impl TuiApp {
             .current_model_info()
             .is_some_and(|model| model.model.input.contains(&ModelInputKind::Image))
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "the active model does not support image attachments".to_string(),
             ));
@@ -152,7 +152,7 @@ impl TuiApp {
             let client = self
                 .gateway_client
                 .clone()
-                .ok_or_else(|| TalosError::internal("gateway client unavailable".to_string()))?;
+                .ok_or_else(|| TalosError::internal("gateway client unavailable"))?;
             let response = client
                 .upload_file(
                     FileUploadRequest {
@@ -173,7 +173,7 @@ impl TuiApp {
             .into_iter()
             .map(|index| match &self.pasted_image_attachments[index].state {
                 PastedImageState::Uploaded { file_id } => Ok(file_id.clone()),
-                PastedImageState::Pending { .. } => Err(TalosError::public(
+                PastedImageState::Pending { .. } => Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "pasted image upload did not produce a file id".to_string(),
                 )),

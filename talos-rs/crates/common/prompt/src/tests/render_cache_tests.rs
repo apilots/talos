@@ -90,8 +90,10 @@ async fn test_rendered_cache_breakpoints_stay_before_user_input() {
 async fn test_static_prefix_and_bootstrap_blocks_are_cacheable() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
 
-    let mut config = PromptBuildConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let config = PromptBuildConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..PromptBuildConfig::default()
+    };
 
     let assembly = PromptBuilder::new()
         .config(config)
@@ -134,8 +136,10 @@ async fn test_prompt_cache_break_reason_detects_tool_catalog_changes() {
 #[tokio::test]
 async fn test_prompt_cache_break_reason_detects_bootstrap_changes() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
-    let mut config = PromptBuildConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let config = PromptBuildConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..PromptBuildConfig::default()
+    };
 
     let baseline = PromptBuilder::new()
         .config(config.clone())

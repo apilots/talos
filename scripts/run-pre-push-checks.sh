@@ -49,5 +49,7 @@ if [[ "${rust_changed}" == true ]]; then
         exit 1
     }
     just fmt-check
+    python3 scripts/check_error_contract_tests.py
+    python3 scripts/check_error_contract.py
     just check
 fi

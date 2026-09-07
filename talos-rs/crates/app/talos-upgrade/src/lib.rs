@@ -108,7 +108,7 @@ async fn run_startup_upgrades_for_version(
             paths: &paths,
         };
         if workspace_layout::legacy_installation_exists(&context)? {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 format!(
                     "workspace layout upgrade requires Talos 0.1.8; current version is {current_version}"

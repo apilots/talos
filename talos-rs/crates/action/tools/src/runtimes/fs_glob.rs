@@ -7,7 +7,7 @@ use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
 use talos_types::talos::TalosToolSearchMatch;
 
 use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
-use crate::runtimes::map_sandbox_file_error;
+use crate::runtimes::map_sandbox_error;
 use crate::ToolContext;
 
 const DEFAULT_LIMIT: usize = 200;
@@ -52,7 +52,7 @@ pub fn requested_file_system_access(
         vec![base],
     )
     .map_err(|error| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             error.to_string(),
         )
@@ -64,7 +64,7 @@ pub async fn run(
     context: &ToolContext,
 ) -> TalosResult<GlobFilesResponse> {
     if request.pattern.trim().is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "pattern must not be empty".to_string(),
         ));
@@ -76,7 +76,7 @@ pub async fn run(
     };
     let matcher = Glob::new(&request.pattern)
         .map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("invalid glob pattern: {}", err),
             )
@@ -95,7 +95,7 @@ pub async fn run(
         let entries = match file_system.read_directory(&directory).await {
             Ok(entries) => entries,
             Err(error) if directory == base => {
-                return Err(map_sandbox_file_error(error));
+                return Err(map_sandbox_error(error));
             }
             Err(_) => continue,
         };

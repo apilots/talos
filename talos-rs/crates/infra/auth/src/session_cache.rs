@@ -212,19 +212,24 @@ impl CloudSessionCache {
             Ok(content) => content,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => {
-                return Err(TalosError::internal(format!(
-                    "read cloud session cache {}: {}",
-                    self.path.display(),
-                    err
-                )));
+                return Err({
+                    let diagnostic =
+                        format!("read cloud session cache {}: {}", self.path.display(), err);
+                    TalosError::internal_with_source(
+                        "Read cloud session cache; technical details were withheld.",
+                        err,
+                    )
+                    .context(diagnostic)
+                });
             }
         };
         let entry: CloudSessionCacheEntry = serde_json::from_str(&content).map_err(|err| {
-            TalosError::internal(format!(
-                "parse cloud session cache {}: {}",
-                self.path.display(),
-                err
-            ))
+            let diagnostic = format!("parse cloud session cache {}: {}", self.path.display(), err);
+            TalosError::internal_with_source(
+                "Parse cloud session cache; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })?;
         if entry.is_candidate_usable(now_ms, self.idle_timeout_ms) {
             Ok(Some(entry))
@@ -235,13 +240,13 @@ impl CloudSessionCache {
 
     pub fn store(&self, entry: &CloudSessionCacheEntry) -> TalosResult<()> {
         if entry.schema_version != SCHEMA_VERSION {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "cloud session cache schema version is unsupported".to_string(),
             ));
         }
         if entry.access_token.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "cloud session cache access token is empty".to_string(),
             ));
@@ -295,7 +300,7 @@ impl CloudSessionCache {
 
 fn acquire_cache_lock(path: &Path) -> TalosResult<talos_fs::FileLock> {
     talos_fs::std_fs().try_file_lock(path)?.ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::Conflict,
             format!(
                 "cloud session cache lock already exists: {}",

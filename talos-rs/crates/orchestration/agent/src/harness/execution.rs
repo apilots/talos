@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use talos_agent_api::{AgentEventPayload, AgentInterruptOutcome, AgentTurnStarted};
+use talos_error::TalosError;
 use talos_run_control::{
-    ActiveRunControl, CancellationMode, RunTaskCompletion, RunTaskError, RunTermination,
-    SettlementKind,
+    ActiveRunControl, CancellationMode, RunTaskCompletion, RunTermination, SettlementKind,
 };
 use tokio::sync::{oneshot, watch};
 
@@ -15,11 +15,10 @@ use super::{
     ActiveInvocation, ActiveOperation, Harness, RUN_CANCELLATION_POLICY, RUN_COMPLETION_TIMEOUT,
 };
 use crate::{
-    event_sink::AgentEventPipeline, AgentAdmission, AgentAdmissionPermit, AgentError,
-    AgentErrorKind, AgentEventSink, AgentInterruptParams, AgentOperationControl,
-    AgentProgressEventReceiver, AgentProvider, AgentResult, AgentRunExecution, AgentRunParams,
-    AgentRunSettlement, AgentRunSettlementReceiver, AgentSession, SessionTurnInputReceiver,
-    SessionTurnParams,
+    event_sink::AgentEventPipeline, AgentAdmission, AgentAdmissionPermit, AgentEventSink,
+    AgentInterruptParams, AgentOperationControl, AgentProgressEventReceiver, AgentProvider,
+    AgentResult, AgentRunExecution, AgentRunParams, AgentRunSettlement, AgentRunSettlementReceiver,
+    AgentSession, SessionTurnInputReceiver, SessionTurnParams,
 };
 
 impl<P> Harness<P>
@@ -73,9 +72,12 @@ where
 
         let (start_tx, start_rx) = oneshot::channel();
         let permit = AgentAdmissionPermit::new(async move {
-            start_tx
-                .send(())
-                .map_err(|_| AgentError::run_not_found("admitted Agent run is no longer active"))
+            start_tx.send(()).map_err(|_| {
+                TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    "admitted Agent run is no longer active",
+                )
+            })
         });
         let (settlement_tx, settlement_rx) = oneshot::channel();
         let harness = self.clone();
@@ -111,10 +113,10 @@ where
         self.validate_agent_id(&params.agent_id)?;
         let identity = params.identity;
         let operation = self.inner.active.get(&identity.session_id).ok_or_else(|| {
-            AgentError::run_not_found(format!(
-                "active Agent turn `{}` was not found",
-                identity.turn_id
-            ))
+            TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("active Agent turn `{}` was not found", identity.turn_id),
+            )
         })?;
         let (active_identity, control, cleanup_pending) = match operation.value() {
             ActiveOperation::Reserved { identity, control } => {
@@ -132,17 +134,18 @@ where
             } => (identity.clone(), control.clone(), Some(*task_count)),
             ActiveOperation::Maintenance { .. }
             | ActiveOperation::MaintenanceCleanupPending { .. } => {
-                return Err(AgentError::run_not_found(
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
                     "Agent interrupt does not target a live Turn",
                 ));
             }
         };
         drop(operation);
         if active_identity != identity {
-            return Err(AgentError::run_not_found(format!(
-                "active Agent turn `{}` was not found",
-                identity.turn_id
-            )));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("active Agent turn `{}` was not found", identity.turn_id),
+            ));
         }
         if let Some(task_count) = cleanup_pending {
             return Ok(AgentInterruptOutcome::CleanupUnconfirmed { task_count });
@@ -168,8 +171,8 @@ where
         tokio::select! {
             biased;
             () = control.cancellation().requested() => {
-                let result = settle_failure(&pipeline, AgentError::new(
-                    AgentErrorKind::Interrupted,
+                let result = settle_failure(&pipeline, TalosError::new(
+                    talos_error::ErrorCode::Cancelled,
                     "Agent run was cancelled before Provider start",
                 )).await;
                 let _ = settlement_tx.send(result);
@@ -178,7 +181,7 @@ where
             }
             start = start_rx => {
                 if start.is_err() {
-                    let result = settle_failure(&pipeline, AgentError::run_not_found(
+                    let result = settle_failure(&pipeline, TalosError::new(talos_error::ErrorCode::ResourceNotFound,
                         "Agent run start permit was dropped before execution",
                     )).await;
                     let _ = settlement_tx.send(result);
@@ -208,10 +211,7 @@ where
         let session = match self.session(session_context, &control).await {
             Ok(session) => session.session,
             Err(error) => {
-                let result = if matches!(
-                    error.kind,
-                    AgentErrorKind::RunFailure(talos_error::ErrorCode::RunCleanupUnconfirmed)
-                ) {
+                let result = if error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed) {
                     Err(error)
                 } else {
                     settle_failure(&pipeline, error).await
@@ -280,6 +280,16 @@ where
         pipeline.wait_until_unreserved().await;
         let input_error = input_failure_rx.borrow().clone();
         if !cleanup_confirmed(&lifecycle) {
+            match provider_result {
+                Ok(Err(error)) => talos_logging::report_error(&error),
+                Err(error) => {
+                    talos_logging::report_error(&talos_error::TalosError::internal_with_source(
+                        "Agent Provider task stopped before cleanup confirmation",
+                        error,
+                    ))
+                }
+                Ok(Ok(_)) => {}
+            }
             self.mark_cleanup_pending(&identity, control, &lifecycle);
             let _ = settlement_tx.send(Err(cleanup_error(&lifecycle)));
             return;
@@ -294,7 +304,10 @@ where
         ) {
             settle_failure(
                 &pipeline,
-                AgentError::new(AgentErrorKind::Interrupted, "Agent run was interrupted"),
+                TalosError::new(
+                    talos_error::ErrorCode::Cancelled,
+                    "Agent run was interrupted",
+                ),
             )
             .await
         } else if let Some(error) = input_error {
@@ -306,10 +319,14 @@ where
                     Err(error) => settle_failure(&pipeline, error).await,
                 },
                 Ok(Err(error)) => settle_failure(&pipeline, error).await,
-                Err(RunTaskError::Stopped) => {
+                Err(error) => {
                     settle_failure(
                         &pipeline,
-                        AgentError::provider_error("Agent Provider task stopped"),
+                        TalosError::from_source(
+                            talos_error::ErrorCode::InternalError,
+                            "Agent Provider task stopped",
+                            error,
+                        ),
                     )
                     .await
                 }

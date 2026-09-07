@@ -1,4 +1,4 @@
-import type { AppProtocol } from "@talos/sdk-core";
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { BrowserWindow, ipcMain, shell } from "electron";
 
 import type { DesktopAppServerController } from "./app-server-controller";
@@ -6,15 +6,15 @@ import { assertDesktopRendererInvoke } from "./ipc-guard";
 import { TALOS_IPC, type TalosRuntimeState } from "./ipc";
 
 export function registerDesktopIpcHandlers(runtime: DesktopAppServerController): void {
-  ipcMain.handle(TALOS_IPC.connect, () => runtime.connect());
+  ipcMain.handle(TALOS_IPC.connect, () => ipcResponse(() => runtime.connect()));
   ipcMain.handle(
     TALOS_IPC.invoke,
-    (_event, method: unknown, params: unknown, options: unknown) => {
+    (_event, method: unknown, params: unknown, options: unknown) => ipcResponse(() => {
       const invokeOptions = assertDesktopRendererInvoke(method, params, options);
       return runtime.invoke(invokeOptions.method, params, {
         actorCredentials: invokeOptions.actorCredentials,
       });
-    },
+    }),
   );
   ipcMain.handle(TALOS_IPC.openExternal, (_event, url: unknown) => {
     if (typeof url !== "string") {
@@ -26,6 +26,23 @@ export function registerDesktopIpcHandlers(runtime: DesktopAppServerController):
     }
     return shell.openExternal(parsed.toString());
   });
+}
+
+/** Preserve the public envelope across IPC; native Error properties do not survive it. */
+async function ipcResponse<T>(operation: () => Promise<T>): Promise<AppProtocol.ApiResponse<T>> {
+  try {
+    return { status: "success", data: await operation() };
+  } catch (error) {
+    if (error instanceof TalosApiError) {
+      return { status: "error", error: error.apiError };
+    }
+    console.error("Desktop IPC operation failed", error);
+    return { status: "error", error: {
+      code: AppProtocol.ErrorCode.InternalError,
+      message: "The desktop backend connection failed; technical details are available in the desktop log.",
+      localization: null,
+    } };
+  }
 }
 
 export function broadcastTimelineEvent(event: AppProtocol.TimelineEvent): void {

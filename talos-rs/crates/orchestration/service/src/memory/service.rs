@@ -135,7 +135,7 @@ impl MemoryService {
         )
         .await?
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 "memory file not found".to_string(),
             )
@@ -186,7 +186,7 @@ impl MemoryService {
             date,
         )
         .await?
-        .ok_or_else(|| TalosError::internal("memory file missing after write".to_string()))
+        .ok_or_else(|| TalosError::internal("memory file missing after write"))
     }
 
     pub async fn write_file_with_request(
@@ -272,7 +272,7 @@ impl MemoryService {
             .find(|workspace| workspace.workspace_id == scope.workspace_id)
             .map(|workspace| workspace.timezone)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     format!("unknown memory workspace_id: {}", scope.workspace_id),
                 )
@@ -307,7 +307,7 @@ impl MemoryReader for MemoryService {
         Box::pin(async move {
             let memory_id = request.memory_id.trim();
             if memory_id.is_empty() {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "memory_id cannot be empty".to_string(),
                 ));
@@ -318,7 +318,7 @@ impl MemoryReader for MemoryService {
                 .get_scope(scope, &self.memory_dirname, timezone, memory_id)
                 .await?
                 .ok_or_else(|| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::ResourceNotFound,
                         "memory not found".to_string(),
                     )
@@ -384,32 +384,32 @@ impl DreamMemoryFormationStore for MemoryService {
 fn validate_search_request(request: MemorySearchRequest) -> TalosResult<MemorySearchQuery> {
     let text = request.query.trim().to_string();
     if text.is_empty() || text.chars().any(char::is_control) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "memory query must be non-empty text".to_string(),
         ));
     }
     if text.chars().count() > MAX_QUERY_CHARS {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("memory query exceeds {MAX_QUERY_CHARS} characters"),
         ));
     }
     let limit = request.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
     if !(1..=MAX_SEARCH_LIMIT).contains(&limit) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("memory search limit must be between 1 and {MAX_SEARCH_LIMIT}"),
         ));
     }
     if request.kinds.as_ref().is_some_and(Vec::is_empty) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "memory kinds cannot be empty".to_string(),
         ));
     }
     if matches!((request.since_at, request.until_at), (Some(since), Some(until)) if since > until) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "memory since_at must not exceed until_at".to_string(),
         ));
@@ -536,7 +536,7 @@ fn expected_version(value: Option<String>) -> ExpectedFileVersion {
 }
 
 fn memory_domain_error(error: talos_memory::DreamMemoryError) -> TalosError {
-    TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+    TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
 }
 
 fn parse_optional_memory_date(value: Option<&str>) -> TalosResult<Option<MemoryDate>> {

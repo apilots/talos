@@ -2,13 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use talos_agent::{
-    AgentAdmissionPermit, AgentContext, AgentError, AgentEventReducer, AgentInputParams,
-    AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentAdmissionPermit, AgentContext, AgentEventReducer, AgentInputParams, AgentRunExecution,
+    AgentRunFailure, AgentRunParams, AgentRunSettlement,
 };
 use talos_agent_api::{
-    AgentErrorInfo, AgentEvent, AgentEventPayload, AgentInterruptOutcome, AgentMessage,
-    AgentMessageBlockContent, AgentMessageBlockStatus, AgentMessageStatus, AgentTurnFailed,
-    AgentTurnRef, AgentUserContent,
+    AgentEvent, AgentEventPayload, AgentInterruptOutcome, AgentMessage, AgentMessageBlockContent,
+    AgentMessageBlockStatus, AgentMessageStatus, AgentTurnFailed, AgentTurnRef, AgentUserContent,
 };
 use talos_coordinator::AgentCoordinator;
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -23,6 +22,8 @@ use crate::timeline::TimelineEventService;
 use crate::user_workspace_memory::UserWorkspaceMemoryReflection;
 use crate::SessionMessageQueueService;
 
+mod execution_task;
+mod notice;
 mod timeline_writer;
 
 #[derive(Clone)]
@@ -122,11 +123,12 @@ impl ExecutionPurpose {
 /// exact committed records through the product Timeline.
 #[derive(Clone)]
 pub(crate) struct AgentExecutionDriver {
-    coordinator: Arc<dyn AgentCoordinator>,
-    execution_store: Arc<dyn AgentExecutionStore>,
+    // Shared only with the sibling turn policy; assembly owns their identity.
+    pub(super) coordinator: Arc<dyn AgentCoordinator>,
+    pub(super) execution_store: Arc<dyn AgentExecutionStore>,
     event_service: Arc<TimelineEventService>,
     memory_reflection: Option<Arc<UserWorkspaceMemoryReflection>>,
-    sessions: Arc<crate::session::SessionService>,
+    pub(super) sessions: Arc<crate::session::SessionService>,
     inner_model: Option<Arc<crate::InnerModelClient>>,
     active: Arc<Mutex<HashMap<String, LiveExecution>>>,
 }
@@ -237,16 +239,23 @@ impl AgentExecutionDriver {
                 ExecutionPurpose::Compaction,
             )
             .await?;
-        let settlement = completion.await.map_err(|_| {
-            TalosError::internal("Agent compaction writer stopped before reporting its result")
+        let settlement = completion.await.map_err(|error| {
+            TalosError::internal_with_source(
+                "Agent compaction writer stopped before reporting its result",
+                error,
+            )
         })??;
         match settlement {
-            AgentRunSettlement::Finished { event, metrics, .. } => match event.payload {
-                AgentEventPayload::TurnCompleted(_) => Ok(metrics.usage),
-                AgentEventPayload::TurnFailed(failure) => Err(TalosError::public(
-                    failure.error.code,
-                    failure.error.message,
-                )),
+            AgentRunSettlement::Finished {
+                event,
+                metrics,
+                result,
+                ..
+            } => match event.payload {
+                AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_) => {
+                    result?;
+                    Ok(metrics.usage)
+                }
                 _ => Err(TalosError::internal(
                     "Agent compaction settled with a nonterminal event",
                 )),
@@ -257,77 +266,17 @@ impl AgentExecutionDriver {
         }
     }
 
-    async fn launch_execution(
-        &self,
-        execution: AgentRunExecution,
-        commit: AgentEventCommit,
-        agent_id: String,
-        purpose: ExecutionPurpose,
-    ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
-        let AgentRunExecution {
-            admission,
-            events,
-            settlement,
-        } = execution;
-        let identity = commit.active_turn.identity.clone();
-        let last_sequence = commit
-            .events
-            .last()
-            .expect("initial Agent admission contains canonical events")
-            .sequence;
-        let durable_tail = commit.active_turn.last_event_seq;
-        let (completion_tx, completion_rx) = oneshot::channel();
-        let (input_tx, input_rx) = mpsc::channel(1);
-        let (terminal_commit_tx, _terminal_commit_rx) = watch::channel(false);
-        let active = ActiveTimelineStream {
-            identity: identity.clone(),
-            agent_id,
-            input_tx,
-            terminal_commit_tx,
-        };
-        self.promote_admission(active.clone())?;
-        self.event_service.publish_committed(commit.events);
-        let driver = self.clone();
-        let task = tokio::spawn(async move {
-            let result = match admission.permit.consume().await {
-                Ok(()) => {
-                    driver
-                        .drive(
-                            active,
-                            events,
-                            input_rx,
-                            settlement,
-                            (commit.active_turn.last_event_seq, last_sequence),
-                            purpose,
-                        )
-                        .await
-                }
-                Err(error) => {
-                    let error = error.into_talos_error();
-                    tracing::error!(error = %error, "Agent start permit failed after durable admission");
-                    driver
-                        .recover_failed_execution(&active, durable_tail, &error)
-                        .await
-                }
-            };
-            driver.remove_live_execution(&identity);
-            let _ = completion_tx.send(result);
-        });
-        drop(task);
-        Ok(completion_rx)
-    }
-
     /// Commit recovery only with an actual exact-Turn cleanup outcome from Coordinator.
     /// Callers own the live writer or Session exclusion; no Context is reconstructed.
     pub(crate) async fn settle_recovered_turn(
         &self,
         identity: AgentTurnRef,
         expected_event_seq: i64,
-        failure: AgentErrorInfo,
+        failure: AgentRunFailure,
         cleanup: AgentInterruptOutcome,
     ) -> TalosResult<AgentRunSettlement> {
         if let AgentInterruptOutcome::CleanupUnconfirmed { task_count } = cleanup {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::RunCleanupUnconfirmed,
                 format!("Agent cleanup is unconfirmed for {task_count} task(s)"),
             ));
@@ -336,34 +285,32 @@ impl AgentExecutionDriver {
             .event_service
             .turn_checkpoint(&identity, expected_event_seq)
             .await?;
-        let mut reducer = AgentEventReducer::from_checkpoint(identity.clone(), checkpoint)
-            .map_err(AgentError::into_talos_error)?;
-        let cancelled = failure.code == ErrorCode::Cancelled;
+        let mut reducer = AgentEventReducer::from_checkpoint(identity.clone(), checkpoint)?;
+        let cancelled = failure.error().is_code(ErrorCode::Cancelled);
         let occurred_at = chrono::Utc::now().timestamp();
-        let recovery_events = reducer
-            .close_open_lifecycle(
-                if cancelled {
-                    AgentMessageStatus::Cancelled
-                } else {
-                    AgentMessageStatus::Failed
-                },
-                if cancelled {
-                    AgentMessageBlockStatus::Cancelled
-                } else {
-                    AgentMessageBlockStatus::Failed
-                },
-                occurred_at,
-            )
-            .map_err(AgentError::into_talos_error)?;
+        let recovery_events = reducer.close_open_lifecycle(
+            if cancelled {
+                AgentMessageStatus::Cancelled
+            } else {
+                AgentMessageStatus::Failed
+            },
+            if cancelled {
+                AgentMessageBlockStatus::Cancelled
+            } else {
+                AgentMessageBlockStatus::Failed
+            },
+            occurred_at,
+        )?;
         let event = AgentEvent {
             identity,
             sequence: reducer.next_sequence(),
             occurred_at,
-            payload: AgentEventPayload::TurnFailed(AgentTurnFailed { error: failure }),
+            payload: AgentEventPayload::TurnFailed(AgentTurnFailed {
+                error: failure.error().to_api_error(),
+                retryable: failure.is_retryable(),
+            }),
         };
-        reducer
-            .apply(event.clone())
-            .map_err(AgentError::into_talos_error)?;
+        reducer.apply(event.clone())?;
         let mut current_event_seq = expected_event_seq;
         for recovery_event in recovery_events {
             let commit = self
@@ -387,6 +334,7 @@ impl AgentExecutionDriver {
             event,
             messages: checkpoint.messages,
             metrics: checkpoint.metrics,
+            result: Err(failure.into_error()),
         })
     }
 
@@ -480,7 +428,7 @@ impl AgentExecutionDriver {
                 | LiveExecution::Maintenance { .. } => None,
             })
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     ErrorCode::Conflict,
                     "message input targets no active Timeline writer",
                 )
@@ -498,13 +446,13 @@ impl AgentExecutionDriver {
             })
             .await
             .map_err(|_| {
-                TalosError::public(
+                TalosError::new(
                     ErrorCode::Conflict,
                     "Agent Turn ended before input admission could be committed",
                 )
             })?;
         result_rx.await.map_err(|_| {
-            TalosError::public(
+            TalosError::new(
                 ErrorCode::Conflict,
                 "Agent Turn ended while input admission was being committed",
             )
@@ -520,7 +468,7 @@ impl AgentExecutionDriver {
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
         let identity = context.identity();
         let (action_id, _response) = user_action_response(&input).ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 ErrorCode::InvalidRequest,
                 "waiting Agent continuation requires one UserAction response",
             )
@@ -530,14 +478,14 @@ impl AgentExecutionDriver {
             .get_agent_continuation_binding(&identity)
             .await?
             .ok_or_else(|| {
-                TalosError::public(ErrorCode::Conflict, "Agent continuation binding is missing")
+                TalosError::new(ErrorCode::Conflict, "Agent continuation binding is missing")
             })?;
         let checkpoint = self
             .event_service
             .turn_checkpoint(&identity, binding.expected_event_seq)
             .await?;
         if action_id != binding.action_id {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::Conflict,
                 "UserAction response does not match the durable continuation",
             ));
@@ -589,7 +537,7 @@ impl AgentExecutionDriver {
     fn begin_admission(&self, identity: AgentTurnRef) -> TalosResult<()> {
         let mut active = self.active.lock().expect("active Timeline stream lock");
         if active.contains_key(&identity.session_id) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::ActiveTurnRunning,
                 format!(
                     "session `{}` already has a live Agent execution",
@@ -610,7 +558,7 @@ impl AgentExecutionDriver {
     ) -> TalosResult<SessionMaintenanceGuard> {
         let mut active = self.active.lock().expect("active Timeline stream lock");
         if active.contains_key(session_id) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::ActiveTurnRunning,
                 format!("session `{session_id}` already has a live Agent execution"),
             ));

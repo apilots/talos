@@ -137,7 +137,7 @@ export function useChatSessionComposer({
         updateSessionModel(modelSelection, {
           onError: (error) => sessionCommands.showModelChangeFailed(
             modelLabel,
-            error instanceof Error ? error.message : String(error),
+            error,
             reasoningLevel,
           ),
           onSuccess: () => sessionCommands.showModelChanged(modelLabel, reasoningLevel),
@@ -167,7 +167,7 @@ export function useChatSessionComposer({
         updateSessionModel(modelSelection, {
           onError: (error) => sessionCommands.showModelChangeFailed(
             currentModelLabel,
-            error instanceof Error ? error.message : String(error),
+            error,
             level,
           ),
           onSuccess: () => sessionCommands.showModelChanged(currentModelLabel, level),

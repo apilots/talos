@@ -1,4 +1,6 @@
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { SkillSuggestion } from "@talos/sdk-browser";
 
 import { suggestSkills } from "../../api";
@@ -25,7 +27,8 @@ export function useComposerSuggestions({
   value,
 }: UseComposerSuggestionsOptions) {
   const [skills, setSkills] = useState<SkillSuggestion[]>([]);
-  const [error, setError] = useState<string>();
+  useTranslation("errors");
+  const [error, setError] = useState<ReturnType<typeof userVisibleError>>();
   const [resolvedTrigger, setResolvedTrigger] = useState<ComposerTrigger | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [cancelledKey, setCancelledKey] = useState<string>();
@@ -57,7 +60,7 @@ export function useComposerSuggestions({
         .catch((requestError: unknown) => {
           if (!cancelled) {
             setSkills([]);
-            setError(requestError instanceof Error ? requestError.message : "Unable to load Skills");
+            setError(userVisibleError(requestError, "Unable to load Skills"));
             setResolvedTrigger(trigger);
           }
         });
@@ -108,7 +111,7 @@ export function useComposerSuggestions({
 
   return {
     cancelCurrentTrigger,
-    error: currentError,
+    error: currentError ? apiErrorMessage(currentError) : undefined,
     loading,
     open,
     selectedIndex,

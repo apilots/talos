@@ -463,7 +463,7 @@ impl LlmProvider for TestLlmProvider {
 
     async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
         Err(talos_error::TalosError::internal(
-            "stream is not used in this test".to_string(),
+            "stream is not used in this test",
         ))
     }
 

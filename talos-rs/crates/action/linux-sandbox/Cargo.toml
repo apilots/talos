@@ -24,3 +24,6 @@ tempfile = "3"
 [[bin]]
 name = "talos-linux-sandbox-launcher"
 path = "src/main.rs"
+
+[lints]
+workspace = true

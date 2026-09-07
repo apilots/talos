@@ -10,6 +10,7 @@ async fn interrupt_turn_without_matching_active_turn_returns_not_found() {
             cancel_mode: TestCancelMode::MissingLiveTurn,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -49,6 +50,7 @@ async fn interrupt_turn_unknown_session_returns_not_found() {
             cancel_mode: TestCancelMode::MissingLiveTurn,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -78,6 +80,7 @@ async fn interrupt_turn_finalizes_orphaned_canonical_turn() {
             cancel_mode: TestCancelMode::MissingLiveTurn,
             cancelled_turn_ids: cancelled_turn_ids.clone(),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )

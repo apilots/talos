@@ -2,7 +2,7 @@ use talos_config::{Config, TalosPaths};
 use talos_error::TalosResult;
 use talos_logging::{LogGuard, StartupLoggingOptions};
 use talos_upgrade::{BeforeConfigLoadReport, RuntimeResourcesReport};
-use tracing::{error, info};
+use tracing::info;
 
 use super::TalosServerOptions;
 
@@ -22,8 +22,12 @@ pub fn prepare_startup(options: Option<&TalosServerOptions>) -> TalosResult<LogG
         config_file: paths.config_file.clone(),
         log_file: paths.log_file.clone(),
         stdout,
+    })
+    .inspect_err(|error| {
+        // No logging sink exists yet; stderr is the startup diagnostic boundary.
+        eprintln!("startup logging failed: {error:#?}");
     })?;
-    let report = prepare_before_config_load()?;
+    let report = prepare_before_config_load().inspect_err(talos_logging::report_error)?;
     info!(report = ?report, "pre-config resource preparation completed");
     Ok(log_guard)
 }
@@ -38,16 +42,10 @@ pub fn finish_startup(config: &Config) -> TalosResult<FinishStartupReport> {
 
 /// Prepares resources needed before runtime configuration is loaded.
 fn prepare_before_config_load() -> TalosResult<BeforeConfigLoadReport> {
-    talos_upgrade::prepare_before_config_load().map_err(|error| {
-        error!("pre-config resource preparation failed: {}", error);
-        error
-    })
+    talos_upgrade::prepare_before_config_load()
 }
 
 /// Prepares resources that require a validated runtime configuration.
 fn prepare_runtime_resources(config: &Config) -> TalosResult<RuntimeResourcesReport> {
-    talos_upgrade::prepare_runtime_resources(config).map_err(|error| {
-        error!("runtime resource preparation failed: {}", error);
-        error
-    })
+    talos_upgrade::prepare_runtime_resources(config)
 }

@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 
 import { cancelActiveTurn, isActiveTurnRunningError, retryTimelineTurn, startTimelineTurn } from "../api";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
-import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
 import type { ChatUserInput } from "@/shared/types/ui";
 import type { StartTurnRequest } from "@talos/sdk-browser";
@@ -31,7 +31,7 @@ export function useSessionStreaming(
     onError: (error) => {
       useAppStore.getState().setStreamError(
         sessionId,
-        userVisibleErrorMessage(error, "Failed to stop response."),
+        userVisibleError(error, "Failed to stop response."),
       );
       useAppStore.getState().setSessionStatus(sessionId, "error");
       useAppStore.getState().setStreamMeta(sessionId, {
@@ -85,7 +85,7 @@ export function useSessionStreaming(
         useAppStore.getState().setPendingInput(sessionId, undefined);
         useAppStore.getState().setStreamError(
           sessionId,
-          userVisibleErrorMessage(error, "A turn is already running."),
+          userVisibleError(error, "A turn is already running."),
         );
         useAppStore.getState().setStreamMeta(sessionId, {
           isStreaming: false,
@@ -114,7 +114,7 @@ export function useSessionStreaming(
       useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,
-        userVisibleErrorMessage(error, "Failed to stream message."),
+        userVisibleError(error, "Failed to stream message."),
       );
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
@@ -165,7 +165,7 @@ export function useSessionStreaming(
       useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,
-        userVisibleErrorMessage(error, "Failed to retry response."),
+        userVisibleError(error, "Failed to retry response."),
       );
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,

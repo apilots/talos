@@ -1,5 +1,7 @@
-use super::{ChatCompletionReasoningDetail, ChatReasoningContinuationFormat};
-use crate::{ReasoningBlock, ReasoningContinuation};
+use super::{
+    ChatCompletionReasoningDetail, ChatCompletionResponseMessage, ChatReasoningContinuationFormat,
+};
+use crate::{ReasoningBlock, ReasoningContinuation, ReasoningOutput};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 type ChatReasoningFields = (
@@ -17,7 +19,7 @@ pub(super) fn reasoning_fields(
     };
 
     match (format, continuation) {
-        (ChatReasoningContinuationFormat::None, _) => Err(TalosError::public(
+        (ChatReasoningContinuationFormat::None, _) => Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "Chat protocol received reasoning continuation without a replay format".to_string(),
         )),
@@ -67,7 +69,7 @@ fn text_reasoning_continuation(continuation: ReasoningContinuation) -> TalosResu
                 match block {
                     ReasoningBlock::Text(block) => text.push_str(&block.text),
                     ReasoningBlock::Summary(_) | ReasoningBlock::Encrypted(_) => {
-                        return Err(TalosError::public(
+                        return Err(TalosError::new(
                             ErrorCode::InvalidRequest,
                             "Chat text reasoning field cannot replay structured reasoning blocks"
                                 .to_string(),
@@ -77,5 +79,45 @@ fn text_reasoning_continuation(continuation: ReasoningContinuation) -> TalosResu
             }
             Ok(text)
         }
+    }
+}
+
+pub(super) fn response_reasoning(message: &ChatCompletionResponseMessage) -> ReasoningOutput {
+    if let Some(details) = message
+        .reasoning_details
+        .as_ref()
+        .filter(|details| !details.is_empty())
+    {
+        let blocks: Vec<_> = details
+            .iter()
+            .cloned()
+            .map(ChatCompletionReasoningDetail::into_reasoning_block)
+            .collect();
+        let display_text = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ReasoningBlock::Text(block) => Some(block.text.clone()),
+                ReasoningBlock::Summary(block) => Some(block.text.clone()),
+                ReasoningBlock::Encrypted(_) => None,
+            })
+            .collect();
+        return ReasoningOutput {
+            display_text,
+            continuation: Some(ReasoningContinuation::Blocks(blocks)),
+        };
+    }
+
+    let text = message
+        .reasoning_content
+        .clone()
+        .or_else(|| message.thinking.clone())
+        .or_else(|| message.reasoning.clone())
+        .filter(|text| !text.is_empty());
+    match text {
+        Some(text) => ReasoningOutput {
+            display_text: vec![text.clone()],
+            continuation: Some(ReasoningContinuation::Text(text)),
+        },
+        None => ReasoningOutput::default(),
     }
 }

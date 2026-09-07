@@ -12,3 +12,12 @@ export function accountTypeFromWire(value: Lowercase<AccountType>): AccountType 
       return "Max";
   }
 }
+/** Authentication lifecycle shared by connection state and presentation props. */
+export type AuthStatus =
+  | "unknown"
+  | "loading"
+  | "error"
+  | "authenticated"
+  | "unauthenticated"
+  | "logged_out"
+  | "open";

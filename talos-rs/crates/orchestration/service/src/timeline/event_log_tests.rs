@@ -37,6 +37,80 @@ fn user_message(identity: &AgentTurnRef, message_id: &str) -> AgentMessage {
 }
 
 #[tokio::test]
+async fn product_notices_share_replay_without_advancing_agent_state() {
+    use talos_agent_api::{
+        AgentEvent, AgentEventPayload, AgentRunMetrics, AgentSystemNotice, SystemNoticeContent,
+        TimelineEventPayload, TimelineSystemNotice,
+    };
+    use talos_store::session::AgentExecutionStore;
+    let (store, service) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let commit = commit_test_running_turn(
+        store.as_ref(),
+        identity.clone(),
+        user_message(&identity, "message-1"),
+    )
+    .await;
+    let notice = service
+        .publish_notice(TimelineSystemNotice {
+            identity: identity.clone(),
+            occurred_at: 11,
+            notice: AgentSystemNotice {
+                level: talos_types::TalosTimelineNoticeLevel::Warning,
+                content: SystemNoticeContent::Error(
+                    talos_error::TalosError::internal("Usage update failed.").to_api_error(),
+                ),
+            },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        store.get_agent_active_turn("session-1").await.unwrap(),
+        Some(commit.active_turn.clone())
+    );
+    let progress = AgentEvent {
+        identity: identity.clone(),
+        sequence: commit.events.last().unwrap().sequence + 1,
+        occurred_at: 12,
+        payload: AgentEventPayload::MetricsUpdated(AgentRunMetrics::default()),
+    };
+    let committed = store
+        .commit_progress_event(progress.clone(), commit.active_turn.last_event_seq)
+        .await
+        .unwrap();
+    let after = service
+        .list_events_after(
+            "session-1",
+            Some(&TimelineEventId::from(notice.event_id.clone())),
+            1,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        after
+            .iter()
+            .map(|entry| entry.event.clone())
+            .collect::<Vec<_>>(),
+        vec![TimelineEventPayload::Agent(progress.clone())]
+    );
+    assert_eq!(
+        service
+            .turn_checkpoint(&identity, committed.active_turn.last_event_seq)
+            .await
+            .unwrap()
+            .last_sequence,
+        progress.sequence
+    );
+    assert_eq!(
+        service
+            .turn_notices(&[identity], committed.active_turn.last_event_seq)
+            .await
+            .unwrap(),
+        vec![notice]
+    );
+}
+
+#[tokio::test]
 async fn timeline_reads_the_canonical_store_without_a_projection_store() {
     let (store, service) = fixture().await;
     let identity = AgentTurnRef::new("session-1", "turn-1");
@@ -53,8 +127,8 @@ async fn timeline_reads_the_canonical_store_without_a_projection_store() {
         .expect("canonical Timeline should load");
 
     assert_eq!(events.len(), commit.events.len());
-    assert_eq!(events[0].event.identity, identity);
-    assert_eq!(events[0].event.sequence, 1);
+    assert_eq!(events[0].event.agent_event().unwrap().identity, identity);
+    assert_eq!(events[0].event.agent_event().unwrap().sequence, 1);
     assert_eq!(events[0].event_id, TimelineEventId::from_seq(1).to_string());
 }
 
@@ -86,7 +160,25 @@ async fn timeline_rejects_a_cursor_owned_by_another_session() {
         .await
         .expect_err("cross-Session cursor must be rejected");
 
-    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidCursor);
+}
+
+#[tokio::test]
+async fn timeline_cursor_failures_are_classified_before_transport() {
+    let (_, service) = fixture().await;
+    for (cursor, code) in [
+        ("invalid".to_string(), talos_error::ErrorCode::InvalidCursor),
+        (
+            TimelineEventId::from_seq(999).to_string(),
+            talos_error::ErrorCode::EventCursorExpired,
+        ),
+    ] {
+        let error = service
+            .list_events_after("session-1", Some(&TimelineEventId::from(cursor)), 10)
+            .await
+            .expect_err("invalid or unavailable cursor should fail");
+        assert_eq!(error.error_code(), code);
+    }
 }
 
 #[tokio::test]

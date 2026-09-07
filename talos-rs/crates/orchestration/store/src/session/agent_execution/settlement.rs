@@ -176,15 +176,23 @@ async fn update_completed_turn_session(
         .get_string("usage_json")
         .ok_or_else(|| TalosError::internal("Session usage is missing"))
         .and_then(|value| {
-            serde_json::from_str::<talos_types::SessionUsage>(&value)
-                .map_err(|error| TalosError::internal(format!("parse Session usage: {error}")))
+            serde_json::from_str::<talos_types::SessionUsage>(&value).map_err(|error| {
+                TalosError::internal_with_source(
+                    "parse Session usage; technical details were withheld.",
+                    error,
+                )
+            })
         })?;
     usage.tokens.accumulate(&metrics.usage);
     if let Some(context) = metrics.context {
         usage.context = Some(context);
     }
-    let usage_json = serde_json::to_string(&usage)
-        .map_err(|error| TalosError::internal(format!("serialize Session usage: {error}")))?;
+    let usage_json = serde_json::to_string(&usage).map_err(|error| {
+        TalosError::internal_with_source(
+            "serialize Session usage; technical details were withheld.",
+            error,
+        )
+    })?;
     let message_count = message_count.to_string();
     let latest_turn_seq = latest_turn_seq.to_string();
     let last_activity = chrono::Utc::now().timestamp_millis().to_string();
@@ -304,7 +312,10 @@ async fn save_waiting_binding(
     previous: Option<&super::AgentContinuationBindingRecord>,
 ) -> TalosResult<()> {
     let provider_ref = serde_json::to_string(continuation).map_err(|error| {
-        TalosError::internal(format!("serialize Agent continuation reference: {error}"))
+        TalosError::internal_with_source(
+            "serialize Agent continuation reference; technical details were withheld.",
+            error,
+        )
     })?;
     let expected_event_seq = record.event_seq.to_string();
     match previous {

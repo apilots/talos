@@ -176,6 +176,9 @@ talos-sdk-embedded = { path = "apps/sdk-embedded" }
 talos-base = { path = "crates/app/talos-base" }
 talos-upgrade = { path = "crates/app/talos-upgrade" }
 
+[workspace.lints.rust]
+unused_must_use = "deny"
+
 [profile.dev]
 # Keep source locations in local backtraces while minimizing debug artifacts.
 debug = "line-tables-only"

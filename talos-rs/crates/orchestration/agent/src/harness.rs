@@ -5,6 +5,7 @@ use std::time::Duration;
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use talos_agent_api::AgentTurnRef;
+use talos_error::TalosError;
 use talos_run_control::{ActiveRunControl, CancellationPolicy, Settlement};
 use tokio::sync::{watch, Notify};
 
@@ -19,7 +20,7 @@ use settlement::cleanup_task_count;
 
 use crate::{
     event_sink::AgentEventPipeline, provider::SessionTurnInputSender, AgentCapabilities,
-    AgentError, AgentErrorKind, AgentProvider, AgentResult, AgentSessionContext,
+    AgentProvider, AgentResult, AgentSessionContext,
 };
 
 const RUN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -33,7 +34,7 @@ struct ActiveInvocation {
     control: Arc<ActiveRunControl>,
     input: SessionTurnInputSender,
     pipeline: AgentEventPipeline,
-    input_failure: watch::Sender<Option<AgentError>>,
+    input_failure: watch::Sender<Option<TalosError>>,
 }
 
 #[derive(Clone)]
@@ -128,18 +129,22 @@ where
         if agent_id == self.inner.agent_id {
             return Ok(());
         }
-        Err(AgentError::invalid_execution_context(
+        Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "AgentContext is bound to another Agent Harness",
         ))
     }
 
     fn reserve(&self, identity: &AgentTurnRef, control: Arc<ActiveRunControl>) -> AgentResult<()> {
         if !self.inner.accepting.load(Ordering::Acquire) {
-            return Err(AgentError::provider_error("Agent Harness is shutting down"));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "Agent Harness is shutting down",
+            ));
         }
         match self.inner.active.entry(identity.session_id.clone()) {
-            Entry::Occupied(_) => Err(AgentError::new(
-                AgentErrorKind::ActiveTurnRunning,
+            Entry::Occupied(_) => Err(TalosError::new(
+                talos_error::ErrorCode::ActiveTurnRunning,
                 format!(
                     "session `{}` already has an active Agent operation",
                     identity.session_id
@@ -163,7 +168,7 @@ where
                 {
                     self.inner.active.remove(&identity.session_id);
                     self.inner.active_changed.notify_waiters();
-                    return Err(AgentError::provider_error("Agent Harness is shutting down"));
+                    return Err(TalosError::new(talos_error::ErrorCode::InternalError, "Agent Harness is shutting down"));
                 }
                 Ok(())
             }
@@ -181,11 +186,13 @@ where
                     entry.insert(ActiveOperation::Running(invocation));
                     Ok(())
                 }
-                _ => Err(AgentError::run_conflict(
+                _ => Err(TalosError::new(
+                    talos_error::ErrorCode::Conflict,
                     "Agent run reservation changed before Provider start",
                 )),
             },
-            Entry::Vacant(_) => Err(AgentError::run_not_found(
+            Entry::Vacant(_) => Err(TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
                 "Agent run reservation disappeared before Provider start",
             )),
         }

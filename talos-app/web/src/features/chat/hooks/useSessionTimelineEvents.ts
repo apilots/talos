@@ -5,6 +5,7 @@ import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
 import { applyStreamEvent, applyTimelineRecovery } from "../stream-events";
 import type { useSessionMessageQueue } from "./useSessionMessageQueue";
 import { useAppStore } from "@/shared/store/app-store";
+import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
 const EVENT_CURSOR_EXPIRED_CODE = AppProtocol.ErrorCode.EventCursorExpired;
@@ -49,11 +50,11 @@ export function useSessionTimelineEvents(
             sessionId,
             (event) => {
               subscriptionCursor = event.eventId;
-              useAppStore.getState().setStreamError(sessionId, undefined);
               applyStreamEvent(sessionId, event);
               if (
-                event.event.payload.type === "turnCompleted" ||
-                event.event.payload.type === "turnFailed"
+                event.event.type === "systemNotice" ||
+                (event.event.type === "agent" && (event.event.data.payload.type === "turnCompleted" ||
+                event.event.data.payload.type === "turnFailed"))
               ) {
                 void onTerminalTurnRef.current?.();
               }
@@ -84,12 +85,12 @@ export function useSessionTimelineEvents(
                 ? await recoverTimelineLiveTail(sessionId)
                 : await recoverTimelineLiveTail(sessionId, subscriptionCursor);
               if (disposed) return;
+              useAppStore.getState().setStreamError(sessionId, undefined);
               applyTimelineRecovery(sessionId, recovery);
               subscriptionCursor =
                 recovery.replay.nextCursor ??
                 recovery.replay.highWaterMarkEventId ??
                 subscriptionCursor;
-              useAppStore.getState().setStreamError(sessionId, undefined);
               await onTerminalTurnRef.current?.();
               // The Session subscription must also survive an idle recovery:
               // another client or the queue can start its next Turn.
@@ -102,9 +103,7 @@ export function useSessionTimelineEvents(
           const state = useAppStore.getState();
           state.setStreamError(
             sessionId,
-            subscriptionError instanceof Error
-              ? subscriptionError.message
-              : "Session event subscription failed.",
+            userVisibleError(subscriptionError, "Session event subscription failed."),
           );
           if (state.streams[sessionId]?.isStreaming) {
             state.setStreamMeta(sessionId, {

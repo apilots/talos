@@ -30,7 +30,10 @@ impl MemoryStore {
     pub async fn open(path: &Path) -> TalosResult<Self> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                TalosError::internal(format!("create memory index directory: {error}"))
+                TalosError::internal_with_source(
+                    "create memory index directory; technical details were withheld.",
+                    error,
+                )
             })?;
         }
         for attempt in 0..2 {
@@ -65,7 +68,7 @@ impl MemoryStore {
                     continue;
                 }
                 return Err(TalosError::internal(
-                    "memory index is corrupt after rebuild".to_string(),
+                    "memory index is corrupt after rebuild",
                 ));
             }
             match SQLITE_MIGRATOR.run(&pool).await {
@@ -73,14 +76,15 @@ impl MemoryStore {
                     return Ok(Self { pool });
                 }
                 Err(error) => {
-                    return Err(TalosError::internal(format!(
-                        "initialize memory index: {error}"
-                    )));
+                    return Err(TalosError::internal_with_source(
+                        "initialize memory index; technical details were withheld.",
+                        error,
+                    ));
                 }
             }
         }
         Err(TalosError::internal(
-            "failed to rebuild corrupt memory index".to_string(),
+            "failed to rebuild corrupt memory index",
         ))
     }
 
@@ -91,10 +95,12 @@ impl MemoryStore {
             .connect("sqlite::memory:")
             .await
             .map_err(storage_error("connect memory index"))?;
-        SQLITE_MIGRATOR
-            .run(&pool)
-            .await
-            .map_err(|error| TalosError::internal(format!("initialize memory index: {error}")))?;
+        SQLITE_MIGRATOR.run(&pool).await.map_err(|error| {
+            TalosError::internal_with_source(
+                "initialize memory index; technical details were withheld.",
+                error,
+            )
+        })?;
         Ok(Self { pool })
     }
 
@@ -274,15 +280,16 @@ pub(super) async fn load_sources(
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "invalid memory filename".to_string(),
                 )
             })?;
         let source_path = format!("{memory_dirname}/{name}");
-        let content = talos_fs::read_file(&path)
-            .await?
-            .ok_or_else(|| TalosError::internal(format!("memory source missing: {source_path}")))?;
+        let content = talos_fs::read_file(&path).await?.ok_or_else(|| {
+            TalosError::internal("memory source missing; technical details were withheld.")
+                .context(format!("memory source missing: {source_path}"))
+        })?;
         sources.push(source_from_markdown(
             &scope.workspace_id,
             &scope.user_id,
@@ -301,7 +308,7 @@ pub(super) fn validate_scope_sources(sources: &[ParsedMemorySource]) -> TalosRes
         for parsed in &source.records {
             let record = &parsed.record;
             if !memory_ids.insert(&record.memory_id) {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     format!(
                         "duplicate memory_id {} in user scope",
@@ -328,7 +335,7 @@ pub(super) fn validate_scope_sources(sources: &[ParsedMemorySource]) -> TalosRes
                 && range.source_range != other.source_range
                 && range.source_range.overlaps(other.source_range)
             {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     "Dream Memory entries contain overlapping session ranges".to_string(),
                 ));
@@ -350,7 +357,7 @@ fn validate_sqlite_source_range(
     if i64::try_from(source_range.from_seq()).is_err()
         || i64::try_from(source_range.until_seq()).is_err()
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!(
                 "memory {} source range exceeds SQLite integer bounds",
@@ -387,10 +394,17 @@ async fn remove_index_files(path: &Path) -> TalosResult<()> {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
-                return Err(TalosError::internal(format!(
-                    "remove corrupt memory index {}: {error}",
-                    candidate.display()
-                )));
+                return Err({
+                    let diagnostic = format!(
+                        "remove corrupt memory index {}: {error}",
+                        candidate.display()
+                    );
+                    TalosError::internal_with_source(
+                        "Remove corrupt memory index; technical details were withheld.",
+                        error,
+                    )
+                    .context(diagnostic)
+                });
             }
         }
     }
@@ -463,13 +477,13 @@ impl<'a> SqliteProvenance<'a> {
             } => Ok(Self {
                 session_id: Some(session_id.as_str()),
                 source_from_seq: Some(i64::try_from(source_range.from_seq()).map_err(|_| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         "Dream Memory source range exceeds SQLite integer bounds".to_string(),
                     )
                 })?),
                 source_until_seq: Some(i64::try_from(source_range.until_seq()).map_err(|_| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         "Dream Memory source range exceeds SQLite integer bounds".to_string(),
                     )
@@ -485,7 +499,7 @@ impl<'a> SqliteProvenance<'a> {
 }
 
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {
-    move |error| TalosError::internal(format!("{action}: {error}"))
+    move |error| talos_storage::database_error(action, error)
 }
 
 #[cfg(test)]

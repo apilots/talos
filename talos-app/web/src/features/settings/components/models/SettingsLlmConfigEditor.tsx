@@ -1,3 +1,4 @@
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -49,11 +50,6 @@ const PROVIDERS = Object.entries(PROVIDER_LABELS).map(([key, label]) => ({
 function fmtContext(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}K`;
   return String(n);
-}
-
-function parseErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Request failed.";
 }
 
 function protocolLabel(protocol: LlmProtocol, t: (key: string) => string): string {
@@ -256,7 +252,7 @@ export function SettingsLlmConfigEditor() {
   if (error) {
     return (
       <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
-        <div className="text-sm text-danger">{parseErrorMessage(error)}</div>
+        <div className="text-sm text-danger">{userVisibleErrorMessage(error, "Request failed.")}</div>
       </Panel>
     );
   }
@@ -338,7 +334,6 @@ export function SettingsLlmConfigEditor() {
         dirty={isDirty}
         error={mutation.isError ? mutation.error : null}
         onSave={() => draft && mutation.mutate(draft)}
-        parseError={parseErrorMessage}
         pending={mutation.isPending}
         saveLabel={t("modelsPanel.saveChanges")}
         savingLabel={t("modelsPanel.saving")}

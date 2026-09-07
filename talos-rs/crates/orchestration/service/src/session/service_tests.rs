@@ -132,7 +132,7 @@ impl SessionStore for RecordingSessionStore {
             })
             .is_ok()
         {
-            return Err(TalosError::internal("injected update failure".to_string()));
+            return Err(TalosError::internal("injected update failure"));
         }
         let mut records = self.records.lock().unwrap();
         let Some(stored) = records

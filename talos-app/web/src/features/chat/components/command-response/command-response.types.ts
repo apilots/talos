@@ -3,6 +3,7 @@ import type {
   ContextCompactionStage,
 } from "@/shared/types/protocol";
 import type { ReasoningLevel, RuntimeMode } from "@/shared/types/ui";
+import type { AppProtocol } from "@talos/sdk-browser";
 
 export interface ComposerStatusSnapshot {
   model: string;
@@ -22,14 +23,14 @@ export type ComposerCommandResponseState =
     }
   | {
       kind: "compact";
-      message?: string;
+      error?: AppProtocol.ApiError;
       outcome?: ContextCompactionOutcome;
       state: "success" | "error" | "cancelled";
     }
-  | { kind: "clear"; message?: string; state: "success" | "error" }
+  | { kind: "clear"; error?: AppProtocol.ApiError; state: "success" | "error" }
   | {
       kind: "model";
-      message?: string;
+      error?: AppProtocol.ApiError;
       model: string;
       reasoningLevel?: ReasoningLevel;
       state: "success" | "error";

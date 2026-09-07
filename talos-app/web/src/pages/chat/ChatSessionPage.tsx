@@ -1,3 +1,5 @@
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -25,9 +27,10 @@ export function ChatSessionPage() {
   const location = useLocation();
   const sessionId = useParams().sessionId ?? "";
   const locationState = location.state as SessionLocationState | null;
+  const [pendingInitialSessionId, setPendingInitialSessionId] = useState<string>();
   const { data: session } = useSessionQuery(
     sessionId,
-    !hasInitialSessionInput(locationState),
+    !hasInitialSessionInput(locationState) && pendingInitialSessionId !== sessionId,
   );
   const { data: modelCatalog } = useModelsQuery();
   const models = modelCatalog?.models;
@@ -66,6 +69,7 @@ export function ChatSessionPage() {
     sessionId,
   });
   useInitialSessionInput({
+    onPendingSessionChange: setPendingInitialSessionId,
     locationPathname: location.pathname,
     locationState,
     models,
@@ -126,8 +130,8 @@ export function ChatSessionPage() {
         userActionDisabled={
           submitUserAction.isPending || pendingUserAction?.state !== "pending"
         }
-        userActionError={submitUserAction.error instanceof Error
-          ? submitUserAction.error.message
+        userActionError={submitUserAction.error
+          ? userVisibleErrorMessage(submitUserAction.error, "Failed to submit the response.")
           : undefined}
         viewportRef={autoScroll.viewportRef}
       />

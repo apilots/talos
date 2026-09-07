@@ -21,3 +21,6 @@ talos-llm-provider = { path = "../provider" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

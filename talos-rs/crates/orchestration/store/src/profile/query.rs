@@ -51,7 +51,7 @@ pub(super) async fn usage_summary(
             row.try_get::<i64, _>("usage_session_count")
                 .map_err(storage_error("read profile usage session count"))?,
         )
-        .map_err(|_| TalosError::internal("profile usage session count is negative".to_string()))?,
+        .map_err(|_| TalosError::internal("profile usage session count is negative"))?,
         usage_started_at_ms: row
             .try_get("usage_started_at")
             .map_err(storage_error("read profile usage start"))?,
@@ -108,7 +108,7 @@ pub(super) async fn model_usage(
     limit: usize,
 ) -> TalosResult<Vec<ProfileModelUsageSummary>> {
     let limit = i64::try_from(limit.max(1)).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "profile model limit is too large".to_string(),
         )
@@ -151,9 +151,8 @@ pub(super) async fn model_usage(
                         .try_get("model_id")
                         .map_err(storage_error("read profile model id"))?,
                 },
-                turn_count: u64::try_from(turn_count).map_err(|_| {
-                    TalosError::internal("profile model turn count is negative".to_string())
-                })?,
+                turn_count: u64::try_from(turn_count)
+                    .map_err(|_| TalosError::internal("profile model turn count is negative"))?,
                 usage: usage_from_aggregate_row(row)?,
                 usage_available: row
                     .try_get::<Option<i64>, _>("usage_available")

@@ -17,18 +17,27 @@ use talos_sdk::{
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
-/// Receives live queue invalidations while draining the shared Session stream.
+/// Receives queue invalidations and product notices on the shared Session stream.
 ///
 /// Dropping the subscription stops the TUI-side forwarding task. Queue state
 /// remains owned by the server and must be read through `list_message_queue`.
-pub struct MessageQueueSubscription {
-    receiver: mpsc::Receiver<MessageQueueChangedNotification>,
+pub struct SessionSubscription {
+    receiver: mpsc::Receiver<SessionEvent>,
     forward_task: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl MessageQueueSubscription {
+/// Session-scoped UI signals; canonical Turn execution keeps its existing owner.
+pub(crate) enum SessionEvent {
+    QueueChanged(MessageQueueChangedNotification),
+    Notice {
+        event_seq: i64,
+        notice: talos_sdk::TimelineSystemNotice,
+    },
+}
+
+impl SessionSubscription {
     pub(crate) fn new(
-        receiver: mpsc::Receiver<MessageQueueChangedNotification>,
+        receiver: mpsc::Receiver<SessionEvent>,
         forward_task: Option<tokio::task::JoinHandle<()>>,
     ) -> Self {
         Self {
@@ -37,14 +46,12 @@ impl MessageQueueSubscription {
         }
     }
 
-    pub(crate) fn try_recv(
-        &mut self,
-    ) -> Result<MessageQueueChangedNotification, mpsc::error::TryRecvError> {
+    pub(crate) fn try_recv(&mut self) -> Result<SessionEvent, mpsc::error::TryRecvError> {
         self.receiver.try_recv()
     }
 }
 
-impl Drop for MessageQueueSubscription {
+impl Drop for SessionSubscription {
     fn drop(&mut self) {
         if let Some(task) = self.forward_task.take() {
             task.abort();
@@ -103,10 +110,7 @@ pub trait GatewayClient: Send + Sync {
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse>;
     /// Reuses the persistent Session event stream for queue invalidations.
-    async fn subscribe_message_queue_changes(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<MessageQueueSubscription>;
+    async fn subscribe_session_events(&self, session_id: &str) -> TalosResult<SessionSubscription>;
     async fn update_session_model_selection(
         &self,
         session_id: &str,
@@ -280,10 +284,7 @@ where
         SdkGatewayClient::submit_turn_input(&mut *client, request).await
     }
 
-    async fn subscribe_message_queue_changes(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<MessageQueueSubscription> {
+    async fn subscribe_session_events(&self, session_id: &str) -> TalosResult<SessionSubscription> {
         let mut client = self.lock().await;
         let subscription = SdkGatewayClient::open_timeline_stream(
             &mut *client,
@@ -306,22 +307,23 @@ where
             loop {
                 tokio::select! {
                     event = timeline.recv() => {
-                        if event.is_none() {
-                            return;
+                        let Some(event) = event else { return; };
+                        if let talos_sdk::TimelineEventPayload::SystemNotice(notice) = event.event {
+                            if sender.send(SessionEvent::Notice { event_seq: event.event_seq, notice }).await.is_err() { return; }
                         }
                     }
                     change = changes.recv() => {
                         let Some(change) = change else {
                             return;
                         };
-                        if sender.send(change).await.is_err() {
+                        if sender.send(SessionEvent::QueueChanged(change)).await.is_err() {
                             return;
                         }
                     }
                 }
             }
         });
-        Ok(MessageQueueSubscription::new(receiver, Some(forward_task)))
+        Ok(SessionSubscription::new(receiver, Some(forward_task)))
     }
 
     async fn update_session_model_selection(
@@ -455,7 +457,7 @@ where
         .await?
         .active_turn;
         let Some(active_turn) = active_turn else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "No active turn stream is available for this session.".to_string(),
             ));

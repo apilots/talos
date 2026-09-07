@@ -292,7 +292,7 @@ async fn snapshot_from_scope(scope: &MemoryScope) -> TalosResult<UserWorkspaceMe
 fn producer(scope: &MemoryScope) -> TalosResult<UserWorkspaceMemoryProducer> {
     Ok(UserWorkspaceMemoryProducer::new(
         MemoryAgentId::parse(scope.workspace_id.clone()).map_err(|error| {
-            TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+            TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
         })?,
         Utc::now().timestamp(),
     ))
@@ -320,7 +320,7 @@ fn valid_document(
     match snapshot {
         UserWorkspaceMemorySnapshot::Missing { template } => Ok(template),
         UserWorkspaceMemorySnapshot::Valid { document, .. } => Ok(document),
-        UserWorkspaceMemorySnapshot::Invalid { diagnostic, .. } => Err(TalosError::public(
+        UserWorkspaceMemorySnapshot::Invalid { diagnostic, .. } => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             diagnostic,
         )),
@@ -337,5 +337,5 @@ fn map_format_error(error: KnowledgeFormatError) -> TalosError {
         | KnowledgeFormatErrorKind::InvalidEntry
         | KnowledgeFormatErrorKind::LimitExceeded => talos_error::ErrorCode::InvalidRequest,
     };
-    TalosError::public(code, error.to_string())
+    TalosError::new(code, error.to_string())
 }

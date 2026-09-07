@@ -13,3 +13,6 @@ talos-agent = { workspace = true }
 talos-router = { path = "../router" }
 tokio = { workspace = true }
 async-trait = "0.1"
+
+[lints]
+workspace = true

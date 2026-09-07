@@ -1,6 +1,5 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use talos_error::ErrorCode;
 use talos_types::{PendingUserAction, TokenUsage};
 use ts_rs::TS;
 
@@ -31,7 +30,44 @@ pub struct TimelineEvent {
     pub event_seq: i64,
     #[ts(type = "number")]
     pub persisted_at: i64,
-    pub event: AgentEvent,
+    pub event: TimelineEventPayload,
+}
+
+/// Timeline combines execution facts and product notices in one durable cursor.
+/// Notices never enter the Agent reducer or consume an execution sequence number.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+pub enum TimelineEventPayload {
+    Agent(AgentEvent),
+    SystemNotice(TimelineSystemNotice),
+}
+
+/// A product-owned notice attached to a Turn, independent of its execution lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TimelineSystemNotice {
+    pub identity: AgentTurnRef,
+    #[ts(type = "number")]
+    pub occurred_at: i64,
+    pub notice: crate::AgentSystemNotice,
+}
+
+impl TimelineEventPayload {
+    /// Identity used for Session authorization and Turn filtering across all facts.
+    pub fn identity(&self) -> &AgentTurnRef {
+        match self {
+            Self::Agent(event) => &event.identity,
+            Self::SystemNotice(notice) => &notice.identity,
+        }
+    }
+
+    /// Execution-only consumers must explicitly exclude product notices.
+    pub fn agent_event(&self) -> Option<&AgentEvent> {
+        match self {
+            Self::Agent(event) => Some(event),
+            Self::SystemNotice(_) => None,
+        }
+    }
 }
 
 /// Current nonterminal Turn projection for one Session.
@@ -218,15 +254,8 @@ pub enum AgentStopReason {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentTurnFailed {
-    pub error: AgentErrorInfo,
-}
-
-/// Stable, serializable Agent error projection safe for events and history.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AgentErrorInfo {
-    pub code: ErrorCode,
-    pub message: String,
+    pub error: talos_error::ApiError,
+    /// Runtime-owned retry policy; not part of the reusable public error object.
     pub retryable: bool,
 }
 

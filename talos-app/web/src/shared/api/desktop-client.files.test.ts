@@ -70,9 +70,9 @@ describe("createDesktopTalosClient files", () => {
   });
 });
 
-function bridgeWithInvoke(invoke: DesktopRendererBridge["invoke"]): DesktopRendererBridge {
+function bridgeWithInvoke(invoke: <T>(method: AppProtocol.ClientMethod, params?: unknown) => Promise<T>): DesktopRendererBridge {
   return {
-    invoke,
+    invoke: async <T>(method: AppProtocol.ClientMethod, params: unknown) => ({ status: "success", data: await invoke<T>(method, params) }),
     onEvent: () => () => undefined,
     onSubscriptionTerminated: () => () => undefined,
   };

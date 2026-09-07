@@ -1,14 +1,5 @@
 use super::*;
 
-fn interactive_transcript_text(app: &TuiApp) -> String {
-    app.render_runtime
-        .interactive_projection_lines()
-        .into_iter()
-        .map(|line| line.plain_text())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[tokio::test]
 async fn test_context_compaction_stream_renders_right_panel_status() {
     let mut app = create_app_server_app();

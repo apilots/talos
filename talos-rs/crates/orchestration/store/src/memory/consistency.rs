@@ -43,7 +43,7 @@ impl MemoryStore {
                 .join(format!("{}.md", edit.source_date));
             let current = talos_fs::read_file(&file_path).await?;
             if current.as_deref() != edit.expected_content {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     "Dream Memory changed after version validation".to_string(),
                 ));
@@ -108,7 +108,7 @@ impl MemoryStore {
             let record = &parsed.record;
             let Some(existing) = current_by_id.get(&record.memory_id) else {
                 if matches!(&record.provenance, DreamMemoryProvenance::Generated { .. }) {
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::Conflict,
                         "new generated memory blocks must use Dream Memory formation".to_string(),
                     ));
@@ -118,7 +118,7 @@ impl MemoryStore {
             if existing.occurred_at != record.occurred_at
                 || existing.provenance != record.provenance
             {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     format!(
                         "memory provenance is immutable for {}",

@@ -9,7 +9,7 @@ impl MemoryDate {
         NaiveDate::parse_from_str(value, "%Y-%m-%d")
             .map(Self)
             .map_err(|_| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "memory date must use YYYY-MM-DD".to_string(),
                 )

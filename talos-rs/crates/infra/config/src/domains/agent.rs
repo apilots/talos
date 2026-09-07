@@ -156,7 +156,7 @@ impl PlannerMode {
     pub fn parse(value: &str) -> TalosResult<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "built_in" => Ok(Self::BuiltIn),
-            other => Err(talos_error::TalosError::public(
+            other => Err(talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("invalid planner mode: {}", other),
             )),

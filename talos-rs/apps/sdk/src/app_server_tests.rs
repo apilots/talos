@@ -1,3 +1,4 @@
+use super::credentials::actor_credentials_for_method;
 use super::*;
 use bytes::Bytes;
 use std::collections::BTreeMap;
@@ -106,6 +107,53 @@ fn decodes_slash_timeline_notification() {
     assert_eq!(decoded.subscription_id, expected.subscription_id);
     assert_eq!(decoded.event.event_id, expected.event.event_id);
     assert_eq!(decoded.event.event, expected.event.event);
+}
+
+#[tokio::test]
+async fn rejected_cached_credentials_preserve_the_original_request_error() {
+    let mut child = Command::new("cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("start local pipe fixture");
+    let mut client = test_app_server_client(/*use_cloud_session_cache*/ true);
+    client.stdin = child.stdin.take();
+    client.actor_credentials = Some(existing_session_credentials("expired-token".to_string()));
+    let expected = TalosError::from_source(
+        talos_error::ErrorCode::Unauthenticated,
+        "The login session has expired.",
+        std::io::Error::other("private authentication diagnostic"),
+    );
+    let pending = client.pending_responses.clone();
+    let mut lines = BufReader::new(child.stdout.take().expect("fixture stdout")).lines();
+    let response_error = expected.clone();
+    let respond = async move {
+        let line = lines
+            .next_line()
+            .await
+            .expect("read request")
+            .expect("request line");
+        let request: talos_app_protocol::jsonrpc::JsonRpcRequest =
+            serde_json::from_str(&line).expect("request frame");
+        let talos_app_protocol::jsonrpc::RequestId::Number(id) = request.id else {
+            panic!("numeric SDK request ID");
+        };
+        pending
+            .lock()
+            .await
+            .remove(&id)
+            .expect("pending request")
+            .send(Err(response_error))
+            .expect("request receiver");
+    };
+    let (result, ()) = tokio::join!(client.request_value("session/list", ()), respond);
+    let error = result.expect_err("expired login must fail");
+    assert_eq!(error.to_api_error(), expected.to_api_error());
+    assert!(std::ptr::eq(error.backtrace(), expected.backtrace()));
+    assert!(client.actor_credentials.is_none());
+    drop(client.stdin.take());
+    child.wait().await.expect("fixture exit");
 }
 
 #[tokio::test]
@@ -240,12 +288,12 @@ fn timeline_event(event_id: &str, event_seq: i64) -> TimelineEvent {
         event_id: event_id.to_string(),
         event_seq,
         persisted_at: event_seq,
-        event: AgentEvent {
+        event: talos_agent_api::TimelineEventPayload::Agent(AgentEvent {
             identity: AgentTurnRef::new("session-1", "turn-1"),
             sequence: event_seq as u64,
             occurred_at: event_seq,
             payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
-        },
+        }),
     }
 }
 

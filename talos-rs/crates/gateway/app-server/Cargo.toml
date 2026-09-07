@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+talos-logging = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 bytes = { workspace = true }
@@ -29,3 +30,6 @@ uuid = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -17,7 +17,7 @@ impl TalosService {
             .await?
             .is_some_and(|active| active.identity.turn_id != turn_id)
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("active turn `{turn_id}` for session `{session_id}`"),
             ));

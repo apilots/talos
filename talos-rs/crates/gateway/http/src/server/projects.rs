@@ -77,13 +77,6 @@ pub(super) async fn delete_project_handler(
         .gateway
         .delete_project(&shared_actor(&actor.0), ProjectDeleteRequest { project_id })
         .await
-        .map_err(map_project_delete_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))
-}
-
-fn map_project_delete_error(error: talos_error::TalosError) -> ApiError {
-    match error.error_code() {
-        talos_error::ErrorCode::InvalidRequest => ApiError::new(talos_error::ErrorCode::Conflict),
-        _ => ApiError::from_talos_error(error),
-    }
 }

@@ -1,8 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 
-import { AppServerProtocolError, JsonRpcStdioTransport, filterAppServerEnvironment } from "./stdio";
+import { AppServerProtocolError, JsonRpcStdioTransport, StdioAppServerClient, filterAppServerEnvironment } from "./stdio";
+
+it("shares concurrent initialization and does not send initialize twice", async () => {
+  const client = new StdioAppServerClient({});
+  const response = { protocol_version: AppProtocol.PROTOCOL_VERSION,
+    server_info: { name: "fixture", version: "test", auth_enabled: false, cloud_auth_url: null } };
+  const request = vi.spyOn(client.transport, "request").mockResolvedValue(response);
+  vi.spyOn(client.transport, "notify").mockImplementation(() => undefined);
+  expect(await Promise.all([client.connect(), client.connect(), client.connect()])).toEqual([response, response, response]);
+  expect(request).toHaveBeenCalledTimes(1);
+});
 
 describe("AppServerProtocolError", () => {
   it("preserves protocol error fields", () => {
@@ -93,6 +103,29 @@ describe("JsonRpcStdioTransport server requests", () => {
 });
 
 describe("JsonRpcStdioTransport responses", () => {
+  it.each([
+    { id: null, code: AppProtocol.AppServerErrorCode.ParseError },
+    { id: null, code: -99999 },
+    { id: 99, code: AppProtocol.AppServerErrorCode.ParseError },
+    { id: 99, code: -99999 },
+  ])("rejects pending calls for an uncorrelated protocol error: $id/$code", async ({ id, code }) => {
+    const transport = createTransportHarness();
+    const reports: Error[] = [];
+    const failures: unknown[] = [];
+    transport.instance.onError((error) => reports.push(error));
+    const requests = [
+      transport.instance.request("initialize", {}),
+      transport.instance.request("session/list", {}),
+    ].map((request) => request.catch((error: unknown) => failures.push(error)));
+
+    transport.handleLine(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message: "The request could not be decoded." } }));
+    await Promise.resolve();
+
+    expect(reports).toHaveLength(1);
+    expect(failures).toEqual([reports[0], reports[0]]);
+    await Promise.all(requests);
+  });
+
   it("unwraps successful API result data", async () => {
     const transport = createTransportHarness();
     const request = transport.instance.request<{ ok: boolean }>("session/get", {
@@ -123,7 +156,7 @@ describe("JsonRpcStdioTransport responses", () => {
       result: {
         status: "error",
         error: {
-          code: AppProtocol.ErrorCode.ResourceNotFound,
+          code: AppProtocol.ErrorCode.ResourceNotFound, localization: null,
           message: "Resource not found",
         },
       },
@@ -202,7 +235,37 @@ describe("JsonRpcStdioTransport notifications", () => {
     transport.instance.onError((error) => errors.push(error));
 
     expect(() => transport.handleLine("{")).not.toThrow();
-    expect(errors[0]?.message).toContain("Expected property name");
+    expect(errors).toMatchObject([{ code: AppProtocol.ErrorCode.InternalError, message: "The backend returned invalid JSON.", cause: expect.any(SyntaxError) }]);
+  });
+
+  it.each(["null", "SECRET_REMOTE_BODY", '{"method":42}'])("rejects pending calls for an invalid frame: %s", async (frame) => {
+    const transport = createTransportHarness();
+    const operation = transport.instance.request("session/list", {});
+    const assertion = expect(operation).rejects.toBeInstanceOf(Error);
+    transport.handleLine(frame);
+    await assertion;
+  });
+
+  it.each([null, { error: { code: "internalError", message: "Invalid response." }, retryable: false }])("reports malformed terminal data instead of dropping it", (data) => {
+    const transport = createTransportHarness();
+    const error = vi.fn();
+    const event = vi.fn();
+    const terminated = vi.fn();
+    transport.instance.onError(error);
+    transport.instance.onEvent(event);
+    transport.instance.onSubscriptionTerminated(terminated);
+    transport.handleLine(JSON.stringify({ jsonrpc: "2.0", method: "timeline/turn/failed", params: {
+      subscriptionId: "sub-1", event: { eventId: "event-1", eventSeq: 1, persistedAt: 1, event: { type: "agent", data: {
+        identity: { sessionId: "session-1", turnId: "turn-1" }, sequence: 1,
+        payload: { type: "turnFailed", data },
+      } } },
+    } }));
+    expect(error).toHaveBeenCalledOnce();
+    expect(event).not.toHaveBeenCalled();
+    expect(terminated.mock.calls).toEqual([[{
+      subscriptionId: "sub-1", sessionId: "session-1", reason: "interrupted",
+      message: "The app-server returned an invalid timeline event.",
+    }]]);
   });
 });
 

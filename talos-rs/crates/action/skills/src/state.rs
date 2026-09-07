@@ -8,16 +8,20 @@ pub fn load_skill_state(path: &Path) -> TalosResult<SkillState> {
         return Ok(SkillState::default());
     }
     let contents = fs::read_to_string(path).map_err(|err| {
-        TalosError::internal(format!(
-            "failed to read skills state `{}`: {err}",
-            path.display()
-        ))
+        let diagnostic = format!("failed to read skills state `{}`: {err}", path.display());
+        TalosError::internal_with_source(
+            "Failed to read skills state; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     serde_json::from_str(&contents).map_err(|err| {
-        TalosError::internal(format!(
-            "failed to parse skills state `{}`: {err}",
-            path.display()
-        ))
+        let diagnostic = format!("failed to parse skills state `{}`: {err}", path.display());
+        TalosError::internal_with_source(
+            "Failed to parse skills state; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })
 }
 

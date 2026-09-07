@@ -76,7 +76,7 @@ impl KernelMemoryProgressStore for MemoryProgress {
             )
             .map(|_| ())
             .map_err(|current| {
-                talos_error::TalosError::public(
+                talos_error::TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     format!(
                         "memory cursor conflict: expected {expected_until_seq}, current {current}"
@@ -384,10 +384,7 @@ fn kernel_provider_rejects_capabilities_the_adapter_cannot_execute() {
         panic!("unsupported capability must be rejected");
     };
 
-    assert_eq!(
-        error.kind,
-        talos_agent::AgentErrorKind::InvalidExecutionContext
-    );
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
 }
 
 #[test]

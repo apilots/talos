@@ -88,10 +88,9 @@ impl SessionHistoryService {
             .then(|| completed.last().map(|(event_seq, _)| *event_seq))
             .flatten()
             .map(|event_seq| format_history_cursor(high_water_event_seq, event_seq));
-        Ok(SessionHistoryResponse {
-            data: completed.into_iter().map(|(_, turn)| turn).collect(),
-            next_cursor,
-        })
+        let mut data: Vec<_> = completed.into_iter().map(|(_, turn)| turn).collect();
+        self.attach_notices(&mut data, high_water_event_seq).await?;
+        Ok(SessionHistoryResponse { data, next_cursor })
     }
 
     async fn validate_cursor_event(
@@ -104,12 +103,12 @@ impl SessionHistoryService {
             .event_service
             .get_event(event_seq)
             .await?
-            .filter(|event| event.event.identity.session_id == session_id)
+            .filter(|event| event.event.identity().session_id == session_id)
             .ok_or_else(invalid_history_cursor)?;
         if terminal_required
             && !matches!(
-                event.event.payload,
-                AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
+                event.event.agent_event().map(|event| &event.payload),
+                Some(AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_))
             )
         {
             return Err(invalid_history_cursor());
@@ -125,7 +124,7 @@ impl SessionHistoryService {
             return Ok(Vec::new());
         }
         let limit = params.limit.clamp(1, MAX_HISTORY_PAGE_SIZE);
-        match params.window {
+        let mut turns = match params.window {
             SessionHistoryWindow::Latest => {
                 let terminals = self
                     .event_service
@@ -135,17 +134,26 @@ impl SessionHistoryService {
                 for terminal in terminals {
                     turns.push(self.reduce_terminal(terminal).await?);
                 }
-                Ok(turns)
+                turns
             }
             SessionHistoryWindow::OldestAfter {
                 completed_event_seq,
-            } => Ok(self
+            } => self
                 .read_completed_after(&params.session_id, completed_event_seq, None, limit)
                 .await?
                 .into_iter()
                 .map(|(_, turn)| turn)
-                .collect()),
-        }
+                .collect(),
+        };
+        let high_water = self
+            .event_service
+            .latest_event_id(&params.session_id)
+            .await?
+            .map(|id| id.event_seq())
+            .transpose()?
+            .unwrap_or_default();
+        self.attach_notices(&mut turns, high_water).await?;
+        Ok(turns)
     }
 
     async fn read_completed_after(
@@ -175,7 +183,9 @@ impl SessionHistoryService {
                 if through_event_seq.is_some_and(|through| timeline_event.event_seq > through) {
                     break;
                 }
-                let event = timeline_event.event.clone();
+                let Some(event) = timeline_event.event.agent_event().cloned() else {
+                    continue;
+                };
                 let identity = event.identity.clone();
                 let terminal = matches!(
                     event.payload,
@@ -192,12 +202,10 @@ impl SessionHistoryService {
                     continue;
                 }
                 let reducer = reducers
-                    .remove(&timeline_event.event.identity.turn_id)
+                    .remove(&timeline_event.event.identity().turn_id)
                     .expect("terminal Turn reducer exists");
-                completed.push((
-                    timeline_event.event_seq,
-                    self.reduce_checkpoint(timeline_event, reducer.checkpoint())?,
-                ));
+                let turn = self.reduce_checkpoint(timeline_event, reducer.checkpoint())?;
+                completed.push((timeline_event.event_seq, turn));
                 if completed.len() == limit {
                     return Ok(completed);
                 }
@@ -224,9 +232,42 @@ impl SessionHistoryService {
     ) -> TalosResult<SessionHistoryTurn> {
         let checkpoint = self
             .event_service
-            .turn_checkpoint(&terminal.event.identity, terminal.event_seq)
+            .turn_checkpoint(terminal.event.identity(), terminal.event_seq)
             .await?;
         self.reduce_checkpoint(&terminal, checkpoint)
+    }
+
+    /// Enrich only returned Turns, never the pagination lookahead, at one shared high water.
+    async fn attach_notices(
+        &self,
+        turns: &mut [SessionHistoryTurn],
+        high_water: i64,
+    ) -> TalosResult<()> {
+        if turns.is_empty() {
+            return Ok(());
+        }
+        let identities: Vec<_> = turns.iter().map(|turn| turn.identity.clone()).collect();
+        let mut notices = HashMap::<_, Vec<_>>::new();
+        for event in self
+            .event_service
+            .turn_notices(&identities, high_water)
+            .await?
+        {
+            let identity = event.event.identity();
+            notices
+                .entry((identity.session_id.clone(), identity.turn_id.clone()))
+                .or_default()
+                .push(event);
+        }
+        for turn in turns {
+            turn.notices = notices
+                .remove(&(
+                    turn.identity.session_id.clone(),
+                    turn.identity.turn_id.clone(),
+                ))
+                .unwrap_or_default();
+        }
+        Ok(())
     }
 
     fn reduce_checkpoint(
@@ -234,7 +275,11 @@ impl SessionHistoryService {
         terminal: &talos_agent_api::TimelineEvent,
         checkpoint: talos_agent::AgentRunCheckpoint,
     ) -> TalosResult<SessionHistoryTurn> {
-        let result = match &terminal.event.payload {
+        let event = terminal
+            .event
+            .agent_event()
+            .ok_or_else(|| TalosError::internal("History completion must be an Agent event."))?;
+        let result = match &event.payload {
             AgentEventPayload::TurnCompleted(completion) => {
                 AgentRunResult::Completed(AgentRunOutput {
                     messages: checkpoint.messages,
@@ -254,10 +299,11 @@ impl SessionHistoryService {
             }
         };
         Ok(SessionHistoryTurn {
-            identity: terminal.event.identity.clone(),
+            identity: terminal.event.identity().clone(),
             result,
+            notices: Vec::new(),
             completed_event_seq: terminal.event_seq,
-            completed_at: terminal.event.occurred_at,
+            completed_at: event.occurred_at,
         })
     }
 }
@@ -267,11 +313,7 @@ impl SessionHistoryReader for SessionHistoryService {
         &self,
         params: SessionHistoryReadParams,
     ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
-        Box::pin(async move {
-            self.read_window(params)
-                .await
-                .map_err(talos_agent::AgentError::from)
-        })
+        Box::pin(async move { self.read_window(params).await })
     }
 }
 
@@ -295,7 +337,7 @@ fn parse_history_cursor(cursor: &str) -> TalosResult<(i64, i64)> {
 }
 
 fn invalid_history_cursor() -> TalosError {
-    TalosError::public(ErrorCode::InvalidRequest, "invalid Session history cursor")
+    TalosError::new(ErrorCode::InvalidRequest, "invalid Session history cursor")
 }
 
 #[cfg(test)]

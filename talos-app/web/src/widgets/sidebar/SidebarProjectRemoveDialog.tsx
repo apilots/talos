@@ -1,4 +1,6 @@
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -17,7 +19,8 @@ export function SidebarProjectRemoveDialog({
   onClose,
   onRemove,
 }: SidebarProjectRemoveDialogProps) {
-  const [error, setError] = useState<string | null>(null);
+  useTranslation("errors");
+  const [error, setError] = useState<ReturnType<typeof userVisibleError> | null>(null);
 
   async function submitRemove() {
     if (removing) {
@@ -27,7 +30,7 @@ export function SidebarProjectRemoveDialog({
     try {
       await onRemove();
     } catch (submitError) {
-      setError(errorMessage(submitError));
+      setError(userVisibleError(submitError, "Failed to remove the project."));
     }
   }
 
@@ -53,7 +56,7 @@ export function SidebarProjectRemoveDialog({
         </div>
         {error ? (
           <div className="mt-4 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
-            {error}
+            {apiErrorMessage(error)}
           </div>
         ) : null}
         <div className="mt-7 flex justify-end gap-4">
@@ -68,11 +71,4 @@ export function SidebarProjectRemoveDialog({
     </div>,
     document.body,
   );
-}
-
-function errorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }

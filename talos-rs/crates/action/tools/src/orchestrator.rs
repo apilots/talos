@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use talos_config::{ToolSandboxModeConfig, ToolSandboxNetworkConfig};
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_error::{TalosError, TalosResult};
 use talos_tools_sandbox::{
     FileSystemPermissionLevel, GovernanceDecisionReason, GovernanceEventSink, GovernanceOutcome,
     NetworkSandboxPolicy, RequestedFileSystemAccess, RequestedToolPermissions, ToolExecutionPlan,
@@ -177,7 +177,7 @@ impl RegistryOrchestrator {
         )
         .and_then(|permissions| permissions.with_file_system_access(file_system_access))
         .map_err(|error| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 error.to_string(),
             )
@@ -227,7 +227,7 @@ impl RegistryOrchestrator {
 
         let mut risk_summary = None;
         let mut decision = sandbox.evaluate(request.clone()).map_err(|error| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 error.to_string(),
             )
@@ -257,7 +257,7 @@ impl RegistryOrchestrator {
             let mut assessed_request = request;
             assessed_request.command_risk_assessment = Some(assessment);
             decision = sandbox.evaluate(assessed_request).map_err(|error| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ToolExecutionFailed,
                     error.to_string(),
                 )
@@ -310,7 +310,7 @@ impl RegistryOrchestrator {
             ToolGovernanceArgumentOverride::None => {}
             ToolGovernanceArgumentOverride::BashCommandPermissions => {
                 let ToolCallPayload::Function { arguments } = &invocation.payload else {
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::ToolExecutionFailed,
                         "shell tool requires function payload".to_string(),
                     ));
@@ -431,7 +431,7 @@ fn bash_command<'a>(
         return Ok(None);
     }
     let ToolCallPayload::Function { arguments } = &invocation.payload else {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "shell tool requires function payload",
         ));
@@ -441,7 +441,7 @@ fn bash_command<'a>(
         .and_then(Value::as_str)
         .map(Some)
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "shell tool requires command",
             )
@@ -449,17 +449,17 @@ fn bash_command<'a>(
 }
 
 fn invocation_scope_digest(invocation: &ToolInvocation) -> TalosResult<String> {
-    let encoded = serde_json::to_vec(&invocation.payload)
-        .map_err(|error| TalosError::internal(format!("encode tool approval scope: {error}")))?;
+    let encoded = serde_json::to_vec(&invocation.payload).map_err(|error| {
+        TalosError::internal_with_source(
+            "encode tool approval scope; technical details were withheld.",
+            error,
+        )
+    })?;
     Ok(format!("tis_{:x}", Sha256::digest(encoded)))
 }
 
 fn sandbox_permission_failure(message: impl Into<String>) -> TalosError {
-    TalosError::tool_failure(
-        TalosToolErrorKind::PermissionRejection,
-        message,
-        Some("sandbox_policy".to_string()),
-    )
+    TalosError::new(talos_error::ErrorCode::PermissionDenied, message)
 }
 
 fn map_sandbox_mode(mode: &ToolSandboxModeConfig) -> ToolSandboxMode {

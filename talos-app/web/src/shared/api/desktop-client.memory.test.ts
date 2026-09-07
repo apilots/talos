@@ -61,9 +61,9 @@ function bridgeWithResponses(
   responses: Partial<Record<AppProtocol.ClientMethod, unknown>>,
 ): DesktopRendererBridge {
   return {
-    invoke: async function <T>(method: AppProtocol.ClientMethod): Promise<T> {
+    invoke: async function <T>(method: AppProtocol.ClientMethod): Promise<AppProtocol.ApiResponse<T>> {
       if (Object.prototype.hasOwnProperty.call(responses, method)) {
-        return responses[method] as T;
+        return { status: "success", data: responses[method] as T };
       }
       throw new Error(`unexpected method: ${method}`);
     },

@@ -72,7 +72,7 @@ impl OllamaProvider {
         if let Some(api_key) = self.config.api_key.as_deref() {
             let authorization = header::HeaderValue::from_str(&format!("Bearer {api_key}"))
                 .map_err(|error| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!("Ollama API key cannot be encoded as an HTTP header: {error}"),
                     )
@@ -116,19 +116,16 @@ impl OllamaProvider {
             .send()
             .await
             .map_err(|error| {
-                TalosError::internal(format!("Ollama Chat request failed: {error}"))
+                TalosError::internal_with_source(
+                    "Ollama Chat request failed; technical details were withheld.",
+                    error.without_url(),
+                )
             })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        let message = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "response body unavailable".to_string());
-        Err(TalosError::internal(format!(
-            "Ollama API error: {status} - {message}"
-        )))
+        Err(talos_llm_provider::http_response_error("Ollama", &response))
     }
 }
 
@@ -148,7 +145,10 @@ impl LlmProvider for OllamaProvider {
             .json::<chat_protocol::ChatCompletionResponse>()
             .await
             .map_err(|error| {
-                TalosError::internal(format!("Ollama Chat response parsing failed: {error}"))
+                TalosError::internal_with_source(
+                    "Ollama Chat response parsing failed; technical details were withheld.",
+                    error.without_url(),
+                )
             })?;
         chat_protocol::chat_response(response, "Ollama")
     }

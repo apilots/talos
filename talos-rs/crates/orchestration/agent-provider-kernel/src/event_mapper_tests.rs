@@ -16,6 +16,33 @@ use talos_types::{
 use super::*;
 
 #[tokio::test]
+async fn bootstrap_warning_keeps_its_kind_without_exposing_server_paths() {
+    let (pipeline, sink, _events) = AgentEventPipeline::fresh(AgentTurnRef::new("s", "t"));
+    pipeline
+        .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+        .await
+        .unwrap();
+    let mapper = KernelAgentEventMapper::new(sink);
+    let warning = talos_agent_kernel::KernelWarning::PromptBootstrapFileMissing(
+        talos_agent_kernel::PromptBootstrapFileMissingWarning {
+            file_kind: talos_prompt::WorkspaceBootstrapFileKind::Identity,
+            path: "/private/server/secret/IDENTITY.md".into(),
+        },
+    );
+    mapper.map_notice(warning_message(warning)).await.unwrap();
+    let checkpoint = pipeline.checkpoint().await;
+    assert_eq!(
+        checkpoint.messages[0].blocks[0].content,
+        AgentMessageBlockContent::SystemNotice(AgentSystemNotice {
+            level: TalosTimelineNoticeLevel::Warning,
+            content: talos_agent_api::SystemNoticeContent::Text(
+                "Prompt bootstrap file is missing: Identity".into()
+            ),
+        })
+    );
+}
+
+#[tokio::test]
 async fn assistant_kernel_lifecycle_maps_to_one_canonical_agent_block() {
     let (pipeline, sink, _events) =
         AgentEventPipeline::fresh(AgentTurnRef::new("session-1", "turn-1"));
@@ -149,7 +176,8 @@ async fn provider_failure_closes_compaction_and_message_lifecycles() {
         .unwrap();
 
     mapper
-        .finish_failed(&talos_agent::AgentError::provider_error(
+        .finish_failed(&talos_error::TalosError::new(
+            talos_error::ErrorCode::InternalError,
             "compaction failed",
         ))
         .await

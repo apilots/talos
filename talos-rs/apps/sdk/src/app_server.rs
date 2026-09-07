@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 use talos_agent_api::{
     InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineResponse,
@@ -12,7 +11,7 @@ use talos_agent_api::{
     SubmitTurnInputResponse, TimelineEvent,
 };
 use talos_app_protocol::events::TimelineEventNotification;
-use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
+use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification};
 #[cfg(test)]
 use talos_app_protocol::requests::ActorCredential;
 use talos_app_protocol::requests::{
@@ -24,7 +23,7 @@ use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
-use talos_error::{ErrorCode, TalosError, TalosResult};
+use talos_error::{TalosError, TalosResult};
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
@@ -69,6 +68,7 @@ use crate::{
     GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
 };
 
+mod request;
 mod response;
 mod stdout;
 use stdout::spawn_stdout_reader;
@@ -78,9 +78,9 @@ mod credentials;
 #[path = "app_server/files.rs"]
 mod files;
 
+use credentials::existing_session_credentials;
 #[cfg(test)]
 use credentials::is_business_method;
-use credentials::{actor_credentials_for_method, existing_session_credentials};
 
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
@@ -156,16 +156,21 @@ impl AppServerClient {
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| {
-                TalosError::internal(format!("spawn {}: {error}", config.app_server_bin))
+                let diagnostic = format!("spawn {}: {error}", config.app_server_bin);
+                TalosError::internal_with_source(
+                    "Failed to start app-server; technical details were withheld.",
+                    error,
+                )
+                .context(diagnostic)
             })?;
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| TalosError::internal("app-server stdin is not piped".to_string()))?;
+            .ok_or_else(|| TalosError::internal("app-server stdin is not piped"))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| TalosError::internal("app-server stdout is not piped".to_string()))?;
+            .ok_or_else(|| TalosError::internal("app-server stdout is not piped"))?;
         let pending_responses = Arc::new(Mutex::new(HashMap::new()));
         let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
         let pending_subscription_events = Arc::new(Mutex::new(HashMap::new()));
@@ -198,24 +203,31 @@ impl AppServerClient {
         &mut self,
         config: &AppServerClientConfig,
     ) -> TalosResult<InitializeResponse> {
-        self.request_typed(
-            "initialize",
-            InitializeParams {
-                client_info: ClientInfo {
-                    name: config.client_name.clone(),
-                    title: None,
-                    version: config.client_version.clone(),
-                    kind: ClientKind::Sdk,
+        let response: InitializeResponse = self
+            .request_typed(
+                "initialize",
+                InitializeParams {
+                    client_info: ClientInfo {
+                        name: config.client_name.clone(),
+                        title: None,
+                        version: config.client_version.clone(),
+                        kind: ClientKind::Sdk,
+                    },
+                    capabilities: ClientCapabilities {
+                        protocol_version: ProtocolVersion::CURRENT,
+                        supports_server_requests: false,
+                        supports_event_replay: true,
+                    },
+                    actor_credentials: None,
                 },
-                capabilities: ClientCapabilities {
-                    protocol_version: ProtocolVersion::CURRENT,
-                    supports_server_requests: false,
-                    supports_event_replay: true,
-                },
-                actor_credentials: None,
-            },
-        )
-        .await
+            )
+            .await?;
+        if response.protocol_version != ProtocolVersion::CURRENT {
+            return Err(TalosError::internal(
+                "Unsupported app-server protocol version; update the backend and client together.",
+            ));
+        }
+        Ok(response)
     }
 
     async fn notify_initialized(&mut self) -> TalosResult<()> {
@@ -249,13 +261,14 @@ impl AppServerClient {
         self.events
             .recv()
             .await
-            .ok_or_else(|| TalosError::internal("app-server event stream closed".to_string()))
+            .ok_or_else(|| TalosError::internal("app-server event stream closed"))
     }
 
     pub async fn next_notification(&mut self) -> TalosResult<TimelineEventNotification> {
-        self.notifications.recv().await.ok_or_else(|| {
-            TalosError::internal("app-server notification stream closed".to_string())
-        })
+        self.notifications
+            .recv()
+            .await
+            .ok_or_else(|| TalosError::internal("app-server notification stream closed"))
     }
 
     pub(crate) async fn shutdown(&mut self) -> TalosResult<()> {
@@ -263,112 +276,31 @@ impl AppServerClient {
         let child = self.child.take();
 
         if let Some(mut stdin) = stdin {
-            stdin
-                .shutdown()
-                .await
-                .map_err(|error| TalosError::internal(error.to_string()))?;
+            stdin.shutdown().await.map_err(|error| {
+                TalosError::internal_with_source(
+                    "App-server communication failed; technical details were withheld.",
+                    error,
+                )
+            })?;
         }
         if let (AppServerOwnership::OwnedChild, Some(mut child)) = (self.ownership, child) {
-            let status = child
-                .wait()
-                .await
-                .map_err(|error| TalosError::internal(error.to_string()))?;
+            let status = child.wait().await.map_err(|error| {
+                TalosError::internal_with_source(
+                    "App-server communication failed; technical details were withheld.",
+                    error,
+                )
+            })?;
             if status.success() {
                 Ok(())
             } else {
-                Err(TalosError::internal(format!(
-                    "app-server exited with {status}"
-                )))
+                Err(TalosError::internal(
+                    "app-server exited with; technical details were withheld.",
+                )
+                .context(format!("app-server exited with {status}")))
             }
         } else {
             Ok(())
         }
-    }
-
-    async fn request_typed<P, T>(&mut self, method: &str, params: P) -> TalosResult<T>
-    where
-        P: serde::Serialize,
-        T: DeserializeOwned,
-    {
-        let value = self.request_value(method, params).await?;
-        serde_json::from_value(value).map_err(|error| TalosError::internal(error.to_string()))
-    }
-
-    async fn request_value<P>(&mut self, method: &str, params: P) -> TalosResult<Value>
-    where
-        P: serde::Serialize,
-    {
-        let id = self.next_request_id();
-        let params = serde_json::to_value(params)
-            .map_err(|error| TalosError::internal(error.to_string()))?;
-        let mut request = JsonRpcRequest::new(RequestId::Number(id), method, Some(params));
-        request.actor_credentials = self.actor_credentials_for_request(method);
-        let (tx, rx) = oneshot::channel();
-        self.pending_responses.lock().await.insert(id, tx);
-        if let Err(error) = self.write_json(&request).await {
-            self.pending_responses.lock().await.remove(&id);
-            return Err(error);
-        }
-        let response = match tokio::time::timeout(APP_SERVER_REQUEST_TIMEOUT, rx).await {
-            Ok(response) => response,
-            Err(_) => {
-                self.pending_responses.lock().await.remove(&id);
-                return Err(TalosError::internal("app-server request timeout"));
-            }
-        };
-
-        let result = response.map_err(|_| {
-            TalosError::internal(format!(
-                "app-server response channel closed for request {id}"
-            ))
-        })?;
-        match result {
-            Err(error)
-                if error.is_code(ErrorCode::Unauthenticated)
-                    && self.use_cloud_session_cache
-                    && self.actor_credentials.is_some()
-                    && method != "auth/session/clear" =>
-            {
-                let message = error.diagnostic_message().to_string();
-                self.actor_credentials = None;
-                Err(TalosError::public(
-                    ErrorCode::Unauthenticated,
-                    format!("{message}; cached cloud session was rejected, please sign in again"),
-                ))
-            }
-            other => other,
-        }
-    }
-
-    fn actor_credentials_for_request(&self, method: &str) -> Option<ActorCredentials> {
-        actor_credentials_for_method(method, &self.actor_credentials)
-    }
-
-    fn next_request_id(&mut self) -> i32 {
-        let id = self.next_id;
-        self.next_id = self.next_id.saturating_add(1);
-        id
-    }
-
-    async fn write_json<T: serde::Serialize>(&mut self, value: &T) -> TalosResult<()> {
-        let line = serde_json::to_string(value)
-            .map_err(|error| TalosError::internal(error.to_string()))?;
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| TalosError::internal("app-server client is shut down".to_string()))?;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|error| TalosError::internal(error.to_string()))?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|error| TalosError::internal(error.to_string()))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|error| TalosError::internal(error.to_string()))
     }
 }
 
@@ -580,7 +512,7 @@ impl GatewayClient for AppServerClient {
                 .remove(&subscription_id)
                 .unwrap_or_default();
             for event in buffered_events {
-                if event.event.identity.session_id == session_id && tx.try_send(event).is_err() {
+                if event.event.identity().session_id == session_id && tx.try_send(event).is_err() {
                     break;
                 }
             }

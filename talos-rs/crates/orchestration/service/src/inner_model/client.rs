@@ -52,7 +52,7 @@ impl InnerModelClient {
     /// the business owner so it can preserve its write and cursor invariants.
     pub async fn chat(&self, params: InnerModelChatParams) -> TalosResult<ChatResponse> {
         if !params.usage_kind.is_inner() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "usage kind '{}' is not an Inner Model workload",
@@ -178,7 +178,7 @@ impl InnerModelClientBuilder {
 /// Converts a missing Builder dependency into one contextual configuration error.
 fn required<T>(value: Option<T>, field: &str) -> TalosResult<T> {
     value.ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("InnerModelClientBuilder.{field} is required"),
         )

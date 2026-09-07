@@ -41,7 +41,8 @@ fn api_response_error_shape_is_tagged_with_error() {
             "status": "error",
             "error": {
                 "code": "sessionNotFound",
-                "message": "Session not found"
+                "message": "Session not found",
+                "localization": null
             }
         })
     );

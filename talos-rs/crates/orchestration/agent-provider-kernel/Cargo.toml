@@ -8,6 +8,7 @@ description = "Talos built-in Agent Provider adapter for Agent Kernel"
 repository.workspace = true
 
 [dependencies]
+talos-logging = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -30,3 +31,6 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[lints]
+workspace = true

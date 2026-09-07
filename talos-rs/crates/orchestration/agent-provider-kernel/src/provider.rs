@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use talos_agent::{
-    AgentCapabilities, AgentContext, AgentError, AgentOperationControl, AgentProvider, AgentResult,
+    AgentCapabilities, AgentContext, AgentOperationControl, AgentProvider, AgentResult,
     AgentSession, AgentSessionContext, AgentUserActionKind, AgentUserContentKind, AttachmentReader,
     SessionCompactionParams, SessionCompactionResult, SessionHistoryReader, SessionTurnParams,
     SessionTurnResult,
@@ -10,6 +10,7 @@ use talos_agent_kernel::{
     AgentKernel, AgentKernelDependencies, KernelMemoryProgressStore, KernelSessionArtifactStore,
 };
 use talos_config::{AgentKernelConfig, ToolUserPermissionModeConfig};
+use talos_error::TalosError;
 use talos_llm_provider::LlmProviderRouter;
 use talos_memory::{DreamMemoryFormationStore, UserWorkspaceMemoryReader};
 use talos_tools::ToolRegistry;
@@ -107,7 +108,8 @@ impl KernelAgentProvider {
         if agent_id == self.agent_id {
             return Ok(());
         }
-        Err(AgentError::invalid_execution_context(
+        Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel Provider received another Agent identity",
         ))
     }
@@ -151,7 +153,8 @@ impl KernelAgentSession {
         if context.session == self.context {
             return Ok(());
         }
-        Err(AgentError::invalid_execution_context(
+        Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel Agent Session received another Session Context",
         ))
     }
@@ -224,7 +227,6 @@ impl AgentSession for KernelAgentSession {
             .session_artifact_store
             .reset_session(&self.context.workspace.root, &self.context.session_id)
             .await
-            .map_err(AgentError::from)
     }
 
     async fn close(&self, _control: AgentOperationControl) -> AgentResult<()> {
@@ -234,7 +236,8 @@ impl AgentSession for KernelAgentSession {
 
 fn validate_rich_input(content_kinds: &[AgentUserContentKind]) -> AgentResult<()> {
     if content_kinds.is_empty() {
-        return Err(AgentError::invalid_execution_context(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel Provider rich input requires content kinds",
         ));
     }
@@ -242,7 +245,8 @@ fn validate_rich_input(content_kinds: &[AgentUserContentKind]) -> AgentResult<()
     unique_kinds.sort_unstable();
     unique_kinds.dedup();
     if unique_kinds.len() != content_kinds.len() {
-        return Err(AgentError::invalid_execution_context(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel Provider rich input contains duplicate content kinds",
         ));
     }
@@ -252,7 +256,8 @@ fn validate_rich_input(content_kinds: &[AgentUserContentKind]) -> AgentResult<()
             AgentUserContentKind::Audio | AgentUserContentKind::Video
         )
     }) {
-        return Err(AgentError::invalid_execution_context(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel Provider cannot advertise unsupported audio or video input",
         ));
     }

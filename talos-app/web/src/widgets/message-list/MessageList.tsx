@@ -7,6 +7,7 @@ import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
 import { CopyableBlock } from "./CopyableBlock";
 import { MessageTimelineBlock } from "./MessageTimelineBlock";
+import { SystemNotice } from "./SystemNotice";
 import { StatusMessageBlock } from "./StatusMessageBlock";
 import { TextMessageBlock } from "./TextMessageBlock";
 import { ToolCallBlock } from "./ToolCallBlock";
@@ -52,6 +53,7 @@ export function MessageList({
   return (
     <div className="space-y-5 md:space-y-6">
       {blocks.map((block) => {
+        if (block.kind === "notice") return <SystemNotice key={block.id} notice={block.notice} />;
         if (block.kind === "timeline") {
           return (
             <MessageTimelineBlock
@@ -130,7 +132,7 @@ export function MessageList({
   );
 }
 
-function blockToMarkdown(block: Exclude<ChatRenderBlock, { kind: "timeline" | "user" }>) {
+function blockToMarkdown(block: Exclude<ChatRenderBlock, { kind: "timeline" | "user" | "notice" }>) {
   switch (block.kind) {
     case "assistant":
     case "thinking":

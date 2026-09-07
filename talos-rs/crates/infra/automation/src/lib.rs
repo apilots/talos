@@ -134,7 +134,9 @@ async fn run_scheduled_job(
         let next = match next_occurrence(&schedule, timezone, Utc::now()) {
             Ok(next) => next,
             Err(error) => {
-                tracing::error!(job = %name, %error, "automation job schedule failed");
+                talos_logging::report_error(
+                    &error.context(format!("schedule automation job {name}")),
+                );
                 return;
             }
         };
@@ -175,24 +177,27 @@ async fn run_job(name: String, task: JobTask, running: Arc<AtomicBool>) {
         return;
     }
     if let Err(error) = task().await {
-        tracing::warn!(job = %name, %error, "automation job failed");
+        talos_logging::report_error(&error.context(format!("run automation job {name}")));
     }
     running.store(false, Ordering::Release);
 }
 
 fn invalid_schedule(error_name: &str, error: impl std::fmt::Display) -> TalosError {
-    TalosError::public(
+    TalosError::new(
         talos_error::ErrorCode::InvalidRequest,
         format!("invalid automation cron for {error_name}: {error}"),
     )
 }
 
-fn schedule_error(error: impl std::fmt::Display) -> TalosError {
-    TalosError::internal(format!("automation cron error: {error}"))
+fn schedule_error(error: impl std::error::Error + Send + Sync + 'static) -> TalosError {
+    TalosError::internal_with_source(
+        "automation cron error; technical details were withheld.",
+        error,
+    )
 }
 
 fn task_error(error: tokio::task::JoinError) -> TalosError {
-    TalosError::internal(format!("automation task stopped unexpectedly: {error}"))
+    TalosError::internal_with_source("automation task stopped unexpectedly", error)
 }
 
 #[cfg(test)]

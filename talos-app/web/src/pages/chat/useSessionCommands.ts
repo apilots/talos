@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
 import {
-  isActiveTurnRunningError,
   isContextCompactionRunning,
   type ChatContextCompactionItem,
   type ComposerCommandResponseState,
@@ -35,10 +35,10 @@ export function useSessionCommands({
   onCompactionObservationChange,
   sessionId,
 }: UseSessionCommandsOptions) {
-  const { t } = useTranslation("chat");
+  useTranslation("chat");
   const [settledResponse, setSettledResponse] = useState<SessionCommandResponse>();
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
-  const [clearError, setClearError] = useState<string>();
+  const [clearError, setClearError] = useState<ReturnType<typeof userVisibleError>>();
   const [manualCompactionStartingSessionId, setManualCompactionStartingSessionId] = useState<string>();
   const manualCompactionRef = useRef<ManualCompactionOperation | undefined>(undefined);
   const actions = useSessionActions(sessionId);
@@ -160,11 +160,8 @@ export function useSessionCommands({
           setManualCompactionStartingSessionId((startingSessionId) =>
             startingSessionId === sessionId ? undefined : startingSessionId
           );
-          const message = isActiveTurnRunningError(error)
-            ? t("contextCompactingWait")
-            : t("commandCompactErrorDetail");
           setSettledResponse({
-            response: { kind: "compact", message, state: "error" },
+            response: { kind: "compact", error: userVisibleError(error, "Failed to compact the session."), state: "error" },
             sessionId,
           });
           throw error;
@@ -189,12 +186,10 @@ export function useSessionCommands({
       setClearConfirmationOpen(false);
       setSettledResponse({ response: { kind: "clear", state: "success" }, sessionId });
     } catch (error) {
-      const message = isActiveTurnRunningError(error)
-        ? t("contextCompactingWait")
-        : t("clearSessionFailed");
-      setClearError(message);
+      const failure = userVisibleError(error, "Failed to clear the session.");
+      setClearError(failure);
       setSettledResponse({
-        response: { kind: "clear", message, state: "error" },
+        response: { kind: "clear", error: failure, state: "error" },
         sessionId,
       });
     }
@@ -206,7 +201,7 @@ export function useSessionCommands({
       setClearError(undefined);
     },
     clearConfirmationOpen,
-    clearError,
+    clearError: clearError ? apiErrorMessage(clearError) : undefined,
     clearing: actions.clear.isPending,
     compactionStage: contextCompaction && isContextCompactionRunning(contextCompaction)
       ? contextCompaction.stage
@@ -223,9 +218,9 @@ export function useSessionCommands({
         sessionId,
       });
     },
-    showModelChangeFailed: (model: string, message: string, reasoningLevel?: ReasoningLevel) => {
+    showModelChangeFailed: (model: string, error: unknown, reasoningLevel?: ReasoningLevel) => {
       setSettledResponse({
-        response: { kind: "model", message, model, reasoningLevel, state: "error" },
+        response: { kind: "model", error: userVisibleError(error, "Failed to change the model."), model, reasoningLevel, state: "error" },
         sessionId,
       });
     },

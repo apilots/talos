@@ -17,12 +17,12 @@ export interface TalosRuntimeState {
 }
 
 export interface TalosDesktopBridge {
-  connect(): Promise<AppProtocol.InitializeResponse>;
+  connect(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke<T>(
     method: AppProtocol.ClientMethod,
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
-  ): Promise<T>;
+  ): Promise<AppProtocol.ApiResponse<T>>;
   openExternal(url: string): Promise<void>;
   onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void;
   onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void;

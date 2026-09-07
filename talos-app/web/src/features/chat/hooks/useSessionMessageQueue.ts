@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   AgentUserInput,
   MessageQueue,
@@ -9,11 +10,12 @@ import type {
 
 import { MessageQueueSync } from "../message-queue-sync";
 import { getTalosClient } from "@/shared/api/client";
-import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
 export function useSessionMessageQueue(sessionId: string) {
+  useTranslation("errors");
   const [queue, setQueue] = useState<MessageQueue>();
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<ReturnType<typeof userVisibleError>>();
   const syncRef = useRef<MessageQueueSync | undefined>(undefined);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function useSessionMessageQueue(sessionId: string) {
   const onOpen = useCallback((onError: (error: unknown) => void) => {
     const reportError = (error: unknown) => {
       if (syncRef.current !== sync) return;
-      setError(userVisibleErrorMessage(error, "Message queue reconciliation failed."));
+      setError(userVisibleError(error, "Message queue reconciliation failed."));
       onError(error);
     };
     const sync = new MessageQueueSync({
@@ -68,7 +70,7 @@ export function useSessionMessageQueue(sessionId: string) {
       setError(undefined);
       return result;
     } catch (operationError) {
-      setError(userVisibleErrorMessage(operationError, "Message queue operation failed."));
+      setError(userVisibleError(operationError, "Message queue operation failed."));
       throw operationError;
     }
   }, []);
@@ -78,7 +80,7 @@ export function useSessionMessageQueue(sessionId: string) {
     onMessageQueueChanged,
     onDisconnect,
     queue,
-    error,
+    error: error ? apiErrorMessage(error) : undefined,
     add: (input: AgentUserInput) =>
       applyMutation(() => getTalosClient().messageQueue.add({ sessionId, input } satisfies MessageQueueAddRequest)),
     update: (messageId: string, input: AgentUserInput) =>
@@ -102,7 +104,7 @@ export function useSessionMessageQueue(sessionId: string) {
         setError(undefined);
         return response;
       } catch (operationError) {
-        setError(userVisibleErrorMessage(operationError, "Failed to steer queued message."));
+        setError(userVisibleError(operationError, "Failed to steer queued message."));
         throw operationError;
       }
     },
@@ -116,7 +118,7 @@ export function useSessionMessageQueue(sessionId: string) {
         setError(undefined);
         return response;
       } catch (operationError) {
-        setError(userVisibleErrorMessage(operationError, "Failed to start queued message."));
+        setError(userVisibleError(operationError, "Failed to start queued message."));
         throw operationError;
       }
     },

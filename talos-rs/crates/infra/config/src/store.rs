@@ -158,13 +158,21 @@ impl ConfigStore for YamlConfigStore {
             Some(&existing_llm.openrouter),
         )?;
 
-        let llm_value = serde_yaml::to_value(&safe_llm)
-            .map_err(|e| TalosError::internal(format!("failed to serialize llm config: {}", e)))?;
+        let llm_value = serde_yaml::to_value(&safe_llm).map_err(|e| {
+            TalosError::internal_with_source(
+                "failed to serialize llm config; technical details were withheld.",
+                e,
+            )
+        })?;
 
         replace_top_level_section(&mut root, "llm", llm_value)?;
 
-        let output = serde_yaml::to_string(&root)
-            .map_err(|e| TalosError::internal(format!("failed to serialize yaml: {}", e)))?;
+        let output = serde_yaml::to_string(&root).map_err(|e| {
+            TalosError::internal_with_source(
+                "failed to serialize yaml; technical details were withheld.",
+                e,
+            )
+        })?;
 
         self.write_config_and_env(&text, &output, &old_env_values, &env_values)?;
 
@@ -210,11 +218,18 @@ impl ConfigStore for YamlConfigStore {
         )?;
 
         let web_search_value = serde_yaml::to_value(&safe_web_search).map_err(|e| {
-            TalosError::internal(format!("failed to serialize web search config: {}", e))
+            TalosError::internal_with_source(
+                "failed to serialize web search config; technical details were withheld.",
+                e,
+            )
         })?;
         replace_web_search_section(&mut root, web_search_value)?;
-        let output = serde_yaml::to_string(&root)
-            .map_err(|e| TalosError::internal(format!("failed to serialize yaml: {}", e)))?;
+        let output = serde_yaml::to_string(&root).map_err(|e| {
+            TalosError::internal_with_source(
+                "failed to serialize yaml; technical details were withheld.",
+                e,
+            )
+        })?;
 
         self.write_config_and_env(&text, &output, &old_env_values, &env_values)?;
 
@@ -240,11 +255,16 @@ impl YamlConfigStore {
 
     fn read_config_text(&self) -> TalosResult<String> {
         std::fs::read_to_string(&self.config_path).map_err(|e| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "failed to read config file {}: {}",
                 self.config_path.display(),
                 e
-            ))
+            );
+            TalosError::internal_with_source(
+                "Failed to read config file; technical details were withheld.",
+                e,
+            )
+            .context(diagnostic)
         })
     }
 
@@ -258,11 +278,16 @@ impl YamlConfigStore {
         talos_fs::std_fs()
             .write_file(&self.config_path, new_config)
             .map_err(|e| {
-                TalosError::internal(format!(
+                let diagnostic = format!(
                     "failed to write config file {}: {}",
                     self.config_path.display(),
                     e
-                ))
+                );
+                TalosError::internal_with_source(
+                    "Failed to write config file; technical details were withheld.",
+                    e,
+                )
+                .context(diagnostic)
             })?;
 
         let env_store = EnvSecretStore::new(self.env_path.clone());
@@ -271,7 +296,7 @@ impl YamlConfigStore {
             Err(env_error) => {
                 let restore_yaml = talos_fs::std_fs().write_file(&self.config_path, old_config);
                 let restore_env = env_store.write_filtered(old_env_values);
-                Err(TalosError::internal(format!(
+                Err(TalosError::internal("Failed to update configuration and restore the previous state; technical details were withheld.").context(format!(
                     "failed to write env file {}; config path {}; rollback yaml: {}; rollback env: {}; error: {}",
                     self.env_path.display(),
                     self.config_path.display(),
@@ -289,8 +314,12 @@ impl YamlConfigStore {
 }
 
 fn parse_yaml_root(text: &str) -> TalosResult<serde_yaml::Value> {
-    serde_yaml::from_str(text)
-        .map_err(|e| TalosError::internal(format!("failed to parse yaml: {}", e)))
+    serde_yaml::from_str(text).map_err(|e| {
+        TalosError::internal_with_source(
+            "failed to parse yaml; technical details were withheld.",
+            e,
+        )
+    })
 }
 
 fn load_llm_from_root_unsanitized(root: &serde_yaml::Value) -> TalosResult<LlmConfig> {
@@ -299,8 +328,12 @@ fn load_llm_from_root_unsanitized(root: &serde_yaml::Value) -> TalosResult<LlmCo
         .cloned()
         .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
 
-    serde_yaml::from_value(llm_node)
-        .map_err(|e| TalosError::internal(format!("failed to deserialize llm config: {}", e)))
+    serde_yaml::from_value(llm_node).map_err(|e| {
+        TalosError::internal_with_source(
+            "failed to deserialize llm config; technical details were withheld.",
+            e,
+        )
+    })
 }
 
 fn load_web_search_from_root_unsanitized(
@@ -315,7 +348,10 @@ fn load_web_search_from_root_unsanitized(
         .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
 
     serde_yaml::from_value(web_search_node).map_err(|e| {
-        TalosError::internal(format!("failed to deserialize web search config: {}", e))
+        TalosError::internal_with_source(
+            "failed to deserialize web search config; technical details were withheld.",
+            e,
+        )
     })
 }
 
@@ -330,7 +366,7 @@ fn replace_top_level_section(
             Ok(())
         }
         _ => Err(TalosError::internal(
-            "config file root is not a yaml mapping".to_string(),
+            "config file root is not a yaml mapping",
         )),
     }
 }
@@ -339,9 +375,9 @@ fn replace_web_search_section(
     root: &mut serde_yaml::Value,
     value: serde_yaml::Value,
 ) -> TalosResult<()> {
-    let root_map = root.as_mapping_mut().ok_or_else(|| {
-        TalosError::internal("config file root is not a yaml mapping".to_string())
-    })?;
+    let root_map = root
+        .as_mapping_mut()
+        .ok_or_else(|| TalosError::internal("config file root is not a yaml mapping"))?;
     let agent = nested_mapping(root_map, "agent")?;
     let kernel = nested_mapping(agent, "kernel")?;
     let tools = nested_mapping(kernel, "tools")?;
@@ -357,7 +393,8 @@ fn nested_mapping<'a>(
         .entry(serde_yaml::Value::String(key.to_string()))
         .or_insert_with(|| serde_yaml::Value::Mapping(Default::default()));
     value.as_mapping_mut().ok_or_else(|| {
-        TalosError::internal(format!("config section '{}' is not a yaml mapping", key))
+        TalosError::internal("Config section is not a yaml mapping.")
+            .context(format!("config section '{}' is not a yaml mapping", key))
     })
 }
 
@@ -419,10 +456,8 @@ fn validate_env_key(env_key: &str) -> TalosResult<()> {
     if env_key.starts_with("TALOS_") {
         return Ok(());
     }
-    Err(TalosError::internal(format!(
-        "invalid talos env key '{}'",
-        env_key
-    )))
+    Err(TalosError::internal("Invalid talos env key.")
+        .context(format!("invalid talos env key '{}'", env_key)))
 }
 
 fn migrate_existing_llm_plaintext_secret(

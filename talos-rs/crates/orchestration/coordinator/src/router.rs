@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use talos_agent::AgentError;
 use talos_error::TalosResult;
 use talos_router::Router;
 use talos_types::talos::SessionSource;
@@ -59,15 +58,12 @@ impl AgentRouter {
             .await?
             .and_then(|agent_id| normalized(Some(agent_id.as_str())).map(str::to_string))
             .ok_or_else(|| {
-                talos_error::TalosError::public(
+                talos_error::TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     "no Agent routing binding matched the Session source",
                 )
             })?;
-        self.registry
-            .get(&agent_id)
-            .await
-            .map_err(AgentError::into_talos_error)?;
+        self.registry.get(&agent_id).await?;
         Ok(agent_id)
     }
 }

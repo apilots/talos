@@ -148,16 +148,17 @@ impl Channel for TelegramChannel {
 
     async fn start_account(&self, ctx: ChannelRuntimeContext) -> TalosResult<()> {
         let telegram_config = &ctx.config.channels.telegram;
-        let account = self
-            .get_enabled_accounts(telegram_config)
-            .into_iter()
-            .find(|account| account.id == ctx.account_id)
-            .ok_or_else(|| {
-                TalosError::internal(format!(
-                    "Telegram account '{}' is not enabled or not configured",
-                    ctx.account_id
-                ))
-            })?;
+        let account =
+            self.get_enabled_accounts(telegram_config)
+                .into_iter()
+                .find(|account| account.id == ctx.account_id)
+                .ok_or_else(|| {
+                    TalosError::internal("Telegram account is not enabled or not configured.")
+                        .context(format!(
+                            "Telegram account '{}' is not enabled or not configured",
+                            ctx.account_id
+                        ))
+                })?;
 
         let account_id = account.id.clone();
         if self.bots.read().await.contains_key(&account_id) {

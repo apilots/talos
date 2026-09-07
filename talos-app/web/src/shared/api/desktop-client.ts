@@ -1,4 +1,5 @@
 import { createElectronAppServerClient, type DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
+import { TalosStreamTerminatedError } from "@talos/sdk-core";
 import type {
   AppProtocol,
   ConfigResponse,
@@ -269,10 +270,10 @@ function streamUntilTerminal(
     }
 
     const unsubscribe = client.onEvent((event) => {
-      if (event.event.identity.sessionId !== sessionId) {
+      if (event.event.data.identity.sessionId !== sessionId) {
         return;
       }
-      void Promise.resolve(onEvent(event, finish)).catch(fail);
+      void Promise.resolve().then(() => onEvent(event, finish)).catch(fail);
     });
     cleanupFns.push(unsubscribe);
 
@@ -296,7 +297,7 @@ function streamUntilTerminal(
         finish();
         return;
       }
-      fail(new Error(`Desktop event subscription terminated: ${notification.reason}: ${notification.message}`));
+      fail(new TalosStreamTerminatedError(notification));
     });
     cleanupFns.push(unsubscribeTerminated);
 

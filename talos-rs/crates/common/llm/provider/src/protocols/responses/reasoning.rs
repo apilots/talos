@@ -49,7 +49,7 @@ pub(super) fn items(continuation: Option<ReasoningContinuation>) -> TalosResult<
         return Ok(Vec::new());
     };
     let ReasoningContinuation::Blocks(blocks) = continuation else {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "Responses protocol requires structured reasoning continuation".to_string(),
         ));
@@ -64,7 +64,7 @@ pub(super) fn items(continuation: Option<ReasoningContinuation>) -> TalosResult<
         }
         .cloned()
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "Responses reasoning continuation requires a provider item id".to_string(),
             )
@@ -87,7 +87,7 @@ pub(super) fn items(continuation: Option<ReasoningContinuation>) -> TalosResult<
             })),
             ReasoningBlock::Encrypted(block) => {
                 if item.encrypted_content.replace(block.data).is_some() {
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!(
                             "Responses reasoning item '{}' contains multiple encrypted blocks",

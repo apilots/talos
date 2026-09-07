@@ -139,8 +139,12 @@ impl DatabaseFileStore {
 #[async_trait]
 impl FileStore for DatabaseFileStore {
     async fn create_file(&self, record: FileRecord) -> TalosResult<()> {
-        let metadata_json = serde_json::to_string(&record.metadata)
-            .map_err(|error| TalosError::internal(format!("serialize file metadata: {error}")))?;
+        let metadata_json = serde_json::to_string(&record.metadata).map_err(|error| {
+            TalosError::internal_with_source(
+                "serialize file metadata; technical details were withheld.",
+                error,
+            )
+        })?;
         let size_bytes = record.size_bytes.map(size_to_i64).transpose()?;
         let mut transaction = self
             .pool
@@ -195,9 +199,9 @@ impl FileStore for DatabaseFileStore {
             .map_err(|error| storage_error("insert file", error))?;
         if result.rows_affected() == 0 {
             let project_id = record.project_id.as_deref().unwrap_or_default();
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
-                format!("project {project_id}"),
+                format!("Project {project_id} was not found."),
             ));
         }
         Self::insert_tags(&mut transaction, &record.file_id, &record.tags).await?;
@@ -309,7 +313,12 @@ impl FileStore for DatabaseFileStore {
             .as_ref()
             .map(serde_json::to_string)
             .transpose()
-            .map_err(|error| TalosError::internal(format!("serialize file metadata: {error}")))?;
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "serialize file metadata; technical details were withheld.",
+                    error,
+                )
+            })?;
         let result = match metadata_json {
             Some(metadata_json) => {
                 sqlx::query(
@@ -416,8 +425,7 @@ impl FileStore for DatabaseFileStore {
             .fetch_one(&self.pool)
             .await
             .map_err(|error| storage_error("count project files", error))?;
-        u64::try_from(count)
-            .map_err(|_| TalosError::internal("project file count is negative".to_string()))
+        u64::try_from(count).map_err(|_| TalosError::internal("project file count is negative"))
     }
 
     async fn list_storage_ids(&self) -> TalosResult<BTreeSet<String>> {
@@ -441,23 +449,23 @@ fn parse_record(row: &sqlx::sqlite::SqliteRow) -> TalosResult<FileRecord> {
         "ready" => FileStatus::Ready,
         "deleting" => FileStatus::Deleting,
         status => {
-            return Err(TalosError::internal(format!(
-                "unknown file status '{status}'"
-            )))
+            return Err(TalosError::internal("Unknown file status.")
+                .context(format!("unknown file status '{status}'")))
         }
     };
     let metadata_json = row
         .try_get::<String, _>("metadata_json")
         .map_err(|error| storage_error("read file metadata", error))?;
-    let metadata = serde_json::from_str(&metadata_json)
-        .map_err(|error| TalosError::internal(format!("parse file metadata: {error}")))?;
+    let metadata = serde_json::from_str(&metadata_json).map_err(|error| {
+        TalosError::internal_with_source(
+            "parse file metadata; technical details were withheld.",
+            error,
+        )
+    })?;
     let size_bytes = row
         .try_get::<Option<i64>, _>("size_bytes")
         .map_err(|error| storage_error("read file size", error))?
-        .map(|size| {
-            u64::try_from(size)
-                .map_err(|_| TalosError::internal("file size is negative".to_string()))
-        })
+        .map(|size| u64::try_from(size).map_err(|_| TalosError::internal("file size is negative")))
         .transpose()?;
     Ok(FileRecord {
         file_id: read_string(row, "file_id")?,
@@ -491,7 +499,7 @@ fn read_string(row: &sqlx::sqlite::SqliteRow, column: &str) -> TalosResult<Strin
 
 fn size_to_i64(size: u64) -> TalosResult<i64> {
     i64::try_from(size).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file size exceeds SQLite range".to_string(),
         )
@@ -500,7 +508,7 @@ fn size_to_i64(size: u64) -> TalosResult<i64> {
 
 fn validate_limit(limit: usize) -> TalosResult<()> {
     if limit == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file query limit must be greater than zero".to_string(),
         ));
@@ -510,13 +518,13 @@ fn validate_limit(limit: usize) -> TalosResult<()> {
 
 fn limit_to_i64(limit: usize) -> TalosResult<i64> {
     i64::try_from(limit).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "file query limit is too large".to_string(),
         )
     })
 }
 
-fn storage_error(context: &str, error: impl std::fmt::Display) -> TalosError {
-    TalosError::internal(format!("{context}: {error}"))
+fn storage_error(context: &str, error: sqlx::Error) -> TalosError {
+    talos_storage::database_error(context, error)
 }

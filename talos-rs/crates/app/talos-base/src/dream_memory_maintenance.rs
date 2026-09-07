@@ -95,7 +95,7 @@ impl DreamMemoryMaintenance {
             .get(&record.agent_id)
             .cloned()
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("Dream Memory Agent not found: {}", record.agent_id),
                 )

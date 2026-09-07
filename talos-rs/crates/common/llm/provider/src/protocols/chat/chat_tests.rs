@@ -5,6 +5,25 @@ use crate::{
 };
 use bytes::Bytes;
 
+#[tokio::test]
+async fn chat_sse_error_is_not_lost_until_end_of_stream() {
+    let body = "data: {\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"SECRET\"}}\n\n";
+    let response = || reqwest::Response::from(http::Response::new(body));
+    let error = stream(response(), "fixture")
+        .next()
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.error_code(), ErrorCode::UsageLimitExceeded);
+    assert!(!error.to_string().contains("SECRET"));
+    let error = model_blocks(response(), ChatCompletionModelBlocks::openai())
+        .next()
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.error_code(), ErrorCode::UsageLimitExceeded);
+}
+
 #[test]
 fn request_encodes_ordered_text_image_and_file_blocks() {
     let message = ChatMessage::user_with_attachments(

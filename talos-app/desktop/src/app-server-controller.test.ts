@@ -2,101 +2,54 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
-import type { AppProtocol } from "@talos/sdk-core";
+import { AppProtocol } from "@talos/sdk-core";
 import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
 
-import type { AppServerBridge } from "./app-server-controller";
+import { FakeBridge } from "./app-server-controller.test-support";
 import { DesktopAppServerController } from "./app-server-controller";
 import type { TalosRuntimeState } from "./ipc";
 
-class FakeBridge implements AppServerBridge {
-  connected = false;
-  closed = false;
-  readonly requests: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-  private eventHandler?: (event: AppProtocol.TimelineEvent) => void;
-  private subscriptionTerminatedHandler?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
-  private exitHandler?: (status: { code: number | null; signal: NodeJS.Signals | null }) => void;
-
-  constructor(private readonly subscriptionPrefix = "sub") {}
-
-  connect(): Promise<AppProtocol.InitializeResponse> {
-    this.connected = true;
-    return Promise.resolve({
-      protocol_version: { major: 0, minor: 3 },
-      server_info: {
-        name: "fake",
-        version: "0.1.5",
-        auth_enabled: false,
-        cloud_auth_url: null,
-      },
-    });
-  }
-
-  close(): Promise<void> {
-    this.closed = true;
-    return Promise.resolve();
-  }
-
-  invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
-    this.requests.push({ method, params });
-    if (method === "event/subscribe") {
-      const request = params as AppProtocol.SubscribeTimelineRequest;
-      return Promise.resolve({
-        subscriptionId: `${this.subscriptionPrefix}-${this.requests.length}`,
-        sessionId: request.sessionId,
-        highWaterMarkEventId: request.sinceEventId,
-      } satisfies AppProtocol.SubscribeTimelineResponse as T);
-    }
-    return Promise.resolve({} as T);
-  }
-
-  onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void {
-    this.eventHandler = handler;
-    return () => {
-      this.eventHandler = undefined;
-    };
-  }
-
-  onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void {
-    this.subscriptionTerminatedHandler = handler;
-    return () => {
-      this.subscriptionTerminatedHandler = undefined;
-    };
-  }
-
-  onError(): () => void {
-    return () => undefined;
-  }
-
-  onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void {
-    this.exitHandler = handler;
-    return () => {
-      this.exitHandler = undefined;
-    };
-  }
-
-  onStderr(): () => void {
-    return () => undefined;
-  }
-
-  onServerRequest(): () => void {
-    return () => undefined;
-  }
-
-  emitEvent(event: AppProtocol.TimelineEvent): void {
-    this.eventHandler?.(event);
-  }
-
-  emitExit(): void {
-    this.exitHandler?.({ code: 1, signal: null });
-  }
-
-  emitSubscriptionTerminated(notification: AppProtocol.SubscriptionTerminatedNotification): void {
-    this.subscriptionTerminatedHandler?.(notification);
-  }
-}
-
 describe("DesktopAppServerController", () => {
+  it("terminates subscriptions when background reconnect fails without a waiting request", async () => {
+    vi.useFakeTimers();
+    const bridge = new FakeBridge();
+    const replacement = new FakeBridge();
+    vi.spyOn(replacement, "connect").mockRejectedValue(new Error("Reconnect failed."));
+    const bridgeFactory = vi.fn().mockReturnValueOnce(bridge).mockReturnValue(replacement);
+    const terminated = vi.fn();
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const controller = new DesktopAppServerController({ bridgeFactory, onSubscriptionTerminated: terminated });
+    try {
+      await controller.connect();
+      await controller.invoke("event/subscribe", { sessionId: "session-1", turnId: null, sinceEventId: null, replayLimit: null });
+      bridge.emitExit();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(terminated).toHaveBeenCalledOnce();
+      expect(report).toHaveBeenCalledOnce();
+    } finally {
+      await controller.close();
+      report.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("terminates active subscriptions when the transport rejects malformed events", async () => {
+    const bridge = new FakeBridge();
+    const terminated = vi.fn();
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onSubscriptionTerminated: terminated });
+    try {
+      await controller.connect();
+      await controller.invoke("event/subscribe", { sessionId: "session-1", turnId: null, sinceEventId: null, replayLimit: null, closeWhenIdle: false, closeOnTerminal: false });
+      bridge.emitError(new Error("SECRET_INVALID_FRAME"));
+      expect(terminated.mock.calls).toEqual([[{ subscriptionId: "sub-1", sessionId: "session-1", reason: "interrupted", message: "The app-server event stream failed. Please reconnect." }]]);
+      expect(report).toHaveBeenCalledOnce();
+    } finally {
+      await controller.close();
+      report.mockRestore();
+    }
+  });
+
   it("restarts app-server and replays subscriptions from the last seen event", async () => {
     vi.useFakeTimers();
     const bridges: FakeBridge[] = [];
@@ -197,7 +150,9 @@ describe("DesktopAppServerController", () => {
       onRuntimeState: (state) => lifecycle.push(state),
     });
     const rendererClient = createElectronAppServerClient({
-      invoke: (method, params) => controller.invoke(method, params),
+      invoke: async <T>(method: AppProtocol.ClientMethod, params: unknown) => ({
+        status: "success", data: await controller.invoke<T>(method, params),
+      }),
       onEvent: (handler) => {
         rendererHandlers.add(handler);
         return () => {
@@ -274,7 +229,7 @@ function createTimelineEvent(
     eventSeq: 1,
     eventId,
     persistedAt: 1,
-    event: {
+    event: { type: "agent", data: {
       identity: { sessionId, turnId: "turn-1" },
       sequence: 0,
       occurredAt: 1,
@@ -288,7 +243,7 @@ function createTimelineEvent(
               type: "turnCompleted",
               data: { stopReason: "endTurn" },
             },
-    },
+    } },
   };
 }
 

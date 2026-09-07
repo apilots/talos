@@ -34,3 +34,6 @@ talos-storage = { path = "../../infra/storage" }
 talos-tools = { workspace = true }
 talos-tools-policy = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

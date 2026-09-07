@@ -14,12 +14,12 @@ mod turn_api;
 
 pub use continuation::AgentContinuationRef;
 pub use event::{
-    AgentContextCompactionDelta, AgentErrorInfo, AgentEvent, AgentEventPayload,
-    AgentMessageBlockCompleted, AgentMessageBlockDelta, AgentMessageBlockDeltaContent,
-    AgentMessageBlockStarted, AgentMessageStarted, AgentPendingInput, AgentRunMetrics,
-    AgentStopReason, AgentToolCallArgumentsDelta, AgentTurnCompleted, AgentTurnFailed,
-    AgentTurnStarted, RecoverTimelineResponse, SessionActiveTurnResponse, TimelineActiveTurn,
-    TimelineCursorStatus, TimelineEvent, TimelineReplay,
+    AgentContextCompactionDelta, AgentEvent, AgentEventPayload, AgentMessageBlockCompleted,
+    AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
+    AgentMessageStarted, AgentPendingInput, AgentRunMetrics, AgentStopReason,
+    AgentToolCallArgumentsDelta, AgentTurnCompleted, AgentTurnFailed, AgentTurnStarted,
+    RecoverTimelineResponse, SessionActiveTurnResponse, TimelineActiveTurn, TimelineCursorStatus,
+    TimelineEvent, TimelineEventPayload, TimelineReplay, TimelineSystemNotice,
 };
 pub use history::{SessionHistoryResponse, SessionHistoryTurn};
 pub use lifecycle::ActiveTurnState;
@@ -27,7 +27,7 @@ pub use message::{
     AgentAssistantText, AgentAssistantTextPhase, AgentContextCompaction, AgentExecutionSummary,
     AgentMessage, AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus,
     AgentMessageRole, AgentMessageStatus, AgentReasoning, AgentSystemNotice, AgentToolCall,
-    AgentToolCallArguments, AgentToolProgress, AgentToolResult,
+    AgentToolCallArguments, AgentToolProgress, AgentToolResult, SystemNoticeContent,
 };
 pub use run::{AgentRunFailure, AgentRunOutput, AgentRunResult};
 pub use talos_types::{AgentMediaSource, AgentTurnRef, AgentUserContent, AgentUserInput};

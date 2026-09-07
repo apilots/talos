@@ -21,9 +21,11 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { TurnMetricsFooter } from "./TurnMetricsFooter";
 import { ContextCompactionTimelineItem } from "./context-compaction/ContextCompactionTimelineItem";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 type TimelineBlock = Extract<ChatRenderBlock, { kind: "timeline" }>;
 type TimelineItem = TimelineBlock["items"][number];
+import { SystemNotice } from "./SystemNotice";
 type TimelineTextItem = Exclude<TimelineItem, { kind: "tool_call" }>;
 
 interface MessageTimelineBlockProps {
@@ -58,7 +60,8 @@ export function MessageTimelineBlock({
   const responseItems = visibleItems.filter(
     (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
   );
-  const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item));
+  const noticeItems = visibleItems.filter((item) => item.kind === "system_notice" && item.notice);
+  const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item) && !(item.kind === "system_notice" && item.notice));
   const hasRunningItem = processItems.some(
     (item) => item.status === "running" || item.status === "waitingForInput",
   );
@@ -93,7 +96,7 @@ export function MessageTimelineBlock({
     wasActiveRef.current = hasActiveTimeline;
   }, [hasActiveTimeline, requiresAttention]);
 
-  if (processItems.length === 0 && responseItems.length === 0) {
+  if (!block.error && noticeItems.length === 0 && processItems.length === 0 && responseItems.length === 0) {
     return null;
   }
 
@@ -107,6 +110,8 @@ export function MessageTimelineBlock({
 
   return (
     <div className="space-y-4">
+      {noticeItems.map((item) => item.kind === "system_notice" && item.notice ? <SystemNotice key={item.itemId} notice={item.notice} /> : null)}
+      {block.error ? <div role="alert" className="rounded-xl border border-danger/30 p-4 text-sm text-danger">{apiErrorMessage(block.error)}</div> : null}
       {processItems.length > 0 ? (
         <details
           className="group/timeline text-ink"

@@ -2,6 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
+use talos_error::TalosError;
 use talos_run_control::{
     ActiveRunControl, CancellationPolicy, RunControlScope, RunTaskCompletion, RunTermination,
 };
@@ -12,10 +13,7 @@ use super::{
     ActiveOperation, CachedSession, Harness, SessionOperationKind, SessionOperationOutcome,
     RUN_CANCELLATION_POLICY, RUN_COMPLETION_TIMEOUT,
 };
-use crate::{
-    AgentError, AgentErrorKind, AgentOperationControl, AgentProvider, AgentResult, AgentSession,
-    AgentSessionContext,
-};
+use crate::{AgentOperationControl, AgentProvider, AgentResult, AgentSession, AgentSessionContext};
 
 impl<P> Harness<P>
 where
@@ -28,7 +26,8 @@ where
     ) -> AgentResult<CachedSession<P::Session>> {
         if let Some(cached) = self.inner.sessions.get(&context.session_id) {
             if cached.context != context {
-                return Err(AgentError::invalid_execution_context(
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
                     "Agent Session Context changed for a live Harness handle",
                 ));
             }
@@ -47,8 +46,8 @@ where
         let session = match tokio::select! {
             biased;
             () = operation_control.cancellation().requested() => {
-                Err(AgentError::new(
-                    AgentErrorKind::Interrupted,
+                Err(TalosError::new(
+                    talos_error::ErrorCode::Cancelled,
                     "Agent Session acquisition was cancelled",
                 ))
             }
@@ -78,8 +77,8 @@ where
                 tokio::time::Instant::now() + RUN_COMPLETION_TIMEOUT,
             )
             .await?;
-            return Err(AgentError::new(
-                AgentErrorKind::Interrupted,
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Cancelled,
                 "Agent Session acquisition completed after shutdown began",
             ));
         }
@@ -102,8 +101,8 @@ where
                         tokio::time::Instant::now() + RUN_COMPLETION_TIMEOUT,
                     )
                     .await?;
-                    return Err(AgentError::new(
-                        AgentErrorKind::Interrupted,
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Cancelled,
                         "Agent Session acquisition completed after shutdown began",
                     ));
                 }
@@ -118,7 +117,8 @@ where
             tokio::time::Instant::now() + RUN_COMPLETION_TIMEOUT,
         )
         .await?;
-        Err(AgentError::run_conflict(
+        Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "Agent Session handle was acquired concurrently",
         ))
     }
@@ -208,8 +208,10 @@ where
                     Ok(result) => (
                         match result {
                             Ok(result) => result,
-                            Err(_) => Err(AgentError::provider_error(
+                            Err(error) => Err(TalosError::from_source(
+                                talos_error::ErrorCode::InternalError,
                                 "Agent Session operation task stopped",
+                                error,
                             )),
                         },
                         RunTermination::Completed {
@@ -218,8 +220,8 @@ where
                         },
                     ),
                     Err(_) => (
-                        Err(AgentError::new(
-                            AgentErrorKind::Timeout,
+                        Err(TalosError::new(
+                            talos_error::ErrorCode::Timeout,
                             "Agent Session operation timed out",
                         )),
                         RunTermination::Cancelled {

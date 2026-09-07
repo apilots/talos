@@ -1,3 +1,4 @@
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
@@ -19,7 +20,7 @@ export function AddPluginMarketplaceDialog({
   const [gitRef, setGitRef] = useState("main");
   const [sparsePaths, setSparsePaths] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReturnType<typeof userVisibleError> | null>(null);
   if (!open) {
     return null;
   }
@@ -34,7 +35,7 @@ export function AddPluginMarketplaceDialog({
       setSparsePaths("");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("plugins:dialog.failedAddMarketplace"));
+      setError(userVisibleError(err, "Failed to add the marketplace."));
     } finally {
       setSubmitting(false);
     }
@@ -90,7 +91,7 @@ export function AddPluginMarketplaceDialog({
               value={sparsePaths}
             />
           </Field>
-          {error ? <div className="text-sm text-danger">{error}</div> : null}
+          {error ? <div className="text-sm text-danger">{apiErrorMessage(error)}</div> : null}
         </div>
 
         <div className="mt-9 flex justify-end gap-3">

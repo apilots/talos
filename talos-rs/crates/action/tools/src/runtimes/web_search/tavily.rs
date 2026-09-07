@@ -28,7 +28,7 @@ impl TavilySearchProvider {
             .timeout(Duration::from_millis(config.timeout_ms.max(1)))
             .build()
             .map_err(|err| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     format!("build Tavily search client: {err}"),
                 )
@@ -52,7 +52,7 @@ impl SearchProvider for TavilySearchProvider {
         }
 
         let response = self.client.call(&search).await.map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("Tavily search failed: {err}"),
             )

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use talos_agent::{
-    AgentError, AgentEventSink, AgentMessageBlockHandle, AgentMessageHandle, AgentResult,
-};
+use talos_agent::{AgentEventSink, AgentMessageBlockHandle, AgentMessageHandle, AgentResult};
 use talos_agent_api::{
     AgentAssistantText, AgentAssistantTextPhase, AgentContextCompaction,
     AgentContextCompactionDelta, AgentExecutionSummary, AgentMessageBlockContent,
@@ -13,6 +11,7 @@ use talos_agent_kernel::{
     AgentKernelEvent, AgentKernelEventPayload, AssistantTextPhase, KernelStreamItemKey,
     ToolProgressKind, ToolStreamKey,
 };
+use talos_error::TalosError;
 use talos_types::{TalosTimelineNoticeLevel, TalosToolProgressKind};
 
 mod settlement;
@@ -125,7 +124,8 @@ impl KernelAgentEventMapper {
             AgentKernelEventPayload::AssistantTextStarted(data) => {
                 self.close_reasoning().await?;
                 if self.assistant.contains_key(&data.item_key) {
-                    return Err(AgentError::run_conflict(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
                         "Kernel assistant block started twice",
                     ));
                 }
@@ -173,7 +173,8 @@ impl KernelAgentEventMapper {
                         )
                         .await?;
                 } else if assistant.phase != committed_phase {
-                    return Err(AgentError::run_conflict(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
                         "Kernel committed a conflicting assistant text phase",
                     ));
                 }
@@ -274,12 +275,17 @@ impl KernelAgentEventMapper {
 
     pub(crate) fn waiting_handles(&self, call_id: &str) -> AgentResult<(&str, &str)> {
         let message = self.agent_message.as_ref().ok_or_else(|| {
-            AgentError::run_conflict("Kernel waiting result has no Agent message")
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Kernel waiting result has no Agent message",
+            )
         })?;
-        let tool = self
-            .tools_by_call
-            .get(call_id)
-            .ok_or_else(|| AgentError::run_conflict("Kernel waiting result has no Tool block"))?;
+        let tool = self.tools_by_call.get(call_id).ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Kernel waiting result has no Tool block",
+            )
+        })?;
         Ok((message.message_id(), tool.handle.block_id()))
     }
 
@@ -306,18 +312,24 @@ impl KernelAgentEventMapper {
     }
 
     fn assistant_block(&self, key: &KernelStreamItemKey) -> AgentResult<&AssistantBlock> {
-        self.assistant
-            .get(key)
-            .ok_or_else(|| AgentError::run_conflict("Kernel assistant block does not exist"))
+        self.assistant.get(key).ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Kernel assistant block does not exist",
+            )
+        })
     }
 
     fn assistant_block_mut(
         &mut self,
         key: &KernelStreamItemKey,
     ) -> AgentResult<&mut AssistantBlock> {
-        self.assistant
-            .get_mut(key)
-            .ok_or_else(|| AgentError::run_conflict("Kernel assistant block does not exist"))
+        self.assistant.get_mut(key).ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Kernel assistant block does not exist",
+            )
+        })
     }
 
     async fn map_notice(&self, message_text: String) -> AgentResult<()> {
@@ -328,7 +340,7 @@ impl KernelAgentEventMapper {
                 &message,
                 AgentMessageBlockContent::SystemNotice(AgentSystemNotice {
                     level: TalosTimelineNoticeLevel::Warning,
-                    message: message_text,
+                    content: talos_agent_api::SystemNoticeContent::Text(message_text),
                 }),
             )
             .await?;
@@ -410,14 +422,14 @@ fn map_tool_progress_kind(kind: ToolProgressKind) -> TalosToolProgressKind {
 fn warning_message(warning: talos_agent_kernel::KernelWarning) -> String {
     match warning {
         talos_agent_kernel::KernelWarning::PromptBootstrapFileMissing(data) => {
-            format!("Prompt bootstrap file is missing: {}", data.path)
+            format!("Prompt bootstrap file is missing: {:?}", data.file_kind)
         }
         talos_agent_kernel::KernelWarning::PromptBootstrapFileTruncated(data) => format!(
-            "Prompt bootstrap file was truncated: {} ({} of {} characters)",
-            data.path, data.injected_chars, data.raw_chars
+            "Prompt bootstrap file was truncated: {:?} ({} of {} characters)",
+            data.file_kind, data.injected_chars, data.raw_chars
         ),
         talos_agent_kernel::KernelWarning::PromptBootstrapFileDropped(data) => {
-            format!("Prompt bootstrap file was dropped: {}", data.path)
+            format!("Prompt bootstrap file was dropped: {:?}", data.file_kind)
         }
         talos_agent_kernel::KernelWarning::PromptDynamicSectionDropped(data) => format!(
             "Prompt dynamic sections were dropped: {}",

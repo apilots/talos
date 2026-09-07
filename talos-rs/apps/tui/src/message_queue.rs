@@ -15,7 +15,7 @@ use crate::TuiApp;
 const QUEUE_SUBSCRIPTION_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 impl TuiApp {
-    pub(crate) async fn ensure_message_queue_subscription(&mut self) {
+    pub(crate) async fn ensure_session_subscription(&mut self) {
         let Some(session_id) = self.session_id.clone() else {
             self.clear_message_queue_projection();
             return;
@@ -24,8 +24,8 @@ impl TuiApp {
             self.clear_message_queue_projection();
             return;
         }
-        if self.message_queue_subscription.is_some()
-            && self.message_queue_subscription_session_id.as_deref() == Some(session_id.as_str())
+        if self.session_subscription.is_some()
+            && self.session_subscription_session_id.as_deref() == Some(session_id.as_str())
         {
             return;
         }
@@ -40,10 +40,10 @@ impl TuiApp {
         };
 
         self.clear_message_queue_projection();
-        match client.subscribe_message_queue_changes(&session_id).await {
+        match client.subscribe_session_events(&session_id).await {
             Ok(subscription) => {
-                self.message_queue_subscription = Some(subscription);
-                self.message_queue_subscription_session_id = Some(session_id.clone());
+                self.session_subscription = Some(subscription);
+                self.session_subscription_session_id = Some(session_id.clone());
                 match client
                     .list_message_queue(MessageQueueListRequest { session_id })
                     .await
@@ -59,14 +59,18 @@ impl TuiApp {
         }
     }
 
-    pub(crate) async fn poll_message_queue_changes(&mut self) {
+    pub(crate) async fn poll_session_events(&mut self) {
         let mut highest_revision: Option<u64> = None;
         let mut disconnected = false;
-        if let Some(subscription) = self.message_queue_subscription.as_mut() {
+        let mut notices = Vec::new();
+        if let Some(subscription) = self.session_subscription.as_mut() {
             loop {
                 match subscription.try_recv() {
-                    Ok(change) => {
-                        if self.message_queue_subscription_session_id.as_deref()
+                    Ok(crate::client::SessionEvent::Notice { event_seq, notice }) => {
+                        notices.push((event_seq, notice))
+                    }
+                    Ok(crate::client::SessionEvent::QueueChanged(change)) => {
+                        if self.session_subscription_session_id.as_deref()
                             == Some(change.session_id.as_str())
                         {
                             highest_revision =
@@ -82,9 +86,12 @@ impl TuiApp {
             }
         }
 
+        for (event_seq, notice) in notices {
+            self.apply_system_notice(event_seq, notice);
+        }
         if disconnected {
             self.handle_message_queue_disconnect(TalosError::internal(
-                "message queue subscription closed".to_string(),
+                "message queue subscription closed",
             ));
             return;
         }
@@ -365,7 +372,7 @@ impl TuiApp {
                 self.reconcile_queue_driven_turn().await;
             }
             Ok(_) => self.handle_message_queue_disconnect(TalosError::internal(
-                "message queue list did not reach the notified revision".to_string(),
+                "message queue list did not reach the notified revision",
             )),
             Err(error) => self.handle_message_queue_disconnect(error),
         }
@@ -458,8 +465,8 @@ impl TuiApp {
     }
 
     fn clear_message_queue_projection(&mut self) {
-        self.message_queue_subscription = None;
-        self.message_queue_subscription_session_id = None;
+        self.session_subscription = None;
+        self.session_subscription_session_id = None;
         self.message_queue = MessageQueue {
             revision: 0,
             max_messages: 0,
@@ -473,14 +480,17 @@ impl TuiApp {
     fn handle_message_queue_disconnect(&mut self, error: TalosError) {
         self.clear_message_queue_projection();
         self.message_queue_retry_at = Some(Instant::now() + QUEUE_SUBSCRIPTION_RETRY_DELAY);
-        self.push_right_event(format!("message queue disconnected: {error}"));
+        self.push_right_event(format!(
+            "message queue disconnected: {}",
+            error.to_api_error().message
+        ));
     }
 
     fn show_message_queue_error(&mut self, error: &TalosError) {
         let message = if error.is_code(ErrorCode::MessageQueueFull) {
             "Queue is full. The message remains in the composer.".to_string()
         } else {
-            format!("Queue operation failed: {error}")
+            format!("Queue operation failed: {}", error.to_api_error().message)
         };
         self.show_status_hint(message, Duration::from_secs(3));
     }

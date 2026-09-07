@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use talos_agent::{AttachmentReader, ResolvedAttachment, TurnFileScope};
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::file::{FileRecord, FileStatus};
 
 use super::{
@@ -51,7 +51,7 @@ impl FileService {
                 .operator(&record.storage_id)?
                 .stat(&record.object_key)
                 .await
-                .map_err(|error| opendal_error("stat file object", &error))?
+                .map_err(|error| opendal_error("stat file object", error))?
                 .content_length();
             if actual_size > self.limits.max_upload_bytes {
                 return Err(attachment_limit_error(format!(
@@ -69,7 +69,7 @@ impl FileService {
             }
             if actual_size != expected_size {
                 return Err(TalosError::internal(
-                    "stored file size does not match file metadata".to_string(),
+                    "stored file size does not match file metadata",
                 ));
             }
             authorized.push((record, actual_size));
@@ -83,17 +83,19 @@ impl FileService {
 
     fn validate_attachment_ids(&self, file_ids: &[String]) -> TalosResult<()> {
         if file_ids.len() > self.limits.max_files_per_turn {
-            return Err(attachment_limit_error(format!(
-                "turn file count exceeds {}",
-                self.limits.max_files_per_turn
-            )));
+            return Err(TalosError::localized(
+                talos_error::ErrorLocalization::AttachmentCountExceeded {
+                    limit: self.limits.max_files_per_turn as u64,
+                    actual: file_ids.len() as u64,
+                },
+            ));
         }
         let mut unique = HashSet::with_capacity(file_ids.len());
         if file_ids
             .iter()
             .any(|file_id| file_id.trim().is_empty() || !unique.insert(file_id))
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "file ids must be non-empty and unique".to_string(),
             ));
@@ -114,13 +116,13 @@ impl FileService {
             .operator(&record.storage_id)?
             .read(&record.object_key)
             .await
-            .map_err(|error| opendal_error("read file object", &error))?;
+            .map_err(|error| opendal_error("read file object", error))?;
         let bytes = buffer.to_bytes();
         let actual_size = u64::try_from(bytes.len())
             .map_err(|_| attachment_limit_error("file byte count overflow".to_string()))?;
         if actual_size != expected_size {
             return Err(TalosError::internal(
-                "stored file size does not match file metadata".to_string(),
+                "stored file size does not match file metadata",
             ));
         }
         Ok(ResolvedAttachment {
@@ -142,5 +144,5 @@ fn authorized_ready_record(record: &FileRecord, scope: &TurnFileScope) -> bool {
 }
 
 fn attachment_limit_error(message: String) -> TalosError {
-    TalosError::file_error(TalosFileErrorKind::AttachmentLimitExceeded, message)
+    TalosError::new(ErrorCode::AttachmentLimitExceeded, message)
 }

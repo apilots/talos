@@ -1,4 +1,5 @@
 import type { AppProtocol } from "@talos/sdk-core";
+import { unwrapTalosApiResponse, parseTalosApiErrorBody, parseTalosJson, TalosApiError } from "@talos/sdk-core";
 import type { UserDto } from "@talos/sdk-browser";
 import { getDesktopServerInfo } from "@talos/sdk-app-server/desktop";
 
@@ -52,7 +53,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
         },
       },
     );
-    return response.user;
+    return unwrapTalosApiResponse<AppProtocol.UserCurrentResponse>(response).user;
   }
 
   const response = await fetch(new URL("/v1/user", resolveServerBaseUrl()).toString(), {
@@ -61,10 +62,8 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
       Authorization: `Bearer ${accessToken}`,
     },
   });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  const payload = await response.json() as AppProtocol.UserCurrentResponse;
+  await assertAuthResponse(response);
+  const payload = parseTalosJson(await response.text()) as AppProtocol.UserCurrentResponse;
   return payload.user;
 }
 
@@ -89,10 +88,8 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
       Accept: "application/json",
     },
   });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<HealthResponse>;
+  await assertAuthResponse(response);
+  return parseTalosJson(await response.text()) as HealthResponse;
 }
 
 export async function getCloudAuthUrl(): Promise<string> {
@@ -129,10 +126,10 @@ export async function startCloudLogin(): Promise<CloudLoginStartResponse> {
     if (!bridge) {
       throw new Error("Desktop runtime bridge is not available.");
     }
-    return bridge.invoke<CloudLoginStartResponse>("auth/login/start", {
+    return unwrapTalosApiResponse<CloudLoginStartResponse>(await bridge.invoke<CloudLoginStartResponse>("auth/login/start", {
       client_name: "Talos Desktop",
       client_kind: "desktop",
-    });
+    }));
   }
 
   const response = await fetch(new URL("/v1/auth/login/start", resolveServerBaseUrl()).toString(), {
@@ -146,10 +143,8 @@ export async function startCloudLogin(): Promise<CloudLoginStartResponse> {
       client_kind: "web",
     }),
   });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<CloudLoginStartResponse>;
+  await assertAuthResponse(response);
+  return parseTalosJson(await response.text()) as CloudLoginStartResponse;
 }
 
 export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginStatusResponse> {
@@ -158,9 +153,9 @@ export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginSt
     if (!bridge) {
       throw new Error("Desktop runtime bridge is not available.");
     }
-    return bridge.invoke<CloudLoginStatusResponse>("auth/login/status", {
+    return unwrapTalosApiResponse<CloudLoginStatusResponse>(await bridge.invoke<CloudLoginStatusResponse>("auth/login/status", {
       login_id: loginId,
-    });
+    }));
   }
 
   const url = new URL("/v1/auth/login/status", resolveServerBaseUrl());
@@ -170,10 +165,8 @@ export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginSt
       Accept: "application/json",
     },
   });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<CloudLoginStatusResponse>;
+  await assertAuthResponse(response);
+  return parseTalosJson(await response.text()) as CloudLoginStatusResponse;
 }
 
 export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSessionSnapshot | null> {
@@ -188,7 +181,7 @@ export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSession
     "auth/session/read",
     {},
   );
-  return response.session ?? null;
+  return unwrapTalosApiResponse<AppProtocol.AuthSessionReadResponse>(response).session;
 }
 
 export async function clearDesktopCloudSession(): Promise<void> {
@@ -199,5 +192,12 @@ export async function clearDesktopCloudSession(): Promise<void> {
   if (!bridge) {
     return;
   }
-  await bridge.invoke("auth/session/clear", {});
+  unwrapTalosApiResponse(await bridge.invoke("auth/session/clear", {}));
+}
+
+async function assertAuthResponse(response: Response): Promise<void> {
+  if (response.ok) return;
+  const error = parseTalosApiErrorBody(await response.text());
+  if (error) throw new TalosApiError(error);
+  throw new Error(`Authentication request failed: HTTP ${response.status} ${response.statusText}`);
 }

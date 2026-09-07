@@ -665,7 +665,7 @@ async fn malformed(binary: &str) -> Result<()> {
                 "kind": "sdk"
             },
             "capabilities": {
-                "protocol_version": { "major": 0, "minor": 2 },
+                "protocol_version": talos_app_protocol::version::ProtocolVersion::CURRENT,
                 "supports_server_requests": false,
                 "supports_event_replay": true
             }
@@ -708,8 +708,8 @@ fn session_id_from_env() -> Option<String> {
 
 fn is_terminal_event(event: &TimelineEvent) -> bool {
     matches!(
-        event.event.payload,
-        AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
+        event.event.agent_event().map(|event| &event.payload),
+        Some(AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_))
     )
 }
 
@@ -718,10 +718,14 @@ fn is_replayable_event(_event: &TimelineEvent) -> bool {
 }
 
 fn ensure_turn_event_flow(events: &[TimelineEvent]) -> Result<()> {
-    if let Some(error) = events.iter().find_map(|event| match &event.event.payload {
-        AgentEventPayload::TurnFailed(error) => Some(&error.error),
-        _ => None,
-    }) {
+    if let Some(error) = events
+        .iter()
+        .filter_map(|event| event.event.agent_event())
+        .find_map(|event| match &event.payload {
+            AgentEventPayload::TurnFailed(error) => Some(&error.error),
+            _ => None,
+        })
+    {
         return Err(anyhow!("turn failed during app-server e2e: {error:?}"));
     }
     for required in [
@@ -731,7 +735,7 @@ fn ensure_turn_event_flow(events: &[TimelineEvent]) -> Result<()> {
     ] {
         if !events
             .iter()
-            .any(|event| timeline_event_method(&event.event.payload) == required)
+            .any(|event| timeline_event_method(&event.event) == required)
         {
             return Err(anyhow!("turn event flow missing {required}"));
         }
@@ -743,10 +747,10 @@ fn assistant_text_from_events(events: &[TimelineEvent]) -> Result<String> {
     let first = events
         .first()
         .ok_or_else(|| anyhow!("Agent Turn emitted no Timeline events"))?;
-    let mut reducer = AgentEventReducer::new(first.event.identity.clone());
-    for event in events {
+    let mut reducer = AgentEventReducer::new(first.event.identity().clone());
+    for event in events.iter().filter_map(|event| event.event.agent_event()) {
         reducer
-            .apply(event.event.clone())
+            .apply(event.clone())
             .map_err(|error| anyhow!("invalid Agent event sequence: {error}"))?;
     }
     Ok(reducer
@@ -782,9 +786,9 @@ fn assert_matching_event_sequence(left: &[TimelineEvent], right: &[TimelineEvent
 fn event_projection(event: &TimelineEvent) -> (&str, &str, Option<&str>, &'static str) {
     (
         event.event_id.as_str(),
-        event.event.identity.session_id.as_str(),
-        Some(event.event.identity.turn_id.as_str()),
-        timeline_event_method(&event.event.payload),
+        event.event.identity().session_id.as_str(),
+        Some(event.event.identity().turn_id.as_str()),
+        timeline_event_method(&event.event),
     )
 }
 

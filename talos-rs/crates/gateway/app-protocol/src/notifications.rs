@@ -31,6 +31,8 @@ pub enum ServerNotification {
     TimelineTurnCompleted(TimelineEventNotification),
     #[serde(rename = "timeline/turn/failed")]
     TimelineTurnFailed(TimelineEventNotification),
+    #[serde(rename = "timeline/systemNotice")]
+    TimelineSystemNotice(TimelineEventNotification),
     #[serde(rename = "subscription/terminated")]
     SubscriptionTerminated(SubscriptionTerminatedNotification),
     #[serde(rename = "messageQueue/changed")]

@@ -17,7 +17,7 @@ pub(super) async fn dispatch_timeline_event(
                 .push(event);
             return;
         };
-        if event.event.identity.session_id != stream.session_id {
+        if event.event.identity().session_id != stream.session_id {
             return;
         }
         stream.sender.clone()

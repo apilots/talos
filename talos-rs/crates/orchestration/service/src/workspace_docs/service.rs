@@ -44,7 +44,7 @@ impl WorkspaceDocService {
             "user" => Ok(WorkspaceDocKind::User),
             "heartbeat" => Ok(WorkspaceDocKind::Heartbeat),
             "memory" => Ok(WorkspaceDocKind::Memory),
-            _ => Err(TalosError::public(
+            _ => Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "unsupported workspace doc kind".to_string(),
             )),

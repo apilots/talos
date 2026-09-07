@@ -65,7 +65,7 @@ pub(super) async fn convert_legacy_scope(
 
     for entry in entries {
         if !entry.metadata.is_file || entry.metadata.is_symlink {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "Dream Memory conversion only accepts regular files: {}",
@@ -77,10 +77,10 @@ pub(super) async fn convert_legacy_scope(
             .path
             .file_name()
             .and_then(|value| value.to_str())
-            .ok_or_else(|| TalosError::internal("invalid Dream Memory filename".to_string()))?;
+            .ok_or_else(|| TalosError::internal("invalid Dream Memory filename"))?;
         let content = talos_fs::read_file(&entry.path)
             .await?
-            .ok_or_else(|| TalosError::internal("Dream Memory source disappeared".to_string()))?;
+            .ok_or_else(|| TalosError::internal("Dream Memory source disappeared"))?;
         source_revisions.push(SourceRevision {
             path: entry.path.clone(),
             version: workspace_revision(&content),
@@ -90,7 +90,7 @@ pub(super) async fn convert_legacy_scope(
             match DreamMemoryDocument::parse(context.clone(), &content) {
                 Ok(document) => document.render().map_err(map_domain_error)?,
                 Err(_) if content.contains(DREAM_MEMORY_MARKER) => {
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!(
                             "invalid canonical Dream Memory file: {}",
@@ -128,7 +128,7 @@ pub(super) async fn convert_legacy_scope(
         };
     }
     if backup_exists {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::Conflict,
             format!(
                 "legacy Dream Memory backup requires recovery: {}",
@@ -169,9 +169,8 @@ fn switch_memory_directories(
     talos_fs::rename(memory_dir, backup_dir)?;
     if let Err(error) = talos_fs::rename(staging_dir, memory_dir) {
         talos_fs::rename(backup_dir, memory_dir).map_err(|restore_error| {
-            TalosError::internal(format!(
-                "switch Dream Memory directory: {error}; restore legacy directory: {restore_error}"
-            ))
+            talos_logging::report_error(&error);
+            restore_error.context("restore legacy directory after failed Dream Memory switch")
         })?;
         return Err(error);
     }
@@ -196,7 +195,7 @@ async fn recover_interrupted_switch(
             return Ok(());
         }
         if !memory_exists && staging_exists {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "Dream Memory staging exists without a source or backup directory".to_string(),
             ));
@@ -217,7 +216,7 @@ async fn verify_source_revisions(memory_dir: &Path, sources: &[SourceRevision]) 
         .map(|source| source.path.clone())
         .collect::<BTreeSet<_>>();
     if current_paths != expected_paths {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "legacy Dream Memory file set changed during conversion".to_string(),
         ));
@@ -228,7 +227,7 @@ async fn verify_source_revisions(memory_dir: &Path, sources: &[SourceRevision]) 
             .as_deref()
             .is_none_or(|content| workspace_revision(content) != source.version)
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "legacy Dream Memory changed during conversion".to_string(),
             ));
@@ -257,7 +256,7 @@ fn document_context(
 }
 
 fn map_domain_error(error: talos_memory::DreamMemoryError) -> TalosError {
-    TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+    TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
 }
 
 #[cfg(test)]

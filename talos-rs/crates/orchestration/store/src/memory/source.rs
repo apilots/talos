@@ -56,7 +56,7 @@ pub(super) fn source_date(source_path: &str) -> TalosResult<DreamMemoryDate> {
         .transpose()
         .map_err(map_dream_memory_error)?
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 ErrorCode::InvalidRequest,
                 "invalid Dream Memory source path".to_string(),
             )
@@ -71,7 +71,7 @@ pub(super) fn map_dream_memory_error(error: DreamMemoryError) -> TalosError {
         | DreamMemoryErrorKind::InvalidDocument
         | DreamMemoryErrorKind::LimitExceeded => ErrorCode::InvalidRequest,
     };
-    TalosError::public(code, error.to_string())
+    TalosError::new(code, error.to_string())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

@@ -5,6 +5,7 @@ use talos_error::{TalosError, TalosResult};
 use crate::template::PromptTemplate;
 
 /// Manager for multiple prompt templates.
+#[derive(Default)]
 pub struct PromptManager {
     templates: HashMap<String, Arc<PromptTemplate>>,
 }
@@ -35,7 +36,7 @@ impl PromptManager {
     ) -> TalosResult<String> {
         match self.get_template(name) {
             Some(template) => template.render(context),
-            None => Err(TalosError::public(
+            None => Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("Template '{}' not found", name),
             )),

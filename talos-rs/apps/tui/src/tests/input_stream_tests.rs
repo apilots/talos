@@ -2,15 +2,6 @@ use super::*;
 use crate::types::CommandSuggestion;
 use talos_sdk::ReasoningEffort;
 
-fn interactive_transcript_text(app: &TuiApp) -> String {
-    app.render_runtime
-        .interactive_projection_lines()
-        .into_iter()
-        .map(|line| line.plain_text())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[test]
 fn test_command_suggestions_expose_sessions_without_history_alias() {
     let commands = CommandSuggestion::all()
@@ -1009,7 +1000,9 @@ async fn test_stale_timeline_events_are_ignored() {
     app.active_stream_turn_id = Some("turn-test".to_string());
     app.last_stream_sequence = Some(3);
     let mut stale_event = assistant_text_delta_event("msg-stale", "sess-test", 4, "stale");
-    stale_event.event.identity.turn_id = "turn-stale".to_string();
+    if let talos_sdk::TimelineEventPayload::Agent(event) = &mut stale_event.event {
+        event.identity.turn_id = "turn-stale".to_string();
+    }
     app.handle_stream_event(stale_event);
 
     assert!(!interactive_transcript_text(&app).contains("stale"));
@@ -1060,7 +1053,9 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
         "stale",
         false,
     );
-    stale_event.event.identity.turn_id = "turn-stale".to_string();
+    if let talos_sdk::TimelineEventPayload::Agent(event) = &mut stale_event.event {
+        event.identity.turn_id = "turn-stale".to_string();
+    }
     app.handle_stream_event(stale_event);
 
     assert_eq!(app.last_stream_sequence, Some(3));

@@ -115,7 +115,7 @@ impl Tool for BashTool {
         };
         let response = run_bash_command(&request, &context).await?;
         let structured = serde_json::to_value(&response).map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("serialize Bash response: {}", err),
             )
@@ -174,13 +174,13 @@ fn bash_output_chunk(response: &crate::runtimes::bash::BashSessionResponse) -> (
 
 fn parse_bash_input(input: &Value) -> TalosResult<BashInput> {
     let parsed: BashInput = serde_json::from_value(input.clone()).map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("invalid Bash arguments: {err}"),
         )
     })?;
     if parsed.command.trim().is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "command must not be empty".to_string(),
         ));

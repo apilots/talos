@@ -35,7 +35,7 @@ impl Tool for CustomGuardTool {
     }
 
     fn validate_input(&self, _input: &Value) -> TalosResult<()> {
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "input rejected".to_string(),
         ))

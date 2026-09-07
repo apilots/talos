@@ -26,7 +26,7 @@ pub use attachment::{AttachmentReader, ResolvedAttachment, TurnFileScope};
 pub use capability::{AgentCapabilities, AgentUserActionKind, AgentUserContentKind};
 pub use context::{AgentContext, AgentSessionContext};
 pub use definition::{AgentDefinition, AgentDefinitionLoader};
-pub use error::{AgentError, AgentErrorKind, AgentResult};
+pub use error::{AgentResult, AgentRunFailure};
 pub use event_handle::{AgentMessageBlockHandle, AgentMessageHandle};
 pub use event_sink::{AgentEventPipeline, AgentEventSink};
 pub use history::{SessionHistoryReadParams, SessionHistoryReader, SessionHistoryWindow};

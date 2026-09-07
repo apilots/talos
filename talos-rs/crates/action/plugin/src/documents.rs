@@ -85,11 +85,16 @@ pub(crate) fn document_media_type(path: &Path) -> PluginDocumentMediaType {
 pub(crate) fn relative_path(root: &Path, path: &Path) -> TalosResult<String> {
     path.strip_prefix(root)
         .map_err(|err| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "plugin source path `{}` escaped root `{}`: {err}",
                 path.display(),
                 root.display()
-            ))
+            );
+            TalosError::internal_with_source(
+                "Plugin source path escaped root; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })
         .map(|path| path.to_string_lossy().replace('\\', "/"))
 }

@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 
 const MAX_ATTACHMENTS: usize = 5;
 const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
@@ -62,9 +62,12 @@ pub fn validate_inline_attachments(
     supports_media_type: impl Fn(&Attachment) -> bool,
 ) -> TalosResult<AttachmentUsage> {
     if attachments.len() > MAX_ATTACHMENTS {
-        return Err(limit_error(format!(
-            "attachment count exceeds {MAX_ATTACHMENTS}"
-        )));
+        return Err(TalosError::localized(
+            talos_error::ErrorLocalization::AttachmentCountExceeded {
+                limit: MAX_ATTACHMENTS as u64,
+                actual: attachments.len() as u64,
+            },
+        ));
     }
     let mut total_bytes = 0_usize;
     let mut item_tokens = Vec::with_capacity(attachments.len());
@@ -78,8 +81,8 @@ pub fn validate_inline_attachments(
             .checked_add(attachment.bytes.len())
             .ok_or_else(|| limit_error("attachment byte count overflow".to_string()))?;
         if !supports_media_type(attachment) {
-            return Err(TalosError::file_error(
-                TalosFileErrorKind::UnsupportedMediaType,
+            return Err(TalosError::new(
+                ErrorCode::UnsupportedMediaType,
                 format!(
                     "attachment MIME type {} is unsupported for {:?}",
                     attachment.media_type, attachment.kind
@@ -102,7 +105,10 @@ pub fn validate_attachment_usage(
     usage: &AttachmentUsage,
 ) -> TalosResult<usize> {
     if usage.item_tokens.len() != attachment_count {
-        return Err(TalosError::internal(format!(
+        return Err(TalosError::internal(
+            "Provider returned an inconsistent number of attachment estimates.",
+        )
+        .context(format!(
             "provider returned {} attachment estimates for {attachment_count} attachments",
             usage.item_tokens.len()
         )));
@@ -112,7 +118,7 @@ pub fn validate_attachment_usage(
         .iter()
         .any(|tokens| *tokens > MAX_ATTACHMENT_TOKENS)
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ContextWindowExceeded,
             format!("one attachment exceeds the {MAX_ATTACHMENT_TOKENS} token input cap"),
         ));
@@ -121,5 +127,5 @@ pub fn validate_attachment_usage(
 }
 
 fn limit_error(message: String) -> TalosError {
-    TalosError::file_error(TalosFileErrorKind::AttachmentLimitExceeded, message)
+    TalosError::new(ErrorCode::AttachmentLimitExceeded, message)
 }

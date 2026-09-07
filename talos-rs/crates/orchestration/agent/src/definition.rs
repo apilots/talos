@@ -41,7 +41,7 @@ impl AgentDefinitionLoader {
             .map(|definition| {
                 let definition = definition_from_config(config, definition)?;
                 if !seen_ids.insert(definition.id.clone()) {
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!("duplicate agent definition id: {}", definition.id),
                     ));
@@ -70,7 +70,7 @@ fn definition_from_config(
 ) -> TalosResult<AgentDefinition> {
     let id = definition.id.trim();
     if id.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "agent definition id cannot be empty".to_string(),
         ));

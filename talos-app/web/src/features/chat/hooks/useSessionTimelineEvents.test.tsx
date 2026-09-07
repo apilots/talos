@@ -162,7 +162,7 @@ describe("useSessionTimelineEvents", () => {
     apiMocks.subscribeTimelineEvents
       .mockRejectedValueOnce(
         new TalosApiError({
-          code: AppProtocol.ErrorCode.EventCursorExpired,
+          code: AppProtocol.ErrorCode.EventCursorExpired, localization: null,
           message: "Event cursor expired",
         }),
       )

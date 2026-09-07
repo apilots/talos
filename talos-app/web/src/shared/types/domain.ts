@@ -36,6 +36,11 @@ export function getEffectiveSessionStatus(
   return "done";
 }
 
+export function deriveProjectName(directory: string) {
+  const normalized = directory.trim().replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).at(-1) || "project";
+}
+
 export function normalizeProjectDirectory(directory?: string | null) {
   return directory?.trim() || null;
 }
