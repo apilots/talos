@@ -1,5 +1,9 @@
 name: talos-rust
 
+concurrency:
+  group: talos-rust-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   pull_request:
@@ -9,6 +13,8 @@ on:
       - "justfile"
       - ".github/workflows/talos-rust.yml"
   push:
+    branches:
+      - main
     paths:
       - "talos-rs/**"
       - "scripts/check_error_contract*.py"

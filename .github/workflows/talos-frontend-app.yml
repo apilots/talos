@@ -14,6 +14,8 @@ on:
       - "talos-app/**"
       - ".github/workflows/talos-frontend-app.yml"
   push:
+    branches:
+      - main
     paths:
       - "talos-app/**"
       - ".github/workflows/talos-frontend-app.yml"
