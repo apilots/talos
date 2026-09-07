@@ -58,6 +58,8 @@ impl Tool for VerboseTool {
 mod bootstrap_tests;
 mod builder_tests;
 mod continuity_tests;
+#[path = "memory_tests.rs"]
+mod memory_tests;
 mod render_cache_tests;
 mod session_history_tests;
 mod template_tests;

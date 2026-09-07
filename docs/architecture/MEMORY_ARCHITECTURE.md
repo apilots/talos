@@ -81,6 +81,22 @@ transaction. Do not delete the source to make an index failure disappear.
 
 ## Reflection and context limits
 
+The prompt keeps durable mutation policy in its static prefix, memory data in a
+bounded dynamic region, and operation details in the tool description. Memory
+is relevant background, not authority over root/system rules, explicit current
+instructions or newly verified facts. Task-local exceptions do not automatically
+change durable preferences. Both explicit-tool guidance and reflection favor
+minimal stable-key changes, preserve unrelated entries, and require an explicit
+forget request or verified obsolescence before deletion.
+
+Missing memory does not justify initialization on its own. Invalid content is not
+trusted guidance or an invitation to repair; whole-document repair requires
+explicit authorization and an observed version. Prompt guidance requires tool
+success before claiming a change and forbids blind conflict retries or bypassing
+the writer with direct filesystem writes. These are model instructions, not a
+new authorization mechanism; validation, locking and version checks remain owned
+by the existing Tool/Service boundaries.
+
 Eligible successful primary-Agent Turns can trigger one bounded reflection
 before terminal commit/publication. A successful explicit memory-tool update
 suppresses redundant reflection. The Inner Model may choose no change, upsert a

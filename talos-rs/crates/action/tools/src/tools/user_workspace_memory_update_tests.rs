@@ -13,6 +13,7 @@ use super::*;
 struct RecordingWriter {
     upserts: Mutex<Vec<(MemoryScope, UserWorkspaceMemoryEntry)>>,
     updates: Mutex<Vec<(MemoryScope, String, UserWorkspaceMemoryEntryUpdate)>>,
+    upsert_error: Option<talos_error::ErrorCode>,
 }
 
 fn valid_snapshot() -> UserWorkspaceMemorySnapshot {
@@ -72,6 +73,9 @@ impl UserWorkspaceMemoryWriter for RecordingWriter {
                 .lock()
                 .expect("recorded upserts should lock")
                 .push((scope.clone(), entry));
+            if let Some(code) = self.upsert_error {
+                return Err(TalosError::new(code, "Memory write failed."));
+            }
             Ok(valid_snapshot())
         })
     }
@@ -82,18 +86,58 @@ impl UserWorkspaceMemoryWriter for RecordingWriter {
 }
 
 #[tokio::test]
-async fn update_tool_uses_only_the_trusted_context_scope() {
+async fn update_tool_uses_the_same_trusted_scope_across_agents_and_sessions() {
     let writer = Arc::new(RecordingWriter::default());
     let scope = MemoryScope {
         workspace_id: "default".to_string(),
         user_id: "trusted-user".to_string(),
         workspace_root: std::path::PathBuf::from("/trusted/workspace"),
     };
+    let entry = serde_json::json!({
+        "key": "response-style",
+        "section": "interaction_guidance",
+        "title": "Response style",
+        "kind": "preference",
+        "summary": "Keep responses concise."
+    });
+    for (agent_id, session_id) in [("agent-1", "session-1"), ("agent-2", "session-2")] {
+        let context = ToolContext::new(session_id, "trusted-user")
+            .with_agent_id(agent_id)
+            .with_memory_scope(scope.clone())
+            .with_user_workspace_memory_writer(writer.clone());
+        let output = UserWorkspaceMemoryUpdateTool
+            .execute_payload(
+                serde_json::json!({"operation": "upsert_entry", "entry": entry}),
+                context,
+            )
+            .await
+            .expect("memory update should succeed");
+        assert!(!output.is_error());
+    }
+
+    let upserts = writer.upserts.lock().expect("recorded upserts should lock");
+    let entry = serde_json::from_value::<UserWorkspaceMemoryEntry>(entry).expect("valid entry");
+    assert_eq!(
+        *upserts,
+        vec![(scope.clone(), entry.clone()), (scope, entry)]
+    );
+}
+
+#[tokio::test]
+async fn update_tool_propagates_writer_failure_without_success_or_retry() {
+    let writer = Arc::new(RecordingWriter {
+        upsert_error: Some(talos_error::ErrorCode::Conflict),
+        ..RecordingWriter::default()
+    });
     let context = ToolContext::new("session-1", "trusted-user")
-        .with_memory_scope(scope.clone())
+        .with_memory_scope(MemoryScope {
+            workspace_id: "default".to_string(),
+            user_id: "trusted-user".to_string(),
+            workspace_root: std::path::PathBuf::from("/trusted/workspace"),
+        })
         .with_user_workspace_memory_writer(writer.clone());
 
-    let output = UserWorkspaceMemoryUpdateTool
+    let error = UserWorkspaceMemoryUpdateTool
         .execute_payload(
             serde_json::json!({
                 "operation": "upsert_entry",
@@ -108,13 +152,10 @@ async fn update_tool_uses_only_the_trusted_context_scope() {
             context,
         )
         .await
-        .expect("memory update should succeed");
+        .expect_err("writer failure must remain an error");
 
-    assert!(!output.is_error());
-    let upserts = writer.upserts.lock().expect("recorded upserts should lock");
-    assert_eq!(upserts.len(), 1);
-    assert_eq!(upserts[0].0, scope);
-    assert_eq!(upserts[0].1.key, "response-style");
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
+    assert_eq!(writer.upserts.lock().expect("upserts should lock").len(), 1);
 }
 
 #[test]

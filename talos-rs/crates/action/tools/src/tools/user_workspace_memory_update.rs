@@ -29,7 +29,7 @@ impl Tool for UserWorkspaceMemoryUpdateTool {
     }
 
     fn description(&self) -> &str {
-        "Create, update, replace, or remove durable cross-session memory for the current agent and user. For update_entry, provide changed fields directly and use clear_fields only to clear optional fields."
+        "Change durable memory for the current user and workspace, shared across Sessions and Agents. Prefer entry operations and preserve unrelated entries. For update_entry, provide changed fields directly and use clear_fields only to clear optional fields. Use replace_document only for an explicitly authorized whole-document edit or repair, with the observed base_version; never invent a version or overwrite invalid memory automatically."
     }
 
     fn visibility(&self) -> ToolVisibility {
