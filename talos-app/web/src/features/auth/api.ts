@@ -63,8 +63,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
     },
   });
   await assertAuthResponse(response);
-  const payload = parseTalosJson(await response.text()) as AppProtocol.UserCurrentResponse;
-  return payload.user;
+  return unwrapTalosApiResponse<AppProtocol.UserCurrentResponse>(parseTalosJson(await response.text())).user;
 }
 
 export async function getGatewayHealth(): Promise<HealthResponse> {
@@ -144,7 +143,7 @@ export async function startCloudLogin(): Promise<CloudLoginStartResponse> {
     }),
   });
   await assertAuthResponse(response);
-  return parseTalosJson(await response.text()) as CloudLoginStartResponse;
+  return unwrapTalosApiResponse<CloudLoginStartResponse>(parseTalosJson(await response.text()));
 }
 
 export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginStatusResponse> {
@@ -166,7 +165,7 @@ export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginSt
     },
   });
   await assertAuthResponse(response);
-  return parseTalosJson(await response.text()) as CloudLoginStatusResponse;
+  return unwrapTalosApiResponse<CloudLoginStatusResponse>(parseTalosJson(await response.text()));
 }
 
 export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSessionSnapshot | null> {
