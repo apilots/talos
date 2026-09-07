@@ -35,7 +35,8 @@ export function SettingsPage() {
   } = useSettingsPage();
   const requestedSection = params.section;
   const activeSection: SettingsSection = isSettingsSection(requestedSection) ? requestedSection : "profile";
-  const canManageConfig = connection.authStatus === "open" || connection.authRole === "admin";
+  const canManageConfig =
+    connection.authStatus === "open" || connection.deploymentMode === "local" || connection.authRole === "admin";
 
   if (requestedSection && !isSettingsSection(requestedSection)) {
     return <Navigate replace to="/settings" />;

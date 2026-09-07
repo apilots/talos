@@ -61,7 +61,7 @@ RUN groupadd --gid 10001 talos \
 COPY --from=rust-builder /workspace/talos/talos-rs/target/release/talos-server /opt/talos/bin/talos-server
 COPY --from=rust-builder /workspace/talos/talos-rs/target/release/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
 COPY --from=web-builder /workspace/talos/talos-app/web/dist/ /opt/talos/webui/
-COPY talos/conf/talos-prod.yaml /opt/talos/conf/talos.yaml
+COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
 COPY talos/conf/migrations /opt/talos/conf/migrations
 
 RUN chmod 755 /opt/talos/bin/talos-server /opt/talos/bin/talos-linux-sandbox-launcher \

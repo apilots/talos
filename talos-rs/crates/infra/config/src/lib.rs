@@ -39,6 +39,19 @@ pub mod validate;
 pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
+
+/// Selects the instance deployment boundary used for configuration access.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[ts(rename_all = "lowercase")]
+pub enum DeploymentMode {
+    /// A user-owned Talos instance.
+    #[default]
+    Local,
+    /// A shared Talos Cloud instance.
+    Cloud,
+}
+
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentProviderConfig, MessageQueueConfig, PlannerMode,
 };
@@ -106,6 +119,10 @@ pub struct Config {
 
     #[serde(skip)]
     runtime_paths: Option<TalosPaths>,
+
+    /// Controls access to instance-level configuration.
+    #[serde(default)]
+    pub mode: DeploymentMode,
 
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]
@@ -181,6 +198,7 @@ impl Default for Config {
         let mut config = Self {
             source_path: None,
             runtime_paths: None,
+            mode: DeploymentMode::default(),
             timezone: default_timezone(),
             automation: AutomationConfig::default(),
             memory: MemoryConfig::default(),

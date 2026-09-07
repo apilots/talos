@@ -28,6 +28,7 @@ vi.mock("@/features/settings", async () => {
 function buildSettingsState(
   authStatus: "authenticated" | "open" = "authenticated",
   authRole: "user" | "admin" = "user",
+  deploymentMode: "local" | "cloud" = "local",
 ) {
   return {
     connection: {
@@ -37,6 +38,7 @@ function buildSettingsState(
       accountType: "Pro",
       authUsername: authRole,
       userId: `${authRole}-1`,
+      deploymentMode,
       runtimeMode: "local",
     },
     setConnection: vi.fn(),
@@ -58,8 +60,9 @@ function renderSettings(
   initialEntry: string,
   authStatus: "authenticated" | "open" = "authenticated",
   authRole: "user" | "admin" = "user",
+  deploymentMode: "local" | "cloud" = "local",
 ) {
-  useSettingsPageMock.mockReturnValue(buildSettingsState(authStatus, authRole));
+  useSettingsPageMock.mockReturnValue(buildSettingsState(authStatus, authRole, deploymentMode));
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -96,11 +99,11 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("link", { name: "Personalization" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("hides model settings for regular authenticated users", () => {
+  it("shows model settings for regular authenticated local users", () => {
     renderSettings("/settings");
 
     expect(screen.getByText("Profile content")).toBeTruthy();
-    expect(screen.queryByText("Models")).toBeNull();
+    expect(screen.getByText("Models")).toBeTruthy();
   });
 
   it("does not expose disconnected global permission controls", () => {
@@ -131,14 +134,14 @@ describe("SettingsPage", () => {
   });
 
   it("redirects regular users away from config management sections", () => {
-    renderSettings("/settings/web-search");
+    renderSettings("/settings/web-search", "authenticated", "user", "cloud");
 
     expect(screen.getByText("Profile content")).toBeTruthy();
     expect(screen.queryByText("Web Search content")).toBeNull();
   });
 
   it("renders the general settings section", () => {
-    renderSettings("/settings/general");
+    renderSettings("/settings/general", "authenticated", "user", "cloud");
 
     expect(screen.queryByText("Models")).toBeNull();
     expect(screen.getByText("General content")).toBeTruthy();

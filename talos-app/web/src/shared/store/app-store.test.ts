@@ -30,6 +30,7 @@ describe("app store persistence", () => {
         accountType: "Free",
         authUsername: "Anonymous",
         userId: "anonymous",
+        deploymentMode: "local",
         runtimeMode: "local",
       },
       streams: {},
@@ -103,6 +104,7 @@ describe("app store persistence", () => {
       accountType: "Free",
       authUsername: "Anonymous",
       userId: "anonymous",
+      deploymentMode: "local",
       runtimeMode: "local",
     });
   });

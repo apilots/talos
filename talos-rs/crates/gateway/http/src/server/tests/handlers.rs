@@ -102,6 +102,7 @@ async fn test_health() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["mode"], "local");
     assert_eq!(payload["auth_enabled"], true);
     assert_eq!(payload["cloud_auth_url"], "http://127.0.0.1:3000");
 }
@@ -213,7 +214,9 @@ async fn test_get_and_put_web_search_config_handlers() {
 
 #[tokio::test]
 async fn test_config_handler_rejects_regular_user_updates() {
-    let state = test_state(false).await;
+    let mut config = test_config();
+    config.mode = talos_config::DeploymentMode::Cloud;
+    let state = test_state_with_config(config, false).await;
     let error = put_config_handler(
         State(state),
         Some(axum::extract::Extension(test_auth())),
