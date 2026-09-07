@@ -46,6 +46,7 @@ mod project_fs;
 
 #[derive(Clone)]
 pub struct TalosService {
+    mode: talos_config::DeploymentMode,
     access: ResourceAccessService,
     sessions: Arc<SessionService>,
     pub account: AccountService,
@@ -171,6 +172,7 @@ impl TalosService {
         );
 
         Self {
+            mode: base_config.mode,
             access: ResourceAccessService::with_services(
                 coordinator.clone(),
                 sessions.clone(),
@@ -211,6 +213,11 @@ impl TalosService {
             workspace_docs: WorkspaceDocService::new(base_config),
             execution_gate,
         }
+    }
+
+    /// Returns the deployment mode captured when the service starts.
+    pub fn mode(&self) -> talos_config::DeploymentMode {
+        self.mode
     }
 
     /// Reuses one application-owned User Workspace Memory service across model and document APIs.

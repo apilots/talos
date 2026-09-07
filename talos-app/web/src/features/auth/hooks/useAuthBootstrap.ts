@@ -39,6 +39,7 @@ export function useAuthBootstrap() {
         if (canceled) {
           return;
         }
+        setConnection({ deploymentMode: health.mode });
         if (!health.auth_enabled) {
           clearWebAuthToken();
           attemptedKeyRef.current = attemptKey;

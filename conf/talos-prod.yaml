@@ -1,4 +1,5 @@
 timezone: "Asia/Shanghai"
+mode: local
 
 workspaces:
   default_workspace_id: "default"
@@ -22,7 +23,7 @@ automation:
     batch_size: 50
     max_batches: 10
 
-# Production profile for Talos Cloud.
+# Production profile for packaged Talos clients.
 gateway:
   port: 8080
   host: "0.0.0.0"

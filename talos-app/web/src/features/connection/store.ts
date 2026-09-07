@@ -1,4 +1,4 @@
-import type { RuntimeMode } from "@/shared/types/ui";
+import type { DeploymentMode, RuntimeMode } from "@/shared/types/ui";
 import type { AccountType } from "./account-type";
 import type { AuthStatus } from "@/shared/types/account";
 
@@ -12,6 +12,7 @@ export interface ConnectionState {
   accountType: AccountType;
   authUsername: string;
   userId: string;
+  deploymentMode: DeploymentMode;
   runtimeMode: RuntimeMode;
 }
 
@@ -33,6 +34,7 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
       accountType: "Free",
       authUsername: "Anonymous",
       userId: "anonymous",
+      deploymentMode: "local",
       runtimeMode: "local",
     },
     setConnection: (patch) =>
@@ -40,6 +42,9 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
         const nextConnection = {
           ...state.connection,
           ...patch,
+          deploymentMode: normalizeDeploymentMode(
+            patch.deploymentMode ?? state.connection.deploymentMode,
+          ),
           runtimeMode: normalizeRuntimeMode(patch.runtimeMode ?? state.connection.runtimeMode),
         };
         const changed = Object.keys(patch).some((key) => {
@@ -62,4 +67,8 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
 
 function normalizeRuntimeMode(value: RuntimeMode): RuntimeMode {
   return value === "local" ? "local" : "local";
+}
+
+function normalizeDeploymentMode(value: DeploymentMode): DeploymentMode {
+  return value === "cloud" ? "cloud" : "local";
 }

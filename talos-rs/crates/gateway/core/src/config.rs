@@ -1,4 +1,5 @@
 use talos_auth::UserRole;
+use talos_config::DeploymentMode;
 use talos_error::{TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::{
@@ -14,7 +15,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigGetRequest,
     ) -> TalosResult<ConfigResponse> {
-        require_config_admin(actor)?;
+        require_config_access(actor, self.service.mode())?;
         self.service.config.get_config(request)
     }
 
@@ -23,7 +24,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigUpdateRequest,
     ) -> TalosResult<ConfigResponse> {
-        require_config_admin(actor)?;
+        require_config_access(actor, self.service.mode())?;
         self.service.config.update_config(request).await
     }
 
@@ -32,7 +33,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigDeleteRequest,
     ) -> TalosResult<ConfigDeleteResponse> {
-        require_config_admin(actor)?;
+        require_config_access(actor, self.service.mode())?;
         self.service.config.delete_config(request)
     }
 
@@ -41,13 +42,13 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
-        require_config_admin(actor)?;
+        require_config_access(actor, self.service.mode())?;
         self.service.config.reload_config(request).await
     }
 }
 
-fn require_config_admin(actor: &Actor) -> TalosResult<()> {
-    if actor.auth_disabled || actor.role == UserRole::Admin {
+fn require_config_access(actor: &Actor, mode: DeploymentMode) -> TalosResult<()> {
+    if actor.auth_disabled || mode == DeploymentMode::Local || actor.role == UserRole::Admin {
         return Ok(());
     }
     Err(TalosError::new(
