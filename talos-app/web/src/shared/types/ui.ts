@@ -9,7 +9,6 @@ import type {
   TalosToolProgressKind,
 } from "./protocol";
 
-export type RuntimeMode = "cloud" | "local";
 export type DeploymentMode = "cloud" | "local";
 export type ReasoningLevel = "none" | "light" | "medium" | "high" | "extra_high";
 export type SessionUiStatus = "running" | "done" | "error";

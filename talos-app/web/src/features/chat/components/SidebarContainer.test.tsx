@@ -107,7 +107,6 @@ vi.mock("@/shared/store/app-store", () => ({
         authUsername: "user",
         userId: "user",
         authToken: "",
-        runtimeMode: "local",
       },
       sessionAliases: {},
       deleteSessionAlias: mocks.deleteSessionAlias,

@@ -61,10 +61,8 @@ function defaultComposerProps(): React.ComponentProps<typeof ChatComposer> {
     onDraftChange: vi.fn(),
     onModelChange: vi.fn(),
     onProjectChange: vi.fn(),
-    onRuntimeModeChange: vi.fn(),
     onSend: vi.fn(),
     projects: createDefaultProjects(),
-    runtimeMode: "local",
     selectedModel: "mock:model-1",
     showProjectSelector: false,
   };

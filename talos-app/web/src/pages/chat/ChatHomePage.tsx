@@ -16,7 +16,6 @@ import {
   useModelsQuery,
   useProjectsView,
 } from "@/features/chat";
-import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type {
   FileInfo,
@@ -41,8 +40,6 @@ export function ChatHomePage() {
   const projects = projectsView.projects;
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
-  const connection = useAppStore((state) => state.connection);
-  const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
   const [selectedModel, setSelectedModel] = useState<ModelRef>();
   const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("none");
@@ -136,16 +133,10 @@ export function ChatHomePage() {
           }}
           onPermissionModeChange={handlePermissionModeChange}
           onProjectChange={setActiveProjectId}
-          onRuntimeModeChange={(mode) => {
-            if (mode === "local") {
-              setConnection({ runtimeMode: mode });
-            }
-          }}
           onReasoningLevelChange={setSelectedReasoningLevel}
           onSend={(attachments) => handleStartDraft(draft, attachments)}
           permissionMode={permissionMode}
           projects={projects}
-          runtimeMode={connection.runtimeMode}
           selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}
           reasoningLevel={selectedReasoningLevel}
           reasoningEnabled={selectedModelInfo?.reasoning ?? false}

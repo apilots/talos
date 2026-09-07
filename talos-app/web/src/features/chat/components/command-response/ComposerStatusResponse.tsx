@@ -50,7 +50,6 @@ export function ComposerStatusResponse({
     >
       <div className="grid gap-x-7 gap-y-3 px-4 py-3.5 sm:grid-cols-2">
         <StatusMetric label={t("chat:modelLabel")} value={formatModel(status, t)} />
-        <StatusMetric label={t("chat:commandStatusRuntime")} value={t(`common:${status.runtimeMode}`)} />
         <StatusMetric label={t("chat:commandStatusProject")} value={status.project ?? t("chat:commandStatusNoProject")} />
         <StatusMetric label={t("chat:commandStatusSession")} mono value={abbreviateSessionId(status.sessionId)} />
 

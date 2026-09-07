@@ -65,18 +65,6 @@ describe("ChatComposer controls", () => {
     expect(onPermissionModeChange).toHaveBeenCalledWith("approveForMe");
   });
 
-  it("keeps unavailable runtime modes disabled", () => {
-    const onRuntimeModeChange = vi.fn();
-    renderComposer({ onRuntimeModeChange });
-
-    fireEvent.click(screen.getByRole("button", { name: /local/i }));
-    const cloudOption = screen.getByRole("button", { name: /cloudcoming soon/i });
-
-    expect(cloudOption).toBeDisabled();
-    fireEvent.click(cloudOption);
-    expect(onRuntimeModeChange).not.toHaveBeenCalledWith("cloud");
-  });
-
   it("closes the project picker when clicking outside the composer", () => {
     renderWithQueryClient(
       <div>
@@ -90,10 +78,8 @@ describe("ChatComposer controls", () => {
           onDraftChange={vi.fn()}
           onModelChange={vi.fn()}
           onProjectChange={vi.fn()}
-          onRuntimeModeChange={vi.fn()}
           onSend={vi.fn()}
           projects={createDefaultProjects()}
-          runtimeMode="local"
           selectedModel="mock:model-1"
           showProjectSelector
         />

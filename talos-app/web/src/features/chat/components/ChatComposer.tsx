@@ -49,13 +49,10 @@ export function ChatComposer({
   activeProjectId,
   onProjectChange,
   onCreateProject,
-  runtimeMode,
-  onRuntimeModeChange,
   reasoningLevel = "medium",
   onReasoningLevelChange,
   reasoningEnabled = true,
   showProjectSelector = true,
-  showRuntimeModeSelector = true,
   compact = false,
   initialAttachments = EMPTY_ATTACHMENTS,
   supportedAttachmentKinds = EMPTY_ATTACHMENT_KINDS,
@@ -281,11 +278,8 @@ export function ChatComposer({
           compact={compact}
           onCreateProject={onCreateProject}
           onProjectChange={onProjectChange}
-          onRuntimeModeChange={onRuntimeModeChange}
           projects={projects}
-          runtimeMode={runtimeMode}
           showProjectSelector={showProjectSelector}
-          showRuntimeModeSelector={showRuntimeModeSelector}
         />
       </Panel>
     </div>

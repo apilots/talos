@@ -56,7 +56,6 @@ describe("useAuthBootstrap", () => {
         authUsername: "Anonymous",
         userId: "anonymous",
         deploymentMode: "local",
-        runtimeMode: "local",
       },
     }));
   });
@@ -95,7 +94,6 @@ describe("useAuthBootstrap", () => {
     expect(useAppStore.getState().connection.authStatus).toBe("authenticated");
     expect(useAppStore.getState().connection.accountType).toBe("Max");
     expect(useAppStore.getState().connection.deploymentMode).toBe("cloud");
-    expect(useAppStore.getState().connection.runtimeMode).toBe("local");
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 

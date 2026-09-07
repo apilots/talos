@@ -43,7 +43,6 @@ describe("useSettingsPage", () => {
         ...state.connection,
         authToken: "",
         userId: "web-user",
-        runtimeMode: "local",
       },
       locale: "en",
       uiTheme: "light",

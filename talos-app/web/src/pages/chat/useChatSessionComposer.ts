@@ -16,7 +16,6 @@ import {
   type useChatSession,
   type useProjectsView,
 } from "@/features/chat";
-import { useAppStore } from "@/shared/store/app-store";
 import type { ReasoningLevel } from "@/shared/types/ui";
 import type { SessionLocationState } from "./chatSessionLocation";
 import { useSessionCommands } from "./useSessionCommands";
@@ -49,8 +48,6 @@ export function useChatSessionComposer({
     locationState?.initialProjectId,
   );
   const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
-  const connection = useAppStore((state) => state.connection);
-  const setConnection = useAppStore((state) => state.setConnection);
   const activeSessionModelSelection = useConfiguredSessionModelSelection({
     catalog: modelCatalog,
     selection: session?.modelSelection,
@@ -99,7 +96,6 @@ export function useChatSessionComposer({
       model: currentModelLabel,
       project: boundProject?.name,
       reasoningLevel: currentReasoningLevel,
-      runtimeMode: connection.runtimeMode,
       sessionId,
       state: chat.isStreaming ? "running" : "ready",
     },
@@ -174,11 +170,6 @@ export function useChatSessionComposer({
         });
       }
     },
-    onRuntimeModeChange: (mode) => {
-      if (!sessionCommands.compactionStage && mode === "local") {
-        setConnection({ runtimeMode: mode });
-      }
-    },
     onSend: (attachments) => {
       const fileIds = attachments.map((file) => file.fileId);
       const fileOptions = fileIds.length > 0 ? { fileIds } : {};
@@ -200,11 +191,9 @@ export function useChatSessionComposer({
     projects: projectsView.projects,
     reasoningEnabled: currentModelInfo?.reasoning ?? false,
     reasoningLevel: currentReasoningLevel,
-    runtimeMode: connection.runtimeMode,
     selectedModel: currentModel,
     sessionTotalTokens: session?.usage?.tokens.total_tokens,
     showProjectSelector: false,
-    showRuntimeModeSelector: false,
     supportedAttachmentKinds: supportedAttachmentKinds(currentModelInfo),
   };
 
