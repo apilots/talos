@@ -2,6 +2,9 @@
 
 [English](RUNTIME_ARCHITECTURE.md)
 
+> Historical translation. The [English document](RUNTIME_ARCHITECTURE.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 ## 职责链
 
 ```text

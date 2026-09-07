@@ -1,6 +1,10 @@
 # Refactor 040：Agent Provider SPI 与全链路概念收敛
 
-Status: implementation complete; merge review pending. This document consolidates Refactors 040 and 044. Verification evidence and open review items are retained in PR #16.
+Status: implementation merged in PR #15. This document consolidates Refactor 040
+and the earlier Provider-related 044 work. PR #16 subsequently changed errors
+and product notices; consult the current architecture and error contract for
+those implemented boundaries. Historical verification belongs to each PR, not
+to the ignored local implementation plan.
 
 ## 1. 目标与边界
 

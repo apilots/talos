@@ -69,10 +69,14 @@ shape changes also require `just gen-app-protocol`.
 - Local composition registers `KernelAgentProvider`; additional Providers use the same SPI without changing Service or Gateway semantics.
 - Rust `AppServerClient` and `EmbeddedServerClient` implement the same `GatewayClient` capability contract.
 - Tools, Skills, MCP, permissions, and sandbox failures remain explicit.
+- Admission precedes Provider effects; Store commit precedes Timeline publication.
+- Agent facts and product notices share a cursor, but only Agent facts enter execution reducers.
 
 ## Related documentation
 
 - [Runtime architecture](../docs/architecture/RUNTIME_ARCHITECTURE.md)
+- [Domain model](../docs/architecture/DOMAIN_MODEL.md)
+- [Memory architecture](../docs/architecture/MEMORY_ARCHITECTURE.md)
 - [Error model](../docs/architecture/ERROR_MODEL.md)
 - [Development workflow](../docs/development/DEVELOPMENT.md)
 - [TUI notes](apps/tui/README.md)

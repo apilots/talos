@@ -2,6 +2,9 @@
 
 [English](README.md)
 
+> Historical translation. The [English document](README.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 本目录负责 `talos-server` 部署示例以及已发布 `talos` 终端 bundle 的安装资源。
 
 ## 目录

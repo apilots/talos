@@ -2,6 +2,9 @@
 
 [English](ARCHITECTURE.md)
 
+> Historical translation. The [English document](ARCHITECTURE.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 ## 文档目标
 
 本文定义 Talos 的稳定系统边界，描述当前架构以及未来工作应使用的扩展点。

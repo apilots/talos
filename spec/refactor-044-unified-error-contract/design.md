@@ -73,7 +73,10 @@ These sources establish runtime/library behavior. The taxonomy, public payload,
 mandatory Business backtraces, and translation policy below are Talos product
 decisions, not claims that the ecosystem prescribes one universal framework.
 
-## 2. Current failures to correct
+## 2. Historical baseline: failures addressed by this refactor
+
+The table below describes the pre-refactor implementation, not current defects.
+Implemented behavior and extension rules live in the current error contract.
 
 | Current implementation | Consequence |
 | --- | --- |

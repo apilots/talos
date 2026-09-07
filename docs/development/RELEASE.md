@@ -34,3 +34,21 @@ matrix before starting the release build. Pull requests run only the inexpensive
 installer syntax and contract checks when release-related files change. The full
 matrix can also be started explicitly with `workflow_dispatch`. Installation
 acceptance is owned by E2E group `15_tui_install`.
+
+```text
+Merged version + release notes
+             |
+             v
+release.sh -> annotated tag + GitHub Release
+             |
+             v
+tag workflow -> complete native installation matrix
+             |
+         success only
+             v
+dispatch release build -> verify published target artifacts
+```
+
+Protocol/data changes also require coordinated consumer rollout and a tested
+backup/rollback procedure; see [Deployment](../../deploy/README.md#data-upgrades-and-rollback).
+Install success alone does not establish API compatibility or safe data rollback.

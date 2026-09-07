@@ -53,7 +53,9 @@ Node.js or the filesystem directly.
 ```bash
 pnpm --dir talos-app lint
 pnpm --dir talos-app test
+pnpm --dir talos-app typecheck
 pnpm --dir talos-app build
+pnpm --dir talos-app check:repo
 ```
 
 Use package filters for local iteration. Generated protocol files are refreshed
@@ -67,6 +69,9 @@ from Rust with `just gen-app-protocol`; do not edit them manually.
 - TypeScript, Rust, and embedded Rust SDK capabilities are reviewed and completed together.
 - Backend search, matching, lifecycle, and permission rules are not duplicated in UI code.
 - User-visible timeline changes require rendering and interaction coverage.
+- Session subscriptions include product notices beyond a Turn's terminal fact.
+- Keep ApiError structured until rendering; use the shared error presenter.
+- Server deploymentMode governs settings visibility; Gateway enforces authorization.
 
 See [Client architecture](../docs/architecture/CLIENT_ARCHITECTURE.md) for the
 cross-client transport and ownership model.

@@ -2,6 +2,9 @@
 
 [English](README.md)
 
+> Historical translation. The [English document](README.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 本目录保存当前有效的跨组件文档。具体变更设计仍保留在 [`spec/`](../spec/) 中，
 不纳入本目录的整理范围。
 

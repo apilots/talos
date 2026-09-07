@@ -14,32 +14,37 @@ not a substitute for parity tests.
 
 ```text
 +------------------+  +------------------+  +------------------+  +------------------+
-| Web UI           |  | Desktop         |  | TUI / Command    |  | Rust SDK client  |
+| Web UI           |  | Desktop          |  | TUI / Command    |  | Rust SDK client  |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| TS TalosClient   |  | TS AppServer     |  | Rust SDK        |  | Rust SDK        |
-| shared types     |  | Client + types   |  | GatewayClient   |  | GatewayClient   |
+| TS TalosClient   |  | TS AppServer     |  | Rust SDK         |  | Rust SDK         |
+| shared types     |  | Client + types   |  | GatewayClient    |  | GatewayClient    |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| Browser adapter  |  | Typed preload    |  | EmbeddedServer  |  | Rust AppServer   |
-| HTTP + SSE       |  | IPC -> main      |  | Client          |  | Client           |
+| Browser adapter  |  | Typed preload    |  | EmbeddedServer   |  | Rust AppServer   |
+| HTTP + SSE       |  | IPC -> main      |  | Client           |  | Client           |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
-         +---------------------+----------+----------+---------------------+
-                                          |
-                                          v
+         +---------------------+-----------+---------+---------------------+
+                                           |
+                                           v
 +------------------------------------------------------------------------------------+
-| HTTP Gateway | main-process JSON-RPC stdio | in-process Gateway | app-server       |
-+-----------------------------------------+------------------------------------------+
-                                          |
-                                          v
+| HTTP Gateway | main JSON-RPC stdio | in-process Gateway | app-server               |
++------------------------------------------+-----------------------------------------+
+                                           |
+                                           v
 +------------------------------------------------------------------------------------+
-| Shared TalosService domain results, ErrorCode, and Timeline behavior               |
+| TalosService: shared domain responses, ApiError and durable state                  |
++------------------------------------------+-----------------------------------------+
+                                           |
+                                           v
 +------------------------------------------------------------------------------------+
+| Store commit -> Timeline { Agent | SystemNotice } -> subscribers / History         |
++------------------------------------------+-----------------------------------------+
 ```
 
 ## Unified capability surface
@@ -112,6 +117,50 @@ hand-edit generated files, copy request or response DTOs, or expose transport
 envelopes as domain objects.
 
 ## Client ownership
+
+```text
+Request -> transport status -> ApiResponse unwrap -> domain response / ApiError
+                                                         |
+                                              ACK != Turn completion
+
+Session subscription -> replay to high water -> live delivery across Turns
+         |                         |
+         +-- Agent facts ----------+--> bounded live execution projection
+         `-- SystemNotice ---------+--> stable-ID notice blocks
+                                            |
+History page -------------------------------+--> reconcile, then render
+```
+
+The request and subscription lanes can race. Match canonical message identity
+and content before retiring optimistic input; an empty MessageStarted is not
+proof the user's input has been rendered. Queue revision only invalidates queue
+state, not a second execution-state owner. Start/retry finish their request at
+ACK; stopping execution uses the actual interrupt API.
+
+Session subscriptions stay open across terminal facts and subsequent Turns.
+Turn-limited subscriptions end at that Turn's terminal fact and can miss later
+product notices. History notice IDs retain their historical position; live
+notices absent from the loaded page stay visible without duplication. SystemNotice
+never enters LiveTurnProjection or Provider continuation. UI projections are
+bounded app-owned presentation state, not SDK or database truth.
+
+Decode untrusted errors once at ingress. HTTP authentication responses also
+unwrap the application envelope; a successful HTTP status alone is not a domain
+response. Health uses its own documented shape. Electron main returns plain
+envelopes, preload forwards them, and the renderer reconstructs typed errors.
+Connection failure during bootstrap is not proof of logout.
+
+Keep errors structured in UI/terminal state and translate at render time through
+the existing presenter. Branch on codes/typed parameters, never English sentences.
+Show failed Turns even without assistant text. Public error disclosure, report
+ownership and protocol 0.4 migration are defined by [Error contract](ERROR_MODEL.md).
+
+Web reads `deploymentMode` from server health. Local/cloud deployment is not a
+runtime selector; the unused `runtimeMode` control has been removed. Desktop
+currently reports local mode without adding an app-server mode negotiation.
+Settings navigation and direct routes mirror the [configuration authorization
+matrix](../../deploy/README.md#deployment-mode-and-configuration-access); Gateway
+still enforces access independently of client visibility.
 
 - SDKs own the complete product API, typed domain objects, structured errors,
   stream contracts, and transport-neutral lifecycle semantics.

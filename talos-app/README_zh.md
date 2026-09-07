@@ -2,6 +2,9 @@
 
 [English](README.md)
 
+> Historical translation. The [English document](README.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 `talos-app` 包含 React Web UI、Electron Desktop shell 和 TypeScript SDK packages。
 产品功能消费共享 SDK 领域对象和后端语义，不定义客户端特有的业务模型。
 

@@ -47,6 +47,12 @@ talos/
 | Active and archived change designs | `spec/REGISTRY.md` |
 | E2E scenario discovery | `talos-e2e/run_e2e.sh` and `talos-e2e/scenarios/` |
 | Deployment topology | `deploy/` assets and README |
+| Instance configuration authorization | Config DeploymentMode and shared Gateway configuration guard |
+| Public errors and product notices | `docs/architecture/ERROR_MODEL.md` and generated protocol types |
+
+Local `IMPLEMENTATION_PLAN.md` files are ignored working notes, not durable
+repository evidence. Current domain and memory references live under architecture;
+historical decisions and delivery references remain in Spec/PR records.
 
 Generated outputs such as `target/`, `dist/`, reports, logs, and test results are
 not part of the maintained source layout.

@@ -35,11 +35,44 @@ Frontend validation is run from `talos-app`:
 ```bash
 pnpm --dir talos-app lint
 pnpm --dir talos-app test
+pnpm --dir talos-app typecheck
 pnpm --dir talos-app build
+pnpm --dir talos-app check:repo
 ```
 
 Use `pnpm --dir talos-app --filter <package> <script>` for a scoped frontend
 check, for example `pnpm --dir talos-app --filter @talos/sdk-core typecheck`.
+
+## Validation by delivery stage
+
+```text
+Local iteration --> pre-commit --> pre-push --> PR / main CI --> release tag
+ scoped behavior    staged files  changed areas  path filters    native install
+ + quality gates    + fast checks + quality      + quality       before dispatch
+```
+
+| Stage | Current responsibility |
+| --- | --- |
+| Local | Scoped `just test -p <package>` and frontend scenarios, plus applicable quality gates |
+| pre-commit | Changed-file policy, selected frontend ESLint, shell syntax, Rust formatting |
+| pre-push | Changed areas trigger frontend pipeline or Rust format/check and error-contract guards |
+| PR/main CI | Path-filtered workflows; Rust quality checks do not run the full behavioral suite |
+| Release | Native installation matrix must pass before release build dispatch |
+
+See [hook scripts](../../scripts/run-pre-push-checks.sh) and
+[Rust workflow](../../.github/workflows/talos-rust.yml) for exact commands.
+CI success does not substitute for unrun scoped tests, snapshots or real-path
+acceptance. Error changes require source/disclosure, transport/replay coverage
+and generation per [Error contract](../architecture/ERROR_MODEL.md).
+For documentation-only changes, verify links, examples, ASCII layout and source
+claims; do not claim runtime behavior was tested by a Markdown check.
+
+## Plans and durable evidence
+
+Keep staged work in local `IMPLEMENTATION_PLAN.md` (ignored by Git). Specs own
+design, not execution checklists. Preserve lasting decisions and verification
+references in tracked specs or PR evidence before retiring a local plan. Record
+which checks actually ran; historical verification is not a new test result.
 
 ## Runtime configuration
 

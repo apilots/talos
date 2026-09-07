@@ -45,7 +45,7 @@ boundaries; `[planned]` identifies an explicit evolution target.
 |   +-- CodexAgentProvider [planned]                                             |
 |   +-- ClaudeCodeAgentProvider [planned]                                        |
 |   `-- PiAgentProvider [planned]                                                |
-| AgentEvent / AgentRunResult / capabilities / lifecycle control [current]       |
+| Agent progress / settlement | admission and commit via Service/Store [current] |
 +--------------------------+--------------------------+--------------------------+
 | Semantic capability domains; these columns are not an execution sequence       |
 +--------------------------+--------------------------+--------------------------+
@@ -57,6 +57,7 @@ boundaries; `[planned]` identifies an explicit evolution target.
 +--------------------------+--------------------------+--------------------------+
 | Infrastructure [current]                                                       |
 | Store | Storage | Filesystem | Config | Auth | Automation | Logging            |
+| Timeline: Agent facts + product notices | one durable cursor [current]         |
 +--------------------------------------------------------------------------------+
 
 +--------------------------------------------------------------------------------+
@@ -116,6 +117,11 @@ AgentSession executes Turns and emits standardized events and results
 SDK projects the same domain result through its selected transport
 ```
 
+The detailed execution flow adds a durable admission barrier before Provider
+effects and a Store commit before event publication. Product notices share the
+Timeline but never enter the Agent reducer. These are implemented contracts;
+see [Execution](RUNTIME_ARCHITECTURE.md), not a future persistence layer.
+
 HTTP, JSON-RPC, and embedded clients may use different envelopes, but they must
 not define different Session, Turn, Timeline, Tool, or Agent semantics.
 
@@ -124,13 +130,17 @@ not define different Session, Turn, Timeline, Tool, or Agent semantics.
 | Term | Meaning |
 | --- | --- |
 | `Session` | Durable conversation and Agent-binding boundary containing multiple Turns |
-| `Turn` | One durable execution initiated inside a Session |
+| `Turn` | One logical interaction inside a Session, potentially spanning waiting and multiple invocations |
 | `Timeline` | Session-addressed ordered event stream; events identify their owning Turn |
 | `AgentDefinition` | Configured Agent identity selecting one Provider kind and its typed config |
 | `AgentHarness` | Common lifecycle facade registered under one Agent id |
 | `AgentProvider` | Process-level SPI that creates Provider-owned in-memory AgentSession handles |
 | `AgentSession` | Provider-owned in-memory handle for Turn execution and Session management; it is not durable product state |
 | Agent Kernel | Built-in Kernel Agent subsystem (`talos-agent-kernel`) for one bounded Turn reasoning and tool loop |
+
+For User, Workspace, Project, deployment mode and binding relationships, see the
+[Domain model](DOMAIN_MODEL.md). An Agent does not own the User's Workspace.
+Timeline carries both Agent execution facts and independent product notices.
 
 ## Dependency direction
 
@@ -166,6 +176,12 @@ requiring independent per-language copies of server orchestration or the domain 
 
 - `Session` and `Turn` are the durable lifecycle boundary for agent work.
 - `Timeline` is the ordered source for user-visible execution progress.
+- Agent facts and SystemNotice share one durable cursor; only Agent facts consume
+  execution sequence numbers. History/replay never re-report old errors.
+- One TalosError preserves private diagnostics; one ApiError crosses public
+  boundaries. The handling owner reports once; rendering never uses diagnostics.
+- Deployment mode gates instance configuration access in Gateway. UI visibility
+  mirrors authorization; it does not enforce it. See [Deployment](../../deploy/README.md).
 - An Agent binding is resolved by the Coordinator, not selected inside a tool or client.
 - Multiple Agent definitions may be registered; each enabled, supported definition resolves to one Harness and configured AgentProvider.
 - AgentProvider implementations emit the same Agent events and results through their AgentSession contract.
@@ -198,9 +214,29 @@ Create a new crate only when no existing owner can preserve cohesion. Do not add
 parallel managers, registries, event buses, or protocol-specific domain models
 for speculative future use.
 
+Use Guides, Sensors, Loop, Memory, Permissions and Observability as a review lens
+over these owners, not six new subsystems. `AgentHarness` remains the narrow live
+lifecycle facade. Existing memory reflection is implemented; general task
+evaluation, evidence-backed handoff and self-improvement remain evolution topics.
+
+```text
+Proposed improvement loop [not implemented as a generic framework]
+Failure -> Evidence -> Proposed change -> Review -> Apply -> Regression
+                          |                           |
+                          +-- existing owners/APIs ---+
+```
+
+A future completion gate must identify criteria, evidence and artifact versions,
+including not-run/failed/not-applicable outcomes. Prefer deterministic checks.
+`TurnCompleted` today means execution completed, not acceptance passed. Changes
+to guidance or security policy require explicit review and rollback semantics;
+ordinary memory reflection does not grant permission to modify those policies.
+
 ## Detailed documents
 
 - [Agent Provider architecture](RUNTIME_ARCHITECTURE.md)
+- [Domain model and scope](DOMAIN_MODEL.md)
+- [Memory architecture](MEMORY_ARCHITECTURE.md)
 - [Client architecture](CLIENT_ARCHITECTURE.md)
 - [Error model](ERROR_MODEL.md)
 - [Rust workspace modules](../reference/RUST_MODULES.md)

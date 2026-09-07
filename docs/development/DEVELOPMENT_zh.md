@@ -2,6 +2,9 @@
 
 [English](DEVELOPMENT.md)
 
+> Historical translation. The [English document](DEVELOPMENT.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 仓库命令从仓库根目录运行。根 `justfile` 在 `talos-rs` 中执行 Rust 命令，并提供
 共享 E2E 和生成流程入口。
 

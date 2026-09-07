@@ -2,6 +2,9 @@
 
 [English](RELEASE.md)
 
+> Historical translation. The [English document](RELEASE.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 根目录 `release.sh` 创建 annotated Git tag 和 GitHub Release。由 Tag 触发的 CI
 workflow 负责构建、打包和发布产品 artifact。
 

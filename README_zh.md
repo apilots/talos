@@ -2,6 +2,9 @@
 
 [English](README.md)
 
+> Historical translation. The [English document](README.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 Talos 是一个 AI Agent 平台，在终端、Web、Desktop、HTTP 和嵌入式客户端之间
 提供一致的运行时语义。Rust workspace 负责 Agent Runtime、Session/Turn 生命周期、
 模型接入、记忆、工具、Skills、MCP 和沙箱；TypeScript workspace 提供 Web UI、

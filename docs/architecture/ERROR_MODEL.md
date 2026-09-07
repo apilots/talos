@@ -69,6 +69,28 @@ Electron main returns this same plain envelope. Preload forwards it; renderer SD
 
 ## Reporting ownership
 
+```text
+Original typed cause -> TalosError + private context / capture
+                              |
+                    handling boundary (once)
+                              |
+                 +------------+------------------+
+                 |                               |
+                 v                               v
+       report_error -> private log        reviewed ApiError
+       source / stack / context           code / safe text / localization
+                                                 |
+                            +--------------------+--------------------+
+                            |                    |                    |
+                         request            failed Turn         product notice
+                         response           execution failed    effect failed
+                                                 |                    |
+                                                 +---------+----------+
+                                                           v
+                                                durable Timeline / History
+                                                replay never reports again
+```
+
 Product completion notices share the existing Timeline log, global cursor and
 subscription. TimelineEventPayload distinguishes Agent facts from SystemNotice;
 only Agent facts carry execution sequence numbers or enter continuation reducers.
@@ -85,7 +107,9 @@ The durable log resolves publication order between independent writers before
 advancing subscription cursors. Web notices have stable event IDs and remain
 outside collapsed activity; locale changes render their retained ApiError again.
 When history contains a notice ID, Web keeps that historical position instead of
-appending its live duplicate after newer Turns. Unpersisted live notices remain visible.
+appending its live duplicate after newer Turns. Live notices not yet present in
+the loaded History page remain visible; this does not authorize publication of
+uncommitted notices or fabrication of durable cursors.
 TUI reuses the Session subscription that already carries queue changes. Its
 transcript blocks own replay identity, so there is no separate notice registry.
 Notices are not injected into Provider continuation state. A history read rejects

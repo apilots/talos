@@ -15,7 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| refactor-044 | Merged into `refactor-040-agent-provider-api-standardization` | consolidated |
+| refactor-044 | `refactor-044-unified-error-contract` | implemented and verified |
 | refactor-043 | `refactor-043-workspace-agent-session-isolation` | implemented |
 | refactor-042 | `refactor-042-dream-memory-okf` | implemented |
 | refactor-041 | `refactor-041-user-workspace-memory` | implemented |
@@ -26,7 +26,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | feat-039 | `feat-039-tui-release-installer` | active |
 | feat-037 | `feat-037-tool-permission-user-interaction` | draft |
 | feat-036 | `feat-036-unified-tool-sandbox` | draft |
-| refactor-040 | `refactor-040-agent-provider-api-standardization` | verification |
+| refactor-040 | `refactor-040-agent-provider-api-standardization` | implemented; merged in PR #15 |
 | feat-034 | `feat-034-web-search-settings` | implementing |
 | feat-035 | `feat-035-mcp-server-management-reliability` | draft |
 | feat-033 | `feat-033-user-file-storage-model-input` | draft |
@@ -34,6 +34,11 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | refactor-039 | `refactor-039-memory-storage-retrieval` | draft |
 | refactor-038 | `refactor-038-llm-model-selection` | active |
 | feat-031 | `feat-031-profile-usage-statistics` | active |
+
+The earlier Provider-consolidation work also used ID 044 and was incorporated
+into refactor-040. The retained `refactor-044-unified-error-contract` path now
+identifies the error contract merged in PR #16; do not reuse that ID again.
+Spec status records existing delivery evidence, not a new verification run.
 
 ## Archived Specs
 

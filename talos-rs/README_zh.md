@@ -2,6 +2,9 @@
 
 [English](README.md)
 
+> Historical translation. The [English document](README.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 `talos-rs` 包含 Talos Runtime、Application Service、Gateway、Rust SDK、终端产品和
 服务端二进制。它负责 Web、Desktop、TUI、HTTP 和 embedded client 共享的产品语义。
 

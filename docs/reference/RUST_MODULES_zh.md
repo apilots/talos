@@ -2,8 +2,9 @@
 
 [English](RUST_MODULES.md)
 
-Talos Rust workspace 当前包含 46 个 member。`talos-rs/Cargo.toml` 是权威成员来源；
-本文解释职责归属，不替代 manifest。
+Historical translation. The current 50-member inventory and ownership map are
+maintained in [RUST_MODULES.md](RUST_MODULES.md); the older inventory below is
+retained for historical context, not as the current manifest reference.
 
 | 区域 | 数量 | Packages |
 | --- | ---: | --- |

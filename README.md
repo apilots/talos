@@ -2,8 +2,9 @@
 
 [Chinese](README_zh.md)
 
-Talos is an AI agent platform with shared runtime semantics across terminal, web,
-desktop, HTTP, and embedded clients. The Rust workspace owns the agent runtime,
+Talos is an AI agent platform with durable sessions, provider-based execution,
+shared client contracts, and governed tool access across terminal, web, desktop,
+HTTP, and embedded clients. The Rust workspace owns the agent runtime,
 session and turn lifecycle, model integration, memory, tools, Skills, MCP, and
 sandboxing. The TypeScript workspace provides the Web UI, Desktop shell, and
 client SDKs.
@@ -23,6 +24,8 @@ client SDKs.
 - Session, turn, project, and timeline lifecycle management
 - Model-neutral agent execution with multiple LLM providers
 - Persistent memory and bounded context construction
+- Durable execution events and independent product notices with replayable history
+- Structured errors shared by requests, streams, history, and client presenters
 - Built-in tools, Skills, MCP server plugins, policy, and sandbox execution
 - Parent-child subagent collaboration through the same runtime dispatch path
 - SDK-first access and shared domain semantics across Web, Desktop, TUI, and gateways
@@ -45,13 +48,18 @@ domains.
 | Perception             | Cognition              | Action                   |
 | Inputs | Channels      | Memory | Reasoning     | Tools | Skills | MCP     |
 +------------------------+------------------------+--------------------------+
-| Agent orchestration and runtime                                            |
-| Agent routing | Session / Turn | Multiple runtimes | Subagent collaboration|
+| Product lifecycle and durable execution                                    |
+| Session / Turn | Agent binding | Admission -> Commit -> Replay             |
+| Harness -> AgentProvider -> AgentSession | Subagent collaboration          |
+| Kernel Provider [current] | Additional Agent Providers [planned]           |
++----------------------------------------------------------------------------+
+| Shared product facts                                                       |
+| Agent events + SystemNotice -> one durable Timeline -> History / clients   |
 +----------------------------------------------------------------------------+
 | Infrastructure                                                             |
 | Store | Storage | Config | Auth | Automation | Logging | Observability     |
 +----------------------------------------------------------------------------+
-| Metacognition [cross-cutting evolution]                                    |
+| Metacognition [planned cross-cutting evolution]                            |
 | Evaluation | Self-monitoring | Learning | Identity and personality         |
 +----------------------------------------------------------------------------+
 ```
@@ -59,6 +67,22 @@ domains.
 This is the long-term layering direction, not an execution sequence. The same
 layers are expanded with current and planned status in
 [System architecture](docs/architecture/ARCHITECTURE.md).
+
+Multiple LLM providers are supported by the current Kernel Agent. Codex, Claude
+Code and Pi Agent Providers remain planned, not selectable implementations.
+Perception/Cognition/Action describe capabilities rather than a second pipeline.
+
+## Operating boundaries
+
+- A Session binds Agent, User and Workspace; shared memory follows User + Workspace.
+- Accepted input is not completed work. Waiting can resume the same logical Turn;
+  refresh reconnects/replays instead of re-submitting the original input.
+- Recovery requires a supported checkpoint/continuation. Arbitrary-position
+  resume and exactly-once external tool effects are not guaranteed.
+- `local`/`cloud` deployment mode controls instance configuration access, not
+  Agent execution location. See [Deployment](deploy/README.md).
+- `TurnCompleted` does not mean task acceptance passed. Generic completion gates
+  and evidence-driven learning remain [evolution topics](docs/architecture/ARCHITECTURE.md#evolution-model).
 
 ## Repository map
 
@@ -118,7 +142,9 @@ Prefer package-scoped checks during development. See
 
 - [Documentation index](docs/README.md)
 - [System architecture](docs/architecture/ARCHITECTURE.md)
+- [Domain model and scope](docs/architecture/DOMAIN_MODEL.md)
 - [Runtime architecture](docs/architecture/RUNTIME_ARCHITECTURE.md)
+- [Memory architecture](docs/architecture/MEMORY_ARCHITECTURE.md)
 - [Client architecture](docs/architecture/CLIENT_ARCHITECTURE.md)
 - [Error model](docs/architecture/ERROR_MODEL.md)
 - [Project structure](docs/reference/PROJECT_STRUCTURE.md)

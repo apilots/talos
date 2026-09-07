@@ -2,6 +2,9 @@
 
 [English](PROJECT_STRUCTURE.md)
 
+> Historical translation. The [English document](PROJECT_STRUCTURE.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 本文描述当前仓库的顶层布局。详细 crate 清单参见
 [Rust workspace 模块](RUST_MODULES_zh.md)。
 

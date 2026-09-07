@@ -2,6 +2,9 @@
 
 [English](CLIENT_ARCHITECTURE.md)
 
+> Historical translation. The [English document](CLIENT_ARCHITECTURE.md) owns the current
+> 2026-09-07 contracts, diagrams, deployment rules and verification guidance.
+
 ## SDK-first 目标
 
 每个 Talos 产品客户端都使用受支持的 SDK。TypeScript SDK、Rust SDK 和 embedded Rust SDK

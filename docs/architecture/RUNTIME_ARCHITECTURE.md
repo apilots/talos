@@ -1,4 +1,4 @@
-# Agent Provider architecture
+# Agent Provider and durable execution architecture
 
 [Chinese](RUNTIME_ARCHITECTURE_zh.md)
 
@@ -35,7 +35,10 @@ AgentProvider SPI
     `-- PiAgentProvider [planned]
     |
     v
-Standard AgentEvent / AgentRunResult -> Timeline
+Agent progress + unique settlement
+    |
+    v
+Service -> Store commit -> Timeline publication -> SDK / client
 ```
 
 `TalosService` is the product-facing facade. Protocol adapters call it instead
@@ -67,11 +70,15 @@ Composition Root selects a ready AgentProvider from typed config
 AgentRegistry stores multiple AgentHarness registrations by Agent id
     |
     v
-Router / Coordinator selects one registration for a Session or Turn
+Router / Coordinator resolves the initial Session binding
+    |
+    v
+Later Turns dispatch with that Session's exact Agent binding
 ```
 
 Multiple Agent definitions may use the same Provider implementation with
-different identities, models, workspaces, or typed Provider configuration. A
+different identities, models, or typed Provider configuration. Workspace scope
+is resolved independently from Workspace configuration and trusted User identity. A
 new implementation targets `AgentProvider` plus `AgentSession` and remains
 behind the common Harness lifecycle; Coordinator must not downcast or branch on
 a concrete Provider kind.
@@ -90,39 +97,118 @@ may use different private backends, but must return the same standardized Agent
 events, results, capabilities, cancellation behavior, and continuation behavior.
 
 ```text
-Turn request
-     |
-     v
-Validate request and Session state
-     |
-     v
-Persist user input and create the Turn
-     |
-     v
-Resolve Agent binding through Coordinator
-     |
-     v
-Build bounded context from history, memory, Skills, and project inputs
-     |
-     v
-Call the selected model provider
-     |
-     +-- text/reasoning delta ----------> Timeline
-     |
-     +-- tool request -> policy -> approval -> sandbox/tool execution
-     |                                      |
-     |                                      v
-     |                              tool result -> Timeline
-     |                                      |
-     +--------------------------------------+
-     |
-     v
-Persist final response and terminal Turn state
+Client             Service / Store             Harness / Kernel Provider
+  |                       |                                |
+  |-- Turn request ------>| validate + build AgentContext   |
+  |                       |-- reserve execution ---------->|
+  |                       |<-- admission + paused permit --|
+  |                       |                                |
+  |                       | commit admission + active      |
+  |                       | + idempotency state             |
+  |                       |-- consume permit ------------->|
+  |<-- accepted ACK ------|                                |
+  |                       |                 build bounded context
+  |                       |                 from memory/history/Skills
+  |                       |                                |
+  |                       |                 +---- model call <-----+
+  |                       |                 |                     |
+  |                       |                 +-- text/reasoning     |
+  |                       |                 |                     |
+  |                       |                 +-- tool request      |
+  |                       |                     policy/approval   |
+  |                       |                     sandbox/execution |
+  |                       |                     bounded result ---+
+  |                       |                                |
+  |                       |<-- progress -------------------|
+  |<-- committed events --| persist, then publish           |
+  |                       |<-- unique settlement ----------|
+  |                       | commit waiting OR terminal     |
+  |<-- committed fact ----| publish                         |
 ```
 
-The Timeline preserves ordering across model output, tool activity, user
-interaction, errors, and the final response. Clients render or project that
-ordered model rather than reconstructing execution state from transport details.
+ACK confirms admission, not completion; events may race with ACK delivery.
+Execution starts only after durable admission. Owned admission tasks prevent
+request cancellation from orphaning an accepted operation. Progress delivery
+excludes waiting/terminal facts; the separate channel carries the unique
+settlement per invocation, including cumulative logical-Turn metrics. A missing
+settlement is an explicit failure, not a synthesized successful completion.
+
+## Settlement, state and recovery
+
+```text
+Committed admission --> Running -- waiting settlement --> WaitingForInput
+                           |                                    |
+                           |                          claim + same-Turn resume
+                           |<-----------------------------------+
+                           |
+                           +-- completion/failure --> terminal commit
+                           |
+                           `-- cancellation --> cleanup outcome
+                                                    |
+                                  +-----------------+------------------+
+                                  |                                    |
+                              confirmed                            unconfirmed
+                                  |                                    |
+                            terminal commit                   retain active isolation
+```
+
+This is a lifecycle view, not an additional state machine. Store owns durable
+active state; Service owns its live writer and product completion; Harness owns
+tasks and cleanup. A waiting invocation releases live execution without ending
+the logical Turn. Input reservations prevent settlement from overtaking an
+uncommitted input. Terminal commits compare the expected durable tail.
+
+`AgentRunSettlement::Finished` retains the original in-process `TalosResult<()>`
+alongside public facts/messages/metrics. Report the original failure at its
+handling boundary; never reconstruct diagnostics from a persisted `ApiError`.
+History results are bounded projections of committed facts, not another stored
+transcript or result JSON. Provider artifacts remain private execution material.
+
+| Situation | Recovery contract |
+| --- | --- |
+| Browser refresh while execution is live | Replay through a captured high-water mark, then receive live events; do not resubmit input |
+| Waiting with an unclaimed continuation | Keep the pending input available |
+| Claimed continuation with no subsequent durable progress | Resume the same Turn from the supported continuation and committed response |
+| Claimed continuation already advanced without a safe resume point | Do not replay old side effects; fail once after confirmed cleanup |
+| Orphaned nonterminal execution without continuation | Recover from durable facts and fail after confirmed cleanup |
+| Cleanup cannot be confirmed | Retain active isolation; do not fabricate completion |
+
+Natural completion and cancellation converge through the durable terminal
+commit boundary. Cancellation does not automatically dispatch queued work.
+Neither arbitrary-position resume nor exactly-once external tool effects are
+guaranteed. Provider `compact`, `clear` and `close` have distinct contracts; see
+[Domain model](DOMAIN_MODEL.md).
+
+## Product notices share the durable Timeline
+
+```text
+Agent progress / settlement             Service product-effect failure
+            |                                        |
+            v                                        v
+      AgentEvent                              SystemNotice(ApiError)
+      execution sequence                      no execution sequence
+            |                                        |
+            +----------------+-----------------------+
+                             v
+                   Store: one durable Timeline
+                   stable event ID + global cursor
+                             |
+                    +--------+--------+
+                    v                 v
+              Session stream     History + notices
+
+Only Agent facts --> Agent reducer / checkpoint / Provider continuation
+```
+
+Title generation and eligible memory reflection run before terminal commit;
+their failures produce warnings without replacing the main execution result.
+Other completion effects, including usage and queue handling, have their own
+failure boundaries. Notices can therefore precede or follow the terminal fact.
+Interactive clients retain Session subscriptions; Turn-limited subscriptions
+end at the terminal fact. Durable publication resolves order across writers.
+If notice persistence fails, report that failure separately without inventing a
+replay cursor. See [Error contract](ERROR_MODEL.md) for report ownership and
+[Client architecture](CLIENT_ARCHITECTURE.md) for replay/presentation rules.
 
 ## Subagent execution
 
@@ -162,19 +248,23 @@ Tool registry and deferred discovery
       v
 Permission policy and optional user interaction
       |
-      +-- denied -------------------------> explicit error event
+      +-- denied -------------------------> typed tool failure
       |
       v
 Execution plan and sandbox selection
       |
       +-- built-in tool
-      +-- Skill-backed instruction flow
       `-- MCP server tool
       |
       v
-Typed result -> bounded Timeline event -> next model input
+Typed result -> Agent event -> Service commit -> Timeline
+      |
+      `------> bounded next model input
 ```
 
+Skills supply instructions and available capabilities; they are not a third
+tool execution backend. This diagram describes the current Kernel integration;
+future native Providers must prove their capability/policy boundaries explicitly.
 Policy, sandbox, MCP initialization, and schema failures remain visible. The
 Provider must not retry through a weaker execution path without an explicit
 policy decision.
@@ -185,7 +275,8 @@ policy decision.
 - Each injected item has a source, boundary, truncation rule, and token budget.
 - Single items cannot exceed the configured hard cap.
 - Tool results and file content are bounded before model injection.
-- Compaction produces explicit durable history rather than an invisible client-only summary.
+- Explicit compaction changes Provider context and exposes its operation through
+  canonical events; it does not rewrite already committed product history.
 
 ## State rules
 
@@ -194,3 +285,12 @@ policy decision.
 - File state uses locking, temporary writes, and atomic replacement where required.
 - Multi-resource updates define ordering, rollback, and recovery behavior.
 - Terminal Turn states are written only after the corresponding outcome is known.
+
+## Implementation and upgrade references
+
+- [Admission driver](../../talos-rs/crates/orchestration/service/src/turn/agent_execution.rs)
+- [Commit writer](../../talos-rs/crates/orchestration/service/src/turn/agent_execution/timeline_writer.rs)
+- [Execution Store](../../talos-rs/crates/orchestration/store/src/session/agent_execution.rs)
+- [Protocol and data upgrade boundaries](ERROR_MODEL.md#upgrade-and-rollback):
+  coordinated protocol 0.4 consumers, transactional migrations and backup restore.
+  Archived legacy Timeline data is not automatically exposed as current History.
