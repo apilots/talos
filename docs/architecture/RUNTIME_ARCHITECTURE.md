@@ -269,21 +269,29 @@ Policy, sandbox, MCP initialization, and schema failures remain visible. The
 Provider must not retry through a weaker execution path without an explicit
 policy decision.
 
+## MCP implementation rules
+
+- Keep tool and call-state mutation in existing MCP connection/tool call manager boundaries. Do not thread mutation through unrelated function parameters.
+- Reuse connections according to incremental checks, lifecycle state, and negotiated capabilities; avoid unnecessary session or connection resets.
+- Strongly type servers, tools, resources, prompts, call results, capabilities, and transport configuration. Model user configuration, runtime state, source, installation/startup method, and errors separately.
+- Persist auditable startup commands, environment variables, working directories, and permission boundaries for external servers. Surface initialization failures, schema mismatches, disconnections, and permission errors explicitly.
+
 ## Context rules
 
-- Context is built incrementally; historical items are not rewritten.
-- Each injected item has a source, boundary, truncation rule, and token budget.
-- Single items cannot exceed the configured hard cap.
-- Tool results and file content are bounded before model injection.
-- Explicit compaction changes Provider context and exposes its operation through
-  canonical events; it does not rewrite already committed product history.
+These constraints govern context injected by Talos runtime code, not the development assistant's file reads, documentation, or work reports.
+
+- Build context incrementally without rewriting historical items. Preserve content order and structure to avoid unnecessary cache invalidation.
+- Represent injected fragments as typed context objects using the project's injection interface; record source, boundaries, trimming policy, and token-cost assumptions instead of scattering string concatenation.
+- Bound every injected item, list, log, file fragment, and tool result before model injection. Enforce the configured hard cap; no individual item may exceed 10K tokens.
+- Mark new items that may exceed 1K tokens as high risk and obtain human review before merge or release. Prepare the implementation, cap/trimming verification, and review materials first; do not mark delivery complete before review.
+- Explicit compaction changes Provider context and exposes its operation through canonical events; it does not rewrite committed product history.
 
 ## State rules
 
-- Store records remain internal to the store boundary.
-- Service APIs expose domain request and response objects, not database records.
-- File state uses locking, temporary writes, and atomic replacement where required.
-- Multi-resource updates define ordering, rollback, and recovery behavior.
+- Configuration owns defaults, root paths, and derived merging, filtering, and deduplication. Pass configuration/context objects instead of scattered scalars. Tests may override config but must not alter real defaults to fit fixtures.
+- Database-backed capabilities belong in an owning `xxx-store` module or crate with `XxxRecord` and `XxxStore`; keep unrelated business stores separate. Records stay within the store/repository boundary. Services convert them to business DTOs or `XxxInfo` / `XxxResponse` for SDK, Gateway, protocol, and UI callers.
+- Design persistent writes for concurrency, crashes, and partial failure. Use locks, temporary writes, atomic replacement, and fsync where required. Multi-resource updates, including directory-plus-state changes, define ordering, rollback, and recovery.
+- Never delete old data before its replacement is durable or permanently remove an installation before recording its state. Crash cleanup consults state records, not names alone.
 - Terminal Turn states are written only after the corresponding outcome is known.
 
 ## Implementation and upgrade references
