@@ -27,8 +27,10 @@ just test -p talos-service
 just clippy -p talos-service
 ```
 
-Use `just fix -p <package>` only after reviewing the affected package. Shared
-or high-impact changes may require broader checks after scoped validation.
+Run `just fmt` after Rust edits. Broad Rust changes require `just fix -p <package>`
+before committing, after reviewing the affected package. Shared or high-impact
+changes may require broader checks after scoped validation. Use `just test`
+through cargo-nextest rather than substituting bare `cargo test`.
 
 Frontend validation is run from `talos-app`:
 
@@ -67,12 +69,38 @@ and generation per [Error contract](../architecture/ERROR_MODEL.md).
 For documentation-only changes, verify links, examples, ASCII layout and source
 claims; do not claim runtime behavior was tested by a Markdown check.
 
+## Behavioral verification
+
+- Verify observable behavior across affected parsing, service, transport, SDK, UI/TUI, and runtime boundaries. Add regression coverage for executable bug fixes. Talos reasoning, tool calls, context injection, session state, or runtime policy changes require integration tests.
+- Unit and local integration tests are deterministic: no real external services, external network, unstable timing, or implicit process-global environment. Controlled local test servers are allowed for transport checks; pass flags, config, or dependencies instead of mutating process environment.
+- Real integration E2E may use external services, networks, and models. Record prerequisites and unmet conditions; simulated tests do not replace real acceptance.
+- Manual validation exercises the complete affected user path with all required services, including frontend and backend when both are needed. Screenshots or logs demonstrate behavior, not just a static page opening.
+- Reuse test helpers and fixtures. Avoid tests of static definitions or negative tests for removed logic. Rust-specific assertions and layout are defined in [Test organization](RUST.md#test-organization).
+
 ## Plans and durable evidence
 
-Keep staged work in local `IMPLEMENTATION_PLAN.md` (ignored by Git). Specs own
-design, not execution checklists. Preserve lasting decisions and verification
-references in tracked specs or PR evidence before retiring a local plan. Record
-which checks actually ran; historical verification is not a new test result.
+For complex or staged work, maintain a task-owned `IMPLEMENTATION_PLAN.md`
+(ignored by Git) with stages, success criteria, checks, and factual status.
+Reuse the current task's plan; when the root plan belongs to another task, keep
+this plan alongside the current task's spec. Simple edits need no new plan.
+Specs describe architecture, objects, APIs, state schemas, errors, and safety
+constraints, not execution checklists. Keep specs aligned with implementation.
+Preserve lasting decisions and verification in tracked specs or PR evidence
+before retiring a local plan; historical verification is not a new test result.
+
+At stage boundaries, check scope, non-goals, reusable infrastructure, and the
+smallest viable change. Complete that stage's checks and cleanup before starting
+the next authorized stage. Partial implementation or compilation alone is not
+stage completion; a completed stage does not require an extra approval unless
+the task or an applicable contract explicitly requires it.
+
+Keep non-mechanical changes within approximately 800 changed lines and complex
+logic changes within 500; split larger work into reviewable stages and identify
+the first deployable slice. Split modules by responsibility, including pages,
+dialogs, lists, search, forms, runtime panels, and TUI panels. Target Rust modules
+below 500 lines excluding tests; do not add responsibilities to files above
+approximately 800 lines without a recorded reason. Keep orchestration files
+focused and move related tests, docs, and invariants with extracted code.
 
 ## Runtime configuration
 
@@ -110,7 +138,11 @@ just gen-app-protocol
 ```
 
 Generated files are changed only by their owning generator and are committed
-with the source definition.
+with the source definition. Configuration type changes require the configuration
+schema generator; experimental API changes include their experimental schemas.
+Dependency changes update `Cargo.lock` and applicable Bazel, Buck, Nix, or other
+lockfiles. New compile-time resources (`include_str!`, `include_bytes!`, migrations,
+schemas, fixtures) require corresponding build declarations.
 
 ## Build storage
 
@@ -120,6 +152,7 @@ just clean-incremental
 ```
 
 Use `just clean-debug` only when a clean debug rebuild is necessary. Removing
-the whole target directory is not a routine verification step.
+the whole target directory is not a routine verification step. Wait for Rust
+build locks and caches; do not kill build commands by PID.
 
 See [Release workflow](RELEASE.md) for versioned product releases.

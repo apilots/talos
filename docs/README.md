@@ -6,9 +6,9 @@ This directory contains current, cross-component documentation. Baseline: the
 Provider, unified error and deployment-mode changes merged by 2026-09-07.
 Change-specific designs remain under [`spec/`](../spec/) and are outside this hierarchy.
 
-Read README -> System -> Domain for orientation; then Execution/Memory for
-backend work, Client/Error for integrations, or Deployment/Development/Release
-for operating and delivering the product. Each topic owns its detailed contract.
+Choose the topic relevant to the change. System and Domain provide orientation
+when ownership is unfamiliar; they are not prerequisites for every edit. Each
+topic owns its detailed contract.
 
 ## Architecture
 
@@ -28,6 +28,8 @@ for operating and delivering the product. Each topic owns its detailed contract.
 ## Development
 
 - [Development workflow](development/DEVELOPMENT.md): tools, checks, tests, and generated artifacts
+- [Rust conventions](development/RUST.md): implementation and test organization
+- [API conventions](development/API.md): public DTOs, wire rules, and compatibility review
 - [Release workflow](development/RELEASE.md): version validation, tagging, and release automation
 
 ## Documentation rules

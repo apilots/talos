@@ -147,7 +147,7 @@ Smoke runners preserve application codes through CDP instead of parsing exceptio
 
 For a new failure: classify it, preserve the source, write specific safe English, identify its report owner, and test request/stream/history behavior. Add localization only for a real translated scenario and cover both languages and parameter validation. Regenerate protocol artifacts and review consumers together.
 
-Run `just gen-app-protocol`, scoped `just test -p <package>`, `just fmt`, `just fix -p <package>`, frontend lint/test/typecheck, and `pnpm check:repo`. Real Web/Desktop acceptance uses conf/talos-dev.yaml with isolated data and local provider overrides; see talos-app/scripts/error-contract-e2e.py.
+Run `just gen-app-protocol`, scoped `just test -p <package>`, `just fmt`, `just fix -p <package>`, frontend lint/test/typecheck, and `pnpm --dir talos-app check:repo` from the repository root. Real Web/Desktop acceptance uses conf/talos-dev.yaml with isolated data and local provider overrides; see talos-app/scripts/error-contract-e2e.py.
 
 ## Upgrade and rollback
 

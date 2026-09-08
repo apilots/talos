@@ -186,3 +186,10 @@ The Rust trait currently enforces parity between its app-server and embedded
 implementations. TypeScript Browser and App Server facades require explicit
 parity review because they are separate APIs. Documentation must not describe a
 new capability as complete until those paths and their tests are aligned.
+
+## UI implementation
+
+- UI state reflects actual backend state. Search, matching, parsing, and selection rules belong in the backend or existing shared modules, consistent with the ownership boundaries above.
+- Product UI and runtime text changes require snapshot, visual, or E2E coverage in affected clients. With `insta`, generate, inspect, and accept expected snapshots; read `*.snap.new` or equivalent diffs before acceptance.
+- Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
+- Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
