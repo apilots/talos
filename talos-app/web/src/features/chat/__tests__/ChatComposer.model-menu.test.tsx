@@ -35,12 +35,18 @@ describe("ChatComposer model menu", () => {
     expect(screen.queryByText("Speed")).not.toBeInTheDocument();
     expect(screen.queryByText("Advanced")).not.toBeInTheDocument();
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Provider: deepseek" }));
+    expect(screen.getByRole("button", { name: "Provider: deepseek" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Model: DeepSeek V4 Flash" })).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(screen.getByRole("button", { name: "anthropic" }));
 
     expect(onModelChange).toHaveBeenCalledWith("anthropic:claude-opus");
+    expect(screen.queryByRole("button", { name: "Provider: anthropic" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /claude opus.*medium/i }));
     expect(screen.getByRole("button", { name: "Model: Claude Opus" })).toBeInTheDocument();
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Model: Claude Opus" }));
+    expect(screen.getByRole("button", { name: "Provider: anthropic" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Model: Claude Opus" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Claude Sonnet" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "DeepSeek V4 Pro" })).not.toBeInTheDocument();
   });
@@ -62,7 +68,14 @@ describe("ChatComposer model menu", () => {
     fireEvent.click(screen.getByRole("button", { name: "deepseek" }));
 
     expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Provider: deepseek" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /deepseek v4 pro.*medium/i }));
     expect(screen.getByRole("button", { name: "Model: DeepSeek V4 Pro" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Model: DeepSeek V4 Pro" }));
+    fireEvent.click(screen.getByRole("button", { name: "DeepSeek V4 Pro" }));
+    expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Model: DeepSeek V4 Pro" })).not.toBeInTheDocument();
   });
 
   it("changes reasoning effort from the combined model menu", () => {
@@ -75,5 +88,11 @@ describe("ChatComposer model menu", () => {
     fireEvent.click(screen.getByRole("button", { name: "High" }));
 
     expect(onReasoningLevelChange).toHaveBeenCalledWith("high");
+    expect(screen.queryByRole("button", { name: "Reasoning: Medium" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /model 1.*medium/i }));
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Reasoning: Medium" }));
+    fireEvent.click(screen.getByRole("button", { name: "Medium" }));
+    expect(onReasoningLevelChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Reasoning: Medium" })).not.toBeInTheDocument();
   });
 });

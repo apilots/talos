@@ -250,8 +250,6 @@ export function ChatComposer({
             value={permissionMode}
           />
 
-          <div className="min-w-4 flex-1" />
-
           <ComposerRunControls
             canSubmit={attachmentDraft.canSubmit(draft)}
             compact={compact}
