@@ -7,9 +7,9 @@ import { contextRemainingTokens, formatTokenCount, type ContextUsage } from "./c
 interface ComposerContextUsageTooltipProps {
   children: ReactNode;
   label: string;
-  percent: string;
+  percent?: string;
   sessionTotalTokens?: number;
-  usage: ContextUsage;
+  usage?: ContextUsage | null;
 }
 
 export function ComposerContextUsageTooltip({
@@ -21,7 +21,7 @@ export function ComposerContextUsageTooltip({
 }: ComposerContextUsageTooltipProps) {
   const { t } = useTranslation("chat");
   const tooltipId = useId();
-  const rows = [
+  const rows = usage ? [
     {
       label: t("contextUsageTokens"),
       value: t("contextUsageTokenRatio", {
@@ -53,7 +53,7 @@ export function ComposerContextUsageTooltip({
       label: t("contextUsageUpdated"),
       value: formatRelativeTime(usage.measuredAt * 1000),
     },
-  ];
+  ] : [];
 
   return (
     <span className="group relative shrink-0">
@@ -76,9 +76,10 @@ export function ComposerContextUsageTooltip({
         <span className="mb-2.5 flex items-center justify-between gap-3">
           <span className="text-[12px] font-medium text-ink">{t("contextUsageTitle")}</span>
           <span className="text-[12px] font-semibold tabular-nums text-success">
-            {percent}%
+            {percent === undefined ? "—" : `${percent}%`}
           </span>
         </span>
+        {!usage ? <span className="text-[11px] text-muted">{t("contextUsagePending")}</span> : null}
         <span className="grid gap-1.5">
           {rows.map((row) => (
             <span

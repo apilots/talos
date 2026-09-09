@@ -1,4 +1,5 @@
 import type { SessionInfo } from "@talos/sdk-browser";
+import { useTranslation } from "react-i18next";
 
 import { ComposerContextUsageTooltip } from "./ComposerContextUsageTooltip";
 import { contextUsedPercent } from "./contextUsage";
@@ -12,13 +13,11 @@ export function ComposerContextUsageIndicator({
   sessionTotalTokens,
   usage,
 }: ComposerContextUsageIndicatorProps) {
+  const { t } = useTranslation("chat");
   const percent = usage ? contextUsedPercent(usage) : 0;
-  if (!usage || percent === 0) {
-    return null;
-  }
   const roundedPercent = Number(percent.toFixed(1));
-  const formattedPercent = roundedPercent.toFixed(1);
-  const label = `Context usage: ${formattedPercent}%`;
+  const formattedPercent = usage ? roundedPercent.toFixed(1) : undefined;
+  const label = `${t("contextUsageTitle")}: ${formattedPercent === undefined ? t("contextUsagePending") : `${formattedPercent}%`}`;
 
   return (
     <ComposerContextUsageTooltip
@@ -51,7 +50,7 @@ export function ComposerContextUsageIndicator({
           strokeWidth="2.5"
         />
       </svg>
-      <span>{formattedPercent}%</span>
+      <span>{formattedPercent === undefined ? "—" : `${formattedPercent}%`}</span>
     </ComposerContextUsageTooltip>
   );
 }

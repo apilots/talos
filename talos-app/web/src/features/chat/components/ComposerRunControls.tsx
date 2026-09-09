@@ -51,7 +51,7 @@ export function ComposerRunControls({
   const { t } = useTranslation(["chat"]);
 
   return (
-    <>
+    <div className="relative ml-auto flex min-w-0 max-w-full items-center gap-1">
       {!compact ? (
         <ComposerProviderModelDropdowns
           disabled={Boolean(disabled || isBusy)}
@@ -82,6 +82,6 @@ export function ComposerRunControls({
         onCancel={onCancel}
         onSend={onSend}
       />
-    </>
+    </div>
   );
 }

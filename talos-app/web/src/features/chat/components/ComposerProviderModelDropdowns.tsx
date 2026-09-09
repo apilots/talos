@@ -96,12 +96,12 @@ export function ComposerProviderModelDropdowns({
   }, [disabled]);
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="min-w-0" ref={ref}>
       <button
         aria-expanded={open}
         aria-label={`${activeModelLabel} · ${activeEffortLabel}`}
         className={cn(
-          "inline-flex h-8 max-w-[240px] items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-ink/80 outline-none transition-[background-color,color,transform] duration-150",
+          "inline-flex min-h-8 max-w-full items-center gap-1.5 rounded-2xl px-2.5 py-1.5 text-left text-[12px] font-medium text-ink/80 outline-none transition-[background-color,color,transform] duration-150",
           "hover:bg-ink/[0.025] hover:text-ink active:scale-[0.98] active:bg-ink/[0.045] focus-visible:ring-2 focus-visible:ring-brand/20",
           "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:active:scale-100",
           open && "bg-ink/[0.025] text-ink",
@@ -114,8 +114,8 @@ export function ComposerProviderModelDropdowns({
         ref={modelTriggerRef}
         type="button"
       >
-        <span className="truncate">{activeModelLabel}</span>
-        <span className="text-muted">· {activeEffortLabel}</span>
+        <span className="min-w-0 [overflow-wrap:anywhere]">{activeModelLabel}</span>
+        <span className="shrink-0 whitespace-nowrap text-muted">· {activeEffortLabel}</span>
         <ChevronDown
           className={cn("shrink-0 text-muted transition-transform", open && "rotate-180")}
           size={12}
@@ -123,7 +123,7 @@ export function ComposerProviderModelDropdowns({
       </button>
 
       {open ? (
-        <div className="absolute bottom-[calc(100%+8px)] right-0 z-50 w-[268px]">
+        <div className="absolute bottom-[calc(100%+8px)] right-0 z-50 grid w-[544px] max-w-[calc(100vw-4rem)] grid-cols-2 items-start gap-2">
           <div className="rounded-[1.1rem] border border-border/55 bg-card p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.075)]">
             <ComposerProviderModelMenuRow
               active={selectionMenu === "provider"}
@@ -156,14 +156,15 @@ export function ComposerProviderModelDropdowns({
                   ? providerModels.map((model) => ({ label: model.name, value: model.id }))
                   : reasoningItems}
               onChange={(value) => {
+                setOpen(false);
+                setSelectionMenu(undefined);
                 if (selectionMenu === "provider") {
                   changeProvider(value);
                 } else if (selectionMenu === "model") {
-                  onChange?.(value);
-                } else {
+                  if (value !== activeModel) onChange?.(value);
+                } else if (value !== selectedEffort) {
                   onEffortChange?.(value);
                 }
-                setSelectionMenu(undefined);
               }}
               value={selectionMenu === "provider"
                 ? activeProvider

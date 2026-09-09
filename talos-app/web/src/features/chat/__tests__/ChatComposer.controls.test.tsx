@@ -2,11 +2,12 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
 import { ChatComposer } from "../components/ChatComposer";
+import { ComposerContextUsageIndicator } from "../components/ComposerContextUsageIndicator";
 import { createDefaultProjects, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import {
   renderComposer,
@@ -53,6 +54,21 @@ describe("ChatComposer controls", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("keeps context usage visible while a changed model awaits a fresh measurement", () => {
+    const usage = { usedTokens: 200, contextWindowTokens: 1000, effectivePromptBudgetTokens: 800, measuredAt: 1 };
+    const view = render(<ComposerContextUsageIndicator usage={usage} />);
+    expect(screen.getByRole("img", { name: "Context usage: 20.0%" })).toBeInTheDocument();
+
+    view.rerender(<ComposerContextUsageIndicator />);
+    expect(screen.getByRole("img", { name: "Context usage: Updates after your next message" })).toHaveTextContent("—");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Updates after your next message");
+
+    view.rerender(<ComposerContextUsageIndicator usage={{ ...usage, usedTokens: 0 }} />);
+    expect(screen.getByRole("img", { name: "Context usage: 0.0%" })).toBeInTheDocument();
+    view.rerender(<ComposerContextUsageIndicator usage={{ ...usage, contextWindowTokens: 2000 }} />);
+    expect(screen.getByRole("img", { name: "Context usage: 10.0%" })).toBeInTheDocument();
   });
 
   it("changes the current agent access mode", () => {
