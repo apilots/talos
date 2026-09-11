@@ -74,7 +74,7 @@ impl ServiceGateway {
         _actor: &Actor,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
-        self.service.plugins.install(request)
+        self.service.plugins.install(request).await
     }
 
     pub(crate) async fn update_plugin(
@@ -82,7 +82,7 @@ impl ServiceGateway {
         _actor: &Actor,
         request: PluginUpdateRequest,
     ) -> TalosResult<PluginUpdateResponse> {
-        self.service.plugins.update(request)
+        self.service.plugins.update(request).await
     }
 
     pub(crate) async fn uninstall_plugin(
@@ -90,7 +90,7 @@ impl ServiceGateway {
         _actor: &Actor,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        self.service.plugins.uninstall(request)
+        self.service.plugins.uninstall(request).await
     }
 
     pub(crate) async fn enable_plugin(
@@ -98,7 +98,7 @@ impl ServiceGateway {
         _actor: &Actor,
         request: PluginEnableRequest,
     ) -> TalosResult<PluginEnableResponse> {
-        self.service.plugins.enable(request)
+        self.service.plugins.enable(request).await
     }
 
     pub(crate) async fn disable_plugin(
@@ -106,6 +106,6 @@ impl ServiceGateway {
         _actor: &Actor,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        self.service.plugins.disable(request)
+        self.service.plugins.disable(request).await
     }
 }

@@ -1,3 +1,5 @@
+mod image;
+pub use image::ToolImageStore;
 pub mod command_risk;
 pub mod context;
 pub mod handlers;

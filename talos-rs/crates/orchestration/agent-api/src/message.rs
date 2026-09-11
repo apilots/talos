@@ -173,13 +173,69 @@ pub struct AgentSystemNotice {
     pub content: SystemNoticeContent,
 }
 
-/// Notice presentation retains either informational text or the shared error contract.
+/// Notice presentation retains text, nonfatal prompt warnings, or the shared error contract.
 /// Add variants only for distinct presentation semantics, never domain error categories.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum SystemNoticeContent {
     Text(String),
     Error(talos_error::ApiError),
+    PromptWarning(PromptWarningNotice),
+}
+
+/// Nonfatal prompt assembly outcome, kept in execution order. The reviewed
+/// English message serves clients without localization; warning fields own UI
+/// translation. Server paths and diagnostic sources are deliberately excluded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PromptWarningNotice {
+    pub message: String,
+    pub warning: PromptWarning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase")]
+pub enum PromptWarning {
+    BootstrapFileMissing {
+        file: PromptWarningFile,
+    },
+    BootstrapFileTruncated {
+        file: PromptWarningFile,
+        #[serde(rename = "injectedChars")]
+        injected_chars: u32,
+        #[serde(rename = "rawChars")]
+        raw_chars: u32,
+    },
+    BootstrapFileDropped {
+        file: PromptWarningFile,
+    },
+    DynamicSectionsDropped {
+        count: u32,
+    },
+}
+
+/// Bootstrap document identity, independent of its server storage location.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PromptWarningFile {
+    Agents,
+    Soul,
+    Identity,
+    User,
+    Heartbeat,
+}
+
+impl PromptWarningFile {
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Self::Agents => "AGENTS.md",
+            Self::Soul => "SOUL.md",
+            Self::Identity => "IDENTITY.md",
+            Self::User => "USER.md",
+            Self::Heartbeat => "HEARTBEAT.md",
+        }
+    }
 }
 
 impl AgentSystemNotice {
@@ -188,6 +244,7 @@ impl AgentSystemNotice {
         match &self.content {
             SystemNoticeContent::Text(message) => message,
             SystemNoticeContent::Error(error) => &error.message,
+            SystemNoticeContent::PromptWarning(notice) => &notice.message,
         }
     }
 }

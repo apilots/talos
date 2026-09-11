@@ -104,12 +104,24 @@ prevent durable publication and must be reported separately, never assigned a
 fabricated replay cursor.
 
 The durable log resolves publication order between independent writers before
-advancing subscription cursors. Web notices have stable event IDs and remain
-outside collapsed activity; locale changes render their retained ApiError again.
+advancing subscription cursors. Independent Web product notices have stable event
+IDs and remain outside collapsed activity; locale changes render their retained ApiError again.
 When history contains a notice ID, Web keeps that historical position instead of
 appending its live duplicate after newer Turns. Live notices not yet present in
 the loaded History page remain visible; this does not authorize publication of
 uncommitted notices or fabrication of durable cursors.
+
+Turn-owned `AgentSystemNotice` blocks stay inside activity at their original
+execution position. `SystemNoticeContent::PromptWarning` retains a reviewed
+English message and a typed warning descriptor (bootstrap file identity or
+bounded character/section counts) for render-time localization. These nonfatal
+assembly outcomes are not errors and do not alter `TalosError`, `ApiError`, or
+Turn success. Web translates both live and replayed descriptors; CLI/TUI retain
+the English message. Previously persisted plain text stays plain text; no client
+parses English messages to infer a warning type. Backend and clients must upgrade
+together to consume the new content variant. Product notices and terminal errors
+use compact icon/text presentation outside activity.
+
 TUI reuses the Session subscription that already carries queue changes. Its
 transcript blocks own replay identity, so there is no separate notice registry.
 Notices are not injected into Provider continuation state. A history read rejects

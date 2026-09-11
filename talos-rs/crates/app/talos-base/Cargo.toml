@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+futures-util = { workspace = true }
 async-trait = { workspace = true }
 opendal = { workspace = true, features = ["reqwest-rustls-tls", "services-fs", "services-s3"] }
 tokio = { workspace = true }
@@ -37,6 +38,7 @@ talos-router = { path = "../../orchestration/router" }
 talos-store = { workspace = true }
 talos-skills = { workspace = true }
 talos-storage = { workspace = true }
+talos-plugin = { workspace = true }
 talos-mcp = { workspace = true }
 talos-tools = { workspace = true }
 talos-tools-sandbox = { workspace = true }
@@ -44,6 +46,8 @@ talos-types = { workspace = true }
 talos-upgrade = { workspace = true }
 
 [dev-dependencies]
+reqwest = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3"
 
 [lints]

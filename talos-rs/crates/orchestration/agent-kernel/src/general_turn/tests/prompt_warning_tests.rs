@@ -20,6 +20,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
+        image_input_enabled: false,
         messages: Vec::new(),
         maintenance_usage: TokenUsage::default(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),

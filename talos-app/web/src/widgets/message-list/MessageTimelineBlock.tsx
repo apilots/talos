@@ -22,10 +22,10 @@ import { ToolCallBlock } from "./ToolCallBlock";
 import { TurnMetricsFooter } from "./TurnMetricsFooter";
 import { ContextCompactionTimelineItem } from "./context-compaction/ContextCompactionTimelineItem";
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { systemNoticeMessage } from "@/shared/i18n/systemNoticeMessage";
 
 type TimelineBlock = Extract<ChatRenderBlock, { kind: "timeline" }>;
 type TimelineItem = TimelineBlock["items"][number];
-import { SystemNotice } from "./SystemNotice";
 type TimelineTextItem = Exclude<TimelineItem, { kind: "tool_call" }>;
 
 interface MessageTimelineBlockProps {
@@ -60,8 +60,7 @@ export function MessageTimelineBlock({
   const responseItems = visibleItems.filter(
     (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
   );
-  const noticeItems = visibleItems.filter((item) => item.kind === "system_notice" && item.notice);
-  const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item) && !(item.kind === "system_notice" && item.notice));
+  const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item));
   const hasRunningItem = processItems.some(
     (item) => item.status === "running" || item.status === "waitingForInput",
   );
@@ -96,7 +95,7 @@ export function MessageTimelineBlock({
     wasActiveRef.current = hasActiveTimeline;
   }, [hasActiveTimeline, requiresAttention]);
 
-  if (!block.error && noticeItems.length === 0 && processItems.length === 0 && responseItems.length === 0) {
+  if (!block.error && processItems.length === 0 && responseItems.length === 0) {
     return null;
   }
 
@@ -110,8 +109,12 @@ export function MessageTimelineBlock({
 
   return (
     <div className="space-y-4">
-      {noticeItems.map((item) => item.kind === "system_notice" && item.notice ? <SystemNotice key={item.itemId} notice={item.notice} /> : null)}
-      {block.error ? <div role="alert" className="rounded-xl border border-danger/30 p-4 text-sm text-danger">{apiErrorMessage(block.error)}</div> : null}
+      {block.error ? (
+        <div role="alert" className="flex items-start gap-2 px-1 py-2 text-sm leading-6 text-danger">
+          <TriangleAlert aria-hidden="true" className="mt-1 shrink-0" size={14} />
+          <p className="min-w-0 whitespace-pre-wrap break-words">{apiErrorMessage(block.error)}</p>
+        </div>
+      ) : null}
       {processItems.length > 0 ? (
         <details
           className="group/timeline text-ink"
@@ -179,7 +182,7 @@ export function MessageTimelineBlock({
                         <header className="flex items-center justify-between gap-3 px-1 pb-1 pt-2">
                           {role === "system" ? (
                             <span className="truncate text-[12px] font-semibold tracking-[0.01em]">
-                              {timelineItemTitle(item)}
+                              {item.kind === "system_notice" ? t("systemNoticeTitle") : timelineItemTitle(item)}
                             </span>
                           ) : <span />}
                           {statusLabel ? (
@@ -338,14 +341,15 @@ function TimelineTextContent({
   markdown?: boolean;
   role: ReturnType<typeof timelineItemRole> | "final-answer";
 }) {
-  if (!item.text.trim()) {
+  const text = item.kind === "system_notice" && item.notice ? systemNoticeMessage(item.notice) : item.text;
+  if (!text.trim()) {
     return <div className="text-sm leading-6 text-muted">…</div>;
   }
   if (markdown || item.phase === "final_answer") {
     return (
       <MarkdownRenderer
         className="markdown-body prose prose-sm max-w-none prose-headings:font-display prose-headings:tracking-[-0.035em] prose-p:my-2 prose-p:leading-[1.9] prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:leading-[1.8]"
-        text={item.text}
+        text={text}
       />
     );
   }
@@ -354,7 +358,7 @@ function TimelineTextContent({
       className={`min-w-0 whitespace-pre-wrap break-words text-sm leading-6 ${role === "thinking" ? "text-muted" : "text-ink/82"}`}
       data-timeline-text="true"
     >
-      {item.text}
+      {text}
     </p>
   );
 }

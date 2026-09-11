@@ -1,3 +1,4 @@
+import { decodeFileContent } from "./file-content";
 import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
@@ -32,6 +33,10 @@ import type {
   PluginEnableResponse,
   PluginInstallRequest,
   PluginInstallResponse,
+  McpAuthenticationStartRequest, McpAuthenticationStartResponse,
+  McpServerImportRequest, McpAuthenticationReadRequest, McpCredentialsUpdateRequest, McpAuthenticationResponse,
+  McpServerListRequest,
+  McpServerListResponse,
   PluginListRequest,
   PluginListResponse,
   PluginReadRequest,
@@ -116,6 +121,7 @@ import type {
   TimelineEvent,
   RecoverTimelineResponse,
   WorkspaceDocKind,
+  WorkspaceInfoResponse,
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
   WorkspaceDocWriteResponse,
@@ -237,6 +243,16 @@ export class TalosClient {
         method: "POST",
         body: JSON.stringify(request),
       }),
+  };
+
+  mcp = {
+    import: (request: McpServerImportRequest): Promise<PluginInstallResponse> => this.http.request<PluginInstallResponse>(this.url("/v1/mcp/servers/import"), { method: "POST", body: JSON.stringify(request) }),
+    startAuthentication: (request: McpAuthenticationStartRequest): Promise<McpAuthenticationStartResponse> => this.http.request<McpAuthenticationStartResponse>(this.url("/v1/mcp/servers/auth/start"), { method: "POST", body: JSON.stringify(request) }),
+    readAuthentication: (request: McpAuthenticationReadRequest): Promise<McpAuthenticationResponse> => this.http.request<McpAuthenticationResponse>(this.url("/v1/mcp/servers/auth/read"), { method: "POST", body: JSON.stringify(request) }),
+    updateCredentials: (request: McpCredentialsUpdateRequest): Promise<McpAuthenticationResponse> => this.http.request<McpAuthenticationResponse>(this.url("/v1/mcp/servers/credentials"), { method: "PUT", body: JSON.stringify(request) }),
+
+    list: (request: McpServerListRequest = {}): Promise<McpServerListResponse> =>
+      this.http.request<McpServerListResponse>(this.urlWithQuery("/v1/mcp/servers", request)),
   };
 
   plugin = {
@@ -477,6 +493,8 @@ export class TalosClient {
       this.http.request<FileReadResponse>(
         this.url(`/v1/files/${encodeURIComponent(request.fileId)}`),
       ),
+    content: (request: FileReadRequest): Promise<import("./types").FileDownloadResponse> =>
+      this.http.request<import("./generated/app-protocol").FileContentResponse>(this.url(`/v1/files/${encodeURIComponent(request.fileId)}/content`)).then(decodeFileContent),
     update: (request: FileUpdateRequest): Promise<FileUpdateResponse> => {
       const { fileId, ...body } = request;
       return this.http.request<FileUpdateResponse>(
@@ -539,6 +557,8 @@ export class TalosClient {
   };
 
   workspaceDocs = {
+    info: (): Promise<WorkspaceInfoResponse> =>
+      this.http.request<WorkspaceInfoResponse>(this.url("/v1/workspace/info")),
     list: (): Promise<WorkspaceDocListResponse> =>
       this.http.request<WorkspaceDocListResponse>(this.url("/v1/workspace/docs")),
     get: (kind: WorkspaceDocKind) =>

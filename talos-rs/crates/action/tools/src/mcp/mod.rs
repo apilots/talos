@@ -3,117 +3,102 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
-use talos_mcp::TalosMcpRuntime;
+use talos_mcp::{McpConnection, TalosMcpRuntime};
 use talos_types::{
-    JsonContentValue, McpCallToolRequest, McpContent, McpReadResourceRequest, McpResourceContents,
-    McpResourceDescriptor, McpResourceTemplateDescriptor, McpServerSnapshot, TalosContentItem,
+    JsonContentValue, McpCallToolRequest, McpCallToolResponse, McpContent, McpReadResourceRequest,
+    McpResourceContents, TalosContentItem,
 };
 
 use crate::context::ToolContext;
 use crate::output::ToolOutputPayload;
 use crate::spec::{
-    default_governance_for_source, RegisteredToolSpec, ToolBehaviorFlags, ToolParallelism,
-    ToolPayloadKind, ToolSource,
+    default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource,
 };
 
+mod images;
+mod resources;
+
 pub use talos_mcp::{mcp_tool_name, split_mcp_tool_name};
+
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod tests;
 
 #[derive(Clone)]
 pub struct McpConnectionManager {
     runtime: Arc<TalosMcpRuntime>,
-    snapshots: Vec<McpServerSnapshot>,
-    tool_specs: Vec<RegisteredToolSpec>,
 }
 
 impl McpConnectionManager {
-    pub async fn from_runtime(runtime: Arc<TalosMcpRuntime>) -> Self {
-        let snapshots = runtime.snapshots().await;
-        let tool_specs = specs_from_snapshots(&snapshots);
-        Self {
-            runtime,
-            snapshots,
-            tool_specs,
-        }
+    pub fn from_runtime(runtime: Arc<TalosMcpRuntime>) -> Self {
+        Self { runtime }
     }
 
     pub fn all_tool_specs(&self) -> Vec<RegisteredToolSpec> {
-        self.tool_specs.clone()
+        let connections = self.runtime.connections();
+        let mut specs = connections
+            .iter()
+            .flat_map(|connection| connection.tools().iter().map(tool_spec))
+            .collect::<Vec<_>>();
+        if connections.iter().any(McpConnection::supports_resources) {
+            specs.extend(resource_tool_specs());
+        }
+        specs
+    }
+
+    pub(crate) fn resolve(
+        self: &Arc<Self>,
+        name: &str,
+    ) -> Option<(RegisteredToolSpec, Arc<dyn crate::handlers::ToolHandler>)> {
+        let (spec, connection) = if let Some((server, tool)) = split_mcp_tool_name(name) {
+            let connection = self.runtime.connection(&server).ok()?;
+            let spec = connection
+                .tools()
+                .iter()
+                .find(|descriptor| descriptor.name == tool)
+                .map(tool_spec)?;
+            (spec, Some(connection))
+        } else {
+            if !self
+                .runtime
+                .connections()
+                .iter()
+                .any(McpConnection::supports_resources)
+            {
+                return None;
+            }
+            let spec = resource_tool_specs()
+                .into_iter()
+                .find(|spec| spec.definition.name == name)?;
+            (spec, None)
+        };
+        Some((
+            spec,
+            Arc::new(crate::handlers::McpToolHandler::new(
+                self.clone(),
+                connection,
+            )),
+        ))
     }
 
     pub async fn call_tool(
         &self,
-        server: &str,
+        connection: &McpConnection,
         tool: &str,
         arguments: Option<Value>,
         context: &ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let cancellation = context.cancellation();
-        let response = self
-            .runtime
+        let response = connection
             .call_tool(
                 McpCallToolRequest {
-                    server_name: server.to_string(),
+                    server_name: connection.name().to_string(),
                     tool_name: tool.to_string(),
                     arguments: arguments.unwrap_or(Value::Null),
                 },
-                async move {
-                    match cancellation {
-                        Some(cancellation) => cancellation.requested().await,
-                        None => std::future::pending().await,
-                    }
-                },
+                cancelled(context),
             )
             .await?;
-        let payload = mcp_content_to_payload(&response.content)?;
-        if response.is_error {
-            Ok(ToolOutputPayload::Mcp {
-                content: payload.text,
-                is_error: true,
-            })
-        } else {
-            Ok(ToolOutputPayload::success_with_content_items(
-                json!({ "content": payload.entries }),
-                payload.content_items,
-            ))
-        }
-    }
-
-    pub async fn list_resources(
-        &self,
-        server: Option<&str>,
-        _cursor: Option<String>,
-    ) -> TalosResult<Value> {
-        let resources = self
-            .snapshots
-            .iter()
-            .filter(|snapshot| server.is_none_or(|name| snapshot.server.name == name))
-            .flat_map(|snapshot| snapshot.resources.clone())
-            .collect::<Vec<_>>();
-        serde_json::to_value(resources).map_err(|err| {
-            TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("serialize MCP resources: {err}"),
-            )
-        })
-    }
-
-    pub async fn list_resource_templates(
-        &self,
-        server: Option<&str>,
-        _cursor: Option<String>,
-    ) -> TalosResult<Value> {
-        let templates = self
-            .snapshots
-            .iter()
-            .filter(|snapshot| server.is_none_or(|name| snapshot.server.name == name))
-            .flat_map(|snapshot| snapshot.resource_templates.clone())
-            .collect::<Vec<_>>();
-        serde_json::to_value(templates).map_err(|err| {
-            TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("serialize MCP resource templates: {err}"),
-            )
-        })
+        call_tool_payload(response, context).await
     }
 
     pub async fn read_resource(
@@ -122,95 +107,55 @@ impl McpConnectionManager {
         uri: &str,
         context: &ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let cancellation = context.cancellation();
         let response = self
             .runtime
+            .connection(server)?
             .read_resource(
                 McpReadResourceRequest {
                     server_name: server.to_string(),
                     uri: uri.to_string(),
                 },
-                async move {
-                    match cancellation {
-                        Some(cancellation) => cancellation.requested().await,
-                        None => std::future::pending().await,
-                    }
-                },
+                cancelled(context),
             )
             .await?;
-        let mut content_items = Vec::new();
-        let mut entries = Vec::new();
-        for item in response.contents {
-            match item {
-                McpResourceContents::Text {
-                    uri,
-                    mime_type,
-                    text,
-                } => {
-                    entries.push(json!({
-                        "type": "text",
-                        "uri": uri,
-                        "mime_type": mime_type,
-                        "text": text,
-                    }));
-                    content_items.push(talos_types::TalosContentItem::Text { text });
+        let content_items = response
+            .contents
+            .iter()
+            .filter_map(|item| match item {
+                McpResourceContents::Text { text, .. } => {
+                    Some(TalosContentItem::Text { text: text.clone() })
                 }
-                McpResourceContents::Blob {
-                    uri,
-                    mime_type,
-                    blob,
-                } => {
-                    entries.push(json!({
-                        "type": "blob",
-                        "uri": uri,
-                        "mime_type": mime_type,
-                        "blob": blob,
-                    }));
-                }
-                McpResourceContents::Unknown { raw } => entries.push(raw),
-            }
-        }
+                McpResourceContents::Blob { .. } => None,
+            })
+            .collect();
+        let structured = serde_json::to_value(response).map_err(|error| {
+            TalosError::internal_with_source("Failed to encode the MCP resource result.", error)
+        })?;
         Ok(ToolOutputPayload::success_with_content_items(
-            json!({ "contents": entries }),
+            structured,
             content_items,
         ))
     }
 }
 
-fn specs_from_snapshots(snapshots: &[McpServerSnapshot]) -> Vec<RegisteredToolSpec> {
-    let mut specs = Vec::new();
-    for snapshot in snapshots {
-        for tool in &snapshot.tools {
-            let name = mcp_tool_name(&tool.server_name, &tool.name);
-            let description = tool.description.clone().unwrap_or_else(|| {
-                format!(
-                    "MCP tool `{}` from server `{}`.",
-                    tool.name, tool.server_name
-                )
-            });
-            let spec = RegisteredToolSpec::new(
-                ToolDefinition::new(name.clone(), description, Some(tool.input_schema.clone())),
-                ToolSource::Mcp,
-                ToolPayloadKind::Mcp,
-                ToolParallelism::ParallelSafe,
-                false,
-                default_governance_for_source(ToolSource::Mcp),
-            )
-            .with_internal_name(name)
-            .with_user_facing_name(format!("{}:{}", tool.server_name, tool.name))
-            .with_behavior_flags(ToolBehaviorFlags {
-                read_only: true,
-                destructive: false,
-                concurrency_safe: true,
-                requires_user_interaction: false,
-            });
-            specs.push(spec);
-        }
-    }
-    if !snapshots.is_empty() {
-        specs.extend(resource_tool_specs());
-    }
-    specs
+fn tool_spec(tool: &talos_types::McpToolDescriptor) -> RegisteredToolSpec {
+    let name = mcp_tool_name(&tool.server_name, &tool.name);
+    let description = tool.description.clone().unwrap_or_else(|| {
+        format!(
+            "MCP tool `{}` from server `{}`.",
+            tool.name, tool.server_name
+        )
+    });
+    RegisteredToolSpec::new(
+        ToolDefinition::new(name.clone(), description, Some(tool.input_schema.clone())),
+        ToolSource::Mcp,
+        ToolPayloadKind::Mcp,
+        ToolParallelism::SerialOnly,
+        true,
+        default_governance_for_source(ToolSource::Mcp),
+    )
+    .with_internal_name(name)
+    .with_user_facing_name(format!("{}:{}", tool.server_name, tool.name))
 }
 
 fn resource_tool_specs() -> Vec<RegisteredToolSpec> {
@@ -263,37 +208,84 @@ fn function_spec(name: &str, description: &str, parameters: Value) -> Registered
     )
 }
 
+async fn call_tool_payload(
+    response: McpCallToolResponse,
+    context: &ToolContext,
+) -> TalosResult<ToolOutputPayload> {
+    let files = images::persist_images(&response.content, context).await?;
+    let mut payload = mcp_content_to_payload(&response.content, files)?;
+    let structured = match response.structured_content {
+        Some(value) => {
+            payload.content_items.push(TalosContentItem::Json {
+                value: JsonContentValue::from(value.clone()),
+            });
+            value
+        }
+        None => {
+            let value = json!({ "content": payload.entries });
+            if payload.content_items.is_empty() {
+                payload.content_items.push(TalosContentItem::Json {
+                    value: JsonContentValue::from(value.clone()),
+                });
+            }
+            value
+        }
+    };
+    let text = payload
+        .content_items
+        .iter()
+        .filter_map(|item| match item {
+            TalosContentItem::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(ToolOutputPayload::Mcp {
+        content: if text.is_empty() && response.is_error {
+            "The MCP tool reported a failure.".into()
+        } else {
+            text
+        },
+        is_error: response.is_error,
+        structured_content: Some(structured),
+        content_items: payload.content_items,
+    })
+}
+
 struct McpPayloadContent {
-    text: String,
     entries: Vec<Value>,
     content_items: Vec<TalosContentItem>,
 }
 
-fn mcp_content_to_payload(content: &[McpContent]) -> TalosResult<McpPayloadContent> {
-    let mut parts = Vec::new();
+fn mcp_content_to_payload(
+    content: &[McpContent],
+    files: Vec<talos_types::FileInfo>,
+) -> TalosResult<McpPayloadContent> {
+    let mut files = files.into_iter();
     let mut entries = Vec::new();
     let mut content_items = Vec::new();
     for item in content {
         match item {
             McpContent::Text { text } => {
-                parts.push(text.clone());
                 entries.push(json!({
                     "type": "text",
                     "text": text,
                 }));
                 content_items.push(TalosContentItem::Text { text: text.clone() });
             }
-            McpContent::Image { data, mime_type } => {
-                parts.push(format!("[MCP image: {mime_type}]"));
-                let entry = json!({
-                    "type": "image",
-                    "mime_type": mime_type,
-                    "data_base64": data,
-                });
-                entries.push(entry.clone());
-                content_items.push(TalosContentItem::Json {
-                    value: JsonContentValue::from(entry),
-                });
+            McpContent::Image { .. } => {
+                let file = files.next().ok_or_else(|| {
+                    TalosError::internal("MCP image storage returned incomplete results.")
+                })?;
+                let item = TalosContentItem::Image {
+                    file_id: file.file_id,
+                    mime_type: file.mime_type,
+                    label: file.original_filename,
+                };
+                entries.push(serde_json::to_value(&item).map_err(|error| {
+                    TalosError::internal_with_source("Failed to encode MCP image reference.", error)
+                })?);
+                content_items.push(item);
             }
             McpContent::Resource { resource } => {
                 let raw = serde_json::to_value(resource).map_err(|err| {
@@ -302,7 +294,6 @@ fn mcp_content_to_payload(content: &[McpContent]) -> TalosResult<McpPayloadConte
                         format!("serialize MCP resource content: {err}"),
                     )
                 })?;
-                parts.push(raw.to_string());
                 entries.push(json!({
                     "type": "resource",
                     "resource": raw,
@@ -311,25 +302,17 @@ fn mcp_content_to_payload(content: &[McpContent]) -> TalosResult<McpPayloadConte
                     value: JsonContentValue::from(raw),
                 });
             }
-            McpContent::Unknown { raw } => {
-                parts.push(raw.to_string());
-                entries.push(raw.clone());
-                content_items.push(TalosContentItem::Json {
-                    value: JsonContentValue::from(raw.clone()),
-                });
-            }
         }
     }
     Ok(McpPayloadContent {
-        text: parts.join("\n"),
         entries,
         content_items,
     })
 }
 
-#[allow(dead_code)]
-fn _keep_descriptor_types(
-    _: Option<McpResourceDescriptor>,
-    _: Option<McpResourceTemplateDescriptor>,
-) {
+async fn cancelled(context: &ToolContext) {
+    match context.cancellation() {
+        Some(cancellation) => cancellation.requested().await,
+        None => std::future::pending().await,
+    }
 }

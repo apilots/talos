@@ -346,11 +346,16 @@ impl Config {
         loader::default_config_path()
     }
 
+    /// Reload this instance's source and environment without switching runtime home.
+    pub fn reload(&self) -> TalosResult<Self> {
+        loader::load_config_at(self.source_path(), self.talos_paths())
+    }
+
     /// Return the file that produced this configuration instance.
     pub fn source_path(&self) -> PathBuf {
         self.source_path
             .clone()
-            .unwrap_or_else(loader::default_config_path)
+            .unwrap_or_else(|| self.talos_paths().config_file)
     }
 
     #[cfg(test)]
@@ -453,3 +458,5 @@ pub fn provider_config_for_llm<'a>(
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+pub use domains::mcp_auth::{McpAuthentication, McpCredentialBinding, McpOAuthConfig};

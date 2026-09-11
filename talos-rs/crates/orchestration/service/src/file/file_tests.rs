@@ -185,6 +185,18 @@ async fn local_files_complete_the_public_lifecycle_without_exposing_storage_deta
         .await
         .unwrap();
 
+    let content = files
+        .service
+        .read_content(
+            &actor,
+            FileReadRequest {
+                file_id: uploaded.file_id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(content.bytes, PNG);
+    assert_eq!(content.file, updated.file);
     assert_eq!(object, PNG);
     assert_eq!(listed.data, vec![uploaded.clone()]);
     assert_eq!(read.file, uploaded);
@@ -433,6 +445,16 @@ async fn file_scope_and_owner_are_enforced_as_not_found() {
         )
         .await;
 
+    let denied = files
+        .service
+        .read_content(
+            &other,
+            FileReadRequest {
+                file_id: uploaded.file_id.clone(),
+            },
+        )
+        .await;
+    assert!(denied.err().unwrap().is_code(ErrorCode::ResourceNotFound));
     let error = files
         .service
         .read(

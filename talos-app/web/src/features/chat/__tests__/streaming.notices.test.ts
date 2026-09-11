@@ -3,11 +3,11 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { createElement } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { AppProtocol } from "@talos/sdk-core";
-import { applyStreamEvent } from "../stream-events";
+import { applyStreamEvent, buildBlocksFromHistorySnapshot } from "../stream-events";
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
 import { useAppStore } from "@/shared/store/app-store";
 import { MessageList } from "@/widgets/message-list/MessageList";
-import { historyTextItem, sessionHistory, turnCompleted } from "./streaming-fixtures";
+import { baseEvent, historyTextItem, sessionHistory, turnCompleted } from "./streaming-fixtures";
 
 beforeEach(() => useAppStore.setState({ streams: {} }));
 afterEach(cleanup);
@@ -57,4 +57,29 @@ it("preserves success and a warning's historical position across later Turns", (
     `);
   useAppStore.getState().resetLiveResponse("sess-1");
   expect(useAppStore.getState().streams["sess-1"].blocks).toEqual(blocks.filter((block) => block.kind === "notice"));
+});
+
+
+it("retains a turn prompt warning in the same process position through live and history projection", () => {
+  const notice: AppProtocol.AgentSystemNotice = { level: "warning", content: { type: "promptWarning", data: {
+    message: "Prompt bootstrap file is missing: IDENTITY.md",
+    warning: { type: "bootstrapFileMissing", file: "identity" },
+  } } };
+  const blocks: AppProtocol.AgentMessageBlock[] = [
+    historyTextItem("before", "assistant_text", "commentary", "Before"),
+    { blockId: "warning", status: "completed", startedAt: 1, completedAt: 2,
+      content: { type: "systemNotice", data: notice } },
+    historyTextItem("after", "assistant_text", "commentary", "After"),
+  ];
+  const history = sessionHistory(blocks);
+  const message = history.data[0].result.result.messages[0];
+  applyStreamEvent("sess-1", baseEvent({ type: "messageCompleted", data: message }, 1));
+  const live = useAppStore.getState().streams["sess-1"].blocks;
+  const replay = buildBlocksFromHistorySnapshot(history).blocks;
+  for (const projected of [live, replay]) {
+    const timeline = projected.find((block) => block.kind === "timeline");
+    expect(timeline?.items.map((item) => item.itemId)).toEqual(["before", "warning", "after"]);
+    expect(timeline?.items[1]).toMatchObject({ kind: "system_notice", notice });
+    expect(projected.filter((block) => block.kind === "notice")).toEqual([]);
+  }
 });

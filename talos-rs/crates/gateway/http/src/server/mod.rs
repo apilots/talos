@@ -44,8 +44,8 @@ use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
 };
 use self::files::{
-    delete_file_handler, list_files_handler, read_file_handler, update_file_handler,
-    upload_file_handler,
+    delete_file_handler, list_files_handler, read_file_content_handler, read_file_handler,
+    update_file_handler, upload_file_handler,
 };
 use self::fs::{create_directory_handler, read_directory_handler};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
@@ -66,9 +66,11 @@ use self::misc::{
 };
 use self::plugin::{
     add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
-    install_plugin_handler, list_plugin_sources_handler, list_plugins_handler, read_plugin_handler,
-    refresh_plugin_source_handler, remove_plugin_source_handler, search_plugins_handler,
-    uninstall_plugin_handler, update_plugin_handler,
+    import_mcp_server_handler, install_plugin_handler, list_mcp_servers_handler,
+    list_plugin_sources_handler, list_plugins_handler, read_mcp_authentication_handler,
+    read_plugin_handler, refresh_plugin_source_handler, remove_plugin_source_handler,
+    search_plugins_handler, start_mcp_authentication_handler, uninstall_plugin_handler,
+    update_mcp_credentials_handler, update_plugin_handler,
 };
 use self::profile::read_profile_handler;
 use self::projects::{
@@ -87,6 +89,7 @@ use self::state::HttpApiState;
 use self::user_profile::{current_user_handler, logout_handler};
 use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
+    workspace_info_handler,
 };
 use errors::ApiError;
 use talos_auth::AuthService;
@@ -209,6 +212,7 @@ impl HttpServer {
                     .post(upload_file_handler)
                     .layer(DefaultBodyLimit::disable()),
             )
+            .route("/v1/files/:file_id/content", get(read_file_content_handler))
             .route(
                 "/v1/files/:file_id",
                 get(read_file_handler)
@@ -222,6 +226,7 @@ impl HttpServer {
             )
             .route("/v1/memory/search", get(search_memory_files_handler))
             .route("/v1/memory/entries/:memory_id", get(get_memory_handler))
+            .route("/v1/workspace/info", get(workspace_info_handler))
             .route("/v1/workspace/docs", get(list_workspace_docs_handler))
             .route(
                 "/v1/plugin/sources",
@@ -236,6 +241,20 @@ impl HttpServer {
                 post(remove_plugin_source_handler),
             )
             .route("/v1/plugin/search", post(search_plugins_handler))
+            .route("/v1/mcp/servers", get(list_mcp_servers_handler))
+            .route("/v1/mcp/servers/import", post(import_mcp_server_handler))
+            .route(
+                "/v1/mcp/servers/auth/start",
+                post(start_mcp_authentication_handler),
+            )
+            .route(
+                "/v1/mcp/servers/auth/read",
+                post(read_mcp_authentication_handler),
+            )
+            .route(
+                "/v1/mcp/servers/credentials",
+                put(update_mcp_credentials_handler),
+            )
             .route("/v1/plugin/list", post(list_plugins_handler))
             .route("/v1/plugin/read", post(read_plugin_handler))
             .route("/v1/plugin/install", post(install_plugin_handler))

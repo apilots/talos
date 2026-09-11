@@ -42,7 +42,7 @@ use talos_types::{
     StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
     UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 #[async_trait]
@@ -314,6 +314,37 @@ pub trait Gateway: Send + Sync {
         request: PluginSearchRequest,
     ) -> TalosResult<PluginSearchResponse>;
 
+    /// Reads bounded connection status for authenticated single-instance clients.
+    async fn import_mcp_server(
+        &self,
+        actor: &Actor,
+        request: talos_types::McpServerImportRequest,
+    ) -> TalosResult<talos_types::PluginInstallResponse>;
+
+    async fn start_mcp_authentication(
+        &self,
+        actor: &Actor,
+        request: talos_types::McpAuthenticationStartRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationStartResponse>;
+
+    async fn read_mcp_authentication(
+        &self,
+        actor: &Actor,
+        request: talos_types::McpAuthenticationReadRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse>;
+
+    async fn update_mcp_credentials(
+        &self,
+        actor: &Actor,
+        request: talos_types::McpCredentialsUpdateRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse>;
+
+    async fn list_mcp_servers(
+        &self,
+        actor: &Actor,
+        request: talos_types::McpServerListRequest,
+    ) -> TalosResult<talos_types::McpServerListResponse>;
+
     async fn list_plugins(
         &self,
         actor: &Actor,
@@ -384,6 +415,15 @@ pub trait Gateway: Send + Sync {
         Err(file_gateway_unavailable())
     }
 
+    /// Reads actor-owned content with FileService authorization and byte limits.
+    async fn read_file_content(
+        &self,
+        _actor: &Actor,
+        _request: FileReadRequest,
+    ) -> TalosResult<talos_types::FileContentResponse> {
+        Err(file_gateway_unavailable())
+    }
+
     /// Updates mutable metadata for one actor-owned file.
     async fn update_file(
         &self,
@@ -431,6 +471,12 @@ pub trait Gateway: Send + Sync {
         actor: &Actor,
         request: MemoryGetRequest,
     ) -> TalosResult<MemoryGetResponse>;
+
+    async fn workspace_info(
+        &self,
+        actor: &Actor,
+        request: WorkspaceInfoRequest,
+    ) -> TalosResult<WorkspaceInfoResponse>;
 
     async fn list_workspace_docs(
         &self,

@@ -6,17 +6,18 @@ import { useConnectionSettings } from "@/features/connection";
 import { Panel } from "@/shared/ui/Panel";
 import { AgentWorkspaceInstructionsPanel } from "./agent-workspace/AgentWorkspaceInstructionsPanel";
 import { AgentWorkspaceMemoryPanel } from "./agent-workspace/AgentWorkspaceMemoryPanel";
+import { AgentWorkspaceGeneralPanel } from "./agent-workspace/AgentWorkspaceGeneralPanel";
 import { SectionHeader } from "./SectionPrimitives";
 
-type PersonalizationMode = "instructions" | "memory";
+type PersonalizationMode = "workspace" | "instructions" | "memory";
 
-const personalizationModes: PersonalizationMode[] = ["instructions", "memory"];
+const personalizationModes: PersonalizationMode[] = ["workspace", "instructions", "memory"];
 
 export function SettingsPersonalizationSection() {
   const { t } = useTranslation("settings");
   const { connection } = useConnectionSettings();
   const canEdit = connection.authStatus === "open" || connection.authStatus === "authenticated";
-  const [mode, setMode] = useState<PersonalizationMode>("instructions");
+  const [mode, setMode] = useState<PersonalizationMode>("workspace");
 
   return (
     <div className="space-y-5">
@@ -38,12 +39,13 @@ export function SettingsPersonalizationSection() {
               onClick={() => setMode(personalizationMode)}
               type="button"
             >
-              {personalizationMode === "instructions" ? t("agentInstructions") : t("agentMemory")}
+              {t({ workspace: "agentWorkspace", instructions: "agentInstructions", memory: "agentMemory" }[personalizationMode])}
             </button>
           ))}
         </div>
       </Panel>
 
+      {mode === "workspace" ? <AgentWorkspaceGeneralPanel /> : null}
       {mode === "instructions" ? <AgentWorkspaceInstructionsPanel canEdit={canEdit} /> : null}
       {mode === "memory" ? <AgentWorkspaceMemoryPanel canEdit={canEdit} /> : null}
     </div>

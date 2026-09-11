@@ -1,73 +1,27 @@
-import { Plus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
 
 export function FormSection({ children, title }: { children: ReactNode; title: string }) {
-  return (
-    <div className="space-y-3 border-b border-border/45 px-5 py-4 last:border-b-0">
-      <h3 className="text-sm font-semibold text-ink">{title}</h3>
-      {children}
-    </div>
-  );
+  return <div className="space-y-3 border-b border-border/45 px-5 py-4 last:border-b-0"><h3 className="text-sm font-semibold text-ink">{title}</h3>{children}</div>;
+}
+const control = "form-control-focus w-full rounded-[0.75rem] border border-border/75 bg-background/60 px-3 py-2 text-sm text-ink placeholder:text-muted/70 read-only:text-muted";
+export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  return <input className={control} type="text" {...props} />;
+}
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea className={`${control} min-h-24 font-mono`} spellCheck={false} {...props} />;
 }
 
-export function InlineInputRow({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-3">{children}</div>;
+/** One key=value per line; values may contain equals signs. Never silently overwrite duplicates. */
+export function parseEntries(text: string): Record<string, string> {
+  const entries: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const line of text.split(/\r?\n/).filter((line) => line.trim())) {
+    const split = line.indexOf("=");
+    const name = line.slice(0, split).trim();
+    if (split < 1 || !name || Object.hasOwn(entries, name)) throw new Error("invalidEntries");
+    entries[name] = line.slice(split + 1);
+  }
+  return entries;
 }
-
-export function SingleInputRow({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-3">{children}</div>;
-}
-
-export function TextInput({
-  defaultValue,
-  placeholder,
-  readOnly = false,
-}: {
-  defaultValue?: string;
-  placeholder?: string;
-  readOnly?: boolean;
-}) {
-  return (
-    <input
-      className="form-control-focus h-10 w-full rounded-[0.75rem] border border-border/75 bg-background/60 px-3 text-sm font-medium text-ink placeholder:text-muted/70 read-only:text-muted"
-      defaultValue={defaultValue}
-      placeholder={placeholder}
-      readOnly={readOnly}
-      type="text"
-    />
-  );
-}
-
-export function DisabledAddButton({ label }: { label: string }) {
-  const { t } = useTranslation("settings");
-
-  return (
-    <button
-      className="inline-flex h-10 w-full cursor-not-allowed items-center justify-center gap-2 rounded-[0.75rem] bg-muted/10 text-sm font-medium text-muted"
-      disabled
-      title={t("mcpServers.savePendingApi")}
-      type="button"
-    >
-      <Plus aria-hidden="true" size={16} />
-      {label}
-    </button>
-  );
-}
-
-export function TrashIconButton() {
-  return (
-    <button
-      className="flex size-8 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] text-muted/45"
-      disabled
-      type="button"
-    >
-      <Trash2 aria-hidden="true" size={15} />
-    </button>
-  );
-}
-
-export function firstEntry(record: Record<string, string | undefined> | undefined): [string, string] | null {
-  const entry = Object.entries(record ?? {}).find(([, value]) => value !== undefined);
-  return entry && entry[1] !== undefined ? [entry[0], entry[1]] : null;
+export function formatEntries(values: Record<string, string | undefined> | undefined) {
+  return Object.entries(values ?? {}).map(([key, value]) => `${key}=${value ?? ""}`).join("\n");
 }

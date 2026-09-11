@@ -47,14 +47,15 @@ impl TalosApplicationRuntime {
             .coordinator
             .shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT)
             .await;
-        match (automation_result, drain_result) {
+        let result = match (automation_result, drain_result) {
             (Ok(()), result) => result,
             (Err(error), Ok(())) => Err(error),
             (Err(error), Err(drain_error)) => {
                 error!(error = %drain_error, "background task drain failed after automation shutdown error");
                 Err(error)
             }
-        }
+        };
+        combine(result, self.service.plugins.shutdown_mcp().await)
     }
 }
 
@@ -90,8 +91,13 @@ pub(super) async fn start_maintenance(
     .await
 }
 
-pub(super) async fn finish(result: TalosResult<()>, automation: &Automation) -> TalosResult<()> {
-    combine(result, automation.shutdown().await)
+pub(super) async fn finish(
+    result: TalosResult<()>,
+    automation: &Automation,
+    plugins: &talos_service::PluginManagerService,
+) -> TalosResult<()> {
+    let result = combine(result, automation.shutdown().await);
+    combine(result, plugins.shutdown_mcp().await)
 }
 
 pub(super) fn combine(
@@ -102,7 +108,7 @@ pub(super) fn combine(
         (Ok(()), result) => result,
         (Err(error), Ok(())) => Err(error),
         (Err(error), Err(shutdown_error)) => {
-            error!(error = %shutdown_error, "automation shutdown failed");
+            error!(error = %shutdown_error, "component shutdown failed");
             Err(error)
         }
     }
@@ -112,6 +118,7 @@ pub(super) async fn shutdown_server(
     coordinator: &Arc<CoordinatorImpl>,
     automation: &Automation,
     lifecycle: &Arc<ServerLifecycle>,
+    plugins: &talos_service::PluginManagerService,
 ) -> TalosResult<()> {
     if lifecycle.current() == ServerLifecycleState::Stopped {
         return Ok(());
@@ -128,7 +135,7 @@ pub(super) async fn shutdown_server(
     if let Err(err) = coordinator.shutdown(BACKGROUND_TASK_DRAIN_TIMEOUT).await {
         warn!(error = %err, "background task drain failed on shutdown");
     }
-    automation.shutdown().await?;
+    let result = combine(automation.shutdown().await, plugins.shutdown_mcp().await);
     lifecycle.store(ServerLifecycleState::Stopped);
-    Ok(())
+    result
 }

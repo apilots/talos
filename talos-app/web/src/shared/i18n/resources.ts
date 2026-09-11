@@ -2,6 +2,7 @@ export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
 import { errorResources } from "./errorResources";
 import { filesResources } from "./filesResources";
+import { mcpResources } from "./mcpResources";
 import { settingsResources } from "./settingsResources";
 
 export const resources = {
@@ -47,6 +48,13 @@ export const resources = {
       deleteSessionDescription: "This permanently deletes the chat and its saved history.",
     },
     chat: {
+      systemNoticeTitle: "System",
+      promptWarning: {
+        bootstrapFileMissing: "Prompt bootstrap file is missing: {{file}}",
+        bootstrapFileTruncated: "Prompt bootstrap file was truncated: {{file}} ({{injectedChars}} of {{rawChars}} characters)",
+        bootstrapFileDropped: "Prompt bootstrap file was dropped: {{file}}",
+        dynamicSectionsDropped: "Prompt dynamic sections were dropped: {{count}}",
+      },
       newThread: "New chat",
       startPromptTitle: "Start with one clear prompt",
       addPath: "Add path",
@@ -227,26 +235,7 @@ export const resources = {
         cacheRead: "Cache read", mostUsedModels: "Most used models",
         runs: "{{count}} runs", noModelUsage: "No model usage yet.", loading: "Loading profile data...", loadError: "Profile data failed to load.", unavailable: "Unavailable",
       },
-      mcpServers: {
-        title: "MCP servers", detail: "Connect external tools and data sources through installed MCP server plugins.",
-        learnMore: "Learn more.", addServer: "Add server", servers: "Servers", fromPlugins: "From plugins",
-        loading: "Loading MCP server plugins...", loadError: "MCP server plugins failed to load.",
-        empty: "No MCP server plugins are installed.", emptyPlugins: "Install an MCP server plugin to see it here.",
-        openPlugin: "Open MCP plugin", unknownTransport: "Unknown transport", back: "Back",
-        connectTitle: "Connect to a custom MCP", updateTitle: "Update {{name}} MCP", updateTitleBare: "Update {{name}}",
-        docs: "Docs", name: "Name", serverName: "Server name", serverNamePlaceholder: "MCP server name",
-        plugin: "Plugin", source: "Source", manualSource: "manual", transport: "Transport",
-        stdio: "STDIO", streamableHttp: "Streamable HTTP", command: "Command to launch",
-        commandPlaceholder: "openai-dev-mcp serve-sqlite", arguments: "Arguments", argumentPlaceholder: "Argument",
-        addArgument: "Add argument", environmentVariables: "Environment variables", key: "Key", value: "Value",
-        addEnvironmentVariable: "Add environment variable", environmentVariablePassthrough: "Environment variable passthrough",
-        addVariable: "Add variable", workingDirectory: "Working directory", url: "URL",
-        bearerTokenEnvVar: "Bearer token env var", bearerTokenPlaceholder: "MCP_BEARER_TOKEN", headers: "Headers",
-        addHeader: "Add header", headersFromEnvironmentVariables: "Headers from environment variables", save: "Save",
-        savePendingApi: "MCP configuration editing is waiting for backend API support.",
-        switchTypeRequiresUninstall: "If you would like to switch MCP server type, please uninstall first.",
-        serverCount_one: "{{count}} server", serverCount_other: "{{count}} servers",
-      },
+      mcpServers: mcpResources.en,
       modelConfiguration: "Model configuration",
       modelConfigurationDetail: "Choose the default model and inspect available providers.",
       modelsPanel: {
@@ -311,6 +300,13 @@ export const resources = {
       personalizationTitle: "Personalization",
       personalizationDetail:
         "Edit the instructions and durable memory that shape how Talos works for you.",
+      agentWorkspace: "Workspace",
+      workspaceInfoDetail: "Server storage for your default workspace. Existing sessions keep their own workspace binding.",
+      workspaceInfoLoading: "Loading workspace…",
+      workspaceInfoError: "Could not load workspace information.",
+      workspaceId: "Workspace ID",
+      workspaceRootPrefix: "Storage prefix",
+      workspaceUserPath: "Your workspace path",
       agentInstructions: "Instructions",
       agentMemory: "Memory",
       account: {
@@ -539,6 +535,13 @@ export const resources = {
       deleteSessionDescription: "此操作会永久删除该会话及其已保存的历史记录。",
     },
     chat: {
+      systemNoticeTitle: "系统",
+      promptWarning: {
+        bootstrapFileMissing: "缺少提示词引导文件：{{file}}",
+        bootstrapFileTruncated: "提示词引导文件已截断：{{file}}（保留 {{injectedChars}} / {{rawChars}} 个字符）",
+        bootstrapFileDropped: "提示词引导文件未纳入上下文：{{file}}",
+        dynamicSectionsDropped: "有 {{count}} 个动态提示词片段未纳入上下文。",
+      },
       newThread: "新会话",
       startPromptTitle: "从一个清晰的问题开始",
       addPath: "添加路径",
@@ -716,26 +719,7 @@ export const resources = {
         cacheRead: "缓存读取", mostUsedModels: "常用模型",
         runs: "{{count}} 次运行", noModelUsage: "还没有模型使用记录。", loading: "正在加载资料数据…", loadError: "资料数据加载失败。", unavailable: "不可用",
       },
-      mcpServers: {
-        title: "MCP servers", detail: "通过已安装的 MCP server 插件连接外部工具和数据源。",
-        learnMore: "Learn more.", addServer: "添加 server", servers: "Servers", fromPlugins: "来自插件",
-        loading: "正在加载 MCP server 插件...", loadError: "MCP server 插件加载失败。",
-        empty: "还没有安装 MCP server 插件。", emptyPlugins: "安装 MCP server 插件后会显示在这里。",
-        openPlugin: "打开 MCP 插件", unknownTransport: "未知传输方式", back: "Back",
-        connectTitle: "Connect to a custom MCP", updateTitle: "更新 {{name}} MCP", updateTitleBare: "更新 {{name}}",
-        docs: "Docs", name: "Name", serverName: "Server 名称", serverNamePlaceholder: "MCP server name",
-        plugin: "插件", source: "来源", manualSource: "manual", transport: "传输方式",
-        stdio: "STDIO", streamableHttp: "Streamable HTTP", command: "启动命令",
-        commandPlaceholder: "openai-dev-mcp serve-sqlite", arguments: "参数", argumentPlaceholder: "Argument",
-        addArgument: "Add argument", environmentVariables: "Environment variables", key: "Key", value: "Value",
-        addEnvironmentVariable: "Add environment variable", environmentVariablePassthrough: "Environment variable passthrough",
-        addVariable: "Add variable", workingDirectory: "工作目录", url: "URL",
-        bearerTokenEnvVar: "Bearer token env var", bearerTokenPlaceholder: "MCP_BEARER_TOKEN", headers: "Headers",
-        addHeader: "Add header", headersFromEnvironmentVariables: "Headers from environment variables", save: "Save",
-        savePendingApi: "MCP 配置编辑等待后端 API 支持。",
-        switchTypeRequiresUninstall: "If you would like to switch MCP server type, please uninstall first.",
-        serverCount_one: "{{count}} 个 server", serverCount_other: "{{count}} 个 server",
-      },
+      mcpServers: mcpResources.zh,
       modelConfiguration: "模型配置",
       modelConfigurationDetail: "选择默认模型并查看当前可用的 Provider。",
       modelsPanel: {
@@ -799,6 +783,13 @@ export const resources = {
       modelStats: "上下文 {{contextWindow}} · 最大输出 {{tokenCount}}",
       personalizationTitle: "个性化",
       personalizationDetail: "编辑影响 Talos 为你工作的指令和长期记忆。",
+      agentWorkspace: "工作区",
+      workspaceInfoDetail: "默认工作区在服务器上的存储位置。已有会话保留各自绑定的工作区。",
+      workspaceInfoLoading: "正在加载工作区…",
+      workspaceInfoError: "无法加载工作区信息。",
+      workspaceId: "工作区 ID",
+      workspaceRootPrefix: "存储根前缀",
+      workspaceUserPath: "你的工作区路径",
       agentInstructions: "指令",
       agentMemory: "记忆",
       account: {

@@ -43,7 +43,7 @@ use talos_types::{
     StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
     UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 
@@ -340,6 +340,31 @@ pub trait GatewayClient: Send {
         request: PluginSearchRequest,
     ) -> TalosResult<PluginSearchResponse>;
 
+    async fn import_mcp_server(
+        &mut self,
+        request: talos_types::McpServerImportRequest,
+    ) -> TalosResult<talos_types::PluginInstallResponse>;
+
+    async fn start_mcp_authentication(
+        &mut self,
+        request: talos_types::McpAuthenticationStartRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationStartResponse>;
+
+    async fn read_mcp_authentication(
+        &mut self,
+        request: talos_types::McpAuthenticationReadRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse>;
+
+    async fn update_mcp_credentials(
+        &mut self,
+        request: talos_types::McpCredentialsUpdateRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse>;
+
+    async fn list_mcp_servers(
+        &mut self,
+        request: talos_types::McpServerListRequest,
+    ) -> TalosResult<talos_types::McpServerListResponse>;
+
     async fn list_plugins(&mut self, request: PluginListRequest)
         -> TalosResult<PluginListResponse>;
 
@@ -389,6 +414,14 @@ pub trait GatewayClient: Send {
         Err(file_client_unavailable())
     }
 
+    /// Reads authorized bytes without exposing the wire base64 encoding.
+    async fn read_file_content(
+        &mut self,
+        _request: FileReadRequest,
+    ) -> TalosResult<crate::FileDownloadResponse> {
+        Err(file_client_unavailable())
+    }
+
     /// Updates mutable metadata through this client transport.
     async fn update_file(
         &mut self,
@@ -426,6 +459,11 @@ pub trait GatewayClient: Send {
     ) -> TalosResult<MemorySearchResponse>;
 
     async fn get_memory(&mut self, request: MemoryGetRequest) -> TalosResult<MemoryGetResponse>;
+
+    async fn workspace_info(
+        &mut self,
+        request: WorkspaceInfoRequest,
+    ) -> TalosResult<WorkspaceInfoResponse>;
 
     async fn list_workspace_docs(
         &mut self,

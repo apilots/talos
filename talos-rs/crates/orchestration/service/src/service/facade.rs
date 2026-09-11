@@ -77,6 +77,7 @@ impl TalosService {
         files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         base_config: TalosConfig,
+        plugins: PluginManagerService,
         memory: MemoryService,
         config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
@@ -93,6 +94,7 @@ impl TalosService {
             files,
             event_service,
             base_config,
+            plugins,
             memory,
             config_store,
             models,
@@ -112,6 +114,7 @@ impl TalosService {
         files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         base_config: TalosConfig,
+        plugins: PluginManagerService,
         memory: MemoryService,
         config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
@@ -125,7 +128,7 @@ impl TalosService {
             base_config.clone(),
         );
         let sessions = Arc::new(sessions);
-        let execution_gate = Arc::new(RwLock::new(()));
+        let execution_gate = plugins.execution_gate.clone();
         let projects = Arc::new(ProjectService::new(project_store.clone()));
         let config_reload_hook: ConfigReloadHook = {
             let sessions = sessions.clone();
@@ -139,10 +142,6 @@ impl TalosService {
                 }))
             })
         };
-        let plugins = PluginManagerService::new(
-            base_config.agent.kernel.plugins.clone(),
-            base_config.agent.kernel.skills.clone(),
-        );
         let skills = SkillsService::new(
             base_config.agent.kernel.skills.clone(),
             base_config.agent.kernel.plugins.clone(),

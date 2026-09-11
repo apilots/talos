@@ -10,6 +10,8 @@ use crate::{
     ProviderKeyStatus, RuntimeEnv, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 
+mod mcp;
+
 const ANTHROPIC_API_KEY_ENV: &str = "TALOS_LLM_ANTHROPIC_API_KEY";
 const OPENAI_API_KEY_ENV: &str = "TALOS_LLM_OPENAI_API_KEY";
 const BAILIAN_API_KEY_ENV: &str = "TALOS_LLM_BAILIAN_API_KEY";
@@ -26,6 +28,15 @@ const REDACTED_API_KEY: &str = "********";
 /// Implementations must preserve unrelated YAML sections and keep API keys in
 /// the runtime env file instead of the YAML config file.
 pub trait ConfigStore: Send + Sync {
+    /// Reads the configured MCP definitions without exposing them through a public read DTO.
+    fn load_mcp_servers(&self) -> TalosResult<Vec<crate::McpServerConfig>>;
+    /// Replaces one existing server only if the persisted definition still matches the caller's snapshot.
+    fn save_mcp_server(
+        &self,
+        previous: &crate::McpServerConfig,
+        next: &crate::McpServerConfig,
+    ) -> TalosResult<()>;
+
     /// Read the llm: section from yaml without expanding ${VAR} placeholders.
     fn load_llm_raw(&self) -> TalosResult<LlmConfig>;
 
@@ -95,6 +106,18 @@ impl YamlConfigStore {
 }
 
 impl ConfigStore for YamlConfigStore {
+    fn load_mcp_servers(&self) -> TalosResult<Vec<crate::McpServerConfig>> {
+        mcp::load_servers(self)
+    }
+
+    fn save_mcp_server(
+        &self,
+        previous: &crate::McpServerConfig,
+        next: &crate::McpServerConfig,
+    ) -> TalosResult<()> {
+        mcp::save_server(self, previous, next)
+    }
+
     fn load_llm_raw(&self) -> TalosResult<LlmConfig> {
         let mut llm = self.load_llm_raw_unsanitized()?;
         sanitize_llm_for_read(&mut llm);
@@ -767,6 +790,20 @@ impl InMemoryLlmConfigStore {
 }
 
 impl ConfigStore for InMemoryLlmConfigStore {
+    fn load_mcp_servers(&self) -> TalosResult<Vec<crate::McpServerConfig>> {
+        Ok(vec![])
+    }
+    fn save_mcp_server(
+        &self,
+        _previous: &crate::McpServerConfig,
+        _next: &crate::McpServerConfig,
+    ) -> TalosResult<()> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ResourceNotFound,
+            "This configuration store has no persisted MCP servers.",
+        ))
+    }
+
     fn load_llm_raw(&self) -> TalosResult<LlmConfig> {
         Ok(self.llm.read().expect("llm config read lock").clone())
     }

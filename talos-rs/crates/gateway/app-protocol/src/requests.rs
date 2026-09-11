@@ -25,7 +25,7 @@ use talos_types::{
     SessionListRequest, SessionPatchRequest, SkillsListRequest, SkillsReadRequest,
     SkillsRefreshRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
     SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
-    WorkspaceDocWriteRequest,
+    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -108,6 +108,8 @@ pub enum ClientMethod {
     FileList,
     #[serde(rename = "file/read")]
     FileRead,
+    #[serde(rename = "file/content")]
+    FileContent,
     #[serde(rename = "file/update")]
     FileUpdate,
     #[serde(rename = "file/delete")]
@@ -118,6 +120,8 @@ pub enum ClientMethod {
     MemoryFileRead,
     #[serde(rename = "memory/file/write")]
     MemoryFileWrite,
+    #[serde(rename = "workspace/info")]
+    WorkspaceInfo,
     #[serde(rename = "workspace/doc/list")]
     WorkspaceDocList,
     #[serde(rename = "workspace/doc/read")]
@@ -144,6 +148,16 @@ pub enum ClientMethod {
     PluginSourceRemove,
     #[serde(rename = "plugin/search")]
     PluginSearch,
+    #[serde(rename = "mcp/server/list")]
+    McpServerList,
+    #[serde(rename = "mcp/server/credentials/update")]
+    McpCredentialsUpdate,
+    #[serde(rename = "mcp/server/auth/start")]
+    McpAuthenticationStart,
+    #[serde(rename = "mcp/server/auth/read")]
+    McpAuthenticationRead,
+    #[serde(rename = "mcp/server/import")]
+    McpServerImport,
     #[serde(rename = "plugin/list")]
     PluginList,
     #[serde(rename = "plugin/read")]
@@ -220,11 +234,13 @@ impl ClientMethod {
             Self::FileUpload => "file/upload",
             Self::FileList => "file/list",
             Self::FileRead => "file/read",
+            Self::FileContent => "file/content",
             Self::FileUpdate => "file/update",
             Self::FileDelete => "file/delete",
             Self::MemoryFileList => "memory/file/list",
             Self::MemoryFileRead => "memory/file/read",
             Self::MemoryFileWrite => "memory/file/write",
+            Self::WorkspaceInfo => "workspace/info",
             Self::WorkspaceDocList => "workspace/doc/list",
             Self::WorkspaceDocRead => "workspace/doc/read",
             Self::WorkspaceDocWrite => "workspace/doc/write",
@@ -238,6 +254,11 @@ impl ClientMethod {
             Self::PluginSourceRefresh => "plugin/source/refresh",
             Self::PluginSourceRemove => "plugin/source/remove",
             Self::PluginSearch => "plugin/search",
+            Self::McpServerList => "mcp/server/list",
+            Self::McpCredentialsUpdate => "mcp/server/credentials/update",
+            Self::McpAuthenticationStart => "mcp/server/auth/start",
+            Self::McpAuthenticationRead => "mcp/server/auth/read",
+            Self::McpServerImport => "mcp/server/import",
             Self::PluginList => "plugin/list",
             Self::PluginRead => "plugin/read",
             Self::PluginInstall => "plugin/install",
@@ -308,11 +329,13 @@ impl FromStr for ClientMethod {
             "file/upload" => Ok(Self::FileUpload),
             "file/list" => Ok(Self::FileList),
             "file/read" => Ok(Self::FileRead),
+            "file/content" => Ok(Self::FileContent),
             "file/update" => Ok(Self::FileUpdate),
             "file/delete" => Ok(Self::FileDelete),
             "memory/file/list" => Ok(Self::MemoryFileList),
             "memory/file/read" => Ok(Self::MemoryFileRead),
             "memory/file/write" => Ok(Self::MemoryFileWrite),
+            "workspace/info" => Ok(Self::WorkspaceInfo),
             "workspace/doc/list" => Ok(Self::WorkspaceDocList),
             "workspace/doc/read" => Ok(Self::WorkspaceDocRead),
             "workspace/doc/write" => Ok(Self::WorkspaceDocWrite),
@@ -326,6 +349,11 @@ impl FromStr for ClientMethod {
             "plugin/source/refresh" => Ok(Self::PluginSourceRefresh),
             "plugin/source/remove" => Ok(Self::PluginSourceRemove),
             "plugin/search" => Ok(Self::PluginSearch),
+            "mcp/server/list" => Ok(Self::McpServerList),
+            "mcp/server/credentials/update" => Ok(Self::McpCredentialsUpdate),
+            "mcp/server/auth/start" => Ok(Self::McpAuthenticationStart),
+            "mcp/server/auth/read" => Ok(Self::McpAuthenticationRead),
+            "mcp/server/import" => Ok(Self::McpServerImport),
             "plugin/list" => Ok(Self::PluginList),
             "plugin/read" => Ok(Self::PluginRead),
             "plugin/install" => Ok(Self::PluginInstall),
@@ -428,6 +456,8 @@ pub enum ClientRequestParams {
     FileList(FileListRequest),
     #[serde(rename = "file/read")]
     FileRead(FileReadRequest),
+    #[serde(rename = "file/content")]
+    FileContent(FileReadRequest),
     #[serde(rename = "file/update")]
     FileUpdate(FileUpdateRequest),
     #[serde(rename = "file/delete")]
@@ -438,6 +468,8 @@ pub enum ClientRequestParams {
     MemoryFileRead(MemoryFileReadRequest),
     #[serde(rename = "memory/file/write")]
     MemoryFileWrite(MemoryFileWriteRequest),
+    #[serde(rename = "workspace/info")]
+    WorkspaceInfo(WorkspaceInfoRequest),
     #[serde(rename = "workspace/doc/list")]
     WorkspaceDocList(WorkspaceDocListRequest),
     #[serde(rename = "workspace/doc/read")]
@@ -464,6 +496,16 @@ pub enum ClientRequestParams {
     PluginSourceRemove(PluginSourceRemoveRequest),
     #[serde(rename = "plugin/search")]
     PluginSearch(PluginSearchRequest),
+    #[serde(rename = "mcp/server/list")]
+    McpServerList(talos_types::McpServerListRequest),
+    #[serde(rename = "mcp/server/credentials/update")]
+    McpCredentialsUpdate(talos_types::McpCredentialsUpdateRequest),
+    #[serde(rename = "mcp/server/auth/start")]
+    McpAuthenticationStart(talos_types::McpAuthenticationStartRequest),
+    #[serde(rename = "mcp/server/auth/read")]
+    McpAuthenticationRead(talos_types::McpAuthenticationReadRequest),
+    #[serde(rename = "mcp/server/import")]
+    McpServerImport(talos_types::McpServerImportRequest),
     #[serde(rename = "plugin/list")]
     PluginList(PluginListRequest),
     #[serde(rename = "plugin/read")]
@@ -596,6 +638,7 @@ impl ClientRequest {
             ClientMethod::FileUpload => ClientRequestParams::FileUpload(decode(params_value)?),
             ClientMethod::FileList => ClientRequestParams::FileList(decode(params_value)?),
             ClientMethod::FileRead => ClientRequestParams::FileRead(decode(params_value)?),
+            ClientMethod::FileContent => ClientRequestParams::FileContent(decode(params_value)?),
             ClientMethod::FileUpdate => ClientRequestParams::FileUpdate(decode(params_value)?),
             ClientMethod::FileDelete => ClientRequestParams::FileDelete(decode(params_value)?),
             ClientMethod::MemoryFileList => {
@@ -606,6 +649,9 @@ impl ClientRequest {
             }
             ClientMethod::MemoryFileWrite => {
                 ClientRequestParams::MemoryFileWrite(decode(params_value)?)
+            }
+            ClientMethod::WorkspaceInfo => {
+                ClientRequestParams::WorkspaceInfo(decode(params_value)?)
             }
             ClientMethod::WorkspaceDocList => {
                 ClientRequestParams::WorkspaceDocList(decode(params_value)?)
@@ -640,6 +686,21 @@ impl ClientRequest {
                 ClientRequestParams::PluginSourceRemove(decode(params_value)?)
             }
             ClientMethod::PluginSearch => ClientRequestParams::PluginSearch(decode(params_value)?),
+            ClientMethod::McpServerImport => {
+                ClientRequestParams::McpServerImport(decode(params_value)?)
+            }
+            ClientMethod::McpAuthenticationStart => {
+                ClientRequestParams::McpAuthenticationStart(decode(params_value)?)
+            }
+            ClientMethod::McpAuthenticationRead => {
+                ClientRequestParams::McpAuthenticationRead(decode(params_value)?)
+            }
+            ClientMethod::McpCredentialsUpdate => {
+                ClientRequestParams::McpCredentialsUpdate(decode(params_value)?)
+            }
+            ClientMethod::McpServerList => {
+                ClientRequestParams::McpServerList(decode(params_value)?)
+            }
             ClientMethod::PluginList => ClientRequestParams::PluginList(decode(params_value)?),
             ClientMethod::PluginRead => ClientRequestParams::PluginRead(decode(params_value)?),
             ClientMethod::PluginInstall => {

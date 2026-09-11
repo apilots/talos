@@ -1,12 +1,45 @@
+use crate::{ChatMessage, Role};
 use bytes::Bytes;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
-const MAX_ATTACHMENTS: usize = 5;
+pub const MAX_ATTACHMENTS: usize = 5;
 const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
-const MAX_TOTAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
-const MAX_ATTACHMENT_TOKENS: usize = 10_000;
+pub const MAX_TOTAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
+pub const MAX_ATTACHMENT_TOKENS: usize = 10_000;
 
-/// Binary input attached to one user message.
+impl ChatMessage {
+    /// Rejects ambiguous empty attachment state and unsupported message roles.
+    pub fn validate_attachments(&self) -> TalosResult<()> {
+        let Some(attachments) = self.attachments.as_ref() else {
+            return Ok(());
+        };
+        if attachments.is_empty() {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "attachments must be omitted instead of empty".to_string(),
+            ));
+        }
+        if !matches!(self.role, Role::User | Role::Tool) {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "only user or tool messages may contain attachments".to_string(),
+            ));
+        }
+        if self.role == Role::Tool
+            && attachments
+                .iter()
+                .any(|attachment| attachment.kind != AttachmentKind::Image)
+        {
+            return Err(TalosError::new(
+                ErrorCode::UnsupportedMediaType,
+                "Tool messages support image attachments only.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Binary input attached to one user or tool message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attachment {
     /// Wire representation selected by the shared protocol encoders.

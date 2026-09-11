@@ -25,6 +25,14 @@ pub(super) fn user_content(text: String, attachments: Option<Vec<Attachment>>) -
     content
 }
 
+pub(super) fn tool_content(text: String, attachments: Option<Vec<Attachment>>) -> Value {
+    if attachments.is_some() {
+        Value::Array(user_content(text, attachments))
+    } else {
+        Value::String(text)
+    }
+}
+
 fn attachment_block(attachment: Attachment) -> ResponsesInputAttachmentBlock {
     let data_url = super::super::data_url(&attachment.media_type, &attachment.bytes);
     match attachment.kind {

@@ -55,8 +55,12 @@ pub struct AppProtocolSchemaRoot {
     pub auth_session_clear_response: talos_types::AuthSessionClearResponse,
     pub user_current_response: talos_types::UserCurrentResponse,
     pub file_upload_response: talos_types::FileUploadResponse,
+    pub mcp_authentication_start_response: talos_types::McpAuthenticationStartResponse,
+    pub mcp_authentication_response: talos_types::McpAuthenticationResponse,
+    pub mcp_server_list_response: talos_types::McpServerListResponse,
     pub file_list_response: talos_types::FileListResponse,
     pub file_read_response: talos_types::FileReadResponse,
+    pub file_content_response: talos_types::FileContentResponse,
     pub file_update_response: talos_types::FileUpdateResponse,
     pub file_delete_response: talos_types::FileDeleteResponse,
 }
@@ -226,6 +230,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::FileListResponse>());
     output.push_str(&export::<talos_types::FileReadRequest>());
     output.push_str(&export::<talos_types::FileReadResponse>());
+    output.push_str(&export::<talos_types::FileContentResponse>());
     output.push_str(&export::<talos_types::FileUpdateRequest>());
     output.push_str(&export::<talos_types::FileUpdateResponse>());
     output.push_str(&export::<talos_types::FileDeleteRequest>());
@@ -247,6 +252,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::MemorySearchResponse>());
     output.push_str(&export::<talos_types::MemoryInfo>());
     output.push_str(&export::<talos_types::MemoryGetResponse>());
+    output.push_str(&export::<talos_types::WorkspaceInfoRequest>());
+    output.push_str(&export::<talos_types::WorkspaceInfoResponse>());
     output.push_str(&export::<talos_types::WorkspaceDocListRequest>());
     output.push_str(&export::<talos_types::WorkspaceDocListResponse>());
     output.push_str(&export::<talos_types::WorkspaceDocReadRequest>());
@@ -333,7 +340,22 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::McpTransportKind>());
     output.push_str(&export::<talos_types::McpServerRuntimeDescriptor>());
     output.push_str(&export::<talos_types::McpServerSource>());
-    output.push_str(&export::<talos_types::McpServerSnapshot>());
+    output.push_str(&export::<talos_types::McpServerInfo>());
+    output.push_str(&export::<talos_types::McpCredentialBinding>());
+    output.push_str(&export::<talos_types::McpOAuthConfig>());
+    output.push_str(&export::<talos_types::McpAuthenticationStartRequest>());
+    output.push_str(&export::<talos_types::McpAuthenticationStartResponse>());
+    output.push_str(&export::<talos_types::McpAuthentication>());
+    output.push_str(&export::<talos_types::McpDefinitionRef>());
+    output.push_str(&export::<talos_types::McpCredentialValues>());
+    output.push_str(&export::<talos_types::McpCredentialsChange>());
+    output.push_str(&export::<talos_types::McpCredentialsUpdateRequest>());
+    output.push_str(&export::<talos_types::McpAuthenticationReadRequest>());
+    output.push_str(&export::<talos_types::McpAuthenticationResponse>());
+    output.push_str(&export::<talos_types::McpAuthenticationState>());
+    output.push_str(&export::<talos_types::McpServerImportRequest>());
+    output.push_str(&export::<talos_types::McpServerListRequest>());
+    output.push_str(&export::<talos_types::McpServerListResponse>());
     output.push_str(&export::<talos_types::McpServerStatus>());
     output.push_str(&export::<talos_types::McpToolDescriptor>());
     output.push_str(&export::<talos_types::McpResourceDescriptor>());
@@ -381,6 +403,9 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_agent_api::TimelineEventPayload>());
     output.push_str(&export::<talos_agent_api::TimelineSystemNotice>());
     output.push_str(&export::<talos_agent_api::SystemNoticeContent>());
+    output.push_str(&export::<talos_agent_api::PromptWarningNotice>());
+    output.push_str(&export::<talos_agent_api::PromptWarning>());
+    output.push_str(&export::<talos_agent_api::PromptWarningFile>());
     output.push_str(&export::<talos_agent_api::AgentEvent>());
     output.push_str(&export::<talos_agent_api::AgentEventPayload>());
     output.push_str(&export::<talos_agent_api::AgentTurnStarted>());

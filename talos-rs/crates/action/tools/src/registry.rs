@@ -1,4 +1,4 @@
-use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
+use crate::handlers::{DynamicToolHandler, LocalToolHandler, ToolHandler};
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::mcp::McpConnectionManager;
 use crate::orchestrator::{RegistryOrchestrator, ToolPreparation};
@@ -33,6 +33,7 @@ use tracing::warn;
 const GATE_SOURCE_ALLOW_LIST: &str = "allow_list";
 const GATE_SOURCE_TOOL_SEMANTIC: &str = "tool_semantic";
 
+mod catalog;
 mod output_limits;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +114,11 @@ pub trait ToolExecutorPort: ToolDefinitionProvider + Send + Sync {
 
     fn tool_is_mutating(&self, name: &str) -> bool;
 
+    /// Supplies the application-owned file capability for tool image consumption.
+    fn image_store(&self) -> Option<Arc<dyn crate::ToolImageStore>> {
+        None
+    }
+
     fn build_context(
         &self,
         session_id: String,
@@ -130,22 +136,14 @@ pub struct ToolRegistry {
     router: ToolRouter,
     policy_checker: ToolPolicyChecker,
     agent_control: DashMap<&'static str, Arc<dyn AgentControl>>,
+    mcp_manager: DashMap<&'static str, Arc<McpConnectionManager>>,
+    image_store: DashMap<&'static str, Arc<dyn crate::ToolImageStore>>,
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
     user_workspace_memory_writer: DashMap<&'static str, Arc<dyn UserWorkspaceMemoryWriter>>,
     sandbox: ToolSandbox,
 }
 
 impl ToolRegistry {
-    fn tool_priority(name: &str) -> usize {
-        match name {
-            "Grep" => 0,
-            "Read" => 1,
-            "Glob" => 2,
-            "Bash" => 3,
-            _ => 100,
-        }
-    }
-
     fn policy_failure(error: TalosError) -> ToolDispatchFailure {
         if error.is_code(talos_error::ErrorCode::PermissionDenied) {
             ToolDispatchFailure::classified(
@@ -409,6 +407,8 @@ impl ToolRegistry {
             policy_checker: ToolPolicyChecker::new(policy),
             agent_control: DashMap::new(),
             memory_reader: DashMap::new(),
+            mcp_manager: DashMap::new(),
+            image_store: DashMap::new(),
             user_workspace_memory_writer: DashMap::new(),
             sandbox,
         }
@@ -435,22 +435,6 @@ impl ToolRegistry {
         }
     }
 
-    /// Register all tools from a connected [`McpConnectionManager`].
-    ///
-    /// Each tool from the manager is registered with a [`McpToolHandler`] that
-    /// delegates execution back through the manager.
-    pub fn register_mcp_server(&self, manager: Arc<McpConnectionManager>) {
-        let handler = Arc::new(McpToolHandler::new(Arc::clone(&manager)));
-        for spec in manager.all_tool_specs() {
-            let tool_name = spec.internal_name.clone();
-            self.register_handler(
-                tool_name,
-                spec,
-                Arc::clone(&handler) as Arc<dyn ToolHandler>,
-            );
-        }
-    }
-
     /// Register a dynamic tool backed by an async callback.
     pub fn register_dynamic_tool(
         &self,
@@ -466,27 +450,6 @@ impl ToolRegistry {
         let tool_name = spec.internal_name.clone();
         let handler = Arc::new(DynamicToolHandler::external(spec.source));
         self.register_handler(tool_name, spec, handler);
-    }
-
-    pub fn tool_catalog(&self) -> ToolCatalog {
-        let mut specs = self
-            .specs
-            .iter()
-            .map(|entry| entry.value().clone())
-            .collect::<Vec<_>>();
-        specs.sort_by(|left, right| {
-            let left_key = (
-                Self::tool_priority(left.definition.name.as_str()),
-                left.definition.name.as_str(),
-            );
-            let right_key = (
-                Self::tool_priority(right.definition.name.as_str()),
-                right.definition.name.as_str(),
-            );
-            left_key.cmp(&right_key)
-        });
-        specs.dedup_by(|left, right| left.definition.name == right.definition.name);
-        ToolCatalog::new(specs)
     }
 
     pub fn build_function_invocation(
@@ -547,23 +510,43 @@ impl ToolRegistry {
         invocation: ToolInvocation,
         mut context: ToolDispatchContext,
     ) -> ToolDispatchResult<ToolDispatchOutcome> {
-        let catalog = self.tool_catalog();
-        let invocation = self.router.normalize(invocation, &catalog)?;
+        let mcp = self
+            .mcp_manager
+            .get("default")
+            .map(|entry| entry.value().clone());
+        let resolved_mcp = mcp.and_then(|manager| manager.resolve(&invocation.tool_name));
+        let (spec, handler) = if let Some((spec, handler)) = resolved_mcp {
+            (spec, handler)
+        } else {
+            let catalog = self.tool_catalog();
+            let spec = catalog
+                .find(&invocation.tool_name)
+                .cloned()
+                .ok_or_else(|| {
+                    TalosError::new(
+                        talos_error::ErrorCode::ToolExecutionFailed,
+                        "The requested tool is not available.",
+                    )
+                })?;
+            let handler = self
+                .handlers
+                .get(&spec.internal_name)
+                .map(|entry| entry.value().clone())
+                .ok_or_else(|| {
+                    TalosError::new(
+                        talos_error::ErrorCode::ToolExecutionFailed,
+                        "The requested tool is not available.",
+                    )
+                })?;
+            (spec, handler)
+        };
+        let invocation = self
+            .router
+            .normalize(invocation, &ToolCatalog::new(vec![spec.clone()]))?;
         context
             .tool_context_mut()
             .bind_current_call_id(invocation.call_id.clone());
-        let spec = catalog.find(invocation.tool_name.as_str()).cloned();
-        let Some(handler) = spec.as_ref().and_then(|item| {
-            self.handlers
-                .get(item.internal_name.as_str())
-                .map(|entry| entry.value().clone())
-        }) else {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("Tool '{}' not found", invocation.tool_name),
-            )
-            .into());
-        };
+        let spec = Some(spec);
         if !handler.matches(&invocation) {
             return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
@@ -683,6 +666,10 @@ impl ToolRegistry {
         kernel_config: Option<Arc<AgentKernelConfig>>,
     ) -> ToolContext {
         let ctx = ToolContext::new_with_kernel_config(session_id, user_id, kernel_config);
+        let ctx = match self.image_store.get("default") {
+            Some(store) => ctx.with_image_store(store.value().clone()),
+            None => ctx,
+        };
         let ctx = ctx.with_catalog_snapshot(
             self.tool_catalog()
                 .specs()
@@ -732,6 +719,10 @@ impl ToolRegistry {
     /// Configures the application-owned child Session control port.
     pub fn set_agent_control(&self, control: Arc<dyn AgentControl>) {
         self.agent_control.insert("default", control);
+    }
+
+    pub fn set_image_store(&self, store: Arc<dyn crate::ToolImageStore>) {
+        self.image_store.insert("default", store);
     }
 
     pub fn set_memory_reader(&self, reader: Arc<dyn MemoryReader>) {
@@ -825,6 +816,12 @@ impl ToolExecutorPort for ToolRegistry {
 
     fn tool_supports_parallel(&self, name: &str) -> bool {
         ToolRegistry::tool_supports_parallel(self, name)
+    }
+
+    fn image_store(&self) -> Option<Arc<dyn crate::ToolImageStore>> {
+        self.image_store
+            .get("default")
+            .map(|entry| entry.value().clone())
     }
 
     fn tool_is_mutating(&self, name: &str) -> bool {

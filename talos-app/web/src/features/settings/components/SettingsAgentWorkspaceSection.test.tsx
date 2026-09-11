@@ -2,11 +2,17 @@
 
 import { createElement, type PropsWithChildren } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import "@/shared/i18n/setup";
+import { i18n } from "@/shared/i18n/setup";
 import { SettingsPersonalizationSection } from "./SettingsPersonalizationSection";
+
+vi.mock("@/shared/api/client", () => ({
+  getTalosClient: () => ({ workspaceDocs: { info: async () => ({
+    workspaceId: "team", rootPrefix: "/srv/talos/workspace-team", userWorkspaceDir: "/srv/talos/workspace-team/alice",
+  }) } }),
+}));
 
 vi.mock("@/features/connection", () => ({
   useConnectionSettings: () => ({
@@ -100,12 +106,14 @@ describe("SettingsPersonalizationSection", () => {
     vi.clearAllMocks();
   });
 
-  it("does not expose workspace paths", () => {
-    render(<SettingsPersonalizationSection />, { wrapper: createWrapper() });
-
-    expect(screen.queryByText("Workspace path")).toBeNull();
-    expect(screen.queryByDisplayValue("/srv/talos/workspace-talos")).toBeNull();
-    expect(screen.getAllByText("MEMORY.md").length).toBeGreaterThan(0);
+  it("shows read-only actor workspace locations and localized labels", async () => {
+    const { container } = render(<SettingsPersonalizationSection />, { wrapper: createWrapper() });
+    await screen.findByText("/srv/talos/workspace-team/alice");
+    expect(container.querySelector("dl")?.textContent).toMatchInlineSnapshot(`"Workspace IDteamStorage prefix/srv/talos/workspace-teamYour workspace path/srv/talos/workspace-team/alice"`);
+    expect(container.querySelector("input")).toBeNull();
+    await act(() => i18n.changeLanguage("zh-CN"));
+    expect(screen.getByText("你的工作区路径")).toBeTruthy();
+    await act(() => i18n.changeLanguage("en"));
   });
 
   it("switches between instructions and memory", () => {
@@ -114,6 +122,7 @@ describe("SettingsPersonalizationSection", () => {
     const instructionsTab = screen.getByRole("button", { name: "Instructions" });
     const memoryTab = screen.getByRole("button", { name: "Memory" });
 
+    fireEvent.click(instructionsTab);
     expect(instructionsTab.getAttribute("aria-pressed")).toBe("true");
     expect(memoryTab.getAttribute("aria-pressed")).toBe("false");
 

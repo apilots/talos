@@ -669,6 +669,7 @@ fn test_product_configs_include_configured_provider_models() {
             vec![
                 ("deepseek-v4-pro", 1_000_000),
                 ("deepseek-v4-flash", 1_000_000),
+                ("deepseek-v4-flash-vision-exp", 1_000_000),
             ]
         );
         let openrouter_models = config

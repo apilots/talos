@@ -73,6 +73,7 @@ impl TalosContentItem {
                     .map(|value| format!("\n{value}"))
                     .unwrap_or_default()
             ),
+            Self::Image { file_id, label, .. } => format!("image: {label} (file {file_id})"),
             Self::ArtifactRef {
                 artifact_id,
                 label,

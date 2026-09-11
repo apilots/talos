@@ -1,3 +1,4 @@
+import { decodeFileContent } from "./file-content";
 import type * as AppProtocol from "./generated/app-protocol";
 import type { FileUploadOptions } from "./adapters";
 import type {
@@ -53,6 +54,7 @@ import type {
   CloudLoginCancelResponse,
   SessionCloseResponse,
   WorkspaceDocKind,
+  WorkspaceInfoResponse,
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
   WorkspaceDocWriteResponse,
@@ -139,6 +141,8 @@ export class AppServerClient {
       this.transport.request("file/list", request),
     read: (request: FileReadRequest): Promise<FileReadResponse> =>
       this.transport.request("file/read", request),
+    content: (request: FileReadRequest): Promise<import("./types").FileDownloadResponse> =>
+      this.transport.request<import("./generated/app-protocol").FileContentResponse>("file/content", request).then(decodeFileContent),
     update: (request: FileUpdateRequest): Promise<FileUpdateResponse> =>
       this.transport.request("file/update", request),
     delete: (request: FileDeleteRequest): Promise<FileDeleteResponse> =>
@@ -231,6 +235,17 @@ export class AppServerClient {
 
   searchPlugins(params: AppProtocol.PluginSearchRequest): Promise<AppProtocol.PluginSearchResponse> {
     return this.transport.request("plugin/search", params);
+  }
+
+  importMcpServer(params: AppProtocol.McpServerImportRequest): Promise<AppProtocol.PluginInstallResponse> { return this.transport.request("mcp/server/import", params); }
+
+  startMcpAuthentication(params: AppProtocol.McpAuthenticationStartRequest): Promise<AppProtocol.McpAuthenticationStartResponse> { return this.transport.request("mcp/server/auth/start", params); }
+  readMcpAuthentication(params: AppProtocol.McpAuthenticationReadRequest): Promise<AppProtocol.McpAuthenticationResponse> { return this.transport.request("mcp/server/auth/read", params); }
+
+  updateMcpCredentials(params: AppProtocol.McpCredentialsUpdateRequest): Promise<AppProtocol.McpAuthenticationResponse> { return this.transport.request("mcp/server/credentials/update", params); }
+
+  listMcpServers(params: AppProtocol.McpServerListRequest = {}): Promise<AppProtocol.McpServerListResponse> {
+    return this.transport.request("mcp/server/list", params);
   }
 
   listPlugins(params: AppProtocol.PluginListRequest): Promise<AppProtocol.PluginListResponse> {
@@ -474,6 +489,10 @@ export class AppServerClient {
 
   writeMemoryFile(request: MemoryFileWriteRequest): Promise<MemoryFileWriteResponse> {
     return this.transport.request("memory/file/write", request);
+  }
+
+  workspaceInfo(): Promise<WorkspaceInfoResponse> {
+    return this.transport.request<WorkspaceInfoResponse>("workspace/info", {});
   }
 
   listWorkspaceDocs(): Promise<WorkspaceDocListResponse> {

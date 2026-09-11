@@ -140,6 +140,11 @@ pub struct PluginInstallRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PluginInstallTarget {
+    ManualMcpServer {
+        server: Box<crate::McpServerDefinition>,
+        #[ts(optional)]
+        credentials: Option<crate::McpCredentialValues>,
+    },
     Plugin {
         plugin_id: PluginId,
         expected_source_commit: Option<String>,

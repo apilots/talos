@@ -12,6 +12,7 @@ use talos_types::{
 
 #[derive(Debug, Deserialize)]
 struct McpManifest {
+    credentials: Option<talos_types::McpCredentialBinding>,
     name: String,
     description: Option<String>,
     display_name: Option<String>,
@@ -31,12 +32,8 @@ enum McpManifestTransport {
         #[serde(default)]
         cwd: Option<PathBuf>,
     },
+    #[serde(alias = "http")]
     StreamableHttp {
-        url: String,
-        #[serde(default)]
-        headers: BTreeMap<String, String>,
-    },
-    Http {
         url: String,
         #[serde(default)]
         headers: BTreeMap<String, String>,
@@ -50,7 +47,7 @@ pub(crate) fn plugin_from_mcp_manifest(
     manifest_path: &Path,
 ) -> TalosResult<Plugin> {
     let manifest = read_mcp_manifest(manifest_path)?;
-    validate_mcp_name(&manifest.name)?;
+    talos_types::validate_mcp_server_name(&manifest.name)?;
     let transport = transport_from_manifest(manifest.transport, None)?;
     let path_in_source = manifest_path
         .parent()
@@ -93,6 +90,7 @@ pub(crate) fn plugin_from_mcp_manifest(
         status: PluginStatus::NotInstalled,
         definition: PluginDefinition::McpServer(McpServerPlugin {
             server: McpServerDefinition {
+                credentials: manifest.credentials,
                 name,
                 display_name: None,
                 description: None,
@@ -109,9 +107,10 @@ pub(crate) fn server_from_installed_mcp_manifest(
 ) -> TalosResult<McpServerDefinition> {
     let manifest_path = plugin_dir.join("talos-mcp.json");
     let manifest = read_mcp_manifest(&manifest_path)?;
-    validate_mcp_name(&manifest.name)?;
+    talos_types::validate_mcp_server_name(&manifest.name)?;
     let transport = transport_from_manifest(manifest.transport, Some(plugin_dir))?;
     Ok(McpServerDefinition {
+        credentials: manifest.credentials,
         name: manifest.name,
         display_name: manifest.display_name,
         description: manifest.description,
@@ -134,11 +133,9 @@ fn read_mcp_manifest(manifest_path: &Path) -> TalosResult<McpManifest> {
     serde_json::from_str(&contents).map_err(|err| {
         TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
-            format!(
-                "failed to parse MCP manifest `{}`: {err}",
-                manifest_path.display()
-            ),
+            "The MCP manifest is invalid.",
         )
+        .with_source(err)
     })
 }
 
@@ -175,12 +172,11 @@ fn transport_from_manifest(
                 cwd,
             })
         }
-        McpManifestTransport::StreamableHttp { url, headers }
-        | McpManifestTransport::Http { url, headers } => {
+        McpManifestTransport::StreamableHttp { url, headers } => {
             if !url.starts_with("http://") && !url.starts_with("https://") {
                 return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
-                    format!("MCP streamable HTTP URL `{url}` must use http or https"),
+                    "MCP streamable HTTP URLs must use http or https",
                 ));
             }
             if headers
@@ -199,18 +195,4 @@ fn transport_from_manifest(
             "MCP SSE transport is not supported".to_string(),
         )),
     }
-}
-
-fn validate_mcp_name(name: &str) -> TalosResult<()> {
-    if name.is_empty()
-        || !name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-    {
-        return Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("invalid MCP server name `{name}`"),
-        ));
-    }
-    Ok(())
 }

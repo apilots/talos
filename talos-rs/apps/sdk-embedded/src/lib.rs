@@ -46,7 +46,7 @@ use talos_types::{
     StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
     UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::task::JoinHandle;
 
@@ -94,6 +94,56 @@ impl EmbeddedServerClient {
 
 #[async_trait]
 impl GatewayClient for EmbeddedServerClient {
+    async fn import_mcp_server(
+        &mut self,
+        request: talos_sdk::McpServerImportRequest,
+    ) -> TalosResult<talos_sdk::PluginInstallResponse> {
+        self.runtime
+            .gateway
+            .import_mcp_server(&self.actor, request)
+            .await
+    }
+
+    async fn start_mcp_authentication(
+        &mut self,
+        request: talos_sdk::McpAuthenticationStartRequest,
+    ) -> TalosResult<talos_sdk::McpAuthenticationStartResponse> {
+        self.runtime
+            .gateway
+            .start_mcp_authentication(&self.actor, request)
+            .await
+    }
+
+    async fn read_mcp_authentication(
+        &mut self,
+        request: talos_sdk::McpAuthenticationReadRequest,
+    ) -> TalosResult<talos_sdk::McpAuthenticationResponse> {
+        self.runtime
+            .gateway
+            .read_mcp_authentication(&self.actor, request)
+            .await
+    }
+
+    async fn update_mcp_credentials(
+        &mut self,
+        request: talos_sdk::McpCredentialsUpdateRequest,
+    ) -> TalosResult<talos_sdk::McpAuthenticationResponse> {
+        self.runtime
+            .gateway
+            .update_mcp_credentials(&self.actor, request)
+            .await
+    }
+
+    async fn list_mcp_servers(
+        &mut self,
+        request: talos_sdk::McpServerListRequest,
+    ) -> TalosResult<talos_sdk::McpServerListResponse> {
+        self.runtime
+            .gateway
+            .list_mcp_servers(&self.actor, request)
+            .await
+    }
+
     async fn read_auth_session(
         &mut self,
         request: AuthSessionReadRequest,
@@ -712,6 +762,22 @@ impl GatewayClient for EmbeddedServerClient {
         self.runtime.gateway.read_file(&self.actor, request).await
     }
 
+    async fn read_file_content(
+        &mut self,
+        request: FileReadRequest,
+    ) -> TalosResult<talos_sdk::FileDownloadResponse> {
+        let content = self
+            .runtime
+            .service
+            .files
+            .read_content(&self.actor, request)
+            .await?;
+        Ok(talos_sdk::FileDownloadResponse {
+            file: content.file,
+            data: content.bytes,
+        })
+    }
+
     async fn update_file(&mut self, request: FileUpdateRequest) -> TalosResult<FileUpdateResponse> {
         self.runtime.gateway.update_file(&self.actor, request).await
     }
@@ -762,6 +828,16 @@ impl GatewayClient for EmbeddedServerClient {
 
     async fn get_memory(&mut self, request: MemoryGetRequest) -> TalosResult<MemoryGetResponse> {
         self.runtime.gateway.get_memory(&self.actor, request).await
+    }
+
+    async fn workspace_info(
+        &mut self,
+        request: WorkspaceInfoRequest,
+    ) -> TalosResult<WorkspaceInfoResponse> {
+        self.runtime
+            .gateway
+            .workspace_info(&self.actor, request)
+            .await
     }
 
     async fn list_workspace_docs(

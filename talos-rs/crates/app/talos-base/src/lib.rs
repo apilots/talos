@@ -8,8 +8,7 @@ use talos_auth::AuthService;
 use talos_automation::Automation;
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{
-    effective_llm_protocol, AgentKernelConfig, Config, LlmProtocol, McpTransportConfig,
-    ProviderConfig,
+    effective_llm_protocol, AgentKernelConfig, Config, LlmProtocol, ProviderConfig,
 };
 use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
@@ -24,10 +23,9 @@ use talos_llm_openrouter::{OpenRouterConfig, OpenRouterProtocol, OpenRouterProvi
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider};
 use talos_logging::LogGuard;
 use talos_service::{PluginManagerService, TalosService, TimelineEventService};
-use talos_tools::{AgentControl, AgentControlFuture, McpConnectionManager, ToolRegistry};
+use talos_tools::{AgentControl, AgentControlFuture, ToolRegistry};
 use talos_types::{
     AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
-    McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition,
     SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest, SubagentSnapshot,
     SubagentSpawnResult, WaitSubagentRequest,
 };
@@ -38,12 +36,14 @@ use tracing::{info, warn};
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
 mod application_automation;
+mod application_mcp;
 mod application_runtime;
 mod application_storage;
 mod dream_memory_maintenance;
 mod memory_progress;
 mod reloadable_llm_provider;
 mod startup;
+mod tool_images;
 
 #[cfg(test)]
 pub(crate) use application_runtime::build_application_runtime_with_migration_dir;
@@ -61,61 +61,6 @@ impl SkillRootsResolver for AgentSkillRootsResolver {
     ) -> TalosResult<talos_skills::SkillRoots> {
         self.plugins.skill_roots(&kernel_config.skills)
     }
-}
-
-async fn register_mcp_tools(
-    tool_registry: &ToolRegistry,
-    kernel_config: &AgentKernelConfig,
-    plugin_manager: &PluginManagerService,
-) -> TalosResult<()> {
-    if !kernel_config.tools.enable_mcp_tools {
-        return Ok(());
-    }
-    let mut servers = configured_mcp_servers(kernel_config)?;
-    servers.extend(plugin_manager.mcp_servers()?);
-    if servers.is_empty() {
-        return Ok(());
-    }
-    let runtime = Arc::new(talos_mcp::TalosMcpRuntime::connect_all(servers).await);
-    let manager = Arc::new(McpConnectionManager::from_runtime(runtime).await);
-    tool_registry.register_mcp_server(manager);
-    Ok(())
-}
-
-fn configured_mcp_servers(
-    kernel_config: &AgentKernelConfig,
-) -> TalosResult<Vec<McpServerRuntimeDescriptor>> {
-    kernel_config
-        .mcp
-        .servers
-        .iter()
-        .map(|server| {
-            let transport = match &server.transport {
-                McpTransportConfig::Stdio { command, args, env } => McpTransportDefinition::Stdio {
-                    command: command.clone(),
-                    args: args.clone(),
-                    env: env
-                        .iter()
-                        .map(|(key, value)| (key.clone(), value.clone()))
-                        .collect(),
-                    cwd: None,
-                },
-                McpTransportConfig::Http { url, .. } => McpTransportDefinition::StreamableHttp {
-                    url: url.clone(),
-                    headers: Default::default(),
-                },
-            };
-            Ok(McpServerRuntimeDescriptor {
-                server: McpServerDefinition {
-                    name: server.name.clone(),
-                    display_name: None,
-                    description: None,
-                    transport,
-                },
-                source: McpServerSource::Config,
-            })
-        })
-        .collect()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -136,6 +81,7 @@ pub struct TalosServerRuntime {
     shutdown_token: CancellationToken,
     lifecycle: Arc<ServerLifecycle>,
     automation: Automation,
+    plugins: PluginManagerService,
 }
 
 /// Owns the resources created for an in-process app-server runtime.
@@ -204,7 +150,8 @@ impl AgentControl for ApplicationAgentControl {
     }
 }
 
-const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
+// Includes coordinator drain (60s), MCP drain/cleanup (130s), and gateway shutdown.
+const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(240);
 
 pub async fn run_app_server() -> TalosResult<()> {
     let logging_options = TalosServerOptions {
@@ -460,6 +407,7 @@ impl TalosServerRuntime {
             shutdown_token,
             lifecycle,
             automation,
+            plugins,
         } = self;
 
         let signal_shutdown = shutdown_token.clone();
@@ -507,8 +455,13 @@ impl TalosServerRuntime {
         signal_task.abort();
         quiesce_task.abort();
 
-        let shutdown_result =
-            application_automation::shutdown_server(&coordinator, &automation, &lifecycle).await;
+        let shutdown_result = application_automation::shutdown_server(
+            &coordinator,
+            &automation,
+            &lifecycle,
+            &plugins,
+        )
+        .await;
         application_automation::combine(result, shutdown_result)
     }
 }
@@ -574,6 +527,7 @@ async fn start_server_after_startup(
         shutdown_token: CancellationToken::new(),
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
+        plugins: runtime.service.plugins.clone(),
         http_server,
         channel_server,
     })
@@ -596,6 +550,7 @@ async fn run_json_rpc_stdio_after_startup(
     .unwrap_or(usize::MAX);
     let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
     let automation = runtime.automation.clone();
+    let plugins = runtime.service.plugins.clone();
     let replay_limit = config.agent.timeline_replay_batch_size.max(1);
     let service = runtime.service.clone();
     let app = Arc::new(
@@ -626,7 +581,7 @@ async fn run_json_rpc_stdio_after_startup(
             error,
         )
     });
-    application_automation::finish(result, &automation).await
+    application_automation::finish(result, &automation, &plugins).await
 }
 
 async fn build_application_runtime_after_startup(

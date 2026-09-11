@@ -210,7 +210,7 @@ pub fn messages(
                     content: Value::Array(vec![serde_json::json!({
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
-                        "content": msg.content,
+                        "content": attachments::tool_content(msg.content, msg.attachments),
                         "is_error": false,
                     })]),
                 });

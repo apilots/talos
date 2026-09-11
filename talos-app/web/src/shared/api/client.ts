@@ -34,13 +34,14 @@ export type TalosWebClient = {
     "list" | "add" | "update" | "delete" | "reorder" | "start"
   >;
   projects: Methods<BrowserTalosClient["projects"], "list" | "create" | "patch" | "delete">;
-  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "update" | "delete">;
+  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "content" | "update" | "delete">;
   fs: {
     directory: Methods<BrowserTalosClient["fs"]["directory"], "read" | "create">;
   };
   memory: Methods<BrowserTalosClient["memory"], "list" | "get" | "put" | "search" | "getEntry">;
-  workspaceDocs: Methods<BrowserTalosClient["workspaceDocs"], "get" | "put">;
+  workspaceDocs: Methods<BrowserTalosClient["workspaceDocs"], "info" | "get" | "put">;
   skills: Methods<BrowserTalosClient["skills"], "list" | "suggest" | "read">;
+  mcp: Methods<BrowserTalosClient["mcp"], "list" | "import" | "startAuthentication" | "readAuthentication" | "updateCredentials">;
   plugin: Methods<
     BrowserTalosClient["plugin"],
     "search" | "list" | "read" | "install" | "update" | "uninstall" | "enable" | "disable"

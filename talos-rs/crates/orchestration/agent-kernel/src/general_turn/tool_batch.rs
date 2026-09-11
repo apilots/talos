@@ -154,7 +154,9 @@ fn build_tool_result_payload(
                 false,
                 pending_arguments,
             ),
-            ToolOutputPayload::Mcp { content, is_error } => {
+            ToolOutputPayload::Mcp {
+                content, is_error, ..
+            } => {
                 if *is_error {
                     let mut value = serde_json::json!({
                         "ok": false,
@@ -310,11 +312,20 @@ pub(crate) fn collect_general_turn_tool_batch_for_calls(
             payload: reduced.payload.clone(),
             is_error: reduced.is_error,
         });
-        tool_messages.push(ChatMessage::tool(
+        let mut message = ChatMessage::tool(
             output.call_id,
             output.tool_name.clone(),
             build_model_tool_result_text(&reduced),
-        ));
+        );
+        message.image_file_ids = reduced
+            .content_items
+            .iter()
+            .filter_map(|item| match item {
+                TalosContentItem::Image { file_id, .. } => Some(file_id.clone()),
+                _ => None,
+            })
+            .collect();
+        tool_messages.push(message);
     }
 
     if let Some(pending) = &mut pending_user_action {

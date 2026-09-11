@@ -33,6 +33,7 @@ async-trait = "0.1"
 bytes = { workspace = true }
 
 [dev-dependencies]
+talos-mcp = { workspace = true }
 talos-agent = { workspace = true }
 opendal = { workspace = true, features = ["services-memory"] }
 sqlx = { workspace = true }

@@ -267,7 +267,7 @@ impl KernelAgentEventMapper {
             AgentKernelEventPayload::ToolResult(data) => self.map_tool_result(data).await,
             AgentKernelEventPayload::UserActionRequest(_) => self.close_reasoning().await,
             AgentKernelEventPayload::PromptWarning(data) => {
-                self.map_notice(warning_message(data.warning)).await
+                self.map_notice(prompt_warning_notice(data.warning)?).await
             }
             AgentKernelEventPayload::ContextCompaction(data) => self.map_compaction(data).await,
         }
@@ -332,7 +332,7 @@ impl KernelAgentEventMapper {
         })
     }
 
-    async fn map_notice(&self, message_text: String) -> AgentResult<()> {
+    async fn map_notice(&self, notice: talos_agent_api::PromptWarningNotice) -> AgentResult<()> {
         let message = self.sink.start_message(AgentMessageRole::System).await?;
         let block = self
             .sink
@@ -340,7 +340,7 @@ impl KernelAgentEventMapper {
                 &message,
                 AgentMessageBlockContent::SystemNotice(AgentSystemNotice {
                     level: TalosTimelineNoticeLevel::Warning,
-                    content: talos_agent_api::SystemNoticeContent::Text(message_text),
+                    content: talos_agent_api::SystemNoticeContent::PromptWarning(notice),
                 }),
             )
             .await?;
@@ -419,26 +419,67 @@ fn map_tool_progress_kind(kind: ToolProgressKind) -> TalosToolProgressKind {
     }
 }
 
-fn warning_message(warning: talos_agent_kernel::KernelWarning) -> String {
-    match warning {
-        talos_agent_kernel::KernelWarning::PromptBootstrapFileMissing(data) => {
-            format!("Prompt bootstrap file is missing: {:?}", data.file_kind)
+fn prompt_warning_notice(
+    warning: talos_agent_kernel::KernelWarning,
+) -> AgentResult<talos_agent_api::PromptWarningNotice> {
+    use talos_agent_api::PromptWarning;
+    use talos_agent_kernel::KernelWarning;
+    let warning = match warning {
+        KernelWarning::PromptBootstrapFileMissing(data) => PromptWarning::BootstrapFileMissing {
+            file: warning_file(data.file_kind),
+        },
+        KernelWarning::PromptBootstrapFileTruncated(data) => {
+            PromptWarning::BootstrapFileTruncated {
+                file: warning_file(data.file_kind),
+                injected_chars: warning_count(data.injected_chars)?,
+                raw_chars: warning_count(data.raw_chars)?,
+            }
         }
-        talos_agent_kernel::KernelWarning::PromptBootstrapFileTruncated(data) => format!(
-            "Prompt bootstrap file was truncated: {:?} ({} of {} characters)",
-            data.file_kind, data.injected_chars, data.raw_chars
-        ),
-        talos_agent_kernel::KernelWarning::PromptBootstrapFileDropped(data) => {
-            format!("Prompt bootstrap file was dropped: {:?}", data.file_kind)
+        KernelWarning::PromptBootstrapFileDropped(data) => PromptWarning::BootstrapFileDropped {
+            file: warning_file(data.file_kind),
+        },
+        KernelWarning::PromptDynamicSectionDropped(data) => PromptWarning::DynamicSectionsDropped {
+            count: warning_count(data.sections.len())?,
+        },
+    };
+    let message = match &warning {
+        PromptWarning::BootstrapFileMissing { file } => {
+            format!("Prompt bootstrap file is missing: {}", file.file_name())
         }
-        talos_agent_kernel::KernelWarning::PromptDynamicSectionDropped(data) => format!(
-            "Prompt dynamic sections were dropped: {}",
-            data.sections
-                .iter()
-                .map(|section| format!("{section:?}"))
-                .collect::<Vec<_>>()
-                .join(", ")
+        PromptWarning::BootstrapFileTruncated {
+            file,
+            injected_chars,
+            raw_chars,
+        } => format!(
+            "Prompt bootstrap file was truncated: {} ({injected_chars} of {raw_chars} characters)",
+            file.file_name()
         ),
+        PromptWarning::BootstrapFileDropped { file } => {
+            format!("Prompt bootstrap file was dropped: {}", file.file_name())
+        }
+        PromptWarning::DynamicSectionsDropped { count } => {
+            format!("Prompt dynamic sections were dropped: {count}")
+        }
+    };
+    Ok(talos_agent_api::PromptWarningNotice { message, warning })
+}
+
+fn warning_count(count: usize) -> AgentResult<u32> {
+    u32::try_from(count).map_err(|err| {
+        TalosError::internal_with_source("Prompt warning count exceeds the supported range.", err)
+    })
+}
+
+fn warning_file(
+    kind: talos_prompt::WorkspaceBootstrapFileKind,
+) -> talos_agent_api::PromptWarningFile {
+    use talos_prompt::WorkspaceBootstrapFileKind;
+    match kind {
+        WorkspaceBootstrapFileKind::Agents => talos_agent_api::PromptWarningFile::Agents,
+        WorkspaceBootstrapFileKind::Soul => talos_agent_api::PromptWarningFile::Soul,
+        WorkspaceBootstrapFileKind::Identity => talos_agent_api::PromptWarningFile::Identity,
+        WorkspaceBootstrapFileKind::User => talos_agent_api::PromptWarningFile::User,
+        WorkspaceBootstrapFileKind::Heartbeat => talos_agent_api::PromptWarningFile::Heartbeat,
     }
 }
 

@@ -1,3 +1,4 @@
+import { FileImage } from "./FileImage";
 import type { ReactNode } from "react";
 
 import { jsonContentValue } from "@talos/sdk-browser";
@@ -364,11 +365,12 @@ function buildTextJsonModel(items: TalosContentItem[], status: ChatToolStatus): 
   return {
     summary,
     preview: [firstNonEmptyLine(text) ?? summary],
-    body: text ? (
-      <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
-        {text}
-      </pre>
-    ) : null,
+    body: <div className="flex flex-col gap-3">
+      {text && <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">{text}</pre>}
+      {items.filter((item) => item.type === "image").map((item) => (
+        <FileImage key={item.fileId} fileId={item.fileId} label={item.label} />
+      ))}
+    </div>,
   };
 }
 

@@ -118,18 +118,45 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     );
     let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
     let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
+    tool_registry.set_image_store(Arc::new(super::tool_images::ToolImages(
+        file_service.clone(),
+    )));
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
-    let plugin_manager_service = PluginManagerService::new(
-        config.agent.kernel.plugins.clone(),
-        config.agent.kernel.skills.clone(),
+    let plugin_manager_service = PluginManagerService::with_manager(
+        talos_plugin::PluginManager::with_state_store(
+            config.agent.kernel.plugins.clone(),
+            talos_plugin::PluginStateStore::new(config.talos_paths().talos_home.join("plugins")),
+        )
+        .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes),
     );
-    super::register_mcp_tools(
-        tool_registry.as_ref(),
-        &config.agent.kernel,
-        &plugin_manager_service,
-    )
-    .await?;
+    let mcp = Arc::new(talos_mcp::TalosMcpRuntime::new());
+    tool_registry.register_mcp_server(Arc::new(talos_tools::McpConnectionManager::from_runtime(
+        mcp.clone(),
+    )));
+    let credentials = talos_service::McpCredentialStore::new(
+        config.talos_paths().talos_home.join("mcp-credentials"),
+    );
+    let credentials_for_changes = credentials.clone();
+    let mcp_for_changes = mcp.clone();
+    let config_for_mcp = llm_router_config.clone();
+    let plugin_manager_service = plugin_manager_service.with_mcp(
+        mcp.clone(),
+        Arc::new(move |plugins| {
+            let current = config_for_mcp
+                .read()
+                .expect("application config lock poisoned");
+            let prepared = super::application_mcp::prepare(
+                &mcp_for_changes,
+                &current.agent.kernel,
+                plugins,
+                &credentials_for_changes,
+            )?;
+            Ok(Box::new(move || prepared.publish()))
+        }),
+        llm_router_config.clone(),
+        credentials.clone(),
+    );
     let skill_roots_resolver = Arc::new(AgentSkillRootsResolver {
         plugins: plugin_manager_service.clone(),
     });
@@ -199,8 +226,49 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let provider_router_reloader = reloadable_llm_provider_router.clone();
     let provider_router_config_reloader = llm_router_config.clone();
     let inner_model_reloader = inner_model.clone();
+    let plugins_for_reload = plugin_manager_service.clone();
+    let mcp_for_reload = mcp.clone();
+    let credentials_for_reload = credentials.clone();
     let config_reload_hook: talos_service::ConfigReloadHook = Arc::new(move |trigger| {
-        let mut reloaded_config = Config::load()?;
+        if let talos_service::ConfigReloadTrigger::McpCredentials(server) = trigger {
+            let mut candidate = provider_router_config_reloader
+                .read()
+                .expect("application config lock poisoned")
+                .clone();
+            let target = candidate
+                .agent
+                .kernel
+                .mcp
+                .servers
+                .iter_mut()
+                .find(|current| current.name == server.name)
+                .ok_or_else(|| {
+                    TalosError::new(
+                        talos_error::ErrorCode::ResourceNotFound,
+                        "The configured MCP server was not found.",
+                    )
+                })?;
+            *target = *server;
+            let mcp_update = super::application_mcp::prepare(
+                &mcp_for_reload,
+                &candidate.agent.kernel,
+                plugins_for_reload.mcp_servers()?.servers,
+                &credentials_for_reload,
+            )?;
+            let active = provider_router_config_reloader.clone();
+            return Ok(talos_service::ConfigReloadPlan::new(
+                candidate.clone(),
+                move || {
+                    *active.write().expect("application config lock poisoned") = candidate;
+                    mcp_update.publish();
+                },
+            ));
+        }
+
+        let mut reloaded_config = provider_router_config_reloader
+            .read()
+            .expect("application config lock poisoned")
+            .reload()?;
         if let talos_service::ConfigReloadTrigger::Updated(value) = trigger {
             match value {
                 talos_types::ConfigValue::Llm(llm) => {
@@ -235,6 +303,13 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         let provider_router_reloader = provider_router_reloader.clone();
         let provider_router_config_reloader = provider_router_config_reloader.clone();
         let inner_model_reloader = inner_model_reloader.clone();
+        let mcp_update = super::application_mcp::prepare(
+            &mcp_for_reload,
+            &reloaded_config.agent.kernel,
+            plugins_for_reload.mcp_servers()?.servers,
+            &credentials_for_reload,
+        )?;
+        let plugins_for_cleanup = plugins_for_reload.clone();
         Ok(talos_service::ConfigReloadPlan::new(
             reloaded_config.clone(),
             move || {
@@ -244,6 +319,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config;
                 provider_router_reloader.reload();
                 inner_model_reloader.reload(reloaded_inner_model_ref);
+                mcp_update.publish();
+                plugins_for_cleanup.recover_credentials();
             },
         ))
     });
@@ -257,6 +334,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             file_service,
             event_service.clone(),
             config.clone(),
+            plugin_manager_service.clone(),
             memory_service.clone(),
             config_store,
             model_catalog,
@@ -281,6 +359,12 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         config.talos_paths(),
         config.automation.dream_memory_maintenance.clone(),
     );
+    let initial_mcp = super::application_mcp::prepare(
+        &mcp,
+        &config.agent.kernel,
+        plugin_manager_service.mcp_servers()?.servers,
+        &credentials,
+    )?;
     let automation = application_automation::start_maintenance(
         profile_store,
         config.automation.profile_usage_retention.clone(),
@@ -290,6 +374,9 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     )
     .await?;
 
+    // No external MCP starts until every fallible assembly step has completed.
+    plugin_manager_service.recover_credentials();
+    initial_mcp.publish();
     Ok(TalosApplicationRuntime {
         config,
         service,

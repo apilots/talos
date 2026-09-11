@@ -15,7 +15,11 @@ const apiMocks = vi.hoisted(() => ({
   enablePlugin: vi.fn(),
   listManagedMcpPlugins: vi.fn(),
   uninstallPlugin: vi.fn(),
+  listConnections: vi.fn().mockResolvedValue({ data: [], nextCursor: null }),
+  readAuthentication: vi.fn().mockResolvedValue({ authentication: { type: "none" }, state: { type: "unconfigured" } }),
 }));
+
+vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ mcp: { list: apiMocks.listConnections, readAuthentication: apiMocks.readAuthentication } }) }));
 
 vi.mock("@/features/plugins/api", () => ({
   disablePlugin: apiMocks.disablePlugin,
@@ -105,7 +109,7 @@ describe("SettingsMcpServersSection", () => {
     expect(screen.getByText("1 server")).toBeInTheDocument();
   });
 
-  it("opens the pending custom MCP server form from the settings list", async () => {
+  it("opens a custom MCP form with required input validation", async () => {
     apiMocks.listManagedMcpPlugins.mockResolvedValue({
       plugins: [],
       warnings: [],
@@ -121,10 +125,12 @@ describe("SettingsMcpServersSection", () => {
     expect(screen.getByText("Connect to a custom MCP")).toBeInTheDocument();
     expect(screen.getByText("STDIO")).toBeInTheDocument();
     expect(screen.getByText("Streamable HTTP")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Name" })).toBeInvalid();
+    expect(screen.getByRole("textbox", { name: "Command to launch" })).toBeInvalid();
   });
 
-  it("opens an installed MCP plugin in the update form", async () => {
+  it("keeps a marketplace MCP definition read-only while exposing lifecycle actions", async () => {
     apiMocks.listManagedMcpPlugins.mockResolvedValue({
       plugins: [mcpPlugin(true)],
       warnings: [],
@@ -140,7 +146,9 @@ describe("SettingsMcpServersSection", () => {
     expect(screen.getByText("Update Playwright MCP")).toBeInTheDocument();
     expect(screen.getByDisplayValue("npx")).toBeInTheDocument();
     expect(screen.getByDisplayValue("@playwright/mcp@latest")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByDisplayValue("npx")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeEnabled();
   });
 
   it("enables and disables installed MCP plugins through plugin actions", async () => {

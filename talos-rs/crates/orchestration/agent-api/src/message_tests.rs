@@ -60,3 +60,33 @@ fn user_content_variant_fields_use_the_protocol_casing() {
     assert_eq!(encoded["mimeType"], "audio/wav");
     assert!(encoded.get("mime_type").is_none());
 }
+
+#[test]
+fn prompt_warning_survives_history_serialization_with_typed_parameters() {
+    let notice = AgentSystemNotice {
+        level: TalosTimelineNoticeLevel::Warning,
+        content: SystemNoticeContent::PromptWarning(PromptWarningNotice {
+            message: "Prompt bootstrap file was truncated: IDENTITY.md (10 of 30 characters)"
+                .into(),
+            warning: PromptWarning::BootstrapFileTruncated {
+                file: PromptWarningFile::Identity,
+                injected_chars: 10,
+                raw_chars: 30,
+            },
+        }),
+    };
+    let encoded = serde_json::to_value(&notice).unwrap();
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "level": "warning", "content": { "type": "promptWarning", "data": {
+                "message": notice.message(),
+                "warning": { "type": "bootstrapFileTruncated", "file": "identity", "injectedChars": 10, "rawChars": 30 }
+            } }
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<AgentSystemNotice>(encoded).unwrap(),
+        notice
+    );
+}

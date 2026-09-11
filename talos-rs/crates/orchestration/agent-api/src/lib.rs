@@ -27,7 +27,8 @@ pub use message::{
     AgentAssistantText, AgentAssistantTextPhase, AgentContextCompaction, AgentExecutionSummary,
     AgentMessage, AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus,
     AgentMessageRole, AgentMessageStatus, AgentReasoning, AgentSystemNotice, AgentToolCall,
-    AgentToolCallArguments, AgentToolProgress, AgentToolResult, SystemNoticeContent,
+    AgentToolCallArguments, AgentToolProgress, AgentToolResult, PromptWarning, PromptWarningFile,
+    PromptWarningNotice, SystemNoticeContent,
 };
 pub use run::{AgentRunFailure, AgentRunOutput, AgentRunResult};
 pub use talos_types::{AgentMediaSource, AgentTurnRef, AgentUserContent, AgentUserInput};

@@ -367,6 +367,20 @@ llm:
         output: 0.0
         cache_read: 0.0
         cache_write: 0.0
+    - id: deepseek-v4-flash-vision-exp
+      name: DeepSeek V4 Flash Vision (Experimental)
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: high
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
   ollama:
     api_key: null
     base_url: http://localhost:11434

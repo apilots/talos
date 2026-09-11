@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-service = { workspace = true }
 talos-auth = { path = "../../infra/auth" }

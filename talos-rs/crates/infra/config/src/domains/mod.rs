@@ -3,6 +3,7 @@ pub mod automation;
 pub mod cloud;
 pub mod fs;
 pub mod kernel;
+pub mod mcp_auth;
 pub mod memory;
 pub mod network;
 pub mod plugins;
