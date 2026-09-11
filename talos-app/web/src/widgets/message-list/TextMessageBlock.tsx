@@ -1,6 +1,8 @@
-import { Paperclip, Sparkles, Wrench } from "lucide-react";
+import { Sparkles, Wrench } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
+
+import { MessageAttachments } from "./MessageAttachments";
 
 import { cn } from "@/shared/lib/cn";
 const MarkdownRenderer = lazy(() =>
@@ -58,20 +60,7 @@ export function TextMessageBlock({
         <div>
           {isUser ? (
             <div className="space-y-2.5">
-              {fileIds.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {fileIds.map((fileId, index) => (
-                    <span
-                      className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted"
-                      key={fileId}
-                      title={fileId}
-                    >
-                      <Paperclip aria-hidden="true" size={13} />
-                      <span>Attachment {index + 1}</span>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+              {fileIds.length > 0 ? <MessageAttachments fileIds={fileIds} /> : null}
               {text ? (
                 <div className="whitespace-pre-wrap break-words text-sm leading-[1.7]">{text}</div>
               ) : null}

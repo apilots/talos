@@ -44,6 +44,43 @@ async fn collect_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEve
 }
 
 #[test]
+fn vision_chat_encodes_user_and_tool_images_without_changing_tool_identity() {
+    let provider = DeepSeekProvider::new(DeepSeekConfig::new("test-key"));
+    let image = Attachment::new(
+        AttachmentKind::Image,
+        "screenshot.png",
+        "image/png",
+        vec![1, 2, 3].into(),
+    );
+    let mut tool = ChatMessage::tool("capture-1", "screenshot", "Captured page");
+    tool.attachments = Some(vec![image.clone()]);
+    let request = ChatRequest::builder()
+        .model("deepseek-v4-flash-vision-exp")
+        .messages(vec![
+            ChatMessage::user_with_attachments("Inspect this image", vec![image]).unwrap(),
+            ChatMessage::assistant_with_tool_calls(
+                "",
+                vec![FunctionCall::new(
+                    "capture-1",
+                    "screenshot",
+                    serde_json::json!({}),
+                )],
+            ),
+            tool,
+        ])
+        .build();
+    let (endpoint, body) = provider.request_body(request, true).unwrap();
+    assert_eq!(endpoint, "chat/completions");
+    let image_block = serde_json::json!({
+        "type": "image_url", "image_url": {"url": "data:image/png;base64,AQID"}
+    });
+    assert_eq!(body["messages"][0]["content"][1], image_block);
+    assert_eq!(body["messages"][2]["content"][1], image_block);
+    assert_eq!(body["messages"][2]["role"], "tool");
+    assert_eq!(body["messages"][2]["tool_call_id"], "capture-1");
+}
+
+#[test]
 fn chat_maps_supported_efforts_and_omits_disabled_reasoning() {
     for effort in [
         ReasoningEffort::Light,

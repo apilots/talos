@@ -44,7 +44,7 @@ use talos_types::{
     StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
     UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tracing::info;
 
@@ -431,6 +431,46 @@ impl Gateway for ServiceGateway {
         ServiceGateway::search_plugins(self, actor, request).await
     }
 
+    async fn import_mcp_server(
+        &self,
+        _actor: &Actor,
+        request: talos_types::McpServerImportRequest,
+    ) -> TalosResult<talos_types::PluginInstallResponse> {
+        self.service.plugins.import_mcp_server(request).await
+    }
+
+    async fn start_mcp_authentication(
+        &self,
+        _actor: &Actor,
+        request: talos_types::McpAuthenticationStartRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationStartResponse> {
+        self.service.start_mcp_authentication(request).await
+    }
+
+    async fn read_mcp_authentication(
+        &self,
+        _actor: &Actor,
+        request: talos_types::McpAuthenticationReadRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse> {
+        self.service.plugins.read_mcp_authentication(request)
+    }
+
+    async fn update_mcp_credentials(
+        &self,
+        _actor: &Actor,
+        request: talos_types::McpCredentialsUpdateRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse> {
+        self.service.update_mcp_credentials(request).await
+    }
+
+    async fn list_mcp_servers(
+        &self,
+        _actor: &Actor,
+        request: talos_types::McpServerListRequest,
+    ) -> TalosResult<talos_types::McpServerListResponse> {
+        self.service.plugins.list_mcp_servers(request)
+    }
+
     async fn list_plugins(
         &self,
         actor: &Actor,
@@ -512,6 +552,14 @@ impl Gateway for ServiceGateway {
         ServiceGateway::read_file(self, actor, request).await
     }
 
+    async fn read_file_content(
+        &self,
+        actor: &Actor,
+        request: FileReadRequest,
+    ) -> TalosResult<talos_types::FileContentResponse> {
+        ServiceGateway::read_file_content(self, actor, request).await
+    }
+
     async fn update_file(
         &self,
         actor: &Actor,
@@ -566,6 +614,14 @@ impl Gateway for ServiceGateway {
         request: MemoryGetRequest,
     ) -> TalosResult<MemoryGetResponse> {
         ServiceGateway::get_memory(self, actor, request).await
+    }
+
+    async fn workspace_info(
+        &self,
+        actor: &Actor,
+        request: WorkspaceInfoRequest,
+    ) -> TalosResult<WorkspaceInfoResponse> {
+        ServiceGateway::workspace_info(self, actor, request).await
     }
 
     async fn list_workspace_docs(

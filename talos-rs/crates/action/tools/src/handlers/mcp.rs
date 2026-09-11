@@ -13,11 +13,18 @@ use crate::spec::ToolSource;
 /// Dispatches MCP tool invocations to the appropriate server via [`McpConnectionManager`].
 pub struct McpToolHandler {
     manager: Arc<McpConnectionManager>,
+    connection: Option<talos_mcp::McpConnection>,
 }
 
 impl McpToolHandler {
-    pub fn new(manager: Arc<McpConnectionManager>) -> Self {
-        Self { manager }
+    pub fn new(
+        manager: Arc<McpConnectionManager>,
+        connection: Option<talos_mcp::McpConnection>,
+    ) -> Self {
+        Self {
+            manager,
+            connection,
+        }
     }
 }
 
@@ -44,11 +51,24 @@ impl ToolHandler for McpToolHandler {
                 server,
                 tool,
                 arguments,
-            } => Ok(ToolDispatchOutcome::executed(
-                self.manager
-                    .call_tool(&server, &tool, Some(arguments), context.tool_context())
-                    .await?,
-            )),
+            } => {
+                let connection = self.connection.as_ref().ok_or_else(|| {
+                    TalosError::internal("MCP dispatch omitted its connection binding")
+                })?;
+                if server != connection.name()
+                    || invocation.tool_name != talos_mcp::mcp_tool_name(&server, &tool)
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::ToolExecutionFailed,
+                        "The MCP invocation does not match its authorized tool.",
+                    ));
+                }
+                Ok(ToolDispatchOutcome::executed(
+                    self.manager
+                        .call_tool(connection, &tool, Some(arguments), context.tool_context())
+                        .await?,
+                ))
+            }
             ToolCallPayload::Function { arguments } => match invocation.tool_name.as_str() {
                 "ListMcpResources" => {
                     let args: ListArgs = serde_json::from_value(arguments).map_err(|err| {
@@ -60,7 +80,11 @@ impl ToolHandler for McpToolHandler {
                     Ok(ToolDispatchOutcome::executed(
                         ToolOutputPayload::success_structured(
                             self.manager
-                                .list_resources(args.server.as_deref(), args.cursor)
+                                .list_resources(
+                                    args.server.as_deref(),
+                                    args.cursor,
+                                    context.tool_context(),
+                                )
                                 .await?,
                         ),
                     ))
@@ -75,7 +99,11 @@ impl ToolHandler for McpToolHandler {
                     Ok(ToolDispatchOutcome::executed(
                         ToolOutputPayload::success_structured(
                             self.manager
-                                .list_resource_templates(args.server.as_deref(), args.cursor)
+                                .list_resource_templates(
+                                    args.server.as_deref(),
+                                    args.cursor,
+                                    context.tool_context(),
+                                )
                                 .await?,
                         ),
                     ))

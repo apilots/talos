@@ -18,6 +18,12 @@ use talos_store::project::ProjectStore;
 /// Transport-neutral stream consumed by one file upload.
 pub type FileByteStream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
+/// Authorized file bytes, without storage coordinates or transport encoding.
+pub struct FileContent {
+    pub file: talos_types::FileInfo,
+    pub bytes: Bytes,
+}
+
 /// Owns file authorization, object I/O, validation, and lifecycle recovery.
 ///
 /// Gateways pass shared request objects and byte streams to this service. The

@@ -211,7 +211,7 @@ fn test_build_dispatch_rejects_empty_outputs() {
 fn test_build_dispatch_writes_text_logs_to_file() {
     let log_path = temp_log_path("talos.log");
     let config = LoggingConfig {
-        level: "info".to_string(),
+        level: "trace,rmcp::transport::auth[grant]=trace".to_string(),
         format: "text".to_string(),
         file: Some(log_path.to_string_lossy().to_string()),
         stdout: false,
@@ -221,12 +221,17 @@ fn test_build_dispatch_writes_text_logs_to_file() {
     let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
     tracing::dispatcher::with_default(&dispatch, || {
         tracing::info!("file sink is active");
+        let span = tracing::trace_span!(target: "rmcp::transport::auth", "grant");
+        let _entered = span.enter();
+        tracing::debug!(target: "rmcp::transport::auth", code = "private-authorization-code", "callback");
+        tracing::warn!(target: "rmcp::transport::auth", "private-provider-body");
     });
     drop(dispatch);
     drop(guard);
 
     let content = fs::read_to_string(&log_path).expect("log file should exist");
     assert!(content.contains("file sink is active"));
+    assert!(!content.contains("private-"));
 }
 
 #[test]

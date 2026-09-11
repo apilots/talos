@@ -24,11 +24,11 @@ pub(crate) fn installed_mcp_servers(
     }
     let server = server_from_installed_mcp_manifest(&install.installed_path)?;
     Ok(vec![talos_types::McpServerRuntimeDescriptor {
+        content_revision: Some(install.content_digest.clone()),
         server,
         source: talos_types::McpServerSource::Plugin {
             plugin_id: install.plugin_id.clone(),
             install_id: install.id.clone(),
-            installed_path: install.installed_path.clone(),
         },
     }])
 }
@@ -54,6 +54,7 @@ pub(crate) fn missing_plugin_from_install(install: &PluginInstall, enabled: bool
         }),
         PluginKind::McpServer => PluginDefinition::McpServer(talos_types::McpServerPlugin {
             server: talos_types::McpServerDefinition {
+                credentials: None,
                 name: install.name.clone(),
                 display_name: None,
                 description: Some(install.name.clone()),

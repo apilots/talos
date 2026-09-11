@@ -1,14 +1,16 @@
 use crate::installer::{
-    commit_install_activation, commit_uninstall_activation, commit_update_activation,
-    install_plugin, installed_mcp_servers, installed_plugin, installed_skill_root,
-    missing_plugin_from_install, rollback_install_activation, rollback_uninstall_activation,
-    rollback_update_activation, stage_uninstall_plugin, update_plugin, InstallCandidate,
+    cleanup_install_activation, cleanup_uninstall_activation, cleanup_update_activation,
+    install_plugin, installed_plugin, installed_skill_root, missing_plugin_from_install,
+    rollback_install_activation, rollback_uninstall_activation, rollback_update_activation,
+    stage_uninstall_plugin, update_plugin, InstallCandidate,
 };
 use crate::scanner::{scan_source, scanned_at_ms};
 use crate::source::{config_source, source_from_input};
 use crate::state::SourceScanCacheFile;
 use crate::PluginStateStore;
 mod matchers;
+mod mcp;
+pub use mcp::{McpChangeHook, McpDiscovery};
 mod read;
 use matchers::{plugin_matches_list, plugin_matches_search};
 use talos_config::{
@@ -27,11 +29,12 @@ use talos_types::{
     PluginWarningCode,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PluginManager {
     state: PluginStateStore,
     config: PluginsRuntimeConfig,
     max_skill_md_bytes: usize,
+    mcp_change: Option<McpChangeHook>,
 }
 
 impl PluginManager {
@@ -40,6 +43,7 @@ impl PluginManager {
             state: PluginStateStore::from_runtime_home(),
             config,
             max_skill_md_bytes: SkillsRuntimeConfig::default().max_skill_md_bytes,
+            mcp_change: None,
         }
     }
 
@@ -48,6 +52,7 @@ impl PluginManager {
             state,
             config,
             max_skill_md_bytes: SkillsRuntimeConfig::default().max_skill_md_bytes,
+            mcp_change: None,
         }
     }
 
@@ -243,7 +248,7 @@ impl PluginManager {
     fn list_plugins_locked(&self, request: PluginListRequest) -> TalosResult<PluginListResponse> {
         self.state.cleanup_install_temps()?;
         let installs = self.state.load_installs()?.installs;
-        let warnings = Vec::new();
+        let warnings = mcp::discover_mcp(&installs, None)?.warnings;
         let mut plugins = Vec::new();
         for install in installs {
             if request.kind.is_some_and(|kind| kind != install.kind) {
@@ -267,34 +272,63 @@ impl PluginManager {
     }
 
     fn install_locked(&self, request: PluginInstallRequest) -> TalosResult<PluginInstallResponse> {
-        let PluginInstallTarget::Plugin {
-            plugin_id,
-            expected_source_commit,
-        } = request.target;
-        let candidate = self.install_candidate(&plugin_id)?;
-        if expected_source_commit.is_some()
-            && candidate.plugin.source_commit != expected_source_commit
-        {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::Conflict,
-                format!("plugin `{}` source commit changed", plugin_id.0),
-            ));
-        }
+        let candidate = match request.target {
+            PluginInstallTarget::Plugin {
+                plugin_id,
+                expected_source_commit,
+            } => {
+                let candidate = self.install_candidate(&plugin_id)?;
+                if expected_source_commit.is_some()
+                    && candidate.plugin.source_commit != expected_source_commit
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
+                        "The plugin source commit changed.",
+                    ));
+                }
+                candidate
+            }
+            PluginInstallTarget::ManualMcpServer {
+                server,
+                credentials,
+            } => {
+                if credentials.is_some() {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "Private MCP credentials must be prepared by the application service.",
+                    ));
+                }
+                crate::installer::manual_mcp_candidate(self.prepare_manual_mcp(*server)?.1)?
+            }
+        };
         let enabled = request.enable != Some(false);
-        let activation = install_plugin(&self.state, candidate, request.conflict_policy, enabled)?;
-        let install = activation.install.clone();
         let previous_installs = self.state.load_installs()?;
+        let activation = install_plugin(&self.state, candidate, request.conflict_policy, enabled)?;
+        self.finish_install(previous_installs, activation)
+    }
+
+    fn finish_install(
+        &self,
+        previous_installs: crate::state::PluginInstallsFile,
+        activation: crate::installer::InstallActivation,
+    ) -> TalosResult<PluginInstallResponse> {
+        let install = activation.install.clone();
         let mut installs = previous_installs.clone();
         installs
             .installs
             .retain(|item| item.id != install.id && item.installed_path != install.installed_path);
         installs.installs.push(install.clone());
-        if let Err(err) = self.state.save_installs(&installs) {
-            let _ = rollback_install_activation(&self.state, &activation);
-            return Err(err);
+        if let Err(err) =
+            self.save_installs_with_mcp(&previous_installs, &installs, Some(&install.id))
+        {
+            return Err(err.rollback_if_uncommitted(|| {
+                rollback_install_activation(&self.state, &activation)
+            }));
         }
-        commit_install_activation(&activation)?;
-        let plugin = self.plugin_for_install(&install, enabled);
+        if let Err(error) = cleanup_install_activation(&activation) {
+            talos_logging::report_error(&error);
+        }
+        let plugin = self.plugin_for_install(&install, install.enabled);
         Ok(PluginInstallResponse { plugin, install })
     }
 
@@ -304,9 +338,19 @@ impl PluginManager {
     }
 
     fn update_locked(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
-        let install = self.install_by_id(&request.install_id)?;
+        let previous_installs = self.state.load_installs()?;
+        let install = previous_installs
+            .installs
+            .iter()
+            .find(|install| install.id == request.install_id)
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    "The plugin installation was not found.",
+                )
+            })?;
         let enabled = install.enabled;
-        let candidate = self.update_candidate(&install)?;
+        let candidate = self.update_candidate(install)?;
         if request.expected_source_commit.is_some()
             && candidate.plugin.source_commit != request.expected_source_commit
         {
@@ -315,22 +359,26 @@ impl PluginManager {
                 format!("plugin install `{}` source commit changed", install.id.0),
             ));
         }
+        let mut installs = previous_installs.clone();
         let activation = update_plugin(
             &self.state,
-            &install,
+            install,
             candidate,
             request.conflict_policy,
             enabled,
         )?;
         let updated = activation.install.clone();
-        let mut installs = self.state.load_installs()?;
         installs.installs.retain(|item| item.id != updated.id);
         installs.installs.push(updated.clone());
-        if let Err(err) = self.state.save_installs(&installs) {
-            let _ = rollback_update_activation(&self.state, &activation);
-            return Err(err);
+        if let Err(err) =
+            self.save_installs_with_mcp(&previous_installs, &installs, Some(&updated.id))
+        {
+            return Err(err
+                .rollback_if_uncommitted(|| rollback_update_activation(&self.state, &activation)));
         }
-        commit_update_activation(&activation)?;
+        if let Err(error) = cleanup_update_activation(&activation) {
+            talos_logging::report_error(&error);
+        }
         Ok(PluginUpdateResponse {
             plugin: activation.plugin,
             install: updated,
@@ -349,7 +397,8 @@ impl PluginManager {
         &self,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        let mut installs = self.state.load_installs()?;
+        let previous_installs = self.state.load_installs()?;
+        let mut installs = previous_installs.clone();
         let original_len = installs.installs.len();
         let removed_install = installs
             .installs
@@ -370,12 +419,15 @@ impl PluginManager {
             }
         };
         if removed_record {
-            if let Err(err) = self.state.save_installs(&installs) {
-                let _ = rollback_uninstall_activation(&self.state, &activation);
-                return Err(err);
+            if let Err(err) = self.save_installs_with_mcp(&previous_installs, &installs, None) {
+                return Err(err.rollback_if_uncommitted(|| {
+                    rollback_uninstall_activation(&self.state, &activation)
+                }));
             }
         }
-        commit_uninstall_activation(&activation)?;
+        if let Err(error) = cleanup_uninstall_activation(&activation) {
+            talos_logging::report_error(&error);
+        }
         Ok(PluginUninstallResponse {
             install_id: request.install_id,
             uninstalled: removed_record || activation.removed_path,
@@ -471,26 +523,6 @@ impl PluginManager {
         })
     }
 
-    pub fn mcp_servers(&self) -> TalosResult<Vec<talos_types::McpServerRuntimeDescriptor>> {
-        self.state.with_exclusive_lock("plugin.mcp_servers", || {
-            self.state.cleanup_install_temps()?;
-            let mut servers = Vec::new();
-            for install in self.state.load_installs()?.installs {
-                if install.kind != talos_types::PluginKind::McpServer || !install.enabled {
-                    continue;
-                }
-                servers.extend(installed_mcp_servers(&install)?);
-            }
-            servers.sort_by(|left, right| {
-                left.server
-                    .name
-                    .cmp(&right.server.name)
-                    .then_with(|| format!("{:?}", left.source).cmp(&format!("{:?}", right.source)))
-            });
-            Ok(servers)
-        })
-    }
-
     fn configured_skill_root_entries(&self) -> Vec<talos_skills::SkillRoot> {
         self.config
             .roots
@@ -538,30 +570,16 @@ impl PluginManager {
                 .into_iter()
                 .find(|plugin| plugin.id == *plugin_id)
             {
-                return Ok(InstallCandidate { plugin, source });
+                return Ok(InstallCandidate {
+                    plugin,
+                    source: crate::installer::InstallSource::Marketplace(source),
+                });
             }
         }
         Err(TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
             format!("plugin `{}` not found in marketplace cache", plugin_id.0),
         ))
-    }
-
-    fn install_by_id(
-        &self,
-        install_id: &talos_types::PluginInstallId,
-    ) -> TalosResult<PluginInstall> {
-        self.state
-            .load_installs()?
-            .installs
-            .into_iter()
-            .find(|install| &install.id == install_id)
-            .ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::ResourceNotFound,
-                    format!("plugin install `{}` not found", install_id.0),
-                )
-            })
     }
 
     fn plugin_for_install(&self, install: &PluginInstall, enabled: bool) -> Plugin {
@@ -572,9 +590,38 @@ impl PluginManager {
             };
             return plugin;
         }
-        let Some(plugin) = self.find_cached_plugin(&install.plugin_id) else {
+        if install.source == talos_types::PluginInstallSource::Manual {
+            if let Ok(server) = crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(
+                &install.installed_path,
+            ) {
+                return installed_plugin(
+                    crate::installer::manual_mcp_plugin(server),
+                    install,
+                    enabled,
+                );
+            }
+            let mut plugin = missing_plugin_from_install(install, enabled);
+            plugin.status = PluginStatus::Conflict {
+                reason: talos_types::PluginConflictReason::InvalidManifest,
+            };
+            return plugin;
+        }
+        let Some(mut plugin) = self.find_cached_plugin(&install.plugin_id) else {
             return missing_plugin_from_install(install, enabled);
         };
+        if let talos_types::PluginDefinition::McpServer(definition) = &mut plugin.definition {
+            match crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(
+                &install.installed_path,
+            ) {
+                Ok(server) => definition.server = server,
+                Err(_) => {
+                    plugin.status = PluginStatus::Conflict {
+                        reason: talos_types::PluginConflictReason::InvalidManifest,
+                    };
+                    return plugin;
+                }
+            }
+        }
         let latest_commit = plugin
             .source_commit
             .as_ref()
@@ -618,7 +665,8 @@ impl PluginManager {
         install_id: &talos_types::PluginInstallId,
         enabled: bool,
     ) -> TalosResult<PluginInstall> {
-        let mut installs = self.state.load_installs()?;
+        let previous_installs = self.state.load_installs()?;
+        let mut installs = previous_installs.clone();
         let install = installs
             .installs
             .iter_mut()
@@ -631,7 +679,8 @@ impl PluginManager {
             })?;
         install.enabled = enabled;
         let install = install.clone();
-        self.state.save_installs(&installs)?;
+        self.save_installs_with_mcp(&previous_installs, &installs, enabled.then_some(install_id))
+            .map_err(mcp::InstallSaveError::into_error)?;
         Ok(install)
     }
 
@@ -650,6 +699,19 @@ impl PluginManager {
                     reason: talos_types::PluginConflictReason::TargetPathMissing,
                 };
                 continue;
+            }
+            if let talos_types::PluginDefinition::McpServer(definition) = &mut plugin.definition {
+                match crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(
+                    &install.installed_path,
+                ) {
+                    Ok(server) => definition.server = server,
+                    Err(_) => {
+                        plugin.status = PluginStatus::Conflict {
+                            reason: talos_types::PluginConflictReason::InvalidManifest,
+                        };
+                        continue;
+                    }
+                }
             }
             let latest_commit = plugin
                 .source_commit
@@ -703,7 +765,7 @@ impl PluginManager {
             })?;
         Ok(InstallCandidate {
             plugin,
-            source: refreshed.source,
+            source: crate::installer::InstallSource::Marketplace(refreshed.source),
         })
     }
 }

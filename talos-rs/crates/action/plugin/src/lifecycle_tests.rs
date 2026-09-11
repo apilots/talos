@@ -245,7 +245,10 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
         temp.path().join("state").join("mcp").join("playwright")
     );
     assert_eq!(installed.install.content_digest.file_count, 1);
-    let servers = manager.mcp_servers().expect("MCP servers should list");
+    let servers = manager
+        .mcp_servers()
+        .expect("MCP servers should list")
+        .servers;
     assert_eq!(servers.len(), 1);
     assert_eq!(servers[0].server.name, "playwright");
 
@@ -257,6 +260,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
     assert!(manager
         .mcp_servers()
         .expect("MCP servers should list")
+        .servers
         .is_empty());
 
     manager
@@ -268,6 +272,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
         manager
             .mcp_servers()
             .expect("MCP servers should list")
+            .servers
             .len(),
         1
     );
@@ -383,6 +388,24 @@ Second version.
         .state
         .transaction_backup_dir(&installed.install.id)
         .exists());
+    // An unreadable state file must fail before an install can activate a directory.
+    std::fs::write(fixture.state.installs_path(), "broken installation state").unwrap();
+    assert!(fixture
+        .manager
+        .install(PluginInstallRequest {
+            target: PluginInstallTarget::Plugin {
+                plugin_id: fixture.plugin_id.clone(),
+                expected_source_commit: None
+            },
+            enable: Some(true),
+            conflict_policy: PluginInstallConflictPolicy::Replace,
+        })
+        .is_err());
+    assert!(!new_path.exists());
+    assert_eq!(
+        std::fs::read_to_string(old_path.join("SKILL.md")).unwrap(),
+        contents
+    );
 }
 
 #[test]

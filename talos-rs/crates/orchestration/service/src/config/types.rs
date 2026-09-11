@@ -7,6 +7,8 @@ use talos_types::ConfigValue;
 /// Identifies whether configuration reload follows an update or an explicit reload request.
 #[derive(Debug, Clone)]
 pub enum ConfigReloadTrigger {
+    /// Updates credentials of one active MCP definition without reloading unrelated components.
+    McpCredentials(Box<talos_config::McpServerConfig>),
     /// Reloads application components for the supplied update.
     Updated(ConfigValue),
     /// Reloads application components from the configured source.

@@ -8,6 +8,8 @@ description = "Talos - plugin manager"
 repository.workspace = true
 
 [dependencies]
+http = "1"
+url = "2"
 talos-logging = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

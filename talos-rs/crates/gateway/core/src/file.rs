@@ -1,3 +1,4 @@
+use base64::Engine;
 use talos_error::TalosResult;
 use talos_service::{Actor, FileByteStream};
 use talos_types::{
@@ -31,6 +32,18 @@ impl ServiceGateway {
         request: FileReadRequest,
     ) -> TalosResult<FileReadResponse> {
         self.service.files.read(actor, request).await
+    }
+
+    pub(crate) async fn read_file_content(
+        &self,
+        actor: &Actor,
+        request: FileReadRequest,
+    ) -> TalosResult<talos_types::FileContentResponse> {
+        let content = self.service.files.read_content(actor, request).await?;
+        Ok(talos_types::FileContentResponse {
+            file: content.file,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(content.bytes),
+        })
     }
 
     pub(crate) async fn update_file(

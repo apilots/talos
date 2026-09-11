@@ -15,6 +15,19 @@ use super::access::shared_actor;
 use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
+pub(super) async fn workspace_info_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+) -> Result<JsonResponse<talos_types::WorkspaceInfoResponse>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .workspace_info(&actor, talos_types::WorkspaceInfoRequest {})
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
 pub(super) async fn list_workspace_docs_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,

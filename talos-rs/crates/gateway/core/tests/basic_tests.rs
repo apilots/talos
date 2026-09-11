@@ -233,6 +233,10 @@ async fn test_gateway_with_coordinator(
     )
     .unwrap();
     let reload_hook = test_config_reload_hook(config.clone());
+    let plugins = talos_service::PluginManagerService::new(
+        config.agent.kernel.plugins.clone(),
+        config.agent.kernel.skills.clone(),
+    );
     let service = Arc::new(TalosService::new(
         coordinator,
         session_store,
@@ -242,6 +246,7 @@ async fn test_gateway_with_coordinator(
         files,
         event_service,
         config,
+        plugins,
         memory,
         config_store,
         Vec::new(),

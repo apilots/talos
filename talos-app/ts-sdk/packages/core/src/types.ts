@@ -163,7 +163,11 @@ export type {
   McpResourceTemplateDescriptor,
   McpServerDefinition,
   McpServerRuntimeDescriptor,
-  McpServerSnapshot,
+  McpServerInfo,
+  McpOAuthConfig, McpAuthenticationStartRequest, McpAuthenticationStartResponse,
+  McpCredentialBinding, McpAuthentication, McpDefinitionRef, McpCredentialValues, McpCredentialsChange, McpAuthenticationState, McpServerImportRequest, McpAuthenticationReadRequest, McpCredentialsUpdateRequest, McpAuthenticationResponse,
+  McpServerListRequest,
+  McpServerListResponse,
   McpServerSource,
   McpServerStatus,
   McpToolDescriptor,
@@ -213,6 +217,8 @@ export type {
   UserCurrentRequest,
   UserCurrentResponse,
   WorkspaceDocListRequest,
+  WorkspaceInfoRequest,
+  WorkspaceInfoResponse,
   WorkspaceDocListResponse,
   WorkspaceDocReadRequest,
   WorkspaceDocReadResponse,
@@ -332,3 +338,8 @@ export type {
 } from "./generated/app-protocol";
 
 export type FileUploadData = Blob | Uint8Array;
+
+export type FileDownloadResponse = {
+  file: import("./generated/app-protocol").FileInfo;
+  data: Uint8Array;
+};

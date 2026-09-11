@@ -328,3 +328,40 @@ fn sse_line_decoder_rejects_invalid_utf8_line() {
     assert!(lines.into_iter().next().unwrap().is_err());
     assert!(!decoder.has_pending_fragment());
 }
+
+#[test]
+fn tool_images_use_native_provider_blocks_and_persist_only_file_references() {
+    let mut message = ChatMessage::tool(
+        "screenshot",
+        "mcp__browser__screenshot",
+        "screenshot result",
+    );
+    message.image_file_ids = vec!["file-image".into()];
+    message.attachments = Some(vec![png_attachment()]);
+    let persisted = serde_json::to_value(&message).unwrap();
+    let decoded: ChatMessage = serde_json::from_value(persisted.clone()).unwrap();
+    assert_eq!(decoded.image_file_ids, message.image_file_ids);
+    assert_eq!(decoded.attachments, None);
+    assert!(persisted.get("attachments").is_none());
+    let responses = protocols::responses::input(vec![message.clone()]).unwrap();
+    assert_eq!(responses[0]["call_id"], "screenshot");
+    assert_eq!(
+        responses[0]["output"][1],
+        serde_json::json!({"type":"input_image", "image_url":"data:image/png;base64,AQID"})
+    );
+    let (_, messages) = protocols::messages::messages(vec![message.clone()]).unwrap();
+    let messages = serde_json::to_value(messages).unwrap();
+    assert_eq!(messages[0]["content"][0]["tool_use_id"], "screenshot");
+    assert_eq!(
+        messages[0]["content"][0]["content"][1],
+        serde_json::json!({"type":"image", "source":{"type":"base64", "media_type":"image/png", "data":"AQID"}})
+    );
+    let chat = protocols::chat::messages(vec![message], false, Default::default()).unwrap();
+    let chat = serde_json::to_value(chat).unwrap();
+    assert_eq!(chat[0]["role"], "tool");
+    assert_eq!(chat[0]["tool_call_id"], "screenshot");
+    assert_eq!(
+        chat[0]["content"][1],
+        serde_json::json!({"type":"image_url", "image_url":{"url":"data:image/png;base64,AQID"}})
+    );
+}

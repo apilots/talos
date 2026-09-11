@@ -315,11 +315,15 @@ fn estimate_message_tokens(message: &ChatMessage) -> usize {
             })
             .sum::<usize>();
     }
-    if chars == 0 {
-        0
+    let image_tokens = if message.role == talos_llm_provider::Role::Tool {
+        message
+            .image_file_ids
+            .len()
+            .saturating_mul(talos_llm_provider::MAX_ATTACHMENT_TOKENS)
     } else {
-        chars.div_ceil(4) + 4
-    }
+        0
+    };
+    image_tokens.saturating_add(if chars == 0 { 0 } else { chars.div_ceil(4) + 4 })
 }
 
 fn build_working_context_metrics(

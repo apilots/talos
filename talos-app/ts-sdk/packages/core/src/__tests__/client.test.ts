@@ -5,22 +5,19 @@ import type { HttpAdapter, StreamAdapter } from "../adapters";
 import type { AgentEvent, StartTurnRequest, TimelineEvent } from "../types";
 
 describe("TalosClient", () => {
-  it("uses absolute urls for http requests", async () => {
-    const request = vi.fn().mockResolvedValue({ results: [] });
-    const http: HttpAdapter = { request };
-    const streamAdapter = noopStreamAdapter();
-    const client = new TalosClient(http, streamAdapter, "http://localhost:8080/");
-
+  it("uses normalized absolute URLs for workspace info and model requests", async () => {
+    const info = { workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" };
+    const request = vi.fn().mockResolvedValue(info);
+    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
+    await expect(client.workspaceDocs.info()).resolves.toEqual(info);
     await client.models.list();
-
-    expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/models");
+    expect(request).toHaveBeenNthCalledWith(1, "http://localhost:8080/v1/workspace/info");
+    expect(request).toHaveBeenNthCalledWith(2, "http://localhost:8080/v1/models");
   });
 
   it("reads and writes llm config through the user config route", async () => {
     const request = vi.fn().mockResolvedValue({ provider: "anthropic", model: "claude-sonnet-4" });
-    const http: HttpAdapter = { request };
-    const streamAdapter = noopStreamAdapter();
-    const client = new TalosClient(http, streamAdapter, "http://localhost:8080/");
+    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
     const config = { provider: "anthropic", model: "claude-sonnet-4" } as never;
 
     await client.llm.get();

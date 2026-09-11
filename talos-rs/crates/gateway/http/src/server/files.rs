@@ -203,6 +203,19 @@ pub(super) async fn read_file_handler(
     Ok(api_success(response))
 }
 
+pub(super) async fn read_file_content_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Path(file_id): Path<String>,
+) -> Result<JsonResponse<talos_types::FileContentResponse>, ApiError> {
+    let response = state
+        .gateway
+        .read_file_content(&shared_actor(&auth.0), FileReadRequest { file_id })
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
 pub(super) async fn update_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,

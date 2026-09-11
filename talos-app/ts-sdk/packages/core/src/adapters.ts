@@ -220,6 +220,17 @@ function validateSystemNotice(notice: import("./generated/app-protocol").AgentSy
   if (!notice || !["info", "warning", "error"].includes(notice.level)) throw new Error("Invalid Talos notice level.");
   if (notice.content?.type === "error") {
     decodeApiError(notice.content.data);
+  } else if (notice.content?.type === "promptWarning") {
+    const data = notice.content.data;
+    const warning = data?.warning;
+    const validCount = (value: number) => Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff;
+    const validFile = warning && "file" in warning && ["agents", "soul", "identity", "user", "heartbeat"].includes(warning.file);
+    const validWarning = warning && (
+      ((warning.type === "bootstrapFileMissing" || warning.type === "bootstrapFileDropped") && validFile)
+      || (warning.type === "bootstrapFileTruncated" && validFile && validCount(warning.injectedChars) && validCount(warning.rawChars))
+      || (warning.type === "dynamicSectionsDropped" && validCount(warning.count))
+    );
+    if (typeof data?.message !== "string" || !validWarning) throw new Error("Invalid Talos prompt warning.");
   } else if (notice.content?.type !== "text" || typeof notice.content.data !== "string") {
     throw new Error("Invalid Talos notice content.");
   }

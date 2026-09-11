@@ -193,3 +193,21 @@ new capability as complete until those paths and their tests are aligned.
 - Product UI and runtime text changes require snapshot, visual, or E2E coverage in affected clients. With `insta`, generate, inspect, and accept expected snapshots; read `*.snap.new` or equivalent diffs before acceptance.
 - Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
 - Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
+
+### Workspace inspection
+
+Settings → Personalization → Workspace shows the configured default workspace
+for the trusted current actor. `workspace/info` (RPC) and `GET /v1/workspace/info`
+(HTTP) share `WorkspaceInfoRequest` / `WorkspaceInfoResponse`, with camelCase
+`workspaceId`, `rootPrefix`, and `userWorkspaceDir`. The prefix is resolved against
+runtime home by configuration; the user directory uses the same resolver as
+workspace documents. `workspaceDocs.info()` in the HTTP SDK and `workspaceInfo()`
+in the App Server SDK expose the same response. Desktop permits the empty request
+through its existing IPC guard.
+
+This read-only operation has the same actor access as workspace documents. It
+accepts no user ID, workspace selector, or client path, creates no files, and
+propagates configuration/identity errors through the unified error contract.
+Existing sessions retain their own workspace bindings; this endpoint neither
+selects a session's workspace nor manages workspace definitions. Extend selection
+only together with an authorized product workspace management path.

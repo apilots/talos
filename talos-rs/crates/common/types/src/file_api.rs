@@ -217,6 +217,22 @@ impl WorkspaceDocKind {
     }
 }
 
+/// Read the configured default Workspace for the trusted current actor.
+/// This is not a Session workspace selector and accepts no client path or user ID.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceInfoRequest {}
+
+/// Read-only server storage locations resolved by configuration. Available to the
+/// same authenticated actor as workspace documents; no filesystem write is implied.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceInfoResponse {
+    pub workspace_id: String,
+    pub root_prefix: String,
+    pub user_workspace_dir: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct WorkspaceDocListRequest {}
 
@@ -363,6 +379,15 @@ pub struct FileReadRequest {
 #[ts(rename_all = "camelCase")]
 pub struct FileReadResponse {
     pub file: FileInfo,
+}
+
+/// Wire response for authenticated file content; SDKs decode bytes for callers.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileContentResponse {
+    pub file: FileInfo,
+    pub data_base64: String,
 }
 
 /// Replaces selected mutable metadata on one ready file.

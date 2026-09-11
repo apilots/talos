@@ -269,7 +269,10 @@ impl ChatRequest {
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
-    /// Ordered binary inputs for a user message.
+    /// Persisted FileService references for tool images; re-resolved before model calls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_file_ids: Vec<String>,
+    /// Ordered binary inputs for a user or tool message.
     ///
     /// `None` is the only no-attachment state. Generic message serialization
     /// skips this field; shared protocol encoders are its only wire owners.
@@ -307,6 +310,7 @@ impl ChatMessage {
             role: Role::System,
             content: content.into(),
             attachments: None,
+            image_file_ids: Vec::new(),
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -320,6 +324,7 @@ impl ChatMessage {
             role: Role::User,
             content: content.into(),
             attachments: None,
+            image_file_ids: Vec::new(),
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -341,6 +346,7 @@ impl ChatMessage {
         }
         Ok(Self {
             attachments: Some(attachments),
+            image_file_ids: Vec::new(),
             ..Self::user(content)
         })
     }
@@ -350,6 +356,7 @@ impl ChatMessage {
             role: Role::Assistant,
             content: content.into(),
             attachments: None,
+            image_file_ids: Vec::new(),
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -366,6 +373,7 @@ impl ChatMessage {
             role: Role::Assistant,
             content: content.into(),
             attachments: None,
+            image_file_ids: Vec::new(),
             name: None,
             tool_call_id: None,
             tool_calls: Some(tool_calls),
@@ -383,6 +391,7 @@ impl ChatMessage {
             role: Role::Tool,
             content: content.into(),
             attachments: None,
+            image_file_ids: Vec::new(),
             name: Some(name.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: None,
@@ -395,26 +404,6 @@ impl ChatMessage {
     pub fn with_reasoning_continuation(mut self, continuation: ReasoningContinuation) -> Self {
         self.reasoning_continuation = Some(continuation);
         self
-    }
-
-    /// Rejects ambiguous empty attachment state and attachments on non-user roles.
-    pub fn validate_attachments(&self) -> TalosResult<()> {
-        let Some(attachments) = self.attachments.as_ref() else {
-            return Ok(());
-        };
-        if attachments.is_empty() {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "attachments must be omitted instead of empty".to_string(),
-            ));
-        }
-        if self.role != Role::User {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "only user messages may contain attachments".to_string(),
-            ));
-        }
-        Ok(())
     }
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeApiError,
+  parseTimelineEvent,
   parseTalosApiErrorBody,
   TalosApiError,
   TalosHttpError,
@@ -142,5 +143,31 @@ describe("unwrapTalosApiResponse", () => {
         error: { code: "futureCode", message: "Future error" },
       }),
     ).toThrow("Invalid Talos API response.");
+  });
+});
+
+
+describe("prompt warning ingress", () => {
+  const notice = { level: "warning", content: { type: "promptWarning", data: {
+    message: "Prompt bootstrap file was truncated: IDENTITY.md (10 of 20 characters)",
+    warning: { type: "bootstrapFileTruncated", file: "identity", injectedChars: 10, rawChars: 20 },
+  } } };
+  const event = (value: unknown) => ({ event: { type: "agent", data: {
+    identity: { sessionId: "s", turnId: "t" }, payload: { type: "messageBlockCompleted", data: {
+      block: { content: { type: "systemNotice", data: value } },
+    } },
+  } } });
+  it("retains typed prompt warning parameters for live and replay presentation", () => {
+    const record = event(notice);
+    expect(parseTimelineEvent(JSON.parse(JSON.stringify(record)))).toEqual(record);
+  });
+  it.each([
+    { ...notice.content.data.warning, file: "unknown" },
+    { ...notice.content.data.warning, injectedChars: -1 },
+    { ...notice.content.data.warning, rawChars: 2 ** 32 },
+    { ...notice.content.data.warning, type: "unknown" },
+  ])("rejects invalid warning parameters", (warning) => {
+    const invalid = { ...notice, content: { ...notice.content, data: { ...notice.content.data, warning } } };
+    expect(() => parseTimelineEvent(event(invalid))).toThrow("Invalid Talos prompt warning.");
   });
 });

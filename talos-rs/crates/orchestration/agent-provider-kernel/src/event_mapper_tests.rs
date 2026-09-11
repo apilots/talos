@@ -29,14 +29,22 @@ async fn bootstrap_warning_keeps_its_kind_without_exposing_server_paths() {
             path: "/private/server/secret/IDENTITY.md".into(),
         },
     );
-    mapper.map_notice(warning_message(warning)).await.unwrap();
+    mapper
+        .map_notice(prompt_warning_notice(warning).unwrap())
+        .await
+        .unwrap();
     let checkpoint = pipeline.checkpoint().await;
     assert_eq!(
         checkpoint.messages[0].blocks[0].content,
         AgentMessageBlockContent::SystemNotice(AgentSystemNotice {
             level: TalosTimelineNoticeLevel::Warning,
-            content: talos_agent_api::SystemNoticeContent::Text(
-                "Prompt bootstrap file is missing: Identity".into()
+            content: talos_agent_api::SystemNoticeContent::PromptWarning(
+                talos_agent_api::PromptWarningNotice {
+                    message: "Prompt bootstrap file is missing: IDENTITY.md".into(),
+                    warning: talos_agent_api::PromptWarning::BootstrapFileMissing {
+                        file: talos_agent_api::PromptWarningFile::Identity
+                    },
+                }
             ),
         })
     );

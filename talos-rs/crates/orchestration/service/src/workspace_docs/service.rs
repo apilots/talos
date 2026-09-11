@@ -37,6 +37,20 @@ impl WorkspaceDocService {
         self
     }
 
+    /// Inspect the actor's default workspace without creating directories or files.
+    pub fn workspace_info(
+        &self,
+        actor: &Actor,
+        _request: talos_types::WorkspaceInfoRequest,
+    ) -> TalosResult<talos_types::WorkspaceInfoResponse> {
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        Ok(talos_types::WorkspaceInfoResponse {
+            workspace_id: workspace.workspace_id,
+            root_prefix: workspace.base_workspace_dir.to_string_lossy().into_owned(),
+            user_workspace_dir: workspace.user_workspace_dir.to_string_lossy().into_owned(),
+        })
+    }
+
     pub fn parse_kind(raw: &str) -> TalosResult<WorkspaceDocKind> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "soul" => Ok(WorkspaceDocKind::Soul),

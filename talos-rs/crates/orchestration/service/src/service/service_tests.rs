@@ -571,6 +571,10 @@ async fn test_application_with_coordinator(
         delegate: coordinator,
     });
     let reload_hook = test_config_reload_hook(config.clone());
+    let plugins = crate::PluginManagerService::new(
+        config.agent.kernel.plugins.clone(),
+        config.agent.kernel.skills.clone(),
+    );
     let service = TalosService::new(
         coordinator,
         store.clone(),
@@ -580,6 +584,7 @@ async fn test_application_with_coordinator(
         files,
         event_service,
         config,
+        plugins,
         memory,
         config_store,
         Vec::new(),

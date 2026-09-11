@@ -358,6 +358,12 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
+            ClientRequestParams::FileContent(params) => to_value(
+                self.gateway
+                    .read_file_content(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::FileUpdate(params) => to_value(
                 self.gateway
                     .update_file(actor, params)
@@ -385,6 +391,12 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::MemoryFileWrite(params) => to_value(
                 self.gateway
                     .write_memory_file(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::WorkspaceInfo(params) => to_value(
+                self.gateway
+                    .workspace_info(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
@@ -481,6 +493,36 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::PluginSearch(params) => to_value(
                 self.gateway
                     .search_plugins(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::McpServerImport(params) => to_value(
+                self.gateway
+                    .import_mcp_server(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::McpAuthenticationStart(params) => to_value(
+                self.gateway
+                    .start_mcp_authentication(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::McpAuthenticationRead(params) => to_value(
+                self.gateway
+                    .read_mcp_authentication(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::McpCredentialsUpdate(params) => to_value(
+                self.gateway
+                    .update_mcp_credentials(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::McpServerList(params) => to_value(
+                self.gateway
+                    .list_mcp_servers(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),

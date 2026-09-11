@@ -82,6 +82,7 @@ describe("createDesktopTalosClient", () => {
 
   it("keeps desktop fs, memory, and workspace document response envelopes aligned with HTTP client", async () => {
     const bridge = bridgeWithResponses({
+      "workspace/info": { workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" },
       "fs/directory/read": {
             directory: {
               path: "/tmp/project",
@@ -139,6 +140,7 @@ describe("createDesktopTalosClient", () => {
       content: "# Updated memory",
       expected_version: "memory-token",
     })).resolves.toMatchObject({ file: { version_token: "memory-token-2" } });
+    await expect(client.workspaceDocs.info()).resolves.toEqual({ workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" });
     await expect(client.workspaceDocs.get("memory")).resolves.toMatchObject({ doc: { content: "# Workspace memory" } });
     await expect(client.workspaceDocs.put("memory", {
       content: "# Updated workspace memory",

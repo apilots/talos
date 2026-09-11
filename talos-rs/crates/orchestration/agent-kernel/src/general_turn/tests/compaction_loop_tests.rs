@@ -129,7 +129,6 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
-    register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
     let memory_store = Arc::new(TestMemoryStore::new());
@@ -144,7 +143,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
                 ),
                 (
                     SessionPromptMessageRole::Assistant,
-                    format!("historical assistant message {idx} with enough content to stress the prompt window and preserve a larger review trail across repeated follow-up turns"),
+                    format!("historical assistant message {idx} with enough content to stress the prompt window and preserve a larger review trail across repeated follow-up turns").repeat(2),
                 ),
             ],
         );
@@ -193,7 +192,8 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 
     assert!(
         prepared.prompt_diagnostics.dropped_sections.is_empty(),
-        "history compaction should run before section drop"
+        "history compaction should run before section drop: {:?}",
+        prepared.prompt_diagnostics
     );
     let compaction = prepared
         .prompt_diagnostics

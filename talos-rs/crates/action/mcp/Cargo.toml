@@ -6,27 +6,36 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-talos-logging = { workspace = true }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
+oauth2 = { version = "5", default-features = false }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+url = "2"
+reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
+futures-util = { workspace = true }
+talos-logging = { workspace = true }
 rmcp = { workspace = true, features = [
-    "base64",
     "client",
-    "macros",
-    "transport-child-process",
+    "auth",
+    "reqwest-native-tls",
+    "transport-async-rw",
     "transport-streamable-http-client-reqwest",
 ] }
-serde = { workspace = true, features = ["derive"] }
+tokio-util = { workspace = true, features = ["rt", "codec"] }
+process-wrap = { version = "9.1.0", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 talos-error = { workspace = true }
 talos-tools-sandbox = { workspace = true }
 talos-types = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "process", "sync", "time"] }
-tracing = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "sync", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+rmcp = { workspace = true, features = ["server"] }
 
 [lints]
 workspace = true

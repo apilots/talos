@@ -55,7 +55,7 @@ use talos_types::{
     StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
     UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -695,6 +695,42 @@ impl GatewayClient for AppServerClient {
         self.request_typed("plugin/search", request).await
     }
 
+    async fn import_mcp_server(
+        &mut self,
+        request: talos_types::McpServerImportRequest,
+    ) -> TalosResult<talos_types::PluginInstallResponse> {
+        self.request_typed("mcp/server/import", request).await
+    }
+
+    async fn start_mcp_authentication(
+        &mut self,
+        request: talos_types::McpAuthenticationStartRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationStartResponse> {
+        self.request_typed("mcp/server/auth/start", request).await
+    }
+
+    async fn read_mcp_authentication(
+        &mut self,
+        request: talos_types::McpAuthenticationReadRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse> {
+        self.request_typed("mcp/server/auth/read", request).await
+    }
+
+    async fn update_mcp_credentials(
+        &mut self,
+        request: talos_types::McpCredentialsUpdateRequest,
+    ) -> TalosResult<talos_types::McpAuthenticationResponse> {
+        self.request_typed("mcp/server/credentials/update", request)
+            .await
+    }
+
+    async fn list_mcp_servers(
+        &mut self,
+        request: talos_types::McpServerListRequest,
+    ) -> TalosResult<talos_types::McpServerListResponse> {
+        self.request_typed("mcp/server/list", request).await
+    }
+
     async fn list_plugins(
         &mut self,
         request: PluginListRequest,
@@ -764,6 +800,27 @@ impl GatewayClient for AppServerClient {
         self.request_typed("file/read", request).await
     }
 
+    async fn read_file_content(
+        &mut self,
+        request: talos_types::FileReadRequest,
+    ) -> TalosResult<crate::FileDownloadResponse> {
+        use base64::Engine;
+        let response: talos_types::FileContentResponse =
+            self.request_typed("file/content", request).await?;
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(response.data_base64)
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "File content response contains invalid base64.",
+                    error,
+                )
+            })?;
+        Ok(crate::FileDownloadResponse {
+            file: response.file,
+            data: data.into(),
+        })
+    }
+
     async fn update_file(
         &mut self,
         request: talos_types::FileUpdateRequest,
@@ -808,6 +865,13 @@ impl GatewayClient for AppServerClient {
 
     async fn get_memory(&mut self, request: MemoryGetRequest) -> TalosResult<MemoryGetResponse> {
         self.request_typed("memory/get", request).await
+    }
+
+    async fn workspace_info(
+        &mut self,
+        request: WorkspaceInfoRequest,
+    ) -> TalosResult<WorkspaceInfoResponse> {
+        self.request_typed("workspace/info", request).await
     }
 
     async fn list_workspace_docs(

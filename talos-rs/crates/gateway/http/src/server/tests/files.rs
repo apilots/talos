@@ -1,8 +1,8 @@
 use super::*;
 use crate::server::errors::ApiError;
 use crate::server::files::{
-    delete_file_handler, list_files_handler, read_file_handler, update_file_handler,
-    upload_file_handler,
+    delete_file_handler, list_files_handler, read_file_content_handler, read_file_handler,
+    update_file_handler, upload_file_handler,
 };
 use axum::extract::DefaultBodyLimit;
 use axum::http::header::CONTENT_TYPE;
@@ -11,6 +11,7 @@ use talos_types::{FileDeleteResponse, FileListResponse, FileReadResponse, FileUp
 
 fn file_router(state: Arc<HttpApiState>) -> Router {
     Router::new()
+        .route("/v1/files/:file_id/content", get(read_file_content_handler))
         .route(
             "/v1/files",
             get(list_files_handler)
@@ -75,6 +76,19 @@ async fn file_routes_share_one_metadata_lifecycle() {
         .expect("read request should complete");
     let read: FileReadResponse = response_success_json(response).await;
     assert_eq!(read.file, uploaded.file);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("{file_url}/content"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let content: talos_types::FileContentResponse = response_success_json(response).await;
+    assert_eq!(content.file, uploaded.file);
+    assert_eq!(content.data_base64, "iVBORw0KGgo=");
 
     let response = app
         .clone()

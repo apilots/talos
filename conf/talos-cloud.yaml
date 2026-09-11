@@ -349,6 +349,18 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
+      - id: "deepseek-v4-flash-vision-exp"
+        name: "DeepSeek V4 Flash Vision (Experimental)"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        speed: "standard"
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
   openrouter:
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
     base_url: "https://openrouter.ai/api/v1"

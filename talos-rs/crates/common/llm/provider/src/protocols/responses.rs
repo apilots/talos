@@ -201,7 +201,7 @@ pub fn input(messages: Vec<ChatMessage>) -> TalosResult<Vec<Value>> {
                 items.push(serde_json::json!({
                     "type": "function_call_output",
                     "call_id": message.tool_call_id.unwrap_or_default(),
-                    "output": message.content,
+                    "output": attachments::tool_content(message.content, message.attachments),
                 }));
             }
         }

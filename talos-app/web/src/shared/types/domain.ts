@@ -139,6 +139,8 @@ export function outputContentToText(content: TalosContentItem[]) {
           return [item.title ?? item.url, item.title ? item.url : "", item.snippet ?? ""]
             .filter(Boolean)
             .join("\n");
+        case "image":
+          return `${item.label} (file ${item.fileId})`;
         case "artifact_ref":
           return item.label ?? item.artifact_id;
         case "mcp_resource_ref":

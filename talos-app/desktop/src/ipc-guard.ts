@@ -3,6 +3,8 @@ import type { AppProtocol } from "@talos/sdk-core";
 type ParamGuard = (params: unknown) => boolean;
 export type DesktopRendererMethod = Exclude<AppProtocol.ClientMethod, "initialize">;
 
+const mcpDefinitionRef = (value: unknown) => isRecord(value) && ((value.type === "plugin" && typeof value.installId === "string") || (value.type === "config" && typeof value.name === "string"));
+const mcpCredentials = (value: unknown) => isRecord(value) && isRecord(value.authentication) && (value.authentication.type === "none" || value.authentication.type === "bearer" || (value.authentication.type === "header" && typeof value.authentication.name === "string")) && (value.token === undefined || value.token === null || typeof value.token === "string") && [value.env, value.headers].every((map) => map === undefined || map === null || (isRecord(map) && Object.values(map).every((entry) => typeof entry === "string")));
 const emptyParams = (params: unknown) => isRecord(params);
 const sessionParams = (params: unknown) => hasString(params, "sessionId");
 const projectParams = (params: unknown) => hasString(params, "project_id");
@@ -68,16 +70,19 @@ const pluginListParams = (params: unknown) =>
     ["installed", "disabled", "update_available", "source_missing", "conflict"].includes(String(params.status))) &&
   (params.source_id === null || params.source_id === undefined || typeof params.source_id === "string") &&
   typeof params.include_disabled === "boolean";
-const pluginInstallParams = (params: unknown) =>
-  isRecord(params) &&
-  isRecord(params.target) &&
-  params.target.kind === "plugin" &&
-  typeof params.target.plugin_id === "string" &&
-  (params.target.expected_source_commit === null ||
-    params.target.expected_source_commit === undefined ||
-    typeof params.target.expected_source_commit === "string") &&
-  (params.enable === null || params.enable === undefined || typeof params.enable === "boolean") &&
-  ["reject", "replace"].includes(String(params.conflict_policy));
+const pluginInstallParams = (params: unknown) => {
+  if (!isRecord(params) || !isRecord(params.target) ||
+      !(params.enable === null || params.enable === undefined || typeof params.enable === "boolean") ||
+      !["reject", "replace"].includes(String(params.conflict_policy))) return false;
+  const target = params.target;
+  if (target.kind === "plugin") return typeof target.plugin_id === "string" &&
+    (target.expected_source_commit === null || target.expected_source_commit === undefined || typeof target.expected_source_commit === "string");
+  if (target.kind !== "manual_mcp_server" || !isRecord(target.server)) return false;
+  const server = target.server;
+  return typeof server.name === "string" && isRecord(server.transport) &&
+    ((server.transport.type === "stdio" && typeof server.transport.command === "string") ||
+     (server.transport.type === "streamable_http" && typeof server.transport.url === "string"));
+};
 const pluginInstallIdParams = (params: unknown) => isRecord(params) && hasString(params, "install_id");
 const pluginUpdateParams = (params: unknown) =>
   isRecord(params) &&
@@ -126,6 +131,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "file/upload": fileUploadParams,
   "file/list": emptyParams,
   "file/read": fileIdParams,
+  "file/content": fileIdParams,
   "file/update": fileIdParams,
   "file/delete": fileIdParams,
   "fs/directory/create": fsDirectoryCreateParams,
@@ -167,6 +173,13 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "plugin/source/refresh": pluginSourceIdParams,
   "plugin/source/remove": pluginSourceIdParams,
   "plugin/search": pluginSearchParams,
+  "mcp/server/import": (params) => isRecord(params) && typeof params.json === "string" && params.json.length <= 256 * 1024 && (params.conflictPolicy === "reject" || params.conflictPolicy === "replace"),
+  "mcp/server/auth/start": (params) => isRecord(params) && mcpDefinitionRef(params.server) && isRecord(params.config) && (params.clientSecret === undefined || typeof params.clientSecret === "string"),
+  "mcp/server/auth/read": (params) => isRecord(params) && mcpDefinitionRef(params.server),
+  "mcp/server/credentials/update": (params) => isRecord(params) && mcpDefinitionRef(params.server) && isRecord(params.change) && (params.change.type === "clear" || (params.change.type === "replace" && mcpCredentials(params.change.credentials))),
+  "mcp/server/list": (params) => isRecord(params) &&
+    (params.cursor === undefined || params.cursor === null || (typeof params.cursor === "string" && params.cursor.length <= 256)) &&
+    (params.limit === undefined || params.limit === null || (typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 1 && params.limit <= 200)),
   "plugin/list": pluginListParams,
   "plugin/read": pluginReadParams,
   "plugin/install": pluginInstallParams,
@@ -201,6 +214,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     agentUserInput(params.input) &&
     (params.clientRequestId === null || hasString(params, "clientRequestId")),
   "user/current": emptyParams,
+  "workspace/info": emptyParams,
   "workspace/doc/list": emptyParams,
   "workspace/doc/read": (params) => hasString(params, "kind"),
   "workspace/doc/write": (params) => hasString(params, "kind") && hasString(params, "content"),

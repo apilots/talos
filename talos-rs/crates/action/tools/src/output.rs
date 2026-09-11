@@ -76,10 +76,9 @@ impl ToolDispatchFailure {
 
     pub fn into_outcome(self) -> ToolDispatchOutcome {
         match self {
-            Self::Application(error) => ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-                content: error.to_api_error().message,
-                is_error: true,
-            }),
+            Self::Application(error) => ToolDispatchOutcome::executed(
+                ToolOutputPayload::failure_structured(error.to_api_error().message, None),
+            ),
             Self::Classified {
                 error,
                 kind,
@@ -198,6 +197,8 @@ pub enum ToolOutputPayload {
     Mcp {
         content: String,
         is_error: bool,
+        structured_content: Option<Value>,
+        content_items: Vec<TalosContentItem>,
     },
 }
 
@@ -333,7 +334,10 @@ impl ToolOutputPayload {
             Self::Function {
                 structured_content, ..
             } => structured_content.as_ref(),
-            Self::Resource { .. } | Self::Mcp { .. } => None,
+            Self::Mcp {
+                structured_content, ..
+            } => structured_content.as_ref(),
+            Self::Resource { .. } => None,
         }
     }
 
@@ -357,7 +361,9 @@ impl ToolOutputPayload {
                 })
             }
             Self::Resource { .. } => None,
-            Self::Mcp { content, is_error } => {
+            Self::Mcp {
+                content, is_error, ..
+            } => {
                 if *is_error {
                     Some(content.clone())
                 } else {
@@ -493,32 +499,30 @@ impl ToolOutputPayload {
                 pending: None,
                 policy: None,
             },
-            Self::Mcp { content, is_error } => {
-                if *is_error {
-                    let error = ToolResultError::from_message(content);
-                    ToolResultEnvelope {
-                        status: status_for_error_kind(error.error_kind),
-                        structured_content: None,
-                        content_items: vec![TalosContentItem::Text {
-                            text: error.message.clone(),
-                        }],
-                        compact_summary: Some(error.message.clone()),
-                        error: Some(error),
-                        pending: None,
-                        policy: None,
-                    }
-                } else {
-                    ToolResultEnvelope {
-                        status: ToolResultStatus::Success,
-                        structured_content: Some(canonical_success_content(content, None)),
-                        content_items: vec![TalosContentItem::Text {
-                            text: content.clone(),
-                        }],
-                        compact_summary: Some(build_compact_summary(content, "completed")),
-                        error: None,
-                        pending: None,
-                        policy: None,
-                    }
+            Self::Mcp {
+                content,
+                is_error,
+                structured_content,
+                content_items,
+            } => {
+                // Remote structured data never controls local permission or retry semantics.
+                let error = is_error.then(|| ToolResultError::from_message(content));
+                ToolResultEnvelope {
+                    status: if *is_error {
+                        ToolResultStatus::Failure
+                    } else {
+                        ToolResultStatus::Success
+                    },
+                    structured_content: structured_content.clone(),
+                    content_items: content_items.clone(),
+                    compact_summary: Some(build_content_items_summary(
+                        content_items,
+                        content,
+                        "completed",
+                    )),
+                    error,
+                    pending: None,
+                    policy: None,
                 }
             }
         }

@@ -556,7 +556,8 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
     config.compaction.tool_output_keep_last = 1;
     configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream_for_session("working-context-budget", None);
-    ctx.selected_model_info.model.context_window = 1_792;
+    // The initial prompt fits, but the retained 13 KB tool result must exceed the window.
+    ctx.selected_model_info.model.context_window = 2_048;
 
     let error = run_general_turn(
         &mut ctx,
@@ -582,7 +583,7 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
     assert_eq!(
         provider.round.load(Ordering::SeqCst),
         1,
-        "provider should only receive the initial tool-call request"
+        "provider should only receive the initial tool-call request: {error}"
     );
 }
 
@@ -739,6 +740,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
+        image_input_enabled: false,
         messages: vec![ChatMessage::user("Stop from policy.")],
         maintenance_usage: TokenUsage::default(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()
@@ -819,6 +821,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
+        image_input_enabled: false,
         messages: vec![ChatMessage::user(
             "Continue after external dynamic tool result.",
         )],
@@ -953,6 +956,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
+        image_input_enabled: false,
         messages: vec![ChatMessage::user("Continue after the answer.")],
         maintenance_usage: TokenUsage::default(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()

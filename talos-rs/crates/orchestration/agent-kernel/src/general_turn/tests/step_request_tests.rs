@@ -16,6 +16,7 @@ async fn test_build_general_turn_step_request() {
         reasoning_effort: Some(ReasoningEffort::Medium),
         speed: ModelSpeed::Fast,
         attachment_tokens: 0,
+        image_input_enabled: false,
         messages: vec![ChatMessage::user("current user input")],
         maintenance_usage: TokenUsage::default(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),

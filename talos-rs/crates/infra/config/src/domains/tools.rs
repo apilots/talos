@@ -280,8 +280,11 @@ pub struct AgentKernelMcpConfig {
 }
 
 /// Configuration for a single MCP server connection
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
+    /// Reference to private credentials; inline bearer tokens remain a legacy input.
+    #[serde(default)]
+    pub credentials: Option<crate::McpCredentialBinding>,
     /// Logical name used to prefix tool names: `mcp__<name>__<tool>`
     pub name: String,
 
@@ -290,7 +293,7 @@ pub struct McpServerConfig {
 }
 
 /// MCP transport configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum McpTransportConfig {
     /// Launch an MCP server as a child process and communicate via stdin/stdout

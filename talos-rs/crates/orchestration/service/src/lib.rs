@@ -27,14 +27,14 @@ mod test_support;
 pub use access::Actor;
 pub use account::AccountService;
 pub use config::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService};
-pub use file::{FileByteStream, FileService};
+pub use file::{FileByteStream, FileContent, FileService};
 pub use history::SessionHistoryService;
 pub use inner_model::{
     resolve_inner_model_ref, InnerModelChatParams, InnerModelClient, InnerModelClientBuilder,
 };
 pub use memory::MemoryService;
 pub use message_queue::SessionMessageQueueService;
-pub use plugin::PluginManagerService;
+pub use plugin::{mcp_definition_from_config, McpCredentialStore, PluginManagerService};
 pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};
 pub use skills::SkillsService;

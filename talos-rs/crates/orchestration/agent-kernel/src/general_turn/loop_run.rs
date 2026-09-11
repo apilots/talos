@@ -89,7 +89,15 @@ pub async fn execute_general_turn_loop_with_policy(
     let (final_text, stop_reason) = loop {
         let messages = take_running_messages(&prepared)?;
         apply_running_messages(&prepared, &mut state, messages).await;
+        super::attachments::limit_tool_images(&prepared, &mut state.messages);
         enforce_working_context_budget(&prepared, &mut state, kernel_config.as_ref()).await?;
+        super::attachments::resolve_tool_images(
+            &prepared,
+            &mut state.messages,
+            tool_executor_port.as_ref(),
+            llm_provider.as_ref(),
+        )
+        .await?;
         let tool_definitions =
             tool_executor_port.get_tool_definitions_for_request(&prepared.tool_selection_request);
         let mut step_request = build_general_turn_step_request(

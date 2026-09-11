@@ -80,21 +80,21 @@ pub use talos_types::{
     UserActionState, UserCurrentRequest, UserCurrentResponse, UserPermissionMode, WorkspaceDocInfo,
     WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocReadResponse, WorkspaceDocSummary, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 pub use talos_types::{
-    MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,
-    PluginDisableResponse, PluginDocument, PluginDocumentMediaType, PluginDocumentRef,
-    PluginDocumentRole, PluginEnableRequest, PluginEnableResponse, PluginInstall,
-    PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallResponse,
-    PluginInstallSource, PluginInstallTarget, PluginKind, PluginListRequest, PluginListResponse,
-    PluginListStatusFilter, PluginMetadata, PluginReadRequest, PluginReadResponse,
-    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse, PluginSearchStatusFilter,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
-    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
-    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateConflictPolicy, PluginUpdateRequest, PluginUpdateResponse,
-    SkillPlugin,
+    MarketplaceSource, MarketplaceSourceInput, McpServerInfo, McpServerListRequest,
+    McpServerListResponse, Plugin, PluginDefinition, PluginDisableRequest, PluginDisableResponse,
+    PluginDocument, PluginDocumentMediaType, PluginDocumentRef, PluginDocumentRole,
+    PluginEnableRequest, PluginEnableResponse, PluginInstall, PluginInstallConflictPolicy,
+    PluginInstallId, PluginInstallRequest, PluginInstallResponse, PluginInstallSource,
+    PluginInstallTarget, PluginKind, PluginListRequest, PluginListResponse, PluginListStatusFilter,
+    PluginMetadata, PluginReadRequest, PluginReadResponse, PluginSearchRefreshPolicy,
+    PluginSearchRequest, PluginSearchResponse, PluginSearchStatusFilter, PluginSourceAddRequest,
+    PluginSourceAddResponse, PluginSourceListRequest, PluginSourceListResponse,
+    PluginSourceRefreshRequest, PluginSourceRefreshResponse, PluginSourceRemoveRequest,
+    PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest, PluginUninstallResponse,
+    PluginUpdateConflictPolicy, PluginUpdateRequest, PluginUpdateResponse, SkillPlugin,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
@@ -110,3 +110,16 @@ pub async fn connect_app_server(config: AppServerClientConfig) -> TalosResult<Ap
 pub async fn connect_app_server_from_env() -> TalosResult<AppServerClient> {
     AppServerClient::connect(AppServerClientConfig::from_env()?).await
 }
+
+/// Authorized file metadata and decoded content returned by the SDK.
+pub struct FileDownloadResponse {
+    pub file: FileInfo,
+    pub data: bytes::Bytes,
+}
+
+pub use talos_types::{
+    McpAuthentication, McpAuthenticationReadRequest, McpAuthenticationResponse,
+    McpAuthenticationStartRequest, McpAuthenticationStartResponse, McpAuthenticationState,
+    McpCredentialBinding, McpCredentialValues, McpCredentialsChange, McpCredentialsUpdateRequest,
+    McpDefinitionRef, McpOAuthConfig, McpServerImportRequest,
+};

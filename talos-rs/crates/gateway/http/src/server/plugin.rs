@@ -183,3 +183,73 @@ pub(super) async fn disable_plugin_handler(
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))
 }
+
+pub(super) async fn list_mcp_servers_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Query(request): Query<talos_types::McpServerListRequest>,
+) -> Result<JsonResponse<talos_types::McpServerListResponse>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .list_mcp_servers(&actor, request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
+pub(super) async fn import_mcp_server_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<talos_types::McpServerImportRequest>,
+) -> Result<JsonResponse<talos_types::PluginInstallResponse>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .import_mcp_server(&actor, request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
+pub(super) async fn start_mcp_authentication_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<talos_types::McpAuthenticationStartRequest>,
+) -> Result<JsonResponse<talos_types::McpAuthenticationStartResponse>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .start_mcp_authentication(&actor, request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
+pub(super) async fn read_mcp_authentication_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<talos_types::McpAuthenticationReadRequest>,
+) -> Result<JsonResponse<talos_types::McpAuthenticationResponse>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .read_mcp_authentication(&actor, request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
+pub(super) async fn update_mcp_credentials_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<talos_types::McpCredentialsUpdateRequest>,
+) -> Result<JsonResponse<talos_types::McpAuthenticationResponse>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .update_mcp_credentials(&actor, request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}

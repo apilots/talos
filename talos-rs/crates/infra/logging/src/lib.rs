@@ -8,7 +8,7 @@ use tracing::Dispatch;
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::writer::{BoxMakeWriter, MakeWriterExt};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod error_report;
 pub use error_report::report_error;
@@ -221,9 +221,18 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
             .with_writer(writer)
             .with_timer(TzTimer(tz));
         if config.format == "json" {
-            Dispatch::new(builder.json().finish())
+            Dispatch::new(
+                builder
+                    .json()
+                    .finish()
+                    .with(tracing_subscriber::filter::filter_fn(
+                        private_dependency_events,
+                    )),
+            )
         } else {
-            Dispatch::new(builder.finish())
+            Dispatch::new(builder.finish().with(tracing_subscriber::filter::filter_fn(
+                private_dependency_events,
+            )))
         }
     } else {
         let builder = fmt()
@@ -234,13 +243,29 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
             .with_env_filter(filter)
             .with_writer(writer);
         if config.format == "json" {
-            Dispatch::new(builder.json().finish())
+            Dispatch::new(
+                builder
+                    .json()
+                    .finish()
+                    .with(tracing_subscriber::filter::filter_fn(
+                        private_dependency_events,
+                    )),
+            )
         } else {
-            Dispatch::new(builder.finish())
+            Dispatch::new(builder.finish().with(tracing_subscriber::filter::filter_fn(
+                private_dependency_events,
+            )))
         }
     };
 
     Ok((dispatch, guard))
+}
+
+// rmcp auth diagnostics include authorization codes and untrusted provider bodies.
+// This static boundary cannot be overridden by user trace/span directives.
+fn private_dependency_events(metadata: &tracing::Metadata<'_>) -> bool {
+    let target = metadata.target();
+    target != "rmcp::transport::auth" && !target.starts_with("rmcp::transport::auth::")
 }
 
 fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)> {

@@ -177,6 +177,7 @@ pub struct PreparedGeneralTurn {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: ModelSpeed,
     pub attachment_tokens: usize,
+    pub image_input_enabled: bool,
     pub messages: Vec<ChatMessage>,
     pub maintenance_usage: TokenUsage,
     pub tool_selection_request: talos_tools::ToolSelectionRequest,

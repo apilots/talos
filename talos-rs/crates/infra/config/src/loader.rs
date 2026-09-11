@@ -63,6 +63,11 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     if path.is_some() || std::env::var_os(TALOS_CONFIG_ENV).is_some() {
         ensure_runtime_env_file(&paths)?;
     }
+    load_config_at(config_path, paths)
+}
+
+pub(crate) fn load_config_at(config_path: PathBuf, paths: TalosPaths) -> TalosResult<Config> {
+    use talos_error::TalosError;
     let runtime_env = RuntimeEnv::load(&paths.env_file)?;
     let raw = std::fs::read_to_string(&config_path).map_err(|err| {
         TalosError::internal_with_source(
@@ -92,7 +97,7 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
             error,
         )
     })?;
-    let mut config = resolve_env_placeholders(config, &runtime_env)?;
+    let mut config = resolve_env_placeholders(config, &runtime_env)?.with_runtime_paths(paths);
     config.source_path = Some(config_path);
     config.apply_derived_paths();
     config.attach_runtime_env(runtime_env);

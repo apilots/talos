@@ -22,6 +22,31 @@ impl AttachmentReader for FileService {
 }
 
 impl FileService {
+    /// Reads one ready actor-owned file using the same byte limits as Turn input.
+    pub async fn read_content(
+        &self,
+        actor: &crate::Actor,
+        request: talos_types::FileReadRequest,
+    ) -> TalosResult<super::FileContent> {
+        let file = self.read(actor, request).await?.file;
+        let scope = TurnFileScope {
+            owner_user_id: actor.user_id.clone(),
+            project_id: match &file.scope {
+                talos_types::FileScope::Personal => None,
+                talos_types::FileScope::Project { project_id } => Some(project_id.clone()),
+            },
+        };
+        let resolved = self
+            .read_attachments(&scope, std::slice::from_ref(&file.file_id))
+            .await?
+            .pop()
+            .ok_or_else(|| TalosError::internal("File content reader returned no result."))?;
+        Ok(super::FileContent {
+            file,
+            bytes: resolved.bytes,
+        })
+    }
+
     async fn read_attachments(
         &self,
         scope: &TurnFileScope,

@@ -92,6 +92,7 @@ pub struct ToolContext {
     kernel_config: Option<Arc<AgentKernelConfig>>,
     agent_control: Option<Arc<dyn AgentControl>>,
     memory_reader: Option<Arc<dyn MemoryReader>>,
+    image_store: Option<Arc<dyn crate::ToolImageStore>>,
     user_workspace_memory_writer: Option<Arc<dyn UserWorkspaceMemoryWriter>>,
     memory_scope: Option<MemoryScope>,
     session_state: Arc<SessionToolState>,
@@ -133,6 +134,7 @@ impl ToolContext {
             kernel_config,
             agent_control: None,
             memory_reader: None,
+            image_store: None,
             user_workspace_memory_writer: None,
             memory_scope: None,
             session_state: get_session_tool_state(&session_id),
@@ -160,6 +162,20 @@ impl ToolContext {
     pub fn with_agent_id(mut self, agent_id: impl Into<String>) -> Self {
         self.agent_id = Some(agent_id.into());
         self
+    }
+
+    pub fn with_image_store(mut self, store: Arc<dyn crate::ToolImageStore>) -> Self {
+        self.image_store = Some(store);
+        self
+    }
+
+    pub fn image_store(&self) -> talos_error::TalosResult<&dyn crate::ToolImageStore> {
+        self.image_store.as_deref().ok_or_else(|| {
+            talos_error::TalosError::new(
+                talos_error::ErrorCode::UnsupportedMediaType,
+                "Tool image storage is unavailable.",
+            )
+        })
     }
 
     pub fn with_memory_reader(mut self, reader: Arc<dyn MemoryReader>) -> Self {

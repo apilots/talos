@@ -280,6 +280,10 @@ async fn dream_maintenance_processes_two_user_scopes() {
             || {},
         ))
     });
+    let plugins = talos_service::PluginManagerService::new(
+        config.agent.kernel.plugins.clone(),
+        config.agent.kernel.skills.clone(),
+    );
     let service = Arc::new(talos_service::TalosService::new(
         coordinator,
         sessions.clone(),
@@ -289,6 +293,7 @@ async fn dream_maintenance_processes_two_user_scopes() {
         file_service,
         Arc::new(talos_service::TimelineEventService::new(sessions.clone())),
         config.clone(),
+        plugins,
         memory,
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone())),
         resolve_model_catalog(&config.llm),

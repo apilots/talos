@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+http = "1"
 talos-logging = { workspace = true }
 async-trait = { workspace = true }
 base64 = { workspace = true }
@@ -29,6 +30,7 @@ talos-fs = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-knowledge-format = { workspace = true }
 talos-memory = { workspace = true }
+talos-mcp = { workspace = true }
 talos-plugin = { workspace = true }
 talos-skills = { workspace = true }
 talos-store = { workspace = true }

@@ -19,11 +19,8 @@ fn tool_failure_envelopes_preserve_policy_and_default_runtime_semantics() {
             ToolDispatchFailure::from(TalosError::internal(
                 "The tool output could not be decoded.",
             )),
-            ToolOutputPayload::Mcp {
-                content: "The tool output could not be decoded.".into(),
-                is_error: true,
-            }
-            .envelope(),
+            ToolOutputPayload::failure_structured("The tool output could not be decoded.", None)
+                .envelope(),
         ),
         (
             ToolDispatchFailure::classified(

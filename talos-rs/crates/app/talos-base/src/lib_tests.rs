@@ -542,3 +542,13 @@ async fn lifecycle_watch_reports_expected_state_order() {
 
     assert!(SERVER_SHUTDOWN_WAIT_TIMEOUT > Duration::from_secs(0));
 }
+
+#[cfg(unix)]
+#[path = "application_mcp_tests.rs"]
+mod mcp_tests;
+
+#[path = "mcp_credentials_tests.rs"]
+mod mcp_credentials_tests;
+
+#[path = "mcp_oauth_tests.rs"]
+mod mcp_oauth_tests;

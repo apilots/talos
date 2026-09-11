@@ -7,7 +7,8 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
+    validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatRequest,
+    ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
 };
 use tracing::info;
 
@@ -270,6 +271,20 @@ impl LlmProvider for DeepSeekProvider {
 
     fn default_model(&self) -> String {
         self.config.default_model.clone()
+    }
+
+    fn validate_attachments(
+        &self,
+        _model: &str,
+        attachments: &[Attachment],
+    ) -> TalosResult<AttachmentUsage> {
+        validate_inline_attachments(attachments, |attachment| {
+            attachment.kind == AttachmentKind::Image
+                && matches!(
+                    attachment.media_type.as_str(),
+                    "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+                )
+        })
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

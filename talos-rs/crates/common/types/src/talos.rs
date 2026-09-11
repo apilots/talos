@@ -379,6 +379,16 @@ pub enum TalosContentItem {
         #[serde(default)]
         provider_rank: Option<usize>,
     },
+    /// A tool-produced image persisted in the authenticated user's FileService.
+    Image {
+        #[serde(rename = "fileId")]
+        #[ts(rename = "fileId")]
+        file_id: String,
+        #[serde(rename = "mimeType")]
+        #[ts(rename = "mimeType")]
+        mime_type: String,
+        label: String,
+    },
     ArtifactRef {
         artifact_id: String,
         #[serde(default)]

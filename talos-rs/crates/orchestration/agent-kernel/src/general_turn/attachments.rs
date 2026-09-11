@@ -164,3 +164,108 @@ fn token_overflow() -> TalosError {
         "attachment token estimate overflow".to_string(),
     )
 }
+
+/// Keep newest tool images that fit beside user attachments, before loading bytes.
+pub(super) fn limit_tool_images(
+    prepared: &super::PreparedGeneralTurn,
+    messages: &mut [ChatMessage],
+) {
+    let user_images = prepared
+        .messages
+        .iter()
+        .chain(messages.iter())
+        .filter(|message| message.role == Role::User)
+        .map(|message| message.attachments.as_ref().map_or(0, Vec::len))
+        .sum::<usize>();
+    let mut remaining = talos_llm_provider::MAX_ATTACHMENTS.saturating_sub(user_images);
+    for message in messages
+        .iter_mut()
+        .rev()
+        .filter(|message| message.role == Role::Tool)
+    {
+        let keep = remaining.min(message.image_file_ids.len());
+        if keep < message.image_file_ids.len() {
+            message.image_file_ids.truncate(keep);
+            if let Some(images) = &mut message.attachments {
+                images.truncate(keep);
+            }
+            if keep == 0 {
+                message.attachments = None;
+            }
+            message.content.push_str("\nSome tool images were omitted from model input to fit request limits; file references remain available.");
+        }
+        remaining -= keep;
+    }
+}
+
+/// Resolve current and resumed tool references after context trimming.
+pub(super) async fn resolve_tool_images(
+    prepared: &super::PreparedGeneralTurn,
+    messages: &mut [ChatMessage],
+    tools: &dyn talos_tools::ToolExecutorPort,
+    provider: &dyn LlmProvider,
+) -> TalosResult<()> {
+    let user_bytes = prepared
+        .messages
+        .iter()
+        .chain(messages.iter())
+        .filter(|message| message.role == Role::User)
+        .flat_map(|message| message.attachments.iter().flatten())
+        .map(|image| image.bytes.len())
+        .sum::<usize>();
+    let mut remaining_bytes =
+        talos_llm_provider::MAX_TOTAL_ATTACHMENT_BYTES.saturating_sub(user_bytes);
+    for message in messages.iter_mut().rev() {
+        if message.image_file_ids.is_empty() {
+            continue;
+        }
+        if message.role != Role::Tool || !prepared.image_input_enabled {
+            return Err(TalosError::new(
+                ErrorCode::UnsupportedAttachment,
+                "The selected model does not support tool image results.",
+            ));
+        }
+        let store = tools.image_store().ok_or_else(|| {
+            TalosError::new(
+                ErrorCode::UnsupportedMediaType,
+                "Tool image storage is unavailable.",
+            )
+        })?;
+        let mut cached = message.attachments.take().unwrap_or_default().into_iter();
+        let mut retained_ids = Vec::new();
+        let mut images = Vec::new();
+        for id in &message.image_file_ids {
+            let image = match cached.next() {
+                Some(image) => image,
+                None => {
+                    let mut resolved = store
+                        .read(&prepared.user_id, std::slice::from_ref(id))
+                        .await?;
+                    if resolved.len() != 1 {
+                        return Err(TalosError::internal(
+                            "Tool image storage returned incomplete results.",
+                        ));
+                    }
+                    resolved.remove(0)
+                }
+            };
+            if image.bytes.len() > remaining_bytes {
+                continue;
+            }
+            remaining_bytes -= image.bytes.len();
+            retained_ids.push(id.clone());
+            images.push(image);
+        }
+        if retained_ids.len() != message.image_file_ids.len() {
+            message.content.push_str("\nSome tool images were omitted from model input to fit the byte limit; file references remain available.");
+        }
+        message.image_file_ids = retained_ids;
+        if !images.is_empty() {
+            let usage = provider.validate_attachments(&prepared.selected_model, &images)?;
+            validate_attachment_usage(images.len(), &usage)?;
+            message.attachments = Some(images);
+            message.validate_attachments()?;
+        }
+    }
+    Ok(())
+}

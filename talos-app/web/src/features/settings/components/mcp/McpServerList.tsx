@@ -1,10 +1,12 @@
-import type { Plugin } from "@talos/sdk-browser";
+import type { Plugin, McpServerInfo } from "@talos/sdk-browser";
 import { Plus, Settings, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { cn } from "@/shared/lib/cn";
 
 export interface McpServerView {
+  connection?: McpServerInfo;
   id: string;
   enabled: boolean;
   name: string;
@@ -92,14 +94,16 @@ function McpServerRow({
   const { t } = useTranslation(["plugins", "settings"]);
 
   return (
-    <div className="grid min-h-[4.5rem] grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] items-center gap-4 border-b border-border/65 px-5 last:border-b-0">
-      <div className="min-w-0">
+    <div className="grid min-h-[4.5rem] grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] items-center gap-4 border-b border-border/65 px-5 last:border-b-0 max-sm:grid-cols-3 max-sm:py-3">
+      <div className="min-w-0 max-sm:col-span-3">
         <span className="block truncate text-sm font-medium text-ink">{server.name}</span>
-        <span className="mt-0.5 block truncate text-xs text-muted">
+        <span className="mt-0.5 block truncate text-xs text-muted max-sm:whitespace-normal max-sm:break-words">
           {server.transport ?? t("settings:mcpServers.unknownTransport")}
+          {server.connection ? ` · ${t(`settings:mcpServers.connectionState.${server.connection.status.status}`)} · ${t("settings:mcpServers.toolsCount", { count: server.connection.toolCount })}` : ""}
         </span>
+        {server.connection && "error" in server.connection.status ? <p className="mt-1 text-xs text-danger">{apiErrorMessage(server.connection.status.error)}</p> : null}
       </div>
-      <span className="inline-flex items-center gap-2 text-sm text-muted">
+      <span className="inline-flex items-center gap-2 text-sm text-muted max-sm:col-span-3">
         <span className={cn("size-1.5 rounded-full", server.enabled ? "bg-success" : "bg-muted/60")} />
         {server.enabled ? t("plugins:status.enabled") : t("plugins:status.disabled")}
       </span>

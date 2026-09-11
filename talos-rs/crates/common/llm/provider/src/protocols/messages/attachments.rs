@@ -44,6 +44,14 @@ pub(super) fn user_content(
     content
 }
 
+pub(super) fn tool_content(text: String, attachments: Option<Vec<Attachment>>) -> Value {
+    if attachments.is_some() {
+        Value::Array(user_content(text, None, attachments))
+    } else {
+        Value::String(text)
+    }
+}
+
 fn attachment_block(attachment: Attachment) -> MessagesAttachmentBlock {
     let source = MessagesBase64Source {
         source_type: "base64",

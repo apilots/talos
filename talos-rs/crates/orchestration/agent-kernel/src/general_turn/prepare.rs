@@ -809,11 +809,10 @@ pub async fn prepare_general_turn(
         );
     }
     emit_prompt_warning_events(ctx, &warnings).await;
-    let max_output_tokens = Some(kernel_config.output.effective_max_tokens());
     let reasoning_effort = ctx
         .model_selection
         .resolve_reasoning(&ctx.selected_model_info)?;
-    let speed = ctx.selected_model_info.model.speed;
+    let model = &ctx.selected_model_info.model;
 
     let tool_selection_request =
         build_tool_selection_request(&session_id, input, phase, kernel_config);
@@ -832,10 +831,11 @@ pub async fn prepare_general_turn(
         workspace_id: ctx.workspace_id.clone(),
         project_root: ctx.project_root.clone(),
         selected_model,
-        max_output_tokens,
+        max_output_tokens: Some(kernel_config.output.effective_max_tokens()),
         reasoning_effort,
-        speed,
+        speed: model.speed,
         attachment_tokens,
+        image_input_enabled: model.input.contains(&talos_config::ModelInputKind::Image),
         messages,
         maintenance_usage,
         tool_selection_request,

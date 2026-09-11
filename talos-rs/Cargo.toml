@@ -128,7 +128,7 @@ okf-validator = "=0.2.4"
 reqwest = { version = "0.12", features = ["json"] }
 firecrawl = "2.11"
 tavily = "2.1"
-rmcp = { version = "1.7.0", default-features = false }
+rmcp = { version = "3.2.0", default-features = false }
 cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 
 # Internal crates

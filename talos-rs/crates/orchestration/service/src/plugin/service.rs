@@ -1,31 +1,101 @@
+use std::sync::Arc;
 use talos_config::{PluginsRuntimeConfig, SkillsRuntimeConfig};
 use talos_error::TalosResult;
 use talos_plugin::PluginManager;
 use talos_skills::SkillRoots;
 use talos_types::{
-    McpServerRuntimeDescriptor, PluginDisableRequest, PluginDisableResponse, PluginEnableRequest,
-    PluginEnableResponse, PluginInstallRequest, PluginInstallResponse, PluginListRequest,
-    PluginListResponse, PluginReadRequest, PluginReadResponse, PluginSearchRequest,
-    PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
+    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
     PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
     PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
     PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
 };
+use tokio::sync::RwLock;
 
 #[derive(Clone)]
 pub struct PluginManagerService {
-    manager: PluginManager,
+    pub(super) manager: PluginManager,
+    pub(crate) execution_gate: Arc<RwLock<()>>,
+    pub(super) mcp: Option<McpContext>,
+}
+
+#[derive(Clone)]
+pub(super) struct McpContext {
+    pub runtime: Arc<talos_mcp::TalosMcpRuntime>,
+    pub config: Arc<std::sync::RwLock<talos_config::Config>>,
+    pub credentials: super::McpCredentialStore,
+    pub oauth: Arc<super::oauth::OAuthAttempts>,
 }
 
 impl PluginManagerService {
     pub fn new(config: PluginsRuntimeConfig, skills: SkillsRuntimeConfig) -> Self {
         Self {
             manager: PluginManager::new(config).with_max_skill_md_bytes(skills.max_skill_md_bytes),
+            execution_gate: Arc::default(),
+            mcp: None,
         }
     }
 
     pub fn with_manager(manager: PluginManager) -> Self {
-        Self { manager }
+        Self {
+            manager,
+            execution_gate: Arc::default(),
+            mcp: None,
+        }
+    }
+
+    /// Connects plugin publication and status to the application-owned MCP owner.
+    pub fn with_mcp(
+        mut self,
+        runtime: Arc<talos_mcp::TalosMcpRuntime>,
+        hook: talos_plugin::McpChangeHook,
+        config: Arc<std::sync::RwLock<talos_config::Config>>,
+        credentials: super::McpCredentialStore,
+    ) -> Self {
+        self.manager = self.manager.with_mcp_change_hook(hook);
+        self.mcp = Some(McpContext {
+            runtime,
+            config,
+            credentials,
+            oauth: Arc::default(),
+        });
+        self
+    }
+
+    /// Serializes terminal connection shutdown with plugin/configuration commits.
+    pub async fn shutdown_mcp(&self) -> TalosResult<()> {
+        let _guard = self.execution_gate.write().await;
+        match &self.mcp {
+            Some(context) => {
+                let finishing = context.oauth.stop();
+                let result = context.runtime.shutdown().await;
+                drop(_guard);
+                for finished in finishing {
+                    finished.cancelled().await;
+                }
+                context.oauth.tasks.wait().await;
+                result
+            }
+            None => Ok(()),
+        }
+    }
+
+    pub fn list_mcp_servers(
+        &self,
+        request: talos_types::McpServerListRequest,
+    ) -> TalosResult<talos_types::McpServerListResponse> {
+        self.mcp
+            .as_ref()
+            .ok_or_else(|| {
+                talos_error::TalosError::new(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    "MCP management is not attached to this application.",
+                )
+            })?
+            .runtime
+            .list_servers(request)
     }
 
     pub fn list_sources(
@@ -39,14 +109,26 @@ impl PluginManagerService {
         &self,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        self.manager.add_source(request)
+        self.manager.add_source(request).map(|mut response| {
+            response
+                .plugins
+                .iter_mut()
+                .for_each(super::redaction::plugin);
+            response
+        })
     }
 
     pub fn refresh_source(
         &self,
         request: PluginSourceRefreshRequest,
     ) -> TalosResult<PluginSourceRefreshResponse> {
-        self.manager.refresh_source(request)
+        self.manager.refresh_source(request).map(|mut response| {
+            response
+                .plugins
+                .iter_mut()
+                .for_each(super::redaction::plugin);
+            response
+        })
     }
 
     pub fn remove_source(
@@ -57,45 +139,86 @@ impl PluginManagerService {
     }
 
     pub fn search(&self, request: PluginSearchRequest) -> TalosResult<PluginSearchResponse> {
-        self.manager.search(request)
+        self.manager.search(request).map(|mut response| {
+            response
+                .plugins
+                .iter_mut()
+                .for_each(super::redaction::plugin);
+            response
+        })
     }
 
     pub fn list_plugins(&self, request: PluginListRequest) -> TalosResult<PluginListResponse> {
-        self.manager.list_plugins(request)
+        self.manager.list_plugins(request).map(|mut response| {
+            response
+                .plugins
+                .iter_mut()
+                .for_each(super::redaction::plugin);
+            response
+        })
     }
 
     pub fn read(&self, request: PluginReadRequest) -> TalosResult<PluginReadResponse> {
-        self.manager.read(request)
+        super::redaction::read(self.manager.read(request)?)
     }
 
-    pub fn install(&self, request: PluginInstallRequest) -> TalosResult<PluginInstallResponse> {
-        self.manager.install(request)
+    pub async fn install(
+        &self,
+        request: PluginInstallRequest,
+    ) -> TalosResult<PluginInstallResponse> {
+        let _guard = self.execution_gate.write().await;
+        let result = self.install_with_credentials(request).map(|mut response| {
+            super::redaction::plugin(&mut response.plugin);
+            response
+        });
+        self.recover_credentials();
+        result
     }
 
-    pub fn update(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
-        self.manager.update(request)
+    pub async fn update(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
+        let _guard = self.execution_gate.write().await;
+        let result = self.manager.update(request).map(|mut response| {
+            super::redaction::plugin(&mut response.plugin);
+            response
+        });
+        self.recover_credentials();
+        result
     }
 
-    pub fn uninstall(
+    pub async fn uninstall(
         &self,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        self.manager.uninstall(request)
+        let _guard = self.execution_gate.write().await;
+        let result = self.manager.uninstall(request);
+        self.recover_credentials();
+        result
     }
 
-    pub fn enable(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
-        self.manager.enable(request)
+    pub async fn enable(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
+        let _guard = self.execution_gate.write().await;
+        self.manager.enable(request).map(|mut response| {
+            super::redaction::plugin(&mut response.plugin);
+            response
+        })
     }
 
-    pub fn disable(&self, request: PluginDisableRequest) -> TalosResult<PluginDisableResponse> {
-        self.manager.disable(request)
+    pub async fn disable(
+        &self,
+        request: PluginDisableRequest,
+    ) -> TalosResult<PluginDisableResponse> {
+        let _guard = self.execution_gate.write().await;
+        self.manager.disable(request).map(|mut response| {
+            super::redaction::plugin(&mut response.plugin);
+            response
+        })
     }
 
     pub fn skill_roots(&self, config: &SkillsRuntimeConfig) -> TalosResult<SkillRoots> {
         self.manager.skill_roots(config)
     }
 
-    pub fn mcp_servers(&self) -> TalosResult<Vec<McpServerRuntimeDescriptor>> {
+    pub fn mcp_servers(&self) -> TalosResult<talos_plugin::McpDiscovery> {
         self.manager.mcp_servers()
     }
 }

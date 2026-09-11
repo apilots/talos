@@ -2425,6 +2425,24 @@
           "properties": {
             "method": {
               "enum": [
+                "file/content"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FileReadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "file/update"
               ],
               "type": "string"
@@ -2503,6 +2521,24 @@
             },
             "params": {
               "$ref": "#/definitions/MemoryFileWriteRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "workspace/info"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/WorkspaceInfoRequest"
             }
           },
           "required": [
@@ -2737,6 +2773,96 @@
             },
             "params": {
               "$ref": "#/definitions/PluginSearchRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "mcp/server/list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/McpServerListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "mcp/server/credentials/update"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/McpCredentialsUpdateRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "mcp/server/auth/start"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/McpAuthenticationStartRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "mcp/server/auth/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/McpAuthenticationReadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "mcp/server/import"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/McpServerImportRequest"
             }
           },
           "required": [
@@ -3723,6 +3849,22 @@
       ],
       "type": "object"
     },
+    "FileContentResponse": {
+      "description": "Wire response for authenticated file content; SDKs decode bytes for callers.",
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "file": {
+          "$ref": "#/definitions/FileInfo"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "file"
+      ],
+      "type": "object"
+    },
     "FileDeleteRequest": {
       "description": "Selects one file to delete for the authenticated user.",
       "properties": {
@@ -4418,6 +4560,792 @@
         }
       ]
     },
+    "McpAuthentication": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "config": {
+              "$ref": "#/definitions/McpOAuthConfig"
+            },
+            "type": {
+              "enum": [
+                "oauth"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "config",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "bearer"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "header"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpAuthenticationReadRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "server": {
+          "$ref": "#/definitions/McpDefinitionRef"
+        }
+      },
+      "required": [
+        "server"
+      ],
+      "type": "object"
+    },
+    "McpAuthenticationResponse": {
+      "properties": {
+        "authentication": {
+          "$ref": "#/definitions/McpAuthentication"
+        },
+        "server": {
+          "$ref": "#/definitions/McpDefinitionRef"
+        },
+        "state": {
+          "$ref": "#/definitions/McpAuthenticationState"
+        }
+      },
+      "required": [
+        "authentication",
+        "server",
+        "state"
+      ],
+      "type": "object"
+    },
+    "McpAuthenticationStartRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "clientSecret": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config": {
+          "$ref": "#/definitions/McpOAuthConfig"
+        },
+        "server": {
+          "$ref": "#/definitions/McpDefinitionRef"
+        }
+      },
+      "required": [
+        "config",
+        "server"
+      ],
+      "type": "object"
+    },
+    "McpAuthenticationStartResponse": {
+      "properties": {
+        "attemptId": {
+          "type": "string"
+        },
+        "authorizationUrl": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "description": "Unix timestamp in seconds.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "server": {
+          "$ref": "#/definitions/McpDefinitionRef"
+        }
+      },
+      "required": [
+        "attemptId",
+        "authorizationUrl",
+        "expiresAt",
+        "server"
+      ],
+      "type": "object"
+    },
+    "McpAuthenticationState": {
+      "oneOf": [
+        {
+          "properties": {
+            "attemptId": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "authorizing"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "attemptId",
+            "expiresAt",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "authenticated"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "expired"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "unconfigured"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "credentialsStored"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "missing"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ApiError"
+            },
+            "type": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpCredentialBinding": {
+      "additionalProperties": false,
+      "description": "Public configuration contains only an opaque reference to one private credential bundle.",
+      "properties": {
+        "authentication": {
+          "$ref": "#/definitions/McpAuthentication"
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authentication",
+        "reference"
+      ],
+      "type": "object"
+    },
+    "McpCredentialValues": {
+      "additionalProperties": false,
+      "description": "Write-only values for a complete credential replacement. Omitted maps mean no secret entries. These values must never be returned as a definition, status, event or tool result.",
+      "properties": {
+        "authentication": {
+          "$ref": "#/definitions/McpAuthentication"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "authentication"
+      ],
+      "type": "object"
+    },
+    "McpCredentialsChange": {
+      "oneOf": [
+        {
+          "properties": {
+            "credentials": {
+              "$ref": "#/definitions/McpCredentialValues"
+            },
+            "type": {
+              "enum": [
+                "replace"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "credentials",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "clear"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpCredentialsUpdateRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "change": {
+          "$ref": "#/definitions/McpCredentialsChange"
+        },
+        "server": {
+          "$ref": "#/definitions/McpDefinitionRef"
+        }
+      },
+      "required": [
+        "change",
+        "server"
+      ],
+      "type": "object"
+    },
+    "McpDefinitionRef": {
+      "description": "Stable single-instance definition identity, independent of display names and endpoints.",
+      "oneOf": [
+        {
+          "properties": {
+            "install_id": {
+              "$ref": "#/definitions/PluginInstallId"
+            },
+            "type": {
+              "enum": [
+                "plugin"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "install_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "config"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpOAuthConfig": {
+      "additionalProperties": false,
+      "description": "Local authorization configuration. Confidential client secrets remain in private storage.",
+      "properties": {
+        "callbackPort": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "clientId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientMetadataUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "McpServerDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/McpCredentialBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "transport": {
+          "$ref": "#/definitions/McpTransportDefinition"
+        }
+      },
+      "required": [
+        "name",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "McpServerImportRequest": {
+      "additionalProperties": false,
+      "description": "Imports one server object or one-entry mcpServers object. A bare unnamed object needs name.",
+      "properties": {
+        "conflictPolicy": {
+          "$ref": "#/definitions/PluginInstallConflictPolicy"
+        },
+        "enable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "json": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "conflictPolicy",
+        "json"
+      ],
+      "type": "object"
+    },
+    "McpServerInfo": {
+      "description": "A safe connection summary. Commands, environment, headers and URLs are never returned.",
+      "properties": {
+        "displayName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/McpServerSource"
+        },
+        "status": {
+          "$ref": "#/definitions/McpServerStatus"
+        },
+        "toolCount": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "transport": {
+          "$ref": "#/definitions/McpTransportKind"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "status",
+        "toolCount",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "McpServerListRequest": {
+      "additionalProperties": false,
+      "description": "Omitted/null cursor starts from the beginning; omitted/null limit defaults to 50.",
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "McpServerListResponse": {
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/McpServerInfo"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "McpServerSource": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "config"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "install_id": {
+              "$ref": "#/definitions/PluginInstallId"
+            },
+            "kind": {
+              "enum": [
+                "plugin"
+              ],
+              "type": "string"
+            },
+            "plugin_id": {
+              "$ref": "#/definitions/PluginId"
+            }
+          },
+          "required": [
+            "install_id",
+            "kind",
+            "plugin_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpServerStatus": {
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "notStarted"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "starting"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "ready"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ApiError"
+            },
+            "status": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ApiError"
+            },
+            "status": {
+              "enum": [
+                "exited"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpTransportDefinition": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "type": {
+              "enum": [
+                "stdio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "type": "object"
+            },
+            "type": {
+              "enum": [
+                "streamable_http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "McpTransportKind": {
+      "enum": [
+        "stdio",
+        "streamableHttp"
+      ],
+      "type": "string"
+    },
     "MemoryFileListRequest": {
       "properties": {
         "before_date": {
@@ -4912,6 +5840,34 @@
       "oneOf": [
         {
           "properties": {
+            "credentials": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/McpCredentialValues"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "enum": [
+                "manual_mcp_server"
+              ],
+              "type": "string"
+            },
+            "server": {
+              "$ref": "#/definitions/McpServerDefinition"
+            }
+          },
+          "required": [
+            "kind",
+            "server"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "expected_source_commit": {
               "type": [
                 "string",
@@ -5327,6 +6283,124 @@
       },
       "required": [
         "project_id"
+      ],
+      "type": "object"
+    },
+    "PromptWarning": {
+      "oneOf": [
+        {
+          "properties": {
+            "file": {
+              "$ref": "#/definitions/PromptWarningFile"
+            },
+            "type": {
+              "enum": [
+                "bootstrapFileMissing"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "file",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "file": {
+              "$ref": "#/definitions/PromptWarningFile"
+            },
+            "injectedChars": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "rawChars": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "bootstrapFileTruncated"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "file",
+            "injectedChars",
+            "rawChars",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "file": {
+              "$ref": "#/definitions/PromptWarningFile"
+            },
+            "type": {
+              "enum": [
+                "bootstrapFileDropped"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "file",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "count": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "dynamicSectionsDropped"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "count",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PromptWarningFile": {
+      "description": "Bootstrap document identity, independent of its server storage location.",
+      "enum": [
+        "agents",
+        "soul",
+        "identity",
+        "user",
+        "heartbeat"
+      ],
+      "type": "string"
+    },
+    "PromptWarningNotice": {
+      "additionalProperties": false,
+      "description": "Nonfatal prompt assembly outcome, kept in execution order. The reviewed English message serves clients without localization; warning fields own UI translation. Server paths and diagnostic sources are deliberately excluded.",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "warning": {
+          "$ref": "#/definitions/PromptWarning"
+        }
+      },
+      "required": [
+        "message",
+        "warning"
       ],
       "type": "object"
     },
@@ -7125,7 +8199,7 @@
       "type": "string"
     },
     "SystemNoticeContent": {
-      "description": "Notice presentation retains either informational text or the shared error contract. Add variants only for distinct presentation semantics, never domain error categories.",
+      "description": "Notice presentation retains text, nonfatal prompt warnings, or the shared error contract. Add variants only for distinct presentation semantics, never domain error categories.",
       "oneOf": [
         {
           "properties": {
@@ -7153,6 +8227,24 @@
             "type": {
               "enum": [
                 "error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/PromptWarningNotice"
+            },
+            "type": {
+              "enum": [
+                "promptWarning"
               ],
               "type": "string"
             }
@@ -7458,6 +8550,33 @@
           "required": [
             "type",
             "url"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A tool-produced image persisted in the authenticated user's FileService.",
+          "properties": {
+            "fileId": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "mimeType": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "fileId",
+            "label",
+            "mimeType",
+            "type"
           ],
           "type": "object"
         },
@@ -8336,6 +9455,11 @@
         "kind"
       ],
       "type": "object"
+    },
+    "WorkspaceInfoRequest": {
+      "additionalProperties": false,
+      "description": "Read the configured default Workspace for the trusted current actor. This is not a Session workspace selector and accepts no client path or user ID.",
+      "type": "object"
     }
   },
   "properties": {
@@ -8369,6 +9493,9 @@
     "event_unsubscribe_response": {
       "$ref": "#/definitions/EventUnsubscribeResponse"
     },
+    "file_content_response": {
+      "$ref": "#/definitions/FileContentResponse"
+    },
     "file_delete_response": {
       "$ref": "#/definitions/FileDeleteResponse"
     },
@@ -8395,6 +9522,15 @@
     },
     "jsonrpc_message": {
       "$ref": "#/definitions/JsonRpcMessage"
+    },
+    "mcp_authentication_response": {
+      "$ref": "#/definitions/McpAuthenticationResponse"
+    },
+    "mcp_authentication_start_response": {
+      "$ref": "#/definitions/McpAuthenticationStartResponse"
+    },
+    "mcp_server_list_response": {
+      "$ref": "#/definitions/McpServerListResponse"
     },
     "message_queue": {
       "$ref": "#/definitions/MessageQueue"
@@ -8483,6 +9619,7 @@
     "collaboration_tool_result",
     "error",
     "event_unsubscribe_response",
+    "file_content_response",
     "file_delete_response",
     "file_list_response",
     "file_read_response",
@@ -8492,6 +9629,9 @@
     "interrupt_turn_request",
     "interrupt_turn_response",
     "jsonrpc_message",
+    "mcp_authentication_response",
+    "mcp_authentication_start_response",
+    "mcp_server_list_response",
     "message_queue",
     "message_queue_add_request",
     "message_queue_changed_notification",

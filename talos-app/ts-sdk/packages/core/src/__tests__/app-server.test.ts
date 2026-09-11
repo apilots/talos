@@ -12,6 +12,9 @@ class RecordingTransport implements AppServerTransport {
 
   request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.requests.push({ method, params });
+    if (method === "file/content") {
+      return Promise.resolve({ file: { fileId: "file-1" }, dataBase64: "YWI=" } as T);
+    }
     if (method === "model/list") {
       return Promise.resolve({ models: [] } as T);
     }
@@ -72,6 +75,9 @@ describe("AppServerClient", () => {
     await client.files.upload(request, new Uint8Array([97, 98]));
     await client.files.list({ limit: 10 });
     await client.files.read({ fileId: "file-1" });
+    const downloaded = await client.files.content({ fileId: "file-1" });
+    expect(downloaded.data).toEqual(new Uint8Array([97, 98]));
+    expect(downloaded.file.fileId).toBe("file-1");
     await client.files.update({ fileId: "file-1", tags: [] });
     await client.files.delete({ fileId: "file-1" });
 
@@ -82,6 +88,7 @@ describe("AppServerClient", () => {
       },
       { method: "file/list", params: { limit: 10 } },
       { method: "file/read", params: { fileId: "file-1" } },
+      { method: "file/content", params: { fileId: "file-1" } },
       { method: "file/update", params: { fileId: "file-1", tags: [] } },
       { method: "file/delete", params: { fileId: "file-1" } },
     ]);
@@ -115,7 +122,13 @@ describe("AppServerClient", () => {
     const transport = new RecordingTransport();
     const client = new AppServerClient(transport);
 
+    await client.workspaceInfo();
     await client.listModels();
+    await client.listMcpServers({ cursor: "alpha", limit: 1 });
+    await client.importMcpServer({ json: '{"name":"server","command":"npx"}', enable: false, conflictPolicy: "reject" });
+    await client.startMcpAuthentication({ server: { type: "config", name: "server" }, config: { scopes: ["read"] } });
+    await client.readMcpAuthentication({ server: { type: "config", name: "server" } });
+    await client.updateMcpCredentials({ server: { type: "config", name: "server" }, change: { type: "clear" } });
     await client.readProfile();
     await client.patchSession({
       sessionId: "session-1",
@@ -164,7 +177,13 @@ describe("AppServerClient", () => {
     await client.searchMemory({ query: "stable fact", limit: 3 });
 
     expect(transport.requests).toEqual([
+      { method: "workspace/info", params: {} },
       { method: "model/list", params: {} },
+      { method: "mcp/server/list", params: { cursor: "alpha", limit: 1 } },
+      { method: "mcp/server/import", params: { json: '{"name":"server","command":"npx"}', enable: false, conflictPolicy: "reject" } },
+      { method: "mcp/server/auth/start", params: { server: { type: "config", name: "server" }, config: { scopes: ["read"] } } },
+      { method: "mcp/server/auth/read", params: { server: { type: "config", name: "server" } } },
+      { method: "mcp/server/credentials/update", params: { server: { type: "config", name: "server" }, change: { type: "clear" } } },
       { method: "profile/read", params: {} },
       {
         method: "session/patch",

@@ -1,4 +1,6 @@
+mod manual;
 mod runtime;
+pub(crate) use manual::{manual_mcp_candidate, manual_mcp_plugin};
 
 pub(crate) use runtime::{
     installed_mcp_servers, installed_plugin, installed_skill_root, missing_plugin_from_install,
@@ -19,7 +21,13 @@ use talos_types::{
 
 pub(crate) struct InstallCandidate {
     pub plugin: Plugin,
-    pub source: MarketplaceSource,
+    pub source: InstallSource,
+}
+
+pub(crate) enum InstallSource {
+    Marketplace(MarketplaceSource),
+    Installed(PluginInstall),
+    Manual,
 }
 
 pub(crate) struct InstallActivation {
@@ -48,11 +56,20 @@ pub(crate) fn install_plugin(
 ) -> TalosResult<InstallActivation> {
     ensure_installable_plugin(&candidate.plugin)?;
     let install_id = install_id_for(&candidate.plugin.id);
-    let install_dir = final_install_dir(
-        state,
-        candidate.plugin.kind,
-        &candidate.plugin.metadata.name,
-    )?;
+    let install_dir = match &candidate.source {
+        InstallSource::Installed(install) => install.installed_path.clone(),
+        _ => final_install_dir(
+            state,
+            candidate.plugin.kind,
+            &candidate.plugin.metadata.name,
+        )?,
+    };
+    let original_dirty_digest = match &candidate.source {
+        InstallSource::Installed(install) if has_local_changes(install)? => {
+            Some(install.content_digest.clone())
+        }
+        _ => None,
+    };
     let backup_dir = state.transaction_backup_dir(&install_id);
     state.cleanup_install_temps()?;
     if backup_dir.exists() {
@@ -104,8 +121,11 @@ pub(crate) fn install_plugin(
         installed_path: install_dir,
         enabled,
         source: install_source(&candidate.source, &candidate.plugin),
-        content_digest,
-        installed_at_ms: now_ms,
+        content_digest: original_dirty_digest.unwrap_or(content_digest),
+        installed_at_ms: match &candidate.source {
+            InstallSource::Installed(install) => install.installed_at_ms,
+            _ => now_ms,
+        },
         updated_at_ms: now_ms,
     };
     Ok(InstallActivation {
@@ -114,7 +134,7 @@ pub(crate) fn install_plugin(
     })
 }
 
-pub(crate) fn commit_install_activation(activation: &InstallActivation) -> TalosResult<()> {
+pub(crate) fn cleanup_install_activation(activation: &InstallActivation) -> TalosResult<()> {
     if let Some(backup_dir) = &activation.backup_dir {
         if backup_dir.exists() {
             remove_plugin_directory(backup_dir, "remove plugin install backup")?;
@@ -222,7 +242,7 @@ pub(crate) fn update_plugin(
     })
 }
 
-pub(crate) fn commit_update_activation(activation: &UpdateActivation) -> TalosResult<()> {
+pub(crate) fn cleanup_update_activation(activation: &UpdateActivation) -> TalosResult<()> {
     if let Some(backup_dir) = &activation.backup_dir {
         if backup_dir.exists() {
             remove_plugin_directory(backup_dir, "remove plugin update backup")?;
@@ -277,7 +297,7 @@ pub(crate) fn stage_uninstall_plugin(
     })
 }
 
-pub(crate) fn commit_uninstall_activation(activation: &UninstallActivation) -> TalosResult<()> {
+pub(crate) fn cleanup_uninstall_activation(activation: &UninstallActivation) -> TalosResult<()> {
     if activation.removed_path && activation.trash_dir.exists() {
         remove_plugin_directory(&activation.trash_dir, "remove plugin uninstall trash")?;
     }
@@ -457,9 +477,66 @@ fn materialize_install_dir(
     install_id: &PluginInstallId,
     install_dir: &Path,
 ) -> TalosResult<ContentDigest> {
-    let source_dir = plugin_source_dir(state, &candidate.source, &candidate.plugin)?;
     create_plugin_directory(install_dir, "create plugin install dir")?;
-    copy_dir(&source_dir, install_dir)?;
+    match &candidate.source {
+        InstallSource::Marketplace(source) => {
+            let source_dir = plugin_source_dir(state, source, &candidate.plugin)?;
+            copy_dir(&source_dir, install_dir)?;
+        }
+        InstallSource::Installed(install) => {
+            copy_dir(&install.installed_path, install_dir)?;
+            let PluginDefinition::McpServer(mcp) = &candidate.plugin.definition else {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "Only MCP credentials can update an installed manifest.",
+                ));
+            };
+            let path = install_dir.join("talos-mcp.json");
+            let text = fs::read_to_string(&path).map_err(|error| {
+                TalosError::internal_with_source(
+                    "Failed to read the installed MCP manifest.",
+                    error,
+                )
+            })?;
+            let mut document: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
+                TalosError::internal_with_source("The installed MCP manifest is invalid.", error)
+            })?;
+            document["credentials"] =
+                serde_json::to_value(&mcp.server.credentials).map_err(|error| {
+                    TalosError::internal_with_source(
+                        "Failed to encode the MCP credential binding.",
+                        error,
+                    )
+                })?;
+            // Preserve marketplace metadata and unrelated transport fields.
+            match &mcp.server.transport {
+                talos_types::McpTransportDefinition::Stdio { env, .. } => {
+                    document["transport"]["env"] = serde_json::to_value(env).map_err(|error| {
+                        TalosError::internal_with_source(
+                            "Failed to encode the MCP environment.",
+                            error,
+                        )
+                    })?
+                }
+                talos_types::McpTransportDefinition::StreamableHttp { headers, .. } => {
+                    document["transport"]["headers"] =
+                        serde_json::to_value(headers).map_err(|error| {
+                            TalosError::internal_with_source("Failed to encode MCP headers.", error)
+                        })?
+                }
+            }
+            talos_fs::write_json_pretty(&path, &document)?;
+        }
+        InstallSource::Manual => {
+            let PluginDefinition::McpServer(mcp) = &candidate.plugin.definition else {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "Only MCP definitions can be installed manually.",
+                ));
+            };
+            talos_fs::write_json_pretty(&install_dir.join("talos-mcp.json"), &mcp.server)?;
+        }
+    }
     let required_file = match candidate.plugin.kind {
         PluginKind::Skill => "SKILL.md",
         PluginKind::McpServer => "talos-mcp.json",
@@ -477,7 +554,12 @@ fn materialize_install_dir(
     content_digest_for_dir(install_dir)
 }
 
-fn install_source(source: &MarketplaceSource, plugin: &Plugin) -> PluginInstallSource {
+fn install_source(source: &InstallSource, plugin: &Plugin) -> PluginInstallSource {
+    let source = match source {
+        InstallSource::Manual => return PluginInstallSource::Manual,
+        InstallSource::Installed(install) => return install.source.clone(),
+        InstallSource::Marketplace(source) => source,
+    };
     match &source.location {
         MarketplaceSourceLocation::Git { url, reference } => PluginInstallSource::Marketplace {
             source_id: source.id.clone(),
@@ -499,7 +581,7 @@ fn has_local_changes(install: &PluginInstall) -> TalosResult<bool> {
     Ok(current != install.content_digest)
 }
 
-fn final_install_dir(
+pub(crate) fn final_install_dir(
     state: &PluginStateStore,
     kind: PluginKind,
     name: &str,
@@ -674,7 +756,7 @@ fn collect_digest_files(
     Ok(())
 }
 
-fn install_id_for(plugin_id: &PluginId) -> PluginInstallId {
+pub(crate) fn install_id_for(plugin_id: &PluginId) -> PluginInstallId {
     let mut hasher = Sha256::new();
     hasher.update(plugin_id.0.as_bytes());
     let digest = hasher.finalize();

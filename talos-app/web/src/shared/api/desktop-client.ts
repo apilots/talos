@@ -153,6 +153,7 @@ export function createDesktopTalosClient(
       getEntry: (request: MemoryGetRequest) => client.getMemory(request),
     },
     workspaceDocs: {
+      info: () => client.workspaceInfo(),
       get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind),
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
         client
@@ -165,6 +166,14 @@ export function createDesktopTalosClient(
         client.suggestSkills(query),
       read: (request: Parameters<TalosWebClient["skills"]["read"]>[0]) =>
         client.readSkill(request),
+    },
+    mcp: {
+      import: (request: Parameters<TalosWebClient["mcp"]["import"]>[0]) => client.importMcpServer(request),
+      startAuthentication: (request: Parameters<TalosWebClient["mcp"]["startAuthentication"]>[0]) => client.startMcpAuthentication(request),
+      readAuthentication: (request: Parameters<TalosWebClient["mcp"]["readAuthentication"]>[0]) => client.readMcpAuthentication(request),
+      updateCredentials: (request: Parameters<TalosWebClient["mcp"]["updateCredentials"]>[0]) => client.updateMcpCredentials(request),
+
+      list: (request?: Parameters<TalosWebClient["mcp"]["list"]>[0]) => client.listMcpServers(request),
     },
     plugin: {
       search: (request: Parameters<TalosWebClient["plugin"]["search"]>[0]) =>

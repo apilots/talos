@@ -58,6 +58,7 @@ async fn test_state_with_config_and_plugin_manager(
         files,
         event_service.clone(),
         config.clone(),
+        plugin_manager,
         memory,
         config_store,
         vec![test_model_info()],
@@ -65,13 +66,6 @@ async fn test_state_with_config_and_plugin_manager(
         user_service,
         reload_hook,
     );
-    let mut app = app;
-    app.plugins = plugin_manager.clone();
-    app.skills = talos_service::SkillsService::new(
-        config.agent.kernel.skills.clone(),
-        config.agent.kernel.plugins.clone(),
-    )
-    .with_plugin_manager(plugin_manager);
     Arc::new(HttpApiState::from_service(
         Arc::new(app),
         event_service,
@@ -645,6 +639,17 @@ Use this skill for protocol contract verification.
         },
         PluginStateStore::new(temp.path().join("plugin-state")),
     ));
+    let mcp = Arc::new(talos_mcp::TalosMcpRuntime::new());
+    let owner = mcp.clone();
+    let plugin_manager = plugin_manager.with_mcp(
+        mcp.clone(),
+        Arc::new(move |servers| {
+            let prepared = owner.prepare(servers.into_iter().map(Into::into).collect())?;
+            Ok(Box::new(move || prepared.publish()))
+        }),
+        Arc::new(std::sync::RwLock::new(config.clone())),
+        talos_service::McpCredentialStore::new(temp.path().join("credentials")),
+    );
     let state = test_state_with_config_and_plugin_manager(config, plugin_manager, false).await;
 
     let added = add_plugin_source_handler(
@@ -693,6 +698,139 @@ Use this skill for protocol contract verification.
         Some(0)
     );
 
+    // A real JSON HTTP request imports a write-only token; App Server reads and clears the same state.
+    let router = Router::new()
+        .route("/v1/mcp/servers/import", post(import_mcp_server_handler))
+        .layer(axum::Extension(test_auth()))
+        .with_state(state.clone());
+    let response = router.oneshot(Request::builder().method("POST").uri("/v1/mcp/servers/import").header("content-type", "application/json").body(Body::from(serde_json::json!({
+        "json": "{\"mcpServers\":{\"contract_mcp\":{\"url\":\"https://example.com/mcp\",\"headers\":{\"Authorization\":\"Bearer contract-private-token\"}}}}",
+        "enable": false, "conflictPolicy": "reject"
+    }).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&body).contains("contract-private-token"));
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let owner = talos_types::McpDefinitionRef::Plugin {
+        install_id: serde_json::from_value(body["data"]["install"]["id"].clone()).unwrap(),
+    };
+    let authentication = adapter
+        .dispatch(
+            &actor,
+            ClientRequest {
+                method: ClientMethod::McpAuthenticationRead,
+                params: ClientRequestParams::McpAuthenticationRead(
+                    talos_types::McpAuthenticationReadRequest {
+                        server: owner.clone(),
+                    },
+                ),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(authentication.body["state"]["type"], "credentialsStored");
+    let cleared = adapter
+        .dispatch(
+            &actor,
+            ClientRequest {
+                method: ClientMethod::McpCredentialsUpdate,
+                params: ClientRequestParams::McpCredentialsUpdate(
+                    talos_types::McpCredentialsUpdateRequest {
+                        server: owner,
+                        change: talos_types::McpCredentialsChange::Clear,
+                    },
+                ),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(cleared.body["state"]["type"], "missing");
+
+    // Both adapters page the same live connection owner and expose safe errors.
+    mcp.prepare(
+        ["alpha", "beta"]
+            .into_iter()
+            .map(|name| talos_types::McpServerRuntimeDescriptor {
+                content_revision: None,
+                source: talos_types::McpServerSource::Config,
+                server: talos_types::McpServerDefinition {
+                    credentials: None,
+                    name: name.into(),
+                    display_name: None,
+                    description: None,
+                    transport: talos_types::McpTransportDefinition::Stdio {
+                        command: "/missing/private-mcp-command".into(),
+                        args: vec![],
+                        cwd: None,
+                        env: [("API_KEY".into(), "private-mcp-secret".into())].into(),
+                    },
+                },
+            })
+            .map(Into::into)
+            .collect(),
+    )
+    .unwrap()
+    .publish();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !mcp
+            .list_servers(Default::default())
+            .unwrap()
+            .data
+            .iter()
+            .all(|server| matches!(server.status, talos_types::McpServerStatus::Failed { .. }))
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let first = expect_success(
+        list_mcp_servers_handler(
+            State(state.clone()),
+            axum::extract::Extension(test_auth()),
+            Query(talos_types::McpServerListRequest {
+                cursor: None,
+                limit: Some(1),
+            }),
+        )
+        .await
+        .unwrap()
+        .0,
+    );
+    assert_eq!(first.data[0].name, "alpha");
+    assert_eq!(first.next_cursor.as_deref(), Some("alpha"));
+    let second = adapter
+        .dispatch(
+            &actor,
+            ClientRequest {
+                method: ClientMethod::McpServerList,
+                params: ClientRequestParams::McpServerList(talos_types::McpServerListRequest {
+                    cursor: first.next_cursor,
+                    limit: Some(1),
+                }),
+            },
+        )
+        .await
+        .unwrap()
+        .body;
+    assert_eq!(second["data"][0]["name"], "beta");
+    assert_eq!(second["data"][0]["status"]["status"], "failed");
+    assert_eq!(second["data"][0]["toolCount"], 0);
+    assert!(second["nextCursor"].is_null());
+    assert!(!second.to_string().contains("private-mcp"));
+    assert!(list_mcp_servers_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Query(talos_types::McpServerListRequest {
+            cursor: None,
+            limit: Some(0)
+        })
+    )
+    .await
+    .is_err());
+    mcp.shutdown().await.unwrap();
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 
@@ -751,4 +889,44 @@ async fn test_http_server_listen_addr_uses_configured_host() {
     );
 
     assert_eq!(server.listen_addr(), "127.0.0.1:8080");
+}
+
+#[tokio::test]
+async fn workspace_info_http_and_rpc_share_actor_scoped_storage_locations() {
+    use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
+    use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
+    let (config, workspace_dir) = isolated_test_config();
+    let expected = talos_types::WorkspaceInfoResponse {
+        workspace_id: config.default_workspace_id().into(),
+        root_prefix: config
+            .workspace_root_prefix(config.default_workspace_id())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+        user_workspace_dir: config
+            .resolve_workspace(config.default_workspace_id(), "static-token")
+            .unwrap()
+            .root
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let state = test_state_with_config(config, false).await;
+    let http = workspace_info_handler(State(state.clone()), axum::extract::Extension(test_auth()))
+        .await
+        .unwrap();
+    assert_eq!(expect_success(http.0), expected);
+    let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
+    let rpc = adapter
+        .dispatch(
+            &talos_service::Actor::regular("static-token"),
+            ClientRequest {
+                method: ClientMethod::WorkspaceInfo,
+                params: ClientRequestParams::WorkspaceInfo(talos_types::WorkspaceInfoRequest {}),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rpc.body, serde_json::to_value(expected).unwrap());
+    assert!(!workspace_dir.join("static-token/profile.json").exists());
+    std::fs::remove_dir_all(workspace_dir).unwrap();
 }

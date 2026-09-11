@@ -288,6 +288,10 @@ async fn build_test_state_with_agent_execution_store(
     let session_store = test_session_store().await;
     let coordinator = Arc::new(TestAgentCoordinator);
     let reload_hook = test_config_reload_hook(config.base_config.clone());
+    let plugins = talos_service::PluginManagerService::new(
+        config.base_config.agent.kernel.plugins.clone(),
+        config.base_config.agent.kernel.skills.clone(),
+    );
     let app = Arc::new(TalosService::new(
         coordinator,
         session_store,
@@ -297,6 +301,7 @@ async fn build_test_state_with_agent_execution_store(
         files,
         event_service.clone(),
         config.base_config.clone(),
+        plugins,
         memory,
         config_store,
         vec![test_model_info()],
