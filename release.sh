@@ -121,7 +121,7 @@ require_version_commit() {
     || die "HEAD subject must be: ${expected_subject}"
 
   local expected_files actual_files
-  expected_files="$(cat <<'EOF'
+  expected_files="$(cat <<'EOF' | sort
 deploy/docker/.env.example
 deploy/docker/docker-compose.yml
 talos-app/desktop/package.json
