@@ -21,6 +21,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     fi
 
     python3 scripts/check_changed_files.py --base "${base}" --head "${local_sha}"
+    scripts/check-commit-message.sh --range "${base}" "${local_sha}"
     while IFS= read -r -d '' path; do
         [[ "${path}" == talos-app/* ]] && frontend_changed=true
         [[ "${path}" == talos-rs/* || "${path}" == justfile ]] && rust_changed=true

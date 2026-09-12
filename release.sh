@@ -10,8 +10,8 @@ Examples:
   ./release.sh 0.1.3 --notes /tmp/talos-v0.1.3.md
   ./release.sh v0.1.3 --notes CHANGELOG.md --watch
 
-This script only creates the annotated git tag and GitHub Release. Build and
-artifact publishing are handled by release workflows triggered by the tag.
+This script creates the annotated source tag and canonical GitHub Release.
+Artifact publishing is handled by workflows triggered by the source Release.
 EOF
 }
 
@@ -80,18 +80,21 @@ require_clean_worktree() {
   [[ -z "$(git status --porcelain)" ]] || die "working tree is not clean"
 }
 
-require_main_branch() {
+require_release_branch() {
   local branch
   branch="$(git branch --show-current)"
-  [[ "${branch}" == "main" ]] || die "release must run from main, current branch is ${branch}"
+  EXPECTED_BRANCH="release-${VERSION}"
+  [[ "${branch}" == "${EXPECTED_BRANCH}" ]] \
+    || die "release must run from ${EXPECTED_BRANCH}, current branch is ${branch}"
 }
 
-require_synced_main() {
-  git fetch origin main --tags >/dev/null
+require_synced_release_branch() {
+  git fetch origin "${EXPECTED_BRANCH}" --tags >/dev/null
   local local_head remote_head
-  local_head="$(git rev-parse main)"
-  remote_head="$(git rev-parse origin/main)"
-  [[ "${local_head}" == "${remote_head}" ]] || die "main is not synced with origin/main"
+  local_head="$(git rev-parse HEAD)"
+  remote_head="$(git rev-parse "origin/${EXPECTED_BRANCH}")"
+  [[ "${local_head}" == "${remote_head}" ]] \
+    || die "${EXPECTED_BRANCH} is not synced with origin/${EXPECTED_BRANCH}"
 }
 
 require_version_matches() {
@@ -104,14 +107,53 @@ require_version_matches() {
   assert_package_version "talos-app/ts-sdk/packages/core/package.json" "${VERSION}"
   assert_package_version "talos-app/ts-sdk/packages/browser/package.json" "${VERSION}"
   assert_package_version "talos-app/ts-sdk/packages/app-server/package.json" "${VERSION}"
+  assert_file_contains "deploy/docker/.env.example" "TALOS_SERVER_VERSION=${TAG}"
+  assert_file_contains "deploy/docker/docker-compose.yml" "TALOS_SERVER_VERSION:-${TAG}"
 }
 
-require_tag_absent() {
-  if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-    die "local tag already exists: ${TAG}"
+require_version_commit() {
+  local expected_subject="chore(release): prepare ${TAG}"
+  local actual_subject
+  actual_subject="$(git log -1 --format=%s)"
+  [[ "${actual_subject}" == "${expected_subject}" ]] \
+    || die "HEAD subject must be: ${expected_subject}"
+
+  local expected_files actual_files
+  expected_files="$(cat <<'EOF'
+deploy/docker/.env.example
+deploy/docker/docker-compose.yml
+talos-app/desktop/package.json
+talos-app/package.json
+talos-app/ts-sdk/package.json
+talos-app/ts-sdk/packages/app-server/package.json
+talos-app/ts-sdk/packages/browser/package.json
+talos-app/ts-sdk/packages/core/package.json
+talos-app/web/package.json
+talos-rs/Cargo.toml
+talos-rs/apps/tui/src/utils.rs
+EOF
+)"
+  actual_files="$(git diff-tree --no-commit-id --name-only -r HEAD | sort)"
+  [[ "${actual_files}" == "${expected_files}" ]] \
+    || die "HEAD must contain only the required release version files"
+}
+
+resolve_tag_action() {
+  TAG_ACTION="create"
+  if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    return
   fi
+
+  local tag_sha head_sha
+  tag_sha="$(git rev-parse "${TAG}^{commit}")"
+  head_sha="$(git rev-parse HEAD)"
+  [[ "${tag_sha}" == "${head_sha}" ]] \
+    || die "existing tag ${TAG} points to ${tag_sha}, expected ${head_sha}"
+
   if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
-    die "remote tag already exists: ${TAG}"
+    TAG_ACTION="reuse"
+  else
+    TAG_ACTION="push"
   fi
 }
 
@@ -126,7 +168,7 @@ confirm_release() {
     return
   fi
   echo
-  read -r -p "Proceed with tagging ${TAG} and creating the GitHub Release? [y/N] " answer
+  read -r -p "Proceed with tagging ${TAG} and creating the canonical GitHub Release? [y/N] " answer
   [[ "${answer}" == "y" || "${answer}" == "Y" ]] || die "release cancelled"
 }
 
@@ -147,6 +189,8 @@ watch_release_runs() {
 
 VERSION=""
 TAG=""
+EXPECTED_BRANCH=""
+TAG_ACTION=""
 NOTES_FILE=""
 YES=0
 DRY_RUN=0
@@ -192,17 +236,20 @@ done
 [[ -n "${NOTES_FILE}" ]] || die "--notes is required"
 [[ -f "${NOTES_FILE}" ]] || die "release notes file not found: ${NOTES_FILE}"
 [[ -s "${NOTES_FILE}" ]] || die "release notes file is empty: ${NOTES_FILE}"
+[[ "$(head -n 1 "${NOTES_FILE}")" == "# Talos ${TAG}" ]] \
+  || die "release notes must start with the heading: # Talos ${TAG}"
 
 require_command git
 require_command gh
 require_command python3
 require_repo_root
 require_clean_worktree
-require_main_branch
-require_synced_main
+require_release_branch
+require_synced_release_branch
 gh auth status >/dev/null
 require_version_matches
-require_tag_absent
+require_version_commit
+resolve_tag_action
 require_release_absent
 
 HEAD_SHA="$(git rev-parse HEAD)"
@@ -211,17 +258,24 @@ cat <<EOF
 Release summary:
   version:    ${VERSION}
   tag:        ${TAG}
-  branch:     main
+  branch:     ${EXPECTED_BRANCH}
   commit:     ${HEAD_SHA}
   notes file: ${NOTES_FILE}
+  tag action: ${TAG_ACTION}
   dry run:    ${DRY_RUN}
 EOF
 
 confirm_release
 
-run git tag -a "${TAG}" -m "Release ${TAG}"
-run git push origin "${TAG}"
-run gh release create "${TAG}" --title "${TAG}" --notes-file "${NOTES_FILE}"
+if [[ "${TAG_ACTION}" == "create" ]]; then
+  run git tag -a "${TAG}" -m "Release ${TAG}"
+fi
+if [[ "${TAG_ACTION}" != "reuse" ]]; then
+  run git push origin "${TAG}"
+else
+  echo "+ reuse existing remote tag ${TAG} at ${HEAD_SHA}"
+fi
+run gh release create "${TAG}" --title "Talos ${TAG}" --notes-file "${NOTES_FILE}"
 
 if [[ "${DRY_RUN}" == "1" ]]; then
   echo "Dry run complete."

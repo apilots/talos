@@ -45,7 +45,14 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p 'check_changed_files_tests.py'
           scripts/check-commit-message-tests.sh
+          scripts/generate-release-notes-tests.sh
           bash -n .githooks/* scripts/*.sh
+
+      - name: Check commit subjects
+        run: >-
+          scripts/check-commit-message.sh
+          --range "${{ steps.range.outputs.base }}"
+          "${{ steps.range.outputs.head }}"
 
       - name: Check changed files
         run: >-

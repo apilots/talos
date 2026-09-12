@@ -1,9 +1,9 @@
 name: Dispatch release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types:
+      - published
 
 permissions:
   contents: read
@@ -26,10 +26,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TALOS_RELEASES_DISPATCH_TOKEN }}
           RELEASE_REPOSITORY: apilots/talos-releases
-          SOURCE_REPOSITORY: ${{ github.repository }}
-          SOURCE_REF: ${{ github.ref }}
-          SOURCE_SHA: ${{ github.sha }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
 
@@ -47,17 +44,11 @@ jobs:
           jq -n \
             --arg tag "${TAG_NAME}" \
             --arg version "${VERSION}" \
-            --arg source_repo "${SOURCE_REPOSITORY}" \
-            --arg source_ref "${SOURCE_REF}" \
-            --arg source_sha "${SOURCE_SHA}" \
             '{
               event_type: "talos_release",
               client_payload: {
                 tag: $tag,
-                version: $version,
-                source_repo: $source_repo,
-                source_ref: $source_ref,
-                source_sha: $source_sha
+                version: $version
               }
             }' > dispatch.json
 

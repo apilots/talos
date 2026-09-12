@@ -20,6 +20,10 @@ setup-git-hooks:
 test-commit-messages:
     ../scripts/check-commit-message-tests.sh
 
+# Verify release note category and filtering behavior.
+test-release-notes:
+    ../scripts/generate-release-notes-tests.sh
+
 # Verify changed-file policy behavior.
 test-change-policy:
     python3 ../scripts/check_changed_files_tests.py

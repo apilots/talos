@@ -18,6 +18,13 @@ Frontend dependencies are managed separately:
 pnpm --dir talos-app install
 ```
 
+## Commit subjects
+
+Non-merge commits follow the Conventional Commit types and subject forms defined
+in the [Release workflow](RELEASE.md#commit-subjects). Install the repository
+hooks with `just setup-git-hooks`; validate the contract with
+`just test-commit-messages`.
+
 ## Scoped validation
 
 ```bash
@@ -48,7 +55,7 @@ check, for example `pnpm --dir talos-app --filter @talos/sdk-core typecheck`.
 ## Validation by delivery stage
 
 ```text
-Local iteration --> pre-commit --> pre-push --> PR / main CI --> release tag
+Local iteration --> pre-commit --> pre-push --> PR / main CI --> source Release
  scoped behavior    staged files  changed areas  path filters    native install
  + quality gates    + fast checks + quality      + quality       before dispatch
 ```
@@ -59,7 +66,7 @@ Local iteration --> pre-commit --> pre-push --> PR / main CI --> release tag
 | pre-commit | Changed-file policy, selected frontend ESLint, shell syntax, Rust formatting |
 | pre-push | Changed areas trigger frontend pipeline or Rust format/check and error-contract guards |
 | PR/main CI | Path-filtered workflows; Rust quality checks do not run the full behavioral suite |
-| Release | Native installation matrix must pass before release build dispatch |
+| Release | Published source Notes and native installation matrix gate the release build |
 
 See [hook scripts](../../scripts/run-pre-push-checks.sh) and
 [Rust workflow](../../.github/workflows/talos-rust.yml) for exact commands.
