@@ -2,7 +2,8 @@ use super::*;
 use serde_json::json;
 use std::fs;
 use talos_types::{
-    ConfigReloadRequest, MarketplaceSourceInput, PluginDisableRequest, PluginEnableRequest,
+    ConfigReloadRequest, MarketplaceSourceInput, McpAuthentication, McpCredentialBinding,
+    McpServerListRequest, McpServerStatus, PluginDisableRequest, PluginEnableRequest,
     PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget, PluginKind,
     PluginListRequest, PluginSourceAddRequest, PluginUninstallRequest, PluginUpdateConflictPolicy,
     PluginUpdateRequest, PluginWarningCode,
@@ -34,6 +35,46 @@ pub(super) fn save(config: &Config) {
         serde_json::to_vec_pretty(&document).unwrap(),
     )
     .unwrap();
+}
+
+#[test]
+fn unreadable_credentials_publish_a_failed_server_status() {
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_root = temp.path().join("credentials");
+    fs::create_dir_all(&credentials_root).unwrap();
+    let reference = "11111111-1111-1111-1111-111111111111";
+    fs::write(
+        credentials_root.join(format!("{reference}.json")),
+        "invalid credential record",
+    )
+    .unwrap();
+    let mut config = talos_config::AgentKernelConfig::default();
+    config.mcp.servers.push(talos_config::McpServerConfig {
+        name: "broken_credentials".into(),
+        credentials: Some(McpCredentialBinding {
+            reference: reference.into(),
+            authentication: McpAuthentication::Bearer,
+        }),
+        transport: talos_config::McpTransportConfig::Http {
+            url: "https://example.com/mcp".into(),
+            bearer_token: None,
+        },
+    });
+    let runtime = talos_mcp::TalosMcpRuntime::new();
+    let credentials = talos_service::McpCredentialStore::new(credentials_root);
+
+    crate::application_mcp::prepare(&runtime, &config, vec![], &credentials)
+        .unwrap()
+        .publish();
+
+    let listed = runtime
+        .list_servers(McpServerListRequest::default())
+        .unwrap();
+    assert!(matches!(
+        listed.data.as_slice(),
+        [server] if server.name == "broken_credentials"
+            && matches!(server.status, McpServerStatus::Failed { .. })
+    ));
 }
 
 #[tokio::test]

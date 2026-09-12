@@ -134,14 +134,16 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     let header_source = plugins
         .add_source(PluginSourceAddRequest {
             source: MarketplaceSourceInput::LocalFolder {
-                path: header_market,
+                path: header_market.clone(),
                 sparse_paths: vec![],
             },
             refresh: true,
         })
         .unwrap();
+    let mut normal_headers = None;
     for plugin in header_source.plugins {
-        plugins
+        let name = plugin.metadata.name.clone();
+        let installed = plugins
             .install(PluginInstallRequest {
                 target: PluginInstallTarget::Plugin {
                     plugin_id: plugin.id,
@@ -152,7 +154,11 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
             })
             .await
             .unwrap();
+        if name == "normal_headers" {
+            normal_headers = Some(installed);
+        }
     }
+    let normal_headers = normal_headers.unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let page = plugins
@@ -180,6 +186,56 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     assert!(!runtime
         .tool_registry
         .is_tool_available("mcp__duplicate_headers__inspect"));
+    let normal_owner = McpDefinitionRef::Plugin {
+        install_id: normal_headers.install.id.clone(),
+    };
+    runtime
+        .service
+        .update_mcp_credentials(McpCredentialsUpdateRequest {
+            server: normal_owner.clone(),
+            change: McpCredentialsChange::Replace {
+                credentials: McpCredentialValues {
+                    authentication: McpAuthentication::Header {
+                        name: "X-API-Key".into(),
+                    },
+                    token: Some("first-private-value".into()),
+                    env: None,
+                    headers: None,
+                },
+            },
+        })
+        .await
+        .unwrap();
+    fs::write(
+        header_market.join("normal_headers").join("talos-mcp.json"),
+        serde_json::to_vec(&json!({
+            "name": "normal_headers",
+            "description": "Updated without changing the execution target.",
+            "transport": {
+                "type": "streamable_http",
+                "url": format!("{}/key", url.trim_end_matches("/bearer"))
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    plugins
+        .update(PluginUpdateRequest {
+            install_id: normal_headers.install.id,
+            expected_source_commit: None,
+            conflict_policy: PluginUpdateConflictPolicy::RejectLocalChanges,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        plugins
+            .read_mcp_authentication(McpAuthenticationReadRequest {
+                server: normal_owner
+            })
+            .unwrap()
+            .state,
+        McpAuthenticationState::CredentialsStored
+    ));
     for server in ["normal_headers", "private_http"] {
         super::mcp_tests::available(&runtime, server).await;
         let invocation = runtime
@@ -270,20 +326,17 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         })
         .await
         .unwrap();
-    let rejected = runtime
-        .service
-        .update_mcp_credentials(McpCredentialsUpdateRequest {
-            server: McpDefinitionRef::Plugin {
-                install_id: other.install.id,
-            },
-            change: McpCredentialsChange::Clear,
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(
-        rejected.error_code(),
-        talos_error::ErrorCode::PermissionDenied
-    );
+    assert!(matches!(
+        plugins
+            .read_mcp_authentication(McpAuthenticationReadRequest {
+                server: McpDefinitionRef::Plugin {
+                    install_id: other.install.id
+                }
+            })
+            .unwrap()
+            .state,
+        McpAuthenticationState::Unconfigured
+    ));
     assert!(matches!(
         plugins
             .read_mcp_authentication(McpAuthenticationReadRequest {

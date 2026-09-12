@@ -26,12 +26,9 @@ pub(super) fn prepare(
                     }
                 }
             };
-            let resolved = match credentials.resolve(&owner, &descriptor.server) {
-                Ok(values) => values,
-                Err(error) => {
-                    talos_logging::report_error(&error);
-                    None
-                }
+            let (resolved, startup_error) = match credentials.resolve(&owner, &descriptor.server) {
+                Ok(values) => (values, None),
+                Err(error) => (None, Some(error)),
             };
             let resolved = if descriptor.server.credentials.is_none()
                 && matches!(descriptor.source, McpServerSource::Config)
@@ -61,6 +58,7 @@ pub(super) fn prepare(
             talos_mcp::McpConnectionInput {
                 descriptor,
                 credentials: resolved,
+                startup_error,
             }
         })
         .collect();

@@ -208,6 +208,10 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
         r#"{
   "name": "playwright",
   "description": "Browser automation MCP server.",
+  "credentials": {
+    "reference": "00000000-0000-0000-0000-000000000000",
+    "authentication": { "type": "bearer" }
+  },
   "transport": {
     "type": "stdio",
     "command": "npx",
@@ -251,6 +255,25 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
         .servers;
     assert_eq!(servers.len(), 1);
     assert_eq!(servers[0].server.name, "playwright");
+    assert!(servers[0].server.credentials.is_none());
+
+    std::fs::write(
+        installed.install.installed_path.join("talos-mcp.json"),
+        "invalid manifest",
+    )
+    .unwrap();
+    manager
+        .update(PluginUpdateRequest {
+            install_id: installed.install.id.clone(),
+            expected_source_commit: None,
+            conflict_policy: PluginUpdateConflictPolicy::ReplaceLocalChanges,
+        })
+        .expect("marketplace update should repair the installed manifest");
+    assert!(manager
+        .read_mcp_definition(&installed.install.id)
+        .unwrap()
+        .credentials
+        .is_none());
 
     manager
         .disable(PluginDisableRequest {

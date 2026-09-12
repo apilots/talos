@@ -93,7 +93,7 @@ pub(crate) fn install_plugin(
     if temp_dir.exists() {
         remove_plugin_directory(&temp_dir, "clear plugin install temp dir")?;
     }
-    let content_digest = materialize_install_dir(state, &candidate, &install_id, &temp_dir)?;
+    let content_digest = materialize_install_dir(state, &candidate, &install_id, &temp_dir, None)?;
     if replace_existing {
         rename_plugin_path(
             &install_dir,
@@ -202,7 +202,14 @@ pub(crate) fn update_plugin(
     if backup_dir.exists() {
         remove_plugin_directory(&backup_dir, "clear plugin update backup dir")?;
     }
-    let content_digest = materialize_install_dir(state, &candidate, &install.id, &temp_dir)?;
+    let preserved_credentials = marketplace_mcp_credentials(install, &candidate, &install_dir);
+    let content_digest = materialize_install_dir(
+        state,
+        &candidate,
+        &install.id,
+        &temp_dir,
+        preserved_credentials.as_ref(),
+    )?;
     if install.installed_path.exists() {
         rename_plugin_path(
             &install.installed_path,
@@ -476,12 +483,16 @@ fn materialize_install_dir(
     candidate: &InstallCandidate,
     install_id: &PluginInstallId,
     install_dir: &Path,
+    preserved_credentials: Option<&talos_types::McpCredentialBinding>,
 ) -> TalosResult<ContentDigest> {
     create_plugin_directory(install_dir, "create plugin install dir")?;
     match &candidate.source {
         InstallSource::Marketplace(source) => {
             let source_dir = plugin_source_dir(state, source, &candidate.plugin)?;
             copy_dir(&source_dir, install_dir)?;
+            if candidate.plugin.kind == PluginKind::McpServer {
+                write_marketplace_mcp_credentials(install_dir, preserved_credentials)?;
+            }
         }
         InstallSource::Installed(install) => {
             copy_dir(&install.installed_path, install_dir)?;
@@ -552,6 +563,61 @@ fn materialize_install_dir(
         )));
     }
     content_digest_for_dir(install_dir)
+}
+
+fn marketplace_mcp_credentials(
+    install: &PluginInstall,
+    candidate: &InstallCandidate,
+    install_dir: &Path,
+) -> Option<talos_types::McpCredentialBinding> {
+    if !matches!(&candidate.source, InstallSource::Marketplace(_))
+        || candidate.plugin.kind != PluginKind::McpServer
+    {
+        return None;
+    }
+    // Explicit replacement repairs a damaged manifest without inheriting an unverified binding.
+    let previous =
+        crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(&install.installed_path)
+            .ok()?;
+    let PluginDefinition::McpServer(next) = &candidate.plugin.definition else {
+        unreachable!("MCP kind requires an MCP definition")
+    };
+    let mut next_transport = next.server.transport.clone();
+    if let talos_types::McpTransportDefinition::Stdio { cwd, .. } = &mut next_transport {
+        *cwd = Some(match cwd.take() {
+            Some(path) if path.is_absolute() => path,
+            Some(path) => install_dir.join(path),
+            None => install_dir.to_path_buf(),
+        });
+    }
+    (previous.transport == next_transport)
+        .then_some(previous.credentials)
+        .flatten()
+}
+
+fn write_marketplace_mcp_credentials(
+    install_dir: &Path,
+    credentials: Option<&talos_types::McpCredentialBinding>,
+) -> TalosResult<()> {
+    let path = install_dir.join("talos-mcp.json");
+    let mut document: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).map_err(|error| {
+            TalosError::internal_with_source("Failed to read the MCP manifest update.", error)
+        })?)
+        .map_err(|error| {
+            TalosError::internal_with_source("The MCP manifest update is invalid.", error)
+        })?;
+    document
+        .as_object_mut()
+        .ok_or_else(|| TalosError::internal("The MCP manifest update must be a JSON object."))?
+        .remove("credentials");
+
+    if let Some(credentials) = credentials {
+        document["credentials"] = serde_json::to_value(credentials).map_err(|error| {
+            TalosError::internal_with_source("Failed to encode the MCP credential binding.", error)
+        })?;
+    }
+    talos_fs::write_json_pretty(&path, &document)
 }
 
 fn install_source(source: &InstallSource, plugin: &Plugin) -> PluginInstallSource {

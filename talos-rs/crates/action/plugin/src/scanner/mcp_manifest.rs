@@ -90,7 +90,7 @@ pub(crate) fn plugin_from_mcp_manifest(
         status: PluginStatus::NotInstalled,
         definition: PluginDefinition::McpServer(McpServerPlugin {
             server: McpServerDefinition {
-                credentials: manifest.credentials,
+                credentials: None,
                 name,
                 display_name: None,
                 description: None,

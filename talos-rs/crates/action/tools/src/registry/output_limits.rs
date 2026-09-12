@@ -84,6 +84,7 @@ pub(super) fn enforce_output_limits(
     let mut error_raw_size = 0;
     let mut error_returned_size = 0;
     let mut error_truncated = false;
+    let mut mcp_projections_removed = false;
 
     if let ToolOutputPayload::Function {
         structured_content, ..
@@ -98,7 +99,33 @@ pub(super) fn enforce_output_limits(
         }
     }
 
-    if content_truncated || error_truncated {
+    if let ToolOutputPayload::Mcp {
+        is_error: true,
+        structured_content,
+        content_items,
+        ..
+    } = payload
+    {
+        let mut remaining = max_output_bytes.saturating_sub(content_returned_size);
+        if let Some(value) = structured_content.as_ref() {
+            let size = serialized_size(value);
+            if size > remaining {
+                *structured_content = None;
+                mcp_projections_removed = true;
+            } else {
+                remaining -= size;
+            }
+        }
+        if !content_items.is_empty() {
+            let size = serialized_size(content_items);
+            if size > remaining {
+                content_items.clear();
+                mcp_projections_removed = true;
+            }
+        }
+    }
+
+    if content_truncated || error_truncated || mcp_projections_removed {
         warn!(
             tool_name,
             max_output_bytes,
@@ -106,9 +133,14 @@ pub(super) fn enforce_output_limits(
             output_returned_size = content_returned_size,
             error_raw_size,
             error_returned_size,
+            mcp_projections_removed,
             "tool result exceeded size limit and was truncated"
         );
     }
 
     result
+}
+
+fn serialized_size(value: &impl serde::Serialize) -> usize {
+    serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len())
 }

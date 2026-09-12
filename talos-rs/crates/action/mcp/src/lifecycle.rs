@@ -27,16 +27,18 @@ use crate::{
 pub struct TalosMcpRuntime(Arc<Connections>);
 
 /// Connection-only inputs. Secret values are never folded into the serializable definition.
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct McpConnectionInput {
     pub descriptor: McpServerRuntimeDescriptor,
     pub credentials: Option<crate::McpConnectionCredentials>,
+    pub startup_error: Option<TalosError>,
 }
 impl From<McpServerRuntimeDescriptor> for McpConnectionInput {
     fn from(descriptor: McpServerRuntimeDescriptor) -> Self {
         Self {
             descriptor,
             credentials: None,
+            startup_error: None,
         }
     }
 }
@@ -50,6 +52,7 @@ struct Connections {
 struct Server {
     descriptor: McpServerRuntimeDescriptor,
     credentials: Option<crate::McpConnectionCredentials>,
+    preflight_failed: bool,
     abort_calls: CancellationToken,
     state: RwLock<State>,
     retire: CancellationToken,
@@ -257,6 +260,8 @@ impl PreparedMcpUpdate {
                 !current.retire.is_cancelled()
                     && next.descriptor == current.descriptor
                     && next.credentials == current.credentials
+                    && next.startup_error.is_none()
+                    && !current.preflight_failed
             });
             if !keep {
                 if (current.descriptor.server.credentials.is_some()
@@ -276,15 +281,21 @@ impl PreparedMcpUpdate {
             if servers.contains_key(&name) {
                 continue;
             }
+            let startup_error = descriptor.startup_error;
             let server = Arc::new(Server {
                 descriptor: descriptor.descriptor,
                 credentials: descriptor.credentials,
+                preflight_failed: startup_error.is_some(),
                 abort_calls: CancellationToken::new(),
                 state: RwLock::new(State::NotStarted),
                 retire: CancellationToken::new(),
                 calls: TaskTracker::new(),
             });
             servers.insert(name, server.clone());
+            if let Some(error) = startup_error {
+                server.fail(error);
+                continue;
+            }
             self.runtime.0.cleanup.tasks.spawn(server.run(
                 self.runtime.0.startup_slots.clone(),
                 self.runtime.0.cleanup.clone(),
