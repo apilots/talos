@@ -36,6 +36,7 @@ subjects=(
   "tool(release): add notes generator"
   "Legacy release note"
   "chore(release): prepare v0.1.7"
+  "chore(release): start v0.1.8 development"
 )
 for subject in "${subjects[@]}"; do
   commit_subject "${subject}"
@@ -76,4 +77,5 @@ grep -Fqx -- "- **ci:** maintain legacy CI" "${notes}"
 [[ "$(grep -Fc "include merged feature once" "${notes}")" == "1" ]]
 ! grep -Fq "Merge pull request" "${notes}"
 ! grep -Fq "prepare v0.1.7" "${notes}"
+! grep -Fq "start v0.1.8 development" "${notes}"
 grep -Fqx '[v0.1.6...v0.1.7](https://github.com/apilots/talos/compare/v0.1.6...v0.1.7)' "${notes}"

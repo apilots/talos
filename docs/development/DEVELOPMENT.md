@@ -56,8 +56,8 @@ check, for example `pnpm --dir talos-app --filter @talos/sdk-core typecheck`.
 
 ```text
 Local iteration --> pre-commit --> pre-push --> PR / main CI --> source Release
- scoped behavior    staged files  changed areas  path filters    native install
- + quality gates    + fast checks + quality      + quality       before dispatch
+ scoped behavior    staged files  changed areas  path filters    public gates
+ + quality gates    + fast checks + quality      + quality       before publication
 ```
 
 | Stage | Current responsibility |
@@ -66,7 +66,7 @@ Local iteration --> pre-commit --> pre-push --> PR / main CI --> source Release
 | pre-commit | Changed-file policy, selected frontend ESLint, shell syntax, Rust formatting |
 | pre-push | Changed areas trigger frontend pipeline or Rust format/check and error-contract guards |
 | PR/main CI | Path-filtered workflows; Rust quality checks do not run the full behavioral suite |
-| Release | Published source Notes and native installation matrix gate the release build |
+| Release | Public workflow runs source checks before builds and native installation before publication |
 
 See [hook scripts](../../scripts/run-pre-push-checks.sh) and
 [Rust workflow](../../.github/workflows/talos-rust.yml) for exact commands.

@@ -9,17 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  validate-installation:
-    name: Validate native installation
-    uses: ./.github/workflows/talos-tui-install.yml
-    with:
-      run_native: true
-    secrets: inherit
-
   dispatch:
     name: Dispatch release build
-    needs:
-      - validate-installation
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch talos-releases workflow

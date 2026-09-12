@@ -24,104 +24,83 @@ Talos 的每个版本发布在两个仓库中。源码仓库负责 tag 和唯一
 chore(release): prepare v<version>
 ```
 
-## 准备发布
+## 创建 release 分支时切正式版本
 
-先记录远端 `main` 的精确提交，再从该提交创建发布分支：
+从最新远端 `main` 的精确提交创建 `release-<version>`。创建后立即将所有版本位置
+切为正式版本，并以 `chore(release): prepare v<version>` 单独提交、推送。
+版本切换发生在进入 release 阶段时。
 
-```bash
-git fetch origin main --tags
-release_base="$(git rev-parse origin/main)"
-git switch -c release-0.1.8 "${release_base}"
-test "$(git rev-parse HEAD)" = "${release_base}"
-git push -u origin release-0.1.8
-```
+版本位置包括 Rust workspace、TUI 展示、七个 Web/Desktop/SDK package、App Server SDK
+默认客户端版本及 Docker 示例与 Compose 镜像默认值。精确清单、版本和准备提交历史
+统一由 `scripts/check-release-version.sh` 校验。Cargo.lock 保持忽略，由 manifest 生成。
 
-以上一个发布 tag 为起点生成英文 Release Notes 草稿，发布前必须人工审阅并编辑：
+分支建立后，`main` 可以立即用独立的 `chore(release): start v<next-version> development`
+提交进入下一版本 `-SNAPSHOT` 开发，不必等待 release 发布。Docker 默认值继续指向
+已发布的最新正式镜像，直到新版本发布成功。
 
-```bash
-scripts/generate-release-notes.sh v0.1.8 \
-  --from v0.1.7 \
-  --output /tmp/talos-v0.1.8-release-notes.md
-```
+通用发布规范与自动化调整提交到 main，供后续版本生效；不作为产品 bug 修复
+回补到已有 release 分支。
 
-生成器按提交类型分类，排除 merge 和版本准备提交，将历史遗留的无类型提交归入
-Other Changes，并拒绝未知的 typed subject。空分类不会输出。
+## 稳定阶段只修 bug
 
-所有正式版本号位置必须在一个独立提交中更新：
+release 分支只接受 bug 修复，以及修复所需的回归测试、发布文档或打包纠错。
+准备提交之后统一使用 `fix` 提交；不增加特性、不做无关重构，也不将持续开发中的
+main 整体合入。需要共享修复时 cherry-pick 对应提交。
 
-- Rust workspace package 版本。
-- TUI 展示版本。
-- Web、Desktop 和 TypeScript SDK package 版本，包括 App Server SDK 默认上报的
-  client metadata 版本。
-- Docker 示例和 Compose 默认镜像版本。
+版本准备提交不必是 HEAD，最终 tag 指向包含全部修复的 release 分支末端。
+共享校验器拒绝准备提交之后的非 fix 提交；提交分类只是守卫，review 仍须判断内容
+是否偷偷引入新特性。
 
-`talos-rs/Cargo.lock` 由 workspace manifest 生成且已明确忽略，不属于版本提交。
-发布脚本会校验上述固定提交信息，并拒绝版本清单以外的文件进入该提交。
-
-执行 `release.sh` 前，发布分支必须工作区干净、已经推送并与对应远端分支同步。
-
-## 验证
-
-先运行覆盖上一个版本以来所有变更的场景，再完成发布级检查：
+从上一个正式 tag 到最终 release 提交生成英文 Notes，并人工编辑。Talos 源码 Release
+是唯一 Notes 来源；发布仓库原样复用。生成器按提交类型归类，排除 merge、正式版本准备和下一开发版本提交，历史无类型提交保留在 Other Changes，未知类型报错，空分类不输出。
 
 ```bash
-just test-commit-messages
-just test-release-notes
-just fmt-check
-just check
-pnpm --dir talos-app ci:frontend-app
-deploy/install/tests/install_test.sh
-deploy/install/tests/release_contract_test.sh
+scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.9.md
+./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --dry-run --yes
+./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --yes
 ```
 
-对变更行为运行相关 E2E。使用下文准出例外时，发布机器至少要运行 `just test`、
-前端流水线、安装契约测试和受影响的 E2E，并把输出保存在已忽略的
-`output/release-<version>/`。无法完成的平台或真实账号验证必须记录为未验证，
-不得描述为已经通过。
+工作区必须干净，分支必须与同名远端同步。脚本创建 annotated tag 和源码 Release。
+源码 Release 保存源码与 Notes；可下载产品要等公开流水线通过后才发布。
+若 tag 已创建但源码 Release 创建失败，只要 tag 仍指向 HEAD 且源码 Release 不存在，
+可重跑原命令继续发布。已经发布的 tag 不得移动，也不能以修改后的代码重新出同名包。
 
-## 发布源码 Release
+## 统一准出与发包
 
-先运行 `--dry-run`。脚本会校验分支、远端同步状态、版本提交、版本一致性、源码
-Release 不存在以及 Notes 标题，然后推送 annotated source tag 并创建唯一的源码
-Release。如果 tag 已推送但 Release 创建失败，仅当已有 tag 仍精确指向当前 `HEAD` 时，
-相同命令才可安全重试；脚本会先验证该条件。
+`apilots/talos-releases` 的自动调度和手动调度执行同一条流程：
 
-```bash
-./release.sh 0.1.8 --notes /tmp/talos-v0.1.8-release-notes.md --dry-run
-./release.sh 0.1.8 --notes /tmp/talos-v0.1.8-release-notes.md --yes --watch
-```
+1. 将 tag 解析为精确源码 SHA，校验正式版本、准备与修复历史、源码 Release 和非空 Notes。
+2. 从该源码运行 `bash scripts/check-release.sh`：提交与 Notes 契约、Rust 格式/检查/测试、
+   前端流水线、安装器契约测试。
+3. 从验证后的 SHA 构建产品和镜像。四个平台的 TUI 上传前必须通过原生安装 E2E；
+   通过 `TUI_INSTALL_PRODUCT_DIR` 复用刚构建的包，不重复打包。
+4. 所有产品构建与原生安装通过后，才发布镜像 tag、准备最终资产；资产契约通过后
+   发布制品 Release。
+5. 比较发布后的双仓 Notes。下载校验、manifest 和 latest 核验按收尾步骤人工完成。
 
-源码 Release 发布后触发的 workflow 默认先运行完整原生安装矩阵，成功后才调度公开发布仓库。
-公开发布 workflow 在找不到对应源码 Release 或正文为空时必须明确失败。
-
-## 发布准出例外
-
-原生安装准出默认必须通过。当 GitHub 因已记录的基础设施或账单问题无法启动私有仓库
-job 时，发布人员可以将本地发布验证作为一次性例外，并直接调度公开发布 workflow：
+Talos 维护检查脚本和 E2E，公开仓库只负责 runner 环境和编排。源码仓库的调度任务
+不重复跑准出。没有 skip-gate 参数，也不再用本地验证替代公开准出。
+若私有 runner 无法启动轻量调度任务，可直接调用同一公开 workflow：
 
 ```bash
 gh workflow run release.yml --repo apilots/talos-releases \
-  -f tag=v0.1.8 \
-  -f publish_latest=true
+  -f tag=v0.1.9 -f publish_latest=true
 ```
 
-直接调度前，必须确认源码 workflow 是在产品测试运行前因账单或基础设施失败。将该
-workflow 链接、本地检查命令和结果、精确的源码 tag 与 SHA、直接调度的 workflow 链接
-写入 `output/release-<version>/release-evidence.md`。本地 macOS ARM64 不能替代未运行的
-Linux 或 macOS AMD64 安装项，必须将这些项记录为未验证。该例外不得修改或关闭默认源码
-Release 准出。
+这只改变触发方式，全部公开准出仍必须通过。连续发布时先完成旧版，旧版使用
+`publish_latest=false`，最新版使用 true。公开工作流串行执行发布，并以当前公开
+GitHub latest 版本为基准，阻止旧版倒退 latest。日常小修仅验证受影响场景，发布准出统一
+运行完整检查。本地验证输出保存在忽略目录 `output/release-<version>/`；未运行的
+真实账号场景必须记录为未验证，不能由单测或构建成功推断其通过。
 
-连续发布多个版本时，旧版本使用 `publish_latest=false`，等待其公开 workflow 和制品
-全部完成后，再用 `publish_latest=true` 发布最新版本，避免旧任务最后完成而回退 stable
-`latest` 引用。
+## 发布后收尾
 
-## 验证与收尾
+下载公开资产，Linux 使用 `sha256sum --check checksums.txt`，macOS 使用
+`shasum -a 256 -c checksums.txt`。验证双仓 Notes 字节一致、manifest 精确源码 SHA、
+镜像包含 `linux/amd64` 与 `linux/arm64`，最新版本还要验证 latest 引用。
 
-确认两个仓库中同一 tag 的 Release Notes 字节级一致，然后下载公开制品：Linux 运行
-`sha256sum --check checksums.txt`，macOS 运行 `shasum -a 256 -c checksums.txt`。检查
-`manifest.json`，并确认服务端镜像包含 `linux/amd64` 和 `linux/arm64`。最新版本还要
-检查 stable latest 引用。任何必需制品或验证缺失时，发布都不算完成。
-
-发布后将发布分支合回 `main`，再用独立的 `chore(release)` 提交进入下一个开发版本。
-协议或数据变更还必须协调消费者升级，并执行
-[部署文档](../../deploy/README_zh.md#数据升级与回滚)中的备份与回滚流程。
+发布成功后将 release 分支合回 main。发生版本冲突时保留 main 已进入的下一开发
+版本，不能将 main 降回正式版本，也不能用 release 整棵文件树覆盖正在进行的开发。
+Docker 默认值更新为新发布镜像。如果 main 尚未切下一版本，再用独立提交进入开发周期。
+已发布 tag 始终不变。协议和数据升级还需执行
+[部署文档](../../deploy/README_zh.md#数据升级与回滚)中的流程。

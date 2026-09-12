@@ -131,7 +131,7 @@ while IFS= read -r subject || [[ -n "${subject}" ]]; do
   if [[ "${subject}" =~ ^Release[[:space:]]+(Talos[[:space:]]+)?v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     continue
   fi
-  if [[ "${subject}" =~ ^chore\(release\):[[:space:]]+prepare[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "${subject}" =~ ^chore\(release\):[[:space:]]+(prepare[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+|start[[:space:]]+v?[0-9]+\.[0-9]+\.[0-9]+[[:space:]]+development)$ ]]; then
     continue
   fi
 

@@ -56,12 +56,14 @@ verify_tui_install_runner() {
 
 build_tui_release_fixture() {
   local scenario_root="$1"
-  local product_dir="${scenario_root}/products"
+  local product_dir="${TUI_INSTALL_PRODUCT_DIR:-${scenario_root}/products}"
   local release_dir="${scenario_root}/releases/download/v${TUI_INSTALL_E2E_VERSION}"
 
-  PROFILE=release \
-    PRODUCT_DIR="${product_dir}" \
-    "${REPO_ROOT}/build.sh" tui
+  if [[ -z "${TUI_INSTALL_PRODUCT_DIR:-}" ]]; then
+    PROFILE=release \
+      PRODUCT_DIR="${product_dir}" \
+      "${REPO_ROOT}/build.sh" tui
+  fi
   PROFILE=release PRODUCT_DIR="${product_dir}" \
     "${REPO_ROOT}/build/scripts/verify-release-artifacts.sh" tui
 

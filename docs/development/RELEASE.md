@@ -25,123 +25,102 @@ the commit hook detects them directly. Release version commits use exactly:
 chore(release): prepare v<version>
 ```
 
-## Prepare a release
+## Open the release branch
 
-Record the remote `main` commit, then create the release branch from that exact
-commit:
+Fetch remote `main` and create `release-<version>` from its exact commit. Immediately
+change all release version locations to the formal version in one standalone
+`chore(release): prepare v<version>` commit, then push the branch. Do not wait until
+publication to change the version.
 
-```bash
-git fetch origin main --tags
-release_base="$(git rev-parse origin/main)"
-git switch -c release-0.1.8 "${release_base}"
-test "$(git rev-parse HEAD)" = "${release_base}"
-git push -u origin release-0.1.8
-```
+Version locations are the Rust workspace, TUI display, seven Web/Desktop/SDK
+package manifests, App Server SDK default client metadata, and Docker example
+and Compose image defaults. `scripts/check-release-version.sh` owns the exact
+file list and validates both values and preparation history. Cargo.lock remains
+ignored and generated from the workspace manifest.
 
-Generate an English Release Notes draft from the preceding release tag. Review
-and edit the generated Markdown before publishing it.
+After branching, `main` may immediately advance to the next `-SNAPSHOT` version
+in a separate `chore(release): start v<next-version> development` commit. Keep
+Docker defaults on the latest published formal image until the new release ships.
+Development does not wait for the release branch to finish.
 
-```bash
-scripts/generate-release-notes.sh v0.1.8 \
-  --from v0.1.7 \
-  --output /tmp/talos-v0.1.8-release-notes.md
-```
+General release policy and automation changes land on `main` for future versions;
+do not backport them to an existing release branch as product bug fixes.
 
-The generator uses the commit subject type as the category, excludes merge and
-release preparation commits, retains legacy untyped subjects under Other
-Changes, and rejects unknown typed subjects. Empty categories are omitted.
+## Stabilize
 
-Update all release version locations in one standalone commit:
+The release branch accepts only bug fixes, including necessary regression tests
+and corrections to release documentation or packaging. Use `fix` subjects after
+the preparation commit; no features, unrelated refactors, or merges from advancing
+`main`. Transfer individual fixes with cherry-pick when necessary. The version
+commit need not be HEAD: the final tag points to the fully corrected release tip.
+The shared validator rejects non-fix commits after preparation. Commit classification
+is a guardrail; review must still ensure that a fix does not introduce a feature.
 
-- Rust workspace package version.
-- TUI display version.
-- Web, Desktop, and TypeScript SDK package versions, including the App Server
-  SDK's default client metadata version.
-- Docker example and Compose default image versions.
-
-`talos-rs/Cargo.lock` is intentionally ignored and generated from the workspace
-manifest; it is not part of the version commit. The release script requires the
-exact commit subject above and rejects any file outside the listed version
-locations.
-
-The release branch must be clean, pushed, and synchronized with its matching
-remote branch before `release.sh` runs.
-
-## Validate
-
-Run the checks appropriate to every change since the previous release, followed
-by the release-wide gates:
+Generate and edit English Notes from the preceding published tag to the final
+release tip. The source repository owns the only canonical Notes; the artifact
+repository copies them unchanged. The generator groups by commit type, excludes
+merge, release preparation, and next-development version commits, keeps legacy untyped subjects under Other
+Changes, rejects unknown typed subjects, and omits empty categories.
 
 ```bash
-just test-commit-messages
-just test-release-notes
-just fmt-check
-just check
-pnpm --dir talos-app ci:frontend-app
-deploy/install/tests/install_test.sh
-deploy/install/tests/release_contract_test.sh
+scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.9.md
+./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --dry-run --yes
+./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --yes
 ```
 
-Run relevant E2E scenarios for changed behavior. The release exception described
-below requires `just test`, the frontend pipeline, installer contract tests, and
-the affected E2E scenarios on the release host. Store their command output under
-the ignored `output/release-<version>/` directory. Record unavailable platforms
-or external-account validation as unverified instead of presenting it as passed.
+The branch must be clean and synchronized with its matching remote. The script
+creates an annotated tag and source Release. That Release records source and
+Notes; downloadable products become available only after the public pipeline
+passes. If tagging succeeds but source Release creation fails, rerun the same
+command while the tag still points to HEAD and the source Release is absent.
+Existing published tags must never be moved or rebuilt with changed code.
 
-## Publish the source release
+## One release gate
 
-Use `--dry-run` first. The script validates the branch, remote synchronization,
-version commit, version consistency, source Release absence, and Notes heading.
-It then pushes an annotated source tag and creates the canonical source Release.
-If tag creation succeeded but Release creation failed, rerunning the same command
-is safe only when the existing tag still resolves to the current `HEAD`; the
-script checks that condition before reusing it.
+`apilots/talos-releases` executes this sequence for both repository dispatch and
+manual workflow dispatch:
 
-```bash
-./release.sh 0.1.8 --notes /tmp/talos-v0.1.8-release-notes.md --dry-run
-./release.sh 0.1.8 --notes /tmp/talos-v0.1.8-release-notes.md --yes --watch
-```
+1. Resolve the tag to a source SHA; validate formal versions, preparation/fix
+   history, source Release and nonempty canonical Notes.
+2. Run `bash scripts/check-release.sh` from that source: commit and Notes contract
+   tests, Rust format/check/tests, frontend pipeline, and installer contract tests.
+3. Build products and images from the validated source SHA. Run native installation
+   E2E on each of the four TUI products before uploading it, reusing its built bundle
+   through `TUI_INSTALL_PRODUCT_DIR` rather than rebuilding it.
+4. After all product builds and native checks pass, publish image tags and prepare
+   final assets; validate asset contracts before publishing the artifact Release.
+5. Compare the published source and artifact Notes. Complete the remaining
+   download, manifest, and latest checks under Finish manually.
 
-Publishing the source Release normally runs the complete native installation
-matrix before dispatching the public release build. The public workflow must
-fail when the matching source Release or its body is missing.
-
-## Release gate exception
-
-The native installation gate remains mandatory by default. When GitHub cannot
-start the private-repository jobs because of a documented infrastructure or
-billing failure, an operator may use the locally recorded release validation as
-a one-time exception and dispatch the public workflow directly:
+Talos owns the checks and E2E implementation. The public repository only provisions
+runners and orchestrates them. Source-side dispatch does not duplicate the gate.
+There is no skip-gate input or local-validation substitute. If private runners
+cannot start the lightweight dispatch job, invoke the same public workflow directly:
 
 ```bash
 gh workflow run release.yml --repo apilots/talos-releases \
-  -f tag=v0.1.8 \
-  -f publish_latest=true
+  -f tag=v0.1.9 -f publish_latest=true
 ```
 
-Before direct dispatch, confirm that the failed source workflow shows a billing
-or infrastructure failure before product tests ran. Record that workflow URL,
-the local commands and results, the exact source tag and SHA, and the directly
-dispatched workflow URL in `output/release-<version>/release-evidence.md`. A local
-macOS ARM64 host cannot replace the unavailable Linux or macOS AMD64 installation
-rows; record those rows as unverified. This exception does not change or disable
-the default source-Release gate.
+This changes only the trigger; all public gates remain mandatory. Publish consecutive
+versions serially, using `publish_latest=false` for older versions. The public
+workflow serializes release runs and prevents older versions from moving latest
+backward relative to the current public GitHub latest release. Local bug fixes
+need only affected scenario checks; the full suite runs once as the release gate.
+Keep local verification output in ignored `output/release-<version>/`; record
+unavailable external-account scenarios as unverified. Never infer their success
+from unit tests or artifact builds.
 
-When publishing consecutive versions, dispatch the older version with
-`publish_latest=false`, wait until its public workflow and artifacts complete,
-then dispatch the newest version with `publish_latest=true`. This prevents an
-older run from moving stable `latest` references backward.
+## Finish
 
-## Verify and finish
+Download public assets and check `checksums.txt` using `sha256sum --check` on Linux
+or `shasum -a 256 -c` on macOS. Verify byte-identical source/artifact Notes, manifest
+source SHA, and both `linux/amd64` and `linux/arm64` image platforms. Verify latest
+references for the newest release.
 
-Verify that both repositories have byte-identical Release Notes for the tag.
-Then download the public assets and run `sha256sum --check checksums.txt` on Linux
-or `shasum -a 256 -c checksums.txt` on macOS. Inspect `manifest.json` and the
-server image for `linux/amd64` and `linux/arm64`.
-For the newest release, also verify the stable latest references. A release is
-incomplete while any required artifact or verification is missing.
-
-After publishing, merge the release branch back into `main`, then start the next
-development version in a separate `chore(release)` commit. Protocol or data
-changes also require coordinated consumer rollout and the backup and rollback
-procedure in [Deployment](../../deploy/README.md#data-upgrades-and-rollback).
+After successful publication, merge the release branch into `main`. Preserve main's
+next development version when resolving version conflicts; never reset main to the
+released version or copy the entire release tree over ongoing development. Update
+Docker defaults to the newly published image. If main has not advanced yet, start
+the next development version in a separate commit. Keep the released tag immutable.
+Protocol/data upgrades also follow [Deployment](../../deploy/README.md#data-upgrades-and-rollback).

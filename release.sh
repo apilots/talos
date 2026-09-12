@@ -27,30 +27,6 @@ run() {
   fi
 }
 
-assert_file_contains() {
-  local file="$1"
-  local expected="$2"
-  [[ -f "${file}" ]] || die "missing file: ${file}"
-  grep -Fq "${expected}" "${file}" || die "${file} does not contain: ${expected}"
-}
-
-assert_package_version() {
-  local file="$1"
-  local expected="$2"
-  [[ -f "${file}" ]] || die "missing package file: ${file}"
-  PACKAGE_JSON="${file}" EXPECTED_VERSION="${expected}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-path = Path(os.environ["PACKAGE_JSON"])
-expected = os.environ["EXPECTED_VERSION"]
-actual = json.loads(path.read_text()).get("version")
-if actual != expected:
-    raise SystemExit(f"{path} version is {actual!r}, expected {expected!r}")
-PY
-}
-
 normalize_version() {
   local input="$1"
   if [[ "${input}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -95,50 +71,6 @@ require_synced_release_branch() {
   remote_head="$(git rev-parse "origin/${EXPECTED_BRANCH}")"
   [[ "${local_head}" == "${remote_head}" ]] \
     || die "${EXPECTED_BRANCH} is not synced with origin/${EXPECTED_BRANCH}"
-}
-
-require_version_matches() {
-  assert_file_contains "talos-rs/Cargo.toml" "version = \"${VERSION}\""
-  assert_file_contains "talos-rs/apps/tui/src/utils.rs" "APP_VERSION: &str = \"${TAG}\""
-  assert_package_version "talos-app/package.json" "${VERSION}"
-  assert_package_version "talos-app/web/package.json" "${VERSION}"
-  assert_package_version "talos-app/desktop/package.json" "${VERSION}"
-  assert_package_version "talos-app/ts-sdk/package.json" "${VERSION}"
-  assert_package_version "talos-app/ts-sdk/packages/core/package.json" "${VERSION}"
-  assert_package_version "talos-app/ts-sdk/packages/browser/package.json" "${VERSION}"
-  assert_package_version "talos-app/ts-sdk/packages/app-server/package.json" "${VERSION}"
-  assert_file_contains "talos-app/ts-sdk/packages/app-server/src/stdio.ts" \
-    "version: this.options.clientVersion ?? \"${VERSION}\""
-  assert_file_contains "deploy/docker/.env.example" "TALOS_SERVER_VERSION=${TAG}"
-  assert_file_contains "deploy/docker/docker-compose.yml" "TALOS_SERVER_VERSION:-${TAG}"
-}
-
-require_version_commit() {
-  local expected_subject="chore(release): prepare ${TAG}"
-  local actual_subject
-  actual_subject="$(git log -1 --format=%s)"
-  [[ "${actual_subject}" == "${expected_subject}" ]] \
-    || die "HEAD subject must be: ${expected_subject}"
-
-  local expected_files actual_files
-  expected_files="$(cat <<'EOF' | sort
-deploy/docker/.env.example
-deploy/docker/docker-compose.yml
-talos-app/desktop/package.json
-talos-app/package.json
-talos-app/ts-sdk/package.json
-talos-app/ts-sdk/packages/app-server/package.json
-talos-app/ts-sdk/packages/app-server/src/stdio.ts
-talos-app/ts-sdk/packages/browser/package.json
-talos-app/ts-sdk/packages/core/package.json
-talos-app/web/package.json
-talos-rs/Cargo.toml
-talos-rs/apps/tui/src/utils.rs
-EOF
-)"
-  actual_files="$(git diff-tree --no-commit-id --name-only -r HEAD | sort)"
-  [[ "${actual_files}" == "${expected_files}" ]] \
-    || die "HEAD must contain only the required release version files"
 }
 
 resolve_tag_action() {
@@ -250,8 +182,7 @@ require_clean_worktree
 require_release_branch
 require_synced_release_branch
 gh auth status >/dev/null
-require_version_matches
-require_version_commit
+bash scripts/check-release-version.sh "${VERSION}"
 resolve_tag_action
 require_release_absent
 
