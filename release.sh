@@ -107,6 +107,8 @@ require_version_matches() {
   assert_package_version "talos-app/ts-sdk/packages/core/package.json" "${VERSION}"
   assert_package_version "talos-app/ts-sdk/packages/browser/package.json" "${VERSION}"
   assert_package_version "talos-app/ts-sdk/packages/app-server/package.json" "${VERSION}"
+  assert_file_contains "talos-app/ts-sdk/packages/app-server/src/stdio.ts" \
+    "version: this.options.clientVersion ?? \"${VERSION}\""
   assert_file_contains "deploy/docker/.env.example" "TALOS_SERVER_VERSION=${TAG}"
   assert_file_contains "deploy/docker/docker-compose.yml" "TALOS_SERVER_VERSION:-${TAG}"
 }
@@ -126,6 +128,7 @@ talos-app/desktop/package.json
 talos-app/package.json
 talos-app/ts-sdk/package.json
 talos-app/ts-sdk/packages/app-server/package.json
+talos-app/ts-sdk/packages/app-server/src/stdio.ts
 talos-app/ts-sdk/packages/browser/package.json
 talos-app/ts-sdk/packages/core/package.json
 talos-app/web/package.json

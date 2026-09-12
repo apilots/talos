@@ -55,7 +55,8 @@ Update all release version locations in one standalone commit:
 
 - Rust workspace package version.
 - TUI display version.
-- Web, Desktop, and TypeScript SDK package versions.
+- Web, Desktop, and TypeScript SDK package versions, including the App Server
+  SDK's default client metadata version.
 - Docker example and Compose default image versions.
 
 `talos-rs/Cargo.lock` is intentionally ignored and generated from the workspace

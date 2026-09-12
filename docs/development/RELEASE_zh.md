@@ -51,7 +51,8 @@ Other Changes，并拒绝未知的 typed subject。空分类不会输出。
 
 - Rust workspace package 版本。
 - TUI 展示版本。
-- Web、Desktop 和 TypeScript SDK package 版本。
+- Web、Desktop 和 TypeScript SDK package 版本，包括 App Server SDK 默认上报的
+  client metadata 版本。
 - Docker 示例和 Compose 默认镜像版本。
 
 `talos-rs/Cargo.lock` 由 workspace manifest 生成且已明确忽略，不属于版本提交。
