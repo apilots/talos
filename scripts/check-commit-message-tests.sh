@@ -54,6 +54,8 @@ git -C "${temp_dir}" commit -q -m "chore: initialize repository"
 base="$(git -C "${temp_dir}" rev-parse HEAD)"
 printf 'valid\n' >> "${temp_dir}/changes"
 git -C "${temp_dir}" commit -qam "fix(test): validate commit range"
+printf 'also valid\n' >> "${temp_dir}/changes"
+git -C "${temp_dir}" commit -qam "docs(test): validate multiple commits"
 (cd "${temp_dir}" && "${validator}" --range "${base}" "$(git rev-parse HEAD)")
 printf 'invalid\n' >> "${temp_dir}/changes"
 git -C "${temp_dir}" commit -qam "Invalid range subject"

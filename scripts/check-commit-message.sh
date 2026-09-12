@@ -34,7 +34,7 @@ if [[ "${1:-}" == "--range" ]]; then
   git rev-parse --verify "$3^{commit}" >/dev/null
   while IFS= read -r -d '' subject; do
     validate_subject "${subject}"
-  done < <(git log --no-merges --format='%s%x00' "$2..$3")
+  done < <(git log --no-merges -z --format='%s' "$2..$3")
   exit 0
 fi
 
