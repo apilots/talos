@@ -1,6 +1,6 @@
 {
   "name": "talos-ts-sdk",
-  "version": "0.1.8-SNAPSHOT",
+  "version": "0.1.8",
   "private": true,
   "scripts": {
     "test": "pnpm --dir .. --filter @talos/sdk-core --filter @talos/sdk-app-server --filter @talos/sdk-browser test"
