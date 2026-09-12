@@ -123,9 +123,9 @@ Before direct dispatch, confirm that the failed source workflow shows a billing
 or infrastructure failure before product tests ran. Record that workflow URL,
 the local commands and results, the exact source tag and SHA, and the directly
 dispatched workflow URL in `output/release-<version>/release-evidence.md`. A local
-macOS host cannot replace the unavailable Windows and Linux installation rows;
-record those rows as unverified. This exception does not change or disable the
-default source-Release gate.
+macOS ARM64 host cannot replace the unavailable Linux or macOS AMD64 installation
+rows; record those rows as unverified. This exception does not change or disable
+the default source-Release gate.
 
 When publishing consecutive versions, dispatch the older version with
 `publish_latest=false`, wait until its public workflow and artifacts complete,
@@ -135,8 +135,9 @@ older run from moving stable `latest` references backward.
 ## Verify and finish
 
 Verify that both repositories have byte-identical Release Notes for the tag.
-Then download the public assets, run `sha256sum --check checksums.txt`, inspect
-`manifest.json`, and inspect the server image for `linux/amd64` and `linux/arm64`.
+Then download the public assets and run `sha256sum --check checksums.txt` on Linux
+or `shasum -a 256 -c checksums.txt` on macOS. Inspect `manifest.json` and the
+server image for `linux/amd64` and `linux/arm64`.
 For the newest release, also verify the stable latest references. A release is
 incomplete while any required artifact or verification is missing.
 

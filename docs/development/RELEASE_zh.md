@@ -107,8 +107,9 @@ gh workflow run release.yml --repo apilots/talos-releases \
 
 直接调度前，必须确认源码 workflow 是在产品测试运行前因账单或基础设施失败。将该
 workflow 链接、本地检查命令和结果、精确的源码 tag 与 SHA、直接调度的 workflow 链接
-写入 `output/release-<version>/release-evidence.md`。本地 macOS 不能替代未运行的 Windows
-与 Linux 安装项，必须将这些项记录为未验证。该例外不得修改或关闭默认源码 Release 准出。
+写入 `output/release-<version>/release-evidence.md`。本地 macOS ARM64 不能替代未运行的
+Linux 或 macOS AMD64 安装项，必须将这些项记录为未验证。该例外不得修改或关闭默认源码
+Release 准出。
 
 连续发布多个版本时，旧版本使用 `publish_latest=false`，等待其公开 workflow 和制品
 全部完成后，再用 `publish_latest=true` 发布最新版本，避免旧任务最后完成而回退 stable
@@ -116,10 +117,10 @@ workflow 链接、本地检查命令和结果、精确的源码 tag 与 SHA、�
 
 ## 验证与收尾
 
-确认两个仓库中同一 tag 的 Release Notes 字节级一致，然后下载公开制品，运行
-`sha256sum --check checksums.txt`，检查 `manifest.json`，并确认服务端镜像包含
-`linux/amd64` 和 `linux/arm64`。最新版本还要检查 stable latest 引用。任何必需制品或
-验证缺失时，发布都不算完成。
+确认两个仓库中同一 tag 的 Release Notes 字节级一致，然后下载公开制品：Linux 运行
+`sha256sum --check checksums.txt`，macOS 运行 `shasum -a 256 -c checksums.txt`。检查
+`manifest.json`，并确认服务端镜像包含 `linux/amd64` 和 `linux/arm64`。最新版本还要
+检查 stable latest 引用。任何必需制品或验证缺失时，发布都不算完成。
 
 发布后将发布分支合回 `main`，再用独立的 `chore(release)` 提交进入下一个开发版本。
 协议或数据变更还必须协调消费者升级，并执行
