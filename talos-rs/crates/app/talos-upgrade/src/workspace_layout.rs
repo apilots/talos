@@ -152,7 +152,7 @@ fn migrate_legacy_users(backup: &Path, prefix: &Path) -> TalosResult<()> {
     }
     ensure_directory(&users, "legacy users directory")?;
     for entry in sorted_entries(&users)? {
-        if entry.file_name() == ".DS_Store" {
+        if entry.file_name() == ".DS_Store" || entry.file_name() == ".dream-memory-scope.lock" {
             continue;
         }
         let source = entry.path();

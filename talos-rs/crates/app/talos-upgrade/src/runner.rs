@@ -19,6 +19,7 @@ const UPGRADE_LOCK_FILE: &str = ".lock";
 /// Immutable execution context shared by product upgrade tasks.
 pub(crate) struct UpgradeContext<'a> {
     pub config: &'a Config,
+    pub database_pool: &'a sqlx::SqlitePool,
     pub paths: &'a TalosPaths,
 }
 
@@ -26,8 +27,6 @@ pub(crate) struct UpgradeContext<'a> {
 pub(crate) type UpgradeFuture<'a> = Pin<Box<dyn Future<Output = TalosResult<()>> + Send + 'a>>;
 /// Required task callback; implementations mutate only the state owned by that task.
 pub(crate) type UpgradeExecuteFn = for<'a> fn(&'a UpgradeContext<'_>) -> UpgradeFuture<'a>;
-/// Detects installations created before the Product Upgrade version ledger existed.
-pub(crate) type LegacyInstallProbe = fn(&UpgradeContext<'_>) -> TalosResult<bool>;
 
 /// Standard execution boundary implemented by every startup upgrade runner.
 ///
@@ -136,23 +135,26 @@ enum UpgradeTaskStatus {
 
 /// Executes registered Product Upgrade Tasks and owns their common lifecycle state.
 pub(crate) struct ProductUpgradeRunner<'a> {
+    database_pool: &'a sqlx::SqlitePool,
     config: &'a Config,
     tasks: &'a [Box<dyn UpgradeTask>],
-    legacy_install_probe: LegacyInstallProbe,
+    existing_installation: bool,
     current_version: Version,
 }
 
 impl<'a> ProductUpgradeRunner<'a> {
     pub(crate) fn for_version(
         config: &'a Config,
+        database_pool: &'a sqlx::SqlitePool,
         tasks: &'a [Box<dyn UpgradeTask>],
-        legacy_install_probe: LegacyInstallProbe,
+        existing_installation: bool,
         current_version: &str,
     ) -> TalosResult<Self> {
         Ok(Self {
+            database_pool,
             config,
             tasks,
-            legacy_install_probe,
+            existing_installation,
             current_version: parse_version(current_version, "current Talos product version")?,
         })
     }
@@ -165,10 +167,11 @@ impl UpgradeRunner for ProductUpgradeRunner<'_> {
         let paths = self.config.talos_paths();
         let result = run_with_paths(
             self.config,
+            self.database_pool,
             &paths,
             &self.current_version,
             self.tasks,
-            self.legacy_install_probe,
+            self.existing_installation,
         )
         .await;
         if let Err(error) = &result {
@@ -180,10 +183,11 @@ impl UpgradeRunner for ProductUpgradeRunner<'_> {
 
 async fn run_with_paths(
     config: &Config,
+    database_pool: &sqlx::SqlitePool,
     paths: &TalosPaths,
     current_version: &Version,
     tasks: &[Box<dyn UpgradeTask>],
-    legacy_install_probe: LegacyInstallProbe,
+    existing_installation: bool,
 ) -> TalosResult<UpgradeRunReport> {
     let ordered_tasks = validate_and_order_tasks(tasks)?;
     let task_target_ceiling = task_target_ceiling(current_version);
@@ -192,14 +196,37 @@ async fn run_with_paths(
         .map_err(|error| io_error("create upgrade state directory", &upgrade_dir, error))?;
     let _lock = talos_fs::std_fs().with_file_lock(&upgrade_dir.join(UPGRADE_LOCK_FILE))?;
     let state_path = upgrade_dir.join(UPGRADE_STATE_FILE);
-    let context = UpgradeContext { config, paths };
+    let context = UpgradeContext {
+        config,
+        database_pool,
+        paths,
+    };
     let loaded_state = load_state(&state_path)?;
-    let fresh_install = loaded_state.is_none() && !legacy_install_probe(&context)?;
+    let fresh_install = loaded_state.is_none() && !existing_installation;
     let mut state = match loaded_state {
         Some(state) => state,
         None if fresh_install => UpgradeState::new(current_version.clone()),
         None => UpgradeState::new(Version::new(0, 1, 6)),
     };
+    // Baseline only tasks shipped with a fresh installation. A later patch may
+    // add a task for the same product version and must still execute it once.
+    if fresh_install {
+        for task in &ordered_tasks {
+            let definition = task.definition();
+            if definition.target_version <= task_target_ceiling {
+                state.tasks.insert(
+                    definition.id.to_string(),
+                    UpgradeTaskState {
+                        revision: definition.revision,
+                        target_version: definition.target_version.clone(),
+                        executed_version: current_version.clone(),
+                        status: UpgradeTaskStatus::Success,
+                        updated_at: unix_seconds()?,
+                    },
+                );
+            }
+        }
+    }
     if !state_path.exists() {
         write_state(&state_path, &state)?;
     }
@@ -237,16 +264,6 @@ async fn run_with_paths(
         let definition = task.definition();
         let target_version = &definition.target_version;
         let task_started_at = Instant::now();
-        if target_version <= &installed_version {
-            log_skipped(
-                definition,
-                target_version,
-                "already_in_product_version",
-                task_started_at,
-            );
-            report.skipped.push(definition.id.to_string());
-            continue;
-        }
         if target_version > &task_target_ceiling {
             tracing::info!(
                 upgrade_id = definition.id,

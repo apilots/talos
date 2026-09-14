@@ -8,6 +8,9 @@ description = "Talos startup upgrade coordinator"
 repository.workspace = true
 
 [dependencies]
+talos-agent = { workspace = true }
+talos-agent-api = { workspace = true }
+talos-agent-kernel = { workspace = true }
 talos-logging = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }

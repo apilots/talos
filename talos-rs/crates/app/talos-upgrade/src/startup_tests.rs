@@ -23,13 +23,8 @@ async fn startup_runs_versioned_product_tasks_in_real_migration_order() {
         "## Legacy memory\n\nUser-authored body.\n",
     )
     .unwrap();
-    let migrations = temp.path().join("migrations");
-    fs::create_dir_all(&migrations).unwrap();
-    fs::write(
-        migrations.join("202608290001_create_upgrade_probe.sql"),
-        "CREATE TABLE upgrade_probe (id INTEGER PRIMARY KEY);",
-    )
-    .unwrap();
+    let migrations =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
     let pool = SqlitePool::connect("sqlite::memory:")
         .await
         .expect("connect sqlite");
@@ -73,7 +68,10 @@ async fn startup_runs_versioned_product_tasks_in_real_migration_order() {
             Vec::<i64>::new(),
             "0.1.7".to_string(),
             "0.1.8-SNAPSHOT".to_string(),
-            vec!["202608290001_workspace_layout_v1".to_string()],
+            vec![
+                "202608290001_workspace_layout_v1".to_string(),
+                "202609140001_history_repair_0_1_8".to_string()
+            ],
             vec!["202608290002_dream_memory_okf".to_string()],
         )
     );
