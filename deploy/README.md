@@ -85,6 +85,15 @@ sources/Provider artifacts. Rollback restores the old backup and binaries and
 loses later writes; binary-only rollback is unsafe. The authoritative migration
 details are in [Error contract](../docs/architecture/ERROR_MODEL.md#upgrade-and-rollback).
 
+The 0.1.8 repair is part of the SQLite startup upgrade and covers the legacy
+Timeline tables, Provider JSONL artifacts, and `MEMORY.md` documents as one
+validated operation. It retains immutable database and file sources before
+removing legacy records, and its Product Upgrade task is retried after failure
+or skipped after recorded success. Do not edit released SQLx checksums or run
+this SQLite repair against another database backend. Validate an existing
+history, a continued turn, a new turn, memory reflection, and restart behavior
+before treating the upgrade as complete.
+
 ## Terminal installation
 
 The release bundle installer lives under [`install/`](install/README.md). It

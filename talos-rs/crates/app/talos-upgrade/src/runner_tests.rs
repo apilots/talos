@@ -90,9 +90,16 @@ async fn run_at_version(
     config: &Config,
     current_version: &str,
     tasks: &[Box<dyn UpgradeTask>],
-    probe: LegacyInstallProbe,
+    probe: fn(&UpgradeContext<'_>) -> TalosResult<bool>,
 ) -> TalosResult<UpgradeRunReport> {
-    ProductUpgradeRunner::for_version(config, tasks, probe, current_version)?
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let paths = config.talos_paths();
+    let existing = probe(&UpgradeContext {
+        config,
+        database_pool: &pool,
+        paths: &paths,
+    })?;
+    ProductUpgradeRunner::for_version(config, &pool, tasks, existing, current_version)?
         .run()
         .await
 }
@@ -122,7 +129,7 @@ async fn fresh_install_records_current_version_without_running_history() {
             first.skipped,
             second.fresh_install,
             state.product_version,
-            state.tasks,
+            state.tasks.len(),
             temp.path().join("first-ran").exists(),
         ),
         (
@@ -133,14 +140,14 @@ async fn fresh_install_records_current_version_without_running_history() {
             vec![FIRST_TASK_ID.to_string()],
             false,
             Version::new(0, 1, 7),
-            BTreeMap::new(),
+            1,
             false,
         )
     );
 }
 
 #[tokio::test]
-async fn only_tasks_in_product_version_interval_run() {
+async fn tasks_run_when_their_target_version_is_reached() {
     let temp = tempfile::tempdir().expect("temp home");
     let config = test_config(temp.path());
     let tasks = [

@@ -25,10 +25,18 @@ async fn run_workspace_upgrade_at_version(
     current_version: &str,
 ) -> TalosResult<crate::runner::UpgradeRunReport> {
     let tasks = [upgrade_task()];
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let paths = config.talos_paths();
+    let existing = legacy_installation_exists(&UpgradeContext {
+        config,
+        database_pool: &pool,
+        paths: &paths,
+    })?;
     crate::runner::ProductUpgradeRunner::for_version(
         config,
+        &pool,
         &tasks,
-        legacy_installation_exists,
+        existing,
         current_version,
     )?
     .run()
