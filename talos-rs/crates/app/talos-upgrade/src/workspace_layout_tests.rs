@@ -25,10 +25,18 @@ async fn run_workspace_upgrade_at_version(
     current_version: &str,
 ) -> TalosResult<crate::runner::UpgradeRunReport> {
     let tasks = [upgrade_task()];
+    let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let paths = config.talos_paths();
+    let existing = legacy_installation_exists(&UpgradeContext {
+        config,
+        database_pool: &pool,
+        paths: &paths,
+    })?;
     crate::runner::ProductUpgradeRunner::for_version(
         config,
+        &pool,
         &tasks,
-        legacy_installation_exists,
+        existing,
         current_version,
     )?
     .run()
@@ -94,15 +102,18 @@ async fn renames_default_legacy_workspace_and_rebuilds_user_directories() {
     assert!(prefix.join("anonymous").is_dir());
     assert!(!prefix.join("users").exists());
     assert!(!prefix.join("SOUL.md").exists());
+    assert!(!backup.exists());
     assert_eq!(
-        fs::read_to_string(backup.join("users/alice/note.md")).unwrap(),
-        "alice"
-    );
-    assert_eq!(
-        fs::read_to_string(backup.join("SOUL.md")).unwrap(),
+        fs::read_to_string(
+            temp.path()
+                .join("recovered")
+                .join(WORKSPACE_LAYOUT_V1_UPGRADE_ID)
+                .join("SOUL.md")
+        )
+        .unwrap(),
         "unowned"
     );
-    assert!(backup.join(".DS_Store").is_file());
+    assert!(!backup.join(".DS_Store").exists());
 }
 
 #[tokio::test]
@@ -138,9 +149,7 @@ async fn migrates_only_the_single_legacy_workspace_derived_from_agent_name() {
     );
     assert!(!prefix.join("alice/reviewer.md").exists());
     assert!(reviewer.join("users/alice/reviewer.md").is_file());
-    assert!(backup_source(temp.path())
-        .join("users/alice/writer.md")
-        .is_file());
+    assert!(!backup_source(temp.path()).exists());
 }
 
 #[tokio::test]
@@ -167,7 +176,7 @@ async fn resumes_from_stable_backup_after_an_interrupted_migration() {
         fs::read_to_string(prefix.join("alice/two.md")).unwrap(),
         "two"
     );
-    assert!(backup.join("users/alice/one.md").is_file());
+    assert!(!backup.exists());
 }
 
 #[tokio::test]
@@ -218,7 +227,5 @@ async fn nested_target_prefix_does_not_recurse_into_the_legacy_users_directory()
         "alice"
     );
     assert!(!target.join("new").exists());
-    assert!(backup_source(temp.path())
-        .join("users/alice/note.md")
-        .is_file());
+    assert!(!backup_source(temp.path()).exists());
 }

@@ -2,13 +2,14 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use sqlx::SqlitePool;
-use talos_config::Config;
+use talos_config::{Config, DatabaseType};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 use runner::UpgradeRunner;
 
 mod database_migration;
 mod dream_memory;
+mod history_repair_0_1_8;
 mod preparation;
 mod runner;
 mod workspace_layout;
@@ -47,10 +48,20 @@ async fn run_startup_upgrades_for_version(
     current_version: &str,
 ) -> TalosResult<StartupUpgradeReport> {
     let started_at = Instant::now();
+    if params.config.storage.database_type != DatabaseType::Sqlite {
+        return Err(TalosError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "unsupported storage.database_type: {}",
+                params.config.storage.database_type
+            ),
+        ));
+    }
     tracing::info!(
         migration_dir = %params.database_migration_dir.display(),
         "startup upgrade sequence started"
     );
+    history_repair_0_1_8::backup_database(params.config, params.database_pool).await?;
     let database_started_at = Instant::now();
     let database = database_migration::DatabaseMigrationRunner::new(
         params.database_pool,
@@ -87,11 +98,29 @@ async fn run_startup_upgrades_for_version(
     let tasks = [
         dream_memory::upgrade_task(),
         workspace_layout::upgrade_task(),
+        history_repair_0_1_8::upgrade_task(),
     ];
+    let paths = params.config.talos_paths();
+    let context = runner::UpgradeContext {
+        config: params.config,
+        database_pool: params.database_pool,
+        paths: &paths,
+    };
+    let existing_installation = workspace_layout::legacy_installation_exists(&context)?
+        || sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM sessions)")
+            .fetch_one(params.database_pool)
+            .await
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "Inspect upgrade installation state failed.",
+                    error,
+                )
+            })?;
     let product = runner::ProductUpgradeRunner::for_version(
         params.config,
+        params.database_pool,
         &tasks,
-        workspace_layout::legacy_installation_exists,
+        existing_installation,
         current_version,
     )?
     .run()
@@ -105,6 +134,7 @@ async fn run_startup_upgrades_for_version(
         let paths = params.config.talos_paths();
         let context = runner::UpgradeContext {
             config: params.config,
+            database_pool: params.database_pool,
             paths: &paths,
         };
         if workspace_layout::legacy_installation_exists(&context)? {

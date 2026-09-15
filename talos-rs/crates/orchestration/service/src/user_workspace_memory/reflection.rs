@@ -95,11 +95,15 @@ impl UserWorkspaceMemoryReflection {
             workspace_root: workspace.root,
         };
         let snapshot = self.memory.read(&scope).await?;
-        if matches!(snapshot, UserWorkspaceMemorySnapshot::Invalid { .. }) {
+        if let UserWorkspaceMemorySnapshot::Invalid { diagnostic, .. } = &snapshot {
             return Err(talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "Memory reflection could not update an invalid MEMORY.md document.",
-            ));
+            )
+            .context(format!(
+                "parse User Workspace Memory {}: {diagnostic}",
+                scope.workspace_root.join("MEMORY.md").display()
+            )));
         }
         let input = MemoryReflectionInput {
             current_memory: prompt_content(&snapshot)?,
