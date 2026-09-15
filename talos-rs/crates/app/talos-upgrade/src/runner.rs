@@ -11,6 +11,9 @@ use talos_config::{Config, TalosPaths};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::FileSystem;
 
+mod cleanup;
+use cleanup::UpgradeCleanupState;
+
 const STATE_SCHEMA_VERSION: u32 = 1;
 const UPGRADE_DIR: &str = "upgrades";
 const UPGRADE_STATE_FILE: &str = "state.json";
@@ -50,25 +53,37 @@ pub(crate) struct UpgradeTaskDefinition {
 
 /// Standard API implemented by every Product Upgrade Task.
 ///
-/// Tasks expose immutable metadata and business execution only. Implementations
+/// Tasks expose immutable metadata, business execution, and artifact cleanup. Implementations
 /// must not read or write the Product Upgrade ledger or manage retries.
 pub(crate) trait UpgradeTask: Send + Sync {
     fn definition(&self) -> &UpgradeTaskDefinition;
 
     fn execute<'a>(&'a self, context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a>;
+
+    /// Called under the upgrade lock after all applicable tasks and the product
+    /// version are durable. Remove only owned intermediate data, preserve unique
+    /// originals, and tolerate missing paths and partial cleanup. Errors are
+    /// reported and retried by the runner without repeating successful execution.
+    fn cleanup<'a>(&'a self, context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a>;
 }
 
 /// Function-backed task registration used by the current product migrations.
 pub(crate) struct UpgradeTaskRegistration {
     definition: UpgradeTaskDefinition,
     execute: UpgradeExecuteFn,
+    cleanup: UpgradeExecuteFn,
 }
 
 impl UpgradeTaskRegistration {
-    pub(crate) const fn new(definition: UpgradeTaskDefinition, execute: UpgradeExecuteFn) -> Self {
+    pub(crate) const fn new(
+        definition: UpgradeTaskDefinition,
+        execute: UpgradeExecuteFn,
+        cleanup: UpgradeExecuteFn,
+    ) -> Self {
         Self {
             definition,
             execute,
+            cleanup,
         }
     }
 }
@@ -80,6 +95,10 @@ impl UpgradeTask for UpgradeTaskRegistration {
 
     fn execute<'a>(&'a self, context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
         (self.execute)(context)
+    }
+
+    fn cleanup<'a>(&'a self, context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
+        (self.cleanup)(context)
     }
 }
 
@@ -123,6 +142,8 @@ struct UpgradeTaskState {
     executed_version: Version,
     status: UpgradeTaskStatus,
     updated_at: i64,
+    #[serde(default)]
+    cleanup: UpgradeCleanupState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,6 +241,7 @@ async fn run_with_paths(
                         revision: definition.revision,
                         target_version: definition.target_version.clone(),
                         executed_version: current_version.clone(),
+                        cleanup: UpgradeCleanupState::completed(unix_seconds()?),
                         status: UpgradeTaskStatus::Success,
                         updated_at: unix_seconds()?,
                     },
@@ -260,7 +282,7 @@ async fn run_with_paths(
         deferred: Vec::new(),
     };
 
-    for task in ordered_tasks {
+    for task in &ordered_tasks {
         let definition = task.definition();
         let target_version = &definition.target_version;
         let task_started_at = Instant::now();
@@ -297,6 +319,7 @@ async fn run_with_paths(
                 revision: definition.revision,
                 target_version: target_version.clone(),
                 executed_version: current_version.clone(),
+                cleanup: UpgradeCleanupState::pending(unix_seconds()?),
                 status: UpgradeTaskStatus::Running,
                 updated_at: unix_seconds()?,
             },
@@ -380,6 +403,7 @@ async fn run_with_paths(
             "Talos product upgrade version advanced"
         );
     }
+    cleanup::run(&ordered_tasks, &context, &state_path, &mut state).await;
     tracing::info!(report = ?report, "product upgrade runner completed");
     Ok(report)
 }
@@ -470,7 +494,7 @@ fn load_state(path: &Path) -> TalosResult<Option<UpgradeState>> {
         return Ok(None);
     }
     let raw = fs::read(path).map_err(|error| io_error("read upgrade state", path, error))?;
-    let state: UpgradeState = serde_json::from_slice(&raw).map_err(|error| {
+    let mut state: UpgradeState = serde_json::from_slice(&raw).map_err(|error| {
         TalosError::new(
             ErrorCode::InvalidRequest,
             format!("invalid upgrade state at {}: {error}", path.display()),
@@ -485,6 +509,11 @@ fn load_state(path: &Path) -> TalosResult<Option<UpgradeState>> {
                 path.display()
             ),
         ));
+    }
+    for task in state.tasks.values_mut() {
+        if task.cleanup.updated_at == 0 {
+            task.cleanup.updated_at = task.updated_at;
+        }
     }
     Ok(Some(state))
 }

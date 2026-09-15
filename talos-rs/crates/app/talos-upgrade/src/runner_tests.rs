@@ -83,6 +83,7 @@ fn task(
             priority,
         },
         execute,
+        no_op,
     ))
 }
 
@@ -276,6 +277,7 @@ async fn completed_task_revision_change_is_rejected() {
                 target_version: Version::new(0, 1, 7),
                 priority: 100,
             },
+            no_op,
             no_op,
         ))],
         legacy_install,
