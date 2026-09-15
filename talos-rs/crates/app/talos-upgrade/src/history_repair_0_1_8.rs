@@ -29,6 +29,7 @@ pub(crate) fn upgrade_task() -> Box<dyn UpgradeTask> {
             priority: 200,
         },
         run,
+        cleanup,
     ))
 }
 
@@ -86,4 +87,11 @@ fn source_error(error: impl std::error::Error + Send + Sync + 'static) -> TalosE
 }
 fn decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> TalosResult<T> {
     serde_json::from_value(value).map_err(source_error)
+}
+
+fn cleanup<'a>(context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
+    Box::pin(async move {
+        talos_fs::remove_directory(&context.paths.talos_home.join("upgrades").join(UPGRADE_ID))
+            .await
+    })
 }

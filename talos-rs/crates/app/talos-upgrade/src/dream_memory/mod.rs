@@ -19,6 +19,7 @@ pub(crate) fn upgrade_task() -> Box<dyn UpgradeTask> {
             priority: 100,
         },
         run_dream_memory_okf,
+        cleanup_dream_memory_okf,
     ))
 }
 
@@ -62,4 +63,9 @@ async fn convert_legacy_dream_memory(context: &UpgradeContext<'_>) -> TalosResul
         conversion.finish().await?;
     }
     Ok(())
+}
+
+// Conversion finishes each user scope before the layout task moves its paths.
+fn cleanup_dream_memory_okf<'a>(_context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
+    Box::pin(async { Ok(()) })
 }
