@@ -21,6 +21,7 @@ pub(crate) fn upgrade_task() -> Box<dyn UpgradeTask> {
             priority: 100,
         },
         run_workspace_layout_v1,
+        cleanup_workspace_layout,
     ))
 }
 
@@ -46,6 +47,106 @@ fn run_workspace_layout_v1<'a>(context: &'a UpgradeContext<'_>) -> UpgradeFuture
     Box::pin(async move { migrate_workspace_layout_v0_to_v1(context) })
 }
 
+fn cleanup_workspace_layout<'a>(context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
+    Box::pin(async move {
+        let task_dir = context
+            .paths
+            .talos_home
+            .join(UPGRADE_BACKUP_DIR)
+            .join(WORKSPACE_LAYOUT_V1_UPGRADE_ID);
+        let source = backup_source(context.paths);
+        let recovered_root = context.paths.talos_home.join("recovered");
+        let recovered = recovered_root.join(WORKSPACE_LAYOUT_V1_UPGRADE_ID);
+        let prefix = current_workspace_prefix(context.config)?;
+        validate_backup_boundary(&prefix, &source)?;
+        validate_backup_boundary(&prefix, &recovered)?;
+        if !task_dir
+            .try_exists()
+            .map_err(|error| io_error("inspect workspace cleanup", &task_dir, error))?
+        {
+            return Ok(());
+        }
+        ensure_cleanup_directory(&task_dir)?;
+        if source
+            .try_exists()
+            .map_err(|error| io_error("inspect workspace source", &source, error))?
+        {
+            ensure_cleanup_directory(&source)?;
+            // Success proves users were reconciled in full; live files may
+            // since have changed or been removed by their owners.
+            let mut entries = sorted_entries(&source)?;
+            entries
+                .retain(|entry| entry.file_name() != "users" && entry.file_name() != ".DS_Store");
+            if !entries.is_empty() {
+                fs::create_dir_all(&recovered_root).map_err(|error| {
+                    io_error("create recovered data root", &recovered_root, error)
+                })?;
+                ensure_cleanup_directory(&recovered_root)?;
+                fs::create_dir_all(&recovered).map_err(|error| {
+                    io_error("create recovered workspace directory", &recovered, error)
+                })?;
+                ensure_cleanup_directory(&recovered)?;
+                sync_directory(&recovered_root)?;
+                sync_directory(&context.paths.talos_home)?;
+            }
+            for entry in entries {
+                let target = recovered.join(entry.file_name());
+                match fs::symlink_metadata(&target) {
+                    Ok(_) => {
+                        return Err(TalosError::new(
+                            ErrorCode::Conflict,
+                            "Recovered workspace data already exists; originals were retained.",
+                        )
+                        .context(format!("recovery target {}", target.display())));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(io_error("inspect recovered target", &target, error)),
+                }
+                talos_fs::rename(&entry.path(), &target)?;
+                sync_directory(&recovered)?;
+                sync_directory(&source)?;
+            }
+        }
+        // Repeat these syncs even after an interrupted rename, before removing
+        // the source tree or publishing cleanup completion.
+        if recovered
+            .try_exists()
+            .map_err(|error| io_error("inspect recovered workspace", &recovered, error))?
+        {
+            ensure_cleanup_directory(&recovered_root)?;
+            ensure_cleanup_directory(&recovered)?;
+            sync_directory(&recovered)?;
+            sync_directory(&recovered_root)?;
+            sync_directory(&context.paths.talos_home)?;
+            tracing::info!(path = %recovered.display(), "unowned workspace originals recovered");
+        }
+        talos_fs::remove_directory(&source).await?;
+        // Refuse to discard unknown task artifacts outside the owned source.
+        fs::remove_dir(&task_dir).map_err(|error| {
+            io_error("remove empty workspace upgrade directory", &task_dir, error)
+        })?;
+        Ok(())
+    })
+}
+
+fn ensure_cleanup_directory(path: &Path) -> TalosResult<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| io_error("inspect workspace cleanup directory", path, error))?;
+    if !metadata.is_dir() {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Workspace cleanup requires a regular directory.",
+        ));
+    }
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> TalosResult<()> {
+    fs::File::open(path)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| io_error("sync workspace directory", path, error))
+}
+
 fn migrate_workspace_layout_v0_to_v1(context: &UpgradeContext<'_>) -> TalosResult<()> {
     let prefix = current_workspace_prefix(context.config)?;
     let source = legacy_source(context.config, context.paths);
@@ -57,6 +158,10 @@ fn migrate_workspace_layout_v0_to_v1(context: &UpgradeContext<'_>) -> TalosResul
     fs::create_dir_all(&prefix)
         .map_err(|error| io_error("create workspace migration target", &prefix, error))?;
     migrate_legacy_users(&backup, &prefix)?;
+    sync_directory(&prefix)?;
+    if let Some(parent) = prefix.parent() {
+        sync_directory(parent)?;
+    }
     Ok(())
 }
 
@@ -152,7 +257,7 @@ fn migrate_legacy_users(backup: &Path, prefix: &Path) -> TalosResult<()> {
     }
     ensure_directory(&users, "legacy users directory")?;
     for entry in sorted_entries(&users)? {
-        if entry.file_name() == ".DS_Store" {
+        if entry.file_name() == ".DS_Store" || entry.file_name() == ".dream-memory-scope.lock" {
             continue;
         }
         let source = entry.path();
@@ -194,6 +299,7 @@ fn reconcile_tree(source: &Path, target: &Path) -> TalosResult<()> {
         for entry in sorted_entries(source)? {
             reconcile_tree(&entry.path(), &target.join(entry.file_name()))?;
         }
+        sync_directory(target)?;
         return Ok(());
     }
     if target.exists() {
@@ -210,6 +316,9 @@ fn reconcile_tree(source: &Path, target: &Path) -> TalosResult<()> {
         .map_err(|error| io_error("create migrated workspace parent", parent, error))?;
     fs::copy(source, target)
         .map_err(|error| io_error("copy legacy workspace file", source, error))?;
+    fs::File::open(target)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| io_error("sync migrated workspace file", target, error))?;
     Ok(())
 }
 
@@ -222,7 +331,9 @@ fn ensure_files_equal(source: &Path, target: &Path) -> TalosResult<()> {
     let target_bytes =
         fs::read(target).map_err(|error| io_error("read target file", target, error))?;
     if source_bytes == target_bytes {
-        Ok(())
+        fs::File::open(target)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| io_error("sync reconciled workspace file", target, error))
     } else {
         conflict(source, target)
     }
