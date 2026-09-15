@@ -431,7 +431,7 @@ ${TALOS_HOME}/
 ├── upgrades/
 │   ├── state.json                   Product Upgrade Task ledger
 │   └── 202608290001_workspace_layout_v1/
-│       └── source/                  Renamed legacy Workspace backup
+│       └── source/                  Temporary legacy Workspace backup
 └── workspace-talos/                 Workspace prefix
     └── <user-id>/                   EffectiveWorkspace root
         ├── profile.json
@@ -615,7 +615,7 @@ Tenant 需要独立 Spec 定义成员关系、跨用户共享、权限、迁移�
 9. Memory SQLite 是派生索引，可以在规范文件迁移完成后按新 scope 重建。
 10. 旧版本只有一个由顶层 `agent.name` 派生的物理 Workspace；新增的多 Agent definitions 不是历史目录发现来源，Upgrade 不得据此猜测多个 legacy roots。
 11. Prefix 根目录已有的 `SOUL.md`、`USER.md` 等文件必须被识别为 scope 错误产物；运行时不得读取，也不得自动复制给任意 User。
-12. 对上述错误产物的迁移必须可恢复并输出诊断；没有明确归属时只保留在整体 rename 后的 Upgrade 备份中，不得复制到新 Workspace，也不得猜测归属到 `anonymous` 或首个用户。
+12. 对上述错误产物的迁移必须可恢复并输出诊断；没有明确归属时在迁移期间保留于 Upgrade 备份，成功清理时迁至 `${TALOS_HOME}/recovered/<task-id>/`，不得复制到新 Workspace，也不得猜测归属到 `anonymous` 或首个用户。
 13. `workspace.info`、生成的 App Protocol/SDK 类型与 Web Settings 路径面板删除，属于用户 API 和产品表面的 breaking change。
 14. 新增顶层必需 `workspaces` 配置；默认配置 Upgrade 补齐该对象，显式外部配置缺失时 fail fast。
 15. `session.patch` 删除 `project_id` Set/Clear，已有 Session 的 Project 绑定保持原值。
@@ -667,14 +667,16 @@ ${TALOS_HOME}/upgrades/state.json
       "target_version": "0.1.7",
       "executed_version": "0.1.8",
       "status": "success",
-      "updated_at": 1787961600
+      "updated_at": 1787961600,
+      "cleanup": { "status": "completed", "updated_at": 1787961600 }
     },
     "202608290001_workspace_layout_v1": {
       "revision": 1,
       "target_version": "0.1.8",
       "executed_version": "0.1.8",
       "status": "success",
-      "updated_at": 1787961600
+      "updated_at": 1787961600,
+      "cleanup": { "status": "completed", "updated_at": 1787961600 }
     }
   }
 }
@@ -691,7 +693,7 @@ priority: 100
 
 `talos-upgrade::lib.rs` 只负责任务组装和启动编排：先等待独立的 `DatabaseMigrationRunner`，再由 `ProductUpgradeRunner` 执行 Product Task，全部成功后才初始化 Workspace 并允许 Runtime 组装。所有 Runner 实现统一 `UpgradeRunner::run() -> typed report` 接口；Database Runner 和 Product Runner 保持各自强类型报告与独立 ledger，不增加动态 Manager 或自由 JSON envelope。
 
-所有 Product Task 实现统一的 `UpgradeTask` 接口，只暴露 `definition()` 和 `execute(context)`。当前函数式 Task 通过 `UpgradeTaskRegistration` 适配该接口；具体 Dream Memory 和 Workspace 实现只处理业务数据，不读取或写入 ledger，不判断版本、状态或重试。版本过滤、排序、文件锁、日志、`running/failed/success`、失败重试和强类型 JSON 持久化全部由 `ProductUpgradeRunner` 负责。
+所有 Product Task 实现统一的 `UpgradeTask` 接口，暴露 `definition()`、`execute(context)` 和 `cleanup(context)`。当前函数式 Task 通过 `UpgradeTaskRegistration` 适配该接口；具体 Dream Memory 和 Workspace 实现只处理业务数据，不读取或写入 ledger，不判断版本、状态或重试。版本过滤、排序、文件锁、日志、`running/failed/success`、失败重试和强类型 JSON 持久化全部由 `ProductUpgradeRunner` 负责。
 
 Runner 串行处理并遵守以下规则：
 
@@ -704,7 +706,7 @@ Runner 串行处理并遵守以下规则：
 - 重启时只有 `success` 跳过，`running` 或 `failed` 均按原 Task 幂等重试；任一任务失败时不推进 `product_version`，全部区间任务成功后才推进到当前版本；
 - 已完成 task 的 revision 或 target version 与代码不一致、状态文件损坏、产品版本非法或任务 ID 重复：fail fast；
 - 已发布任务不得原地修改迁移语义；后续数据变更增加新的稳定 task ID；
-- `.DS_Store` 等明确列出的系统文件不作为 User 数据；位于旧 `users/` 下时跳过，位于 prefix 根时随其它无归属根文件隔离。
+- `.DS_Store` 等明确列出的系统文件不作为 User 数据；位于旧 `users/` 下时跳过，位于备份根时在成功清理中删除。
 - Workspace Layout Task 被版本区间选中但不存在 legacy source/backup 时成功 no-op，用于支持全新 `0.1.7 -> 0.1.8`；不得把“没有历史数据”当作迁移冲突。
 - 当前程序版本低于 Workspace Layout Task 且仍检测到旧 `users/<user-id>` 布局时，允许更早版本 Task 完成并记账，但必须在 Runtime 初始化前明确停止启动，禁止旧数据尚未迁移就按新路径提供服务。
 
@@ -724,8 +726,8 @@ Dream Memory legacy→OKF 转换是 `0.1.7` Product Upgrade Task，必须在旧 
 4. **Convert Dream Memory**：由 `0.1.7` Task 在旧 `users/<user-id>` 结构中完成 legacy→OKF 转换；它不感知 Upgrade State、重试或产品版本。
 5. **Rename source**：由 `0.1.8` Workspace Task 将整个 legacy Workspace 原子 rename 到 `${TALOS_HOME}/upgrades/202608290001_workspace_layout_v1/source`，然后才创建配置定义的新 Workspace prefix。备份已存在表示上次迁移中断，直接进入恢复流程。
 6. **Migrate users**：只从稳定备份中的每个合法 `users/<user-id>` 重建 `<prefix>/<user-id>`，不依赖 Session DB 枚举用户；`users/anonymous` 作为合法未登录用户数据正常迁移。
-7. **Preserve unowned state**：旧根目录中的 `SOUL.md`、`USER.md` 等无归属内容只保留在完整备份中，不复制到新 prefix，也不猜测 User owner。
-8. **Commit product version**：每个 Task 按 `running -> failed|success` 原子更新强类型状态；所有区间任务均为 `success` 后推进 `product_version`，再初始化当前 Workspace 并允许 Runtime 继续组装。备份不在自动启动流程中删除。
+7. **Preserve unowned state**：旧根目录中的 `SOUL.md`、`USER.md` 等无归属内容在迁移期间保留在完整备份中；成功清理时迁至 `${TALOS_HOME}/recovered/<task-id>/`，不复制到新 prefix，也不猜测 User owner。
+8. **Commit product version**：每个 Task 按 `running -> failed|success` 原子更新强类型状态；所有区间任务均为 `success` 后推进 `product_version`，随后在同一升级锁内清理成功任务的过程数据，完成后任务目录为空或不存在；最后初始化当前 Workspace 并允许 Runtime 继续组装。
 
 ### 15.4 幂等、冲突与恢复规则
 
@@ -737,10 +739,20 @@ Upgrade 函数必须根据 source 与 target 的实际状态幂等恢复，不�
 - target 已存在且对应内容完全一致：视为该部分已完成，继续处理其余目录；
 - target 已存在但内容不同：停止 Upgrade，不自动 merge、覆盖或选择较新文件；
 - 进程崩溃：task 完成状态不写入；完整 backup 仍在，下次启动对已复制的相同文件幂等核对并继续；
-- 无法确认 owner 的根文件：只留在 backup，不分配给 `anonymous`、首个登录用户或默认 Agent；
+- 无法确认 owner 的根文件：清理时迁至 recovered，不分配给 `anonymous`、首个登录用户或默认 Agent；
 - Upgrade 失败：保留完整 backup 和已完成的相同 target，明确阻止启动，不回退读取旧路径。
 
-备份清理由后续独立、可审计的维护动作负责，不属于本次自动 Upgrade 的完成条件。
+过程备份清理由各 Task 实现并由 Runner 自动调度；失败保留待重试状态，不回退已完成的升级。
+
+### 15.5 Upgrade Task 清理生命周期
+
+- `UpgradeTask.cleanup(context)` 由各任务实现，只处理本任务过程产物；Runner 负责状态、调用时机及错误报告。清理必须幂等，不读取或写入账本。
+- Runner 在全部当前适用任务成功、产品版本持久化后执行清理。任务的 `cleanup` 独立记录 `pending | completed` 与 `updated_at`；旧记录缺字段时按 pending 处理，时间沿用任务时间。新安装基线任务直接 completed。
+- 新任务执行前随 running 持久化 pending；旧记录缺字段即为 pending。清理前不重复写入，完成删除后才持久化 completed。失败保留 pending 并报告，继续其他清理及启动；下次即使跳过 execute 也重试 cleanup。状态写入使用候选副本，失败不污染后续保存。失败、运行中、未执行或超出当前版本的任务不清理。
+- Dream Memory 保留每用户转换末尾的 finish，删除 staging/旧格式备份后才允许后续 Workspace 搬迁；Task.cleanup 无额外操作。
+- Workspace Layout 的 success 表示 users 已完整复制或核对。迁移目标文件与目录同步落盘后才提交成功。清理不比较可能已正常修改的新文件；删除 users 副本及系统杂项，将根目录其他原始内容保留相对路径迁至 recovered。恢复目标冲突时停止该任务清理，不覆盖；迁出目录同步后才删除 source，任务目录存在未知产物时保留并报告。
+- History Repair 在文件替换及数据库事务提交、全部任务成功后删除 source、database.sqlite、database.sqlite.partial 和任务目录。数据库备份是升级过程保护数据，不是长期回滚快照；已修复数据库不再含旧历史表，不会再次触发备份。部署回滚所需的一致性备份仍由部署流程负责。
+- `upgrades/state.json`、`upgrades/.lock` 和 SQLx 账本永久保留。completed 表示本任务过程数据清完；recovered 中的唯一原始数据不属于过程数据。
 
 ## 16. 成功标准
 
