@@ -15,34 +15,11 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| refactor-044 | `refactor-044-unified-error-contract` | implemented and verified |
-| refactor-043 | `refactor-043-workspace-agent-session-isolation` | implemented |
-| refactor-042 | `refactor-042-dream-memory-okf` | implemented |
-| refactor-041 | `refactor-041-user-workspace-memory` | implemented |
-| feat-041 | `feat-041-agent-inner-model` | verified |
-| fix-006 | `fix-006-turn-task-lifecycle-control` | implemented |
-| fix-005 | `fix-005-context-compaction-event-presentation` | implemented |
-| feat-040 | `feat-040-web-light-theme-chat-presentation` | implemented |
-| feat-039 | `feat-039-tui-release-installer` | active |
-| feat-037 | `feat-037-tool-permission-user-interaction` | draft |
-| feat-036 | `feat-036-unified-tool-sandbox` | draft |
-| refactor-040 | `refactor-040-agent-provider-api-standardization` | implemented; merged in PR #15 |
-| feat-034 | `feat-034-web-search-settings` | implementing |
-| feat-035 | `feat-035-mcp-server-management-reliability` | draft |
-| feat-033 | `feat-033-user-file-storage-model-input` | draft |
-| feat-032 | `feat-032-session-subagent` | active |
-| refactor-039 | `refactor-039-memory-storage-retrieval` | draft |
-| refactor-038 | `refactor-038-llm-model-selection` | active |
-| feat-031 | `feat-031-profile-usage-statistics` | active |
-
-The earlier Provider-consolidation work also used ID 044 and was incorporated
-into refactor-040. The retained `refactor-044-unified-error-contract` path now
-identifies the error contract merged in PR #16; do not reuse that ID again.
-Spec status records existing delivery evidence, not a new verification run.
+| — | — | — |
 
 ## Archived Specs
 
-All superseded specs were consolidated under `archive/2026/` on 2026-07-14. Archived documents are historical snapshots and are not active implementation entrypoints.
+Superseded and completed specs are consolidated under `archive/2026/`. Archived documents are historical snapshots and are not active implementation entrypoints.
 
 | ID | Directory | Status |
 | --- | --- | --- |
@@ -75,10 +52,23 @@ All superseded specs were consolidated under `archive/2026/` on 2026-07-14. Arch
 | feat-028 | `archive/2026/feat-028-talos-mcp-system` | archived |
 | feat-029 | `archive/2026/feat-029-server-container-release` | archived |
 | feat-030 | `archive/2026/feat-030-tui-tool-call-rendering` | archived |
+| feat-031 | `archive/2026/feat-031-profile-usage-statistics` | archived |
+| feat-032 | `archive/2026/feat-032-session-subagent` | archived |
+| feat-033 | `archive/2026/feat-033-user-file-storage-model-input` | archived |
+| feat-034 | `archive/2026/feat-034-web-search-settings` | archived |
+| feat-035 | `archive/2026/feat-035-mcp-server-management-reliability` | archived |
+| feat-036 | `archive/2026/feat-036-unified-tool-sandbox` | archived |
+| feat-037 | `archive/2026/feat-037-tool-permission-user-interaction` | archived |
+| feat-038 | `archive/2026/feat-038-queued-user-messages-active-turn-steering` | archived |
+| feat-039 | `archive/2026/feat-039-tui-release-installer` | archived |
+| feat-040 | `archive/2026/feat-040-web-light-theme-chat-presentation` | archived |
+| feat-041 | `archive/2026/feat-041-agent-inner-model` | archived |
 | fix-001 | `archive/2026/fix-001-http-sse-tool-reliability-and-prompt-continuity` | archived |
 | fix-002 | `archive/2026/fix-002-tool-stream-ux-stabilization` | archived |
 | fix-003 | `archive/2026/fix-003-plan-react-local-arch-analysis-remediation` | archived |
 | fix-004 | `archive/2026/fix-004-bash-runtime-lifecycle` | archived |
+| fix-005 | `archive/2026/fix-005-context-compaction-event-presentation` | archived |
+| fix-006 | `archive/2026/fix-006-turn-task-lifecycle-control` | archived |
 | refactor-001 | `archive/2026/refactor-001-arch-review-remediation-plan` | archived |
 | refactor-002 | `archive/2026/refactor-002-context-window-threshold-compaction-governance` | archived |
 | refactor-003 | `archive/2026/refactor-003-desktop-appserver-shared-application-service` | archived |
@@ -116,3 +106,10 @@ All superseded specs were consolidated under `archive/2026/` on 2026-07-14. Arch
 | refactor-035 | `archive/2026/refactor-035-tui-render-runtime` | archived |
 | refactor-036 | `archive/2026/refactor-036-provider-reasoning-selection` | archived |
 | refactor-037 | `archive/2026/refactor-037-web-desktop-timeline-render-runtime` | archived |
+| refactor-038 | `archive/2026/refactor-038-llm-model-selection` | archived |
+| refactor-039 | `archive/2026/refactor-039-memory-storage-retrieval` | archived |
+| refactor-040 | `archive/2026/refactor-040-agent-provider-api-standardization` | archived |
+| refactor-041 | `archive/2026/refactor-041-user-workspace-memory` | archived |
+| refactor-042 | `archive/2026/refactor-042-dream-memory-okf` | archived |
+| refactor-043 | `archive/2026/refactor-043-workspace-agent-session-isolation` | archived |
+| refactor-044 | `archive/2026/refactor-044-unified-error-contract` | archived |
