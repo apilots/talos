@@ -607,6 +607,7 @@ impl GatewayClient for MockGatewayClient {
         Ok(SessionHistoryResponse {
             data,
             next_cursor: None,
+            last_stable_event_id: None,
         })
     }
 

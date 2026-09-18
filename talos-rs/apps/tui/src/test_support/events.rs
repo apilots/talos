@@ -66,6 +66,7 @@ pub(crate) fn completed_history_response(
             completed_at: 2,
         }],
         next_cursor: None,
+        last_stable_event_id: Some("ev_00000000000000000009".to_string()),
     }
 }
 

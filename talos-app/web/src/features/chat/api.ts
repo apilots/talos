@@ -205,12 +205,19 @@ export async function clearSession(sessionId: string) {
 }
 
 export async function getActiveTurn(sessionId: string) {
-  const response = await getTalosClient().sessions.activeTurn({ sessionId });
-  return response.activeTurn;
+  return getTalosClient().sessions.activeTurn({ sessionId });
 }
 
 export async function getSessionHistory(sessionId: string) {
-  return getTalosClient().sessions.history({ sessionId, cursor: null, limit: null });
+  const client = getTalosClient();
+  const history = await client.sessions.history({ sessionId, cursor: null, limit: null });
+  while (history.nextCursor) {
+    const page = await client.sessions.history({ sessionId, cursor: history.nextCursor, limit: null });
+    history.data.push(...page.data);
+    history.nextCursor = page.nextCursor;
+    history.lastStableEventId = page.lastStableEventId;
+  }
+  return history;
 }
 
 export async function recoverTimelineLiveTail(sessionId: string, afterEventId?: string) {

@@ -7340,6 +7340,13 @@
           },
           "type": "array"
         },
+        "lastStableEventId": {
+          "description": "Exclusive Timeline replay boundary for the completed Turns in this page. Clients must finish pagination before using the final page's boundary. This never advances past unfinished execution; null means no completed Turn.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "nextCursor": {
           "type": [
             "string",

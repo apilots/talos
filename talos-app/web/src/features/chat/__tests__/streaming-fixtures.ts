@@ -371,6 +371,7 @@ export function sessionHistory(
       },
     }],
     nextCursor: null,
+    lastStableEventId: "ev_00000000000000000009",
   };
 }
 

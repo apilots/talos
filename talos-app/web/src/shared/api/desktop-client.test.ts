@@ -48,10 +48,11 @@ describe("createDesktopTalosClient", () => {
           return {
             data: [],
             nextCursor: null,
+            lastStableEventId: null,
           } as T;
         }
         if (method === "session/active_turn") {
-          return { activeTurn: null } as T;
+          return { activeTurn: null, latestEventId: null } as T;
         }
         if (method === "project/delete") {
           return { success: true } as T;
@@ -63,9 +64,10 @@ describe("createDesktopTalosClient", () => {
     await client.sessions.get({ sessionId: "session-1" });
     await expect(
       client.sessions.history({ sessionId: "session-1", cursor: null, limit: null }),
-    ).resolves.toEqual({ data: [], nextCursor: null });
+    ).resolves.toEqual({ data: [], nextCursor: null, lastStableEventId: null });
     await expect(client.sessions.activeTurn({ sessionId: "session-1" })).resolves.toEqual({
       activeTurn: null,
+      latestEventId: null,
     });
     await client.projects.delete({ project_id: "project-1" });
 

@@ -12,7 +12,7 @@ import { MessageQueueSync } from "../message-queue-sync";
 import { getTalosClient } from "@/shared/api/client";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
-export function useSessionMessageQueue(sessionId: string) {
+export function useSessionMessageQueue(sessionId: string, pollWhileIdle = false) {
   useTranslation("errors");
   const [queue, setQueue] = useState<MessageQueue>();
   const [error, setError] = useState<ReturnType<typeof userVisibleError>>();
@@ -23,8 +23,7 @@ export function useSessionMessageQueue(sessionId: string) {
     setError(undefined);
   }, [sessionId]);
 
-  // Queue revisions share the Session event connection; this hook owns only
-  // queue reconciliation and mutations, not a second transport lifecycle.
+  // Active Turns use revision notifications; idle Sessions refresh the same owner.
   const onDisconnect = useCallback(() => {
     syncRef.current?.clear();
     syncRef.current = undefined;
@@ -49,6 +48,18 @@ export function useSessionMessageQueue(sessionId: string) {
     syncRef.current = sync;
     void sync.refresh().catch(reportError);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!pollWhileIdle) return;
+    const reportError = (failure: unknown) => {
+      setError(userVisibleError(failure, "Message queue reconciliation failed."));
+    };
+    onOpen(reportError);
+    const timer = window.setInterval(() => {
+      void syncRef.current?.refresh().catch(reportError);
+    }, 4_000);
+    return () => window.clearInterval(timer);
+  }, [onOpen, pollWhileIdle]);
 
   const onMessageQueueChanged = useCallback((change: MessageQueueChangedNotification) => {
     if (change.sessionId === sessionId) {

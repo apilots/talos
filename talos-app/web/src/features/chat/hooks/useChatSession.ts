@@ -42,20 +42,24 @@ export function useChatSession(
   const [draft, setDraft] = useState("");
   const sessionAvailable = serverMessageCount !== undefined;
   const streamState = useAppStore((state) => state.streams[sessionId]);
+  const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
+  const refetchHistory = sessionHistoryQuery.refetch;
   const activeTurnQuery = useActiveTurnQuery(
     sessionId,
-    sessionAvailable && !streamState?.isStreaming,
+    sessionHistoryQuery.isSuccess && sessionHistoryQuery.isFetchedAfterMount && !streamState?.isStreaming,
   );
-  const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
-  const messageQueue = useSessionMessageQueue(sessionId);
+  const activeTurn = activeTurnQuery.data?.activeTurn;
+  const messageQueue = useSessionMessageQueue(sessionId, sessionAvailable && !streamState?.isStreaming);
   const {
     contextCompaction,
     retryTimeline,
     setCompactionObservationActive,
   } = useChatSessionTimelineLifecycle({
+    activeTurnQuery,
     messageQueue,
     sessionHistoryQuery,
     sessionId,
+    sessionAvailable,
     streamState,
   });
   const pendingInput = streamState?.pendingInput;
@@ -81,25 +85,31 @@ export function useChatSession(
   );
   const activeTurnId = streamState?.isStreaming
     ? streamState.activeTurnId
-    : isLiveRecoverableActiveTurn(activeTurnQuery.data?.state)
-      ? activeTurnQuery.data?.identity.turnId
+    : isLiveRecoverableActiveTurn(activeTurn?.state)
+      ? activeTurn?.identity.turnId
       : undefined;
 
   useEffect(() => {
-    if (!activeTurnQuery.data) {
+    if (!activeTurn || !activeTurnQuery.isFetchedAfterMount || !sessionHistoryQuery.isSuccess) {
       return;
     }
     // Once replay has established a Turn, only ordered events may advance it.
-    if (useAppStore.getState().streams[sessionId]?.activeTurnId) {
+    if (sessionHistoryQuery.data?.data.some((turn) =>
+      turn.identity.turnId === activeTurn?.identity.turnId,
+    ) || useAppStore.getState().streams[sessionId]?.activeTurnId === activeTurn.identity.turnId) {
       return;
     }
-    applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
-  }, [activeTurnQuery.data, sessionId]);
+    applyActiveTurnSnapshot(sessionId, activeTurn);
+  }, [activeTurn, activeTurnQuery.isFetchedAfterMount, sessionHistoryQuery.data, sessionHistoryQuery.isSuccess, sessionId]);
 
   useEffect(() => {
     const error = activeTurnQuery.error;
-    if (activeTurnQuery.data === null && !useAppStore.getState().streams[sessionId]?.isStreaming) {
+    if (activeTurn === null && !useAppStore.getState().streams[sessionId]?.isStreaming) {
       clearInactiveTurnSnapshot(sessionId);
+      // The snapshot cursor also changes for remote Turns that finish between polls.
+      if (activeTurnQuery.isFetchedAfterMount) {
+        void refetchHistory();
+      }
       return;
     }
     if (
@@ -109,15 +119,11 @@ export function useChatSession(
       return;
     }
     clearInactiveTurnSnapshot(sessionId);
-  }, [activeTurnQuery.data, activeTurnQuery.error, sessionId]);
+  }, [activeTurnQuery.data, activeTurnQuery.error, activeTurnQuery.isFetchedAfterMount, refetchHistory, sessionId]);
 
   useEffect(() => {
     const activeMessageId = streamState?.activeMessageId;
-    if (
-      !activeMessageId ||
-      streamState.isStreaming ||
-      streamState.pendingUserAction
-    ) {
+    if (!activeMessageId) {
       return;
     }
 
@@ -142,7 +148,6 @@ export function useChatSession(
       activeMessageId: undefined,
       activeInput: undefined,
       activeClientMessageId: undefined,
-      lastEventSeq: undefined,
       lastSequence: undefined,
     });
   }, [
@@ -236,6 +241,11 @@ export function useChatSession(
     messageQueue: {
       ...messageQueue,
       activeTurnId,
+      start: async (messageId?: string) => {
+        const response = await messageQueue.start(messageId);
+        await activeTurnQuery.refetch();
+        return response;
+      },
     },
     pendingUserAction: streamState?.pendingUserAction,
     streamConnectionState: streamState?.connectionState ?? "idle",

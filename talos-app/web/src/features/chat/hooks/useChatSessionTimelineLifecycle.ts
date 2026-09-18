@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import {
+  type useActiveTurnQuery,
   type useSessionHistoryQuery,
 } from "./useChatQueries";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
@@ -14,35 +15,56 @@ import {
 import type { StreamSessionState } from "@/shared/types/ui";
 
 interface UseChatSessionTimelineLifecycleOptions {
+  activeTurnQuery: ReturnType<typeof useActiveTurnQuery>;
   sessionHistoryQuery: ReturnType<typeof useSessionHistoryQuery>;
   sessionId: string;
+  sessionAvailable: boolean;
   streamState?: StreamSessionState;
   messageQueue: ReturnType<typeof useSessionMessageQueue>;
 }
 
 /** Owns Session-scoped Timeline recovery, maintenance observation, and compaction selection. */
 export function useChatSessionTimelineLifecycle({
+  activeTurnQuery,
   sessionHistoryQuery,
   sessionId,
+  sessionAvailable,
   streamState,
   messageQueue,
 }: UseChatSessionTimelineLifecycleOptions) {
   const [observedMaintenanceSessionId, setObservedMaintenanceSessionId] = useState<string>();
   const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
-  // SSE owns paginated replay and live handoff. A second recovery query can
-  // overwrite newer events and stop replay on an older Turn's terminal event.
+  const history = sessionHistoryQuery.data;
+  const activeTurn = activeTurnQuery.data?.activeTurn;
+  const streamedTurnIsComplete = history?.data.some((turn) =>
+    turn.identity.turnId === streamState?.activeTurnId,
+  );
+  const hasRemoteActiveTurn = activeTurnQuery.isFetchedAfterMount &&
+    isLiveRecoverableActiveTurn(activeTurn?.state) &&
+    !history?.data.some((turn) => turn.identity.turnId === activeTurn?.identity.turnId) &&
+    !(streamState?.activeTurnId === activeTurn?.identity.turnId && !streamState?.isStreaming);
+  // History owns completed Turns; the subscription only fills the unfinished tail.
   const shouldSubscribeTimeline =
-    Boolean(streamState?.isStreaming && streamState.activeMessageId) ||
-    sessionHistoryQuery.isSuccess ||
+    Boolean(streamState?.isStreaming && streamState.activeMessageId && !streamedTurnIsComplete) ||
+    (sessionHistoryQuery.isSuccess && hasRemoteActiveTurn) ||
     observedMaintenanceSessionId === sessionId;
   const { retryTimeline } = useSessionTimelineEvents(
     sessionId,
-    undefined,
-    Boolean(sessionId) && shouldSubscribeTimeline,
+    history?.lastStableEventId ?? undefined,
+    Boolean(sessionId) && shouldSubscribeTimeline &&
+      (!sessionAvailable || (sessionHistoryQuery.isSuccess && sessionHistoryQuery.isFetchedAfterMount)),
     async () => {
       await invalidateSessionQueries();
     },
     messageQueue,
+    {
+      stableEventSeq: history?.data.at(-1)?.completedEventSeq ?? 0,
+      reloadHistory: async () => {
+        const result = await sessionHistoryQuery.refetch();
+        if (result.error) throw result.error;
+        return result.data!;
+      },
+    },
   );
   const latestCompaction = latestContextCompaction(streamState);
   const contextCompaction = activeContextCompaction(streamState) ??

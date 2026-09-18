@@ -115,6 +115,9 @@ pub struct RecoverTimelineResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionActiveTurnResponse {
     pub active_turn: Option<TimelineActiveTurn>,
+    /// Latest durable Session event, including terminal facts and product notices.
+    /// Idle clients use changes to refresh history; this is not a history boundary.
+    pub latest_event_id: Option<String>,
 }
 
 /// Closed union of canonical Agent Turn lifecycle events.

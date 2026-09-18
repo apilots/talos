@@ -45,15 +45,17 @@ vi.mock("./useChatQueries", () => ({
   useActiveTurnQuery: (...args: unknown[]) => {
     mocks.activeTurnQuery(...args);
     return {
-      data: mocks.activeTurn,
+      data: mocks.activeTurn === undefined ? undefined : { activeTurn: mocks.activeTurn, latestEventId: null },
+      isFetchedAfterMount: true,
       error: undefined,
       refetch: mocks.activeTurnRefetch,
     };
   },
   useSessionHistoryQuery: (_sessionId: string, enabled: boolean) => ({
-    data: { data: [], nextCursor: null },
+    data: { data: [], nextCursor: null, lastStableEventId: null },
     error: undefined,
     isSuccess: enabled,
+    isFetchedAfterMount: enabled,
     refetch: mocks.sessionHistoryRefetch,
   }),
 }));
@@ -142,6 +144,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
+      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
     );
 
     act(() => {
@@ -157,6 +160,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
+      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
     );
 
     act(() => {
@@ -173,6 +177,7 @@ describe("useChatSession", () => {
       true,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
+      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
     );
   });
 
@@ -187,6 +192,7 @@ describe("useChatSession", () => {
       true,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
+      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
     );
   });
 
@@ -204,6 +210,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
+      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
     );
   });
 
@@ -223,20 +230,6 @@ describe("useChatSession", () => {
     renderHook(() => useChatSession("session-1", 1));
 
     expect(mocks.activeTurnQuery).toHaveBeenLastCalledWith("session-1", false);
-  });
-
-  it("keeps session events subscribed across idle and active turns", () => {
-    mocks.activeTurn = undefined;
-
-    renderHook(() => useChatSession("session-1", 1));
-
-    expect(mocks.timeline).toHaveBeenLastCalledWith(
-      "session-1",
-      undefined,
-      true,
-      expect.any(Function),
-      expect.objectContaining({ start: mocks.messageQueueStart }),
-    );
   });
 
   it("refetches authoritative state when the timeline reports a terminal turn", async () => {

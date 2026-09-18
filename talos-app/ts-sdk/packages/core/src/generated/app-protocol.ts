@@ -117,11 +117,22 @@ export type SandboxApprovalDecision = "allowOnce" | "deny" | "cancel";
 
 export type SessionActiveTurnRequest = { sessionId: string, };
 
-export type SessionActiveTurnResponse = { activeTurn: TimelineActiveTurn | null, };
+export type SessionActiveTurnResponse = { activeTurn: TimelineActiveTurn | null,
+/**
+ * Latest durable Session event, including terminal facts and product notices.
+ * Idle clients use changes to refresh history; this is not a history boundary.
+ */
+latestEventId: string | null, };
 
 export type SessionHistoryRequest = { sessionId: string, cursor: string | null, limit: number | null, };
 
-export type SessionHistoryResponse = { data: Array<SessionHistoryTurn>, nextCursor: string | null, };
+export type SessionHistoryResponse = { data: Array<SessionHistoryTurn>, nextCursor: string | null,
+/**
+ * Exclusive Timeline replay boundary for the completed Turns in this page.
+ * Clients must finish pagination before using the final page's boundary.
+ * This never advances past unfinished execution; null means no completed Turn.
+ */
+lastStableEventId: string | null, };
 
 export type SessionHistoryTurn = { identity: AgentTurnRef, result: AgentRunResult,
 /**

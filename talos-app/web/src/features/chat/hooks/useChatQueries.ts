@@ -110,11 +110,8 @@ export function useActiveTurnQuery(sessionId: string, enabled = true) {
     queryKey: chatKeys.activeTurn(connectionKey, sessionId),
     queryFn: () => getActiveTurn(sessionId),
     enabled: Boolean(sessionId) && enabled,
-    refetchInterval: (query) =>
-      query.state.data?.state === "running" ||
-      query.state.data?.state === "waitingForInput"
-        ? 4_000
-        : false,
+    // Discover queue/remote starts while the idle Session has no event subscription.
+    refetchInterval: 4_000,
   });
 }
 

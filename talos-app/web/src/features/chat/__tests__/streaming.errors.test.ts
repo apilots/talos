@@ -19,7 +19,7 @@ it("retains the same public error in live state and historical timeline", () => 
     result: { status: "failed", result: {
       messages: [], metrics: executionMetrics(), failure: { error, retryable: false },
     } },
-  }], nextCursor: null });
+  }], nextCursor: null, lastStableEventId: record.eventId });
   expect({ live: useAppStore.getState().streams["sess-1"].error,
     history: history.blocks.filter((block) => block.kind === "timeline").map((block) => block.error),
   }).toEqual({ live: error, history: [error] });

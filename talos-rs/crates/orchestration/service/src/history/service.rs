@@ -66,6 +66,7 @@ impl SessionHistoryService {
             return Ok(SessionHistoryResponse {
                 data: Vec::new(),
                 next_cursor: None,
+                last_stable_event_id: None,
             });
         }
         if after_event_seq > 0 {
@@ -89,8 +90,15 @@ impl SessionHistoryService {
             .flatten()
             .map(|event_seq| format_history_cursor(high_water_event_seq, event_seq));
         let mut data: Vec<_> = completed.into_iter().map(|(_, turn)| turn).collect();
+        let last_stable_event_id = data
+            .last()
+            .map(|turn| TimelineEventId::from_seq(turn.completed_event_seq).to_string());
         self.attach_notices(&mut data, high_water_event_seq).await?;
-        Ok(SessionHistoryResponse { data, next_cursor })
+        Ok(SessionHistoryResponse {
+            data,
+            next_cursor,
+            last_stable_event_id,
+        })
     }
 
     async fn validate_cursor_event(

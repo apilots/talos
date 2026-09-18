@@ -24,4 +24,8 @@ pub struct SessionHistoryTurn {
 pub struct SessionHistoryResponse {
     pub data: Vec<SessionHistoryTurn>,
     pub next_cursor: Option<String>,
+    /// Exclusive Timeline replay boundary for the completed Turns in this page.
+    /// Clients must finish pagination before using the final page's boundary.
+    /// This never advances past unfinished execution; null means no completed Turn.
+    pub last_stable_event_id: Option<String>,
 }

@@ -42,11 +42,9 @@ impl ServiceGateway {
         actor: &Actor,
         request: SessionActiveTurnRequest,
     ) -> TalosResult<SessionActiveTurnResponse> {
-        let active_turn = self
-            .service
+        self.service
             .get_active_turn(actor, &request.session_id)
-            .await?;
-        Ok(SessionActiveTurnResponse { active_turn })
+            .await
     }
 
     pub(crate) async fn patch_session(

@@ -107,6 +107,19 @@ Rust domain and current protocol definitions
 
 ## 客户端职责
 
+Web/Desktop 进入 Session 时先读取全部 history 分页，已完成轮次由 history 展示，
+未完成轮次再接入增量事件。`lastStableEventId` 是当前历史页最后一个已完成轮次的
+事件游标；读取所有分页后使用最后一页的值。它不是可能包含未完成轮次的最新事件位置，
+也不能与 history 的分页游标混用。该响应字段要求后端与生成客户端同步部署，HTTP 和
+JSON-RPC 使用相同契约；Rust SDK/TUI 的历史读取方可忽略该字段。
+
+持续查看时保留已消费的事件游标，轮次结束后与 history 衔接，不重播已完成内容。
+空闲 Session 通过查询发现运行中轮次和队列变化，不保持执行事件订阅；显式维护操作
+仍可观察 Session 事件。active-turn 响应的 `latestEventId` 表示 Session 最新已落库事件，
+包含失败轮次和产品通知；空闲时快照变化才刷新 history，可发现轮询间完成的远端轮次。
+该字段是变化信号，不能替代订阅所用的 `lastStableEventId`，后端和生成客户端须同步升级。
+底层 Session 订阅继续支持跨轮次推送，由 UI 决定何时关闭。
+
 - SDK 负责完整产品 API、强类型领域对象、结构化错误、Stream contract 和
   transport-neutral 生命周期语义。
 - Transport adapter 负责序列化、认证传输、连接生命周期、上传编码和事件送达机制。

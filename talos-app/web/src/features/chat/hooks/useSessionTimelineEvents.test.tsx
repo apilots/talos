@@ -33,6 +33,7 @@ vi.hoisted(() => {
 });
 
 const apiMocks = vi.hoisted(() => ({
+  getSessionHistory: vi.fn(),
   recoverTimelineLiveTail: vi.fn(),
   subscribeTimelineEvents: vi.fn().mockResolvedValue(undefined),
 }));
@@ -42,17 +43,23 @@ vi.mock("../api", () => ({
   subscribeTimelineEvents: apiMocks.subscribeTimelineEvents,
 }));
 
+const historyOptions = {
+  stableEventSeq: 0,
+  reloadHistory: () => apiMocks.getSessionHistory("sess-1"),
+};
+
 describe("useSessionTimelineEvents", () => {
   beforeEach(() => {
     apiMocks.subscribeTimelineEvents.mockReset().mockResolvedValue(undefined);
     apiMocks.recoverTimelineLiveTail.mockReset();
+    apiMocks.getSessionHistory.mockReset().mockResolvedValue({ data: [], nextCursor: null, lastStableEventId: "event-4" });
     useAppStore.getState().resetStream("sess-1");
   });
 
   afterEach(() => { vi.useRealTimers(); resetTalosClientFactory(); });
 
   it("applies session-scoped compaction events after the stable cursor", () => {
-    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true));
+    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true, undefined, undefined, historyOptions));
     const [sessionId, onEvent, signal, afterEventId] = apiMocks.subscribeTimelineEvents.mock.calls[0] as [
       string,
       (event: TimelineEvent) => void,
@@ -78,7 +85,7 @@ describe("useSessionTimelineEvents", () => {
       options.onMessageQueueChanged({ sessionId: "sess-1", revision: 2 });
       throw new Error("connection lost");
     });
-    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, queue));
+    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, queue, historyOptions));
     await act(async () => { await Promise.resolve(); });
     expect(queue.onOpen).toHaveBeenCalledOnce();
     expect(queue.onMessageQueueChanged).toHaveBeenCalledWith({ sessionId: "sess-1", revision: 2 });
@@ -89,7 +96,7 @@ describe("useSessionTimelineEvents", () => {
   it("requests authoritative reconciliation after a terminal turn", () => {
     const onTerminalTurn = vi.fn();
     renderHook(() =>
-      useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn),
+      useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn, undefined, historyOptions),
     );
     const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1] as
       | ((event: TimelineEvent) => void)
@@ -114,7 +121,7 @@ describe("useSessionTimelineEvents", () => {
     });
     const { result } = renderHook(() => {
       const messages = useSessionMessageQueue("sess-1");
-      useSessionTimelineEvents("sess-1", undefined, true, undefined, messages);
+      useSessionTimelineEvents("sess-1", undefined, true, undefined, messages, historyOptions);
       return messages;
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -127,7 +134,7 @@ describe("useSessionTimelineEvents", () => {
   it("does not reconcile stable history while a turn waits for user action", () => {
     const onTerminalTurn = vi.fn();
     renderHook(() =>
-      useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn),
+      useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn, undefined, historyOptions),
     );
     const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1] as
       | ((event: TimelineEvent) => void)
@@ -149,7 +156,7 @@ describe("useSessionTimelineEvents", () => {
       lastEventId: "event-7",
     });
 
-    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true));
+    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true, undefined, undefined, historyOptions));
     await Promise.resolve();
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(1);
     await act(() => vi.advanceTimersByTimeAsync(500));
@@ -190,19 +197,20 @@ describe("useSessionTimelineEvents", () => {
       lastEventId: "event-1",
     });
 
-    renderHook(() => useSessionTimelineEvents("sess-1", "event-1", true));
+    renderHook(() => useSessionTimelineEvents("sess-1", "event-1", true, undefined, undefined, historyOptions));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(apiMocks.recoverTimelineLiveTail).toHaveBeenCalledWith("sess-1");
+    expect(apiMocks.getSessionHistory).toHaveBeenCalledWith("sess-1");
+    expect(apiMocks.recoverTimelineLiveTail).toHaveBeenCalledWith("sess-1", "event-4");
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
     expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-9");
     expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
       activeMessageId: "message-1",
       isStreaming: true,
-      lastEventId: "event-1",
+      lastEventId: "event-4",
       error: undefined,
     });
   });
@@ -233,7 +241,7 @@ describe("useSessionTimelineEvents", () => {
       lastEventId: "event-7",
     });
 
-    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true));
+    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true, undefined, undefined, historyOptions));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -257,7 +265,7 @@ describe("useSessionTimelineEvents", () => {
     vi.useFakeTimers();
     apiMocks.subscribeTimelineEvents.mockRejectedValue(new Error("stream disconnected"));
 
-    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true));
+    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, historyOptions));
     for (const delay of [500, 1_000, 2_000, 4_000, 8_000, 12_000, 12_000]) {
       await act(() => vi.advanceTimersByTimeAsync(delay));
     }

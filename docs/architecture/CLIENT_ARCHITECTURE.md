@@ -137,9 +137,26 @@ proof the user's input has been rendered. Queue revision only invalidates queue
 state, not a second execution-state owner. Start/retry finish their request at
 ACK; stopping execution uses the actual interrupt API.
 
-Session subscriptions stay open across terminal facts and subsequent Turns.
-Turn-limited subscriptions end at that Turn's terminal fact and can miss later
-product notices. History notice IDs retain their historical position; live
+The Web/Desktop transcript drains every history page on entry before subscribing
+to unfinished execution. `lastStableEventId` is the opaque exclusive event cursor
+of the last completed Turn returned by a history page; use the final page's value
+after pagination. It is not the Session's current event high water, which can
+include an unfinished Turn. The history pagination cursor is not an event cursor.
+This response field requires coordinated backend and generated-client deployment;
+HTTP and JSON-RPC return the same history contract. Rust SDK/TUI readers may ignore it.
+
+Web/Desktop keeps the consumed event cursor while rendering an unfinished Turn,
+then reconciles its terminal output with history without replaying completed
+content. Idle Sessions query active-Turn and queue state rather than subscribe to
+execution events. The active-Turn response includes `latestEventId`, the latest
+durable Session event (including failures and product notices). An idle client
+refreshes history when that snapshot changes, even if a remote Turn starts and
+finishes between polls. This cursor is a change signal, not a replacement for
+`lastStableEventId` when subscribing. Backend and generated clients must upgrade
+together. Explicit maintenance can still observe Session events. The
+transport's Session subscriptions continue to support delivery across Turns;
+the UI owns when to close them. Turn-limited subscriptions end at that Turn's
+terminal fact and can miss later product notices. History notice IDs retain their historical position; live
 notices absent from the loaded page stay visible without duplication. SystemNotice
 never enters LiveTurnProjection or Provider continuation. UI projections are
 bounded app-owned presentation state, not SDK or database truth.

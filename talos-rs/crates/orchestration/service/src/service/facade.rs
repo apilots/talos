@@ -288,12 +288,22 @@ impl TalosService {
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ServiceResult<Option<talos_agent_api::TimelineActiveTurn>> {
+    ) -> ServiceResult<talos_agent_api::SessionActiveTurnResponse> {
         let _session = self.access.load_session(actor, session_id).await?;
-        self.events
+        let active_turn = self
+            .events
             .get_active_turn(session_id)
-            .await
-            .map(|active_turn| active_turn.map(crate::timeline::map_timeline_active_turn))
+            .await?
+            .map(crate::timeline::map_timeline_active_turn);
+        let latest_event_id = self
+            .events
+            .latest_event_id(session_id)
+            .await?
+            .map(|event_id| event_id.to_string());
+        Ok(talos_agent_api::SessionActiveTurnResponse {
+            active_turn,
+            latest_event_id,
+        })
     }
 
     async fn submit_start_turn(

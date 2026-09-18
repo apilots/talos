@@ -189,6 +189,7 @@ describe("TalosClient", () => {
 
   it("reads the active turn recovery snapshot", async () => {
     const request = vi.fn().mockResolvedValue({
+      latestEventId: "ev_00000000000000000007",
       activeTurn: {
         identity: { sessionId: "session-1", turnId: "turn-1" },
         initialMessageId: "msg-1",
@@ -198,8 +199,7 @@ describe("TalosClient", () => {
       },
     });
     const http: HttpAdapter = { request };
-    const streamAdapter = noopStreamAdapter();
-    const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
+    const client = new TalosClient(http, noopStreamAdapter(), "http://localhost:8080");
 
     const activeTurn = await client.sessions.activeTurn({ sessionId: "session-1" });
 

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { AppProtocol, TalosApiError, TalosStreamTerminatedError } from "@talos/sdk-browser";
+import { AppProtocol, TalosApiError, TalosStreamTerminatedError, type SessionHistoryResponse } from "@talos/sdk-browser";
 
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
-import { applyStreamEvent, applyTimelineRecovery } from "../stream-events";
+import { applyStreamEvent, applyTimelineRecovery, clearInactiveTurnSnapshot } from "../stream-events";
 import type { useSessionMessageQueue } from "./useSessionMessageQueue";
 import { useAppStore } from "@/shared/store/app-store";
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
@@ -14,14 +14,22 @@ export function useSessionTimelineEvents(
   sessionId: string,
   afterEventId: string | undefined,
   enabled: boolean,
-  onTerminalTurn?: () => void | Promise<void>,
-  queue?: Pick<ReturnType<typeof useSessionMessageQueue>, "onOpen" | "onDisconnect" | "onMessageQueueChanged">,
+  onTerminalTurn: (() => void | Promise<void>) | undefined,
+  queue: Pick<ReturnType<typeof useSessionMessageQueue>, "onOpen" | "onDisconnect" | "onMessageQueueChanged"> | undefined,
+  historyOptions: {
+    stableEventSeq: number;
+    reloadHistory: () => Promise<SessionHistoryResponse>;
+  },
 ) {
   const [retryGeneration, setRetryGeneration] = useState(0);
   const onTerminalTurnRef = useRef(onTerminalTurn);
   onTerminalTurnRef.current = onTerminalTurn;
   const queueRef = useRef(queue);
   queueRef.current = queue;
+  const historyOptionsRef = useRef(historyOptions);
+  historyOptionsRef.current = historyOptions;
+  const afterEventIdRef = useRef(afterEventId);
+  afterEventIdRef.current = afterEventId;
 
   useEffect(() => {
     if (!enabled) {
@@ -31,8 +39,11 @@ export function useSessionTimelineEvents(
     let controller = new AbortController();
     let reconnectTimer: number | undefined;
     let finishReconnectDelay: (() => void) | undefined;
-    let subscriptionCursor =
-      useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId;
+    const stream = useAppStore.getState().streams[sessionId];
+    const stableEventSeq = historyOptionsRef.current.stableEventSeq;
+    let subscriptionCursor = (stream?.lastEventSeq ?? 0) >= stableEventSeq
+      ? stream?.lastEventId ?? afterEventIdRef.current
+      : afterEventIdRef.current;
 
     const subscribe = async () => {
       for (let attempt = 0; !disposed; attempt += 1) {
@@ -49,7 +60,9 @@ export function useSessionTimelineEvents(
           await subscribeTimelineEvents(
             sessionId,
             (event) => {
+              if (disposed) return;
               subscriptionCursor = event.eventId;
+              if (event.eventSeq <= (historyOptionsRef.current.stableEventSeq)) return;
               applyStreamEvent(sessionId, event);
               if (
                 event.event.type === "systemNotice" ||
@@ -81,10 +94,22 @@ export function useSessionTimelineEvents(
           const lagged = error instanceof TalosStreamTerminatedError && error.reason === "lagged";
           if (cursorExpired || lagged) {
             try {
-              const recovery = cursorExpired
-                ? await recoverTimelineLiveTail(sessionId)
-                : await recoverTimelineLiveTail(sessionId, subscriptionCursor);
+              const history = cursorExpired
+                ? await historyOptionsRef.current.reloadHistory()
+                : undefined;
               if (disposed) return;
+              if (history) subscriptionCursor = history.lastStableEventId ?? undefined;
+              const recovery = await recoverTimelineLiveTail(sessionId, subscriptionCursor);
+              if (disposed) return;
+              if (history) {
+                clearInactiveTurnSnapshot(sessionId);
+                useAppStore.getState().resetLiveResponse(sessionId);
+                useAppStore.getState().setStreamMeta(sessionId, {
+                  lastEventId: subscriptionCursor,
+                  lastEventSeq: history.data.at(-1)?.completedEventSeq ?? 0,
+                  lastSequence: undefined,
+                });
+              }
               useAppStore.getState().setStreamError(sessionId, undefined);
               applyTimelineRecovery(sessionId, recovery);
               subscriptionCursor =
@@ -92,8 +117,7 @@ export function useSessionTimelineEvents(
                 recovery.replay.highWaterMarkEventId ??
                 subscriptionCursor;
               await onTerminalTurnRef.current?.();
-              // The Session subscription must also survive an idle recovery:
-              // another client or the queue can start its next Turn.
+              // The lifecycle owner stops idle subscriptions after reconciliation.
               continue;
             } catch (recoveryError: unknown) {
               subscriptionError = recoveryError;
@@ -133,7 +157,7 @@ export function useSessionTimelineEvents(
       }
       finishReconnectDelay?.();
     };
-  }, [afterEventId, enabled, retryGeneration, sessionId]);
+  }, [enabled, retryGeneration, sessionId]);
 
   return {
     retryTimeline: () => setRetryGeneration((generation) => generation + 1),
