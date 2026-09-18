@@ -829,7 +829,7 @@ current = {"id": "", "event": "", "data": []}
 
 def agent_event(record):
     event = record.get("event")
-    return event if isinstance(event, dict) else {}
+    return event.get("data", {}) if isinstance(event, dict) else {}
 
 def reset():
     current["id"] = ""
@@ -917,7 +917,7 @@ metrics = None
 
 def agent_event(record):
     event = record.get("event")
-    return event if isinstance(event, dict) else {}
+    return event.get("data", {}) if isinstance(event, dict) else {}
 
 def upsert_block(message_id, block):
     if not message_id or not isinstance(block, dict):
@@ -1055,7 +1055,7 @@ send_message_response() {
   fi
 
   events_log="$(scenario_report_path "${log_name}_events.log")"
-  collect_timeline_events "${session_id}" "${turn_id}" "${events_log}"
+  collect_timeline_events "${session_id}" "${turn_id}" "${events_log}" || return $?
   message_response_from_events "${ack_json}" "${events_log}"
 }
 

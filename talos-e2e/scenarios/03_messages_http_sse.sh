@@ -166,7 +166,7 @@ with open(path, "r", encoding="utf-8") as handle:
             continue
         try:
             record = json.loads(line[6:])
-            event = record.get("event") if isinstance(record.get("event"), dict) else record
+            event = record.get("event", {}).get("data", {})
         except Exception:
             continue
         payload = event.get("payload") or {}
@@ -243,7 +243,7 @@ events = data.get("replay", {}).get("events", [])
 has_user_input = False
 has_final_answer = False
 for timeline_event in events:
-    payload = timeline_event.get("event", {}).get("payload", {})
+    payload = timeline_event.get("event", {}).get("data", {}).get("payload", {})
     if payload.get("type") != "messageCompleted":
         continue
     message = payload.get("data") or {}
