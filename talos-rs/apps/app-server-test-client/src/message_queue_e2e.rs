@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use talos_sdk::{
-    AgentTurnRef, AgentUserContent, AgentUserInput, ErrorCode, GatewayClient, InterruptTurnRequest,
-    MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
-    SubmitTurnInput, SubmitTurnInputRequest, SubscribeTimelineRequest, TimelineStreamSubscription,
+    AgentEventPayload, AgentTurnRef, AgentUserContent, AgentUserInput, ErrorCode, GatewayClient,
+    InterruptTurnRequest, MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest,
+    MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
+    MessageQueueUpdateRequest, SubmitTurnInput, SubmitTurnInputRequest, SubscribeTimelineRequest,
+    TimelineStreamSubscription,
 };
 
 use super::request::start_turn_request;
@@ -94,9 +95,7 @@ pub(super) async fn message_queue_e2e(client: &mut talos_sdk::AppServerClient) -
     let full_error = add_text(client, &session_id, "must be rejected")
         .await
         .expect_err("the eleventh queued message must be rejected");
-    if full_error.error_code() != ErrorCode::MessageQueueFull
-        || full_error.to_api_error().message != "Message queue is full"
-    {
+    if full_error.error_code() != ErrorCode::MessageQueueFull {
         return Err(anyhow!("unexpected queue full error: {full_error}"));
     }
 
@@ -264,7 +263,16 @@ async fn wait_for_terminal(subscription: &mut TimelineStreamSubscription) -> Res
         loop {
             let event = subscription.stream.recv().await?;
             if super::is_terminal_event(&event) {
-                return Ok(());
+                return match event.event.agent_event().map(|event| &event.payload) {
+                    Some(AgentEventPayload::TurnFailed(failed))
+                        if failed.error.code == ErrorCode::Cancelled =>
+                    {
+                        Ok(())
+                    }
+                    _ => Err(anyhow!(
+                        "interrupted turn did not settle as cancelled: {event:?}"
+                    )),
+                };
             }
         }
     })

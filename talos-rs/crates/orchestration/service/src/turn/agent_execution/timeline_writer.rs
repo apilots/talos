@@ -286,8 +286,8 @@ fn delivery_error(
     delivery: Option<Result<talos_agent::AgentResult<()>, tokio::task::JoinError>>,
 ) -> Option<TalosError> {
     let error = match delivery {
-        Some(Ok(Ok(()))) | None => return None,
-        Some(Ok(Err(error))) => error,
+        // Harness owns delivery errors and their ordering against cancellation.
+        Some(Ok(_)) | None => return None,
         Some(Err(error)) => {
             TalosError::internal_with_source("Agent input delivery task failed", error)
         }
