@@ -1,0 +1,413 @@
+syntax = "proto3";
+package talos.agent.v1;
+
+// Transport objects only. Domain conversions belong outside agent-pb.
+// UNSPECIFIED and unknown enum values are rejected at the adapter boundary.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_REQUEST = 1;
+  ERROR_CODE_INVALID_RETRY_REQUEST = 2;
+  ERROR_CODE_UNAUTHENTICATED = 3;
+  ERROR_CODE_PERMISSION_DENIED = 4;
+  ERROR_CODE_RESOURCE_NOT_FOUND = 5;
+  ERROR_CODE_SESSION_NOT_FOUND = 6;
+  ERROR_CODE_RESOURCE_EXPIRED = 7;
+  ERROR_CODE_CONFLICT = 8;
+  ERROR_CODE_ACTIVE_TURN_RUNNING = 9;
+  ERROR_CODE_MESSAGE_QUEUE_FULL = 10;
+  ERROR_CODE_MESSAGE_QUEUE_BUSY = 11;
+  ERROR_CODE_RETRY_SOURCE_COMPLETED = 12;
+  ERROR_CODE_RETRY_SOURCE_MISMATCH = 13;
+  ERROR_CODE_IDEMPOTENCY_CONFLICT = 14;
+  ERROR_CODE_INVALID_CURSOR = 15;
+  ERROR_CODE_EVENT_CURSOR_EXPIRED = 16;
+  ERROR_CODE_FS_DISABLED = 17;
+  ERROR_CODE_INVALID_PATH = 18;
+  ERROR_CODE_PATH_OUTSIDE_ROOT = 19;
+  ERROR_CODE_SYMLINK_NOT_SUPPORTED = 20;
+  ERROR_CODE_PATH_NOT_FOUND = 21;
+  ERROR_CODE_NOT_DIRECTORY = 22;
+  ERROR_CODE_INVALID_NAME = 23;
+  ERROR_CODE_ALREADY_EXISTS = 24;
+  ERROR_CODE_UPLOAD_TOO_LARGE = 25;
+  ERROR_CODE_UNSUPPORTED_MEDIA_TYPE = 26;
+  ERROR_CODE_ATTACHMENT_LIMIT_EXCEEDED = 27;
+  ERROR_CODE_UNSUPPORTED_ATTACHMENT = 28;
+  ERROR_CODE_FILE_INPUT_REJECTED = 29;
+  ERROR_CODE_CONTEXT_WINDOW_EXCEEDED = 30;
+  ERROR_CODE_SESSION_BUDGET_EXCEEDED = 31;
+  ERROR_CODE_USAGE_LIMIT_EXCEEDED = 32;
+  ERROR_CODE_CONTEXT_COMPACTION_FAILED = 33;
+  ERROR_CODE_PROVIDER_UNAVAILABLE = 34;
+  ERROR_CODE_TOOL_EXECUTION_FAILED = 35;
+  ERROR_CODE_TIMEOUT = 36;
+  ERROR_CODE_CANCELLED = 37;
+  ERROR_CODE_SERVICE_UNAVAILABLE = 38;
+  ERROR_CODE_RUN_FORCED_ABORT = 39;
+  ERROR_CODE_RUN_CLEANUP_UNCONFIRMED = 40;
+  ERROR_CODE_INTERNAL_ERROR = 41;
+}
+enum MessageRole {
+  MESSAGE_ROLE_UNSPECIFIED = 0;
+  MESSAGE_ROLE_USER = 1;
+  MESSAGE_ROLE_AGENT = 2;
+  MESSAGE_ROLE_TOOL = 3;
+  MESSAGE_ROLE_SYSTEM = 4;
+}
+enum MessageStatus {
+  MESSAGE_STATUS_UNSPECIFIED = 0;
+  MESSAGE_STATUS_IN_PROGRESS = 1;
+  MESSAGE_STATUS_COMPLETED = 2;
+  MESSAGE_STATUS_FAILED = 3;
+  MESSAGE_STATUS_CANCELLED = 4;
+}
+enum BlockStatus {
+  BLOCK_STATUS_UNSPECIFIED = 0;
+  BLOCK_STATUS_QUEUED = 1;
+  BLOCK_STATUS_RUNNING = 2;
+  BLOCK_STATUS_WAITING_FOR_INPUT = 3;
+  BLOCK_STATUS_COMPLETED = 4;
+  BLOCK_STATUS_FAILED = 5;
+  BLOCK_STATUS_CANCELLED = 6;
+}
+enum AssistantPhase {
+  ASSISTANT_PHASE_UNSPECIFIED = 0;
+  ASSISTANT_PHASE_PENDING = 1;
+  ASSISTANT_PHASE_COMMENTARY = 2;
+  ASSISTANT_PHASE_FINAL_ANSWER = 3;
+}
+enum ProgressKind {
+  PROGRESS_KIND_UNSPECIFIED = 0;
+  PROGRESS_KIND_STATUS = 1;
+  PROGRESS_KIND_STDOUT = 2;
+  PROGRESS_KIND_STDERR = 3;
+}
+enum NoticeLevel {
+  NOTICE_LEVEL_UNSPECIFIED = 0;
+  NOTICE_LEVEL_INFO = 1;
+  NOTICE_LEVEL_WARNING = 2;
+  NOTICE_LEVEL_ERROR = 3;
+}
+enum StopReason {
+  STOP_REASON_UNSPECIFIED = 0;
+  STOP_REASON_END_TURN = 1;
+  STOP_REASON_OUTPUT_LIMIT = 2;
+  STOP_REASON_TRANSFER_UNRESOLVED = 3;
+}
+enum PermissionMode {
+  PERMISSION_MODE_UNSPECIFIED = 0;
+  PERMISSION_MODE_ASK_FOR_APPROVAL = 1;
+  PERMISSION_MODE_APPROVE_FOR_ME = 2;
+  PERMISSION_MODE_FULL_ACCESS = 3;
+}
+enum UserActionState {
+  USER_ACTION_STATE_UNSPECIFIED = 0;
+  USER_ACTION_STATE_PENDING = 1;
+  USER_ACTION_STATE_RESPONSE_ACCEPTED = 2;
+  USER_ACTION_STATE_RESUMING = 3;
+  USER_ACTION_STATE_RESUME_FAILED = 4;
+  USER_ACTION_STATE_EXECUTION_UNKNOWN = 5;
+  USER_ACTION_STATE_RESOLVED = 6;
+  USER_ACTION_STATE_CANCELLED = 7;
+}
+enum ApprovalReason {
+  APPROVAL_REASON_UNSPECIFIED = 0;
+  APPROVAL_REASON_NETWORK_ACCESS = 1;
+  APPROVAL_REASON_FILE_SYSTEM_ACCESS_OUTSIDE_WORKSPACE = 2;
+  APPROVAL_REASON_SANDBOX_BYPASS = 3;
+  APPROVAL_REASON_RISKY_COMMAND = 4;
+}
+enum ApprovalDecision {
+  APPROVAL_DECISION_UNSPECIFIED = 0;
+  APPROVAL_DECISION_ALLOW_ONCE = 1;
+  APPROVAL_DECISION_DENY = 2;
+  APPROVAL_DECISION_CANCEL = 3;
+}
+enum FileOperation {
+  FILE_OPERATION_UNSPECIFIED = 0;
+  FILE_OPERATION_READ = 1;
+  FILE_OPERATION_WRITE = 2;
+}
+enum CompactionTrigger {
+  COMPACTION_TRIGGER_UNSPECIFIED = 0;
+  COMPACTION_TRIGGER_USER_REQUESTED = 1;
+  COMPACTION_TRIGGER_THRESHOLD_EXCEEDED = 2;
+  COMPACTION_TRIGGER_HARD_THRESHOLD_EXCEEDED = 3;
+  COMPACTION_TRIGGER_BUDGET_EXCEEDED = 4;
+  COMPACTION_TRIGGER_HISTORY_SECTIONS_DROPPED = 5;
+  COMPACTION_TRIGGER_WORKING_CONTEXT_EXCEEDED = 6;
+}
+enum CompactionStage {
+  COMPACTION_STAGE_UNSPECIFIED = 0;
+  COMPACTION_STAGE_PREPARING = 1;
+  COMPACTION_STAGE_SUMMARIZING = 2;
+  COMPACTION_STAGE_REBUILDING_PROMPT = 3;
+  COMPACTION_STAGE_TRIMMING = 4;
+  COMPACTION_STAGE_COMPLETED = 5;
+  COMPACTION_STAGE_FAILED = 6;
+}
+enum CompactionOutcome {
+  COMPACTION_OUTCOME_UNSPECIFIED = 0;
+  COMPACTION_OUTCOME_APPLIED = 1;
+  COMPACTION_OUTCOME_NO_CHANGES = 2;
+  COMPACTION_OUTCOME_REJECTED_MISSING_SUMMARY = 3;
+  COMPACTION_OUTCOME_TRIMMED_FALLBACK_APPLIED = 4;
+  COMPACTION_OUTCOME_FAILED_CONTEXT_STILL_TOO_LARGE = 5;
+  COMPACTION_OUTCOME_FAILED_PROVIDER_ERROR = 6;
+  COMPACTION_OUTCOME_FAILED_INTERNAL_ERROR = 7;
+}
+enum PromptFile {
+  PROMPT_FILE_UNSPECIFIED = 0;
+  PROMPT_FILE_AGENTS = 1;
+  PROMPT_FILE_SOUL = 2;
+  PROMPT_FILE_IDENTITY = 3;
+  PROMPT_FILE_USER = 4;
+  PROMPT_FILE_HEARTBEAT = 5;
+}
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_QUEUED = 1;
+  TASK_STATUS_RUNNING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_TIMED_OUT = 5;
+  TASK_STATUS_CANCELLED = 6;
+}
+enum ReasoningEffort {
+  REASONING_EFFORT_UNSPECIFIED = 0;
+  REASONING_EFFORT_LIGHT = 1;
+  REASONING_EFFORT_MEDIUM = 2;
+  REASONING_EFFORT_HIGH = 3;
+  REASONING_EFFORT_XHIGH = 4;
+}
+enum ModelSpeed {
+  MODEL_SPEED_UNSPECIFIED = 0;
+  MODEL_SPEED_STANDARD = 1;
+  MODEL_SPEED_FAST = 2;
+}
+enum ModelInputKind {
+  MODEL_INPUT_KIND_UNSPECIFIED = 0;
+  MODEL_INPUT_KIND_TEXT = 1;
+  MODEL_INPUT_KIND_IMAGE = 2;
+  MODEL_INPUT_KIND_AUDIO = 3;
+  MODEL_INPUT_KIND_VIDEO = 4;
+  MODEL_INPUT_KIND_FILE = 5;
+}
+enum ConnectionMode {
+  CONNECTION_MODE_UNSPECIFIED = 0;
+  CONNECTION_MODE_EMBEDDED = 1;
+  CONNECTION_MODE_REMOTE = 2;
+}
+enum SubagentUpdateKind {
+  SUBAGENT_UPDATE_KIND_UNSPECIFIED = 0;
+  SUBAGENT_UPDATE_KIND_COMMENTARY = 1;
+  SUBAGENT_UPDATE_KIND_FINAL_ANSWER = 2;
+}
+
+message Empty {}
+message ApiError {
+  ErrorCode code = 1;
+  string message = 2;
+  oneof localization {
+    ModelNotConfigured model_not_configured = 3;
+    AttachmentCountExceeded attachment_count_exceeded = 4;
+  }
+}
+message ModelNotConfigured { string provider = 1; string model = 2; }
+message AttachmentCountExceeded { uint64 limit = 1; uint64 actual = 2; }
+message Failure { ApiError error = 1; }
+message TurnRef { string session_id = 1; string turn_id = 2; }
+message TokenUsage {
+  uint32 input_tokens = 1; uint32 output_tokens = 2; uint32 total_tokens = 3;
+  optional uint32 cache_creation_input_tokens = 4;
+  optional uint32 cache_read_input_tokens = 5;
+}
+message ContextUsage {
+  uint32 used_tokens = 1; uint32 context_window_tokens = 2;
+  uint32 effective_prompt_budget_tokens = 3; int64 measured_at = 4;
+}
+message RunMetrics {
+  uint32 model_rounds = 1; uint32 tool_calls = 2; uint32 tool_successes = 3;
+  uint32 tool_errors = 4; TokenUsage usage = 5; ContextUsage context = 6;
+  optional uint64 duration_ms = 7;
+}
+message CompactionMetrics {
+  optional uint64 covers_from_seq = 1; optional uint64 covers_until_seq = 2;
+  uint32 pre_compaction_total_tokens = 3; uint32 post_compaction_total_tokens = 4;
+  uint32 compaction_input_tokens = 5; uint32 compaction_output_tokens = 6;
+  uint32 trimmed_context_unit_count = 7; optional uint32 raw_tail_preferred_count = 8;
+  optional uint32 raw_tail_backfilled_count = 9;
+  optional uint32 working_context_input_messages = 10;
+  optional uint32 working_context_compacted_messages = 11;
+  optional uint32 working_context_preserved_recent_exchanges = 12;
+}
+message ModelSelection { string provider = 1; string model_id = 2; optional ReasoningEffort reasoning_effort = 3; }
+message ModelCost { double input = 1; double output = 2; double cache_read = 3; double cache_write = 4; }
+message ModelInfo {
+  string provider = 1; string id = 2; string name = 3; uint32 context_window = 4;
+  bool reasoning = 5; ReasoningEffort reasoning_effort = 6; ModelSpeed speed = 7;
+  repeated ModelInputKind input = 8; ModelCost cost = 9;
+}
+// Resolve the logical Workspace on the node; never forward a CP absolute root.
+message SessionContext {
+  string agent_id = 1; string session_id = 2; string user_id = 3;
+  string workspace_id = 4;
+}
+message SessionEnvironment { string directory = 1; ConnectionMode connection_mode = 2; }
+message AgentContext {
+  SessionContext session = 1; string turn_id = 2; optional string project_id = 3;
+  optional string working_directory = 4; SessionEnvironment environment = 5;
+  ModelInfo model = 6; ModelSelection model_selection = 7; PermissionMode permission_mode = 8;
+}
+message Checkpoint { uint64 last_sequence = 1; repeated AgentMessage messages = 2; RunMetrics metrics = 3; }
+message ContinuationRef { string opaque_id = 1; }
+message RunParams { AgentContext context = 1; AgentMessage input = 2; Checkpoint checkpoint = 3; ContinuationRef continuation = 4; }
+message InputParams { string agent_id = 1; TurnRef identity = 2; AgentMessage input = 3; }
+message MediaSource { oneof source { string url = 1; string inline_base64 = 2; } }
+message Media { MediaSource source = 1; optional string mime_type = 2; }
+message SkillSelection { string name = 1; string path = 2; }
+message UserContent {
+  oneof content {
+    string text = 1; SkillSelection skill_selection = 2; string file_id = 3;
+    Media audio = 4; Media video = 5; ActionResponse user_action_response = 6;
+  }
+}
+message ActionResponse { string action_id = 1; UserActionResponse response = 2; }
+message DynamicToolResult { string output = 1; bool success = 2; }
+message QuestionAnswer { oneof answer { string option_id = 1; string text = 2; } }
+message UserActionResponse {
+  oneof response { DynamicToolResult dynamic_tool_result = 1; QuestionAnswer question = 2; ApprovalDecision sandbox_approval = 3; }
+}
+message QuestionOption { string id = 1; string label = 2; string description = 3; }
+message Question { string header = 1; string question = 2; repeated QuestionOption options = 3; }
+message ApprovalCommand { string command = 1; string cwd = 2; optional string risk_summary = 3; }
+message ApprovalFileSystem { FileOperation operation = 1; repeated string paths = 2; }
+message SandboxApproval {
+  string tool_name = 1; ApprovalReason reason = 2;
+  oneof presentation { ApprovalCommand command = 3; ApprovalFileSystem file_system = 4; string network_scope = 5; }
+  repeated ApprovalDecision available_decisions = 6;
+}
+message PendingUserAction {
+  string action_id = 1; string call_id = 2; optional string item_id = 3; UserActionState state = 4;
+  oneof params { string dynamic_tool_name = 5; Question question = 6; SandboxApproval sandbox_approval = 7; }
+}
+message PendingMessage { string action_id = 1; string prompt = 2; }
+message PendingInput { oneof input { PendingMessage message = 1; PendingUserAction user_action = 2; } }
+message AgentMessage {
+  string message_id = 1; string turn_id = 2; MessageRole role = 3; MessageStatus status = 4;
+  repeated MessageBlock blocks = 5; int64 created_at = 6; optional int64 completed_at = 7;
+}
+message MessageBlock {
+  string block_id = 1; BlockStatus status = 2; int64 started_at = 3; optional int64 completed_at = 4;
+  oneof content {
+    UserContent user_content = 10; string reasoning = 11; AssistantText assistant_text = 12;
+    ToolCall tool_call = 13; ToolResult tool_result = 14; string execution_summary = 15;
+    ContextCompaction context_compaction = 16; SystemNotice system_notice = 17;
+  }
+}
+message AssistantText { AssistantPhase phase = 1; string text = 2; }
+// JSON is confined to the existing ToolArguments/JsonContentValue extension points.
+// Validate UTF-8 JSON losslessly (including integers); never encode whole messages here.
+message ToolArguments { string json_utf8 = 1; }
+message JsonContent { string json_utf8 = 1; }
+message ToolCall {
+  string call_id = 1; string name = 2;
+  oneof arguments { string json_fragment = 3; ToolArguments complete = 4; }
+  repeated ToolProgress progress = 5;
+}
+message ToolProgress { ProgressKind kind = 1; string text = 2; int64 occurred_at = 3; }
+message ToolResult { string call_id = 1; string tool_name = 2; repeated ToolContent content = 3; bool is_error = 4; }
+message ContextCompaction {
+  CompactionTrigger trigger = 1; CompactionStage stage = 2;
+  optional CompactionOutcome outcome = 3; CompactionMetrics metrics = 4; optional string message = 5;
+}
+message CompactionDelta {
+  optional CompactionStage stage = 1; optional CompactionOutcome outcome = 2;
+  CompactionMetrics metrics = 3; optional string message = 4;
+}
+message SystemNotice {
+  NoticeLevel level = 1;
+  oneof content { string text = 2; ApiError error = 3; PromptWarningNotice prompt_warning = 4; }
+}
+message PromptTruncated { PromptFile file = 1; uint32 injected_chars = 2; uint32 raw_chars = 3; }
+message PromptWarningNotice {
+  string message = 1;
+  oneof warning {
+    PromptFile bootstrap_file_missing = 2; PromptTruncated bootstrap_file_truncated = 3;
+    PromptFile bootstrap_file_dropped = 4; uint32 dynamic_sections_dropped = 5;
+  }
+}
+message ToolContent {
+  oneof content {
+    string text = 1; JsonContent json = 2; CollaborationResult subagent_result = 3;
+    FileRead file_read = 4; Diff diff = 5; SearchResults search_results = 6;
+    BashOutput bash_output = 7; WebReference web_reference = 8; Image image = 9;
+    ArtifactRef artifact_ref = 10; McpResourceRef mcp_resource_ref = 11; ToolContentProgress progress = 12;
+  }
+}
+message FileRead { string path = 1; uint64 offset = 2; uint64 limit = 3; uint64 total_lines = 4; string content = 5; bool truncated = 6; }
+message Diff { repeated FileDiff files = 1; }
+message FileDiff { string path = 1; optional string old_path = 2; repeated DiffHunk hunks = 3; bool truncated = 4; }
+message DiffHunk {
+  optional uint32 old_start = 1; optional uint32 old_lines = 2;
+  optional uint32 new_start = 3; optional uint32 new_lines = 4; repeated DiffLine lines = 5;
+}
+message DiffLine { oneof line { string context = 1; string added = 2; string removed = 3; } }
+message SearchMatch { string path = 1; uint32 line = 2; optional uint32 column = 3; string text = 4; repeated string before = 5; repeated string after = 6; }
+message SearchResults {
+  optional string query = 1; repeated SearchMatch matches = 2; uint64 offset = 3; uint64 limit = 4;
+  optional uint64 total_matches = 5; bool more_available = 6; bool partial = 7;
+}
+message BashOutput {
+  optional int64 session_id = 1; TaskStatus status = 2; optional int32 exit_code = 3;
+  string stdout = 4; string stderr = 5; bool truncated = 6; optional uint64 elapsed_ms = 7;
+}
+message WebReference {
+  string url = 1; optional string title = 2; optional string citation_id = 3;
+  optional string snippet = 4; optional string source_domain = 5;
+  optional string published_at = 6; optional uint64 provider_rank = 7;
+}
+message Image { string file_id = 1; string mime_type = 2; string label = 3; }
+message ArtifactRef { string artifact_id = 1; optional string mime_type = 2; optional string label = 3; }
+message McpResourceRef { string server = 1; string uri = 2; optional string mime_type = 3; }
+message ToolContentProgress { string message = 1; optional uint64 elapsed_ms = 2; }
+message SubagentRef { string path = 1; string session_id = 2; TurnRef parent = 3; }
+message SubagentSpawnResult { SubagentRef subagent = 1; string agent_id = 2; TurnRef turn = 3; }
+message SendMessageResult { SubagentRef subagent = 1; string agent_id = 2; TurnRef turn = 3; bool accepted = 4; }
+message SubagentUpdate { SubagentUpdateKind kind = 1; string text = 2; bool truncated = 3; }
+message ChildCompleted { string turn_id = 1; string output = 2; bool truncated = 3; }
+message ChildFailed { string turn_id = 1; string error = 2; bool truncated = 3; }
+message SubagentSnapshot {
+  SubagentRef subagent = 1; string agent_id = 2; SubagentUpdate latest_update = 3;
+  oneof outcome {
+    string running_turn_id = 4; string waiting_user_action_turn_id = 5; string cancelling_turn_id = 6;
+    ChildCompleted completed = 7; ChildFailed failed = 8; string interrupted_turn_id = 9;
+  }
+}
+message AgentTreeNode { SubagentSnapshot snapshot = 1; repeated AgentTreeNode children = 2; }
+message AgentTree { repeated AgentTreeNode children = 1; }
+message CollaborationResult {
+  oneof result {
+    SubagentSpawnResult spawn_agent = 1; SendMessageResult send_message = 2;
+    SubagentSnapshot wait_agent = 3; SubagentSnapshot interrupt_agent = 4;
+    SubagentSnapshot followup_task = 5; AgentTree list_agents = 6;
+  }
+}
+message BlockSnapshot { string message_id = 1; MessageBlock block = 2; }
+message BlockDelta {
+  string message_id = 1; string block_id = 2;
+  oneof delta {
+    string text = 3; AssistantPhase assistant_text_phase = 4; string tool_call_arguments_fragment = 5;
+    ToolProgress tool_progress = 6; CompactionDelta context_compaction = 7;
+  }
+}
+message TurnFailed { ApiError error = 1; bool retryable = 2; }
+message AgentEvent {
+  TurnRef identity = 1; uint64 sequence = 2; int64 occurred_at = 3;
+  oneof payload {
+    Empty turn_started = 10; AgentMessage message_started = 11; BlockSnapshot message_block_started = 12;
+    BlockDelta message_block_delta = 13; BlockSnapshot message_block_completed = 14;
+    AgentMessage message_completed = 15; PendingInput waiting_for_input = 16; RunMetrics metrics_updated = 17;
+    StopReason turn_completed = 18; TurnFailed turn_failed = 19;
+  }
+}

@@ -142,12 +142,15 @@ async fn committed_failure_recovery_releases_execution_and_dispatches_the_queue(
         let subscriber = tracing::dispatcher::set_default(&dispatch);
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
         let execution = Arc::new(RecordingAgentExecution::default());
-        let (service, _, store, queue) = test_service_with_storage(
-            execution.clone(),
-            Arc::new(RecordingAgentCoordinator::default()),
-            storage.clone(),
-        )
-        .await;
+        let coordinator = Arc::new(RecordingAgentCoordinator::default());
+        if rejected_stage == "turnCompleted" {
+            *coordinator.interrupt_error.lock().unwrap() = Some(TalosError::new(
+                talos_error::ErrorCode::RunCleanupUnconfirmed,
+                "The remote Client no longer owns a live invocation",
+            ));
+        }
+        let (service, _, store, queue) =
+            test_service_with_storage(execution.clone(), coordinator, storage.clone()).await;
         create_test_session_record(store.clone()).await;
         if rejected_stage == "metricsUpdated" {
             *execution.progress_event.lock().unwrap() = Some(

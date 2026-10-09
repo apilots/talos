@@ -1,0 +1,42 @@
+[package]
+name = "talos-worker-bin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "talos-worker"
+path = "src/main.rs"
+
+[dependencies]
+talos-worker = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+talos-agent = { workspace = true }
+talos-agent-api = { workspace = true }
+talos-agent-provider-kernel = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-tools = { workspace = true }
+talos-types = { workspace = true }
+agent-client = { workspace = true }
+agent-protocol = { workspace = true }
+chrono = { workspace = true }
+libc = { workspace = true }
+rcgen = "0.14"
+talos-auth = { workspace = true }
+talos-base = { workspace = true }
+talos-config = { workspace = true }
+talos-coordinator = { path = "../../crates/orchestration/coordinator" }
+talos-error = { workspace = true }
+talos-router = { path = "../../crates/orchestration/router" }
+talos-service = { workspace = true }
+talos-storage = { workspace = true }
+talos-store = { workspace = true }
+tempfile = "3"
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+
+[lints]
+workspace = true

@@ -89,6 +89,14 @@ impl DatabaseSessionStore {
                 TalosError::internal("Session is missing its agent binding.")
                     .context(format!("session '{id}' is missing its agent binding"))
             })?;
+        let execution_node_id = Self::normalized_optional_string(
+            row.get_string("execution_node_id"),
+        )
+        .ok_or_else(|| {
+            TalosError::internal("Session is missing its execution node binding.").context(format!(
+                "session '{id}' is missing its execution node binding"
+            ))
+        })?;
 
         let workspace_id = Self::normalized_optional_string(row.get_string("workspace_id"))
             .ok_or_else(|| {
@@ -99,6 +107,7 @@ impl DatabaseSessionStore {
         Ok(SessionRecord {
             id,
             agent_id,
+            execution_node_id,
             tree_identity,
             workspace_id,
             title: row

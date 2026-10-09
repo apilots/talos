@@ -1,39 +1,31 @@
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use talos_agent::{
-    create_agent_harness, AgentDefinitionLoader, AgentUserContentKind, SessionHistoryReader,
-};
-use talos_agent_provider_kernel::{
-    FileKernelSessionArtifactStore, KernelAgentProvider, KernelAgentProviderParams,
-    KernelMemoryProgressStore, KernelSessionArtifactStore,
-};
+use talos_agent::SessionHistoryReader;
+use talos_agent_provider_kernel::KernelMemoryProgressStore;
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
-use talos_config::{AgentProviderConfig, Config, ConfigStore, YamlConfigStore};
+use talos_config::{Config, ConfigStore, YamlConfigStore};
 use talos_coordinator::CoordinatorImpl;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_llm_provider::{LlmProviderRouter, ModelRef, ReloadableLlmProviderRouter};
+use talos_llm_provider::LlmProviderRouter;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_service::{
-    resolve_inner_model_ref, FileService, InnerModelClient, MemoryService, PluginManagerService,
+    resolve_inner_model_ref, AgentNodeService, FileService, InnerModelClient,
     SessionHistoryService, TalosService, TimelineEventService,
 };
-use talos_store::memory::MemoryStore;
+use talos_store::node::DatabaseAgentNodeStore;
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionStore};
 
 use crate::memory_progress::SessionMemoryProgress;
-use talos_tools::{
-    register_core_local_tools, register_network_tools, register_subagent_tools, ToolRegistry,
-};
-use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
+use talos_tools::{AgentControl, ToolImageStore};
 use talos_types::{resolve_default_model_selection, resolve_model_catalog};
+use talos_worker::{create_llm_provider, prepare_mcp, TalosWorker, TalosWorkerResources};
 
 use super::{
-    application_automation, application_storage, create_llm_provider, AgentSkillRootsResolver,
-    ApplicationAgentControl, ReloadableLlmProvider, TalosApplicationRuntime,
+    application_automation, application_storage, ApplicationAgentControl, ReloadableLlmProvider,
+    TalosApplicationRuntime,
 };
 
 pub(crate) async fn build_application_runtime_with_migration_dir(
@@ -52,6 +44,10 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         application_storage::build_database_stores(&storage_connection);
     let storage: Arc<dyn talos_storage::Storage> = storage_impl;
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
+    let node_store = Arc::new(DatabaseAgentNodeStore::new(
+        storage_connection.pool().clone(),
+    ));
+    let node_service = AgentNodeService::new(node_store.clone());
     let project_store_impl = Arc::new(StorageProjectStore::new(storage.clone()).await?);
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
     let project_store: Arc<dyn ProjectStore> = project_store_impl.clone();
@@ -61,23 +57,33 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         application_storage::build_file_operators(&config.storage.files)?,
         config.storage.files.clone(),
     )?);
+    let attachment_reader: Arc<dyn talos_agent::AttachmentReader> = file_service.clone();
     file_service.reconcile_incomplete().await?;
     let agent_execution_store: Arc<dyn AgentExecutionStore> = session_store_impl.clone();
     let event_service = Arc::new(TimelineEventService::new(agent_execution_store.clone()));
     let session_history_reader: Arc<dyn SessionHistoryReader> =
         Arc::new(SessionHistoryService::new(event_service.clone()));
+    let memory_progress_store: Arc<dyn KernelMemoryProgressStore> =
+        Arc::new(SessionMemoryProgress::new(session_store_impl.clone()));
+    let tool_image_store: Arc<dyn ToolImageStore> =
+        Arc::new(super::tool_images::ToolImages(file_service.clone()));
+    let worker = TalosWorker::build(
+        config.clone(),
+        TalosWorkerResources {
+            session_history_reader: session_history_reader.clone(),
+            memory_progress_store: memory_progress_store.clone(),
+            attachment_reader: file_service.clone(),
+            tool_image_store: tool_image_store.clone(),
+            agent_control: None,
+        },
+    )
+    .await?;
     let default_model_selection = resolve_default_model_selection(&config.llm)?;
-    let agent_definitions = AgentDefinitionLoader::load(&config.agent)?;
-    let default_agent_id = agent_definitions
-        .iter()
-        .find(|definition| definition.enabled)
-        .map(|definition| definition.id.clone())
-        .ok_or_else(|| {
-            TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "no enabled agent definitions".to_string(),
-            )
-        })?;
+    let default_agent_id = worker
+        .deployments()
+        .first()
+        .map(|deployment| deployment.agent_id.clone())
+        .expect("TalosWorker requires an enabled Agent deployment");
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
     router
         .add_binding(Binding {
@@ -90,20 +96,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
 
     let initial_llm_provider = create_llm_provider(&config)?;
     let reloadable_llm_provider = Arc::new(ReloadableLlmProvider::new(initial_llm_provider));
-    let llm_router_config = Arc::new(RwLock::new(config.clone()));
-    let llm_router_config_for_factory = llm_router_config.clone();
-    let reloadable_llm_provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
-        move |model_ref: &ModelRef| {
-            let provider_name = model_ref.provider.trim().to_ascii_lowercase();
-            let mut provider_config = llm_router_config_for_factory
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone();
-            provider_config.llm.provider = provider_name;
-            provider_config.llm.model = model_ref.id.clone();
-            create_llm_provider(&provider_config)
-        },
-    )));
+    let llm_router_config = worker.config();
+    let reloadable_llm_provider_router = worker.provider_router();
     let llm_provider_router: Arc<dyn LlmProviderRouter> = reloadable_llm_provider_router.clone();
     let model_catalog = resolve_model_catalog(&config.llm);
     let inner_model = Arc::new(
@@ -116,98 +110,26 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             .profile_timezone(config.agent.kernel.timezone.clone())
             .build()?,
     );
-    let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
-    let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
-    tool_registry.set_image_store(Arc::new(super::tool_images::ToolImages(
-        file_service.clone(),
-    )));
-    register_core_local_tools(tool_registry.as_ref());
-    register_network_tools(tool_registry.as_ref());
-    let plugin_manager_service = PluginManagerService::with_manager(
-        talos_plugin::PluginManager::with_state_store(
-            config.agent.kernel.plugins.clone(),
-            talos_plugin::PluginStateStore::new(config.talos_paths().talos_home.join("plugins")),
-        )
-        .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes),
-    );
-    let mcp = Arc::new(talos_mcp::TalosMcpRuntime::new());
-    tool_registry.register_mcp_server(Arc::new(talos_tools::McpConnectionManager::from_runtime(
-        mcp.clone(),
-    )));
-    let credentials = talos_service::McpCredentialStore::new(
-        config.talos_paths().talos_home.join("mcp-credentials"),
-    );
-    let credentials_for_changes = credentials.clone();
-    let mcp_for_changes = mcp.clone();
-    let config_for_mcp = llm_router_config.clone();
-    let plugin_manager_service = plugin_manager_service.with_mcp(
-        mcp.clone(),
-        Arc::new(move |plugins| {
-            let current = config_for_mcp
-                .read()
-                .expect("application config lock poisoned");
-            let prepared = super::application_mcp::prepare(
-                &mcp_for_changes,
-                &current.agent.kernel,
-                plugins,
-                &credentials_for_changes,
-            )?;
-            Ok(Box::new(move || prepared.publish()))
-        }),
-        llm_router_config.clone(),
-        credentials.clone(),
-    );
-    let skill_roots_resolver = Arc::new(AgentSkillRootsResolver {
-        plugins: plugin_manager_service.clone(),
-    });
-    let session_artifact_store: Arc<dyn KernelSessionArtifactStore> =
-        Arc::new(FileKernelSessionArtifactStore);
-    let memory_progress_store: Arc<dyn KernelMemoryProgressStore> =
-        Arc::new(SessionMemoryProgress::new(session_store_impl.clone()));
-    let memory_database = config.talos_paths().data_dir.join("memory-index.sqlite");
-    let memory_store = Arc::new(MemoryStore::open(&memory_database).await?);
-    let memory_service = MemoryService::new(config.clone(), memory_store)?;
-    memory_service.rebuild_known_scopes().await?;
-    tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
-    let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
-    tool_registry.set_user_workspace_memory_writer(user_workspace_memory.clone());
+    let tool_registry = worker.tool_registry();
+    let plugin_manager_service = worker.plugin_manager();
+    let memory_service = worker.memory_service();
+    let user_workspace_memory = worker.user_workspace_memory();
+    let mcp = worker.mcp_runtime();
+    let credentials = worker.mcp_credentials();
 
-    let coordinator = Arc::new(CoordinatorImpl::new(router));
-    let mut kernel_providers = HashMap::new();
-
-    for definition in &agent_definitions {
-        if !definition.enabled {
-            continue;
-        }
-        let provider = match &definition.provider {
-            AgentProviderConfig::Kernel { kernel } => {
-                KernelAgentProvider::new(KernelAgentProviderParams {
-                    agent_id: definition.id.clone(),
-                    name: definition.name.clone(),
-                    description: definition.description.clone(),
-                    llm_provider_router: llm_provider_router.clone(),
-                    tool_registry: tool_registry.clone(),
-                    kernel_config: kernel.clone(),
-                    skill_roots_resolver: skill_roots_resolver.clone(),
-                    session_artifact_store: session_artifact_store.clone(),
-                    session_history_reader: session_history_reader.clone(),
-                    memory_progress_store: memory_progress_store.clone(),
-                    dream_memory_store: Arc::new(memory_service.clone()),
-                    user_workspace_memory_reader: user_workspace_memory.clone(),
-                    attachment_reader: file_service.clone(),
-                    rich_input: vec![
-                        AgentUserContentKind::SkillSelection,
-                        AgentUserContentKind::File,
-                    ],
-                })?
-            }
-        };
-        kernel_providers.insert(definition.id.clone(), provider.clone());
-        let agent = create_agent_harness(definition.id.clone(), provider);
+    let coordinator = Arc::new(CoordinatorImpl::new(
+        router,
+        session_store.clone(),
+        node_store,
+    ));
+    for (agent_id, agent) in worker.harnesses() {
         coordinator
-            .register_agent(definition.id.clone(), agent)
+            .register_agent("embedded".into(), agent_id.clone(), agent.clone())
             .await?;
     }
+    node_service
+        .register_embedded(!worker.harnesses().is_empty())
+        .await?;
 
     let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
     let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
@@ -249,7 +171,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
                     )
                 })?;
             *target = *server;
-            let mcp_update = super::application_mcp::prepare(
+            let mcp_update = prepare_mcp(
                 &mcp_for_reload,
                 &candidate.agent.kernel,
                 plugins_for_reload.mcp_servers()?.servers,
@@ -303,7 +225,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         let provider_router_reloader = provider_router_reloader.clone();
         let provider_router_config_reloader = provider_router_config_reloader.clone();
         let inner_model_reloader = inner_model_reloader.clone();
-        let mcp_update = super::application_mcp::prepare(
+        let mcp_update = prepare_mcp(
             &mcp_for_reload,
             &reloaded_config.agent.kernel,
             plugins_for_reload.mcp_servers()?.servers,
@@ -327,7 +249,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let service = Arc::new(
         TalosService::new(
             coordinator.clone(),
-            session_store,
+            session_store.clone(),
             session_store_impl.clone(),
             project_store,
             profile_store.clone(),
@@ -344,27 +266,19 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         )
         .with_user_workspace_memory(user_workspace_memory, inner_model.clone()),
     );
-    if config.agent.kernel.tools.enable_collaboration_tools {
-        register_subagent_tools(tool_registry.as_ref());
-        tool_registry.set_agent_control(Arc::new(ApplicationAgentControl::new(service.clone())));
-    }
+    let agent_control: Arc<dyn AgentControl> =
+        Arc::new(ApplicationAgentControl::new(service.clone()));
+    worker.install_agent_control(agent_control.clone());
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
     let dream_memory_maintenance = crate::dream_memory_maintenance::DreamMemoryMaintenance::new(
         session_store_impl,
         service.clone(),
-        kernel_providers,
+        coordinator.clone(),
         inner_model,
-        config.workspaces.clone(),
-        config.talos_paths(),
+        &config,
         config.automation.dream_memory_maintenance.clone(),
     );
-    let initial_mcp = super::application_mcp::prepare(
-        &mcp,
-        &config.agent.kernel,
-        plugin_manager_service.mcp_servers()?.servers,
-        &credentials,
-    )?;
     let automation = application_automation::start_maintenance(
         profile_store,
         config.automation.profile_usage_retention.clone(),
@@ -375,8 +289,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     .await?;
 
     // No external MCP starts until every fallible assembly step has completed.
-    plugin_manager_service.recover_credentials();
-    initial_mcp.publish();
+    worker.activate_mcp()?;
     Ok(TalosApplicationRuntime {
         config,
         service,
@@ -384,27 +297,14 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         auth_service,
         gateway,
         coordinator,
+        node_service,
         tool_registry,
+        session_store,
+        session_history_reader,
+        attachment_reader,
+        memory_progress_store,
+        agent_control,
+        tool_image_store,
         automation,
     })
-}
-
-fn sandbox_runtime_paths(config: &Config) -> SandboxRuntimePaths {
-    let configured = config
-        .agent
-        .kernel
-        .tools
-        .sandbox_policy
-        .platform
-        .linux_helper_executable
-        .clone();
-    let linux_helper_executable = configured.or_else(|| {
-        let mut candidate = std::env::current_exe().ok()?;
-        candidate.set_file_name("talos-linux-sandbox-launcher");
-        candidate.is_file().then_some(candidate)
-    });
-    SandboxRuntimePaths {
-        macos_sandbox_executable: None,
-        linux_helper_executable,
-    }
 }

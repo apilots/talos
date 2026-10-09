@@ -22,6 +22,7 @@ fn record(
     SessionRecord {
         id: id.to_string(),
         agent_id: "agent-a".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
@@ -141,6 +142,7 @@ async fn test_insert_and_get_session_record_roundtrip() {
         Some("project-1".to_string()),
         Some(PathBuf::from("/repo")),
     );
+    record.execution_node_id = "laptop-1".to_string();
     record.conf = SessionConf {
         model_selection: Some(ModelSelection {
             model_ref: ModelRef {
@@ -378,6 +380,7 @@ async fn session_patch_updates_only_settings_owned_columns() {
 async fn context_usage_update_preserves_the_rest_of_the_session_record() {
     let store = store().await;
     let mut record = record("session-1", "user-1", None, None);
+    record.execution_node_id = "laptop-1".to_string();
     record.title = "Concurrent title".to_string();
     record.conf.model_selection = Some(ModelSelection::without_reasoning(ModelRef {
         provider: "openai".to_string(),

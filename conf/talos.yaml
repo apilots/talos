@@ -28,6 +28,10 @@ gateway:
   host: "0.0.0.0"
   auth: true
 
+agent_node:
+  control_plane: null
+  runner: null
+
 cloud:
   api_base_url: "https://api.talos.love"
   web_base_url: "https://cloud.talos.love"

@@ -243,6 +243,7 @@ async fn update_config_rejects_nonterminal_turn_before_persistence_or_reload() {
         .insert_session_record(&SessionRecord {
             id: "session-config-gate".to_string(),
             agent_id: "default".to_string(),
+            execution_node_id: "embedded".to_string(),
             tree_identity: talos_store::session::SessionTreeIdentity::Primary,
             workspace_id: "default".to_string(),
             title: talos_types::DEFAULT_SESSION_TITLE.to_string(),

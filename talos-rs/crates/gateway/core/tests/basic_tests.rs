@@ -73,6 +73,15 @@ impl AgentCoordinator for RecordingHandler {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         let identity = params.context.identity();
         let (pipeline, _sink, progress_rx) = AgentEventPipeline::fresh(identity);

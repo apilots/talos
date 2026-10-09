@@ -306,9 +306,20 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
     let (storage, store) = test_session_storage().await;
     let agent = build_agent(&config, store.clone());
-    let coordinator = Arc::new(CoordinatorImpl::new(Arc::new(StaticRouter)));
+    let node_store = Arc::new(talos_store::node::DatabaseAgentNodeStore::new(
+        storage.pool().clone(),
+    ));
+    talos_service::AgentNodeService::new(node_store.clone())
+        .register_embedded(true)
+        .await
+        .unwrap();
+    let coordinator = Arc::new(CoordinatorImpl::new(
+        Arc::new(StaticRouter),
+        store.clone(),
+        node_store,
+    ));
     coordinator
-        .register_agent(AGENT_ID.to_string(), agent)
+        .register_agent("embedded".into(), AGENT_ID.to_string(), agent)
         .await
         .expect("integration agent should register");
     let gateway = test_gateway_with_coordinator(

@@ -1,7 +1,7 @@
 use super::{
     apply_runtime_options, build_application_runtime_with_migration_dir, create_llm_provider,
-    resolve_webui_dir, ModelSetupRequiredProvider, ReloadableLlmProvider, TalosServerHandle,
-    TalosServerOptions, WebuiLookupInput, WebuiLookupResult, SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    resolve_webui_dir, ReloadableLlmProvider, TalosServerHandle, TalosServerOptions,
+    WebuiLookupInput, WebuiLookupResult, SERVER_SHUTDOWN_WAIT_TIMEOUT,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -320,10 +320,11 @@ async fn application_runtime_skips_disabled_agent_definitions() {
 
 #[tokio::test]
 async fn setup_required_provider_reports_configuration_error_for_model_blocks() {
-    let provider = ModelSetupRequiredProvider {
-        model: "missing-model".to_string(),
-        message: "model setup required: missing key".to_string(),
-    };
+    let mut config = Config::default();
+    config.llm.provider = "openai".to_string();
+    config.llm.model = "missing-model".to_string();
+    config.llm.openai.api_key = None;
+    let provider = create_llm_provider(&config).unwrap();
 
     let result = provider
         .stream_model_blocks(ChatRequest::new_user("hello", "missing-model"))
@@ -333,7 +334,7 @@ async fn setup_required_provider_reports_configuration_error_for_model_blocks() 
         Err(err) => err,
     };
 
-    assert!(format!("{err}").contains("model setup required: missing key"));
+    assert!(format!("{err}").contains("model setup required"));
 }
 
 #[tokio::test]

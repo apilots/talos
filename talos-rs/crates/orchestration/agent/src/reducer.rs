@@ -7,15 +7,7 @@ use talos_agent_api::{
 };
 use talos_error::TalosError;
 
-use crate::AgentResult;
-
-/// Durable reducer state reconstructed from canonical Agent events.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AgentRunCheckpoint {
-    pub last_sequence: u64,
-    pub messages: Vec<AgentMessage>,
-    pub metrics: AgentRunMetrics,
-}
+use crate::{AgentResult, AgentRunCheckpoint};
 
 /// Deterministic authority for canonical Agent message and metrics state.
 ///

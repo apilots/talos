@@ -1,12 +1,7 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use talos_agent_provider_kernel::{
-    KernelAgentProvider, KernelDreamMemoryParams, KernelDreamMemoryResult,
-};
 use talos_config::{DreamMemoryMaintenanceConfig, TalosPaths, WorkspaceConfig};
-use talos_error::{TalosError, TalosResult};
-use talos_memory::MemoryScope;
+use talos_error::TalosResult;
 use talos_service::{InnerModelClient, TalosService};
 use talos_store::session::{SessionPageCursor, SessionQuery, SessionStore};
 use talos_types::ModelUsageKind;
@@ -23,7 +18,7 @@ pub(super) struct DreamMemoryMaintenanceReport {
 pub(super) struct DreamMemoryMaintenance {
     session_store: Arc<dyn SessionStore>,
     service: Arc<TalosService>,
-    kernel_providers: Arc<HashMap<String, KernelAgentProvider>>,
+    coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
     inner_model: Arc<InnerModelClient>,
     workspaces: WorkspaceConfig,
     workspace_paths: TalosPaths,
@@ -34,19 +29,18 @@ impl DreamMemoryMaintenance {
     pub(super) fn new(
         session_store: Arc<dyn SessionStore>,
         service: Arc<TalosService>,
-        kernel_providers: HashMap<String, KernelAgentProvider>,
+        coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
         inner_model: Arc<InnerModelClient>,
-        workspaces: WorkspaceConfig,
-        workspace_paths: TalosPaths,
+        runtime_config: &talos_config::Config,
         config: DreamMemoryMaintenanceConfig,
     ) -> Self {
         Self {
             session_store,
             service,
-            kernel_providers: Arc::new(kernel_providers),
+            coordinator,
             inner_model,
-            workspaces,
-            workspace_paths,
+            workspaces: runtime_config.workspaces.clone(),
+            workspace_paths: runtime_config.talos_paths(),
             config,
         }
     }
@@ -90,57 +84,46 @@ impl DreamMemoryMaintenance {
         &self,
         record: talos_store::session::SessionRecord,
     ) -> TalosResult<bool> {
-        let provider = self
-            .kernel_providers
-            .get(&record.agent_id)
-            .cloned()
-            .ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::ResourceNotFound,
-                    format!("Dream Memory Agent not found: {}", record.agent_id),
-                )
-            })?;
         let workspace = self.workspaces.resolve(
             &self.workspace_paths,
             &record.workspace_id,
             &record.user_id,
         )?;
-        let params = KernelDreamMemoryParams {
+        let context = talos_agent::AgentSessionContext {
+            agent_id: record.agent_id.clone(),
             session_id: record.id.clone(),
-            workspace_root: workspace.root.clone(),
-            memory_scope: MemoryScope {
-                workspace_id: record.workspace_id.clone(),
-                user_id: record.user_id.clone(),
-                workspace_root: workspace.root,
-            },
+            workspace: workspace.clone(),
         };
+        let harness = self.coordinator.session_harness(&context).await?;
         let inner_model = self.inner_model.clone();
         let user_id = record.user_id.clone();
         let session_id = record.id.clone();
         let result = self
             .service
             .run_idle_session_maintenance(&record.id, move || async move {
-                provider
-                    .form_dream_memory(params, move |messages| {
-                        let inner_model = inner_model.clone();
-                        let user_id = user_id.clone();
-                        let session_id = session_id.clone();
-                        async move {
-                            inner_model
-                                .chat(talos_service::InnerModelChatParams {
-                                    user_id,
-                                    session_id: Some(session_id),
-                                    usage_kind: ModelUsageKind::Dream,
-                                    messages,
-                                })
-                                .await
-                        }
-                    })
+                harness
+                    .form_dream_memory(
+                        context,
+                        Arc::new(move |messages| {
+                            let inner_model = inner_model.clone();
+                            let user_id = user_id.clone();
+                            let session_id = session_id.clone();
+                            Box::pin(async move {
+                                inner_model
+                                    .chat(talos_service::InnerModelChatParams {
+                                        user_id,
+                                        session_id: Some(session_id),
+                                        usage_kind: ModelUsageKind::Dream,
+                                        messages,
+                                    })
+                                    .await
+                            })
+                        }),
+                    )
                     .await
             })
             .await?;
-        Ok(result
-            .is_some_and(|KernelDreamMemoryResult { covers_until_seq }| covers_until_seq.is_some()))
+        Ok(result.flatten().is_some())
     }
 }
 

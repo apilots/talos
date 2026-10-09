@@ -1,8 +1,18 @@
 use super::*;
 
 impl TurnService {
-    pub(crate) async fn validate_subagent_agent(&self, agent_id: &str) -> TalosResult<()> {
-        self.execution.coordinator.ensure_agent(agent_id).await
+    pub(crate) async fn validate_subagent_agent(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        node_id: &str,
+    ) -> TalosResult<()> {
+        self.execution.coordinator.ensure_agent(agent_id).await?;
+        self.execution
+            .coordinator
+            .select_execution_node(agent_id, user_id, Some(node_id))
+            .await
+            .map(|_| ())
     }
 
     pub(crate) async fn submit_subagent_turn(

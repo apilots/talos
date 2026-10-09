@@ -155,7 +155,12 @@ impl AgentExecutionDriver {
                         "Agent compaction cannot wait for User input",
                     );
                     return self
-                        .recover_failed_execution(&active, expected_event_seq, &error)
+                        .settle_failed_execution(
+                            &active,
+                            expected_event_seq,
+                            &error,
+                            AgentInterruptOutcome::Completed,
+                        )
                         .await;
                 }
                 self.execution_store
@@ -230,8 +235,16 @@ impl AgentExecutionDriver {
                 {
                     talos_logging::report_error(error);
                 }
-                self.recover_failed_execution(&active, expected_event_seq, &commit_error)
-                    .await
+                // A canonical settlement is emitted only after Harness cleanup is
+                // confirmed. Preserve that fact even if persistence fails; an RPC
+                // client need not retain another completed-Turn ledger.
+                self.settle_failed_execution(
+                    &active,
+                    expected_event_seq,
+                    &commit_error,
+                    AgentInterruptOutcome::Completed,
+                )
+                .await
             }
         }
     }
@@ -261,6 +274,17 @@ impl AgentExecutionDriver {
                 return Err(interrupt_error);
             }
         };
+        self.settle_failed_execution(active, expected_event_seq, commit_error, cleanup)
+            .await
+    }
+
+    async fn settle_failed_execution(
+        &self,
+        active: &ActiveTimelineStream,
+        expected_event_seq: i64,
+        commit_error: &TalosError,
+        cleanup: AgentInterruptOutcome,
+    ) -> TalosResult<AgentRunSettlement> {
         let failure = AgentRunFailure::from(
             commit_error
                 .clone()

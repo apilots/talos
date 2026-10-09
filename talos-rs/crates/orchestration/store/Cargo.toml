@@ -14,6 +14,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 sqlx = { workspace = true }
 talos-agent-api = { workspace = true }
+agent-protocol = { workspace = true }
 talos-error = { workspace = true }
 talos-fs = { workspace = true }
 talos-llm-provider = { workspace = true }

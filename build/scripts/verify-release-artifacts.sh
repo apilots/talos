@@ -22,6 +22,10 @@ verify_server_config_template() {
     echo "Missing server binary in ${archive_path}" >&2
     exit 1
   fi
+  if ! tar -tzf "${archive_path}" | grep -E '^(\./)?bin/talos-worker$' >/dev/null; then
+    echo "Missing worker binary in ${archive_path}" >&2
+    exit 1
+  fi
   if [[ "$(basename "${archive_path}")" == *linux* ]] \
     && ! tar -tzf "${archive_path}" | grep -E '^(\./)?bin/talos-linux-sandbox-launcher$' >/dev/null; then
     echo "Missing Linux sandbox launcher in ${archive_path}" >&2

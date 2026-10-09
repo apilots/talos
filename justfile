@@ -48,6 +48,10 @@ build *args:
 dev-server *args:
     TALOS_RESOURCE_DIR="$PWD/.." cargo run -p talos-server --bin talos-server "$@"
 
+# Run the standalone Agent worker with repository resources.
+dev-worker *args:
+    TALOS_RESOURCE_DIR="$PWD/.." cargo run -p talos-worker-bin --bin talos-worker "$@"
+
 # Run the development Web UI with repository resources in the process environment.
 dev-web *args:
     TALOS_RESOURCE_DIR="$PWD/.." pnpm --dir ../talos-app dev "$@"

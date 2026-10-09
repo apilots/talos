@@ -4,8 +4,6 @@
 //! context, and restricted capabilities. Product DTOs remain in `talos-agent-api`.
 
 mod attachment;
-mod capability;
-mod context;
 mod definition;
 mod error;
 mod event_admission;
@@ -13,35 +11,33 @@ mod event_handle;
 mod event_sink;
 mod harness;
 mod history;
-mod port;
 mod provider;
 mod reducer;
-mod run;
+mod rpc;
 
 use std::sync::Arc;
 
 use harness::Harness;
 
+pub use agent_protocol::{
+    AgentAdmission, AgentAdmissionPermit, AgentCapabilities, AgentContext, AgentFuture,
+    AgentHarness, AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver, AgentResult,
+    AgentRunCheckpoint, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunSettlementReceiver, AgentSessionContext, AgentUserActionKind, AgentUserContentKind,
+};
 pub use attachment::{AttachmentReader, ResolvedAttachment, TurnFileScope};
-pub use capability::{AgentCapabilities, AgentUserActionKind, AgentUserContentKind};
-pub use context::{AgentContext, AgentSessionContext};
 pub use definition::{AgentDefinition, AgentDefinitionLoader};
-pub use error::{AgentResult, AgentRunFailure};
+pub use error::AgentRunFailure;
 pub use event_handle::{AgentMessageBlockHandle, AgentMessageHandle};
 pub use event_sink::{AgentEventPipeline, AgentEventSink};
 pub use history::{SessionHistoryReadParams, SessionHistoryReader, SessionHistoryWindow};
-pub use port::{AgentFuture, AgentHarness};
 pub use provider::{
     AgentOperationControl, AgentProvider, AgentSession, SessionCompactionParams,
     SessionCompactionResult, SessionTurnInputDelivery, SessionTurnInputReceiver, SessionTurnParams,
     SessionTurnResult,
 };
-pub use reducer::{AgentEventReducer, AgentRunCheckpoint};
-pub use run::{
-    AgentAdmission, AgentAdmissionPermit, AgentInputParams, AgentInterruptParams,
-    AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
-    AgentRunSettlementReceiver,
-};
+pub use reducer::AgentEventReducer;
+pub use rpc::AgentHarnessRpcAdapter;
 
 /// Compose one provider-neutral Agent Harness around a concrete Provider.
 ///

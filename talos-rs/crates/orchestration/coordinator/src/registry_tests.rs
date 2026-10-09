@@ -8,7 +8,7 @@ async fn registry_rejects_empty_agent_id() {
     let registry = AgentRegistry::new();
 
     let error = registry
-        .register(String::new(), Arc::new(TestHarness))
+        .register("embedded".into(), String::new(), Arc::new(TestHarness))
         .await
         .expect_err("empty id should fail");
 
@@ -19,12 +19,12 @@ async fn registry_rejects_empty_agent_id() {
 async fn registry_rejects_duplicate_agent_id() {
     let registry = AgentRegistry::new();
     registry
-        .register("mock".to_string(), Arc::new(TestHarness))
+        .register("embedded".into(), "mock".to_string(), Arc::new(TestHarness))
         .await
         .expect("first registration should succeed");
 
     let error = registry
-        .register("mock".to_string(), Arc::new(TestHarness))
+        .register("embedded".into(), "mock".to_string(), Arc::new(TestHarness))
         .await
         .expect_err("duplicate registration should fail");
 

@@ -155,10 +155,6 @@ impl SessionService {
         } else {
             None
         };
-        let workspace_root = self
-            .base_config_snapshot()
-            .resolve_workspace(&record.workspace_id, &record.user_id)?
-            .root;
         if project_directory.is_some() {
             return Ok(project_directory);
         }
@@ -168,7 +164,8 @@ impl SessionService {
         {
             return Ok(record.current_directory.clone());
         }
-        Ok(workspace_root.exists().then_some(workspace_root))
+        // The execution node resolves the implicit Workspace from its own configuration.
+        Ok(None)
     }
 
     async fn validate_project_binding(&self, project_id: &str, user_id: &str) -> TalosResult<()> {
@@ -493,6 +490,7 @@ impl SessionService {
         let record = SessionRecord {
             id: session_id,
             agent_id: params.target_agent,
+            execution_node_id: params.execution_node_id,
             tree_identity,
             workspace_id: params.workspace_id,
             title: DEFAULT_SESSION_TITLE.to_string(),

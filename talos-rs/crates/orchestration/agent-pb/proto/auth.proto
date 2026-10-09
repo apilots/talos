@@ -1,0 +1,13 @@
+syntax = "proto3";
+package talos.agent.v1;
+
+// Always required at node RPC ingress. Never log this object or its parent request.
+// Register accepts a provisioned credential; other methods accept the current lease token.
+message NodeAuth {
+  string node_id = 1;
+  string token = 2;
+}
+message LeaseValidity {
+  int64 expires_at = 1;
+  int64 server_at = 2;
+}

@@ -55,12 +55,17 @@ impl ResourceAccessService {
         let target_agent = self
             .resolve_target_agent(&params.source, &actor.user_id)
             .await?;
+        let execution_node_id = self
+            .coordinator
+            .select_execution_node(&target_agent, &actor.user_id, None)
+            .await?;
         self.sessions
             .create_session(CreateSessionParams {
                 session_id: Some(params.session_id),
                 source: params.source,
                 user_id: actor.user_id.clone(),
                 target_agent,
+                execution_node_id,
                 model_selection: params.model_selection,
                 conf: params
                     .user_permission_mode

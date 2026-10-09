@@ -1,0 +1,297 @@
+use std::sync::{Arc, RwLock};
+
+use agent_protocol::{AgentHarness, Deployment};
+use talos_agent::{
+    create_agent_harness, AgentDefinitionLoader, AgentUserContentKind, AttachmentReader,
+    SessionHistoryReader,
+};
+use talos_agent_provider_kernel::{
+    FileKernelSessionArtifactStore, KernelAgentProvider, KernelAgentProviderParams,
+    KernelMemoryProgressStore, KernelSessionArtifactStore, SkillRootsResolver,
+};
+use talos_config::{AgentKernelConfig, AgentProviderConfig, Config};
+use talos_error::{ErrorCode, TalosError, TalosResult};
+use talos_llm_provider::{LlmProviderRouter, ModelRef, ReloadableLlmProviderRouter};
+use talos_service::{
+    McpCredentialStore, MemoryService, PluginManagerService, UserWorkspaceMemoryService,
+};
+use talos_store::memory::MemoryStore;
+use talos_tools::{
+    register_core_local_tools, register_network_tools, register_subagent_tools, AgentControl,
+    ToolImageStore, ToolRegistry,
+};
+use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
+
+use crate::{create_llm_provider, prepare_mcp};
+
+pub struct TalosWorkerResources {
+    pub session_history_reader: Arc<dyn SessionHistoryReader>,
+    pub memory_progress_store: Arc<dyn KernelMemoryProgressStore>,
+    pub attachment_reader: Arc<dyn AttachmentReader>,
+    pub tool_image_store: Arc<dyn ToolImageStore>,
+    pub agent_control: Option<Arc<dyn AgentControl>>,
+}
+
+/// One Agent execution runtime shared by embedded and standalone hosts.
+pub struct TalosWorker {
+    harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
+    config: Arc<RwLock<Config>>,
+    provider_router: Arc<ReloadableLlmProviderRouter>,
+    tool_registry: Arc<ToolRegistry>,
+    plugin_manager: PluginManagerService,
+    memory_service: MemoryService,
+    user_workspace_memory: Arc<UserWorkspaceMemoryService>,
+    mcp: Arc<talos_mcp::TalosMcpRuntime>,
+    mcp_credentials: McpCredentialStore,
+    collaboration_tools_enabled: bool,
+}
+
+impl TalosWorker {
+    pub async fn build(config: Config, resources: TalosWorkerResources) -> TalosResult<Self> {
+        let active_config = Arc::new(RwLock::new(config.clone()));
+        let provider_config = active_config.clone();
+        let provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
+            move |model_ref: &ModelRef| {
+                let mut config = provider_config
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                config.llm.provider = model_ref.provider.trim().to_ascii_lowercase();
+                config.llm.model = model_ref.id.clone();
+                create_llm_provider(&config)
+            },
+        )));
+        let llm_provider_router: Arc<dyn LlmProviderRouter> = provider_router.clone();
+
+        let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
+        let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
+        tool_registry.set_image_store(resources.tool_image_store);
+        register_core_local_tools(tool_registry.as_ref());
+        register_network_tools(tool_registry.as_ref());
+        let collaboration_tools_enabled = config.agent.kernel.tools.enable_collaboration_tools;
+        if collaboration_tools_enabled {
+            register_subagent_tools(tool_registry.as_ref());
+            if let Some(agent_control) = resources.agent_control {
+                tool_registry.set_agent_control(agent_control);
+            }
+        }
+
+        let mcp = Arc::new(talos_mcp::TalosMcpRuntime::new());
+        tool_registry.register_mcp_server(Arc::new(
+            talos_tools::McpConnectionManager::from_runtime(mcp.clone()),
+        ));
+        let mcp_credentials =
+            McpCredentialStore::new(config.talos_paths().talos_home.join("mcp-credentials"));
+        let mcp_for_changes = mcp.clone();
+        let credentials_for_changes = mcp_credentials.clone();
+        let config_for_changes = active_config.clone();
+        let plugin_manager = PluginManagerService::with_manager(
+            talos_plugin::PluginManager::with_state_store(
+                config.agent.kernel.plugins.clone(),
+                talos_plugin::PluginStateStore::new(
+                    config.talos_paths().talos_home.join("plugins"),
+                ),
+            )
+            .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes),
+        )
+        .with_mcp(
+            mcp.clone(),
+            Arc::new(move |plugins| {
+                let current = config_for_changes
+                    .read()
+                    .expect("worker config lock poisoned");
+                let prepared = prepare_mcp(
+                    &mcp_for_changes,
+                    &current.agent.kernel,
+                    plugins,
+                    &credentials_for_changes,
+                )?;
+                Ok(Box::new(move || prepared.publish()))
+            }),
+            active_config.clone(),
+            mcp_credentials.clone(),
+        );
+        let skill_roots_resolver = Arc::new(WorkerSkillRootsResolver {
+            plugins: plugin_manager.clone(),
+        });
+
+        let memory_store = Arc::new(
+            MemoryStore::open(&config.talos_paths().data_dir.join("memory-index.sqlite")).await?,
+        );
+        let memory_service = MemoryService::new(config.clone(), memory_store)?;
+        memory_service.rebuild_known_scopes().await?;
+        tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
+        let user_workspace_memory = Arc::new(UserWorkspaceMemoryService::new());
+        tool_registry.set_user_workspace_memory_writer(user_workspace_memory.clone());
+
+        let session_artifact_store: Arc<dyn KernelSessionArtifactStore> =
+            Arc::new(FileKernelSessionArtifactStore);
+        let mut harnesses = Vec::new();
+        for definition in AgentDefinitionLoader::load(&config.agent)? {
+            if !definition.enabled {
+                continue;
+            }
+            let provider = match definition.provider {
+                AgentProviderConfig::Kernel { kernel } => {
+                    KernelAgentProvider::new(KernelAgentProviderParams {
+                        agent_id: definition.id.clone(),
+                        name: definition.name,
+                        description: definition.description,
+                        llm_provider_router: llm_provider_router.clone(),
+                        tool_registry: tool_registry.clone(),
+                        kernel_config: kernel,
+                        skill_roots_resolver: skill_roots_resolver.clone(),
+                        session_artifact_store: session_artifact_store.clone(),
+                        session_history_reader: resources.session_history_reader.clone(),
+                        memory_progress_store: resources.memory_progress_store.clone(),
+                        dream_memory_store: Arc::new(memory_service.clone()),
+                        user_workspace_memory_reader: user_workspace_memory.clone(),
+                        attachment_reader: resources.attachment_reader.clone(),
+                        rich_input: vec![
+                            AgentUserContentKind::SkillSelection,
+                            AgentUserContentKind::File,
+                        ],
+                    })?
+                }
+            };
+            harnesses.push((
+                definition.id.clone(),
+                Arc::new(crate::harness::WorkerHarness {
+                    provider: provider.clone(),
+                    execution: create_agent_harness(definition.id, provider),
+                    workspace_memory: user_workspace_memory.clone(),
+                }) as Arc<dyn AgentHarness>,
+            ));
+        }
+        if harnesses.is_empty() {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Talos Worker has no enabled Agent deployment",
+            ));
+        }
+
+        Ok(Self {
+            harnesses,
+            config: active_config,
+            provider_router,
+            tool_registry,
+            plugin_manager,
+            memory_service,
+            user_workspace_memory,
+            mcp,
+            mcp_credentials,
+            collaboration_tools_enabled,
+        })
+    }
+
+    pub fn harnesses(&self) -> &[(String, Arc<dyn AgentHarness>)] {
+        &self.harnesses
+    }
+
+    pub fn deployments(&self) -> Vec<Deployment> {
+        self.harnesses
+            .iter()
+            .map(|(agent_id, _)| Deployment {
+                agent_id: agent_id.clone(),
+            })
+            .collect()
+    }
+
+    pub fn config(&self) -> Arc<RwLock<Config>> {
+        self.config.clone()
+    }
+
+    pub fn provider_router(&self) -> Arc<ReloadableLlmProviderRouter> {
+        self.provider_router.clone()
+    }
+
+    pub fn tool_registry(&self) -> Arc<ToolRegistry> {
+        self.tool_registry.clone()
+    }
+
+    pub fn plugin_manager(&self) -> PluginManagerService {
+        self.plugin_manager.clone()
+    }
+
+    pub fn memory_service(&self) -> MemoryService {
+        self.memory_service.clone()
+    }
+
+    pub fn user_workspace_memory(&self) -> Arc<UserWorkspaceMemoryService> {
+        self.user_workspace_memory.clone()
+    }
+
+    pub fn mcp_runtime(&self) -> Arc<talos_mcp::TalosMcpRuntime> {
+        self.mcp.clone()
+    }
+
+    pub fn mcp_credentials(&self) -> McpCredentialStore {
+        self.mcp_credentials.clone()
+    }
+
+    pub fn install_agent_control(&self, agent_control: Arc<dyn AgentControl>) {
+        if self.collaboration_tools_enabled {
+            self.tool_registry.set_agent_control(agent_control);
+        }
+    }
+
+    pub fn activate_mcp(&self) -> TalosResult<()> {
+        let config = self
+            .config
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let prepared = prepare_mcp(
+            &self.mcp,
+            &config.agent.kernel,
+            self.plugin_manager.mcp_servers()?.servers,
+            &self.mcp_credentials,
+        )?;
+        drop(config);
+        self.plugin_manager.recover_credentials();
+        prepared.publish();
+        Ok(())
+    }
+
+    pub async fn shutdown(&self) -> TalosResult<()> {
+        let mut result = Ok(());
+        for (_, harness) in &self.harnesses {
+            let stopped = harness
+                .shutdown(std::time::Duration::from_secs(5))
+                .await
+                .inspect_err(talos_logging::report_error);
+            result = result.and(stopped);
+        }
+        result.and(self.plugin_manager.shutdown_mcp().await)
+    }
+}
+
+#[derive(Clone)]
+struct WorkerSkillRootsResolver {
+    plugins: PluginManagerService,
+}
+
+impl SkillRootsResolver for WorkerSkillRootsResolver {
+    fn skill_roots(&self, config: &AgentKernelConfig) -> TalosResult<talos_skills::SkillRoots> {
+        self.plugins.skill_roots(&config.skills)
+    }
+}
+
+fn sandbox_runtime_paths(config: &Config) -> SandboxRuntimePaths {
+    let configured = config
+        .agent
+        .kernel
+        .tools
+        .sandbox_policy
+        .platform
+        .linux_helper_executable
+        .clone();
+    let linux_helper_executable = configured.or_else(|| {
+        let mut candidate = std::env::current_exe().ok()?;
+        candidate.set_file_name("talos-linux-sandbox-launcher");
+        candidate.is_file().then_some(candidate)
+    });
+    SandboxRuntimePaths {
+        macos_sandbox_executable: None,
+        linux_helper_executable,
+    }
+}

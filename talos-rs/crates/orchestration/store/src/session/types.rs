@@ -10,6 +10,7 @@ use talos_types::{
 pub struct SessionRecord {
     pub id: String,
     pub agent_id: String,
+    pub execution_node_id: String,
     pub tree_identity: SessionTreeIdentity,
     pub workspace_id: String,
     pub title: String,

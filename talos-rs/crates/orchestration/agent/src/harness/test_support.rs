@@ -19,6 +19,7 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub(super) enum FakeMode {
     Release,
+    ProgressThenRelease,
     Input,
     PendingInput,
     RejectInput,
@@ -170,6 +171,16 @@ impl AgentSession for FakeSession {
             FakeMode::Release => {
                 tokio::select! {
                     () = self.provider.release.notified() => completed(),
+                    () = turn.control.cancellation().requested() => interrupted(),
+                }
+            }
+            FakeMode::ProgressThenRelease => {
+                let message = turn.events.start_message(AgentMessageRole::Agent).await?;
+                tokio::select! {
+                    () = self.provider.release.notified() => {
+                        turn.events.complete_message(&message, talos_agent_api::AgentMessageStatus::Completed).await?;
+                        completed()
+                    },
                     () = turn.control.cancellation().requested() => interrupted(),
                 }
             }

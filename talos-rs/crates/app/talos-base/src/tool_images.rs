@@ -8,7 +8,7 @@ use talos_service::{Actor, FileService};
 use talos_tools::ToolImageStore;
 use talos_types::{FileInfo, FileScope, FileUploadRequest};
 
-pub(super) struct ToolImages(pub Arc<FileService>);
+pub(crate) struct ToolImages(pub Arc<FileService>);
 
 impl ToolImageStore for ToolImages {
     fn save<'a>(

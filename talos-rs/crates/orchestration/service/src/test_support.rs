@@ -139,6 +139,15 @@ impl AgentCoordinator for NoopAgentCoordinator {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         unreachable!("Agent execution is outside this test scenario")
     }

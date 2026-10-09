@@ -3,7 +3,7 @@ use talos_error::TalosResult;
 use talos_mcp::{PreparedMcpUpdate, TalosMcpRuntime};
 use talos_types::{McpServerRuntimeDescriptor, McpServerSource};
 
-pub(super) fn prepare(
+pub fn prepare(
     runtime: &TalosMcpRuntime,
     config: &AgentKernelConfig,
     plugins: Vec<McpServerRuntimeDescriptor>,

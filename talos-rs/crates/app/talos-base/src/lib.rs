@@ -2,27 +2,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use talos_agent_provider_kernel::SkillRootsResolver;
 use talos_app_server::BackgroundTaskDrain;
 use talos_auth::AuthService;
 use talos_automation::Automation;
 use talos_channel::{ChannelServer, TelegramChannel};
-use talos_config::{
-    effective_llm_protocol, AgentKernelConfig, Config, LlmProtocol, ProviderConfig,
-};
+use talos_config::Config;
 use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
-use talos_llm_anthropic::AnthropicProvider;
-use talos_llm_bailian::BailianProvider;
-use talos_llm_deepseek::{DeepSeekConfig, DeepSeekProtocol, DeepSeekProvider};
-use talos_llm_ollama::{OllamaConfig, OllamaProvider};
-use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
-use talos_llm_openrouter::{OpenRouterConfig, OpenRouterProtocol, OpenRouterProvider};
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider};
 use talos_logging::LogGuard;
-use talos_service::{PluginManagerService, TalosService, TimelineEventService};
+use talos_service::{AgentNodeService, PluginManagerService, TalosService, TimelineEventService};
 use talos_tools::{AgentControl, AgentControlFuture, ToolRegistry};
 use talos_types::{
     AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
@@ -35,8 +25,9 @@ use tracing::{info, warn};
 
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
+mod agent_node_rpc;
+pub use agent_node_rpc::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
 mod application_automation;
-mod application_mcp;
 mod application_runtime;
 mod application_storage;
 mod dream_memory_maintenance;
@@ -48,20 +39,8 @@ mod tool_images;
 #[cfg(test)]
 pub(crate) use application_runtime::build_application_runtime_with_migration_dir;
 use reloadable_llm_provider::ReloadableLlmProvider;
-
-#[derive(Clone)]
-struct AgentSkillRootsResolver {
-    plugins: PluginManagerService,
-}
-
-impl SkillRootsResolver for AgentSkillRootsResolver {
-    fn skill_roots(
-        &self,
-        kernel_config: &AgentKernelConfig,
-    ) -> TalosResult<talos_skills::SkillRoots> {
-        self.plugins.skill_roots(&kernel_config.skills)
-    }
-}
+#[cfg(test)]
+use talos_worker::create_llm_provider;
 
 #[derive(Debug, Clone, Default)]
 pub struct TalosServerOptions {
@@ -76,6 +55,7 @@ pub struct TalosServerOptions {
 pub struct TalosServerRuntime {
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
+    node_rpc_server: Option<agent_node_rpc::NodeRpcServer>,
     coordinator: Arc<CoordinatorImpl>,
     gateway_url: String,
     shutdown_token: CancellationToken,
@@ -101,7 +81,15 @@ pub struct TalosApplicationRuntime {
     pub auth_service: Arc<dyn AuthService>,
     pub gateway: Arc<dyn Gateway>,
     pub coordinator: Arc<CoordinatorImpl>,
+    pub node_service: AgentNodeService,
     pub tool_registry: Arc<ToolRegistry>,
+    pub(crate) session_store: Arc<dyn talos_store::session::SessionStore>,
+    pub(crate) session_history_reader: Arc<dyn talos_agent::SessionHistoryReader>,
+    pub(crate) attachment_reader: Arc<dyn talos_agent::AttachmentReader>,
+    pub(crate) memory_progress_store:
+        Arc<dyn talos_agent_provider_kernel::KernelMemoryProgressStore>,
+    pub(crate) agent_control: Arc<dyn talos_tools::AgentControl>,
+    pub(crate) tool_image_store: Arc<dyn talos_tools::ToolImageStore>,
     automation: Automation,
 }
 
@@ -328,7 +316,7 @@ fn log_config_source(config_source: Option<PathBuf>) {
 }
 
 pub fn exit_with_error(context: &str, error: TalosError) -> ! {
-    eprintln!("{context}: {error}");
+    eprintln!("{context}: {}", error.to_api_error().message);
     std::process::exit(1);
 }
 
@@ -402,6 +390,7 @@ impl TalosServerRuntime {
         let TalosServerRuntime {
             http_server,
             channel_server,
+            node_rpc_server,
             coordinator,
             gateway_url: _,
             shutdown_token,
@@ -425,32 +414,27 @@ impl TalosServerRuntime {
             }
         });
 
-        let result = match channel_server {
-            Some(channel_server) => {
-                let mut tasks = JoinSet::new();
-                let shutdown_token_for_http = shutdown_token.clone();
-                tasks.spawn(async move {
-                    http_server
-                        .run_with_shutdown(shutdown_token_for_http.clone())
-                        .await
-                });
-                tasks.spawn(async move { channel_server.run().await });
-
-                let result = match tasks.join_next().await {
-                    Some(Ok(result)) => result,
-                    Some(Err(err)) => Err(TalosError::internal_with_source(
-                        "server task join error; technical details were withheld.",
-                        err,
-                    )),
-                    None => Ok(()),
-                };
-                shutdown_token.cancel();
-                tasks.abort_all();
-                while tasks.join_next().await.is_some() {}
-                result
-            }
-            None => http_server.run_with_shutdown(shutdown_token.clone()).await,
+        let mut tasks = JoinSet::new();
+        let shutdown_token_for_http = shutdown_token.clone();
+        tasks.spawn(async move { http_server.run_with_shutdown(shutdown_token_for_http).await });
+        if let Some(channel_server) = channel_server {
+            tasks.spawn(async move { channel_server.run().await });
+        }
+        if let Some(node_rpc_server) = node_rpc_server {
+            let shutdown_token_for_rpc = shutdown_token.clone();
+            tasks.spawn(async move { node_rpc_server.run(shutdown_token_for_rpc).await });
+        }
+        let result = match tasks.join_next().await {
+            Some(Ok(result)) => result,
+            Some(Err(error)) => Err(TalosError::internal_with_source(
+                "server task join error; technical details were withheld.",
+                error,
+            )),
+            None => Ok(()),
         };
+        shutdown_token.cancel();
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
 
         signal_task.abort();
         quiesce_task.abort();
@@ -485,6 +469,34 @@ async fn start_server_after_startup(
     let config = apply_runtime_options(config, options.as_ref());
     config.validate_runtime()?;
     let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
+
+    let node_rpc_server = config
+        .agent_node
+        .control_plane
+        .as_ref()
+        .map(|node_config| {
+            let session_data = agent_node_rpc::NodeSessionDataRpc::new(
+                runtime.node_service.clone(),
+                runtime.session_store.clone(),
+                runtime.session_history_reader.clone(),
+                runtime.attachment_reader.clone(),
+                runtime.memory_progress_store.clone(),
+            );
+            agent_node_rpc::NodeRpcServer::new(
+                node_config,
+                runtime.node_service.clone(),
+                runtime.auth_service.clone(),
+                runtime.coordinator.clone(),
+                session_data,
+                runtime.agent_control.clone(),
+                agent_node_rpc::NodeToolImageRpc::new(
+                    runtime.node_service.clone(),
+                    runtime.tool_image_store.clone(),
+                    runtime.config.storage.files.limits.max_upload_bytes,
+                ),
+            )
+        })
+        .transpose()?;
 
     let mut http_server = HttpServer::new(
         runtime.service.clone(),
@@ -530,6 +542,7 @@ async fn start_server_after_startup(
         plugins: runtime.service.plugins.clone(),
         http_server,
         channel_server,
+        node_rpc_server,
     })
 }
 
@@ -611,218 +624,6 @@ fn apply_runtime_options(mut config: Config, options: Option<&TalosServerOptions
     }
 
     config
-}
-
-fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
-    let readiness = config.model_readiness();
-    if !readiness.ready {
-        warn!(
-            provider = readiness.provider,
-            model = readiness.model,
-            issues = ?readiness.issues,
-            "model provider is not ready; runtime will start in setup-required mode"
-        );
-        return Ok(Arc::new(ModelSetupRequiredProvider {
-            model: config.llm.model.clone(),
-            message: format!("model setup required: {}", readiness.issues.join("; ")),
-        }));
-    }
-
-    match config.llm.provider.as_str() {
-        "anthropic" => {
-            let api_key = config.llm.anthropic.api_key.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.anthropic.api_key is required".to_string(),
-                )
-            })?;
-            let base_url = config
-                .llm
-                .anthropic
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
-            let anthropic_config = talos_llm_anthropic::AnthropicConfig::new(&api_key)
-                .with_base_url(&base_url)
-                .with_default_model(&config.llm.model);
-            Ok(Arc::new(AnthropicProvider::new(anthropic_config)))
-        }
-        "openai" => {
-            let api_key = config.llm.openai.api_key.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.openai.api_key is required".to_string(),
-                )
-            })?;
-            let mut openai_config = talos_llm_openai::OpenAIConfig::new(&api_key)
-                .with_default_model(&config.llm.model)
-                .with_protocol(openai_protocol("openai", &config.llm.openai)?);
-            if let Some(base_url) = config.llm.openai.base_url.as_deref() {
-                openai_config = openai_config.with_base_url(base_url);
-            }
-            Ok(Arc::new(OpenAIProvider::new(openai_config)))
-        }
-        "bailian" => {
-            let api_key = config.llm.bailian.api_key.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.bailian.api_key is required".to_string(),
-                )
-            })?;
-            let base_url = config.llm.bailian.base_url.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.bailian.base_url is required".to_string(),
-                )
-            })?;
-            let bailian_config =
-                talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
-            Ok(Arc::new(BailianProvider::new(bailian_config)))
-        }
-        "deepseek" => {
-            let api_key = config.llm.deepseek.api_key.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.deepseek.api_key is required".to_string(),
-                )
-            })?;
-            let base_url = config
-                .llm
-                .deepseek
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.deepseek.com".to_string());
-            let deepseek_config = DeepSeekConfig::new(&api_key)
-                .with_base_url(&base_url)
-                .with_default_model(&config.llm.model)
-                .with_protocol(deepseek_protocol(&config.llm.deepseek)?);
-            Ok(Arc::new(DeepSeekProvider::new(deepseek_config)))
-        }
-        "ollama" => {
-            let base_url = config.llm.ollama.base_url.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.ollama.base_url is required".to_string(),
-                )
-            })?;
-            let mut ollama_config = OllamaConfig::new(&base_url, &config.llm.model);
-            if let Some(api_key) = config.llm.ollama.api_key.as_deref() {
-                ollama_config = ollama_config.with_api_key(api_key);
-            }
-            Ok(Arc::new(OllamaProvider::new(ollama_config)))
-        }
-        "openrouter" => {
-            let api_key = config.llm.openrouter.api_key.clone().ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "llm.openrouter.api_key is required".to_string(),
-                )
-            })?;
-            let base_url = config
-                .llm
-                .openrouter
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string());
-            let openrouter_config = OpenRouterConfig::new(&api_key)
-                .with_base_url(&base_url)
-                .with_default_model(&config.llm.model)
-                .with_protocol(openrouter_protocol(&config.llm.openrouter)?);
-            Ok(Arc::new(OpenRouterProvider::new(openrouter_config)))
-        }
-        _ => Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("unsupported provider '{}'", config.llm.provider),
-        )),
-    }
-}
-
-fn openai_protocol(
-    provider: &str,
-    provider_config: &ProviderConfig,
-) -> TalosResult<OpenAIProtocol> {
-    match effective_llm_protocol(provider, provider_config).ok_or_else(|| {
-        TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("llm.{provider}.protocol is required"),
-        )
-    })? {
-        LlmProtocol::Chat => Ok(OpenAIProtocol::Chat),
-        LlmProtocol::Responses => Ok(OpenAIProtocol::Responses),
-        protocol => Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("llm.{provider}.protocol does not support {protocol}"),
-        )),
-    }
-}
-
-fn openrouter_protocol(provider_config: &ProviderConfig) -> TalosResult<OpenRouterProtocol> {
-    match effective_llm_protocol("openrouter", provider_config).ok_or_else(|| {
-        TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            "llm.openrouter.protocol is required".to_string(),
-        )
-    })? {
-        LlmProtocol::Chat => Ok(OpenRouterProtocol::Chat),
-        LlmProtocol::Responses => Ok(OpenRouterProtocol::Responses),
-        LlmProtocol::Messages => Ok(OpenRouterProtocol::Messages),
-    }
-}
-
-fn deepseek_protocol(provider_config: &ProviderConfig) -> TalosResult<DeepSeekProtocol> {
-    match effective_llm_protocol("deepseek", provider_config).ok_or_else(|| {
-        TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            "llm.deepseek.protocol is required".to_string(),
-        )
-    })? {
-        LlmProtocol::Chat => Ok(DeepSeekProtocol::Chat),
-        LlmProtocol::Messages => Ok(DeepSeekProtocol::Messages),
-        LlmProtocol::Responses => Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            "llm.deepseek.protocol does not support responses".to_string(),
-        )),
-    }
-}
-
-struct ModelSetupRequiredProvider {
-    model: String,
-    message: String,
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for ModelSetupRequiredProvider {
-    fn name(&self) -> &str {
-        "setup-required"
-    }
-
-    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
-        Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            self.message.clone(),
-        ))
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            self.message.clone(),
-        ))
-    }
-
-    fn default_model(&self) -> String {
-        self.model.clone()
-    }
-
-    async fn stream_model_blocks(
-        &self,
-        _request: ChatRequest,
-    ) -> TalosResult<talos_llm_provider::ModelBlockStream> {
-        Err(TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            self.message.clone(),
-        ))
-    }
 }
 
 #[cfg(test)]

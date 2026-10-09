@@ -12,6 +12,11 @@ opendal = { workspace = true, features = ["reqwest-rustls-tls", "services-fs", "
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+tonic = { workspace = true }
+rustls = { workspace = true }
+agent-pb = { workspace = true }
+agent-client = { workspace = true }
+agent-protocol = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
 talos-agent-api = { workspace = true }
 talos-agent-provider-kernel = { workspace = true }
@@ -25,29 +30,24 @@ talos-error = { workspace = true }
 talos-app-server = { workspace = true }
 talos-gateway = { path = "../../gateway/core" }
 talos-gateway-http = { path = "../../gateway/http" }
-talos-llm-anthropic = { workspace = true }
-talos-llm-bailian = { workspace = true }
-talos-llm-deepseek = { workspace = true }
-talos-llm-ollama = { workspace = true }
-talos-llm-openai = { workspace = true }
-talos-llm-openrouter = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-memory = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
 talos-store = { workspace = true }
-talos-skills = { workspace = true }
 talos-storage = { workspace = true }
-talos-plugin = { workspace = true }
-talos-mcp = { workspace = true }
 talos-tools = { workspace = true }
-talos-tools-sandbox = { workspace = true }
 talos-types = { workspace = true }
 talos-upgrade = { workspace = true }
+talos-worker = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
+chrono = { workspace = true }
+rcgen = "0.14"
 reqwest = { workspace = true }
 serde_json = { workspace = true }
+talos-mcp = { workspace = true }
 tempfile = "3"
 
 [lints]

@@ -20,6 +20,9 @@ opendal = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+getrandom = { workspace = true }
+subtle = { workspace = true }
+agent-protocol = { workspace = true }
 talos-auth = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-agent = { workspace = true }

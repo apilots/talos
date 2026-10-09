@@ -341,6 +341,7 @@ fn record_for(
     SessionRecord {
         id: session_id.to_string(),
         agent_id: "default".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
@@ -462,5 +463,6 @@ async fn creating_session_uses_actor_user_id() {
         .expect("session should be created");
 
     assert_eq!(session.user_id, "member-user");
+    assert_eq!(session.execution_node_id, "embedded");
     assert_eq!(store.records.lock().unwrap()[0].user_id, "member-user");
 }

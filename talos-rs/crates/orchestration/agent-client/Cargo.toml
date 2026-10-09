@@ -1,0 +1,30 @@
+[package]
+name = "agent-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Concrete Agent node and remote Harness clients"
+
+[dependencies]
+talos-logging = { workspace = true }
+talos-memory = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+agent-pb = { workspace = true }
+agent-protocol = { workspace = true }
+talos-agent = { workspace = true }
+talos-agent-api = { workspace = true }
+talos-error = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-tools = { workspace = true }
+talos-types = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+rustls = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -7,19 +7,32 @@ license.workspace = true
 description = "Talos Agent Harness and Provider SPI"
 
 [dependencies]
+talos-memory = { workspace = true }
 bytes = { workspace = true }
+prost = { workspace = true }
 chrono = { workspace = true }
 serde_json = { workspace = true }
 talos-agent-api = { workspace = true }
+agent-protocol = { workspace = true }
+agent-pb = { workspace = true }
 talos-error = { workspace = true }
 talos-logging = { workspace = true }
 talos-config = { workspace = true }
 thiserror = { workspace = true }
 talos-types = { workspace = true }
 talos-run-control = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 dashmap = "5.4"
+
+[dev-dependencies]
+agent-client = { workspace = true }
+rcgen = "0.14"
 
 [lints]
 workspace = true

@@ -90,7 +90,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -158,7 +158,7 @@ impl DatabaseSessionStore {
     ) -> TalosResult<Option<SessionRecord>> {
         let rows = transaction
             .query(
-                "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?",
+                "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?",
                 &[session_id],
             )
             .await?;
@@ -203,6 +203,7 @@ impl SessionStore for DatabaseSessionStore {
                 "source_provider".to_string(),
                 "channel_id".to_string(),
                 "agent_id".to_string(),
+                "execution_node_id".to_string(),
                 "parent_session_id".to_string(),
                 "parent_turn_id".to_string(),
                 "tree_root_session_id".to_string(),
@@ -232,6 +233,7 @@ impl SessionStore for DatabaseSessionStore {
                     .map(Value::String)
                     .unwrap_or(Value::Null),
                 Value::String(record.agent_id.clone()),
+                Value::String(record.execution_node_id.clone()),
                 parent_session_id.map(Value::String).unwrap_or(Value::Null),
                 parent_turn_id.map(Value::String).unwrap_or(Value::Null),
                 tree_root_session_id
@@ -284,7 +286,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
+                "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
                 &[tree_root_session_id, agent_path.as_str()],
             )
             .await?;
@@ -292,7 +294,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);

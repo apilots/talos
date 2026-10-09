@@ -228,7 +228,7 @@ impl TalosService {
     ) -> Self {
         self.turns = self
             .turns
-            .with_user_workspace_memory_reflection(memory.clone(), inner_model);
+            .with_user_workspace_memory_reflection(inner_model);
         self.workspace_docs = self.workspace_docs.with_user_workspace_memory(memory);
         self
     }

@@ -1,5 +1,6 @@
 mod access;
 mod account;
+mod agent_node;
 mod config;
 pub mod file;
 mod fs;
@@ -26,6 +27,10 @@ mod test_support;
 
 pub use access::Actor;
 pub use account::AccountService;
+pub use agent_node::{
+    AgentNodeService, CreateNodeRequest, GetNodeRequest, ListNodesRequest, NodePrincipal,
+    RotateCredentialRequest, UpdateNodeRequest,
+};
 pub use config::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService};
 pub use file::{FileByteStream, FileContent, FileService};
 pub use history::SessionHistoryService;

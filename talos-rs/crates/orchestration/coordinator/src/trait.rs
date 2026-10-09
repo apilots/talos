@@ -23,6 +23,26 @@ pub trait AgentCoordinator: Send + Sync {
     /// Validate that one Agent binding is registered.
     async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()>;
 
+    /// Bind a new Session, or validate its parent's pinned execution node.
+    async fn select_execution_node(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String>;
+
+    /// Resolve the Session's pinned execution port for Workspace maintenance.
+    /// The caller must use trusted Session context; node ownership and availability are checked here.
+    async fn session_harness(
+        &self,
+        context: &AgentSessionContext,
+    ) -> TalosResult<std::sync::Arc<dyn talos_agent::AgentHarness>> {
+        let _ = context;
+        Err(talos_error::TalosError::internal(
+            "Coordinator does not provide Session maintenance",
+        ))
+    }
+
     /// Forward one fresh or continuation Turn admission to its bound Harness.
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution>;
 
@@ -41,6 +61,6 @@ pub trait AgentCoordinator: Send + Sync {
     /// Release Provider-owned live Session resources.
     async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()>;
 
-    /// Stop new admission and release all registered Harness resources.
+    /// Release the Harness resources owned by this process. Independent nodes keep running.
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()>;
 }

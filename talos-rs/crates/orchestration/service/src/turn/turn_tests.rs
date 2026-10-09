@@ -181,6 +181,15 @@ impl AgentCoordinator for RecordingAgentCoordinator {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         unreachable!("execution is delegated by the scenario Coordinator")
     }
@@ -225,6 +234,17 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
 
     async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
         self.delegate.ensure_agent(agent_id).await
+    }
+
+    async fn select_execution_node(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        self.delegate
+            .select_execution_node(agent_id, user_id, preferred_node_id)
+            .await
     }
 
     async fn start(&self, request: AgentRunParams) -> TalosResult<AgentRunExecution> {
@@ -860,6 +880,7 @@ fn test_session() -> SessionRecord {
     SessionRecord {
         id: "s1".to_string(),
         agent_id: "default".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: SessionTreeIdentity::Primary,
         workspace_id: "default".to_string(),
         title: "Untitled Session".to_string(),

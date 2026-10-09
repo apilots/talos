@@ -397,6 +397,15 @@ impl AgentCoordinator for TestAgentCoordinator {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         mock_agent_execution(params).await
     }

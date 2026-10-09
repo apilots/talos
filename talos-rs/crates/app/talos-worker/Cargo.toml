@@ -1,0 +1,46 @@
+[package]
+name = "talos-worker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos Agent execution runtime for embedded and standalone hosts"
+
+[dependencies]
+talos-memory = { workspace = true }
+agent-client = { workspace = true }
+agent-pb = { workspace = true }
+agent-protocol = { workspace = true }
+async-trait = { workspace = true }
+rustls = { workspace = true }
+talos-agent-api = { workspace = true }
+talos-agent = { workspace = true }
+talos-agent-provider-kernel = { workspace = true }
+talos-config = { workspace = true }
+talos-error = { workspace = true }
+talos-llm-anthropic = { workspace = true }
+talos-llm-bailian = { workspace = true }
+talos-llm-deepseek = { workspace = true }
+talos-llm-ollama = { workspace = true }
+talos-llm-openai = { workspace = true }
+talos-llm-openrouter = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-logging = { workspace = true }
+talos-mcp = { workspace = true }
+talos-plugin = { workspace = true }
+talos-service = { workspace = true }
+talos-skills = { workspace = true }
+talos-store = { workspace = true }
+talos-tools = { workspace = true }
+talos-tools-sandbox = { workspace = true }
+talos-types = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal"] }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

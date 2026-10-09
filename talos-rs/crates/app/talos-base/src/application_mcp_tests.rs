@@ -63,7 +63,7 @@ fn unreadable_credentials_publish_a_failed_server_status() {
     let runtime = talos_mcp::TalosMcpRuntime::new();
     let credentials = talos_service::McpCredentialStore::new(credentials_root);
 
-    crate::application_mcp::prepare(&runtime, &config, vec![], &credentials)
+    talos_worker::prepare_mcp(&runtime, &config, vec![], &credentials)
         .unwrap()
         .publish();
 

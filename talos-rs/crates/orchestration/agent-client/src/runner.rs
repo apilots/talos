@@ -1,0 +1,238 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use agent_protocol::{
+    Deployment, HeartbeatParams, NodeAuth, NodeHealth, NodeRequest, RegisterParams, Registration,
+};
+use talos_error::{ErrorCode, TalosError, TalosResult};
+use tokio::time::{interval_at, sleep, sleep_until, Instant};
+use tokio_util::sync::CancellationToken;
+
+use crate::AgentNodeClient;
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+const RENEW_INTERVAL: Duration = Duration::from_secs(30);
+const RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Independent node registration lifecycle. It never persists a Turn or
+/// fabricates Harness capabilities. A caller must stop execution admission
+/// when this runner ends with an expired or rejected lease.
+pub struct AgentNodeRunner {
+    client: AgentNodeClient,
+    node_id: String,
+    credential: String,
+    deployments: Vec<Deployment>,
+    lease_observer: Option<AgentNodeLeaseObserver>,
+}
+
+pub type AgentNodeLeaseObserver =
+    Arc<dyn Fn(Option<AgentNodeLeaseUpdate>) -> TalosResult<()> + Send + Sync>;
+
+#[derive(Clone)]
+pub struct AgentNodeLeaseUpdate {
+    pub auth: NodeAuth,
+    pub owner_user_id: String,
+    pub validity: agent_protocol::LeaseValidity,
+    pub deadline: Instant,
+}
+
+impl AgentNodeRunner {
+    pub fn new(
+        client: AgentNodeClient,
+        node_id: String,
+        credential: String,
+        deployments: Vec<Deployment>,
+    ) -> Self {
+        Self {
+            client,
+            node_id,
+            credential,
+            deployments,
+            lease_observer: None,
+        }
+    }
+
+    pub fn with_lease_observer(mut self, observer: AgentNodeLeaseObserver) -> Self {
+        self.lease_observer = Some(observer);
+        self
+    }
+
+    pub async fn run(self, shutdown: CancellationToken) -> TalosResult<()> {
+        let result = self.run_registered(&shutdown).await;
+        // Every exit, including an explicit authentication rejection, revokes
+        // admission and live streams before the host starts graceful shutdown.
+        let cleanup = self.publish_lease(None);
+        cleanup?;
+        if let Some(auth) = result? {
+            let unregister = tokio::time::timeout(
+                Duration::from_secs(10),
+                self.client.unregister(NodeRequest { auth, params: () }),
+            )
+            .await
+            .unwrap_or_else(|error| {
+                Err(TalosError::from_source(
+                    ErrorCode::Timeout,
+                    "Agent node unregister timed out",
+                    error,
+                ))
+            });
+            if let Err(error) = unregister {
+                tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node unregister was not confirmed");
+            }
+        }
+        Ok(())
+    }
+
+    async fn run_registered(&self, shutdown: &CancellationToken) -> TalosResult<Option<NodeAuth>> {
+        'registered: loop {
+            let Some(mut lease) = self.register_until_success(shutdown).await? else {
+                return Ok(None);
+            };
+            self.publish_lease(Some(lease.clone()))?;
+            tracing::info!(node_id = %self.node_id, "Agent node registered");
+            let mut heartbeat =
+                interval_at(Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+            let mut renewal = interval_at(Instant::now() + RENEW_INTERVAL, RENEW_INTERVAL);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => {
+                        return Ok((Instant::now() < lease.deadline).then_some(lease.auth));
+                    }
+                    _ = sleep_until(lease.deadline) => {
+                        self.publish_lease(None)?;
+                        tracing::warn!(node_id = %self.node_id, "Agent node lease expired locally; registration will be renewed");
+                        continue 'registered;
+                    }
+                    _ = heartbeat.tick() => {
+                        let result = tokio::select! {
+                            biased;
+                            _ = shutdown.cancelled() => return Ok((Instant::now() < lease.deadline).then_some(lease.auth.clone())),
+                            result = tokio::time::timeout_at(lease.deadline, self.client.heartbeat(NodeRequest {
+                                auth: lease.auth.clone(),
+                                params: HeartbeatParams { health: NodeHealth::Healthy },
+                            })) => result.unwrap_or_else(|_| Err(TalosError::new(ErrorCode::ResourceExpired, "Agent node lease expired locally"))),
+                        };
+                        match result {
+                            Ok(result) if result.registration_required => {
+                                self.publish_lease(None)?;
+                                continue 'registered
+                            },
+                            Ok(_) => {}
+                            Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
+                                self.publish_lease(None)?;
+                                continue 'registered
+                            },
+                            Err(error) if is_transient(&error) => {
+                                tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node heartbeat could not reach control plane");
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    _ = renewal.tick() => {
+                        let sent_at = Instant::now();
+                        let result = tokio::select! {
+                            biased;
+                            _ = shutdown.cancelled() => return Ok((Instant::now() < lease.deadline).then_some(lease.auth.clone())),
+                            result = tokio::time::timeout_at(lease.deadline, self.client.renew_lease(NodeRequest {
+                                auth: lease.auth.clone(),
+                                params: (),
+                            })) => result.unwrap_or_else(|_| Err(TalosError::new(ErrorCode::ResourceExpired, "Agent node lease expired locally"))),
+                        };
+                        match result {
+                            Ok(validity) => {
+                                lease.deadline = local_deadline(sent_at, validity.expires_at, validity.server_at)?;
+                                lease.validity = validity;
+                                self.publish_lease(Some(lease.clone()))?;
+                            },
+                            Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
+                                self.publish_lease(None)?;
+                                continue 'registered
+                            },
+                            Err(error) if is_transient(&error) => {
+                                tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node lease renewal could not reach control plane");
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn publish_lease(&self, update: Option<AgentNodeLeaseUpdate>) -> TalosResult<()> {
+        match &self.lease_observer {
+            Some(observer) => observer(update),
+            None => Ok(()),
+        }
+    }
+
+    async fn register_until_success(
+        &self,
+        shutdown: &CancellationToken,
+    ) -> TalosResult<Option<AgentNodeLeaseUpdate>> {
+        loop {
+            let sent_at = Instant::now();
+            let registration = tokio::select! {
+                _ = shutdown.cancelled() => return Ok(None),
+                result = self.client.register(NodeRequest {
+                    auth: NodeAuth { node_id: self.node_id.clone(), token: self.credential.clone() },
+                    params: RegisterParams { deployments: self.deployments.clone() },
+                }) => result,
+            };
+            match registration {
+                Ok(registration) => {
+                    return Ok(Some(active_lease(&self.node_id, registration, sent_at)?))
+                }
+                Err(error) if is_transient(&error) => {
+                    tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node registration could not reach control plane");
+                    tokio::select! {
+                        _ = shutdown.cancelled() => return Ok(None),
+                        _ = sleep(RETRY_INTERVAL) => {}
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+fn active_lease(
+    node_id: &str,
+    registration: Registration,
+    sent_at: Instant,
+) -> TalosResult<AgentNodeLeaseUpdate> {
+    let expires_at = local_deadline(
+        sent_at,
+        registration.validity.expires_at,
+        registration.validity.server_at,
+    )?;
+    let auth = NodeAuth {
+        node_id: node_id.to_string(),
+        token: registration.lease_token,
+    };
+    Ok(AgentNodeLeaseUpdate {
+        auth,
+        owner_user_id: registration.owner_user_id,
+        validity: registration.validity,
+        deadline: expires_at,
+    })
+}
+
+fn local_deadline(sent_at: Instant, expires_at: i64, server_at: i64) -> TalosResult<Instant> {
+    let lifetime = expires_at
+        .checked_sub(server_at)
+        .filter(|seconds| *seconds > 0)
+        .ok_or_else(|| TalosError::internal("Agent node lease validity is malformed"))?;
+    Ok(sent_at + Duration::from_secs(lifetime as u64))
+}
+
+fn is_transient(error: &TalosError) -> bool {
+    error.is_code(ErrorCode::ServiceUnavailable)
+        || error.is_code(ErrorCode::Timeout)
+        || error.is_code(ErrorCode::Cancelled)
+}
+
+#[cfg(test)]
+#[path = "runner_tests.rs"]
+mod tests;

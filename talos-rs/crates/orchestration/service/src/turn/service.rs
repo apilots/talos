@@ -20,7 +20,7 @@ use tokio::sync::{oneshot, RwLock};
 use {tracing::error, uuid::Uuid};
 
 use crate::message_queue::MessageQueueReservation;
-use crate::{InnerModelClient, SessionMessageQueueService, UserWorkspaceMemoryService};
+use crate::{InnerModelClient, SessionMessageQueueService};
 
 use super::{
     auto_dispatch_session_from_event, retry_idempotency_key,
@@ -75,16 +75,16 @@ impl TurnService {
 
     pub(crate) fn with_user_workspace_memory_reflection(
         mut self,
-        memory: Arc<UserWorkspaceMemoryService>,
         inner_model: Arc<InnerModelClient>,
     ) -> Self {
         let sessions = self.execution.sessions.clone();
+        let coordinator = self.execution.coordinator.clone();
         self.execution = self.execution.with_inner_model(
             inner_model.clone(),
             Arc::new(
                 crate::user_workspace_memory::UserWorkspaceMemoryReflection::new(
                     inner_model,
-                    memory,
+                    coordinator,
                     sessions,
                 ),
             ),

@@ -281,6 +281,7 @@ fn create_session_params(
         source,
         user_id: "user-1".to_string(),
         target_agent: target_agent.to_string(),
+        execution_node_id: "embedded".to_string(),
         model_selection,
         conf: None,
         workspace_id: "default".to_string(),
@@ -907,4 +908,29 @@ async fn ordinary_delete_rejects_a_subagent_session() {
         .unwrap()
         .iter()
         .all(|record| record.id != child_id));
+}
+
+#[tokio::test]
+async fn existing_control_plane_workspace_is_not_an_implicit_working_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config_with_model("anthropic", "global-model").with_workspace_definition(
+        talos_config::WorkspaceDefinition::new("default", directory.path()),
+    );
+    let workspace = config.resolve_workspace("default", "user-1").unwrap();
+    std::fs::create_dir_all(&workspace.root).unwrap();
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config,
+    );
+    let session = service
+        .create_session(create_session_params(source(), "agent-1", None))
+        .await
+        .unwrap();
+    let context = service
+        .build_agent_context(&session, AgentTurnRef::new(&session.id, "turn-1"))
+        .await
+        .unwrap();
+    assert_eq!(context.session.workspace, workspace);
+    assert_eq!(context.working_directory, None);
 }

@@ -1,7 +1,4 @@
-use talos_error::{TalosError, TalosResult};
-
-/// Agent-domain result shared by Provider, Harness, and Coordinator adapters.
-pub type AgentResult<T> = TalosResult<T>;
+use talos_error::TalosError;
 
 /// Operation-owned delivery policy for a terminal Agent failure.
 ///

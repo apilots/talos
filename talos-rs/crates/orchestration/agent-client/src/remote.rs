@@ -1,0 +1,646 @@
+//! Remote transport hidden behind the same AgentHarness port as the embedded host.
+
+use std::collections::HashSet;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use agent_pb as pb;
+use agent_protocol::{
+    error_pb, harness_pb, node_pb, AgentAdmission, AgentAdmissionPermit, AgentContext, AgentFuture,
+    AgentHarness, AgentInputParams, AgentInterruptParams, AgentProgressEventReceiver, AgentResult,
+    AgentRunExecution, AgentRunParams, AgentRunSettlement, AgentRunSettlementReceiver,
+    AgentSessionContext, NodeAuth,
+};
+use talos_agent_api::{AgentInterruptOutcome, AgentTurnRef};
+use talos_error::{ErrorCode, TalosError, TalosResult};
+use tokio::sync::{mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
+use tonic::{Response, Status, Streaming};
+
+#[path = "remote_dream.rs"]
+mod dream;
+
+const RPC_WAIT: Duration = Duration::from_secs(30);
+
+type TurnKey = (String, String);
+
+/// A single logical Agent deployment on a registered remote node.
+#[derive(Clone)]
+pub struct RemoteAgentClient {
+    channel: Channel,
+    agent_id: String,
+    auth: NodeAuth,
+    /// Evidence that this Client instance accepted a Turn. A new instance can
+    /// never infer cleanup from the remote Harness saying ResourceNotFound.
+    accepted: Arc<Mutex<HashSet<TurnKey>>>,
+}
+
+impl RemoteAgentClient {
+    pub async fn connect(
+        endpoint: &str,
+        trusted_ca_pem: Vec<u8>,
+        agent_id: String,
+        auth: NodeAuth,
+    ) -> TalosResult<Self> {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        if !endpoint.starts_with("https://")
+            || agent_id.is_empty()
+            || auth.node_id.is_empty()
+            || auth.token.is_empty()
+        {
+            return Err(invalid_response());
+        }
+        let endpoint = Endpoint::from_shared(endpoint.to_owned()).map_err(|error| {
+            TalosError::from_source(
+                ErrorCode::InvalidRequest,
+                "Agent Harness endpoint is invalid",
+                error,
+            )
+        })?;
+        let endpoint = endpoint
+            .connect_timeout(Duration::from_secs(10))
+            .tls_config(
+                ClientTlsConfig::new().ca_certificate(Certificate::from_pem(trusted_ca_pem)),
+            )
+            .map_err(|error| {
+                TalosError::from_source(
+                    ErrorCode::InvalidRequest,
+                    "Agent Harness TLS trust is invalid",
+                    error,
+                )
+            })?;
+        Ok(Self {
+            channel: endpoint.connect_lazy(),
+            agent_id,
+            auth,
+            accepted: Arc::new(Mutex::new(HashSet::new())),
+        })
+    }
+
+    fn check_agent(&self, agent_id: &str) -> AgentResult<()> {
+        if agent_id != self.agent_id {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Agent Harness deployment does not match request",
+            ));
+        }
+        Ok(())
+    }
+
+    async fn open_run<T, F>(
+        &self,
+        sender: mpsc::Sender<T>,
+        commit: T,
+        call: F,
+        identity: AgentTurnRef,
+    ) -> AgentResult<AgentRunExecution>
+    where
+        T: Send + 'static,
+        F: Future<Output = Result<Response<Streaming<pb::RunResponse>>, Status>> + Send,
+    {
+        let (inbound, first) = wait_for_rpc(async {
+            let mut inbound = call.await.map_err(transport_error)?.into_inner();
+            let first = inbound
+                .message()
+                .await
+                .map_err(transport_error)?
+                .ok_or_else(invalid_response)?;
+            Ok((inbound, first))
+        })
+        .await?;
+        let admission = match first.result.ok_or_else(invalid_response)? {
+            pb::run_response::Result::Admission(value) => {
+                harness_pb::decode_admission_events(value)?
+            }
+            pb::run_response::Result::Failure(value) => {
+                return Err(error_pb::decode_failure(value)?)
+            }
+            _ => return Err(invalid_response()),
+        };
+        let (progress_tx, progress_rx) = mpsc::channel(32);
+        let (settlement_tx, settlement_rx) = oneshot::channel();
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        let accepted = self.accepted.clone();
+        let stop = tokio_util::sync::CancellationToken::new();
+        let task_stop = stop.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = task_stop.cancelled() => {},
+                _ = read_run(inbound, accepted_tx, progress_tx, settlement_tx, accepted, identity) => {},
+            }
+        });
+        // Dropping or timing out an unconsumed permit closes the network stream.
+        let guard = stop.drop_guard();
+        let permit = AgentAdmissionPermit::new(async move {
+            let result = wait_for_rpc(async {
+                sender.send(commit).await.map_err(|_| transport_closed())?;
+                drop(sender);
+                accepted_rx.await.map_err(|_| transport_closed())?
+            })
+            .await;
+            if result.is_ok() {
+                guard.disarm();
+            }
+            result
+        });
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: admission,
+                permit,
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
+    }
+
+    async fn run_start(&self, params: AgentRunParams) -> AgentResult<AgentRunExecution> {
+        self.check_agent(&params.context.session.agent_id)?;
+        let identity = params.context.identity();
+        let params = harness_pb::encode_run_params(params)?;
+        let (tx, rx) = mpsc::channel(2);
+        tx.send(pb::StartRequest {
+            auth: Some(node_pb::encode_auth(self.auth.clone())),
+            params: Some(pb::StartParams {
+                body: Some(pb::start_params::Body::Run(params)),
+            }),
+        })
+        .await
+        .map_err(|_| transport_closed())?;
+        let mut rpc =
+            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone());
+        let call = rpc.start(ReceiverStream::new(rx));
+        self.open_run(
+            tx,
+            pb::StartRequest {
+                auth: Some(node_pb::encode_auth(self.auth.clone())),
+                params: Some(pb::StartParams {
+                    body: Some(pb::start_params::Body::Commit(pb::Empty {})),
+                }),
+            },
+            call,
+            identity,
+        )
+        .await
+    }
+
+    async fn run_compact(&self, context: AgentContext) -> AgentResult<AgentRunExecution> {
+        self.check_agent(&context.session.agent_id)?;
+        let identity = context.identity();
+        let context = harness_pb::encode_context(context)?;
+        let (tx, rx) = mpsc::channel(2);
+        tx.send(pb::CompactSessionRequest {
+            auth: Some(node_pb::encode_auth(self.auth.clone())),
+            params: Some(pb::CompactSessionParams {
+                body: Some(pb::compact_session_params::Body::Context(context)),
+            }),
+        })
+        .await
+        .map_err(|_| transport_closed())?;
+        let mut rpc =
+            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone());
+        let call = rpc.compact_session(ReceiverStream::new(rx));
+        self.open_run(
+            tx,
+            pb::CompactSessionRequest {
+                auth: Some(node_pb::encode_auth(self.auth.clone())),
+                params: Some(pb::CompactSessionParams {
+                    body: Some(pb::compact_session_params::Body::Commit(pb::Empty {})),
+                }),
+            },
+            call,
+            identity,
+        )
+        .await
+    }
+
+    async fn run_input(&self, params: AgentInputParams) -> AgentResult<AgentAdmission> {
+        self.check_agent(&params.agent_id)?;
+        let params = harness_pb::encode_input_params(params)?;
+        let (tx, rx) = mpsc::channel(2);
+        tx.send(pb::SubmitInputRequest {
+            auth: Some(node_pb::encode_auth(self.auth.clone())),
+            params: Some(pb::SubmitInputParams {
+                body: Some(pb::submit_input_params::Body::Input(params)),
+            }),
+        })
+        .await
+        .map_err(|_| transport_closed())?;
+        let (mut inbound, first) = wait_for_rpc(async {
+            let mut inbound =
+                pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
+                    .submit_input(ReceiverStream::new(rx))
+                    .await
+                    .map_err(transport_error)?
+                    .into_inner();
+            let first = inbound
+                .message()
+                .await
+                .map_err(transport_error)?
+                .ok_or_else(invalid_response)?;
+            Ok((inbound, first))
+        })
+        .await?;
+        let events = match first.result.ok_or_else(invalid_response)? {
+            pb::input_response::Result::Admission(value) => {
+                harness_pb::decode_admission_events(value)?
+            }
+            pb::input_response::Result::Failure(value) => {
+                return Err(error_pb::decode_failure(value)?)
+            }
+            _ => return Err(invalid_response()),
+        };
+        let auth = self.auth.clone();
+        let permit = AgentAdmissionPermit::new(wait_for_rpc(async move {
+            tx.send(pb::SubmitInputRequest {
+                auth: Some(node_pb::encode_auth(auth)),
+                params: Some(pb::SubmitInputParams {
+                    body: Some(pb::submit_input_params::Body::Commit(pb::Empty {})),
+                }),
+            })
+            .await
+            .map_err(|_| transport_closed())?;
+            drop(tx);
+            let frame = inbound
+                .message()
+                .await
+                .map_err(transport_error)?
+                .ok_or_else(transport_closed)?;
+            match frame.result.ok_or_else(invalid_response)? {
+                pb::input_response::Result::Accepted(_) => {
+                    if inbound.message().await.map_err(transport_error)?.is_some() {
+                        return Err(invalid_response());
+                    }
+                    Ok(())
+                }
+                pb::input_response::Result::Failure(value) => Err(error_pb::decode_failure(value)?),
+                _ => Err(invalid_response()),
+            }
+        }));
+        Ok(AgentAdmission { events, permit })
+    }
+
+    async fn run_interrupt(
+        &self,
+        params: AgentInterruptParams,
+    ) -> AgentResult<AgentInterruptOutcome> {
+        self.check_agent(&params.agent_id)?;
+        let key = (
+            params.identity.session_id.clone(),
+            params.identity.turn_id.clone(),
+        );
+        if !self
+            .accepted
+            .lock()
+            .expect("Agent client lock poisoned")
+            .contains(&key)
+        {
+            return Err(cleanup_unconfirmed());
+        }
+        let response = rpc_response(
+            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
+                .interrupt(rpc_request(
+                    pb::InterruptRequest {
+                        auth: Some(node_pb::encode_auth(self.auth.clone())),
+                        params: Some(harness_pb::encode_interrupt_params(params)),
+                    },
+                    RPC_WAIT,
+                )),
+            RPC_WAIT,
+        )
+        .await?
+        .into_inner();
+        match response.result.ok_or_else(invalid_response)? {
+            pb::interrupt_response::Result::Interrupted(value) => {
+                let outcome = harness_pb::decode_interrupt_outcome(value)?;
+                if !matches!(outcome, AgentInterruptOutcome::CleanupUnconfirmed { .. }) {
+                    self.accepted
+                        .lock()
+                        .expect("Agent client lock poisoned")
+                        .remove(&key);
+                }
+                Ok(outcome)
+            }
+            pb::interrupt_response::Result::Failure(value) => {
+                let error = error_pb::decode_failure(value)?;
+                if error.is_code(ErrorCode::ResourceNotFound) {
+                    self.accepted
+                        .lock()
+                        .expect("Agent client lock poisoned")
+                        .remove(&key);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn run_session(&self, params: AgentSessionContext, close: bool) -> AgentResult<()> {
+        self.check_agent(&params.agent_id)?;
+        let request = pb::SessionRequest {
+            auth: Some(node_pb::encode_auth(self.auth.clone())),
+            params: Some(harness_pb::encode_session_context(params)),
+        };
+        let mut client =
+            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone());
+        let response = wait_for_rpc(async {
+            if close {
+                client.close_session(rpc_request(request, RPC_WAIT)).await
+            } else {
+                client.clear_session(rpc_request(request, RPC_WAIT)).await
+            }
+            .map_err(transport_error)
+        })
+        .await?
+        .into_inner();
+        decode_empty(response)
+    }
+
+    async fn run_shutdown(&self, timeout: Duration) -> AgentResult<()> {
+        let timeout_ms = u64::try_from(timeout.as_millis()).map_err(|_| {
+            TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Agent shutdown timeout is too large",
+            )
+        })?;
+        let response = rpc_response(
+            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
+                .shutdown(rpc_request(
+                    pb::ShutdownRequest {
+                        auth: Some(node_pb::encode_auth(self.auth.clone())),
+                        params: Some(pb::ShutdownParams {
+                            agent_id: self.agent_id.clone(),
+                            timeout_ms,
+                        }),
+                    },
+                    timeout.saturating_add(RPC_WAIT),
+                )),
+            timeout.saturating_add(RPC_WAIT),
+        )
+        .await?
+        .into_inner();
+        decode_empty(response)
+    }
+}
+
+impl AgentHarness for RemoteAgentClient {
+    fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
+        Box::pin(self.run_start(params))
+    }
+    fn submit_input(
+        &self,
+        params: AgentInputParams,
+    ) -> AgentFuture<'_, AgentResult<AgentAdmission>> {
+        Box::pin(self.run_input(params))
+    }
+    fn interrupt(
+        &self,
+        params: AgentInterruptParams,
+    ) -> AgentFuture<'_, AgentResult<AgentInterruptOutcome>> {
+        Box::pin(self.run_interrupt(params))
+    }
+    fn compact_session(
+        &self,
+        context: AgentContext,
+    ) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
+        Box::pin(self.run_compact(context))
+    }
+    fn clear_session(&self, params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(self.run_session(params, false))
+    }
+    fn close_session(&self, params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(self.run_session(params, true))
+    }
+    fn read_workspace_memory(
+        &self,
+        context: AgentSessionContext,
+    ) -> AgentFuture<'_, AgentResult<talos_memory::UserWorkspaceMemorySnapshot>> {
+        Box::pin(async move {
+            self.check_agent(&context.agent_id)?;
+            let mut request = tonic::Request::new(pb::SessionRequest {
+                auth: Some(node_pb::encode_auth(self.auth.clone())),
+                params: Some(harness_pb::encode_session_context(context)),
+            });
+            request.set_timeout(Duration::from_secs(10));
+            let response = rpc_response(
+                pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
+                    .read_workspace_memory(request),
+                Duration::from_secs(10),
+            )
+            .await?
+            .into_inner();
+            match response.result.ok_or_else(invalid_response)? {
+                pb::workspace_memory_response::Result::Snapshot(value) => {
+                    agent_protocol::memory_pb::decode_snapshot(value)
+                }
+                pb::workspace_memory_response::Result::Failure(value) => {
+                    Err(error_pb::decode_failure(value)?)
+                }
+            }
+        })
+    }
+
+    fn update_workspace_memory(
+        &self,
+        context: AgentSessionContext,
+        update: talos_memory::UserWorkspaceMemoryUpdate,
+    ) -> AgentFuture<'_, AgentResult<talos_memory::UserWorkspaceMemorySnapshot>> {
+        Box::pin(async move {
+            self.check_agent(&context.agent_id)?;
+            let mut request = tonic::Request::new(pb::UpdateWorkspaceMemoryRequest {
+                auth: Some(node_pb::encode_auth(self.auth.clone())),
+                params: Some(pb::UpdateWorkspaceMemoryParams {
+                    context: Some(harness_pb::encode_session_context(context)),
+                    update: Some(agent_protocol::memory_pb::encode_update(update)),
+                }),
+            });
+            request.set_timeout(Duration::from_secs(10));
+            let response = rpc_response(
+                pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
+                    .update_workspace_memory(request),
+                Duration::from_secs(10),
+            )
+            .await?
+            .into_inner();
+            match response.result.ok_or_else(invalid_response)? {
+                pb::workspace_memory_response::Result::Snapshot(value) => {
+                    agent_protocol::memory_pb::decode_snapshot(value)
+                }
+                pb::workspace_memory_response::Result::Failure(value) => {
+                    Err(error_pb::decode_failure(value)?)
+                }
+            }
+        })
+    }
+
+    fn form_dream_memory(
+        &self,
+        context: AgentSessionContext,
+        model_call: agent_protocol::DreamMemoryModelCall,
+    ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
+        self.run_dream_memory(context, model_call)
+    }
+
+    fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(self.run_shutdown(timeout))
+    }
+}
+
+async fn read_run(
+    mut inbound: Streaming<pb::RunResponse>,
+    accepted_tx: oneshot::Sender<AgentResult<()>>,
+    progress_tx: mpsc::Sender<talos_agent_api::AgentEvent>,
+    settlement_tx: oneshot::Sender<AgentResult<AgentRunSettlement>>,
+    accepted: Arc<Mutex<HashSet<TurnKey>>>,
+    identity: AgentTurnRef,
+) {
+    let key = (identity.session_id, identity.turn_id);
+    let mut accepted_tx = Some(accepted_tx);
+    let mut settlement_tx = Some(settlement_tx);
+    loop {
+        let frame = match inbound.message().await {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                let error = transport_closed();
+                if let Some(tx) = accepted_tx.take() {
+                    let _ = tx.send(Err(error.clone()));
+                }
+                if let Some(tx) = settlement_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                return;
+            }
+            Err(status) => {
+                let error = transport_error(status);
+                if let Some(tx) = accepted_tx.take() {
+                    let _ = tx.send(Err(error.clone()));
+                }
+                if let Some(tx) = settlement_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                return;
+            }
+        };
+        let result = match frame.result {
+            Some(value) => value,
+            None => {
+                let error = invalid_response();
+                if let Some(tx) = accepted_tx.take() {
+                    let _ = tx.send(Err(error.clone()));
+                }
+                if let Some(tx) = settlement_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                return;
+            }
+        };
+        match result {
+            pb::run_response::Result::Accepted(_) if accepted_tx.is_some() => {
+                accepted
+                    .lock()
+                    .expect("Agent client lock poisoned")
+                    .insert(key.clone());
+                let _ = accepted_tx.take().expect("checked").send(Ok(()));
+            }
+            pb::run_response::Result::Progress(value) if accepted_tx.is_none() => {
+                match harness_pb::decode_event(value) {
+                    Ok(event) => {
+                        if progress_tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(tx) = settlement_tx.take() {
+                            let _ = tx.send(Err(error));
+                        }
+                        return;
+                    }
+                }
+            }
+            pb::run_response::Result::Settlement(value) if accepted_tx.is_none() => {
+                let outcome = harness_pb::decode_settlement(value);
+                if outcome.is_ok() {
+                    accepted
+                        .lock()
+                        .expect("Agent client lock poisoned")
+                        .remove(&key);
+                }
+                if let Some(tx) = settlement_tx.take() {
+                    let _ = tx.send(outcome);
+                }
+                return;
+            }
+            pb::run_response::Result::Failure(value) => {
+                let error = error_pb::decode_failure(value).unwrap_or_else(|error| error);
+                if let Some(tx) = accepted_tx.take() {
+                    let _ = tx.send(Err(error.clone()));
+                }
+                if let Some(tx) = settlement_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                return;
+            }
+            _ => {
+                let error = invalid_response();
+                if let Some(tx) = accepted_tx.take() {
+                    let _ = tx.send(Err(error.clone()));
+                }
+                if let Some(tx) = settlement_tx.take() {
+                    let _ = tx.send(Err(error));
+                }
+                return;
+            }
+        }
+    }
+}
+
+fn decode_empty(response: pb::EmptyResponse) -> TalosResult<()> {
+    match response.result.ok_or_else(invalid_response)? {
+        pb::empty_response::Result::Completed(_) => Ok(()),
+        pb::empty_response::Result::Failure(value) => Err(error_pb::decode_failure(value)?),
+    }
+}
+
+fn transport_error(status: Status) -> TalosError {
+    error_pb::decode_status(status)
+}
+
+fn rpc_request<T>(body: T, timeout: Duration) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(body);
+    request.set_timeout(timeout);
+    request
+}
+
+async fn wait_for_rpc<T>(future: impl Future<Output = TalosResult<T>>) -> TalosResult<T> {
+    tokio::time::timeout(RPC_WAIT, future)
+        .await
+        .map_err(|_| TalosError::new(ErrorCode::Timeout, "Agent RPC response timed out"))?
+}
+
+async fn rpc_response<T>(
+    future: impl Future<Output = Result<T, Status>>,
+    timeout: Duration,
+) -> TalosResult<T> {
+    tokio::time::timeout(timeout, future)
+        .await
+        .map_err(|error| {
+            TalosError::from_source(ErrorCode::Timeout, "Agent RPC response timed out", error)
+        })?
+        .map_err(transport_error)
+}
+
+fn invalid_response() -> TalosError {
+    TalosError::internal("Agent Harness RPC response is malformed")
+}
+fn transport_closed() -> TalosError {
+    TalosError::new(
+        ErrorCode::ServiceUnavailable,
+        "Agent Harness RPC stream closed before settlement",
+    )
+}
+fn cleanup_unconfirmed() -> TalosError {
+    TalosError::new(
+        ErrorCode::RunCleanupUnconfirmed,
+        "Remote Agent Turn cleanup could not be confirmed",
+    )
+}

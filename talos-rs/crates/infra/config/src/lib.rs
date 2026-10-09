@@ -55,6 +55,7 @@ pub enum DeploymentMode {
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentProviderConfig, MessageQueueConfig, PlannerMode,
 };
+pub use domains::agent_node::{AgentNodeConfig, AgentNodeControlConfig, AgentNodeRunnerConfig};
 pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
 };
@@ -144,6 +145,10 @@ pub struct Config {
     #[serde(default)]
     pub agent: AgentConfig,
 
+    /// Distributed Agent node control and runner configuration.
+    #[serde(default)]
+    pub agent_node: AgentNodeConfig,
+
     /// Gateway 配置
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -204,6 +209,7 @@ impl Default for Config {
             memory: MemoryConfig::default(),
             workspaces: WorkspaceConfig::default(),
             agent: AgentConfig::default(),
+            agent_node: AgentNodeConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
             fs: FsConfig::default(),

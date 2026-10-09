@@ -90,6 +90,7 @@ pub(crate) async fn test_session_store() -> Arc<DatabaseSessionStore> {
         .insert_session_record(&SessionRecord {
             id: "mock-session".to_string(),
             agent_id: "default".to_string(),
+            execution_node_id: "embedded".to_string(),
             tree_identity: SessionTreeIdentity::Primary,
             workspace_id: "default".to_string(),
             title: "Untitled Session".to_string(),
