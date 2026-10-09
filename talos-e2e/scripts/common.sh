@@ -548,6 +548,17 @@ build_server_binary() {
   export TALOS_SERVER_BINARY_READY=1
 }
 
+build_worker_binary() {
+  if [[ "${TALOS_WORKER_BINARY_READY:-}" == "1" ]] \
+    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-worker" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${REPORT_ROOT}"
+  (cd "${TALOS_RS_DIR}" && cargo build -p talos-worker-bin >/dev/null)
+  export TALOS_WORKER_BINARY_READY=1
+}
+
 build_cli_binary() {
   if [[ "${TALOS_CLI_BINARY_READY:-}" == "1" ]] \
     && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
@@ -780,6 +791,9 @@ send_message_ack() {
   if [[ -n "${idempotency_key}" ]]; then
     args+=(-H "Idempotency-Key: ${idempotency_key}")
   fi
+  if [[ -n "${TALOS_E2E_BEARER_TOKEN:-}" ]]; then
+    args+=(-H "Authorization: Bearer ${TALOS_E2E_BEARER_TOKEN}")
+  fi
   curl "${args[@]}" -d "${payload}"
 }
 
@@ -796,6 +810,7 @@ collect_timeline_events() {
   AFTER_EVENT_ID="${after_event_id}" \
   STOP_PAYLOAD_TYPES="${stop_payload_types}" \
   GATEWAY_URL="${GATEWAY_URL}" \
+  TALOS_E2E_BEARER_TOKEN="${TALOS_E2E_BEARER_TOKEN:-}" \
   python3 - <<'PY'
 import json
 import os
@@ -821,6 +836,11 @@ request = urllib.request.Request(
     url,
     headers={
         "Accept": "text/event-stream",
+        **(
+            {"Authorization": f"Bearer {os.environ['TALOS_E2E_BEARER_TOKEN']}"}
+            if os.environ.get("TALOS_E2E_BEARER_TOKEN")
+            else {}
+        ),
     },
 )
 

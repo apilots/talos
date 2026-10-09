@@ -47,6 +47,14 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 | `11`-`13` | Cloud auth、Files 和持久化用户交互 |
 | `14` | 统一 Sandbox 和权限执行 |
 | `15` | Release bundle 安装和已安装 TUI 启动 |
+| `17` | 三个 Worker：公开接口注册、归属隔离、路由、续租、协同与 Workspace 归属 |
+
+运行 `just e2e-group 17_multi_node` 会启动真实 Cloud Auth、一个 Server 和三个 Worker，
+使用独立 HOME 和端口。需要相邻 `talos-cloud` 仓库（或 `TALOS_CLOUD_REPO`）、
+`protoc`、Python `grpcio` / `protobuf` / `PyYAML`；执行场景还需要 `.env` 中的真实模型密钥。
+附件场景默认使用 `deepseek-v4-flash-vision-exp`，可用 `TALOS_E2E_IMAGE_MODEL` 指定已配置、可访问的视觉模型。
+节点创建和状态修改走公开 RPC，数据库仅用于只读验收。具体场景见
+[多节点验收说明](scenarios/17_multi_node/README.md)。已知缺陷也必须报告 FAIL，不能跳过。
 
 当前 case 清单以 `scenarios/` 为事实来源。
 当前没有 Group `04`；应以场景目录为准，不要假设 Group 编号连续。

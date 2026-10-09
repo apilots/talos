@@ -49,6 +49,7 @@ single case during development and the owning group before handoff.
 | `11`-`13` | Cloud auth, files, and durable user interaction |
 | `14` | Unified sandbox and permission enforcement |
 | `15` | Release bundle installation and installed TUI startup |
+| `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 There is no current group `04`; use the scenario directory rather than assuming
@@ -67,6 +68,18 @@ that group numbers are contiguous.
 
 Each scenario owns its preflight and reports missing variables or tools. Read
 the selected script before running a credentialed or external-service group.
+
+`just e2e-group 17_multi_node` starts a real Cloud Auth server, one Talos Server,
+and three Talos Workers in isolated homes. It requires the adjacent `talos-cloud`
+checkout (or `TALOS_CLOUD_REPO`), `protoc`, and Python `grpcio`, `protobuf` and
+`PyYAML`. Execution scenarios also require a real provider key in `.env`. The attachment
+scenario uses `deepseek-v4-flash-vision-exp` by default; `TALOS_E2E_IMAGE_MODEL`
+can select another configured, accessible vision model.
+Management uses the existing protobuf descriptors and public RPCs; SQLite is
+opened read-only for persistence assertions. No fake Provider or direct database
+registration is used. Set `TALOS_MULTI_NODE_KEEP_TMP=1` to retain fixture data
+for diagnosis; retained homes contain test credentials. A failed acceptance
+scenario is reported as FAIL even when it exposes a known implementation bug.
 
 ## Evidence and temporary data
 
