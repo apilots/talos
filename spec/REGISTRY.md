@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 042 |
+| `feat` | 043 |
 | `fix` | 007 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,7 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| — | — | — |
+| feat-042 | `feat-042-distributed-agent-execution` | implemented |
 
 ## Archived Specs
 

@@ -2,22 +2,21 @@
 
 [English](RUST_MODULES.md)
 
-Historical translation. The current 50-member inventory and ownership map are
-maintained in [RUST_MODULES.md](RUST_MODULES.md); the older inventory below is
-retained for historical context, not as the current manifest reference.
+当前 55 个 workspace member 及其职责以 [RUST_MODULES.md](RUST_MODULES.md) 和
+`talos-rs/Cargo.toml` 为准。
 
 | 区域 | 数量 | Packages |
 | --- | ---: | --- |
-| Common | 10 | `talos-llm-provider`、Provider 实现、`talos-fs`、`talos-prompt`、`talos-types` |
+| Common | 11 | `talos-llm-provider`、Provider 实现、`talos-fs`、`talos-knowledge-format`、`talos-prompt`、`talos-types` |
 | Infrastructure | 6 | `talos-error`、`talos-config`、`talos-logging`、`talos-storage`、`talos-auth`、`talos-automation` |
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
 | Action | 10 | `talos-mcp`、`talos-plugin`、`talos-skills`、Tools、Policy、Sandbox SPI 和平台沙箱 |
-| Orchestration | 6 | `talos-agent-kernel`、`talos-agent`、`talos-store`、`talos-service`、`talos-router`、`talos-coordinator` |
+| Orchestration | 12 | `agent-pb`、`agent-protocol`、`agent-client`、`talos-agent-api`、`talos-run-control`、`talos-agent-kernel`、`talos-agent-provider-kernel`、`talos-agent`、`talos-store`、`talos-service`、`talos-router`、`talos-coordinator` |
 | Gateway | 4 | `talos-gateway`、`talos-gateway-http`、`talos-app-protocol`、`talos-app-server` |
-| Application composition | 2 | `talos-base`、`talos-upgrade` |
+| Application composition | 3 | `talos-base`、`talos-worker`、`talos-upgrade` |
 | Apps and SDKs | 4 | `talos-sdk`、`talos-sdk-embedded`、`talos-app-server-test-client`、`talos-tui` |
-| Binaries | 2 | `app-server`、`talos-server` |
+| Binaries | 3 | `app-server`、`talos-server`、`talos-worker` |
 
 ## Common
 
@@ -45,10 +44,12 @@ retained for historical context, not as the current manifest reference.
 ## 组装与入口
 
 - `crates/app/talos-base/`：供产品二进制和 embedded client 复用的 Runtime 组装。
+- `crates/app/talos-worker/`：供 embedded 与独立 Host 复用的 Agent 执行组装。
 - `crates/app/talos-upgrade/`：Release upgrade 能力。
 - `apps/sdk/` 和 `apps/sdk-embedded/`：协议与进程内 Rust SDK。
 - `apps/tui/`：`talos` 终端产品。
 - `bin/app-server/`：本地 JSON-RPC adapter 二进制。
 - `bin/talos-server/`：HTTP 和 Web UI server 二进制。
+- `bin/talos-worker/`：独立 Agent worker 二进制。
 
 Workspace member 变化时，应在更新 `Cargo.toml` 后，同步更新本文和英文版本。

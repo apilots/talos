@@ -28,7 +28,7 @@ talos/
 |   `-- tests/             Runner and helper tests
 |-- talos-rs/
 |   |-- apps/              Rust SDKs, TUI, and protocol test client
-|   |-- bin/               Product and protocol-adapter binaries
+|   |-- bin/               Product and protocol-adapter binaries, including `talos-worker`
 |   `-- crates/            Layered Rust libraries
 |-- AGENTS.md              Repository engineering rules
 |-- CLAUDE.md              Claude-specific repository guidance

@@ -2,8 +2,8 @@
 
 [Chinese](README_zh.md)
 
-This directory owns deployment examples for `talos-server` and installation
-assets for the released `talos` terminal bundle.
+This directory owns deployment examples for `talos-server`, the standalone
+`talos-worker`, and installation assets for the released `talos` terminal bundle.
 
 ## Layout
 
@@ -20,6 +20,10 @@ deploy/
 `talos-server` exposes HTTP APIs, the Web UI, and SSE Timeline streams. Reverse
 proxies must disable response buffering and compression for
 `/v1/sessions/*/events` so events are delivered incrementally.
+
+The server image also contains `talos-worker`. A worker deployment overrides
+the container command with `/opt/talos/bin/talos-worker` and supplies its node
+registration and TLS configuration.
 
 The examples under `caddy/`, `nginx/`, and `docker/` are the maintained starting
 points. Review authentication, TLS, persistence, resource limits, and secrets
