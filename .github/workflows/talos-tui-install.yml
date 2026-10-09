@@ -98,6 +98,15 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Protocol Buffer compiler
+        run: |
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            brew install protobuf
+          else
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
+
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
         with:

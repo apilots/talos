@@ -12,6 +12,11 @@ just install-tools
 just setup-git-hooks
 ```
 
+Rust builds generate the Agent gRPC bindings and require `protoc` on `PATH`.
+Install it with `brew install protobuf` on macOS or
+`sudo apt-get install protobuf-compiler` on Debian/Ubuntu before running the
+Rust checks. The Docker builder and source-build CI provision it explicitly.
+
 Frontend dependencies are managed separately:
 
 ```bash
