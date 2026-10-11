@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::{fs, net::SocketAddr};
 
-use agent_client::RemoteAgentClient;
+use agent_client::{AgentTlsTrust, RemoteAgentClient};
 use agent_pb as pb;
 use agent_protocol::{error_pb, node_pb, AgentHarness, Deployment, NodeAuth, Registration};
 use talos_auth::AuthService;
@@ -19,6 +19,8 @@ use tonic::{Request, Response, Status};
 #[path = "agent_node_resources_rpc.rs"]
 mod resources;
 pub use resources::{NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc};
+#[path = "agent_node_connect.rs"]
+mod connect;
 
 pub struct NodeRpcServer {
     bind_address: SocketAddr,
@@ -33,7 +35,7 @@ pub struct NodeRpcServer {
 
 impl NodeRpcServer {
     /// Compose the complete node listener with its existing resource owners.
-    /// Registration always publishes execution clients; management revokes them.
+    /// Direct registration publishes execution clients; outbound registration awaits Connect.
     /// Callers must supply all resource services before starting the listener.
     pub fn new(
         config: &AgentNodeControlConfig,
@@ -63,17 +65,22 @@ impl NodeRpcServer {
                 error,
             )
         })?;
-        let trusted_node_ca = fs::read(&config.trusted_node_ca_file).map_err(|error| {
-            TalosError::internal_with_source(
-                "Read trusted Agent node CA; technical details were withheld.",
-                error,
-            )
-        })?;
+        let trusted_node_ca = config
+            .trusted_node_ca_file
+            .as_ref()
+            .map(fs::read)
+            .transpose()
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "Read trusted Agent node CA; technical details were withheld.",
+                    error,
+                )
+            })?;
         let remote_publisher = RemoteNodePublisher {
             coordinator,
-            lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             nodes: nodes.clone(),
-            trusted_node_ca: Arc::new(trusted_node_ca),
+            trusted_node_ca: trusted_node_ca
+                .map_or(AgentTlsTrust::SystemRoots, AgentTlsTrust::Certificate),
         };
         let subagent_control = NodeSubagentControlRpc::new(session_data.clone(), agent_control);
         Ok(Self {
@@ -90,11 +97,14 @@ impl NodeRpcServer {
 
     pub async fn run(self, shutdown: CancellationToken) -> TalosResult<()> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let control = pb::agent_node_control_server::AgentNodeControlServer::new(
-            NodeControlRpc::new(self.nodes.clone(), self.remote_publisher.clone()),
-        );
+        let control =
+            pb::agent_node_control_server::AgentNodeControlServer::new(NodeControlRpc::new(
+                self.nodes.clone(),
+                self.remote_publisher.clone(),
+                shutdown.clone(),
+            ));
         let management = pb::agent_node_management_server::AgentNodeManagementServer::new(
-            NodeManagementRpc::new(self.nodes, self.auth_service, self.remote_publisher),
+            NodeManagementRpc::new(self.nodes, self.auth_service),
         );
         let session_data =
             pb::agent_session_data_rpc_server::AgentSessionDataRpcServer::new(self.session_data);
@@ -130,11 +140,9 @@ impl NodeRpcServer {
 
 #[derive(Clone)]
 pub struct RemoteNodePublisher {
-    // Serialize directory mutations with publication; never hold across execution RPCs.
-    lifecycle: Arc<tokio::sync::Mutex<()>>,
     coordinator: Arc<CoordinatorImpl>,
     nodes: AgentNodeService,
-    trusted_node_ca: Arc<Vec<u8>>,
+    trusted_node_ca: AgentTlsTrust,
 }
 
 impl RemoteNodePublisher {
@@ -153,17 +161,16 @@ impl RemoteNodePublisher {
                 },
             )
             .await?;
-        let endpoint = node.endpoint.ok_or_else(|| {
-            TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Remote Agent node endpoint is missing",
-            )
-        })?;
+        let Some(endpoint) = node.endpoint else {
+            // Registration alone is not evidence of an outbound execution connection.
+            self.unpublish(node_id).await;
+            return Ok(());
+        };
         let mut clients = Vec::<(String, Arc<dyn AgentHarness>)>::with_capacity(deployments.len());
         for deployment in deployments {
             let client = RemoteAgentClient::connect(
                 &endpoint,
-                self.trusted_node_ca.as_ref().clone(),
+                self.trusted_node_ca.clone(),
                 deployment.agent_id.clone(),
                 NodeAuth {
                     node_id: node_id.to_owned(),
@@ -179,7 +186,35 @@ impl RemoteNodePublisher {
                 .replace_remote_agent(node_id.to_owned(), agent_id, client)
                 .await?;
         }
-        Ok(())
+        let environment = agent_client::AgentEnvironmentClient::connect(
+            &endpoint,
+            self.trusted_node_ca.clone(),
+            NodeAuth {
+                node_id: node_id.to_owned(),
+                token: registration.lease_token.clone(),
+            },
+        )
+        .await?;
+        self.coordinator
+            .register_environment(node_id.to_owned(), Arc::new(environment))
+            .await;
+        let coordinator = self.coordinator.clone();
+        let published_node_id = node_id.to_owned();
+        self.nodes
+            .mark_registration_published(
+                &NodeAuth {
+                    node_id: node_id.to_owned(),
+                    token: registration.lease_token.clone(),
+                },
+                Arc::new(move || {
+                    let coordinator = coordinator.clone();
+                    let node_id = published_node_id.clone();
+                    Box::pin(async move {
+                        coordinator.unregister_remote_node(&node_id).await;
+                    })
+                }),
+            )
+            .await
     }
 
     async fn unpublish(&self, node_id: &str) {
@@ -191,25 +226,41 @@ impl RemoteNodePublisher {
 pub struct NodeControlRpc {
     nodes: AgentNodeService,
     remote_publisher: RemoteNodePublisher,
+    shutdown: CancellationToken,
 }
 
 impl NodeControlRpc {
-    fn new(nodes: AgentNodeService, remote_publisher: RemoteNodePublisher) -> Self {
+    fn new(
+        nodes: AgentNodeService,
+        remote_publisher: RemoteNodePublisher,
+        shutdown: CancellationToken,
+    ) -> Self {
         Self {
             nodes,
             remote_publisher,
+            shutdown,
         }
     }
 }
 
 #[tonic::async_trait]
 impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
+    type ConnectStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<pb::ControlToNodeFrame, Status>> + Send>,
+    >;
+    async fn connect(
+        &self,
+        request: Request<tonic::Streaming<pb::NodeToControlFrame>>,
+    ) -> Result<Response<Self::ConnectStream>, Status> {
+        self.accept_connection(request.into_inner()).await
+    }
+
     async fn register(
         &self,
         request: Request<pb::RegisterRequest>,
     ) -> Result<Response<pb::RegisterResponse>, Status> {
         let result = async {
-            let _lifecycle = self.remote_publisher.lifecycle.lock().await;
+            let _lifecycle = self.nodes.lock_lifecycle().await;
             let request = request.into_inner();
             let auth = node_pb::decode_auth(request.auth)?;
             let params = node_pb::decode_register(request.params)?;
@@ -218,12 +269,6 @@ impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
             let registration = self.nodes.register(&principal, params).await?;
             self.remote_publisher
                 .publish(&auth.node_id, &registration, &deployments)
-                .await?;
-            self.nodes
-                .mark_registration_published(&NodeAuth {
-                    node_id: auth.node_id,
-                    token: registration.lease_token.clone(),
-                })
                 .await?;
             Ok(registration)
         }
@@ -287,7 +332,7 @@ impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
         request: Request<pb::UnregisterRequest>,
     ) -> Result<Response<pb::UnregisterResponse>, Status> {
         let result = async {
-            let _lifecycle = self.remote_publisher.lifecycle.lock().await;
+            let _lifecycle = self.nodes.lock_lifecycle().await;
             let request = request.into_inner();
             let auth = node_pb::decode_auth(request.auth)?;
             let node_id = auth.node_id.clone();
@@ -311,19 +356,13 @@ impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
 pub struct NodeManagementRpc {
     nodes: AgentNodeService,
     auth_service: Arc<dyn AuthService>,
-    remote_publisher: RemoteNodePublisher,
 }
 
 impl NodeManagementRpc {
-    fn new(
-        nodes: AgentNodeService,
-        auth_service: Arc<dyn AuthService>,
-        remote_publisher: RemoteNodePublisher,
-    ) -> Self {
+    fn new(nodes: AgentNodeService, auth_service: Arc<dyn AuthService>) -> Self {
         Self {
             nodes,
             auth_service,
-            remote_publisher,
         }
     }
 
@@ -422,15 +461,7 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         let result = async {
             let actor = self.actor(&request).await?;
             let params = node_pb::decode_update(request.into_inner())?;
-            let node_id = params.node_id.clone();
-            let _lifecycle = self.remote_publisher.lifecycle.lock().await;
-            let info = self.nodes.update_node(&actor, params).await?;
-            // A missing heartbeat does not revoke a registration. Only a
-            // directory mutation that cleared the lease withdraws its client.
-            if info.lease_expires_at.is_none() {
-                self.remote_publisher.unpublish(&node_id).await;
-            }
-            Ok(info)
+            self.nodes.update_node(&actor, params).await
         }
         .await;
         Ok(Response::new(pb::GetNodeResponse {
@@ -448,11 +479,7 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         let result = async {
             let actor = self.actor(&request).await?;
             let params = node_pb::decode_rotate(request.into_inner());
-            let node_id = params.node_id.clone();
-            let _lifecycle = self.remote_publisher.lifecycle.lock().await;
-            let credential = self.nodes.rotate_credential(&actor, params).await?;
-            self.remote_publisher.unpublish(&node_id).await;
-            Ok(credential)
+            self.nodes.rotate_credential(&actor, params).await
         }
         .await;
         Ok(Response::new(pb::CredentialResponse {

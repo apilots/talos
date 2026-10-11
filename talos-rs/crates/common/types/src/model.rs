@@ -9,8 +9,13 @@ pub use talos_config::{
 
 pub type TalosConfig = talos_config::Config;
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ModelListRequest {}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ModelListRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(rename_all = "camelCase")]

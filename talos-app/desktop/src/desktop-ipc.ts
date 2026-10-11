@@ -6,6 +6,7 @@ import { assertDesktopRendererInvoke } from "./ipc-guard";
 import { TALOS_IPC, type TalosRuntimeState } from "./ipc";
 
 export function registerDesktopIpcHandlers(runtime: DesktopAppServerController): void {
+  ipcMain.handle(TALOS_IPC.workerIdentity, () => ipcResponse(() => runtime.invoke("desktop/workerIdentity", null)));
   ipcMain.handle(TALOS_IPC.connect, () => ipcResponse(() => runtime.connect()));
   ipcMain.handle(
     TALOS_IPC.invoke,

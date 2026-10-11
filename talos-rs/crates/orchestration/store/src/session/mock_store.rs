@@ -93,7 +93,7 @@ impl SessionStore for MockSessionStore {
         Ok(false)
     }
 
-    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self, _node_id: Option<&str>) -> TalosResult<bool> {
         Ok(false)
     }
 

@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { getLlmConfig } from "@/features/settings/api";
 
 export function llmConfigKey(connectionKey: string) {
-  return ["llm-config", connectionKey] as const;
+  return ["talos", connectionKey, "llm-config"] as const;
 }
 
 export function useLlmConfigQuery() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
 
   return useQuery({
     queryKey: llmConfigKey(connectionKey),

@@ -1,0 +1,159 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "auth.proto";
+import "harness.proto";
+import "environment.proto";
+import "memory.proto";
+import "types.proto";
+
+message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; }
+message ConnectNodeResponse {
+  oneof result { Empty ready = 1; Failure failure = 2; }
+}
+message NodeToControlFrame {
+  oneof body {
+    ConnectNodeRequest connect = 1;
+    WorkerRpcResult result = 2;
+  }
+}
+message ControlToNodeFrame {
+  oneof body {
+    ConnectNodeResponse connected = 1;
+    WorkerRpcCall call = 2;
+    CancelWorkerRpcCall cancel = 3;
+    AcknowledgeWorkerRpcResult acknowledge = 4;
+  }
+}
+message WorkerRpcCall {
+  uint64 call_id = 1;
+  uint64 sequence = 2;
+  bool requests_closed = 3;
+  // Relative timeout on first frame; zero means no additional transport deadline.
+  uint64 timeout_ms = 4;
+  // First frame only: bounded number of unconsumed response messages.
+  uint32 response_window = 5;
+  oneof request {
+    CompleteMcpAuthenticationRequest complete_mcp_authentication = 77;
+    StartMcpAuthenticationRequest start_mcp_authentication = 76;
+    ImportMcpServerRequest import_mcp_server = 75;
+    UpdateMcpCredentialsRequest update_mcp_credentials = 74;
+    ReadMcpAuthenticationRequest read_mcp_authentication = 73;
+    ListMcpServersRequest list_mcp_servers = 72;
+    DisablePluginRequest disable_plugin = 71;
+    EnablePluginRequest enable_plugin = 70;
+    UninstallPluginRequest uninstall_plugin = 69;
+    UpdatePluginRequest update_plugin = 68;
+    InstallPluginRequest install_plugin = 67;
+    ReadPluginRequest read_plugin = 66;
+    ListPluginsRequest list_plugins = 65;
+    SearchPluginsRequest search_plugins = 64;
+    RemovePluginSourceRequest remove_plugin_source = 63;
+    RefreshPluginSourceRequest refresh_plugin_source = 62;
+    AddPluginSourceRequest add_plugin_source = 61;
+    ListPluginSourcesRequest list_plugin_sources = 60;
+    ReloadConfigRequest reload_config = 53;
+    DeleteConfigRequest delete_config = 52;
+    UpdateConfigRequest update_config = 51;
+    GetConfigRequest get_config = 50;
+    StartRequest start = 10;
+    SubmitInputRequest submit_input = 11;
+    InterruptRequest interrupt = 12;
+    CompactSessionRequest compact_session = 13;
+    SessionRequest clear_session = 14;
+    SessionRequest close_session = 15;
+    SessionRequest read_workspace_memory = 16;
+    UpdateWorkspaceMemoryRequest update_workspace_memory = 17;
+    FormDreamMemoryRequest form_dream_memory = 18;
+    ShutdownRequest shutdown = 19;
+    ListMemoryFilesRequest list_memory_files = 40;
+    ReadMemoryFileRequest read_memory_file = 41;
+    WriteMemoryFileRequest write_memory_file = 42;
+    SearchMemoryRequest search_memory = 43;
+    GetMemoryRequest get_memory = 44;
+    ListSkillsRequest list_skills = 45;
+    RefreshSkillsRequest refresh_skills = 46;
+    SuggestSkillsRequest suggest_skills = 47;
+    ReadSkillRequest read_skill = 48;
+    ResolveSkillsRequest resolve_skills = 49;
+    GetWorkspaceInfoRequest workspace_info = 30;
+    ListWorkerModelsRequest list_models = 31;
+    ReadDirectoryRequest read_directory = 32;
+    CreateDirectoryRequest create_directory = 33;
+    GetProjectStatusRequest project_status = 34;
+    ValidateProjectDirectoryRequest validate_project_directory = 35;
+    ListWorkspaceDocsRequest list_workspace_docs = 36;
+    ReadWorkspaceDocRequest read_workspace_doc = 37;
+    WriteWorkspaceDocRequest write_workspace_doc = 38;
+
+
+  }
+}
+message WorkerRpcResult {
+  uint64 call_id = 1;
+  uint64 sequence = 2;
+  bool completed = 3;
+  oneof response {
+    CompleteMcpAuthenticationResponse complete_mcp_authentication = 77;
+    StartMcpAuthenticationResponse start_mcp_authentication = 76;
+    ImportMcpServerResponse import_mcp_server = 75;
+    UpdateMcpCredentialsResponse update_mcp_credentials = 74;
+    ReadMcpAuthenticationResponse read_mcp_authentication = 73;
+    ListMcpServersResponse list_mcp_servers = 72;
+    DisablePluginResponse disable_plugin = 71;
+    EnablePluginResponse enable_plugin = 70;
+    UninstallPluginResponse uninstall_plugin = 69;
+    UpdatePluginResponse update_plugin = 68;
+    InstallPluginResponse install_plugin = 67;
+    ReadPluginResponse read_plugin = 66;
+    ListPluginsResponse list_plugins = 65;
+    SearchPluginsResponse search_plugins = 64;
+    RemovePluginSourceResponse remove_plugin_source = 63;
+    RefreshPluginSourceResponse refresh_plugin_source = 62;
+    AddPluginSourceResponse add_plugin_source = 61;
+    ListPluginSourcesResponse list_plugin_sources = 60;
+    ReloadConfigResponse reload_config = 53;
+    DeleteConfigResponse delete_config = 52;
+    UpdateConfigResponse update_config = 51;
+    GetConfigResponse get_config = 50;
+    RunResponse run = 10;
+    InputResponse input = 11;
+    InterruptResponse interrupt = 12;
+    EmptyResponse empty = 13;
+    WorkspaceMemoryResponse workspace_memory = 14;
+    FormDreamMemoryResponse dream_memory = 15;
+    // RPC status/framing failure; method results retain their existing response shape.
+    Failure failure = 16;
+    ListMemoryFilesResponse list_memory_files = 40;
+    ReadMemoryFileResponse read_memory_file = 41;
+    WriteMemoryFileResponse write_memory_file = 42;
+    SearchMemoryResponse search_memory = 43;
+    GetMemoryResponse get_memory = 44;
+    ListSkillsResponse list_skills = 45;
+    RefreshSkillsResponse refresh_skills = 46;
+    SuggestSkillsResponse suggest_skills = 47;
+    ReadSkillResponse read_skill = 48;
+    ResolveSkillsResponse resolve_skills = 49;
+    GetWorkspaceInfoResponse workspace_info = 30;
+    ListWorkerModelsResponse list_models = 31;
+    ReadDirectoryResponse read_directory = 32;
+    CreateDirectoryResponse create_directory = 33;
+    GetProjectStatusResponse project_status = 34;
+    ValidateProjectDirectoryResponse validate_project_directory = 35;
+    ListWorkspaceDocsResponse list_workspace_docs = 36;
+    ReadWorkspaceDocResponse read_workspace_doc = 37;
+    WriteWorkspaceDocResponse write_workspace_doc = 38;
+
+
+  }
+}
+message CancelWorkerRpcCall {
+  NodeAuth auth = 1;
+  uint64 call_id = 2;
+}
+
+// Cumulative receipt by the invocation consumer, not a persisted business commit.
+message AcknowledgeWorkerRpcResult {
+  NodeAuth auth = 1;
+  uint64 call_id = 2;
+  uint64 sequence = 3;
+}

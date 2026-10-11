@@ -50,6 +50,7 @@ single case during development and the owning group before handoff.
 | `14` | Unified sandbox and permission enforcement |
 | `15` | Release bundle installation and installed TUI startup |
 | `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
+| `18` | Computer workspace: real Desktop device login, durable UUID, outbound registration and renewal |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 There is no current group `04`; use the scenario directory rather than assuming
@@ -80,6 +81,13 @@ opened read-only for persistence assertions. No fake Provider or direct database
 registration is used. Set `TALOS_MULTI_NODE_KEEP_TMP=1` to retain fixture data
 for diagnosis; retained homes contain test credentials. A failed acceptance
 scenario is reported as FAIL even when it exposes a known implementation bug.
+
+Computer registration and outbound execution use `18_computer_workspace`.
+Registration alone: `just e2e-case 18_computer_workspace/01_registration`, with
+Caddy (`TALOS_E2E_CADDY_BIN`), Node.js and pnpm dependencies; no model key required.
+The full group also requires funded execution/inner/vision providers. Real
+execution acceptance has resumed after provider funding. See the
+[scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
 
 ## Evidence and temporary data
 

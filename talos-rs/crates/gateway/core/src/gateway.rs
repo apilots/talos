@@ -47,6 +47,42 @@ use talos_types::{
 
 #[async_trait]
 pub trait Gateway: Send + Sync {
+    async fn list_computers(
+        &self,
+        actor: &Actor,
+        request: talos_types::ComputerListRequest,
+    ) -> TalosResult<talos_types::ComputerListResponse>;
+
+    async fn read_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::GetNodeRequest,
+    ) -> TalosResult<talos_types::NodeInfo>;
+
+    async fn create_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::CreateNodeRequest,
+    ) -> TalosResult<talos_types::CreatedNode>;
+
+    async fn rename_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::RenameComputerRequest,
+    ) -> TalosResult<talos_types::NodeInfo>;
+
+    async fn set_computer_status(
+        &self,
+        actor: &Actor,
+        request: talos_types::SetComputerStatusRequest,
+    ) -> TalosResult<talos_types::NodeInfo>;
+
+    async fn rotate_computer_credential(
+        &self,
+        actor: &Actor,
+        request: talos_types::RotateCredentialRequest,
+    ) -> TalosResult<talos_types::NodeCredential>;
+
     /// Reads the authenticated caller's Profile usage view.
     async fn read_profile(
         &self,

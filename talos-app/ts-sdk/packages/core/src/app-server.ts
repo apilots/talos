@@ -149,20 +149,20 @@ export class AppServerClient {
       this.transport.request("file/delete", request),
   };
 
-  listModels(): Promise<ModelListResponse> {
-    return this.transport.request("model/list", {} satisfies AppProtocol.ModelListRequest);
+  listModels(params: AppProtocol.ModelListRequest = {}): Promise<ModelListResponse> {
+    return this.transport.request("model/list", params);
   }
 
-  configGet(path: ConfigPath = "llm"): Promise<ConfigResponse> {
-    return this.transport.request("config/get", { path });
+  configGet(path: ConfigPath = "llm", target: { nodeId?: string } = {}): Promise<ConfigResponse> {
+    return this.transport.request("config/get", { path, ...target });
   }
 
-  configUpdate(value: ConfigValue): Promise<ConfigResponse> {
-    return this.transport.request("config/update", { value });
+  configUpdate(value: ConfigValue, target: { nodeId?: string } = {}): Promise<ConfigResponse> {
+    return this.transport.request("config/update", { value, ...target });
   }
 
-  configDelete(path: ConfigPath): Promise<ConfigDeleteResponse> {
-    return this.transport.request("config/delete", { path });
+  configDelete(path: ConfigPath, target: { nodeId?: string } = {}): Promise<ConfigDeleteResponse> {
+    return this.transport.request("config/delete", { path, ...target });
   }
 
   getLlmConfig(): Promise<ConfigResponse> {
@@ -173,9 +173,17 @@ export class AppServerClient {
     return this.configUpdate({ type: "llm", value: config });
   }
 
-  configReload(): Promise<ConfigReloadResponse> {
-    return this.transport.request("config/reload", {});
+  configReload(target: { nodeId?: string } = {}): Promise<ConfigReloadResponse> {
+    return this.transport.request("config/reload", target);
   }
+
+  /** Host settings and safe identity; enrollment returns no node credential. */
+  readonly desktop = {
+    connection: () => this.transport.request<AppProtocol.DesktopConnectionResponse>("desktop/connection/read", null),
+    setConnection: (params: AppProtocol.DesktopConnectionSetParams) => this.transport.request<AppProtocol.DesktopConnectionResponse>("desktop/connection/set", params),
+    workerIdentity: () => this.transport.request<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerIdentity", null),
+    enrollWorker: (params: AppProtocol.DesktopWorkerEnrollParams) => this.transport.request<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerEnroll", params),
+  };
 
   authLogout(): Promise<AuthLogoutResponse> {
     return this.transport.request("auth/logout", {});
@@ -376,6 +384,21 @@ export class AppServerClient {
     });
   }
 
+  computers = {
+    list: (params: AppProtocol.ComputerListRequest = {}): Promise<AppProtocol.ComputerListResponse> =>
+      this.transport.request("computer/list", params),
+    read: (params: AppProtocol.GetNodeRequest): Promise<AppProtocol.NodeInfo> =>
+      this.transport.request("computer/read", params),
+    create: (params: AppProtocol.CreateNodeRequest): Promise<AppProtocol.CreatedNode> =>
+      this.transport.request("computer/create", params),
+    rename: (params: AppProtocol.RenameComputerRequest): Promise<AppProtocol.NodeInfo> =>
+      this.transport.request("computer/rename", params),
+    setStatus: (params: AppProtocol.SetComputerStatusRequest): Promise<AppProtocol.NodeInfo> =>
+      this.transport.request("computer/setStatus", params),
+    rotateCredential: (params: AppProtocol.RotateCredentialRequest): Promise<AppProtocol.NodeCredential> =>
+      this.transport.request("computer/rotateCredential", params),
+  };
+
   listProjects(params: AppProtocol.ProjectListRequest = {}): Promise<ProjectListResponse> {
     return this.transport.request<ProjectListResponse>("project/list", params);
   }
@@ -491,27 +514,29 @@ export class AppServerClient {
     return this.transport.request("memory/file/write", request);
   }
 
-  workspaceInfo(): Promise<WorkspaceInfoResponse> {
-    return this.transport.request<WorkspaceInfoResponse>("workspace/info", {});
+  workspaceInfo(params: AppProtocol.WorkspaceInfoRequest = {}): Promise<WorkspaceInfoResponse> {
+    return this.transport.request<WorkspaceInfoResponse>("workspace/info", params);
   }
 
-  listWorkspaceDocs(): Promise<WorkspaceDocListResponse> {
-    return this.transport.request<WorkspaceDocListResponse>("workspace/doc/list", {});
+  listWorkspaceDocs(params: AppProtocol.WorkspaceDocListRequest = {}): Promise<WorkspaceDocListResponse> {
+    return this.transport.request<WorkspaceDocListResponse>("workspace/doc/list", params);
   }
 
-  readWorkspaceDoc(kind: WorkspaceDocKind): Promise<WorkspaceDocReadResponse> {
-    return this.transport.request("workspace/doc/read", { kind });
+  readWorkspaceDoc(kind: WorkspaceDocKind, target: AppProtocol.WorkspaceInfoRequest = {}): Promise<WorkspaceDocReadResponse> {
+    return this.transport.request("workspace/doc/read", { kind, ...target });
   }
 
   writeWorkspaceDoc(
     kind: WorkspaceDocKind,
     content: string,
     expectedVersion: string | null,
+    target: AppProtocol.WorkspaceInfoRequest = {},
   ): Promise<WorkspaceDocWriteResponse> {
     return this.transport.request("workspace/doc/write", {
       kind,
       content,
       expected_version: expectedVersion,
+      ...target,
     });
   }
 }

@@ -10,6 +10,10 @@ use ts_rs::TS;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct StartTurnRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
     pub session_id: String,
     pub input: AgentUserInput,
     #[serde(default)]

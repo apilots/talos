@@ -215,7 +215,7 @@ pub fn decode_update(value: pb::WorkspaceMemoryUpdate) -> TalosResult<UserWorksp
     Ok(update)
 }
 
-fn encode_kind(value: MemoryKind) -> i32 {
+pub(crate) fn encode_kind(value: MemoryKind) -> i32 {
     match value {
         MemoryKind::Preference => pb::MemoryKind::Preference as i32,
         MemoryKind::Fact => pb::MemoryKind::Fact as i32,
@@ -224,7 +224,7 @@ fn encode_kind(value: MemoryKind) -> i32 {
         MemoryKind::Episode => pb::MemoryKind::Episode as i32,
     }
 }
-fn decode_kind(value: i32) -> TalosResult<MemoryKind> {
+pub(crate) fn decode_kind(value: i32) -> TalosResult<MemoryKind> {
     match pb::MemoryKind::try_from(value) {
         Ok(pb::MemoryKind::Preference) => Ok(MemoryKind::Preference),
         Ok(pb::MemoryKind::Fact) => Ok(MemoryKind::Fact),

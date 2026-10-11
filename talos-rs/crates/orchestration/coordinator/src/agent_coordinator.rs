@@ -65,6 +65,17 @@ impl CoordinatorImpl {
         self.registry.replace(node_id, agent_id, harness).await
     }
 
+    /// Publish the environment alongside this node's existing deployment handles.
+    pub async fn register_environment(
+        &self,
+        node_id: String,
+        environment: Arc<dyn agent_protocol::WorkerEnvironment>,
+    ) {
+        self.registry
+            .register_environment(node_id, environment)
+            .await;
+    }
+
     pub async fn unregister_remote_node(&self, node_id: &str) {
         if node_id != "embedded" {
             self.registry.unregister_node(node_id).await;
@@ -124,6 +135,33 @@ impl CoordinatorImpl {
         }
     }
 
+    async fn validate_environment_node(&self, node_id: &str, user_id: &str) -> TalosResult<()> {
+        if node_id.trim().is_empty() {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Node ID cannot be empty",
+            ));
+        }
+        let node = self.node_store.get(node_id).await?.ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                "Worker node was not found",
+            )
+        })?;
+        if node_id != EMBEDDED_NODE_ID && node.owner_user_id.as_deref() != Some(user_id) {
+            return Err(TalosError::authorization_denied());
+        }
+        let now = chrono::Utc::now().timestamp();
+        if node.status != NodeStatus::Enabled
+            || (node_id != EMBEDDED_NODE_ID
+                && (node.lease_expires_at.is_none_or(|expiry| expiry <= now)
+                    || !node_has_recent_heartbeat(&node, now)))
+        {
+            return Err(remote_unavailable());
+        }
+        Ok(())
+    }
+
     async fn context_harness(&self, context: &AgentContext) -> TalosResult<Arc<dyn AgentHarness>> {
         self.harness(
             &context.session.agent_id,
@@ -143,6 +181,15 @@ fn remote_unavailable() -> TalosError {
 
 #[async_trait]
 impl AgentCoordinator for CoordinatorImpl {
+    async fn worker_environment(
+        &self,
+        node_id: &str,
+        user_id: &str,
+    ) -> TalosResult<Arc<dyn agent_protocol::WorkerEnvironment>> {
+        self.validate_environment_node(node_id, user_id).await?;
+        self.registry.environment(node_id).await
+    }
+
     async fn session_harness(
         &self,
         context: &AgentSessionContext,
@@ -176,6 +223,23 @@ impl AgentCoordinator for CoordinatorImpl {
         user_id: &str,
         preferred_node_id: Option<&str>,
     ) -> TalosResult<String> {
+        if let Some(node_id) = preferred_node_id {
+            self.validate_environment_node(node_id, user_id).await?;
+            self.registry
+                .get(node_id, agent_id)
+                .await
+                .map_err(|error| {
+                    if error.is_code(talos_error::ErrorCode::ResourceNotFound) {
+                        TalosError::new(
+                            talos_error::ErrorCode::InvalidRequest,
+                            "Selected Agent is not deployed on the requested Worker",
+                        )
+                    } else {
+                        error
+                    }
+                })?;
+            return Ok(node_id.to_owned());
+        }
         let mut nodes = self.registry.nodes_for_agent(agent_id).await;
         if preferred_node_id.is_none() {
             nodes.sort_by_key(|node_id| node_id == EMBEDDED_NODE_ID);
@@ -382,6 +446,19 @@ mod affinity_tests {
             .select_execution_node("default", "user-2", Some("z-laptop"))
             .await
             .is_err());
+        coordinator
+            .register_agent(
+                "embedded".into(),
+                "only-embedded".into(),
+                Arc::new(TestHarness),
+            )
+            .await
+            .unwrap();
+        assert!(coordinator
+            .select_execution_node("only-embedded", "user-1", Some("z-laptop"))
+            .await
+            .unwrap_err()
+            .is_code(talos_error::ErrorCode::InvalidRequest));
         assert!(Arc::ptr_eq(
             &coordinator
                 .harness("default", "session-1", Some("user-1"))

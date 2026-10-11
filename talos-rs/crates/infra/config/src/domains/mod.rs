@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_node;
 pub mod automation;
 pub mod cloud;
+pub mod desktop;
 pub mod fs;
 pub mod kernel;
 pub mod mcp_auth;

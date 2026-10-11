@@ -34,6 +34,10 @@ export class DesktopMainAppServerBridge {
     return this.client.transport.request<T>(method, params, options);
   }
 
+  onNotification(handler: (notification: AppProtocol.JsonRpcNotification) => void): () => void {
+    return this.client.transport.onNotification(handler);
+  }
+
   onEvent(handler: AppServerEventHandler): () => void {
     return this.client.onEvent(handler);
   }

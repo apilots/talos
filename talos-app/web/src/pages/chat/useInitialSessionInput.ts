@@ -74,6 +74,7 @@ export function useInitialSessionInput({
         locationState?.initialModel,
         locationState?.initialReasoningLevel,
       ),
+      nodeId: locationState?.initialNodeId,
       userPermissionMode: locationState?.initialPermissionMode,
       project,
       ...(initialAttachments.length

@@ -126,9 +126,32 @@ where
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
     let mut writer_finished = false;
+    let mut worker_failures = app.subscribe_worker_failures();
 
     loop {
         tokio::select! {
+            changed = async {
+                match &mut worker_failures {
+                    Some(receiver) => receiver.changed().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if changed.is_err() {
+                    worker_failures = None;
+                } else if let Some(error) = worker_failures.as_ref().and_then(|receiver| receiver.borrow().clone()) {
+                    let params = match serde_json::to_value(error) {
+                        Ok(params) => params,
+                        Err(source) => {
+                            report_error(&TalosError::internal_with_source("Serialize Worker registration failure.", source));
+                            break;
+                        }
+                    };
+                    if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
+                        "desktop/worker/failed", Some(params),
+                    ))).await.is_err() { break; }
+                }
+            }
+
             line_result = read_bounded_line(
                 &mut reader,
                 &mut line,
@@ -537,7 +560,11 @@ async fn resolve_request_actor(
 
     if matches!(
         method,
-        ClientMethod::AuthLoginStart
+        ClientMethod::DesktopConnectionRead
+            | ClientMethod::DesktopConnectionSet
+            | ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::DesktopWorkerEnroll
+            | ClientMethod::AuthLoginStart
             | ClientMethod::AuthLoginStatus
             | ClientMethod::AuthLoginCancel
             | ClientMethod::AuthSessionRead

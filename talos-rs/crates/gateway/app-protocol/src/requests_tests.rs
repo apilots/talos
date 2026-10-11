@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use std::str::FromStr;
 use talos_agent_api::{SubmitTurnInput, SubmitTurnInputRequest};
 use talos_types::{AgentTurnRef, QuestionAnswer, UserActionResponse};
 
@@ -98,14 +99,14 @@ fn skills_methods_parse_canonical_paths() {
     .expect("skills resolve request should decode");
     assert!(matches!(
         request.params,
-        ClientRequestParams::SkillsResolve(SkillsResolveRequest { .. })
+        ClientRequestParams::SkillsResolve(SkillsResolveRequest { node_id: None, .. })
     ));
 
     let request = ClientRequest::decode("skills/refresh", None)
         .expect("skills refresh request should decode");
     assert!(matches!(
         request.params,
-        ClientRequestParams::SkillsRefresh(SkillsRefreshRequest {})
+        ClientRequestParams::SkillsRefresh(SkillsRefreshRequest { node_id: None })
     ));
 }
 

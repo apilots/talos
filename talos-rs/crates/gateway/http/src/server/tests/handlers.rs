@@ -40,7 +40,7 @@ async fn test_state_with_config_and_plugin_manager(
     let event_service = event_service_from_store(agent_execution_store.clone());
     let config_store: Arc<dyn ConfigStore> =
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
-    let session_store = test_session_store().await;
+    let (session_store, nodes) = test_session_store().await;
     let memory = talos_service::MemoryService::new(
         config.clone(),
         Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
@@ -49,8 +49,19 @@ async fn test_state_with_config_and_plugin_manager(
     let project_store = Arc::new(talos_store::project::MockProjectStore::new());
     let files = test_file_service(project_store.clone(), config.storage.files.clone()).await;
     let reload_hook = test_config_reload_hook(config.clone());
+    let config_service = talos_service::ConfigService::new(
+        config_store,
+        plugin_manager.execution_gate(),
+        reload_hook,
+    );
     let app = TalosService::new(
-        Arc::new(TestAgentCoordinator),
+        Arc::new(TestAgentCoordinator(
+            config.clone(),
+            memory,
+            plugin_manager.clone(),
+            config_service.clone(),
+        )),
+        nodes,
         session_store,
         agent_execution_store,
         project_store,
@@ -58,13 +69,8 @@ async fn test_state_with_config_and_plugin_manager(
         files,
         event_service.clone(),
         config.clone(),
-        plugin_manager,
-        memory,
-        config_store,
-        vec![test_model_info()],
         auth_service.clone(),
         user_service,
-        reload_hook,
     );
     Arc::new(HttpApiState::from_service(
         Arc::new(app),
@@ -175,6 +181,7 @@ async fn test_get_and_put_web_search_config_handlers() {
     let update_response = put_config_handler(
         State(state.clone()),
         Some(axum::extract::Extension(admin_auth())),
+        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
         Json(talos_types::ConfigValue::WebSearch(Box::new(
             web_search.clone(),
         ))),
@@ -192,6 +199,7 @@ async fn test_get_and_put_web_search_config_handlers() {
     let get_response = get_config_handler(
         State(state),
         Some(axum::extract::Extension(admin_auth())),
+        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
         Path("webSearch".to_string()),
     )
     .await
@@ -214,6 +222,7 @@ async fn test_config_handler_rejects_regular_user_updates() {
     let error = put_config_handler(
         State(state),
         Some(axum::extract::Extension(test_auth())),
+        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
         Json(talos_types::ConfigValue::WebSearch(Box::default())),
     )
     .await
@@ -444,6 +453,7 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
     let state = test_state_with_config(config, false).await;
 
     let response = get_workspace_doc_handler(
+        Query(Default::default()),
         State(state),
         axum::extract::Extension(test_auth()),
         Path("soul".to_string()),
@@ -468,6 +478,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
         Json(talos_types::MemoryFileWriteRequest {
+            node_id: None,
             date: "2026-04-04".to_string(),
             content: canonical_memory("stable fact"),
             expected_version: None,
@@ -480,6 +491,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     assert_eq!(put_data.file.date, "2026-04-04");
 
     let get_response = get_memory_file_handler(
+        Query(Default::default()),
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
@@ -525,6 +537,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
         Json(talos_types::MemoryFileWriteRequest {
+            node_id: None,
             date: "2026-04-04".to_string(),
             content: canonical_memory("shared service fact"),
             expected_version: None,
@@ -541,6 +554,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
             ClientRequest {
                 method: ClientMethod::MemoryFileRead,
                 params: ClientRequestParams::MemoryFileRead(MemoryFileReadRequest {
+                    node_id: None,
                     date: "2026-04-04".to_string(),
                 }),
             },
@@ -558,6 +572,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
             ClientRequest {
                 method: ClientMethod::WorkspaceDocRead,
                 params: ClientRequestParams::WorkspaceDocRead(WorkspaceDocReadRequest {
+                    node_id: None,
                     kind: WorkspaceDocKind::Soul,
                 }),
             },
@@ -656,6 +671,7 @@ Use this skill for protocol contract verification.
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Json(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: vec!["skills".to_string()],
@@ -677,6 +693,7 @@ Use this skill for protocol contract verification.
             ClientRequest {
                 method: ClientMethod::PluginSearch,
                 params: ClientRequestParams::PluginSearch(PluginSearchRequest {
+                    node_id: None,
                     query: Some("contract".to_string()),
                     source_id: Some(added.source.id),
                     kind: Some(PluginKind::Skill),
@@ -723,6 +740,7 @@ Use this skill for protocol contract verification.
                 method: ClientMethod::McpAuthenticationRead,
                 params: ClientRequestParams::McpAuthenticationRead(
                     talos_types::McpAuthenticationReadRequest {
+                        node_id: None,
                         server: owner.clone(),
                     },
                 ),
@@ -738,6 +756,7 @@ Use this skill for protocol contract verification.
                 method: ClientMethod::McpCredentialsUpdate,
                 params: ClientRequestParams::McpCredentialsUpdate(
                     talos_types::McpCredentialsUpdateRequest {
+                        node_id: None,
                         server: owner,
                         change: talos_types::McpCredentialsChange::Clear,
                     },
@@ -791,6 +810,7 @@ Use this skill for protocol contract verification.
             State(state.clone()),
             axum::extract::Extension(test_auth()),
             Query(talos_types::McpServerListRequest {
+                node_id: None,
                 cursor: None,
                 limit: Some(1),
             }),
@@ -807,6 +827,7 @@ Use this skill for protocol contract verification.
             ClientRequest {
                 method: ClientMethod::McpServerList,
                 params: ClientRequestParams::McpServerList(talos_types::McpServerListRequest {
+                    node_id: None,
                     cursor: first.next_cursor,
                     limit: Some(1),
                 }),
@@ -824,6 +845,7 @@ Use this skill for protocol contract verification.
         State(state),
         axum::extract::Extension(test_auth()),
         Query(talos_types::McpServerListRequest {
+            node_id: None,
             cursor: None,
             limit: Some(0)
         })
@@ -864,6 +886,7 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     assert_eq!(search_data.data[0].source.date, "2026-04-04");
     let memory_id = search_data.data[0].memory_id.clone();
     let detail = get_memory_handler(
+        Query(Default::default()),
         State(state),
         axum::extract::Extension(test_auth()),
         Path(memory_id.clone()),
@@ -911,9 +934,13 @@ async fn workspace_info_http_and_rpc_share_actor_scoped_storage_locations() {
             .into_owned(),
     };
     let state = test_state_with_config(config, false).await;
-    let http = workspace_info_handler(State(state.clone()), axum::extract::Extension(test_auth()))
-        .await
-        .unwrap();
+    let http = workspace_info_handler(
+        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+        State(state.clone()),
+        axum::extract::Extension(test_auth()),
+    )
+    .await
+    .unwrap();
     assert_eq!(expect_success(http.0), expected);
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
     let rpc = adapter
@@ -921,7 +948,9 @@ async fn workspace_info_http_and_rpc_share_actor_scoped_storage_locations() {
             &talos_service::Actor::regular("static-token"),
             ClientRequest {
                 method: ClientMethod::WorkspaceInfo,
-                params: ClientRequestParams::WorkspaceInfo(talos_types::WorkspaceInfoRequest {}),
+                params: ClientRequestParams::WorkspaceInfo(talos_types::WorkspaceInfoRequest {
+                    node_id: None,
+                }),
             },
         )
         .await

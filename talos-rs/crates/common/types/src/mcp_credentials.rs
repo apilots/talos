@@ -41,6 +41,9 @@ impl std::fmt::Debug for McpCredentialValues {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpCredentialsUpdateRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub server: McpDefinitionRef,
     pub change: McpCredentialsChange,
 }
@@ -55,6 +58,9 @@ pub enum McpCredentialsChange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpAuthenticationReadRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub server: McpDefinitionRef,
 }
 
@@ -89,6 +95,9 @@ pub enum McpAuthenticationState {
 #[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpServerImportRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub json: String,
     #[ts(optional)]
     pub name: Option<String>,
@@ -107,6 +116,9 @@ impl std::fmt::Debug for McpServerImportRequest {
 #[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpAuthenticationStartRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub server: McpDefinitionRef,
     pub config: crate::McpOAuthConfig,
     #[ts(optional)]

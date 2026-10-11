@@ -16,7 +16,7 @@ use talos_types::{
     ModelRef, ModelUsageKind, SessionInfo, StartTurnRequest, StartTurnResponse, TalosConfig,
     TurnCommandStatus, UserActionResponse, UserActionState,
 };
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::oneshot;
 use {tracing::error, uuid::Uuid};
 
 use crate::message_queue::MessageQueueReservation;
@@ -47,7 +47,7 @@ pub(crate) struct TurnService {
     profile_store: Arc<dyn ProfileStore>,
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
-    execution_gate: Arc<RwLock<()>>,
+    execution_gate: Arc<super::NodeAdmissionGates>,
 }
 
 struct TurnSubmission {
@@ -62,7 +62,7 @@ impl TurnService {
         profile_store: Arc<dyn ProfileStore>,
         message_queue: SessionMessageQueueService,
         base_config: TalosConfig,
-        execution_gate: Arc<RwLock<()>>,
+        execution_gate: Arc<super::NodeAdmissionGates>,
     ) -> Self {
         Self {
             execution,
@@ -113,7 +113,11 @@ impl TurnService {
         request_id: String,
         identity: AgentTurnRef,
     ) -> TalosResult<SessionInfo> {
-        let _admission_guard = self.execution_gate.read().await;
+        let _admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         let context = self
             .execution
             .sessions
@@ -274,7 +278,11 @@ impl TurnService {
         prepared: Option<PreparedTurnSubmission>,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<StartTurnResponse> {
-        let _admission_guard = self.execution_gate.read().await;
+        let _admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         validate_user_input(&submission.input)?;
         let session_id = session.id.clone();
         let request_hash = turn_submission_hash(&session_id, &submission.input)?;

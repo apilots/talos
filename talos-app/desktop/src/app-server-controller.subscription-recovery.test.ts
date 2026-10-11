@@ -34,6 +34,8 @@ class RecoveryBridge implements AppServerBridge {
     return Promise.resolve({} as T);
   }
 
+  onNotification(): () => void { return () => undefined; }
+
   onEvent(): () => void {
     return () => undefined;
   }

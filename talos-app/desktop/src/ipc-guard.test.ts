@@ -4,6 +4,14 @@ import type { AppProtocol } from "@talos/sdk-core";
 import { assertDesktopRendererInvoke, isDesktopRendererMethod } from "./ipc-guard";
 
 describe("desktop IPC guard", () => {
+  it("allows Computer metadata operations while keeping credentials in the trusted host", () => {
+    expect(() => assertDesktopRendererInvoke("computer/list", { query: "laptop", limit: 50 })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("computer/read", { nodeId: "node-1" })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("computer/rename", { nodeId: "node-1", displayName: "Laptop" })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("computer/setStatus", { nodeId: "node-1", status: "disabled" })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("computer/create", { displayName: "Laptop", credentialExpiresAt: 2000000000 })).toThrow();
+    expect(() => assertDesktopRendererInvoke("computer/rotateCredential", { nodeId: "node-1", expiresAt: 2000000000 })).toThrow();
+  });
   it("allows typed file methods without duplicating file business validation", () => {
     expect(() =>
       assertDesktopRendererInvoke("file/upload", {

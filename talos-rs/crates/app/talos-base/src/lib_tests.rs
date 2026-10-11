@@ -1,7 +1,7 @@
 use super::{
     apply_runtime_options, build_application_runtime_with_migration_dir, create_llm_provider,
-    resolve_webui_dir, ReloadableLlmProvider, TalosServerHandle, TalosServerOptions,
-    WebuiLookupInput, WebuiLookupResult, SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    resolve_webui_dir, TalosServerHandle, TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
+    SERVER_SHUTDOWN_WAIT_TIMEOUT,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use talos_config::{
 };
 use talos_coordinator::AgentCoordinator;
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_llm_provider::ChatRequest;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -413,64 +413,6 @@ async fn deepseek_provider_uses_chat_completions_path_and_concrete_provider() {
         "/chat/completions"
     );
     assert_eq!(response.content, "ok");
-}
-
-#[tokio::test]
-async fn reloadable_llm_provider_uses_reloaded_provider() {
-    let provider = ReloadableLlmProvider::new(Arc::new(TestLlmProvider {
-        text: "before".to_string(),
-        model: "model-a".to_string(),
-    }));
-
-    let first = provider
-        .chat(ChatRequest::new_user("hello", "model-a"))
-        .await
-        .expect("first provider should respond");
-    provider.reload(Arc::new(TestLlmProvider {
-        text: "after".to_string(),
-        model: "model-b".to_string(),
-    }));
-    let second = provider
-        .chat(ChatRequest::new_user("hello", "model-a"))
-        .await
-        .expect("reloaded provider should respond");
-
-    assert_eq!(first.content, "before");
-    assert_eq!(second.content, "after");
-    assert_eq!(provider.default_model(), "model-b");
-}
-
-struct TestLlmProvider {
-    text: String,
-    model: String,
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for TestLlmProvider {
-    fn name(&self) -> &str {
-        "test"
-    }
-
-    async fn chat(&self, request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
-        Ok(ChatResponse {
-            content: self.text.clone(),
-            reasoning: Default::default(),
-            model: request.model,
-            usage: Usage::default(),
-            finish_reason: Some("stop".to_string()),
-            tool_calls: None,
-        })
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
-        Err(talos_error::TalosError::internal(
-            "stream is not used in this test",
-        ))
-    }
-
-    fn default_model(&self) -> String {
-        self.model.clone()
-    }
 }
 
 #[tokio::test]

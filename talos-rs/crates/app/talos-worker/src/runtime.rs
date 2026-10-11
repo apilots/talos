@@ -33,6 +33,7 @@ pub struct TalosWorkerResources {
 }
 
 /// One Agent execution runtime shared by embedded and standalone hosts.
+#[derive(Clone)]
 pub struct TalosWorker {
     harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     config: Arc<RwLock<Config>>,
@@ -44,6 +45,7 @@ pub struct TalosWorker {
     mcp: Arc<talos_mcp::TalosMcpRuntime>,
     mcp_credentials: McpCredentialStore,
     collaboration_tools_enabled: bool,
+    config_service: talos_service::ConfigService,
 }
 
 impl TalosWorker {
@@ -118,7 +120,8 @@ impl TalosWorker {
         let memory_store = Arc::new(
             MemoryStore::open(&config.talos_paths().data_dir.join("memory-index.sqlite")).await?,
         );
-        let memory_service = MemoryService::new(config.clone(), memory_store)?;
+        let memory_service = MemoryService::new(config.clone(), memory_store)?
+            .with_live_config(active_config.clone());
         memory_service.rebuild_known_scopes().await?;
         tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
         let user_workspace_memory = Arc::new(UserWorkspaceMemoryService::new());
@@ -127,6 +130,7 @@ impl TalosWorker {
         let session_artifact_store: Arc<dyn KernelSessionArtifactStore> =
             Arc::new(FileKernelSessionArtifactStore);
         let mut harnesses = Vec::new();
+        let mut providers = Vec::new();
         for definition in AgentDefinitionLoader::load(&config.agent)? {
             if !definition.enabled {
                 continue;
@@ -154,12 +158,15 @@ impl TalosWorker {
                     })?
                 }
             };
+            providers.push((definition.id.clone(), provider.clone()));
             harnesses.push((
                 definition.id.clone(),
                 Arc::new(crate::harness::WorkerHarness {
                     provider: provider.clone(),
                     execution: create_agent_harness(definition.id, provider),
                     workspace_memory: user_workspace_memory.clone(),
+                    execution_gate: plugin_manager.execution_gate(),
+                    config: active_config.clone(),
                 }) as Arc<dyn AgentHarness>,
             ));
         }
@@ -170,6 +177,15 @@ impl TalosWorker {
             ));
         }
 
+        let config_service = crate::config::service(
+            active_config.clone(),
+            provider_router.clone(),
+            plugin_manager.clone(),
+            mcp.clone(),
+            mcp_credentials.clone(),
+            providers,
+        );
+        let plugin_manager = plugin_manager.with_config_service(config_service.clone());
         Ok(Self {
             harnesses,
             config: active_config,
@@ -181,7 +197,26 @@ impl TalosWorker {
             mcp,
             mcp_credentials,
             collaboration_tools_enabled,
+            config_service,
         })
+    }
+
+    /// The same node-local environment is used by embedded and network hosts.
+    pub fn environment(&self) -> Arc<dyn agent_protocol::WorkerEnvironment> {
+        Arc::new(
+            talos_service::WorkerEnvironmentService::new(
+                self.config.clone(),
+                std::env::var_os("HOME").map(std::path::PathBuf::from),
+            )
+            .with_user_workspace_memory(self.user_workspace_memory.clone())
+            .with_memory_service(self.memory_service.clone())
+            .with_plugin_manager(self.plugin_manager.clone())
+            .with_config_service(self.config_service.clone()),
+        )
+    }
+
+    pub fn config_service(&self) -> talos_service::ConfigService {
+        self.config_service.clone()
     }
 
     pub fn harnesses(&self) -> &[(String, Arc<dyn AgentHarness>)] {
@@ -211,22 +246,6 @@ impl TalosWorker {
 
     pub fn plugin_manager(&self) -> PluginManagerService {
         self.plugin_manager.clone()
-    }
-
-    pub fn memory_service(&self) -> MemoryService {
-        self.memory_service.clone()
-    }
-
-    pub fn user_workspace_memory(&self) -> Arc<UserWorkspaceMemoryService> {
-        self.user_workspace_memory.clone()
-    }
-
-    pub fn mcp_runtime(&self) -> Arc<talos_mcp::TalosMcpRuntime> {
-        self.mcp.clone()
-    }
-
-    pub fn mcp_credentials(&self) -> McpCredentialStore {
-        self.mcp_credentials.clone()
     }
 
     pub fn install_agent_control(&self, agent_control: Arc<dyn AgentControl>) {

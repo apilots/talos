@@ -3,8 +3,9 @@ mod types;
 
 pub use store::{AgentNodeStore, DatabaseAgentNodeStore};
 pub use types::{
-    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodePageRecord, NodeRecord,
-    RegisterNodeParams, RenewNodeParams, RotateCredentialParams, UpdateNodeParams,
+    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodeListScope,
+    NodePageRecord, NodeRecord, RegisterNodeParams, RenameNodeParams, RenewNodeParams,
+    RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
 };
 
 #[cfg(test)]

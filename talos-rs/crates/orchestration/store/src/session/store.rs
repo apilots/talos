@@ -44,7 +44,7 @@ pub trait SessionStore: Send + Sync {
     async fn has_active_subagent_turn(&self, tree_root_session_id: &str) -> TalosResult<bool>;
 
     /// Returns whether any Session currently owns a non-terminal Agent Turn.
-    async fn has_nonterminal_turns(&self) -> TalosResult<bool>;
+    async fn has_nonterminal_turns(&self, node_id: Option<&str>) -> TalosResult<bool>;
 
     /// Atomically rejects active Sessions and replaces only settings-owned columns.
     async fn patch_session(&self, params: PatchSessionParams)
@@ -298,6 +298,10 @@ impl SessionStore for DatabaseSessionStore {
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
+        if let Some(node_id) = query.execution_node_id.as_deref() {
+            clauses.push("execution_node_id = ?");
+            params.push(node_id.to_string());
+        }
         if let Some(user_id) = query.user_id.as_deref() {
             clauses.push("user_id = ?");
             params.push(user_id.to_string());
@@ -366,6 +370,10 @@ impl SessionStore for DatabaseSessionStore {
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
+        if let Some(node_id) = query.execution_node_id.as_deref() {
+            clauses.push("execution_node_id = ?");
+            params.push(node_id.to_string());
+        }
         if let Some(user_id) = query.user_id.as_deref() {
             clauses.push("user_id = ?");
             params.push(user_id.to_string());
@@ -440,11 +448,13 @@ impl SessionStore for DatabaseSessionStore {
         Ok(!rows.is_empty())
     }
 
-    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
-        let rows = self
-            .storage
-            .query("SELECT 1 AS active FROM agent_active_turns LIMIT 1", &[])
-            .await?;
+    async fn has_nonterminal_turns(&self, node_id: Option<&str>) -> TalosResult<bool> {
+        let rows = match node_id {
+            Some(node_id) => self.storage.query(
+                "SELECT 1 AS active FROM agent_active_turns a JOIN sessions s ON s.session_key = a.session_id WHERE s.execution_node_id = ? LIMIT 1", &[node_id],
+            ).await?,
+            None => self.storage.query("SELECT 1 AS active FROM agent_active_turns LIMIT 1", &[]).await?,
+        };
         Ok(!rows.is_empty())
     }
 

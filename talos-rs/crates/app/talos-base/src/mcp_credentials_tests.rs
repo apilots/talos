@@ -48,7 +48,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         build_application_runtime_with_migration_dir(config.clone(), &test_migrations_dir())
             .await
             .unwrap();
-    let plugins = &runtime.service.plugins;
+    let plugins = &runtime.worker.plugin_manager();
     for invalid in [
         json!({"mcpServers": {"one": {"command": "npx"}, "two": {"command": "npx"}}}),
         json!({"name": "old", "type": "sse", "url": url}),
@@ -57,6 +57,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     ] {
         let error = plugins
             .import_mcp_server(McpServerImportRequest {
+                node_id: None,
                 json: invalid.to_string(),
                 name: None,
                 enable: Some(false),
@@ -67,13 +68,14 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
     }
 
-    let imported = plugins.import_mcp_server(McpServerImportRequest { json: json!({"mcpServers":{"private_http":{"url":url,"headers":{"Authorization":"Bearer first-private-value"}}}}).to_string(), name: None, enable: Some(true), conflict_policy: PluginInstallConflictPolicy::Reject }).await.unwrap();
+    let imported = plugins.import_mcp_server(McpServerImportRequest { node_id: None, json: json!({"mcpServers":{"private_http":{"url":url,"headers":{"Authorization":"Bearer first-private-value"}}}}).to_string(), name: None, enable: Some(true), conflict_policy: PluginInstallConflictPolicy::Reject }).await.unwrap();
     super::mcp_tests::available(&runtime, "private_http").await;
     let owner = McpDefinitionRef::Plugin {
         install_id: imported.install.id.clone(),
     };
     let read = plugins
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: imported.plugin.id.clone(),
         })
         .unwrap();
@@ -133,6 +135,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     }
     let header_source = plugins
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: header_market.clone(),
                 sparse_paths: vec![],
@@ -145,6 +148,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         let name = plugin.metadata.name.clone();
         let installed = plugins
             .install(PluginInstallRequest {
+                node_id: None,
                 target: PluginInstallTarget::Plugin {
                     plugin_id: plugin.id,
                     expected_source_commit: None,
@@ -190,8 +194,10 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         install_id: normal_headers.install.id.clone(),
     };
     runtime
-        .service
+        .worker
+        .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
+            node_id: None,
             server: normal_owner.clone(),
             change: McpCredentialsChange::Replace {
                 credentials: McpCredentialValues {
@@ -221,6 +227,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     .unwrap();
     plugins
         .update(PluginUpdateRequest {
+            node_id: None,
             install_id: normal_headers.install.id,
             expected_source_commit: None,
             conflict_policy: PluginUpdateConflictPolicy::RejectLocalChanges,
@@ -230,6 +237,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     assert!(matches!(
         plugins
             .read_mcp_authentication(McpAuthenticationReadRequest {
+                node_id: None,
                 server: normal_owner
             })
             .unwrap()
@@ -257,6 +265,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     );
     plugins
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
@@ -268,6 +277,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     );
     plugins
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
@@ -275,8 +285,10 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     super::mcp_tests::available(&runtime, "private_http").await;
     fs::write(workspace.join("expected"), "replacement-private-value").unwrap();
     runtime
-        .service
+        .worker
+        .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
+            node_id: None,
             server: owner.clone(),
             change: McpCredentialsChange::Replace {
                 credentials: McpCredentialValues {
@@ -293,6 +305,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     assert!(!credential_file.exists(), "replaced bundles are collected");
     let updated = plugins
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: imported.plugin.id.clone(),
         })
         .unwrap();
@@ -308,6 +321,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     .unwrap();
     let source = plugins
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: market,
                 sparse_paths: vec![],
@@ -317,6 +331,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         .unwrap();
     let other = plugins
         .install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: source.plugins[0].id.clone(),
                 expected_source_commit: None,
@@ -329,6 +344,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     assert!(matches!(
         plugins
             .read_mcp_authentication(McpAuthenticationReadRequest {
+                node_id: None,
                 server: McpDefinitionRef::Plugin {
                     install_id: other.install.id
                 }
@@ -340,6 +356,7 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
     assert!(matches!(
         plugins
             .read_mcp_authentication(McpAuthenticationReadRequest {
+                node_id: None,
                 server: owner.clone()
             })
             .unwrap()
@@ -350,8 +367,10 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         .unwrap()
         .contains("replacement-private-value"));
     runtime
-        .service
+        .worker
+        .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
+            node_id: None,
             server: owner.clone(),
             change: McpCredentialsChange::Clear,
         })
@@ -362,7 +381,10 @@ async fn manual_http_credentials_are_private_replaceable_and_bound_to_their_owne
         .is_tool_available("mcp__private_http__inspect"));
     assert!(matches!(
         plugins
-            .read_mcp_authentication(McpAuthenticationReadRequest { server: owner })
+            .read_mcp_authentication(McpAuthenticationReadRequest {
+                node_id: None,
+                server: owner
+            })
             .unwrap()
             .state,
         McpAuthenticationState::Missing
@@ -438,8 +460,10 @@ async fn static_credentials_preserve_placeholders_and_follow_configuration_remov
         headers: None,
     };
     runtime
-        .service
+        .worker
+        .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
+            node_id: None,
             server: owner.clone(),
             change: McpCredentialsChange::Replace {
                 credentials: values.clone(),
@@ -478,12 +502,12 @@ async fn static_credentials_preserve_placeholders_and_follow_configuration_remov
     let mut removed = before.clone();
     removed.agent.kernel.mcp.servers.clear();
     super::mcp_tests::save(&removed);
-    runtime.service.plugins.recover_credentials();
+    runtime.worker.plugin_manager().recover_credentials();
     assert!(private_file.exists());
     runtime
-        .service
-        .config
-        .reload_config(ConfigReloadRequest {})
+        .worker
+        .config_service()
+        .reload_config(ConfigReloadRequest { node_id: None })
         .await
         .unwrap();
     assert!(!private_file.exists());

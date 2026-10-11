@@ -1,6 +1,4 @@
-use talos_auth::UserRole;
-use talos_config::DeploymentMode;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest, ConfigReloadRequest,
@@ -15,8 +13,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigGetRequest,
     ) -> TalosResult<ConfigResponse> {
-        require_config_access(actor, self.service.mode())?;
-        self.service.config.get_config(request)
+        self.service.get_config(actor, request).await
     }
 
     pub(crate) async fn update_config(
@@ -24,8 +21,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigUpdateRequest,
     ) -> TalosResult<ConfigResponse> {
-        require_config_access(actor, self.service.mode())?;
-        self.service.config.update_config(request).await
+        self.service.update_config(actor, request).await
     }
 
     pub(crate) async fn delete_config(
@@ -33,8 +29,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigDeleteRequest,
     ) -> TalosResult<ConfigDeleteResponse> {
-        require_config_access(actor, self.service.mode())?;
-        self.service.config.delete_config(request)
+        self.service.delete_config(actor, request).await
     }
 
     pub(crate) async fn reload_config(
@@ -42,17 +37,6 @@ impl ServiceGateway {
         actor: &Actor,
         request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
-        require_config_access(actor, self.service.mode())?;
-        self.service.config.reload_config(request).await
+        self.service.reload_config(actor, request).await
     }
-}
-
-fn require_config_access(actor: &Actor, mode: DeploymentMode) -> TalosResult<()> {
-    if actor.auth_disabled || mode == DeploymentMode::Local || actor.role == UserRole::Admin {
-        return Ok(());
-    }
-    Err(TalosError::new(
-        talos_error::ErrorCode::PermissionDenied,
-        "configuration management requires an admin user".to_string(),
-    ))
 }

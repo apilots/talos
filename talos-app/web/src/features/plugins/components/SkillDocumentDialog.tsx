@@ -1,3 +1,4 @@
+import { useEnvironmentKey } from "@/features/computers";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Loader2, X } from "lucide-react";
@@ -14,10 +15,11 @@ interface SkillDocumentDialogProps {
 }
 
 export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps) {
+  const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("plugins");
   const documentQuery = useQuery({
     enabled: Boolean(skill),
-    queryKey: ["talos", "skills", "document", skill?.path],
+    queryKey: ["talos", environmentKey, "skills", "document", skill?.path],
     queryFn: () => readLocalSkill(skill as SkillSummary),
   });
 

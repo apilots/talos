@@ -759,3 +759,41 @@ async fn missing_session_rolls_back_the_terminal_fact_and_nonterminal_deletion()
         Some(AgentTurnRef::new("session-1", "turn-1"))
     );
 }
+
+#[tokio::test]
+async fn config_admission_checks_nonterminal_turns_only_on_the_target_node() {
+    let store = store().await;
+    let mut session = session_record();
+    session.execution_node_id = "computer-a".into();
+    store.insert_session_record(&session).await.unwrap();
+    let admitted = store
+        .commit_initial_admission(initial_admission(admission()))
+        .await
+        .unwrap();
+    assert!(store
+        .has_nonterminal_turns(Some("computer-a"))
+        .await
+        .unwrap());
+    assert!(!store
+        .has_nonterminal_turns(Some("computer-b"))
+        .await
+        .unwrap());
+    assert!(store.has_nonterminal_turns(None).await.unwrap());
+    store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: event(
+                3,
+                AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            ),
+            expected_event_seq: admitted.active_turn.last_event_seq,
+            completed_turn_metrics: Some(AgentRunMetrics::default()),
+        })
+        .await
+        .unwrap();
+    assert!(!store
+        .has_nonterminal_turns(Some("computer-a"))
+        .await
+        .unwrap());
+}

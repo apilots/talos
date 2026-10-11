@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod mcp_credentials;
 pub mod message_queue;
 pub mod model;
+pub mod node;
 pub mod plugin;
 pub mod profile_api;
 mod response;
@@ -40,6 +41,7 @@ pub use mcp::*;
 pub use mcp_credentials::*;
 pub use message_queue::*;
 pub use model::*;
+pub use node::*;
 pub use plugin::*;
 pub use profile_api::*;
 pub use response::ApiResponse;
@@ -55,3 +57,6 @@ pub use user_action::*;
 #[cfg(test)]
 #[path = "types_tests.rs"]
 mod tests;
+
+mod desktop;
+pub use desktop::*;

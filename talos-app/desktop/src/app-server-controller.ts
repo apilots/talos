@@ -1,4 +1,4 @@
-import type { AppProtocol } from "@talos/sdk-core";
+import { AppProtocol, TalosApiError, decodeApiError } from "@talos/sdk-core";
 import {
   createDesktopMainAppServerBridge,
   type AppServerClientOptions,
@@ -15,6 +15,7 @@ export interface AppServerBridge {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T>;
+  onNotification(handler: (notification: AppProtocol.JsonRpcNotification) => void): () => void;
   onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void;
   onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void;
   onError(handler: (error: Error) => void): () => void;
@@ -32,6 +33,8 @@ export interface DesktopAppServerControllerOptions extends AppServerClientOption
   onRuntimeState?: (state: TalosRuntimeState) => void;
   onServerRequest?: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown;
   restartDelayMs?: number;
+  /** Enable host enrollment only for the packaged Desktop composition. */
+  desktopHost?: boolean;
 }
 
 interface SubscriptionReplayState {
@@ -49,6 +52,7 @@ export class DesktopAppServerController {
   private initializeResponse?: AppProtocol.InitializeResponse;
   private reconnecting?: Promise<void>;
   private closed = false;
+  private connection?: AppProtocol.DesktopConnectionResponse;
   private readonly subscriptions = new Map<string, SubscriptionReplayState>();
   private readonly sessionsBySubscriptionId = new Map<string, string>();
 
@@ -61,6 +65,16 @@ export class DesktopAppServerController {
     this.closed = false;
     this.emitRuntimeState("starting", null);
     const response = await this.ensureBridge().connect();
+    if (this.options.desktopHost) {
+      this.connection = await this.ensureBridge().invoke<AppProtocol.DesktopConnectionResponse>("desktop/connection/read", null);
+      if (this.connection.connectionMode === "cloud") {
+        const session = await this.ensureBridge().invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
+        this.initializeResponse = response;
+        this.emitRuntimeState("ready", null);
+        if (session.session) { await this.enrollWorker(); }
+        return response;
+      }
+    }
     this.initializeResponse = response;
     this.emitRuntimeState("ready", null);
     return response;
@@ -79,6 +93,17 @@ export class DesktopAppServerController {
       ? this.resolveUnsubscribeParams(params as AppProtocol.EventUnsubscribeRequest)
       : params;
     const result = await this.ensureBridge().invoke<T>(method, effectiveParams, options);
+    if (this.connection?.connectionMode === "cloud" && (
+      (method === "auth/login/status" && (result as AppProtocol.CloudLoginStatusResponse).status === "authenticated") ||
+      (method === "auth/session/read" && (result as AppProtocol.AuthSessionReadResponse).session !== null)
+    )) {
+      await this.enrollWorker();
+    }
+    if (method === "desktop/workerEnroll") this.emitRuntimeState("ready", null);
+    if (method === "desktop/connection/set") {
+      await this.close();
+      await this.connect();
+    }
     if (method === "event/subscribe") {
       this.recordSubscription(params as AppProtocol.SubscribeTimelineRequest, result as AppProtocol.SubscribeTimelineResponse);
     }
@@ -99,16 +124,41 @@ export class DesktopAppServerController {
     this.emitRuntimeState("stopped", null);
   }
 
+  /** Enrollment is independent of successful login; report its failure without rewriting auth. */
+  private async enrollWorker(): Promise<void> {
+    try {
+      await this.ensureBridge().invoke("desktop/workerEnroll", { nodeId: null });
+      this.emitRuntimeState("ready", null);
+    } catch (error) {
+      if (!(error instanceof TalosApiError)) { console.error("Desktop Worker enrollment failed", error); }
+      this.options.onRuntimeState?.({
+        kind: "error",
+        message: "Worker registration failed. Recover or reconnect this computer to retry.",
+        error: error instanceof TalosApiError ? error.apiError : {
+          code: AppProtocol.ErrorCode.InternalError,
+          message: "Worker registration failed; technical details are available in the desktop log.",
+          localization: null,
+        },
+      });
+    }
+  }
+
   private ensureBridge(): AppServerBridge {
     if (this.bridge) {
       return this.bridge;
     }
 
     const bridge = this.createBridge();
+    bridge.onNotification((notification) => {
+      if (this.bridge !== bridge || notification.method !== "desktop/worker/failed") return;
+      try {
+        this.options.onRuntimeState?.({ kind: "error", message: null, error: decodeApiError(notification.params) });
+      } catch (error) { this.handleError(error); }
+    });
     bridge.onEvent((event) => this.handleEvent(event));
     bridge.onSubscriptionTerminated((notification) => this.handleSubscriptionTerminated(notification));
     bridge.onError((error) => this.handleError(error));
-    bridge.onExit((status) => this.handleExit(status));
+    bridge.onExit((status) => { if (this.bridge === bridge) this.handleExit(status); });
     bridge.onStderr((chunk) => {
       if (chunk.trim()) {
         console.error("App-server diagnostics:", chunk.trim());

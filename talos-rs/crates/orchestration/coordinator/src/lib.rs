@@ -16,3 +16,5 @@ pub use router::AgentSelectionParams;
 pub mod prelude {
     pub use super::{AgentCoordinator, CoordinatorImpl};
 }
+
+pub use agent_protocol::{WorkerEnvironment, WorkerEnvironmentContext};

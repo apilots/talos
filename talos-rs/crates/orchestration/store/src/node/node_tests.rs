@@ -7,6 +7,114 @@ use talos_storage::SqliteStorage;
 use super::*;
 
 #[tokio::test]
+async fn outbound_migration_preserves_registered_nodes_and_security_constraints() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let migrations = sqlx::migrate::Migrator::new(crate::migration::test_migrations_dir())
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            migrations
+                .iter()
+                .filter(|migration| migration.version < 202610110001)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(storage.pool())
+    .await
+    .unwrap();
+    let nodes = DatabaseAgentNodeStore::new(storage.pool().clone());
+    let direct = CreateNodeParams {
+        node_id: "existing-node".into(),
+        owner_user_id: Some("owner".into()),
+        display_name: "Existing laptop".into(),
+        mode: NodeMode::Remote,
+        endpoint: Some("https://node.example".into()),
+        credential_hash: Some([11; 32]),
+        credential_expires_at: Some(300),
+        now_at: 10,
+    };
+    let direct_id = direct.node_id.clone();
+    nodes.create(direct).await.unwrap();
+    nodes
+        .register(RegisterNodeParams {
+            node_id: direct_id.clone(),
+            expected_credential_hash: [11; 32],
+            lease_token_hash: [22; 32],
+            lease_expires_at: 100,
+            now_at: 10,
+        })
+        .await
+        .unwrap();
+    let before = nodes.get(&direct_id).await.unwrap().unwrap();
+    nodes
+        .upsert_embedded(NodeStatus::Enabled, 10)
+        .await
+        .unwrap();
+    crate::migration::run_migrations(storage.pool(), &crate::migration::test_migrations_dir())
+        .await
+        .unwrap();
+    let after = nodes.get(&direct_id).await.unwrap().unwrap();
+    assert!(
+        after == before,
+        "migration must preserve the entire registered node"
+    );
+    assert_eq!(
+        nodes.get("embedded").await.unwrap().unwrap().mode,
+        NodeMode::Embedded
+    );
+
+    let outbound = |node_id: &str| CreateNodeParams {
+        node_id: node_id.into(),
+        owner_user_id: Some("owner".into()),
+        display_name: "Outbound laptop".into(),
+        mode: NodeMode::Remote,
+        endpoint: None,
+        credential_hash: Some([11; 32]),
+        credential_expires_at: Some(300),
+        now_at: 10,
+    };
+    assert_eq!(
+        nodes
+            .create(outbound("outbound-node"))
+            .await
+            .unwrap()
+            .endpoint,
+        None
+    );
+    for invalid in [
+        CreateNodeParams {
+            owner_user_id: None,
+            ..outbound("missing-owner")
+        },
+        CreateNodeParams {
+            credential_hash: None,
+            ..outbound("missing-credential")
+        },
+        CreateNodeParams {
+            endpoint: Some(" ".into()),
+            ..outbound("empty-endpoint")
+        },
+    ] {
+        assert!(nodes.create(invalid).await.is_err());
+    }
+    assert!(nodes
+        .register(RegisterNodeParams {
+            node_id: "outbound-node".into(),
+            expected_credential_hash: [11; 32],
+            lease_token_hash: [33; 32],
+            lease_expires_at: 301,
+            now_at: 10,
+        })
+        .await
+        .is_err());
+}
+
+#[tokio::test]
 async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease() {
     let directory = tempfile::tempdir().unwrap();
     let database = directory.path().join("agent-nodes.db");
@@ -111,7 +219,11 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
     assert_eq!(
         nodes
             .list(ListNodesParams {
-                owner_user_id: Some("user-2".into()),
+                scope: NodeListScope::Owner {
+                    user_id: "user-2".into(),
+                    include_embedded: false
+                },
+                query: None,
                 cursor: None,
                 limit: 50,
             })

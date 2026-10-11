@@ -319,6 +319,15 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         node_store,
     ));
     coordinator
+        .register_environment(
+            "embedded".into(),
+            Arc::new(talos_service::WorkerEnvironmentService::new(
+                Arc::new(std::sync::RwLock::new(config.clone())),
+                Some(std::env::temp_dir()),
+            )),
+        )
+        .await;
+    coordinator
         .register_agent("embedded".into(), AGENT_ID.to_string(), agent)
         .await
         .expect("integration agent should register");
@@ -336,6 +345,7 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
             &actor,
             super::request_source(),
             StartTurnRequest {
+                node_id: None,
                 session_id: SESSION_ID.to_string(),
                 input: AgentUserInput {
                     content: vec![AgentUserContent::Text {

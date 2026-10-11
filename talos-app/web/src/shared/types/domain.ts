@@ -2,7 +2,6 @@ import { i18n } from "@/shared/i18n/setup";
 import { jsonContentValue } from "@talos/sdk-browser";
 import type { SessionInfo, TalosContentItem } from "./protocol";
 import type {
-  MemoryItemView,
   ProjectView,
   SessionUiStatus,
   StreamSessionState,
@@ -79,40 +78,6 @@ export function resolveProjectView(projects: ProjectView[], projectId?: string |
 
 export function isUnboundProject(projectId?: string | null) {
   return !projectId || projectId === UNBOUND_PROJECT_ID;
-}
-
-export function createDefaultMemory(): MemoryItemView[] {
-  const now = Date.now();
-  return [
-    {
-      id: "memory-1",
-      title: "Role and background",
-      detail: "You are a Rust backend engineer building Talos and care about strong API contracts.",
-      tags: ["profile", "engineer"],
-      updatedAt: now,
-    },
-    {
-      id: "memory-2",
-      title: "Code review preference",
-      detail: "Prefer concise findings first, then risks, then next steps.",
-      tags: ["review", "ui"],
-      updatedAt: now - 60_000,
-    },
-    {
-      id: "memory-3",
-      title: "Workspace convention",
-      detail: "New frontend work lives under talos-app/ and mirrors shared APIs first.",
-      tags: ["workspace"],
-      updatedAt: now - 120_000,
-    },
-    {
-      id: "memory-4",
-      title: "Communication preference",
-      detail: "Prefer direct explanations in Chinese during collaboration and English in code artifacts.",
-      tags: ["communication", "style"],
-      updatedAt: now - 180_000,
-    },
-  ];
 }
 
 export function outputContentToText(content: TalosContentItem[]) {

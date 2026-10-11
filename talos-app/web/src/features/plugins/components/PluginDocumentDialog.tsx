@@ -1,3 +1,4 @@
+import { useEnvironmentKey } from "@/features/computers";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
@@ -19,11 +20,12 @@ interface PluginDocumentDialogProps {
 }
 
 export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogProps) {
+  const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("plugins");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const documentQuery = useQuery({
     enabled: Boolean(plugin),
-    queryKey: ["talos", "plugins", "document", plugin?.id],
+    queryKey: ["talos", environmentKey, "plugins", "document", plugin?.id],
     queryFn: () => readPluginDocument(plugin as Plugin),
   });
 

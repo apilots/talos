@@ -348,6 +348,7 @@ fn build_start_turn_request(
     (
         source,
         StartTurnRequest {
+            node_id: None,
             session_id,
             input,
             model_selection: None,

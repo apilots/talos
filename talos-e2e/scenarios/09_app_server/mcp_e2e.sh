@@ -7,6 +7,16 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 build_app_server_binaries
 prepare_talos_home
+python3 - <<'PYTHON'
+import os
+from pathlib import Path
+import yaml
+path = Path(os.environ['TALOS_HOME']) / 'conf/talos.yaml'
+config = yaml.safe_load(path.read_text())
+servers = config['agent']['kernel']['mcp']['servers']
+config['agent']['kernel']['mcp']['servers'] = [server for server in servers if server['name'] != 'playwright']
+path.write_text(yaml.safe_dump(config, sort_keys=False))
+PYTHON
 
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
 export TALOS_PLAYWRIGHT_MCP_BROWSER="${TALOS_PLAYWRIGHT_MCP_BROWSER:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"

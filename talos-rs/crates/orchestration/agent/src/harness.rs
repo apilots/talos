@@ -247,3 +247,7 @@ mod test_support;
 #[cfg(test)]
 #[path = "rpc_tests.rs"]
 mod rpc_tests;
+
+#[cfg(test)]
+#[path = "rpc_connect_tests.rs"]
+mod rpc_connect_tests;

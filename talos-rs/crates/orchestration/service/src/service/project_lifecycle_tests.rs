@@ -14,8 +14,11 @@ async fn project_delete_is_blocked_until_owned_files_are_removed() {
     let project = service
         .create_project(
             &actor,
-            "Project with file".to_string(),
-            directory.path().to_path_buf(),
+            talos_types::ProjectCreateRequest {
+                node_id: None,
+                name: "Project with file".to_string(),
+                directory: directory.path().to_path_buf(),
+            },
         )
         .await
         .unwrap();

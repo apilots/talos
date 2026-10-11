@@ -1,16 +1,10 @@
 use std::sync::Arc;
 
-use talos_config::{
-    provider_config_for_llm, ConfigStore, LlmConfig, WebSearchProviderRuntimeConfig,
-    WebSearchToolConfig,
-};
+use talos_config::{ConfigStore, WebSearchProviderRuntimeConfig, WebSearchToolConfig};
 use talos_error::{TalosError, TalosResult};
-use talos_store::session::SessionStore;
 use talos_types::{
-    resolve_default_model_selection, resolve_model_catalog, ConfigDeleteRequest,
-    ConfigDeleteResponse, ConfigGetRequest, ConfigPath, ConfigReloadRequest, ConfigReloadResponse,
-    ConfigResponse, ConfigUpdateRequest, ConfigValue, ModelInfo, ModelListResponse, ModelRef,
-    ModelSelection,
+    ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest, ConfigPath, ConfigReloadRequest,
+    ConfigReloadResponse, ConfigResponse, ConfigUpdateRequest, ConfigValue,
 };
 use tokio::sync::RwLock;
 
@@ -19,8 +13,6 @@ use super::types::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger};
 #[derive(Clone)]
 pub struct ConfigService {
     config_store: Arc<dyn ConfigStore>,
-    models: Arc<RwLock<Vec<ModelInfo>>>,
-    session_store: Arc<dyn SessionStore>,
     execution_gate: Arc<RwLock<()>>,
     reload_hook: ConfigReloadHook,
 }
@@ -51,70 +43,14 @@ impl ConfigService {
 
     pub fn new(
         config_store: Arc<dyn ConfigStore>,
-        models: Vec<ModelInfo>,
-        session_store: Arc<dyn SessionStore>,
         execution_gate: Arc<RwLock<()>>,
         reload_hook: ConfigReloadHook,
     ) -> Self {
         Self {
             config_store,
-            models: Arc::new(RwLock::new(models)),
-            session_store,
             execution_gate,
             reload_hook,
         }
-    }
-
-    pub async fn list_models(&self) -> TalosResult<ModelListResponse> {
-        let llm = self.config_store.load_llm_raw()?;
-        let default_model_selection = resolve_default_model_selection(&llm)?;
-        Ok(ModelListResponse {
-            models: self.models.read().await.clone(),
-            default_model_selection,
-        })
-    }
-
-    pub fn validate_model_selection_supported(
-        &self,
-        selection: &ModelSelection,
-    ) -> TalosResult<()> {
-        let model = self.model_info_for_ref(&selection.model_ref)?;
-        selection.resolve_reasoning(&model)?;
-        Ok(())
-    }
-
-    fn model_info_for_ref(&self, model_ref: &ModelRef) -> TalosResult<ModelInfo> {
-        if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ProviderUnavailable,
-                format!("{}:{}", model_ref.provider, model_ref.id),
-            ));
-        }
-        let llm = self.config_store.load_llm_raw()?;
-        let Some(provider) = provider_config_for_llm(&llm, &model_ref.provider) else {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ProviderUnavailable,
-                format!("{}:{}", model_ref.provider, model_ref.id),
-            ));
-        };
-        if let Some(model) = provider
-            .models
-            .iter()
-            .find(|entry| entry.id == model_ref.id)
-        {
-            return Ok(ModelInfo::from_provider_model(
-                model_ref.provider.clone(),
-                model.clone(),
-            ));
-        }
-        Err(TalosError::new(
-            talos_error::ErrorCode::ProviderUnavailable,
-            format!("{}:{}", model_ref.provider, model_ref.id),
-        ))
-    }
-
-    pub fn get_llm(&self) -> TalosResult<LlmConfig> {
-        self.config_store.load_llm_raw()
     }
 
     pub fn get_config(&self, request: ConfigGetRequest) -> TalosResult<ConfigResponse> {
@@ -125,8 +61,12 @@ impl ConfigService {
     }
 
     pub async fn update_config(&self, request: ConfigUpdateRequest) -> TalosResult<ConfigResponse> {
-        let _execution_guard = self.execution_gate.write().await;
-        self.reject_nonterminal_turns().await?;
+        let _execution_guard = self.execution_gate.clone().try_write_owned().map_err(|_| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Worker configuration cannot change while execution is active",
+            )
+        })?;
         match request.value {
             ConfigValue::Llm(llm) => {
                 let llm = *llm;
@@ -134,8 +74,7 @@ impl ConfigService {
                     ConfigValue::Llm(Box::new(llm.clone())),
                 ))?;
                 self.config_store.save_llm(&llm)?;
-                let reloaded = prepared.publish();
-                self.reload_models(&reloaded.llm).await;
+                prepared.publish();
                 self.config_store.load_llm_read().map(Into::into)
             }
             ConfigValue::WebSearch(web_search) => {
@@ -162,33 +101,20 @@ impl ConfigService {
         &self,
         _request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
-        let _execution_guard = self.execution_gate.write().await;
-        self.reject_nonterminal_turns().await?;
-        let config = self
-            .prepare_reload(ConfigReloadTrigger::Explicit)?
-            .publish();
-        self.reload_models(&config.llm).await;
-        Ok(ConfigReloadResponse { success: true })
-    }
-
-    async fn reject_nonterminal_turns(&self) -> TalosResult<()> {
-        if self.session_store.has_nonterminal_turns().await? {
-            return Err(TalosError::new(
+        let _execution_guard = self.execution_gate.clone().try_write_owned().map_err(|_| {
+            TalosError::new(
                 talos_error::ErrorCode::Conflict,
-                "configuration cannot reload while an Agent Turn is non-terminal",
-            ));
-        }
-        Ok(())
+                "Worker configuration cannot change while execution is active",
+            )
+        })?;
+        self.prepare_reload(ConfigReloadTrigger::Explicit)?
+            .publish();
+        Ok(ConfigReloadResponse { success: true })
     }
 
     /// Builds the composition-root replacement before config persistence.
     fn prepare_reload(&self, trigger: ConfigReloadTrigger) -> TalosResult<ConfigReloadPlan> {
         (self.reload_hook)(trigger)
-    }
-
-    async fn reload_models(&self, new_config: &LlmConfig) {
-        let new_catalog = resolve_model_catalog(new_config);
-        *self.models.write().await = new_catalog;
     }
 
     fn validate_delete_path(path: &str) -> TalosResult<()> {

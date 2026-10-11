@@ -1,4 +1,5 @@
 import path from "node:path";
+import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow } from "electron";
@@ -32,7 +33,8 @@ async function createController(): Promise<DesktopAppServerController> {
       platform: process.platform,
       resourcesPath: process.resourcesPath,
     }),
-    env,
+    env: { ...env, TALOS_DESKTOP_HOSTNAME: hostname() },
+    desktopHost: true,
     clientName: "talos-desktop",
     clientVersion: app.getVersion(),
     clientKind: "desktop",
@@ -84,8 +86,15 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
-  void controller?.close();
+let quitState: "running" | "closing" | "closed" = "running";
+app.on("before-quit", (event) => {
+  if (quitState === "closed") { return; }
+  event.preventDefault();
+  if (quitState === "closing") { return; }
+  quitState = "closing";
+  void (controller?.close() ?? Promise.resolve())
+    .catch((error: unknown) => console.error("Desktop host shutdown failed", error))
+    .finally(() => { quitState = "closed"; app.quit(); });
 });
 
 app.on("window-all-closed", () => {

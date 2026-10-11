@@ -31,6 +31,20 @@ pub trait AgentCoordinator: Send + Sync {
         preferred_node_id: Option<&str>,
     ) -> TalosResult<String>;
 
+    /// Resolve a node's environment after checking trusted actor ownership and availability.
+    /// No Session is required. Omitted product targets are resolved by Service before calling.
+    async fn worker_environment(
+        &self,
+        node_id: &str,
+        user_id: &str,
+    ) -> TalosResult<std::sync::Arc<dyn agent_protocol::WorkerEnvironment>> {
+        let _ = (node_id, user_id);
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Worker environment is unavailable",
+        ))
+    }
+
     /// Resolve the Session's pinned execution port for Workspace maintenance.
     /// The caller must use trusted Session context; node ownership and availability are checked here.
     async fn session_harness(

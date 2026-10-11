@@ -1,0 +1,104 @@
+syntax = "proto3";
+package talos.agent.v1;
+
+// Projections of the existing talos-types business objects.
+enum SkillScope {
+  SKILL_SCOPE_UNSPECIFIED = 0;
+  SKILL_SCOPE_PROJECT = 1;
+  SKILL_SCOPE_PLUGIN = 2;
+  SKILL_SCOPE_EXTERNAL = 3;
+  SKILL_SCOPE_SYSTEM = 4;
+}
+enum SkillLoadErrorKind {
+  SKILL_LOAD_ERROR_KIND_UNSPECIFIED = 0;
+  SKILL_LOAD_ERROR_KIND_SKILL_ROOT_READ_FAILED = 1;
+  SKILL_LOAD_ERROR_KIND_SKILL_DIRECTORY_READ_FAILED = 2;
+  SKILL_LOAD_ERROR_KIND_MISSING_SKILL_FILE = 3;
+  SKILL_LOAD_ERROR_KIND_SKILL_FILE_METADATA_READ_FAILED = 4;
+  SKILL_LOAD_ERROR_KIND_SKILL_FILE_TOO_LARGE = 5;
+  SKILL_LOAD_ERROR_KIND_SKILL_FILE_READ_FAILED = 6;
+  SKILL_LOAD_ERROR_KIND_INVALID_FRONTMATTER = 7;
+  SKILL_LOAD_ERROR_KIND_MISSING_REQUIRED_FIELD = 8;
+}
+enum SkillWarningCode {
+  SKILL_WARNING_CODE_UNSPECIFIED = 0;
+  SKILL_WARNING_CODE_SKILL_NOT_FOUND = 1;
+  SKILL_WARNING_CODE_AMBIGUOUS_SKILL_NAME = 2;
+  SKILL_WARNING_CODE_SKILL_INJECTION_FAILED = 3;
+}
+message SkillsListParams {
+  bool include_disabled = 1;
+}
+message SkillsRefreshParams {
+}
+message SkillsSuggestParams {
+  string query = 1;
+  optional uint64 limit = 2;
+}
+message SkillsReadParams {
+  SkillSelector selector = 1;
+}
+message SkillsResolveParams {
+  string text = 1;
+  repeated SkillSelector selected = 2;
+}
+message SkillSelector {
+  optional string name = 1;
+  optional string path = 2;
+}
+message SkillMetadata {
+  optional string display_name = 1;
+  optional string icon = 2;
+  optional string author = 3;
+  optional string version = 4;
+  optional string argument_hint = 5;
+}
+message SkillSummary {
+  string name = 1;
+  string description = 2;
+  optional string short_description = 3;
+  string root = 4;
+  string path = 5;
+  SkillScope scope = 6;
+  optional string source_plugin = 7;
+  optional string source_install = 8;
+  bool enabled = 9;
+  bool read_only = 10;
+  SkillMetadata metadata = 11;
+}
+message SkillSuggestion {
+  string name = 1;
+  string description = 2;
+  optional string short_description = 3;
+  string root = 4;
+  string path = 5;
+  SkillScope scope = 6;
+  optional string source_plugin = 7;
+  optional string source_install = 8;
+  SkillMetadata metadata = 9;
+}
+message SkillLoadError {
+  SkillLoadErrorKind kind = 1;
+  string root = 2;
+  optional string path = 3;
+  string message = 4;
+}
+message SkillWarning {
+  SkillWarningCode code = 1;
+  string message = 2;
+}
+message Skills {
+  repeated SkillSummary data = 1;
+  repeated SkillLoadError errors = 2;
+}
+message SkillDocument {
+  SkillSummary summary = 1;
+  string contents = 2;
+}
+message SkillSuggestions {
+  repeated SkillSuggestion data = 1;
+}
+message ResolvedSkills {
+  repeated SkillSummary data = 1;
+  repeated SkillWarning warnings = 2;
+}

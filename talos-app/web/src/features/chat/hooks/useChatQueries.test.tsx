@@ -6,6 +6,8 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelSelection, SessionInfo } from "@talos/sdk-browser";
 
+import { connectionScope } from "@/shared/store/connection-scope";
+import { useAppStore } from "@/shared/store/app-store";
 import { chatKeys, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
 
 const apiMocks = vi.hoisted(() => ({
@@ -46,7 +48,7 @@ describe("useUpdateSessionModelMutation", () => {
       }),
     );
     const { queryClient, wrapper } = createQueryHarness();
-    const connectionKey = "token|user-1";
+    const connectionKey = useAppStore((state) => connectionScope(state.connection));
     const sessionKey = chatKeys.session(connectionKey, "session-1");
     queryClient.setQueryData(sessionKey, {
       modelSelection: {
@@ -77,7 +79,7 @@ describe("useUpdateSessionModelMutation", () => {
       () => new Promise<void>((resolve) => resolvers.push(resolve)),
     );
     const { queryClient, wrapper } = createQueryHarness();
-    const sessionKey = chatKeys.session("token|user-1", "session-1");
+    const sessionKey = chatKeys.session(useAppStore((state) => connectionScope(state.connection)), "session-1");
     queryClient.setQueryData(sessionKey, {
       modelSelection: {
         modelRef: { provider: "deepseek", id: "deepseek-v4-flash" },
@@ -171,7 +173,7 @@ describe("useSessionActions", () => {
     } as SessionInfo;
     apiMocks.compactSession.mockResolvedValue(compactedSession);
     const { queryClient, wrapper } = createQueryHarness();
-    const sessionKey = chatKeys.session("token|user-1", "session-1");
+    const sessionKey = chatKeys.session(useAppStore((state) => connectionScope(state.connection)), "session-1");
     queryClient.setQueryData(sessionKey, previousSession);
     const { result } = renderHook(() => useSessionActions("session-1"), { wrapper });
 

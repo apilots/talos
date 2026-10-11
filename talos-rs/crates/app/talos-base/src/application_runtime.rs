@@ -4,15 +4,15 @@ use std::sync::Arc;
 use talos_agent::SessionHistoryReader;
 use talos_agent_provider_kernel::KernelMemoryProgressStore;
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
-use talos_config::{Config, ConfigStore, YamlConfigStore};
+use talos_config::Config;
 use talos_coordinator::CoordinatorImpl;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_llm_provider::LlmProviderRouter;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_service::{
-    resolve_inner_model_ref, AgentNodeService, FileService, InnerModelClient,
-    SessionHistoryService, TalosService, TimelineEventService,
+    AgentNodeService, FileService, InnerModelClient, SessionHistoryService, TalosService,
+    TimelineEventService,
 };
 use talos_store::node::DatabaseAgentNodeStore;
 use talos_store::project::{ProjectStore, StorageProjectStore};
@@ -21,11 +21,10 @@ use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionSto
 use crate::memory_progress::SessionMemoryProgress;
 use talos_tools::{AgentControl, ToolImageStore};
 use talos_types::{resolve_default_model_selection, resolve_model_catalog};
-use talos_worker::{create_llm_provider, prepare_mcp, TalosWorker, TalosWorkerResources};
+use talos_worker::{TalosWorker, TalosWorkerResources};
 
 use super::{
-    application_automation, application_storage, ApplicationAgentControl, ReloadableLlmProvider,
-    TalosApplicationRuntime,
+    application_automation, application_storage, ApplicationAgentControl, TalosApplicationRuntime,
 };
 
 pub(crate) async fn build_application_runtime_with_migration_dir(
@@ -94,9 +93,6 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         })
         .await?;
 
-    let initial_llm_provider = create_llm_provider(&config)?;
-    let reloadable_llm_provider = Arc::new(ReloadableLlmProvider::new(initial_llm_provider));
-    let llm_router_config = worker.config();
     let reloadable_llm_provider_router = worker.provider_router();
     let llm_provider_router: Arc<dyn LlmProviderRouter> = reloadable_llm_provider_router.clone();
     let model_catalog = resolve_model_catalog(&config.llm);
@@ -111,17 +107,15 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             .build()?,
     );
     let tool_registry = worker.tool_registry();
-    let plugin_manager_service = worker.plugin_manager();
-    let memory_service = worker.memory_service();
-    let user_workspace_memory = worker.user_workspace_memory();
-    let mcp = worker.mcp_runtime();
-    let credentials = worker.mcp_credentials();
 
     let coordinator = Arc::new(CoordinatorImpl::new(
         router,
         session_store.clone(),
         node_store,
     ));
+    coordinator
+        .register_environment("embedded".into(), worker.environment())
+        .await;
     for (agent_id, agent) in worker.harnesses() {
         coordinator
             .register_agent("embedded".into(), agent_id.clone(), agent.clone())
@@ -139,116 +133,10 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         Arc::new(OpenModeUserService)
     };
 
-    let config_store: Arc<dyn ConfigStore> = Arc::new(YamlConfigStore::with_env_path(
-        config.source_path(),
-        config.talos_paths().env_file,
-    ));
-
-    let provider_reloader = reloadable_llm_provider.clone();
-    let provider_router_reloader = reloadable_llm_provider_router.clone();
-    let provider_router_config_reloader = llm_router_config.clone();
-    let inner_model_reloader = inner_model.clone();
-    let plugins_for_reload = plugin_manager_service.clone();
-    let mcp_for_reload = mcp.clone();
-    let credentials_for_reload = credentials.clone();
-    let config_reload_hook: talos_service::ConfigReloadHook = Arc::new(move |trigger| {
-        if let talos_service::ConfigReloadTrigger::McpCredentials(server) = trigger {
-            let mut candidate = provider_router_config_reloader
-                .read()
-                .expect("application config lock poisoned")
-                .clone();
-            let target = candidate
-                .agent
-                .kernel
-                .mcp
-                .servers
-                .iter_mut()
-                .find(|current| current.name == server.name)
-                .ok_or_else(|| {
-                    TalosError::new(
-                        talos_error::ErrorCode::ResourceNotFound,
-                        "The configured MCP server was not found.",
-                    )
-                })?;
-            *target = *server;
-            let mcp_update = prepare_mcp(
-                &mcp_for_reload,
-                &candidate.agent.kernel,
-                plugins_for_reload.mcp_servers()?.servers,
-                &credentials_for_reload,
-            )?;
-            let active = provider_router_config_reloader.clone();
-            return Ok(talos_service::ConfigReloadPlan::new(
-                candidate.clone(),
-                move || {
-                    *active.write().expect("application config lock poisoned") = candidate;
-                    mcp_update.publish();
-                },
-            ));
-        }
-
-        let mut reloaded_config = provider_router_config_reloader
-            .read()
-            .expect("application config lock poisoned")
-            .reload()?;
-        if let talos_service::ConfigReloadTrigger::Updated(value) = trigger {
-            match value {
-                talos_types::ConfigValue::Llm(llm) => {
-                    let mut llm = *llm;
-                    talos_config::resolve_llm_update_for_runtime(&reloaded_config.llm, &mut llm);
-                    reloaded_config.llm = llm;
-                }
-                talos_types::ConfigValue::WebSearch(web_search) => {
-                    let mut web_search = *web_search;
-                    talos_config::resolve_web_search_update_for_runtime(
-                        &reloaded_config.agent.kernel.tools.web_search,
-                        &mut web_search,
-                    );
-                    reloaded_config.agent.kernel.tools.web_search = web_search;
-                }
-            }
-        }
-        reloaded_config.validate_runtime()?;
-        let reloaded_provider = create_llm_provider(&reloaded_config)?;
-        let reloaded_default_selection = resolve_default_model_selection(&reloaded_config.llm)?;
-        let reloaded_model_catalog = resolve_model_catalog(&reloaded_config.llm);
-        let reloaded_inner_model_ref = resolve_inner_model_ref(
-            reloaded_config.agent.inner_model.as_ref(),
-            &reloaded_default_selection.model_ref,
-            &reloaded_model_catalog,
-        )?;
-        let mut inner_provider_config = reloaded_config.clone();
-        inner_provider_config.llm.provider = reloaded_inner_model_ref.provider.clone();
-        inner_provider_config.llm.model = reloaded_inner_model_ref.id.clone();
-        create_llm_provider(&inner_provider_config)?;
-        let provider_reloader = provider_reloader.clone();
-        let provider_router_reloader = provider_router_reloader.clone();
-        let provider_router_config_reloader = provider_router_config_reloader.clone();
-        let inner_model_reloader = inner_model_reloader.clone();
-        let mcp_update = prepare_mcp(
-            &mcp_for_reload,
-            &reloaded_config.agent.kernel,
-            plugins_for_reload.mcp_servers()?.servers,
-            &credentials_for_reload,
-        )?;
-        let plugins_for_cleanup = plugins_for_reload.clone();
-        Ok(talos_service::ConfigReloadPlan::new(
-            reloaded_config.clone(),
-            move || {
-                provider_reloader.reload(reloaded_provider);
-                *provider_router_config_reloader
-                    .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config;
-                provider_router_reloader.reload();
-                inner_model_reloader.reload(reloaded_inner_model_ref);
-                mcp_update.publish();
-                plugins_for_cleanup.recover_credentials();
-            },
-        ))
-    });
     let service = Arc::new(
         TalosService::new(
             coordinator.clone(),
+            node_service.clone(),
             session_store.clone(),
             session_store_impl.clone(),
             project_store,
@@ -256,15 +144,10 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             file_service,
             event_service.clone(),
             config.clone(),
-            plugin_manager_service.clone(),
-            memory_service.clone(),
-            config_store,
-            model_catalog,
             auth_service.clone(),
             user_service,
-            config_reload_hook,
         )
-        .with_user_workspace_memory(user_workspace_memory, inner_model.clone()),
+        .with_user_workspace_memory_reflection(inner_model.clone()),
     );
     let agent_control: Arc<dyn AgentControl> =
         Arc::new(ApplicationAgentControl::new(service.clone()));
@@ -291,6 +174,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     // No external MCP starts until every fallible assembly step has completed.
     worker.activate_mcp()?;
     Ok(TalosApplicationRuntime {
+        worker,
         config,
         service,
         event_service,

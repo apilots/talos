@@ -85,7 +85,7 @@ impl UserWorkspaceMemoryReflection {
         if !matches!(session.tree_identity, SessionTreeIdentity::Primary) {
             return Ok(());
         }
-        let context = self.sessions.build_agent_session_context(&session)?;
+        let context = self.sessions.build_agent_session_context(&session).await?;
         let harness = self.coordinator.session_harness(&context).await?;
         let snapshot = harness.read_workspace_memory(context.clone()).await?;
         if let UserWorkspaceMemorySnapshot::Invalid { diagnostic, .. } = &snapshot {

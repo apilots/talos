@@ -9,12 +9,45 @@ use talos_service::UserWorkspaceMemoryService;
 pub(crate) struct WorkerHarness {
     pub provider: talos_agent_provider_kernel::KernelAgentProvider,
     pub execution: Arc<dyn AgentHarness>,
+    pub config: Arc<std::sync::RwLock<talos_config::Config>>,
+    pub execution_gate: Arc<tokio::sync::RwLock<()>>,
     pub workspace_memory: Arc<UserWorkspaceMemoryService>,
+}
+
+impl WorkerHarness {
+    fn resolve_context(&self, context: &mut AgentContext) -> talos_error::TalosResult<()> {
+        let config = self.config.read().expect("Worker config lock poisoned");
+        context.session.workspace = config.resolve_workspace(
+            &context.session.workspace.workspace_id,
+            &context.session.workspace.user_id,
+        )?;
+        let catalog = talos_types::resolve_model_catalog(&config.llm);
+        context.model = catalog
+            .into_iter()
+            .find(|model| {
+                model.provider == context.model_selection.model_ref.provider
+                    && model.model.id == context.model_selection.model_ref.id
+            })
+            .ok_or_else(|| {
+                talos_error::TalosError::new(
+                    talos_error::ErrorCode::ProviderUnavailable,
+                    "The requested model is not configured on this Computer",
+                )
+            })?;
+        context.model_selection.resolve_reasoning(&context.model)?;
+        Ok(())
+    }
 }
 
 impl AgentHarness for WorkerHarness {
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
-        self.execution.start(params)
+        Box::pin(async move {
+            let guard = self.execution_gate.clone().read_owned().await;
+            let mut params = params;
+            self.resolve_context(&mut params.context)?;
+            let execution = self.execution.start(params).await?;
+            Ok(guard_execution(execution, guard))
+        })
     }
     fn submit_input(
         &self,
@@ -32,7 +65,13 @@ impl AgentHarness for WorkerHarness {
         &self,
         context: AgentContext,
     ) -> AgentFuture<'_, AgentResult<AgentRunExecution>> {
-        self.execution.compact_session(context)
+        Box::pin(async move {
+            let guard = self.execution_gate.clone().read_owned().await;
+            let mut context = context;
+            self.resolve_context(&mut context)?;
+            let execution = self.execution.compact_session(context).await?;
+            Ok(guard_execution(execution, guard))
+        })
     }
     fn clear_session(&self, context: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
         self.execution.clear_session(context)
@@ -50,6 +89,7 @@ impl AgentHarness for WorkerHarness {
         model_call: DreamMemoryModelCall,
     ) -> AgentFuture<'_, AgentResult<Option<u64>>> {
         Box::pin(async move {
+            let _guard = self.execution_gate.clone().read_owned().await;
             let root = context.workspace.root.clone();
             let result = self
                 .provider
@@ -117,3 +157,24 @@ fn scope(context: AgentSessionContext) -> MemoryScope {
         workspace_root: context.workspace.root,
     }
 }
+
+/// Retain the node execution guard through the actual invocation settlement.
+/// The existing paused admission, event channel and result remain unchanged.
+fn guard_execution(
+    mut execution: AgentRunExecution,
+    guard: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> AgentRunExecution {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let settlement = execution.settlement;
+    tokio::spawn(async move {
+        let result = settlement.recv().await;
+        let _ = sender.send(result);
+        drop(guard);
+    });
+    execution.settlement = AgentRunSettlementReceiver::new(receiver);
+    execution
+}
+
+#[cfg(test)]
+#[path = "harness_tests.rs"]
+mod tests;

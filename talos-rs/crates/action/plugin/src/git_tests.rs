@@ -27,6 +27,7 @@ Alpha skill.
 
     let first_added = manager_with_state_path(temp.path().join("state-one"))
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::Git {
                 url: url.clone(),
                 reference: "main".to_string(),
@@ -37,6 +38,7 @@ Alpha skill.
         .expect("git source should refresh");
     let second_added = manager_with_state_path(temp.path().join("state-two"))
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::Git {
                 url,
                 reference: "main".to_string(),

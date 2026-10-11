@@ -1741,6 +1741,186 @@
           "properties": {
             "method": {
               "enum": [
+                "desktop/connection/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/connection/set"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopConnectionSetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/workerIdentity"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/workerEnroll"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopWorkerEnrollParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ComputerListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/GetNodeRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/create"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CreateNodeRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/rename"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/RenameComputerRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/setStatus"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SetComputerStatusRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/rotateCredential"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/RotateCredentialRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "profile/read"
               ],
               "type": "string"
@@ -3439,8 +3619,66 @@
         }
       ]
     },
+    "ComputerListRequest": {
+      "description": "Selectable Computers for the caller, including the existing shared embedded node.",
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ComputerListResponse": {
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/NodeInfo"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "data",
+        "total"
+      ],
+      "type": "object"
+    },
     "ConfigDeleteRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "type": "string"
         }
@@ -3452,6 +3690,12 @@
     },
     "ConfigGetRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "allOf": [
             {
@@ -3471,10 +3715,24 @@
       "type": "string"
     },
     "ConfigReloadRequest": {
+      "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ConfigUpdateRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "value": {
           "$ref": "#/definitions/ConfigValue"
         }
@@ -3691,6 +3949,114 @@
         "measuredAt",
         "usedTokens"
       ],
+      "type": "object"
+    },
+    "CreateNodeRequest": {
+      "description": "Creates a node with a control-plane-generated, immutable UUID.",
+      "properties": {
+        "credentialExpiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "endpoint": {
+          "description": "None selects an outbound connection; Some requires a nonempty HTTPS origin.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ownerUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "credentialExpiresAt",
+        "displayName"
+      ],
+      "type": "object"
+    },
+    "CreatedNode": {
+      "properties": {
+        "credential": {
+          "$ref": "#/definitions/NodeCredential"
+        },
+        "node": {
+          "$ref": "#/definitions/NodeInfo"
+        }
+      },
+      "required": [
+        "credential",
+        "node"
+      ],
+      "type": "object"
+    },
+    "DesktopConnectionMode": {
+      "description": "Product connection source, independent of the server deployment mode.",
+      "enum": [
+        "cloud",
+        "local"
+      ],
+      "type": "string"
+    },
+    "DesktopConnectionResponse": {
+      "properties": {
+        "connectionMode": {
+          "$ref": "#/definitions/DesktopConnectionMode"
+        },
+        "controlPlaneEndpoint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connectionMode",
+        "controlPlaneEndpoint"
+      ],
+      "type": "object"
+    },
+    "DesktopConnectionSetParams": {
+      "properties": {
+        "connectionMode": {
+          "$ref": "#/definitions/DesktopConnectionMode"
+        }
+      },
+      "required": [
+        "connectionMode"
+      ],
+      "type": "object"
+    },
+    "DesktopWorkerEnrollParams": {
+      "properties": {
+        "nodeId": {
+          "description": "Explicit UUID for credential recovery. Omitted/null enrolls or reuses saved identity.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "DesktopWorkerIdentityResponse": {
+      "properties": {
+        "controlPlaneEndpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "DynamicToolResult": {
@@ -4175,6 +4541,14 @@
         "name": {
           "type": "string"
         },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "parent": {
           "type": "string"
         }
@@ -4187,6 +4561,14 @@
     },
     "FsDirectoryReadRequest": {
       "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "default": null,
           "type": [
@@ -4195,6 +4577,17 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "GetNodeRequest": {
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId"
+      ],
       "type": "object"
     },
     "InitializeParams": {
@@ -4631,6 +5024,12 @@
     "McpAuthenticationReadRequest": {
       "additionalProperties": false,
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "server": {
           "$ref": "#/definitions/McpDefinitionRef"
         }
@@ -4670,6 +5069,12 @@
         },
         "config": {
           "$ref": "#/definitions/McpOAuthConfig"
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "server": {
           "$ref": "#/definitions/McpDefinitionRef"
@@ -4917,6 +5322,12 @@
         "change": {
           "$ref": "#/definitions/McpCredentialsChange"
         },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "server": {
           "$ref": "#/definitions/McpDefinitionRef"
         }
@@ -5062,6 +5473,12 @@
             "string",
             "null"
           ]
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5121,6 +5538,12 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "type": [
+            "string",
             "null"
           ]
         }
@@ -5377,6 +5800,14 @@
             "integer",
             "null"
           ]
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -5385,6 +5816,14 @@
       "properties": {
         "date": {
           "type": "string"
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5406,6 +5845,14 @@
             "string",
             "null"
           ]
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5418,6 +5865,14 @@
       "properties": {
         "memoryId": {
           "type": "string"
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5453,6 +5908,14 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -5663,6 +6126,16 @@
       "type": "string"
     },
     "ModelListRequest": {
+      "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ModelRef": {
@@ -5710,6 +6183,124 @@
       "enum": [
         "standard",
         "fast"
+      ],
+      "type": "string"
+    },
+    "NodeCredential": {
+      "description": "A one-time management response that must never be logged or re-readable.",
+      "properties": {
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expiresAt",
+        "nodeId",
+        "token"
+      ],
+      "type": "object"
+    },
+    "NodeHealth": {
+      "enum": [
+        "unknown",
+        "healthy",
+        "degraded"
+      ],
+      "type": "string"
+    },
+    "NodeInfo": {
+      "description": "Public node state; credential and lease hashes stay inside the Store.",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "credentialExpiresAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health": {
+          "$ref": "#/definitions/NodeHealth"
+        },
+        "lastHeartbeatAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "leaseExpiresAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/NodeMode"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "ownerUserId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/definitions/NodeStatus"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available",
+        "createdAt",
+        "displayName",
+        "health",
+        "mode",
+        "nodeId",
+        "status",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "NodeMode": {
+      "enum": [
+        "embedded",
+        "remote"
+      ],
+      "type": "string"
+    },
+    "NodeStatus": {
+      "enum": [
+        "enabled",
+        "disabled"
       ],
       "type": "string"
     },
@@ -5784,6 +6375,12 @@
       "properties": {
         "install_id": {
           "$ref": "#/definitions/PluginInstallId"
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5795,6 +6392,12 @@
       "properties": {
         "install_id": {
           "$ref": "#/definitions/PluginInstallId"
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5823,6 +6426,12 @@
         "enable": {
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -5916,6 +6525,12 @@
             }
           ]
         },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source_id": {
           "anyOf": [
             {
@@ -5954,6 +6569,12 @@
     },
     "PluginReadRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "plugin_id": {
           "$ref": "#/definitions/PluginId"
         }
@@ -5988,6 +6609,12 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -6038,6 +6665,12 @@
     },
     "PluginSourceAddRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "refresh": {
           "default": false,
           "type": "boolean"
@@ -6052,10 +6685,24 @@
       "type": "object"
     },
     "PluginSourceListRequest": {
+      "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "PluginSourceRefreshRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source_id": {
           "$ref": "#/definitions/MarketplaceSourceId"
         }
@@ -6067,6 +6714,12 @@
     },
     "PluginSourceRemoveRequest": {
       "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source_id": {
           "$ref": "#/definitions/MarketplaceSourceId"
         }
@@ -6080,6 +6733,12 @@
       "properties": {
         "install_id": {
           "$ref": "#/definitions/PluginInstallId"
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -6107,6 +6766,12 @@
         },
         "install_id": {
           "$ref": "#/definitions/PluginInstallId"
+        },
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -6237,6 +6902,14 @@
         },
         "name": {
           "type": "string"
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -6257,6 +6930,16 @@
       "type": "object"
     },
     "ProjectListRequest": {
+      "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ProjectPatchRequest": {
@@ -6687,6 +7370,22 @@
       ],
       "type": "object"
     },
+    "RenameComputerRequest": {
+      "description": "Only the display name changes; endpoint, lease and status remain intact.",
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "displayName",
+        "nodeId"
+      ],
+      "type": "object"
+    },
     "RequestId": {
       "anyOf": [
         {
@@ -6730,6 +7429,22 @@
         "input",
         "retryOfMessageId",
         "sessionId"
+      ],
+      "type": "object"
+    },
+    "RotateCredentialRequest": {
+      "properties": {
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expiresAt",
+        "nodeId"
       ],
       "type": "object"
     },
@@ -7166,6 +7881,24 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/worker/failed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApiError"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7431,6 +8164,9 @@
         "modelSelection": {
           "$ref": "#/definitions/ModelSelection"
         },
+        "nodeId": {
+          "type": "string"
+        },
         "projectId": {
           "default": null,
           "type": [
@@ -7476,6 +8212,7 @@
         "lastActivity",
         "messageCount",
         "modelSelection",
+        "nodeId",
         "sourceProvider",
         "sourceType",
         "title",
@@ -7492,6 +8229,14 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -7593,6 +8338,22 @@
       ],
       "type": "object"
     },
+    "SetComputerStatusRequest": {
+      "description": "Disabling a Computer revokes execution admission, without shutting down its host.",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/NodeStatus"
+        }
+      },
+      "required": [
+        "nodeId",
+        "status"
+      ],
+      "type": "object"
+    },
     "SkillSelector": {
       "properties": {
         "name": {
@@ -7617,12 +8378,28 @@
         "include_disabled": {
           "default": false,
           "type": "boolean"
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
     },
     "SkillsReadRequest": {
       "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selector": {
           "$ref": "#/definitions/SkillSelector"
         }
@@ -7633,10 +8410,28 @@
       "type": "object"
     },
     "SkillsRefreshRequest": {
+      "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SkillsResolveRequest": {
       "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "selected": {
           "default": [],
           "items": {
@@ -7659,6 +8454,14 @@
           "minimum": 0.0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -7701,6 +8504,14 @@
           ],
           "default": null,
           "description": "Explicit model selection for this turn; absent means use the session or configured default."
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "projectId": {
           "default": null,
@@ -9428,12 +10239,30 @@
       "type": "string"
     },
     "WorkspaceDocListRequest": {
+      "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "WorkspaceDocReadRequest": {
       "properties": {
         "kind": {
           "$ref": "#/definitions/WorkspaceDocKind"
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -9455,6 +10284,14 @@
         },
         "kind": {
           "$ref": "#/definitions/WorkspaceDocKind"
+        },
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null selects the embedded Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -9466,6 +10303,16 @@
     "WorkspaceInfoRequest": {
       "additionalProperties": false,
       "description": "Read the configured default Workspace for the trusted current actor. This is not a Session workspace selector and accepts no client path or user ID.",
+      "properties": {
+        "nodeId": {
+          "default": null,
+          "description": "Omitted or null preserves the existing target selection.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     }
   },
@@ -9493,6 +10340,18 @@
     },
     "collaboration_tool_result": {
       "$ref": "#/definitions/CollaborationToolResult"
+    },
+    "computer_list_response": {
+      "$ref": "#/definitions/ComputerListResponse"
+    },
+    "created_node": {
+      "$ref": "#/definitions/CreatedNode"
+    },
+    "desktop_connection_response": {
+      "$ref": "#/definitions/DesktopConnectionResponse"
+    },
+    "desktop_worker_identity_response": {
+      "$ref": "#/definitions/DesktopWorkerIdentityResponse"
     },
     "error": {
       "$ref": "#/definitions/AppServerErrorBody"
@@ -9563,6 +10422,12 @@
     "message_queue_update_request": {
       "$ref": "#/definitions/MessageQueueUpdateRequest"
     },
+    "node_credential": {
+      "$ref": "#/definitions/NodeCredential"
+    },
+    "node_info": {
+      "$ref": "#/definitions/NodeInfo"
+    },
     "pending_user_action": {
       "$ref": "#/definitions/PendingUserAction"
     },
@@ -9624,6 +10489,10 @@
     "cloud_login_start_response",
     "cloud_login_status_response",
     "collaboration_tool_result",
+    "computer_list_response",
+    "created_node",
+    "desktop_connection_response",
+    "desktop_worker_identity_response",
     "error",
     "event_unsubscribe_response",
     "file_content_response",
@@ -9647,6 +10516,8 @@
     "message_queue_reorder_request",
     "message_queue_start_request",
     "message_queue_update_request",
+    "node_credential",
+    "node_info",
     "pending_user_action",
     "profile_read_response",
     "recover_timeline_request",

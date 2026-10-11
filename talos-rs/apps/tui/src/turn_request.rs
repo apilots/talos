@@ -20,6 +20,7 @@ impl TerminalTurnRequest {
         let input = build_terminal_input(self.message, &self.skills, self.file_ids);
 
         StartTurnRequest {
+            node_id: None,
             session_id: self.session_id,
             input,
             model_selection: self.model_selection.filter(|selection| {

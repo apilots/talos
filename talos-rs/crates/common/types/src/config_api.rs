@@ -19,18 +19,27 @@ pub enum ConfigPath {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ConfigGetRequest {
+    pub node_id: Option<String>,
     #[serde(default)]
     pub path: ConfigPath,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ConfigUpdateRequest {
+    pub node_id: Option<String>,
     pub value: ConfigValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct ConfigDeleteRequest {
+    pub node_id: Option<String>,
     pub path: String,
 }
 
@@ -39,8 +48,12 @@ pub struct ConfigDeleteResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ConfigReloadRequest {}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct ConfigReloadRequest {
+    pub node_id: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ConfigReloadResponse {

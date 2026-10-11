@@ -55,11 +55,14 @@ pub enum DeploymentMode {
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentProviderConfig, MessageQueueConfig, PlannerMode,
 };
-pub use domains::agent_node::{AgentNodeConfig, AgentNodeControlConfig, AgentNodeRunnerConfig};
+pub use domains::agent_node::{
+    AgentNodeConfig, AgentNodeControlConfig, AgentNodeRunnerConfig, AgentNodeTransport,
+};
 pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
+pub use domains::desktop::{DesktopConfig, DesktopConnectionMode};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
@@ -149,6 +152,10 @@ pub struct Config {
     #[serde(default)]
     pub agent_node: AgentNodeConfig,
 
+    /// Desktop product connection settings; ignored by Server and CLI hosts.
+    #[serde(default)]
+    pub desktop: DesktopConfig,
+
     /// Gateway 配置
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -210,6 +217,7 @@ impl Default for Config {
             workspaces: WorkspaceConfig::default(),
             agent: AgentConfig::default(),
             agent_node: AgentNodeConfig::default(),
+            desktop: DesktopConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
             fs: FsConfig::default(),

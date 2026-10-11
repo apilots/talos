@@ -6,8 +6,8 @@ export function useSessionQueryInvalidation(sessionId: string) {
   const queryClient = useQueryClient();
 
   async function invalidateSessionQueries() {
+    await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "talos" && query.queryKey.includes("sessions") });
     await Promise.all([
-      chatKeys.sessions(connectionKey),
       chatKeys.session(connectionKey, sessionId),
       chatKeys.activeTurn(connectionKey, sessionId),
       chatKeys.sessionHistory(connectionKey, sessionId),

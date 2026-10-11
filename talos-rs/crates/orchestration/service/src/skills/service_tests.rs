@@ -1,4 +1,5 @@
 use super::*;
+use talos_config::PluginsRuntimeConfig;
 use talos_plugin::{PluginManager, PluginStateStore};
 
 fn test_service(
@@ -10,8 +11,7 @@ fn test_service(
         plugins.clone(),
         PluginStateStore::new(temp.path().join("plugin-state")),
     );
-    SkillsService::new(config, plugins)
-        .with_plugin_manager(PluginManagerService::with_manager(manager))
+    SkillsService::new(config, PluginManagerService::with_manager(manager))
 }
 
 #[test]

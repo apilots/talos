@@ -14,7 +14,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: WorkspaceInfoRequest,
     ) -> TalosResult<WorkspaceInfoResponse> {
-        self.service.workspace_docs.workspace_info(actor, request)
+        self.service.workspace_info(actor, request).await
     }
 
     pub(crate) async fn list_workspace_docs(
@@ -22,35 +22,20 @@ impl ServiceGateway {
         actor: &Actor,
         request: WorkspaceDocListRequest,
     ) -> TalosResult<WorkspaceDocListResponse> {
-        self.service
-            .workspace_docs
-            .list_docs_with_request(actor, request)
-            .await
+        self.service.list_workspace_docs(actor, request).await
     }
-
     pub(crate) async fn read_workspace_doc(
         &self,
         actor: &Actor,
         request: WorkspaceDocReadRequest,
     ) -> TalosResult<WorkspaceDocReadResponse> {
-        let doc = self
-            .service
-            .workspace_docs
-            .read_doc_with_request(actor, request)
-            .await?;
-        Ok(WorkspaceDocReadResponse { doc })
+        self.service.read_workspace_doc(actor, request).await
     }
-
     pub(crate) async fn write_workspace_doc(
         &self,
         actor: &Actor,
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
-        let doc = self
-            .service
-            .workspace_docs
-            .write_doc_with_request(actor, request)
-            .await?;
-        Ok(WorkspaceDocWriteResponse { doc })
+        self.service.write_workspace_doc(actor, request).await
     }
 }

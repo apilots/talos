@@ -19,14 +19,14 @@ not a substitute for parity tests.
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| TS TalosClient   |  | TS AppServer     |  | Rust SDK         |  | Rust SDK         |
+| TS TalosClient   |  | TS product SDK   |  | Rust SDK         |  | Rust SDK         |
 | shared types     |  | Client + types   |  | GatewayClient    |  | GatewayClient    |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| Browser adapter  |  | Typed preload    |  | EmbeddedServer   |  | Rust AppServer   |
-| HTTP + SSE       |  | IPC -> main      |  | Client           |  | Client           |
+| Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer   |  | Rust AppServer   |
+| HTTP + SSE       |  | cloud/local mode |  | Client           |  | Client           |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          +---------------------+-----------+---------+---------------------+
@@ -54,6 +54,7 @@ responses, errors, and stream behavior:
 
 ```text
 Authentication and profile
+Computer directory, owner management and availability
 Models and configuration
 Sessions, Turns, history, compaction, retry, and interruption
 Timeline subscription, replay, recovery, and terminal state
@@ -75,9 +76,12 @@ embedded SDK, and their product transports can all reach it.
 | `@talos/sdk-browser` | HTTP, multipart upload, authentication header, and SSE transport implementation |
 | `@talos/sdk-app-server` | JSON-RPC transport plus Electron main-process and typed preload IPC adapters |
 
-Web uses `TalosClient` through the browser transport. Desktop uses the
-TypeScript `AppServerClient` through typed preload IPC and an Electron
-main-process transport that owns JSON-RPC stdio. The two facades share generated
+Web and cloud-mode Desktop use `TalosClient` through HTTP/SSE to the same product
+control plane. Desktop main hosts its bundled app-server, which owns one
+`TalosWorker`, persists the UUID/registration credential and connects outward.
+Typed preload IPC supplies host connection settings, safe identity and the existing
+login lifecycle; node secrets never reach the renderer. Explicit local mode uses
+`AppServerClient` through that same IPC/main JSON-RPC stdio path for product APIs. The two facades share generated
 domain and protocol types, but they do not currently implement one common
 TypeScript client interface. Capability parity is therefore enforced through
 API review and parity tests rather than the TypeScript type system alone.
@@ -172,10 +176,10 @@ the existing presenter. Branch on codes/typed parameters, never English sentence
 Show failed Turns even without assistant text. Public error disclosure, report
 ownership and protocol 0.4 migration are defined by [Error contract](ERROR_MODEL.md).
 
-Web reads `deploymentMode` from server health. Local/cloud deployment is not a
-runtime selector; the unused `runtimeMode` control has been removed. Desktop
-currently reports local mode without adding an app-server mode negotiation.
-Settings navigation and direct routes mirror the [configuration authorization
+Web and cloud-mode Desktop read `deploymentMode` from the selected control plane's
+health response. Desktop's explicit host `connectionMode` chooses cloud product
+APIs or local stdio; it is separate from server deployment policy. Settings
+navigation and direct routes mirror the [configuration authorization
 matrix](../../deploy/README.md#deployment-mode-and-configuration-access); Gateway
 still enforces access independently of client visibility.
 
@@ -228,3 +232,24 @@ propagates configuration/identity errors through the unified error contract.
 Existing sessions retain their own workspace bindings; this endpoint neither
 selects a session's workspace nor manages workspace definitions. Extend selection
 only together with an authorized product workspace management path.
+
+## Computer selection and execution ownership
+
+`features/computers` owns the independent rail, full paginated search, selection
+and management view. Desktop identifies its local Computer by control-plane
+endpoint plus UUID; Web requires an explicit selection when more than one exists.
+The existing account menu remains the account owner. Cloud/local is an explicit
+host setting and an offline Computer never redirects execution elsewhere.
+
+Product requests reuse canonical optional `nodeId` fields. The UI binds environment
+APIs once at composition; Session operations retain their saved identity. Query
+caches use account/control-plane/resource identity, with Computer identity for
+environment and list views. Drafts/recent selection are client-owned and scoped;
+Projects, Sessions and Timeline remain on the control plane. A Computer switch
+unsubscribes observations without cancelling its running Turn.
+
+`AgentHarness` and `WorkerEnvironment` hide embedded/direct/outbound transport.
+Worker owns config, MCP credentials and Workspace files. Remote MCP OAuth callbacks
+use the control-plane relay to the original bounded Worker attempt; only transient
+state-hash routing lives on the control plane. SDK and the generated PB projection
+reuse the canonical business types.

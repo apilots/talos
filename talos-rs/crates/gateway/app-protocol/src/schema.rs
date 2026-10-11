@@ -13,13 +13,19 @@ pub fn json_value_schema(_generator: &mut schemars::gen::SchemaGenerator) -> Sch
     Schema::Bool(true)
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Serialize, JsonSchema)]
 pub struct AppProtocolSchemaRoot {
     pub jsonrpc_message: JsonRpcMessage,
     pub client_request_params: ClientRequestParams,
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
     pub error: AppServerErrorBody,
+    pub computer_list_response: talos_types::ComputerListResponse,
+    pub desktop_connection_response: talos_types::DesktopConnectionResponse,
+    pub desktop_worker_identity_response: talos_types::DesktopWorkerIdentityResponse,
+    pub node_info: talos_types::NodeInfo,
+    pub created_node: talos_types::CreatedNode,
+    pub node_credential: talos_types::NodeCredential,
     pub profile_read_response: talos_types::ProfileReadResponse,
     pub session_get_response: talos_types::SessionGetResponse,
     pub start_turn_request: talos_types::StartTurnRequest,
@@ -94,6 +100,11 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
     output.push_str(&export::<crate::requests::FileUploadParams>());
+    output.push_str(&export::<talos_types::DesktopConnectionMode>());
+    output.push_str(&export::<talos_types::DesktopConnectionResponse>());
+    output.push_str(&export::<talos_types::DesktopConnectionSetParams>());
+    output.push_str(&export::<talos_types::DesktopWorkerIdentityResponse>());
+    output.push_str(&export::<talos_types::DesktopWorkerEnrollParams>());
     output.push_str(&export::<talos_types::ProfileReadRequest>());
     output.push_str(&export::<talos_types::ProfileReadResponse>());
     output.push_str(&export::<talos_types::ProfileDailyUsage>());
@@ -144,6 +155,22 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_agent_api::TimelineCursorStatus>());
     output.push_str(&export::<talos_agent_api::TimelineActiveTurn>());
     output.push_str(&export::<talos_agent_api::ActiveTurnState>());
+    output.push_str(&export::<talos_types::NodeInfo>());
+    output.push_str(&export::<talos_types::NodePage>());
+    output.push_str(&export::<talos_types::NodeMode>());
+    output.push_str(&export::<talos_types::NodeStatus>());
+    output.push_str(&export::<talos_types::NodeHealth>());
+    output.push_str(&export::<talos_types::NodeCredential>());
+    output.push_str(&export::<talos_types::CreatedNode>());
+    output.push_str(&export::<talos_types::CreateNodeRequest>());
+    output.push_str(&export::<talos_types::GetNodeRequest>());
+    output.push_str(&export::<talos_types::ListNodesRequest>());
+    output.push_str(&export::<talos_types::UpdateNodeRequest>());
+    output.push_str(&export::<talos_types::RotateCredentialRequest>());
+    output.push_str(&export::<talos_types::ComputerListRequest>());
+    output.push_str(&export::<talos_types::ComputerListResponse>());
+    output.push_str(&export::<talos_types::RenameComputerRequest>());
+    output.push_str(&export::<talos_types::SetComputerStatusRequest>());
     output.push_str(&export::<talos_types::ProjectCreateRequest>());
     output.push_str(&export::<talos_types::ProjectCreateResponse>());
     output.push_str(&export::<talos_types::ProjectListRequest>());

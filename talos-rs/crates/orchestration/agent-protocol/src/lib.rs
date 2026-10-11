@@ -6,6 +6,15 @@ mod capability;
 mod checkpoint;
 mod context;
 pub mod dream_pb;
+mod environment;
+mod environment_config_pb;
+mod environment_docs_pb;
+mod environment_memory_pb;
+mod environment_oauth;
+mod environment_oauth_pb;
+pub mod environment_pb;
+mod environment_plugins_pb;
+mod environment_skills_pb;
 pub mod error_pb;
 pub mod harness_pb;
 pub mod memory_pb;
@@ -31,4 +40,11 @@ pub use run::{
     AgentAdmission, AgentAdmissionPermit, AgentInputParams, AgentInterruptParams,
     AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
     AgentRunSettlementReceiver,
+};
+
+pub use environment::{WorkerEnvironment, WorkerEnvironmentContext};
+
+pub use environment_oauth::{
+    McpAuthenticationCallbackParams, McpAuthenticationStartParams, McpOAuthCallbackOutcome,
+    McpOAuthCallbackTarget,
 };

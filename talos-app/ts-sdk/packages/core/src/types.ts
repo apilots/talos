@@ -1,4 +1,18 @@
 export type {
+  ComputerListRequest,
+  ComputerListResponse,
+  NodeInfo,
+  NodeMode,
+  NodeStatus,
+  NodeHealth,
+  CreatedNode,
+  NodeCredential,
+  CreateNodeRequest,
+  GetNodeRequest,
+  RenameComputerRequest,
+  SetComputerStatusRequest,
+  RotateCredentialRequest,
+
   ActiveTurnState,
   AgentAssistantText,
   AgentAssistantTextPhase,

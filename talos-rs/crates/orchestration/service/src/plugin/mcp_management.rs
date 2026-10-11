@@ -81,11 +81,30 @@ impl PluginManagerService {
         }
     }
 
+    pub(super) fn authorization_definition(
+        &self,
+        owner: &McpDefinitionRef,
+    ) -> TalosResult<McpServerDefinition> {
+        let enabled=match owner {
+            McpDefinitionRef::Plugin {install_id} => self.manager.mcp_servers()?.servers.iter().any(|server|
+                matches!(&server.source, McpServerSource::Plugin {install_id:candidate,..} if candidate==install_id)),
+            McpDefinitionRef::Config {name} => self.mcp_context()?.config.read().expect("Worker config lock poisoned")
+                .agent.kernel.mcp.servers.iter().any(|server|server.name==*name),
+        };
+        if !enabled {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "MCP authorization requires an enabled service.",
+            ));
+        }
+        self.definition(owner)
+    }
+
     /// Called after commit/rollback, outside the Plugin file lock. Invalid state retains its secrets.
     pub fn recover_credentials(&self) {
         if let Some(context) = &self.mcp {
             context.oauth.invalidate(|owner, captured| {
-                self.definition(owner)
+                self.authorization_definition(owner)
                     .is_ok_and(|current| current == *captured)
             });
             let active = context

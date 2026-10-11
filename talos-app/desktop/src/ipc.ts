@@ -2,6 +2,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 
 export const TALOS_IPC = {
   connect: "talos:connect",
+  workerIdentity: "desktop/workerIdentity",
   event: "talos:event",
   invoke: "talos:invoke",
   openExternal: "talos:open-external",
@@ -9,14 +10,11 @@ export const TALOS_IPC = {
   subscriptionTerminated: "talos:subscription-terminated",
 } as const;
 
-export type TalosRuntimeStateKind = "starting" | "ready" | "restarting" | "stopped" | "error";
-
-export interface TalosRuntimeState {
-  kind: TalosRuntimeStateKind;
-  message: string | null;
-}
+export type { TalosRuntimeStateKind, TalosRuntimeState } from "@talos/sdk-app-server/desktop";
+import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 
 export interface TalosDesktopBridge {
+  workerIdentity(): Promise<AppProtocol.ApiResponse<AppProtocol.DesktopWorkerIdentityResponse>>;
   connect(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke<T>(
     method: AppProtocol.ClientMethod,

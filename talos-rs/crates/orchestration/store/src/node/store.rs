@@ -6,8 +6,9 @@ use talos_storage::database_error;
 use agent_protocol::{NodeHealth, NodeMode, NodeStatus};
 
 use super::{
-    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodePageRecord, NodeRecord,
-    RegisterNodeParams, RenewNodeParams, RotateCredentialParams, UpdateNodeParams,
+    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodeListScope,
+    NodePageRecord, NodeRecord, RegisterNodeParams, RenameNodeParams, RenewNodeParams,
+    RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
 };
 
 const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at";
@@ -23,6 +24,8 @@ pub trait AgentNodeStore: Send + Sync {
     async fn heartbeat(&self, params: HeartbeatNodeParams) -> TalosResult<NodeRecord>;
     async fn unregister(&self, lease: LeaseCheck) -> TalosResult<()>;
     async fn update(&self, params: UpdateNodeParams) -> TalosResult<NodeRecord>;
+    async fn rename(&self, params: RenameNodeParams) -> TalosResult<NodeRecord>;
+    async fn set_status(&self, params: SetNodeStatusParams) -> TalosResult<NodeRecord>;
     async fn rotate_credential(&self, params: RotateCredentialParams) -> TalosResult<NodeRecord>;
 }
 
@@ -98,17 +101,48 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
 
     async fn list(&self, params: ListNodesParams) -> TalosResult<NodePageRecord> {
         let limit = i64::from(params.limit.clamp(1, 200)) + 1;
+        let (all, owner, embedded) = match params.scope {
+            NodeListScope::All => (true, None, true),
+            NodeListScope::Owner {
+                user_id,
+                include_embedded,
+            } => (false, Some(user_id), include_embedded),
+            NodeListScope::Embedded => (false, None, true),
+        };
+        let filter = "(? OR owner_user_id = ? OR (? AND mode = 'embedded')) AND (? IS NULL OR instr(lower(display_name), lower(?)) > 0)";
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(|error| database_error("begin Agent node directory read", error))?;
         let rows = sqlx::query(&format!(
-            "SELECT {NODE_COLUMNS} FROM agent_nodes WHERE (? IS NULL OR owner_user_id = ?) AND (? IS NULL OR node_id > ?) ORDER BY node_id LIMIT ?"
+            "SELECT {NODE_COLUMNS} FROM agent_nodes WHERE {filter} AND (? IS NULL OR node_id > ?) ORDER BY node_id LIMIT ?"
         ))
-        .bind(params.owner_user_id.as_deref())
-        .bind(params.owner_user_id.as_deref())
+        .bind(all)
+        .bind(owner.as_deref())
+        .bind(embedded)
+        .bind(params.query.as_deref())
+        .bind(params.query.as_deref())
         .bind(params.cursor.as_deref())
         .bind(params.cursor.as_deref())
         .bind(limit)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| database_error("list Agent nodes", error))?;
+        let total: i64 =
+            sqlx::query_scalar(&format!("SELECT COUNT(*) FROM agent_nodes WHERE {filter}"))
+                .bind(all)
+                .bind(owner.as_deref())
+                .bind(embedded)
+                .bind(params.query.as_deref())
+                .bind(params.query.as_deref())
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(|error| database_error("count Agent nodes", error))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|error| database_error("complete Agent node directory read", error))?;
         let mut data = rows
             .iter()
             .map(record_from_row)
@@ -122,7 +156,11 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         } else {
             None
         };
-        Ok(NodePageRecord { data, next_cursor })
+        Ok(NodePageRecord {
+            data,
+            next_cursor,
+            total: total as u64,
+        })
     }
 
     async fn register(&self, params: RegisterNodeParams) -> TalosResult<NodeRecord> {
@@ -228,6 +266,29 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .await
         .map_err(|error| database_error("rotate Agent node credential", error))?;
         record_or_missing(row.into_iter().next())
+    }
+
+    async fn rename(&self, params: RenameNodeParams) -> TalosResult<NodeRecord> {
+        let row = sqlx::query(&format!(
+            "UPDATE agent_nodes SET display_name = ?, updated_at = ? WHERE node_id = ? AND mode = 'remote' RETURNING {NODE_COLUMNS}"
+        ))
+        .bind(params.display_name).bind(params.now_at).bind(params.node_id)
+        .fetch_optional(&self.pool).await
+        .map_err(|error| database_error("rename Agent node", error))?;
+        record_or_missing(row)
+    }
+
+    async fn set_status(&self, params: SetNodeStatusParams) -> TalosResult<NodeRecord> {
+        let disabled = params.status == NodeStatus::Disabled;
+        let row = sqlx::query(&format!(
+            "UPDATE agent_nodes SET status = ?, lease_token_hash = CASE WHEN ? THEN NULL ELSE lease_token_hash END, lease_expires_at = CASE WHEN ? THEN NULL ELSE lease_expires_at END, last_heartbeat_at = CASE WHEN ? THEN NULL ELSE last_heartbeat_at END, health = CASE WHEN ? THEN 'unknown' ELSE health END, updated_at = ? WHERE node_id = ? AND mode = 'remote' RETURNING {NODE_COLUMNS}"
+        ))
+        .bind(status_text(params.status))
+        .bind(disabled).bind(disabled).bind(disabled).bind(disabled)
+        .bind(params.now_at).bind(params.node_id)
+        .fetch_optional(&self.pool).await
+        .map_err(|error| database_error("set Agent node status", error))?;
+        record_or_missing(row)
     }
 }
 

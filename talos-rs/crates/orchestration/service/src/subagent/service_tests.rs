@@ -349,7 +349,7 @@ async fn test_services_uninitialized() -> TestServices {
         talos_config::DEFAULT_WORKSPACE_ID,
         workspace.path().to_path_buf(),
     ));
-    let sessions = Arc::new(SessionService::new(
+    let sessions = Arc::new(crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config.clone(),
@@ -373,7 +373,7 @@ async fn test_services_uninitialized() -> TestServices {
         profile_store,
         SessionMessageQueueService::new(10).expect("queue service should initialize"),
         config,
-        Arc::new(tokio::sync::RwLock::new(())),
+        Arc::new(crate::turn::NodeAdmissionGates::default()),
     ));
     let subagents = SubagentService::new(sessions.clone(), turns, event_service.clone());
     TestServices {
@@ -522,6 +522,7 @@ async fn create_live_running_child(
         .submit_subagent_turn(
             child.clone(),
             talos_types::StartTurnRequest {
+                node_id: None,
                 session_id: child.id.clone(),
                 input: crate::test_support::test_user_input("running child"),
                 model_selection: None,

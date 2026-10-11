@@ -163,7 +163,7 @@ fn decode_environment(value: pb::SessionEnvironment) -> TalosResult<TalosSession
     })
 }
 
-fn encode_model_selection(value: ModelSelection) -> pb::ModelSelection {
+pub fn encode_model_selection(value: ModelSelection) -> pb::ModelSelection {
     pb::ModelSelection {
         provider: value.model_ref.provider,
         model_id: value.model_ref.id,
@@ -171,7 +171,7 @@ fn encode_model_selection(value: ModelSelection) -> pb::ModelSelection {
     }
 }
 
-fn decode_model_selection(value: Option<pb::ModelSelection>) -> TalosResult<ModelSelection> {
+pub fn decode_model_selection(value: Option<pb::ModelSelection>) -> TalosResult<ModelSelection> {
     let value = value.ok_or_else(invalid)?;
     if value.provider.is_empty() || value.model_id.is_empty() {
         return Err(invalid());
@@ -185,7 +185,7 @@ fn decode_model_selection(value: Option<pb::ModelSelection>) -> TalosResult<Mode
     })
 }
 
-fn encode_model(value: ModelInfo) -> pb::ModelInfo {
+pub fn encode_model(value: ModelInfo) -> pb::ModelInfo {
     let model = value.model;
     pb::ModelInfo {
         provider: value.provider,
@@ -208,7 +208,7 @@ fn encode_model(value: ModelInfo) -> pb::ModelInfo {
     }
 }
 
-fn decode_model(value: Option<pb::ModelInfo>) -> TalosResult<ModelInfo> {
+pub fn decode_model(value: Option<pb::ModelInfo>) -> TalosResult<ModelInfo> {
     let value = value.ok_or_else(invalid)?;
     if value.provider.is_empty() || value.id.is_empty() {
         return Err(invalid());

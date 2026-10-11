@@ -22,12 +22,10 @@ use talos_agent_api::{
     AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
 };
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{ConfigStore, InMemoryLlmConfigStore};
 use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
-use talos_store::memory::MemoryStore;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::StorageProjectStore;
 use talos_store::session::{
@@ -98,9 +96,6 @@ impl TalosService {
         actor: &Actor,
         params: CreateSessionRequest,
     ) -> ServiceResult<SessionInfo> {
-        if let Some(selection) = params.model_selection.as_ref() {
-            self.config.validate_model_selection_supported(selection)?;
-        }
         let record = self.access.create_session(actor, params).await?;
         self.sessions.session_info(&record)
     }
@@ -140,30 +135,6 @@ fn configured_test_config_with_turn_model() -> TalosConfig {
             cost: talos_config::ModelCostConfig::default(),
         });
     config
-}
-
-fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
-    let active = Arc::new(std::sync::RwLock::new(config));
-    Arc::new(move |trigger| {
-        let mut next = active
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        if let ConfigReloadTrigger::Updated(value) = trigger {
-            match value {
-                talos_types::ConfigValue::Llm(llm) => next.llm = *llm,
-                talos_types::ConfigValue::WebSearch(web_search) => {
-                    next.agent.kernel.tools.web_search = *web_search;
-                }
-            }
-        }
-        let active = active.clone();
-        Ok(ConfigReloadPlan::new(next.clone(), move || {
-            *active
-                .write()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
-        }))
-    })
 }
 
 #[async_trait]
@@ -564,6 +535,9 @@ async fn test_application_with_coordinator(
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let nodes = crate::AgentNodeService::new(Arc::new(
+        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+    ));
     let project_store = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let file_operator = Operator::new(Memory::default()).unwrap().finish();
     let files = Arc::new(
@@ -576,27 +550,17 @@ async fn test_application_with_coordinator(
         .unwrap(),
     );
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
-    let config_store: Arc<dyn ConfigStore> =
-        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
-    let memory = MemoryService::new(
-        config.clone(),
-        Arc::new(MemoryStore::in_memory().await.unwrap()),
-    )
-    .unwrap();
     let coordinator: Arc<dyn AgentCoordinator> = Arc::new(TestExecutionCoordinator {
         execution: agent_execution,
         delegate: coordinator,
     });
-    let reload_hook = test_config_reload_hook(config.clone());
-    let plugins = crate::PluginManagerService::new(
-        config.agent.kernel.plugins.clone(),
-        config.agent.kernel.skills.clone(),
-    );
+    let coordinator = crate::test_support::with_environment(coordinator, config.clone());
     let service = TalosService::new(
         coordinator,
+        nodes,
         store.clone(),
         store.clone(),
         project_store,
@@ -604,13 +568,8 @@ async fn test_application_with_coordinator(
         files,
         event_service,
         config,
-        plugins,
-        memory,
-        config_store,
-        Vec::new(),
         auth_service,
         user_service,
-        reload_hook,
     );
     (service, store)
 }
@@ -621,6 +580,7 @@ fn request_source() -> SessionSource {
 
 fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
     StartTurnRequest {
+        node_id: None,
         session_id: session_id.to_string(),
         input: crate::test_support::test_user_input(text),
         model_selection: None,
@@ -665,6 +625,7 @@ fn create_session_params(
     current_directory: Option<std::path::PathBuf>,
 ) -> CreateSessionRequest {
     CreateSessionRequest {
+        node_id: None,
         session_id: session_id.to_string(),
         source,
         model_selection: None,
@@ -896,16 +857,22 @@ async fn existing_session_start_turn_rejects_a_project_override() {
     let first_project = service
         .create_project(
             &actor,
-            "First Project".to_string(),
-            first_directory.path().to_path_buf(),
+            talos_types::ProjectCreateRequest {
+                node_id: None,
+                name: "First Project".to_string(),
+                directory: first_directory.path().to_path_buf(),
+            },
         )
         .await
         .unwrap();
     let second_project = service
         .create_project(
             &actor,
-            "Second Project".to_string(),
-            second_directory.path().to_path_buf(),
+            talos_types::ProjectCreateRequest {
+                node_id: None,
+                name: "Second Project".to_string(),
+                directory: second_directory.path().to_path_buf(),
+            },
         )
         .await
         .unwrap();

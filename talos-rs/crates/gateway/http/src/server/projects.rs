@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::Json;
 
 use talos_auth::RequestIdentity;
@@ -15,12 +15,13 @@ use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 pub(super) async fn list_projects_handler(
+    Query(request): Query<ProjectListRequest>,
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<JsonResponse<ProjectListResponse>, ApiError> {
     let response = state
         .gateway
-        .list_projects(&shared_actor(&actor.0), ProjectListRequest::default())
+        .list_projects(&shared_actor(&actor.0), request)
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))

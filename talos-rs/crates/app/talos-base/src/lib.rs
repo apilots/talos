@@ -30,15 +30,17 @@ pub use agent_node_rpc::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
 mod application_automation;
 mod application_runtime;
 mod application_storage;
+mod desktop_application;
+mod desktop_stdio;
+mod desktop_worker;
+use desktop_stdio::run_cloud_desktop;
 mod dream_memory_maintenance;
 mod memory_progress;
-mod reloadable_llm_provider;
 mod startup;
 mod tool_images;
 
 #[cfg(test)]
 pub(crate) use application_runtime::build_application_runtime_with_migration_dir;
-use reloadable_llm_provider::ReloadableLlmProvider;
 #[cfg(test)]
 use talos_worker::create_llm_provider;
 
@@ -75,6 +77,7 @@ pub struct EmbeddedAppServer {
 
 #[derive(Clone)]
 pub struct TalosApplicationRuntime {
+    pub(crate) worker: talos_worker::TalosWorker,
     pub config: Config,
     pub service: Arc<TalosService>,
     pub event_service: Arc<TimelineEventService>,
@@ -539,7 +542,7 @@ async fn start_server_after_startup(
         shutdown_token: CancellationToken::new(),
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
-        plugins: runtime.service.plugins.clone(),
+        plugins: runtime.worker.plugin_manager(),
         http_server,
         channel_server,
         node_rpc_server,
@@ -561,9 +564,15 @@ async fn run_json_rpc_stdio_after_startup(
             .saturating_add(1024 * 1024),
     )
     .unwrap_or(usize::MAX);
+    let desktop_host = std::env::var("TALOS_DESKTOP_HOSTNAME").ok();
+    if config.desktop.connection_mode == talos_config::DesktopConnectionMode::Cloud {
+        if let Some(device_name) = &desktop_host {
+            return run_cloud_desktop(config, device_name.clone(), max_incoming_frame_bytes).await;
+        }
+    }
     let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
     let automation = runtime.automation.clone();
-    let plugins = runtime.service.plugins.clone();
+    let plugins = runtime.worker.plugin_manager();
     let replay_limit = config.agent.timeline_replay_batch_size.max(1);
     let service = runtime.service.clone();
     let app = Arc::new(
@@ -574,9 +583,19 @@ async fn run_json_rpc_stdio_after_startup(
             .with_cloud_api_base_url(config.cloud.api_base_url.clone()),
     );
     let validator = Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
-        runtime.auth_service,
+        runtime.auth_service.clone(),
         service.account.clone(),
     ));
+    let app: Arc<dyn talos_app_server::AppServerApplication> = match desktop_host {
+        Some(device_name) => Arc::new(desktop_application::DesktopApplication::new(
+            config.clone(),
+            service.account.clone(),
+            runtime.auth_service.clone(),
+            device_name,
+            Some(app),
+        )),
+        None => app,
+    };
     let result = talos_app_server::run_stdio_with_max_frame_bytes(
         app,
         validator,

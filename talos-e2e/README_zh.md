@@ -48,6 +48,7 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 | `14` | 统一 Sandbox 和权限执行 |
 | `15` | Release bundle 安装和已安装 TUI 启动 |
 | `17` | 三个 Worker：公开接口注册、归属隔离、路由、续租、协同与 Workspace 归属 |
+| `18` | Computer 云注册：真实 Desktop 登录、持久 UUID、出站注册与续租 |
 
 运行 `just e2e-group 17_multi_node` 会启动真实 Cloud Auth、一个 Server 和三个 Worker，
 使用独立 HOME 和端口。需要相邻 `talos-cloud` 仓库（或 `TALOS_CLOUD_REPO`）、
@@ -72,6 +73,12 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 
 每个场景负责自己的 preflight，并报告缺失变量或工具。运行带 credential 或外部服务的
 Group 前先阅读所选脚本。
+
+Computer 注册与主动执行验收组：`18_computer_workspace`。仅注册运行
+`just e2e-case 18_computer_workspace/01_registration`，需要 Caddy（可用
+`TALOS_E2E_CADDY_BIN` 指定）、Node.js 和 pnpm 依赖，不需要模型 key。
+完整执行组还需要可用且有额度的执行/inner/vision Provider；当前按用户要求暂停真实执行 E2E，
+待充值后恢复。覆盖范围与证据见[场景说明](scenarios/18_computer_workspace/README.md)。
 
 ## 证据和临时数据
 

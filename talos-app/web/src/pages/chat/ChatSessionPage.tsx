@@ -1,5 +1,5 @@
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -11,6 +11,7 @@ import {
   useSessionQuery,
   useSubmitUserActionMutation,
 } from "@/features/chat";
+import { useComputer, useComputers, useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
@@ -28,11 +29,18 @@ export function ChatSessionPage() {
   const sessionId = useParams().sessionId ?? "";
   const locationState = location.state as SessionLocationState | null;
   const [pendingInitialSessionId, setPendingInitialSessionId] = useState<string>();
-  const { data: session } = useSessionQuery(
+  const sessionQuery = useSessionQuery(
     sessionId,
     !hasInitialSessionInput(locationState) && pendingInitialSessionId !== sessionId,
   );
-  const { data: modelCatalog } = useModelsQuery();
+  const session = sessionQuery.data;
+  const computers = useComputers();
+  const scope = useProductScope();
+  const selectComputer = useAppStore((state) => state.selectComputer);
+  const nodeId = session?.nodeId ?? locationState?.initialNodeId ?? computers.selectedId;
+  const target = useComputer(nodeId);
+  useEffect(() => { if (session?.nodeId) selectComputer(scope, session.nodeId); }, [session?.nodeId, sessionId, scope, selectComputer]);
+  const { data: modelCatalog } = useModelsQuery(nodeId);
   const models = modelCatalog?.models;
   const projectsView = useProjectsView();
   const chat = useChatSession(sessionId, session?.messageCount);
@@ -87,6 +95,7 @@ export function ChatSessionPage() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
+      {sessionQuery.error && !locationState ? <p role="alert" className="px-7 py-3 text-sm text-danger">{userVisibleErrorMessage(sessionQuery.error, "Unable to load this session.")}</p> : null}
       {sidebarOpen ? (
         <ChatContextBar
           loading={!session}
@@ -137,7 +146,7 @@ export function ChatSessionPage() {
       />
       <div className="mt-4 shrink-0">
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
-          <ChatComposer {...sessionComposer.props} />
+          <ChatComposer {...sessionComposer.props} disabled={!target.data?.available || (sessionQuery.isPending && !locationState && pendingInitialSessionId !== sessionId)} />
         </div>
       </div>
       <SessionClearConfirmationDialog {...sessionComposer.clearConfirmation} />

@@ -39,7 +39,11 @@ impl KernelAgentProvider {
             params.workspace_root.clone(),
             params.session_id.clone(),
         );
-        let mut kernel_config = self.base_kernel_config.clone();
+        let mut kernel_config = self
+            .base_kernel_config
+            .read()
+            .expect("Kernel config lock poisoned")
+            .clone();
         kernel_config.workspace_dir = params.workspace_root.to_string_lossy().into_owned();
         let result = talos_agent_kernel::form_dream_session_memory(
             talos_agent_kernel::MemoryFormationParams {

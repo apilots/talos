@@ -1,14 +1,18 @@
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { createBrowserTalosClient } from "@talos/sdk-browser";
 
+import { connectionScope } from "@/shared/store/connection-scope";
+import { bindComputerTarget } from "./computer-target";
 import { createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { resolveServerBaseUrl } from "./server-base-url";
-import { getConnectionSettings } from "@/shared/store/app-store";
+import { useAppStore, getConnectionSettings } from "@/shared/store/app-store";
 
 type BrowserTalosClient = ReturnType<typeof createBrowserTalosClient>;
 type Methods<T, K extends keyof T> = Pick<T, K>;
 
 /** Transport-neutral API surface consumed by the Web application. */
 export type TalosWebClient = {
+  computers: Methods<BrowserTalosClient["computers"], "list" | "read" | "rename" | "setStatus">;
   auth: Methods<BrowserTalosClient["auth"], "logout">;
   user: Methods<BrowserTalosClient["user"], "current">;
   profile: Methods<BrowserTalosClient["profile"], "read">;
@@ -55,14 +59,21 @@ export type TalosClientFactory = () => TalosWebClient;
 let clientFactory: TalosClientFactory | undefined;
 
 function createDefaultBrowserClient() {
+  const token = getAuthTokenForRequests();
   const desktopBridge = getDesktopBridge();
   if (desktopBridge) {
-    return createDesktopTalosClient(desktopBridge, getAuthTokenForRequests);
+    const mode = getConnectionSettings().desktopConnectionMode;
+    if (mode === "local") return createDesktopTalosClient(desktopBridge, () => token);
+    if (mode !== "cloud") throw new TalosApiError({
+      code: AppProtocol.ErrorCode.ServiceUnavailable,
+      message: "The desktop connection is still initializing.",
+      localization: null,
+    });
   }
 
   return createBrowserTalosClient({
     baseUrl: resolveServerBaseUrl(),
-    getToken: getAuthTokenForRequests,
+    getToken: () => token,
   });
 }
 
@@ -82,6 +93,9 @@ export function resetTalosClientFactory() {
   clientFactory = undefined;
 }
 
-export function getTalosClient() {
-  return (clientFactory ?? createDefaultBrowserClient)();
+export function getTalosClient(nodeId?: string) {
+  const state = useAppStore.getState();
+  const target = nodeId ?? state.selectedComputers[connectionScope(state.connection)];
+  const client = (clientFactory ?? createDefaultBrowserClient)();
+  return target ? bindComputerTarget(client, target) : client;
 }

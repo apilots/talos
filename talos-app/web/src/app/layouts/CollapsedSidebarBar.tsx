@@ -1,8 +1,7 @@
 import { ArrowLeft, ArrowRight, FileText, PanelLeft, PencilLine } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { useSessionsQuery } from "@/features/chat";
-import { useAppStore } from "@/shared/store/app-store";
+import { useProjectsQuery, useSessionQuery } from "@/features/chat";
 
 interface CollapsedSidebarBarProps {
   onOpenSidebar: () => void;
@@ -30,12 +29,11 @@ function staticPageTitle(pathname: string) {
 export function CollapsedSidebarBar({ onOpenSidebar }: CollapsedSidebarBarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const sessionsQuery = useSessionsQuery();
-  const projects = useAppStore((state) => state.projects);
   const sessionId = location.pathname.startsWith("/sessions/")
     ? location.pathname.slice("/sessions/".length)
     : null;
-  const session = sessionId ? sessionsQuery.data?.find((entry) => entry.id === sessionId) : undefined;
+  const { data: session } = useSessionQuery(sessionId ?? "", Boolean(sessionId));
+  const { data: projects = [] } = useProjectsQuery(session?.nodeId);
   const project = session?.projectId ? projects.find((entry) => entry.id === session.projectId) : undefined;
   const title = session?.title ?? staticPageTitle(location.pathname);
 

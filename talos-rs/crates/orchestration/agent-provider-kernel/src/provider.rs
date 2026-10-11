@@ -60,7 +60,7 @@ pub struct KernelAgentProvider {
     pub(crate) description: String,
     pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
     pub(crate) tool_registry: Arc<ToolRegistry>,
-    pub(crate) base_kernel_config: AgentKernelConfig,
+    pub(crate) base_kernel_config: Arc<std::sync::RwLock<AgentKernelConfig>>,
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     pub(crate) session_artifact_store: Arc<dyn KernelSessionArtifactStore>,
     pub(crate) session_history_reader: Arc<dyn SessionHistoryReader>,
@@ -92,7 +92,9 @@ impl KernelAgentProvider {
             description: params.description,
             llm_provider_router: params.llm_provider_router,
             tool_registry: params.tool_registry,
-            base_kernel_config: normalize_kernel_config(params.kernel_config),
+            base_kernel_config: Arc::new(std::sync::RwLock::new(normalize_kernel_config(
+                params.kernel_config,
+            ))),
             skill_roots_resolver: params.skill_roots_resolver,
             session_artifact_store: params.session_artifact_store,
             session_history_reader: params.session_history_reader,
@@ -102,6 +104,16 @@ impl KernelAgentProvider {
             attachment_reader: params.attachment_reader,
             capabilities,
         })
+    }
+
+    /// Publishes a validated node-local configuration between invocations.
+    /// The Worker must hold its execution write gate across preparation and publication.
+    /// Existing Session handles share this configuration; no Session history is replaced.
+    pub fn reload_kernel_config(&self, config: AgentKernelConfig) {
+        *self
+            .base_kernel_config
+            .write()
+            .expect("Kernel config lock poisoned") = normalize_kernel_config(config);
     }
 
     pub(crate) fn validate_agent_id(&self, agent_id: &str) -> AgentResult<()> {
@@ -115,7 +127,11 @@ impl KernelAgentProvider {
     }
 
     pub(crate) fn effective_kernel_config(&self, context: &AgentContext) -> AgentKernelConfig {
-        let mut config = self.base_kernel_config.clone();
+        let mut config = self
+            .base_kernel_config
+            .read()
+            .expect("Kernel config lock poisoned")
+            .clone();
         config.workspace_dir = context
             .session
             .workspace

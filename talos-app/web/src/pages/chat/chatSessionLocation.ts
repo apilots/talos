@@ -8,6 +8,7 @@ import type { ProjectView, ReasoningLevel } from "@/shared/types/ui";
 
 /** Navigation state accepted when opening a chat session draft. */
 export interface SessionLocationState {
+  initialNodeId?: string;
   initialPrompt?: string;
   initialModel?: ModelRef;
   initialReasoningLevel?: ReasoningLevel;

@@ -19,6 +19,7 @@ pub struct PluginManagerService {
     pub(super) manager: PluginManager,
     pub(crate) execution_gate: Arc<RwLock<()>>,
     pub(super) mcp: Option<McpContext>,
+    pub(super) config_service: Option<crate::ConfigService>,
 }
 
 #[derive(Clone)]
@@ -35,6 +36,7 @@ impl PluginManagerService {
             manager: PluginManager::new(config).with_max_skill_md_bytes(skills.max_skill_md_bytes),
             execution_gate: Arc::default(),
             mcp: None,
+            config_service: None,
         }
     }
 
@@ -43,7 +45,21 @@ impl PluginManagerService {
             manager,
             execution_gate: Arc::default(),
             mcp: None,
+            config_service: None,
         }
+    }
+
+    /// Attaches the Worker's existing atomic configuration publisher for configured MCP credentials.
+    /// Hosts must compose this after the MCP hook; it never owns product persistence.
+    #[must_use]
+    pub fn with_config_service(mut self, service: crate::ConfigService) -> Self {
+        self.config_service = Some(service);
+        self
+    }
+
+    /// The node-local gate shared by actual execution and environment commits.
+    pub fn execution_gate(&self) -> Arc<RwLock<()>> {
+        self.execution_gate.clone()
     }
 
     /// Connects plugin publication and status to the application-owned MCP owner.
@@ -166,7 +182,7 @@ impl PluginManagerService {
         &self,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
-        let _guard = self.execution_gate.write().await;
+        let _guard = self.commit_guard()?;
         let result = self.install_with_credentials(request).map(|mut response| {
             super::redaction::plugin(&mut response.plugin);
             response
@@ -176,7 +192,7 @@ impl PluginManagerService {
     }
 
     pub async fn update(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
-        let _guard = self.execution_gate.write().await;
+        let _guard = self.commit_guard()?;
         let result = self.manager.update(request).map(|mut response| {
             super::redaction::plugin(&mut response.plugin);
             response
@@ -189,14 +205,14 @@ impl PluginManagerService {
         &self,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        let _guard = self.execution_gate.write().await;
+        let _guard = self.commit_guard()?;
         let result = self.manager.uninstall(request);
         self.recover_credentials();
         result
     }
 
     pub async fn enable(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
-        let _guard = self.execution_gate.write().await;
+        let _guard = self.commit_guard()?;
         self.manager.enable(request).map(|mut response| {
             super::redaction::plugin(&mut response.plugin);
             response
@@ -207,10 +223,21 @@ impl PluginManagerService {
         &self,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        let _guard = self.execution_gate.write().await;
-        self.manager.disable(request).map(|mut response| {
+        let _guard = self.commit_guard()?;
+        let result = self.manager.disable(request).map(|mut response| {
             super::redaction::plugin(&mut response.plugin);
             response
+        });
+        self.recover_credentials();
+        result
+    }
+
+    pub(super) fn commit_guard(&self) -> TalosResult<tokio::sync::RwLockWriteGuard<'_, ()>> {
+        self.execution_gate.try_write().map_err(|_| {
+            talos_error::TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Worker environment cannot change while execution is active",
+            )
         })
     }
 

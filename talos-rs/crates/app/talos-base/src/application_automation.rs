@@ -55,7 +55,7 @@ impl TalosApplicationRuntime {
                 Err(error)
             }
         };
-        combine(result, self.service.plugins.shutdown_mcp().await)
+        combine(result, self.worker.plugin_manager().shutdown_mcp().await)
     }
 }
 

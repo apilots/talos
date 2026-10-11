@@ -14,9 +14,17 @@ use talos_types::{
 };
 
 fn dream_memory(date: &str, entries: &[(&str, &str, &str)]) -> String {
+    dream_memory_for_workspace("default", date, entries)
+}
+
+fn dream_memory_for_workspace(
+    workspace_id: &str,
+    date: &str,
+    entries: &[(&str, &str, &str)],
+) -> String {
     let timezone = talos_config::parse_timezone("UTC").expect("timezone");
     let context = DreamMemoryDocumentContext::new(
-        MemoryAgentId::parse("default").expect("agent id"),
+        MemoryAgentId::parse(workspace_id).expect("agent id"),
         MemoryUserId::parse("user-1").expect("user id"),
         DreamMemoryDate::parse(date).expect("date"),
         MemoryTimezone::new(timezone),
@@ -179,6 +187,7 @@ async fn file_list_reads_only_the_requested_latest_files() {
         .list_files_with_request(
             &actor,
             MemoryFileListRequest {
+                node_id: None,
                 limit: Some(1),
                 ..MemoryFileListRequest::default()
             },
@@ -188,4 +197,82 @@ async fn file_list_reads_only_the_requested_latest_files() {
 
     assert_eq!(response.data.len(), 1);
     assert_eq!(response.data[0].date, "2026-07-18");
+}
+
+#[tokio::test]
+async fn retained_tool_and_dream_readers_follow_worker_configuration_reload() {
+    use talos_config::{TalosPaths, WorkspaceConfig, WorkspaceDefinition};
+    use talos_memory::MemoryReader;
+    let home = tempfile::tempdir().unwrap();
+    let config = Arc::new(std::sync::RwLock::new(
+        TalosConfig::default().with_runtime_paths(TalosPaths::from_home(home.path().into())),
+    ));
+    let initial_config = config.read().unwrap().clone();
+    let store = Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap());
+    let service = MemoryService::new(initial_config, store)
+        .unwrap()
+        .with_live_config(config.clone());
+    let tool_reader = service.clone();
+    let dream_reader = service.clone();
+    {
+        let mut config = config.write().unwrap();
+        config.workspaces = WorkspaceConfig {
+            default_workspace_id: "reloaded".into(),
+            definitions: vec![WorkspaceDefinition::new("reloaded", "new-files")],
+        };
+        config.memory.memory_dirname = "journal".into();
+    }
+    let content = dream_memory_for_workspace(
+        "reloaded",
+        "2026-07-17",
+        &[(
+            "mem_0123456789abcdef0123456789abcdef",
+            "Reload note",
+            "needle reload memory",
+        )],
+    );
+    let reloaded_config = config.read().unwrap().clone();
+    service
+        .with_config(reloaded_config)
+        .unwrap()
+        .put_file(
+            &Actor::regular("user-1"),
+            MemoryDate::parse("2026-07-17").unwrap(),
+            DocUpdateRequest {
+                content,
+                base_version: ExpectedFileVersion::MustNotExist,
+            },
+        )
+        .await
+        .unwrap();
+    let scope = MemoryScope {
+        workspace_id: "reloaded".into(),
+        user_id: "user-1".into(),
+        workspace_root: home.path().join("new-files/user-1"),
+    };
+    let hits = MemoryReader::search(
+        &tool_reader,
+        &scope,
+        talos_types::MemorySearchRequest {
+            query: "needle".into(),
+            limit: None,
+            kinds: None,
+            since_at: None,
+            until_at: None,
+            node_id: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(hits.data.len(), 1);
+    let snapshot = dream_reader
+        .read_day(&scope, DreamMemoryDate::parse("2026-07-17").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(snapshot.entries().len(), 1);
+    assert!(scope.workspace_root.join("journal/2026-07-17.md").exists());
+    assert!(!home
+        .path()
+        .join("workspace/user-1/journal/2026-07-17.md")
+        .exists());
 }

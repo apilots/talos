@@ -89,7 +89,7 @@ impl PluginManager {
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
         let source = source_from_input(request.source)?;
-        let existing = self.list_sources(PluginSourceListRequest {})?;
+        let existing = self.list_sources(PluginSourceListRequest { node_id: None })?;
         if existing.sources.iter().any(|item| item.id == source.id) {
             return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
@@ -103,6 +103,7 @@ impl PluginManager {
 
         if request.refresh {
             let refreshed = self.refresh_source_locked(PluginSourceRefreshRequest {
+                node_id: None,
                 source_id: source.id,
             })?;
             return Ok(PluginSourceAddResponse {
@@ -183,7 +184,10 @@ impl PluginManager {
     pub fn search(&self, request: PluginSearchRequest) -> TalosResult<PluginSearchResponse> {
         let mut plugins = Vec::new();
         let mut warnings = Vec::new();
-        for source in self.list_sources(PluginSourceListRequest {})?.sources {
+        for source in self
+            .list_sources(PluginSourceListRequest { node_id: None })?
+            .sources
+        {
             if request
                 .source_id
                 .as_ref()
@@ -199,6 +203,7 @@ impl PluginManager {
             };
             let source_plugins = if should_refresh {
                 match self.refresh_source(PluginSourceRefreshRequest {
+                    node_id: None,
                     source_id: source.id.clone(),
                 }) {
                     Ok(refreshed) => {
@@ -563,7 +568,10 @@ impl PluginManager {
         &self,
         plugin_id: &talos_types::PluginId,
     ) -> TalosResult<InstallCandidate> {
-        for source in self.list_sources(PluginSourceListRequest {})?.sources {
+        for source in self
+            .list_sources(PluginSourceListRequest { node_id: None })?
+            .sources
+        {
             let cache = self.state.load_source_scan_cache(&source.id)?;
             if let Some(plugin) = cache
                 .plugins
@@ -644,7 +652,9 @@ impl PluginManager {
     }
 
     fn find_cached_plugin(&self, plugin_id: &talos_types::PluginId) -> Option<Plugin> {
-        let sources = self.list_sources(PluginSourceListRequest {}).ok()?;
+        let sources = self
+            .list_sources(PluginSourceListRequest { node_id: None })
+            .ok()?;
         for source in sources.sources {
             let Ok(cache) = self.state.load_source_scan_cache(&source.id) else {
                 continue;
@@ -749,7 +759,10 @@ impl PluginManager {
                 format!("plugin install `{}` has no update source", install.id.0),
             )
         })?;
-        let refreshed = self.refresh_source_locked(PluginSourceRefreshRequest { source_id })?;
+        let refreshed = self.refresh_source_locked(PluginSourceRefreshRequest {
+            node_id: None,
+            source_id,
+        })?;
         let plugin = refreshed
             .plugins
             .into_iter()

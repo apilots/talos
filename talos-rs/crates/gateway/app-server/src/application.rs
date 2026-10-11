@@ -51,6 +51,11 @@ pub struct ApplicationResponse {
 
 #[async_trait]
 pub trait AppServerApplication: Send + Sync {
+    /// Desktop-only terminal registration feedback; never a product event or durable state.
+    fn subscribe_worker_failures(&self) -> Option<tokio::sync::watch::Receiver<Option<ApiError>>> {
+        None
+    }
+
     async fn dispatch(
         &self,
         actor: &Actor,
@@ -207,6 +212,48 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(talos_error_to_api_error)?;
                 to_value(snapshot)
             }
+            ClientRequestParams::DesktopConnectionRead(_)
+            | ClientRequestParams::DesktopConnectionSet(_)
+            | ClientRequestParams::DesktopWorkerIdentity(_)
+            | ClientRequestParams::DesktopWorkerEnroll(_) => {
+                Err(ApiError::new(ErrorCode::InvalidRequest))
+            }
+            ClientRequestParams::ComputerList(params) => to_value(
+                self.gateway
+                    .list_computers(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerRead(params) => to_value(
+                self.gateway
+                    .read_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerCreate(params) => to_value(
+                self.gateway
+                    .create_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerRename(params) => to_value(
+                self.gateway
+                    .rename_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerSetStatus(params) => to_value(
+                self.gateway
+                    .set_computer_status(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerRotateCredential(params) => to_value(
+                self.gateway
+                    .rotate_computer_credential(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::ProjectCreate(params) => to_value(
                 self.gateway
                     .create_project(actor, params)

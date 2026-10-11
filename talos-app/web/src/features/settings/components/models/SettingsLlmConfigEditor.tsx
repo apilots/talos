@@ -12,7 +12,7 @@ import { Brain, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { updateLlmConfig, type LlmConfigResponse } from "@/features/settings/api";
 import { llmConfigKey, useLlmConfigQuery } from "@/features/settings/hooks/useLlmConfigQuery";
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
@@ -211,7 +211,7 @@ function ProviderTab({ config, capabilities, keyConfigured, onChange }: Provider
 
 export function SettingsLlmConfigEditor() {
   const { t } = useTranslation("settings");
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const queryClient = useQueryClient();
   const [activeProvider, setActiveProvider] = useState<ProviderKey>("anthropic");
   const [draft, setDraft] = useState<LlmConfig | null>(null);

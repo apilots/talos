@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { WorkspaceDocInfo, WorkspaceDocKind } from "@talos/sdk-browser";
 
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { getTalosClient } from "@/shared/api/client";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
@@ -34,7 +34,7 @@ export function formatWorkspaceDocDate(updatedAt?: number | null) {
 }
 
 export function useWorkspaceDocsPage() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const queryClient = useQueryClient();
   const [selectedDocKind, setSelectedDocKind] = useState<WorkspaceDocKind>("memory");
   const [docDraft, setDocDraft] = useState("");

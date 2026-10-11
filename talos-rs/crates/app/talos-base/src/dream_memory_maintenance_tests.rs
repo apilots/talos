@@ -10,7 +10,6 @@ use talos_agent_api::{
     AgentTurnStarted,
 };
 use talos_auth::{AuthService, OpenModeUserService, RequestIdentity};
-use talos_config::InMemoryLlmConfigStore;
 use talos_coordinator::CoordinatorImpl;
 use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter,
@@ -20,7 +19,6 @@ use talos_memory::{
     DreamMemoryDate, DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryProvenance,
     MemoryAgentId, MemoryTimezone, MemoryUserId,
 };
-use talos_service::MemoryService;
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
 use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
@@ -185,15 +183,6 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         )
         .await;
     }
-    let memory = MemoryService::new(
-        config.clone(),
-        Arc::new(
-            talos_store::memory::MemoryStore::in_memory()
-                .await
-                .expect("memory store"),
-        ),
-    )
-    .expect("memory service");
     let provider: Arc<dyn LlmProvider> = Arc::new(TestProvider {
         responses: Mutex::new(VecDeque::from([
             candidate_response("first"),
@@ -217,6 +206,9 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .build()
             .expect("inner model client"),
     );
+    let nodes = talos_service::AgentNodeService::new(Arc::new(
+        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+    ));
     let project_store = Arc::new(
         StorageProjectStore::new(storage.clone())
             .await
@@ -269,19 +261,9 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             .unwrap();
     }
     let auth = Arc::new(TestAuthService);
-    let reload_config = config.clone();
-    let reload_hook: talos_service::ConfigReloadHook = Arc::new(move |_trigger| {
-        Ok(talos_service::ConfigReloadPlan::new(
-            reload_config.clone(),
-            || {},
-        ))
-    });
-    let plugins = talos_service::PluginManagerService::new(
-        config.agent.kernel.plugins.clone(),
-        config.agent.kernel.skills.clone(),
-    );
     let service = Arc::new(talos_service::TalosService::new(
         coordinator.clone(),
+        nodes,
         sessions.clone(),
         sessions.clone(),
         project_store,
@@ -289,13 +271,8 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
         file_service,
         Arc::new(talos_service::TimelineEventService::new(sessions.clone())),
         config.clone(),
-        plugins,
-        memory,
-        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone())),
-        resolve_model_catalog(&config.llm),
         auth,
         Arc::new(OpenModeUserService),
-        reload_hook,
     ));
     let maintenance = DreamMemoryMaintenance::new(
         sessions.clone(),

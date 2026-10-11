@@ -179,6 +179,10 @@ impl SessionConfigOverridePolicy {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct SessionListRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
@@ -198,6 +202,9 @@ pub struct SessionListResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct SessionInfo {
+    #[serde(rename = "nodeId")]
+    #[ts(rename = "nodeId")]
+    pub node_id: String,
     pub id: String,
     pub title: String,
     pub user_id: String,
@@ -371,10 +378,19 @@ pub struct SessionConf {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct ProjectListRequest {}
+pub struct ProjectListRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct ProjectCreateRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
     pub name: String,
     pub directory: PathBuf,
 }
@@ -406,6 +422,9 @@ pub struct ProjectDeleteRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct ProjectInfo {
+    #[serde(rename = "nodeId")]
+    #[ts(rename = "nodeId")]
+    pub node_id: String,
     pub project_id: String,
     pub name: String,
     pub directory: PathBuf,
@@ -458,6 +477,9 @@ pub enum ProjectStatusState {
     Missing,
     NotDirectory,
     PermissionDenied,
+    #[serde(rename = "nodeUnavailable")]
+    #[ts(rename = "nodeUnavailable")]
+    NodeUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
@@ -466,6 +488,9 @@ pub enum ProjectUnavailableReason {
     PathNotFound,
     NotDirectory,
     PermissionDenied,
+    #[serde(rename = "nodeUnavailable")]
+    #[ts(rename = "nodeUnavailable")]
+    NodeUnavailable,
 }
 
 impl Default for ProjectStatus {

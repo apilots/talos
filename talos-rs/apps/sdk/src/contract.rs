@@ -94,6 +94,42 @@ impl MessageQueueChangeStream {
 
 #[async_trait]
 pub trait GatewayClient: Send {
+    /// Lists caller-owned Computers and the shared embedded Computer, including offline metadata.
+    async fn list_computers(
+        &mut self,
+        request: talos_types::ComputerListRequest,
+    ) -> TalosResult<talos_types::ComputerListResponse>;
+
+    /// Reads an authorized Computer without exposing registration or lease credentials.
+    async fn read_computer(
+        &mut self,
+        request: talos_types::GetNodeRequest,
+    ) -> TalosResult<talos_types::NodeInfo>;
+
+    /// Creates a caller-owned UUID and returns its one-time credential; protect the token at the host boundary.
+    async fn create_computer(
+        &mut self,
+        request: talos_types::CreateNodeRequest,
+    ) -> TalosResult<talos_types::CreatedNode>;
+
+    /// Updates owner-visible metadata while preserving the UUID and Session bindings.
+    async fn rename_computer(
+        &mut self,
+        request: talos_types::RenameComputerRequest,
+    ) -> TalosResult<talos_types::NodeInfo>;
+
+    /// Changes registration availability; disabling revokes the active lease and execution handle.
+    async fn set_computer_status(
+        &mut self,
+        request: talos_types::SetComputerStatusRequest,
+    ) -> TalosResult<talos_types::NodeInfo>;
+
+    /// Revokes existing credentials and returns an owner-authorized one-time replacement.
+    async fn rotate_computer_credential(
+        &mut self,
+        request: talos_types::RotateCredentialRequest,
+    ) -> TalosResult<talos_types::NodeCredential>;
+
     async fn read_auth_session(
         &mut self,
         request: AuthSessionReadRequest,

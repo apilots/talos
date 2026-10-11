@@ -143,7 +143,7 @@ export function createAppStoreMock() {
   return {
     useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
       selector({
-        connection: {},
+        connection: {}, selectComputer: vi.fn(),
       }),
   };
 }

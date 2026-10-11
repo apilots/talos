@@ -15,8 +15,9 @@ mod tool_content;
 mod tests;
 
 pub use context::{
-    decode_context, decode_metrics, decode_session_context, decode_turn_ref, encode_context,
-    encode_metrics, encode_session_context, encode_turn_ref,
+    decode_context, decode_metrics, decode_model, decode_model_selection, decode_session_context,
+    decode_turn_ref, encode_context, encode_metrics, encode_model, encode_model_selection,
+    encode_session_context, encode_turn_ref,
 };
 pub use event::{decode_event, encode_event};
 pub use input::{decode_user_content, encode_user_content};

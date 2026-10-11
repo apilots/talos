@@ -3,17 +3,18 @@ use super::*;
 impl AgentHarnessRpcAdapter {
     pub(super) async fn serve_dream_memory(
         &self,
-        request: Request<Streaming<pb::FormDreamMemoryRequest>>,
+        request: RpcStream<pb::FormDreamMemoryRequest>,
     ) -> Result<Response<RpcStream<pb::FormDreamMemoryResponse>>, Status> {
-        let mut inbound = request.into_inner();
-        let first = tokio::time::timeout(Duration::from_secs(30), inbound.message())
+        let mut inbound = request;
+        let first = tokio::time::timeout(Duration::from_secs(30), inbound.next())
             .await
             .map_err(|_| {
                 status_from_error(TalosError::new(
                     ErrorCode::Timeout,
                     "Dream Memory context timed out",
                 ))
-            })??
+            })?
+            .transpose()?
             .ok_or_else(|| status_from_error(invalid_request()))?;
         let auth = node_pb::decode_auth(first.auth).map_err(status_from_error)?;
         let lease = self.authorize(&auth).map_err(status_from_error)?;
@@ -46,11 +47,12 @@ impl AgentHarnessRpcAdapter {
                     )
                     .await
                     .map_err(|_| unauthenticated())?;
-                let frame = tokio::time::timeout(Duration::from_secs(300), inbound.message())
+                let frame = tokio::time::timeout(Duration::from_secs(300), inbound.next())
                     .await
                     .map_err(|_| {
                         TalosError::new(ErrorCode::Timeout, "Dream Memory model reply timed out")
                     })?
+                    .transpose()
                     .map_err(transport_error)?
                     .ok_or_else(invalid_request)?;
                 let auth = node_pb::decode_auth(frame.auth)?;

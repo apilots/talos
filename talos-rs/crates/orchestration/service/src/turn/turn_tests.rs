@@ -1,5 +1,4 @@
 use super::*;
-use crate::session::SessionService;
 use crate::test_support::{
     canonical_user_admission, commit_test_running_turn, run_test_migrations, test_user_input,
 };
@@ -629,6 +628,7 @@ async fn submit_start_turn_preserves_executor_error_semantics() {
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("hello"),
             model_selection: None,
@@ -689,7 +689,7 @@ async fn test_service_with_storage(
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let config = test_config();
-    let sessions = Arc::new(SessionService::new(
+    let sessions = Arc::new(crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config.clone(),
@@ -706,7 +706,7 @@ async fn test_service_with_storage(
             profile_store,
             message_queue.clone(),
             config,
-            Arc::new(tokio::sync::RwLock::new(())),
+            Arc::new(crate::turn::NodeAdmissionGates::default()),
         ),
         event_service,
         store,

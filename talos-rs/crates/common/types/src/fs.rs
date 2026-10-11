@@ -5,12 +5,20 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct FsDirectoryReadRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
     #[serde(default)]
     pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct FsDirectoryCreateRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
     pub parent: PathBuf,
     pub name: String,
 }

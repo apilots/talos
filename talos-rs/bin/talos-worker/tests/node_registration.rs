@@ -60,7 +60,7 @@ async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_si
         bind_address: address.to_string(),
         tls_certificate_file: certificate_path.clone(),
         tls_private_key_file: private_key_path.clone(),
-        trusted_node_ca_file: certificate_path.clone(),
+        trusted_node_ca_file: Some(certificate_path.clone()),
     };
 
     let node_socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -92,7 +92,7 @@ async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_si
             &Actor::regular("user-1"),
             CreateNodeRequest {
                 display_name: "Laptop".into(),
-                endpoint: format!("https://{node_address}"),
+                endpoint: Some(format!("https://{node_address}")),
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },

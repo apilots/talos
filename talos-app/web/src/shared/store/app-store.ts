@@ -8,29 +8,28 @@ import {
   type ConnectionSlice,
 } from "@/features/connection/store";
 import {
-  createMemorySlice,
-  type MemorySlice,
-} from "@/features/memory/store";
-import {
   createUiSlice,
-  mergeById,
   normalizeProjects,
   type UiSlice,
 } from "@/shared/store/ui-slice";
 import { createPersistStorage } from "@/shared/store/persist-storage";
 
+import { createComputerSlice, type ComputerSlice } from "@/features/computers/store";
+
+import { connectionScope } from "./connection-scope";
+
 export interface AppState
   extends ChatSlice,
     ConnectionSlice,
     UiSlice,
-    MemorySlice {}
+    ComputerSlice {}
 
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
+      ...createComputerSlice(set),
       ...createConnectionSlice(set as unknown as (updater: (state: ConnectionSlice) => Partial<ConnectionSlice>) => void),
       ...createUiSlice(set as unknown as (updater: (state: UiSlice) => Partial<UiSlice>) => void),
-      ...createMemorySlice(set as unknown as (updater: (state: MemorySlice) => Partial<MemorySlice>) => void),
       ...createChatSlice(set as unknown as ChatSliceSetter),
     }),
     {
@@ -38,31 +37,29 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(createPersistStorage),
       merge: (persistedState, currentState) => {
         const typedState = persistedState as Partial<AppState> | undefined;
-        const projects = normalizeProjects(typedState?.projects);
-        const activeProjectExists = projects.some(
-          (project) => project.id === typedState?.activeProjectId,
-        );
         return {
           ...currentState,
-          ...typedState,
+          selectedComputers: typedState?.selectedComputers ?? currentState.selectedComputers,
+          composerDrafts: typedState?.composerDrafts ?? currentState.composerDrafts,
+          sessionAliasesByScope: typedState?.sessionAliasesByScope ?? currentState.sessionAliasesByScope,
+          sidebarOpen: typedState?.sidebarOpen ?? currentState.sidebarOpen,
           uiTheme: typedState?.uiTheme ?? currentState.uiTheme,
           locale: typedState?.locale ?? currentState.locale,
-          projects,
-          activeProjectId: activeProjectExists ? typedState?.activeProjectId ?? projects[0].id : projects[0].id,
+          activeProjectId: currentState.activeProjectId,
           transientStatuses: {},
           streams: {},
-          memoryItems: mergeById(currentState.memoryItems, typedState?.memoryItems),
+          sessionAliases: {},
           connection: currentState.connection,
         };
       },
       partialize: (state) => ({
+        sessionAliasesByScope: { ...state.sessionAliasesByScope, [connectionScope(state.connection)]: state.sessionAliases },
+        selectedComputers: state.selectedComputers,
+        composerDrafts: state.composerDrafts,
         uiTheme: state.uiTheme,
         locale: state.locale,
         sidebarOpen: state.sidebarOpen,
-        activeProjectId: state.activeProjectId,
-        projects: state.projects,
-        sessionAliases: state.sessionAliases,
-        memoryItems: state.memoryItems,
+
       }),
     },
   ),
@@ -71,3 +68,15 @@ export const useAppStore = create<AppState>()(
 export function getConnectionSettings() {
   return useAppStore.getState().connection;
 }
+
+// Reset only actor-owned views. Computer switches preserve running Session observations.
+useAppStore.subscribe((state, previous) => {
+  const scope = connectionScope(state.connection);
+  const oldScope = connectionScope(previous.connection);
+  if (scope !== oldScope) {
+    const aliases = { ...state.sessionAliasesByScope, [oldScope]: previous.sessionAliases };
+    useAppStore.setState({ sessionAliasesByScope: aliases, sessionAliases: aliases[scope] ?? {}, streams: {}, transientStatuses: {}, activeProjectId: normalizeProjects()[0].id });
+  } else if (state.selectedComputers[scope] !== previous.selectedComputers[scope]) {
+    useAppStore.setState({ activeProjectId: normalizeProjects()[0].id });
+  }
+});

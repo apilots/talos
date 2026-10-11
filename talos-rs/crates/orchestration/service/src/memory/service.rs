@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use talos_config::{parse_timezone, validate_user_workspace_segment, TalosTimezone};
 use talos_error::{TalosError, TalosResult};
@@ -38,6 +38,7 @@ pub struct MemoryService {
     store: Arc<MemoryStore>,
     workspace_indexes: Arc<Vec<WorkspaceMemoryIndex>>,
     memory_dirname: String,
+    live_config: Option<Arc<RwLock<TalosConfig>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,9 +58,36 @@ impl MemoryService {
             store,
             workspace_indexes: Arc::new(workspace_indexes),
             memory_dirname,
+            live_config: None,
         })
     }
 
+    /// Use the Worker's existing configuration owner for tool and Dream operations.
+    /// Each operation captures one snapshot; clones retain the same index Store.
+    #[must_use]
+    pub fn with_live_config(mut self, config: Arc<RwLock<TalosConfig>>) -> Self {
+        self.live_config = Some(config);
+        self
+    }
+
+    fn snapshot(&self) -> TalosResult<Self> {
+        match &self.live_config {
+            Some(config) => {
+                self.with_config(config.read().expect("Worker config lock poisoned").clone())
+            }
+            None => Ok(self.clone()),
+        }
+    }
+
+    /// Validate Memory configuration before the Worker publishes a reload.
+    pub fn validate_config(config: &TalosConfig) -> TalosResult<()> {
+        resolve_workspace_memory_indexes(config).map(|_| ())
+    }
+
+    /// Resolve live Worker defaults while retaining the single node-local index owner.
+    pub fn with_config(&self, config: TalosConfig) -> TalosResult<Self> {
+        Self::new(config, self.store.clone())
+    }
     pub async fn rebuild_known_scopes(&self) -> TalosResult<()> {
         for workspace_index in self.workspace_indexes.iter() {
             for scope in known_user_scopes(workspace_index)? {
@@ -287,11 +315,12 @@ impl MemoryReader for MemoryService {
         request: MemorySearchRequest,
     ) -> Pin<Box<dyn Future<Output = TalosResult<MemorySearchResponse>> + Send + 'a>> {
         Box::pin(async move {
+            let service = self.snapshot()?;
             let query = validate_search_request(request)?;
-            let timezone = self.timezone_for_scope(scope)?;
-            let records = self
+            let timezone = service.timezone_for_scope(scope)?;
+            let records = service
                 .store
-                .search_scope(scope, &self.memory_dirname, timezone, &query)
+                .search_scope(scope, &service.memory_dirname, timezone, &query)
                 .await?;
             Ok(MemorySearchResponse {
                 data: records.into_iter().map(memory_search_hit).collect(),
@@ -305,6 +334,7 @@ impl MemoryReader for MemoryService {
         request: MemoryGetRequest,
     ) -> Pin<Box<dyn Future<Output = TalosResult<MemoryGetResponse>> + Send + 'a>> {
         Box::pin(async move {
+            let service = self.snapshot()?;
             let memory_id = request.memory_id.trim();
             if memory_id.is_empty() {
                 return Err(TalosError::new(
@@ -312,10 +342,10 @@ impl MemoryReader for MemoryService {
                     "memory_id cannot be empty".to_string(),
                 ));
             }
-            let timezone = self.timezone_for_scope(scope)?;
-            let record = self
+            let timezone = service.timezone_for_scope(scope)?;
+            let record = service
                 .store
-                .get_scope(scope, &self.memory_dirname, timezone, memory_id)
+                .get_scope(scope, &service.memory_dirname, timezone, memory_id)
                 .await?
                 .ok_or_else(|| {
                     TalosError::new(
@@ -337,10 +367,11 @@ impl DreamMemoryFormationStore for MemoryService {
         date: DreamMemoryDate,
     ) -> Pin<Box<dyn Future<Output = TalosResult<DreamMemoryDaySnapshot>> + Send + 'a>> {
         Box::pin(async move {
-            let timezone = self.timezone_for_scope(scope)?;
+            let service = self.snapshot()?;
+            let timezone = service.timezone_for_scope(scope)?;
             let path = scope
                 .workspace_root
-                .join(&self.memory_dirname)
+                .join(&service.memory_dirname)
                 .join(format!("{date}.md"));
             let content = talos_fs::read_file(&path).await?;
             let entries = match content.as_deref() {
@@ -373,9 +404,10 @@ impl DreamMemoryFormationStore for MemoryService {
         request: DreamMemoryWriteRequest,
     ) -> Pin<Box<dyn Future<Output = TalosResult<()>> + Send + 'a>> {
         Box::pin(async move {
-            let timezone = self.timezone_for_scope(scope)?;
+            let service = self.snapshot()?;
+            let timezone = service.timezone_for_scope(scope)?;
             self.store
-                .write_batch(scope, &self.memory_dirname, timezone, &request)
+                .write_batch(scope, &service.memory_dirname, timezone, &request)
                 .await
         })
     }

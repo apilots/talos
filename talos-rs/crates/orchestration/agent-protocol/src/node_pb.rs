@@ -238,3 +238,47 @@ fn invalid_request() -> TalosError {
 fn invalid_response() -> TalosError {
     TalosError::internal("Agent node response is malformed")
 }
+
+/// Decode the canonical public node object; unknown business enum values fail explicitly.
+pub fn decode_info(value: pb::NodeInfo) -> TalosResult<NodeInfo> {
+    let mode = match pb::NodeMode::try_from(value.mode).map_err(|_| invalid_response())? {
+        pb::NodeMode::Embedded => NodeMode::Embedded,
+        pb::NodeMode::Remote => NodeMode::Remote,
+        pb::NodeMode::Unspecified => return Err(invalid_response()),
+    };
+    Ok(NodeInfo {
+        node_id: value.node_id,
+        display_name: value.display_name,
+        mode,
+        endpoint: value.endpoint,
+        status: decode_status(value.status)?,
+        health: decode_health(value.health)?,
+        lease_expires_at: value.lease_expires_at,
+        last_heartbeat_at: value.last_heartbeat_at,
+        created_at: value.created_at,
+        updated_at: value.updated_at,
+        owner_user_id: value.owner_user_id,
+        available: value.available,
+        credential_expires_at: value.credential_expires_at,
+    })
+}
+
+pub fn decode_credential(value: pb::NodeCredential) -> TalosResult<NodeCredential> {
+    if value.node_id.is_empty() || value.token.is_empty() || value.expires_at <= 0 {
+        return Err(invalid_response());
+    }
+    Ok(NodeCredential {
+        node_id: value.node_id,
+        token: value.token,
+        expires_at: value.expires_at,
+    })
+}
+
+pub fn decode_created(value: pb::CreatedNode) -> TalosResult<CreatedNode> {
+    let node = decode_info(value.node.ok_or_else(invalid_response)?)?;
+    let credential = decode_credential(value.credential.ok_or_else(invalid_response)?)?;
+    if node.node_id != credential.node_id {
+        return Err(invalid_response());
+    }
+    Ok(CreatedNode { node, credential })
+}

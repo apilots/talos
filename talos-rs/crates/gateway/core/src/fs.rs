@@ -13,7 +13,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: FsDirectoryReadRequest,
     ) -> TalosResult<FsDirectoryReadResponse> {
-        let directory = self.service.read_fs_directory(actor, request.path).await?;
+        let directory = self.service.read_fs_directory(actor, request).await?;
         Ok(FsDirectoryReadResponse { directory })
     }
 
@@ -22,8 +22,6 @@ impl ServiceGateway {
         actor: &Actor,
         request: FsDirectoryCreateRequest,
     ) -> TalosResult<FsDirectoryCreateResponse> {
-        self.service
-            .create_fs_directory(actor, request.parent, request.name)
-            .await
+        self.service.create_fs_directory(actor, request).await
     }
 }

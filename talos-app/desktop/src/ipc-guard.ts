@@ -1,7 +1,10 @@
 import type { AppProtocol } from "@talos/sdk-core";
 
 type ParamGuard = (params: unknown) => boolean;
-export type DesktopRendererMethod = Exclude<AppProtocol.ClientMethod, "initialize">;
+// Enrollment and credential delivery belong to the trusted host, never the renderer bridge.
+export type DesktopRendererMethod = Exclude<
+  AppProtocol.ClientMethod, "initialize" | "computer/create" | "computer/rotateCredential"
+>;
 
 const mcpDefinitionRef = (value: unknown) => isRecord(value) && ((value.type === "plugin" && typeof value.installId === "string") || (value.type === "config" && typeof value.name === "string"));
 const mcpCredentials = (value: unknown) => isRecord(value) && isRecord(value.authentication) && (value.authentication.type === "none" || value.authentication.type === "bearer" || (value.authentication.type === "header" && typeof value.authentication.name === "string")) && (value.token === undefined || value.token === null || typeof value.token === "string") && [value.env, value.headers].every((map) => map === undefined || map === null || (isRecord(map) && Object.values(map).every((entry) => typeof entry === "string")));
@@ -116,6 +119,17 @@ const messageQueueMessageParams = (params: unknown) =>
   messageQueueSessionParams(params) && hasString(params, "messageId");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
+  "desktop/connection/read": (params) => params === null || params === undefined,
+  "desktop/connection/set": (params) => isRecord(params) && (params.connectionMode === "cloud" || params.connectionMode === "local"),
+  "desktop/workerIdentity": (params) => params === null || params === undefined,
+  "desktop/workerEnroll": (params) => isRecord(params) && (params.nodeId === undefined || params.nodeId === null || typeof params.nodeId === "string"),
+  "computer/list": (params) => isRecord(params) &&
+    [params.query, params.cursor].every((value) => value == null || typeof value === "string") &&
+    (params.limit == null || (typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0)),
+  "computer/read": (params) => hasString(params, "nodeId"),
+  "computer/rename": (params) => hasString(params, "nodeId") && hasString(params, "displayName"),
+  "computer/setStatus": (params) => hasString(params, "nodeId") && isRecord(params) &&
+    (params.status === "enabled" || params.status === "disabled"),
   "auth/login/cancel": authLoginSessionParams,
   "auth/login/start": authLoginStartParams,
   "auth/login/status": authLoginSessionParams,

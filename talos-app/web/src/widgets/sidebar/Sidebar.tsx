@@ -18,6 +18,7 @@ type AuthConnectionState = {
 };
 
 interface SidebarProps {
+  showAccount?: boolean;
   chats: SidebarSessionItem[];
   connection: AuthConnectionState;
   currentPath: string;
@@ -35,6 +36,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  showAccount = true,
   chats,
   connection,
   currentPath,
@@ -53,7 +55,7 @@ export function Sidebar({
   const [sessionPendingDelete, setSessionPendingDelete] = useState<SidebarSessionItem | null>(null);
 
   return (
-    <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border/80 bg-sidebar px-4 py-4">
+    <aside className="sticky top-0 flex h-full w-full shrink-0 flex-col border-r border-border/80 bg-sidebar px-4 py-4">
       <div className="absolute right-4 top-4 z-20">
         <SidebarCollapseButton onCollapse={onCollapse} />
       </div>
@@ -79,12 +81,12 @@ export function Sidebar({
         />
       </div>
 
-      <SidebarAccountMenu
+      {showAccount ? <SidebarAccountMenu
         accountType={connection.accountType}
         authStatus={connection.authStatus}
         authUsername={connection.authUsername}
         onLogout={onLogout}
-      />
+      /> : null}
       {sessionPendingDelete ? (
         <SidebarSessionDeleteDialog
           deleting={sessionActionPending}

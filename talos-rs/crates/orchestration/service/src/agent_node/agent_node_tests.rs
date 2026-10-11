@@ -35,7 +35,7 @@ async fn owner_registration_restart_and_credential_rotation() {
             &owner,
             CreateNodeRequest {
                 display_name: "Laptop".into(),
-                endpoint: "https://node.example:18801".into(),
+                endpoint: Some("https://node.example:18801".into()),
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -119,7 +119,7 @@ async fn owner_registration_restart_and_credential_rotation() {
         .unwrap_err()
         .is_code(ErrorCode::PermissionDenied));
     service
-        .mark_registration_published(&lease_auth)
+        .mark_registration_published(&lease_auth, Arc::new(|| Box::pin(async {})))
         .await
         .unwrap();
     let lease_principal = service.authenticate_lease(&lease_auth).await.unwrap();

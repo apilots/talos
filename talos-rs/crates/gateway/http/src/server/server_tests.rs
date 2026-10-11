@@ -285,15 +285,23 @@ async fn build_test_state_with_agent_execution_store(
         config.base_config.storage.files.clone(),
     )
     .await;
-    let session_store = test_session_store().await;
-    let coordinator = Arc::new(TestAgentCoordinator);
+    let (session_store, nodes) = test_session_store().await;
     let reload_hook = test_config_reload_hook(config.base_config.clone());
     let plugins = talos_service::PluginManagerService::new(
         config.base_config.agent.kernel.plugins.clone(),
         config.base_config.agent.kernel.skills.clone(),
     );
+    let config_service =
+        talos_service::ConfigService::new(config_store, plugins.execution_gate(), reload_hook);
+    let coordinator = Arc::new(TestAgentCoordinator(
+        config.base_config.clone(),
+        memory,
+        plugins.clone(),
+        config_service.clone(),
+    ));
     let app = Arc::new(TalosService::new(
         coordinator,
+        nodes,
         session_store,
         agent_execution_store,
         project_store,
@@ -301,13 +309,8 @@ async fn build_test_state_with_agent_execution_store(
         files,
         event_service.clone(),
         config.base_config.clone(),
-        plugins,
-        memory,
-        config_store,
-        vec![test_model_info()],
         auth_service.clone(),
         user_service,
-        reload_hook,
     ));
     Arc::new(HttpApiState::from_service(
         app,
@@ -384,10 +387,31 @@ async fn test_state_with_gateway_event_store_config(
     .await
 }
 
-struct TestAgentCoordinator;
+struct TestAgentCoordinator(
+    talos_types::TalosConfig,
+    talos_service::MemoryService,
+    talos_service::PluginManagerService,
+    talos_service::ConfigService,
+);
 
 #[async_trait::async_trait]
 impl AgentCoordinator for TestAgentCoordinator {
+    async fn worker_environment(
+        &self,
+        _node_id: &str,
+        _user_id: &str,
+    ) -> TalosResult<Arc<dyn talos_coordinator::WorkerEnvironment>> {
+        Ok(Arc::new(
+            talos_service::WorkerEnvironmentService::new(
+                Arc::new(std::sync::RwLock::new(self.0.clone())),
+                Some(std::env::temp_dir()),
+            )
+            .with_config_service(self.3.clone())
+            .with_memory_service(self.1.clone())
+            .with_plugin_manager(self.2.clone()),
+        ))
+    }
+
     async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
         let _ = params;
         Ok("default".to_string())
@@ -567,6 +591,8 @@ fn test_auth() -> RequestIdentity {
 mod active_turn;
 #[path = "tests/auth_lifecycle.rs"]
 mod auth_lifecycle;
+#[path = "tests/computers.rs"]
+mod computers;
 #[path = "tests/events.rs"]
 mod events;
 #[path = "tests/files.rs"]

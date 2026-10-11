@@ -1,4 +1,4 @@
-use talos_config::{PluginsRuntimeConfig, SkillsRuntimeConfig};
+use talos_config::SkillsRuntimeConfig;
 use talos_error::TalosResult;
 use talos_skills::{
     read_document, refresh, resolve, suggest, SkillDocument, SkillRoots, SkillSelector,
@@ -18,16 +18,9 @@ pub struct SkillsService {
 }
 
 impl SkillsService {
-    pub fn new(config: SkillsRuntimeConfig, plugins: PluginsRuntimeConfig) -> Self {
-        Self {
-            plugins: PluginManagerService::new(plugins, config.clone()),
-            config,
-        }
-    }
-
-    pub fn with_plugin_manager(mut self, plugin_manager: PluginManagerService) -> Self {
-        self.plugins = plugin_manager;
-        self
+    /// Uses the existing Worker installation owner.
+    pub fn new(config: SkillsRuntimeConfig, plugins: PluginManagerService) -> Self {
+        Self { config, plugins }
     }
 
     pub fn refresh(&self) -> TalosResult<SkillSnapshot> {

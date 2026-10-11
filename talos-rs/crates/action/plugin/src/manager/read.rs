@@ -91,7 +91,7 @@ impl PluginManager {
             )
         })?;
         let source = self
-            .list_sources(PluginSourceListRequest {})?
+            .list_sources(PluginSourceListRequest { node_id: None })?
             .sources
             .into_iter()
             .find(|source| &source.id == source_id)

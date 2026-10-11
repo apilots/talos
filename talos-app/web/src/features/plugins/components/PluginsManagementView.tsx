@@ -1,3 +1,4 @@
+import { useEnvironmentKey } from "@/features/computers";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Plugin, PluginSearchRefreshPolicy } from "@talos/sdk-browser";
@@ -41,14 +42,15 @@ export function PluginsManagementView({
   refreshVersion,
   showCatalog = true,
 }: PluginsManagementViewProps) {
+  const environmentKey = useEnvironmentKey();
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
   const [actionPluginId, setActionPluginId] = useState<string | null>(null);
   const installedPluginsQuery = useQuery({
-    queryKey: ["talos", "plugins", "installed", kind],
+    queryKey: ["talos", environmentKey, "plugins", "installed", kind],
     queryFn: () => listManagedPluginsForKind(kind),
   });
   const marketplaceQuery = useQuery({
-    queryKey: ["talos", "plugins", kind, "search", query],
+    queryKey: ["talos", environmentKey, "plugins", kind, "search", query],
     queryFn: () => searchPluginsForKind(kind, query, "refresh_stale"),
     enabled: showCatalog,
   });

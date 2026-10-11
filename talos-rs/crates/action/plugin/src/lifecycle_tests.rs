@@ -29,6 +29,7 @@ impl PluginFixture {
         let manager = manager_with_state(state.clone());
         let added = manager
             .add_source(PluginSourceAddRequest {
+                node_id: None,
                 source: MarketplaceSourceInput::LocalFolder {
                     path: repo,
                     sparse_paths: vec!["skills".to_string()],
@@ -56,6 +57,7 @@ impl PluginFixture {
     ) -> PluginInstallResponse {
         self.manager
             .install(PluginInstallRequest {
+                node_id: None,
                 target: PluginInstallTarget::Plugin {
                     plugin_id: self.plugin_id.clone(),
                     expected_source_commit: None,
@@ -116,6 +118,7 @@ Use this skill to translate text.
     let disabled = fixture
         .manager
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
         })
         .expect("plugin should disable");
@@ -136,6 +139,7 @@ Use this skill to translate text.
     let enabled = fixture
         .manager
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: install_id.clone(),
         })
         .expect("plugin should enable");
@@ -146,6 +150,7 @@ Use this skill to translate text.
     let listed = fixture
         .manager
         .list_plugins(PluginListRequest {
+            node_id: None,
             kind: Some(PluginKind::Skill),
             status: Some(PluginListStatusFilter::Installed),
             source_id: Some(fixture.source_id.clone()),
@@ -157,6 +162,7 @@ Use this skill to translate text.
     let installed_search = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: Some("translate".to_string()),
             source_id: Some(fixture.source_id.clone()),
             kind: Some(PluginKind::Skill),
@@ -174,6 +180,7 @@ Use this skill to translate text.
     let not_installed_search = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: Some("translate".to_string()),
             source_id: Some(fixture.source_id),
             kind: Some(PluginKind::Skill),
@@ -186,7 +193,10 @@ Use this skill to translate text.
 
     let uninstalled = fixture
         .manager
-        .uninstall(PluginUninstallRequest { install_id })
+        .uninstall(PluginUninstallRequest {
+            node_id: None,
+            install_id,
+        })
         .expect("plugin should uninstall");
     assert!(uninstalled.uninstalled);
     assert!(fixture
@@ -224,6 +234,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
     let manager = manager_with_state(state);
     let added = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: vec!["mcp".to_string()],
@@ -235,6 +246,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
 
     let installed = manager
         .install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: plugin.id.clone(),
                 expected_source_commit: None,
@@ -264,6 +276,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
     .unwrap();
     manager
         .update(PluginUpdateRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
             expected_source_commit: None,
             conflict_policy: PluginUpdateConflictPolicy::ReplaceLocalChanges,
@@ -277,6 +290,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
 
     manager
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
         })
         .expect("MCP plugin should disable");
@@ -288,6 +302,7 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
 
     manager
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: installed.install.id,
         })
         .expect("MCP plugin should enable");
@@ -338,6 +353,7 @@ Second version.
     let rejected = fixture
         .manager
         .update(PluginUpdateRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
             expected_source_commit: None,
             conflict_policy: PluginUpdateConflictPolicy::RejectLocalChanges,
@@ -348,6 +364,7 @@ Second version.
     let updated = fixture
         .manager
         .update(PluginUpdateRequest {
+            node_id: None,
             install_id: installed.install.id,
             expected_source_commit: None,
             conflict_policy: PluginUpdateConflictPolicy::ReplaceLocalChanges,
@@ -395,6 +412,7 @@ Second version.
     let err = fixture
         .manager
         .update(PluginUpdateRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
             expected_source_commit: None,
             conflict_policy: PluginUpdateConflictPolicy::ReplaceLocalChanges,
@@ -416,6 +434,7 @@ Second version.
     assert!(fixture
         .manager
         .install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: fixture.plugin_id.clone(),
                 expected_source_commit: None
@@ -441,6 +460,7 @@ fn list_plugins_cleans_stale_transaction_dirs() {
 
     let listed = manager
         .list_plugins(PluginListRequest {
+            node_id: None,
             kind: None,
             status: None,
             source_id: None,
@@ -483,6 +503,7 @@ Second version.
         let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
         let added = manager
             .add_source(PluginSourceAddRequest {
+                node_id: None,
                 source: MarketplaceSourceInput::LocalFolder {
                     path: repo,
                     sparse_paths: vec!["skills".to_string()],
@@ -506,6 +527,7 @@ Second version.
 
         manager
             .install(PluginInstallRequest {
+                node_id: None,
                 target: PluginInstallTarget::Plugin {
                     plugin_id: first.id.clone(),
                     expected_source_commit: None,
@@ -516,6 +538,7 @@ Second version.
             .expect("first plugin should install");
         manager
             .install(PluginInstallRequest {
+                node_id: None,
                 target: PluginInstallTarget::Plugin {
                     plugin_id: second.id.clone(),
                     expected_source_commit: None,
@@ -527,6 +550,7 @@ Second version.
 
         let installs = manager
             .list_plugins(PluginListRequest {
+                node_id: None,
                 kind: Some(PluginKind::Skill),
                 status: Some(PluginListStatusFilter::Installed),
                 source_id: Some(added.source.id),
@@ -557,6 +581,7 @@ Invalid skill.
         let err = fixture
             .manager
             .install(PluginInstallRequest {
+                node_id: None,
                 target: PluginInstallTarget::Plugin {
                     plugin_id: fixture.plugin_id.clone(),
                     expected_source_commit: None,
@@ -592,6 +617,7 @@ First version.
         let err = fixture
             .manager
             .install(PluginInstallRequest {
+                node_id: None,
                 target: PluginInstallTarget::Plugin {
                     plugin_id: fixture.plugin_id.clone(),
                     expected_source_commit: None,
@@ -629,6 +655,7 @@ Installed version.
     let err = fixture
         .manager
         .uninstall(PluginUninstallRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
         })
         .expect_err("uninstall should fail when installs state cannot save");

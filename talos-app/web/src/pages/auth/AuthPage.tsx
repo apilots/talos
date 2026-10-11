@@ -11,6 +11,7 @@ import {
   storeWebAuthToken,
 } from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
+import { DesktopConnectionControl } from "@/features/computers";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
 import { accountTypeFromWire } from "@/shared/types/account";
@@ -168,6 +169,7 @@ export function AuthPage() {
           </button>
         ) : null}
 
+        <DesktopConnectionControl />
         {error ? <p className="mt-4 text-center text-[13px] leading-5 text-danger">{error}</p> : null}
       </Panel>
     </div>

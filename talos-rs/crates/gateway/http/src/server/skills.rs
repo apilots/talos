@@ -27,13 +27,14 @@ pub(super) async fn list_skills_handler(
 }
 
 pub(super) async fn refresh_skills_handler(
+    Query(params): Query<talos_types::SkillsRefreshRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<JsonResponse<SkillsListResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let response = state
         .gateway
-        .refresh_skills(&actor, Default::default())
+        .refresh_skills(&actor, params)
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))

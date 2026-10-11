@@ -39,10 +39,10 @@ async fn server(
     let endpoint = format!("https://{address}");
     let adapter = AgentHarnessRpcAdapter::new(
         "node-1".into(),
-        Arc::new(
+        Arc::new(std::sync::RwLock::new(
             Config::default()
                 .with_workspace_definition(WorkspaceDefinition::new("workspace-1", "/tmp")),
-        ),
+        )),
         vec![(TEST_AGENT_ID.into(), harness)],
     );
     adapter
@@ -72,7 +72,7 @@ async fn server(
     });
     let client = RemoteAgentClient::connect(
         &endpoint,
-        pem.clone(),
+        agent_client::AgentTlsTrust::Certificate(pem.clone()),
         TEST_AGENT_ID.into(),
         NodeAuth {
             node_id: "node-1".into(),
@@ -151,7 +151,7 @@ async fn rpc_input_commit_and_new_client_interrupt_keep_cleanup_conservative() {
     provider.wait_started().await;
     let new_client = RemoteAgentClient::connect(
         &endpoint,
-        pem,
+        agent_client::AgentTlsTrust::Certificate(pem),
         TEST_AGENT_ID.into(),
         NodeAuth {
             node_id: "node-1".into(),
@@ -309,7 +309,7 @@ async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() 
     let (client, _, pem, endpoint, stop, task) = server(harness).await;
     let wrong = RemoteAgentClient::connect(
         &endpoint,
-        pem,
+        agent_client::AgentTlsTrust::Certificate(pem),
         TEST_AGENT_ID.into(),
         NodeAuth {
             node_id: "node-1".into(),

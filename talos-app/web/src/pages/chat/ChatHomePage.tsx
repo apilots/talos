@@ -16,6 +16,8 @@ import {
   useModelsQuery,
   useProjectsView,
 } from "@/features/chat";
+import { useComputers, useProductScope, ComputerContext } from "@/features/computers";
+import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type {
   FileInfo,
@@ -40,7 +42,13 @@ export function ChatHomePage() {
   const projects = projectsView.projects;
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
-  const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
+  const computers = useComputers();
+  const scope = useProductScope();
+  const draftKey = JSON.stringify([scope, computers.selectedId, "home"]);
+  const savedDraft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
+  const saveDraft = useAppStore((state) => state.saveComposerDraft);
+  const draft = locationState?.initialDraft ?? savedDraft;
+  const setDraft = (text: string) => saveDraft(draftKey, text);
   const [selectedModel, setSelectedModel] = useState<ModelRef>();
   const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("none");
   const [permissionMode, setPermissionMode] = useState<UserPermissionMode>("fullAccess");
@@ -69,18 +77,22 @@ export function ChatHomePage() {
     if (!locationState?.initialDraft) {
       return;
     }
+    saveDraft(draftKey, locationState.initialDraft);
     navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, locationState?.initialDraft, navigate]);
+  }, [draftKey, saveDraft, location.pathname, locationState?.initialDraft, navigate]);
 
   async function handleStartDraft(
     initialPrompt?: string,
     attachments: FileInfo[] = [],
   ) {
+    if (!computers.selected?.available) return;
     const trimmed = initialPrompt?.trim();
+    setDraft("");
     const sessionId = generateSessionId();
     navigate(`/sessions/${sessionId}`, {
       state: trimmed || attachments.length > 0
         ? {
+            initialNodeId: computers.selectedId,
             initialPrompt: trimmed ?? "",
             initialModel: selectedModel,
             initialReasoningLevel: selectedReasoningLevel,
@@ -112,12 +124,13 @@ export function ChatHomePage() {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8">
       <div className="w-full max-w-[660px]">
+        <ComputerContext />
         <h1 className="mb-8 text-center text-[26px] font-semibold tracking-tight text-ink">
           {t("chat:startPromptTitle")}
         </h1>
         <ChatComposer
           activeProjectId={activeProject?.id ?? activeProjectId}
-          disabled={false}
+          disabled={!computers.selected?.available}
           draft={draft}
           isStreaming={false}
           models={modelPickerOptions(models)}

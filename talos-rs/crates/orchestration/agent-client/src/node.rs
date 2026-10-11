@@ -4,16 +4,18 @@ use agent_protocol::{
     RegisterParams, Registration,
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
+use tonic::transport::{Channel, Endpoint};
+
+use crate::AgentTlsTrust;
 
 /// Concrete gRPC client for control-plane node registration and lease methods.
 #[derive(Clone)]
 pub struct AgentNodeClient {
-    channel: Channel,
+    pub(crate) channel: Channel,
 }
 
 impl AgentNodeClient {
-    pub async fn connect(endpoint: &str, trusted_ca_pem: Vec<u8>) -> TalosResult<Self> {
+    pub async fn connect(endpoint: &str, trust: AgentTlsTrust) -> TalosResult<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         if !endpoint.starts_with("https://") {
             return Err(TalosError::new(
@@ -30,10 +32,7 @@ impl AgentNodeClient {
         })?;
         let endpoint = endpoint
             .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(10))
-            .tls_config(
-                ClientTlsConfig::new().ca_certificate(Certificate::from_pem(trusted_ca_pem)),
-            )
+            .tls_config(trust.into_config())
             .map_err(|error| {
                 TalosError::internal_with_source(
                     "Configure Agent node TLS; technical details were withheld.",
@@ -50,12 +49,12 @@ impl AgentNodeClient {
     ) -> TalosResult<Registration> {
         let response =
             pb::agent_node_control_client::AgentNodeControlClient::new(self.channel.clone())
-                .register(pb::RegisterRequest {
+                .register(node_request(pb::RegisterRequest {
                     auth: Some(node_pb::encode_auth(request.auth)),
                     params: Some(node_pb::encode_register(request.params)),
-                })
+                }))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::register_response::Result::Registered(value) => node_pb::decode_registration(value),
@@ -66,12 +65,12 @@ impl AgentNodeClient {
     pub async fn renew_lease(&self, request: NodeRequest<()>) -> TalosResult<LeaseValidity> {
         let response =
             pb::agent_node_control_client::AgentNodeControlClient::new(self.channel.clone())
-                .renew_lease(pb::RenewLeaseRequest {
+                .renew_lease(node_request(pb::RenewLeaseRequest {
                     auth: Some(node_pb::encode_auth(request.auth)),
                     params: Some(pb::Empty {}),
-                })
+                }))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::renew_lease_response::Result::Renewed(value) => node_pb::decode_validity(value),
@@ -87,14 +86,14 @@ impl AgentNodeClient {
     ) -> TalosResult<HeartbeatResult> {
         let response =
             pb::agent_node_control_client::AgentNodeControlClient::new(self.channel.clone())
-                .heartbeat(pb::HeartbeatRequest {
+                .heartbeat(node_request(pb::HeartbeatRequest {
                     auth: Some(node_pb::encode_auth(request.auth)),
                     params: Some(pb::HeartbeatParams {
                         health: node_pb::encode_health(request.params.health),
                     }),
-                })
+                }))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::heartbeat_response::Result::Accepted(value) => Ok(node_pb::decode_heartbeat(value)),
@@ -105,12 +104,12 @@ impl AgentNodeClient {
     pub async fn unregister(&self, request: NodeRequest<()>) -> TalosResult<()> {
         let response =
             pb::agent_node_control_client::AgentNodeControlClient::new(self.channel.clone())
-                .unregister(pb::UnregisterRequest {
+                .unregister(node_request(pb::UnregisterRequest {
                     auth: Some(node_pb::encode_auth(request.auth)),
                     params: Some(pb::Empty {}),
-                })
+                }))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::unregister_response::Result::Completed(_) => Ok(()),
@@ -121,10 +120,12 @@ impl AgentNodeClient {
     }
 }
 
-fn status_error(status: tonic::Status) -> TalosError {
-    error_pb::decode_status(status)
-}
-
 fn invalid_response() -> TalosError {
     TalosError::internal("Agent node RPC response is malformed")
+}
+
+fn node_request<T>(body: T) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(body);
+    request.set_timeout(std::time::Duration::from_secs(10));
+    request
 }

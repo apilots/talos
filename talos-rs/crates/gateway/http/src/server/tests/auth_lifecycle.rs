@@ -161,9 +161,13 @@ async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
 #[tokio::test]
 async fn test_get_llm_allows_auth_disabled_actor() {
     let state = test_state(true).await;
-    let response = get_llm_handler(State(state), None)
-        .await
-        .expect("auth disabled actor should access llm config");
+    let response = get_llm_handler(
+        State(state),
+        None,
+        axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
+    )
+    .await
+    .expect("auth disabled actor should access llm config");
     let data = expect_success(response.0);
     match data {
         talos_types::ConfigResponse::Llm { config, .. } => {

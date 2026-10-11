@@ -6,6 +6,7 @@ import { TALOS_IPC } from "./ipc";
 import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
+  workerIdentity: () => ipcRenderer.invoke(TALOS_IPC.workerIdentity) as Promise<AppProtocol.ApiResponse<AppProtocol.DesktopWorkerIdentityResponse>>,
   connect: () => ipcRenderer.invoke(TALOS_IPC.connect) as Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>,
   invoke: <T>(
     method: AppProtocol.ClientMethod,

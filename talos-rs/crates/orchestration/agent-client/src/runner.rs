@@ -23,6 +23,7 @@ pub struct AgentNodeRunner {
     credential: String,
     deployments: Vec<Deployment>,
     lease_observer: Option<AgentNodeLeaseObserver>,
+    execution_adapter: Option<talos_agent::AgentHarnessRpcAdapter>,
 }
 
 pub type AgentNodeLeaseObserver =
@@ -49,11 +50,19 @@ impl AgentNodeRunner {
             credential,
             deployments,
             lease_observer: None,
+            execution_adapter: None,
         }
     }
 
     pub fn with_lease_observer(mut self, observer: AgentNodeLeaseObserver) -> Self {
         self.lease_observer = Some(observer);
+        self
+    }
+
+    /// Enable outbound execution through this node's existing Harness adapter.
+    /// Its lease observer must install every published lease before Connect starts.
+    pub fn with_execution_adapter(mut self, adapter: talos_agent::AgentHarnessRpcAdapter) -> Self {
+        self.execution_adapter = Some(adapter);
         self
     }
 
@@ -84,11 +93,38 @@ impl AgentNodeRunner {
     }
 
     async fn run_registered(&self, shutdown: &CancellationToken) -> TalosResult<Option<NodeAuth>> {
+        let mut connection: Option<ExecutionConnectionTask> = None;
         'registered: loop {
+            if let Some(mut previous) = connection.take() {
+                previous.stop.cancel();
+                let _ = previous.wait().await?;
+            }
+            if let Some(adapter) = &self.execution_adapter {
+                adapter.drain_disconnected().await?;
+            }
             let Some(mut lease) = self.register_until_success(shutdown).await? else {
                 return Ok(None);
             };
+            if shutdown.is_cancelled() {
+                return Ok(Some(lease.auth));
+            }
             self.publish_lease(Some(lease.clone()))?;
+            connection = self.execution_adapter.as_ref().map(|adapter| {
+                let stop = shutdown.child_token();
+                let task_stop = stop.clone();
+                let client = self.client.clone();
+                let auth = lease.auth.clone();
+                let adapter = adapter.clone();
+                let handle = tokio::spawn(async move {
+                    client
+                        .run_execution_connection(auth, adapter, task_stop)
+                        .await
+                });
+                ExecutionConnectionTask {
+                    stop,
+                    handle: Some(handle),
+                }
+            });
             tracing::info!(node_id = %self.node_id, "Agent node registered");
             let mut heartbeat =
                 interval_at(Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
@@ -98,6 +134,17 @@ impl AgentNodeRunner {
                     biased;
                     _ = shutdown.cancelled() => {
                         return Ok((Instant::now() < lease.deadline).then_some(lease.auth));
+                    }
+                    result = async {
+                        match &mut connection { Some(connection) => connection.wait().await, None => futures_util::future::pending().await }
+                    } => {
+                        if let Err(error) = result? {
+                            if !is_transient(&error) { return Err(error); }
+                            tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent execution connection ended");
+                        }
+                        self.publish_lease(None)?;
+                        tokio::select! { _ = shutdown.cancelled() => return Ok(Some(lease.auth)), _ = sleep(RETRY_INTERVAL) => {} }
+                        continue 'registered;
                     }
                     _ = sleep_until(lease.deadline) => {
                         self.publish_lease(None)?;
@@ -173,13 +220,23 @@ impl AgentNodeRunner {
     ) -> TalosResult<Option<AgentNodeLeaseUpdate>> {
         loop {
             let sent_at = Instant::now();
-            let registration = tokio::select! {
-                _ = shutdown.cancelled() => return Ok(None),
-                result = self.client.register(NodeRequest {
-                    auth: NodeAuth { node_id: self.node_id.clone(), token: self.credential.clone() },
-                    params: RegisterParams { deployments: self.deployments.clone() },
-                }) => result,
-            };
+            if shutdown.is_cancelled() {
+                return Ok(None);
+            }
+            // An issued Register can already have committed at the control plane.
+            // Drain its bounded response so shutdown can unregister the returned lease.
+            let registration = self
+                .client
+                .register(NodeRequest {
+                    auth: NodeAuth {
+                        node_id: self.node_id.clone(),
+                        token: self.credential.clone(),
+                    },
+                    params: RegisterParams {
+                        deployments: self.deployments.clone(),
+                    },
+                })
+                .await;
             match registration {
                 Ok(registration) => {
                     return Ok(Some(active_lease(&self.node_id, registration, sent_at)?))
@@ -236,3 +293,28 @@ fn is_transient(error: &TalosError) -> bool {
 #[cfg(test)]
 #[path = "runner_tests.rs"]
 mod tests;
+
+struct ExecutionConnectionTask {
+    stop: CancellationToken,
+    handle: Option<tokio::task::JoinHandle<TalosResult<()>>>,
+}
+impl ExecutionConnectionTask {
+    async fn wait(&mut self) -> TalosResult<TalosResult<()>> {
+        let Some(handle) = self.handle.as_mut() else {
+            return Ok(Ok(()));
+        };
+        let result = handle.await.map_err(|error| {
+            TalosError::internal_with_source(
+                "Agent connection task failed; technical details were withheld.",
+                error,
+            )
+        })?;
+        self.handle.take();
+        Ok(result)
+    }
+}
+impl Drop for ExecutionConnectionTask {
+    fn drop(&mut self) {
+        self.stop.cancel();
+    }
+}

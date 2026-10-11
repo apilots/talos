@@ -20,6 +20,8 @@ use crate::{
 pub(super) enum FakeMode {
     Release,
     ProgressThenRelease,
+    FloodProgress,
+    BurstProgress,
     Input,
     PendingInput,
     RejectInput,
@@ -172,6 +174,25 @@ impl AgentSession for FakeSession {
                 tokio::select! {
                     () = self.provider.release.notified() => completed(),
                     () = turn.control.cancellation().requested() => interrupted(),
+                }
+            }
+            FakeMode::FloodProgress | FakeMode::BurstProgress => {
+                for count in 1..=128 {
+                    tokio::select! {
+                        () = turn.control.cancellation().requested() => return interrupted(),
+                        result = turn.events.update_metrics(talos_agent_api::AgentRunMetrics {
+                            usage: TokenUsage { input_tokens: count, total_tokens: count, ..TokenUsage::default() },
+                            ..talos_agent_api::AgentRunMetrics::default()
+                        }) => result?,
+                    }
+                }
+                match self.provider.mode {
+                    FakeMode::FloodProgress => {
+                        turn.control.cancellation().requested().await;
+                        interrupted()
+                    }
+                    FakeMode::BurstProgress => completed(),
+                    _ => unreachable!("progress mode"),
                 }
             }
             FakeMode::ProgressThenRelease => {

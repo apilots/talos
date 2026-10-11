@@ -22,6 +22,7 @@ impl ServiceGateway {
             .account
             .logout_with_request(actor, request)
             .await?;
+        self.service.invalidate_mcp_callbacks(actor);
         Ok(AuthLogoutResponse { success: true })
     }
 

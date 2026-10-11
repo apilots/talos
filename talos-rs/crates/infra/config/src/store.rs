@@ -10,6 +10,7 @@ use crate::{
     ProviderKeyStatus, RuntimeEnv, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 
+mod desktop;
 mod mcp;
 
 const ANTHROPIC_API_KEY_ENV: &str = "TALOS_LLM_ANTHROPIC_API_KEY";

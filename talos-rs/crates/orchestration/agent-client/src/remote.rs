@@ -16,8 +16,10 @@ use talos_agent_api::{AgentInterruptOutcome, AgentTurnRef};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
-use tonic::{Response, Status, Streaming};
+use tonic::transport::Endpoint;
+
+use crate::AgentTlsTrust;
+use tonic::{Response, Status};
 
 #[path = "remote_dream.rs"]
 mod dream;
@@ -29,7 +31,7 @@ type TurnKey = (String, String);
 /// A single logical Agent deployment on a registered remote node.
 #[derive(Clone)]
 pub struct RemoteAgentClient {
-    channel: Channel,
+    transport: crate::harness_transport::HarnessTransport,
     agent_id: String,
     auth: NodeAuth,
     /// Evidence that this Client instance accepted a Turn. A new instance can
@@ -40,7 +42,7 @@ pub struct RemoteAgentClient {
 impl RemoteAgentClient {
     pub async fn connect(
         endpoint: &str,
-        trusted_ca_pem: Vec<u8>,
+        trust: AgentTlsTrust,
         agent_id: String,
         auth: NodeAuth,
     ) -> TalosResult<Self> {
@@ -61,9 +63,7 @@ impl RemoteAgentClient {
         })?;
         let endpoint = endpoint
             .connect_timeout(Duration::from_secs(10))
-            .tls_config(
-                ClientTlsConfig::new().ca_certificate(Certificate::from_pem(trusted_ca_pem)),
-            )
+            .tls_config(trust.into_config())
             .map_err(|error| {
                 TalosError::from_source(
                     ErrorCode::InvalidRequest,
@@ -72,11 +72,26 @@ impl RemoteAgentClient {
                 )
             })?;
         Ok(Self {
-            channel: endpoint.connect_lazy(),
+            transport: crate::harness_transport::HarnessTransport::Direct(endpoint.connect_lazy()),
             agent_id,
             auth,
             accepted: Arc::new(Mutex::new(HashSet::new())),
         })
+    }
+
+    /// Bind one advertised deployment to an authenticated outbound connection.
+    /// The publication owner must supply that connection's current node lease.
+    pub fn from_connection(
+        connection: Arc<crate::AgentExecutionConnection>,
+        agent_id: String,
+        auth: NodeAuth,
+    ) -> Self {
+        Self {
+            transport: crate::harness_transport::HarnessTransport::Outbound(connection),
+            agent_id,
+            auth,
+            accepted: Arc::new(Mutex::new(HashSet::new())),
+        }
     }
 
     fn check_agent(&self, agent_id: &str) -> AgentResult<()> {
@@ -98,14 +113,19 @@ impl RemoteAgentClient {
     ) -> AgentResult<AgentRunExecution>
     where
         T: Send + 'static,
-        F: Future<Output = Result<Response<Streaming<pb::RunResponse>>, Status>> + Send,
+        F: Future<
+                Output = Result<
+                    Response<crate::transport_stream::RpcStream<pb::RunResponse>>,
+                    Status,
+                >,
+            > + Send,
     {
         let (inbound, first) = wait_for_rpc(async {
-            let mut inbound = call.await.map_err(transport_error)?.into_inner();
+            let mut inbound = call.await.map_err(crate::decode_rpc_status)?.into_inner();
             let first = inbound
                 .message()
                 .await
-                .map_err(transport_error)?
+                .map_err(crate::decode_rpc_status)?
                 .ok_or_else(invalid_response)?;
             Ok((inbound, first))
         })
@@ -168,8 +188,7 @@ impl RemoteAgentClient {
         })
         .await
         .map_err(|_| transport_closed())?;
-        let mut rpc =
-            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone());
+        let rpc = self.transport.clone();
         let call = rpc.start(ReceiverStream::new(rx));
         self.open_run(
             tx,
@@ -198,8 +217,7 @@ impl RemoteAgentClient {
         })
         .await
         .map_err(|_| transport_closed())?;
-        let mut rpc =
-            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone());
+        let rpc = self.transport.clone();
         let call = rpc.compact_session(ReceiverStream::new(rx));
         self.open_run(
             tx,
@@ -228,16 +246,17 @@ impl RemoteAgentClient {
         .await
         .map_err(|_| transport_closed())?;
         let (mut inbound, first) = wait_for_rpc(async {
-            let mut inbound =
-                pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
-                    .submit_input(ReceiverStream::new(rx))
-                    .await
-                    .map_err(transport_error)?
-                    .into_inner();
+            let mut inbound = self
+                .transport
+                .clone()
+                .submit_input(ReceiverStream::new(rx))
+                .await
+                .map_err(crate::decode_rpc_status)?
+                .into_inner();
             let first = inbound
                 .message()
                 .await
-                .map_err(transport_error)?
+                .map_err(crate::decode_rpc_status)?
                 .ok_or_else(invalid_response)?;
             Ok((inbound, first))
         })
@@ -265,11 +284,16 @@ impl RemoteAgentClient {
             let frame = inbound
                 .message()
                 .await
-                .map_err(transport_error)?
+                .map_err(crate::decode_rpc_status)?
                 .ok_or_else(transport_closed)?;
             match frame.result.ok_or_else(invalid_response)? {
                 pb::input_response::Result::Accepted(_) => {
-                    if inbound.message().await.map_err(transport_error)?.is_some() {
+                    if inbound
+                        .message()
+                        .await
+                        .map_err(crate::decode_rpc_status)?
+                        .is_some()
+                    {
                         return Err(invalid_response());
                     }
                     Ok(())
@@ -299,14 +323,13 @@ impl RemoteAgentClient {
             return Err(cleanup_unconfirmed());
         }
         let response = rpc_response(
-            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
-                .interrupt(rpc_request(
-                    pb::InterruptRequest {
-                        auth: Some(node_pb::encode_auth(self.auth.clone())),
-                        params: Some(harness_pb::encode_interrupt_params(params)),
-                    },
-                    RPC_WAIT,
-                )),
+            self.transport.clone().interrupt(rpc_request(
+                pb::InterruptRequest {
+                    auth: Some(node_pb::encode_auth(self.auth.clone())),
+                    params: Some(harness_pb::encode_interrupt_params(params)),
+                },
+                RPC_WAIT,
+            )),
             RPC_WAIT,
         )
         .await?
@@ -341,15 +364,14 @@ impl RemoteAgentClient {
             auth: Some(node_pb::encode_auth(self.auth.clone())),
             params: Some(harness_pb::encode_session_context(params)),
         };
-        let mut client =
-            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone());
+        let client = self.transport.clone();
         let response = wait_for_rpc(async {
             if close {
                 client.close_session(rpc_request(request, RPC_WAIT)).await
             } else {
                 client.clear_session(rpc_request(request, RPC_WAIT)).await
             }
-            .map_err(transport_error)
+            .map_err(crate::decode_rpc_status)
         })
         .await?
         .into_inner();
@@ -364,17 +386,16 @@ impl RemoteAgentClient {
             )
         })?;
         let response = rpc_response(
-            pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
-                .shutdown(rpc_request(
-                    pb::ShutdownRequest {
-                        auth: Some(node_pb::encode_auth(self.auth.clone())),
-                        params: Some(pb::ShutdownParams {
-                            agent_id: self.agent_id.clone(),
-                            timeout_ms,
-                        }),
-                    },
-                    timeout.saturating_add(RPC_WAIT),
-                )),
+            self.transport.clone().shutdown(rpc_request(
+                pb::ShutdownRequest {
+                    auth: Some(node_pb::encode_auth(self.auth.clone())),
+                    params: Some(pb::ShutdownParams {
+                        agent_id: self.agent_id.clone(),
+                        timeout_ms,
+                    }),
+                },
+                timeout.saturating_add(RPC_WAIT),
+            )),
             timeout.saturating_add(RPC_WAIT),
         )
         .await?
@@ -423,8 +444,7 @@ impl AgentHarness for RemoteAgentClient {
             });
             request.set_timeout(Duration::from_secs(10));
             let response = rpc_response(
-                pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
-                    .read_workspace_memory(request),
+                self.transport.clone().read_workspace_memory(request),
                 Duration::from_secs(10),
             )
             .await?
@@ -456,8 +476,7 @@ impl AgentHarness for RemoteAgentClient {
             });
             request.set_timeout(Duration::from_secs(10));
             let response = rpc_response(
-                pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
-                    .update_workspace_memory(request),
+                self.transport.clone().update_workspace_memory(request),
                 Duration::from_secs(10),
             )
             .await?
@@ -487,7 +506,7 @@ impl AgentHarness for RemoteAgentClient {
 }
 
 async fn read_run(
-    mut inbound: Streaming<pb::RunResponse>,
+    mut inbound: crate::transport_stream::RpcStream<pb::RunResponse>,
     accepted_tx: oneshot::Sender<AgentResult<()>>,
     progress_tx: mpsc::Sender<talos_agent_api::AgentEvent>,
     settlement_tx: oneshot::Sender<AgentResult<AgentRunSettlement>>,
@@ -511,7 +530,7 @@ async fn read_run(
                 return;
             }
             Err(status) => {
-                let error = transport_error(status);
+                let error = crate::decode_rpc_status(status);
                 if let Some(tx) = accepted_tx.take() {
                     let _ = tx.send(Err(error.clone()));
                 }
@@ -545,8 +564,13 @@ async fn read_run(
             pb::run_response::Result::Progress(value) if accepted_tx.is_none() => {
                 match harness_pb::decode_event(value) {
                     Ok(event) => {
-                        if progress_tx.send(event).await.is_err() {
-                            return;
+                        tokio::select! {
+                            biased;
+                            error = inbound.failed() => {
+                                if let Some(tx) = settlement_tx.take() { let _ = tx.send(Err(error)); }
+                                return;
+                            },
+                            sent = progress_tx.send(event) => { if sent.is_err() { return; } },
                         }
                     }
                     Err(error) => {
@@ -601,10 +625,6 @@ fn decode_empty(response: pb::EmptyResponse) -> TalosResult<()> {
     }
 }
 
-fn transport_error(status: Status) -> TalosError {
-    error_pb::decode_status(status)
-}
-
 fn rpc_request<T>(body: T, timeout: Duration) -> tonic::Request<T> {
     let mut request = tonic::Request::new(body);
     request.set_timeout(timeout);
@@ -626,7 +646,7 @@ async fn rpc_response<T>(
         .map_err(|error| {
             TalosError::from_source(ErrorCode::Timeout, "Agent RPC response timed out", error)
         })?
-        .map_err(transport_error)
+        .map_err(crate::decode_rpc_status)
 }
 
 fn invalid_response() -> TalosError {

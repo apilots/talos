@@ -40,14 +40,11 @@ pub(crate) fn test_config_reload_hook(
             }
         }
         let active = active.clone();
-        Ok(talos_service::ConfigReloadPlan::new(
-            next.clone(),
-            move || {
-                *active
-                    .write()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
-            },
-        ))
+        Ok(talos_service::ConfigReloadPlan::new(move || {
+            *active
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+        }))
     })
 }
 
@@ -75,17 +72,30 @@ pub(crate) async fn test_file_service(
 }
 
 pub(crate) async fn test_agent_execution_store() -> Arc<DatabaseSessionStore> {
+    test_database_stores().await.0
+}
+
+pub(crate) async fn test_database_stores(
+) -> (Arc<DatabaseSessionStore>, talos_service::AgentNodeService) {
     let storage = Arc::new(talos_storage::SqliteStorage::new(":memory:").await.unwrap());
     let migration_dir =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
     run_migrations(storage.pool(), &migration_dir)
         .await
         .unwrap();
-    Arc::new(DatabaseSessionStore::new(storage).await.unwrap())
+    let nodes = talos_service::AgentNodeService::new(Arc::new(
+        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+    ));
+    nodes.register_embedded(true).await.unwrap();
+    (
+        Arc::new(DatabaseSessionStore::new(storage).await.unwrap()),
+        nodes,
+    )
 }
 
-pub(crate) async fn test_session_store() -> Arc<DatabaseSessionStore> {
-    let store = test_agent_execution_store().await;
+pub(crate) async fn test_session_store(
+) -> (Arc<DatabaseSessionStore>, talos_service::AgentNodeService) {
+    let (store, nodes) = test_database_stores().await;
     store
         .insert_session_record(&SessionRecord {
             id: "mock-session".to_string(),
@@ -128,7 +138,7 @@ pub(crate) async fn test_session_store() -> Arc<DatabaseSessionStore> {
         })
         .await
         .unwrap();
-    store
+    (store, nodes)
 }
 
 pub(crate) async fn seed_running_agent_execution(

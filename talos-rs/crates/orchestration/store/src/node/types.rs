@@ -70,8 +70,18 @@ pub struct RotateCredentialParams {
     pub now_at: i64,
 }
 
+pub enum NodeListScope {
+    All,
+    Owner {
+        user_id: String,
+        include_embedded: bool,
+    },
+    Embedded,
+}
+
 pub struct ListNodesParams {
-    pub owner_user_id: Option<String>,
+    pub scope: NodeListScope,
+    pub query: Option<String>,
     pub cursor: Option<String>,
     pub limit: u32,
 }
@@ -79,4 +89,17 @@ pub struct ListNodesParams {
 pub struct NodePageRecord {
     pub data: Vec<NodeRecord>,
     pub next_cursor: Option<String>,
+    pub total: u64,
+}
+
+pub struct RenameNodeParams {
+    pub node_id: String,
+    pub display_name: String,
+    pub now_at: i64,
+}
+
+pub struct SetNodeStatusParams {
+    pub node_id: String,
+    pub status: NodeStatus,
+    pub now_at: i64,
 }

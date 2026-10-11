@@ -220,20 +220,21 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
     ));
     let certificate = rcgen::generate_simple_self_signed(vec!["node.example".into()]).unwrap();
     let publisher = RemoteNodePublisher {
-        lifecycle: Arc::new(tokio::sync::Mutex::new(())),
         coordinator: coordinator.clone(),
         nodes: nodes.clone(),
-        trusted_node_ca: Arc::new(certificate.cert.pem().into_bytes()),
+        trusted_node_ca: agent_client::AgentTlsTrust::Certificate(
+            certificate.cert.pem().into_bytes(),
+        ),
     };
-    let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth), publisher.clone());
-    let control = NodeControlRpc::new(nodes, publisher);
+    let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth));
+    let control = NodeControlRpc::new(nodes, publisher, CancellationToken::new());
 
     let created = management
         .create_node(management_request(
             "user-1",
             pb::CreateNodeRequest {
                 display_name: "Laptop".into(),
-                endpoint: "https://node.example:18801".into(),
+                endpoint: Some("https://node.example:18801".into()),
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -386,7 +387,7 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
             &Actor::regular("user-1"),
             agent_protocol::CreateNodeRequest {
                 display_name: "Laptop".into(),
-                endpoint: format!("https://{address}"),
+                endpoint: Some(format!("https://{address}")),
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -414,7 +415,7 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
             bind_address: address.to_string(),
             tls_certificate_file: certificate_path.clone(),
             tls_private_key_file: private_key_path,
-            trusted_node_ca_file: certificate_path,
+            trusted_node_ca_file: Some(certificate_path),
         },
         nodes.clone(),
         Arc::new(TestAuth),
@@ -431,7 +432,7 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
         loop {
             match AgentNodeClient::connect(
                 &format!("https://{address}"),
-                certificate_pem.as_bytes().to_vec(),
+                agent_client::AgentTlsTrust::Certificate(certificate_pem.as_bytes().to_vec()),
             )
             .await
             {
@@ -444,7 +445,7 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
     .unwrap();
     let resources = AgentSessionDataClient::connect(
         &format!("https://{address}"),
-        certificate_pem.as_bytes().to_vec(),
+        agent_client::AgentTlsTrust::Certificate(certificate_pem.as_bytes().to_vec()),
         agent_protocol::NodeAuth {
             node_id: node_id.clone(),
             token: created.credential.token.clone(),
@@ -599,3 +600,6 @@ fn session_record() -> SessionRecord {
 
 #[path = "agent_node_lifecycle_tests.rs"]
 mod lifecycle;
+
+#[path = "desktop_registration_tests.rs"]
+mod desktop_registration_tests;

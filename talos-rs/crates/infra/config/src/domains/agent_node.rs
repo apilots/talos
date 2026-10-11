@@ -21,8 +21,9 @@ pub struct AgentNodeControlConfig {
     pub bind_address: String,
     pub tls_certificate_file: PathBuf,
     pub tls_private_key_file: PathBuf,
-    /// CA used by the control plane when dialing a remote Harness listener.
-    pub trusted_node_ca_file: PathBuf,
+    /// Optional private CA for direct Harness listeners; omitted uses system roots.
+    #[serde(default)]
+    pub trusted_node_ca_file: Option<PathBuf>,
 }
 
 /// Stable identity and TLS endpoints for a standalone Agent node.
@@ -32,6 +33,9 @@ pub struct AgentNodeControlConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
+    /// Omitted on existing listener configurations preserves direct deployment.
+    #[serde(default)]
+    pub transport: Option<AgentNodeTransport>,
     pub node_id: String,
     pub control_plane_endpoint: String,
     pub credential_file: PathBuf,
@@ -41,7 +45,31 @@ pub struct AgentNodeRunnerConfig {
     pub tls_certificate_file: PathBuf,
     #[serde(default)]
     pub tls_private_key_file: PathBuf,
-    pub trusted_ca_file: PathBuf,
+    /// Optional private CA for the control plane; omitted uses system roots.
+    #[serde(default)]
+    pub trusted_ca_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentNodeTransport {
+    Outbound,
+    Direct,
+}
+
+impl AgentNodeRunnerConfig {
+    pub fn transport(&self) -> AgentNodeTransport {
+        self.transport.unwrap_or_else(|| {
+            if self.bind_address.is_empty()
+                && self.tls_certificate_file.as_os_str().is_empty()
+                && self.tls_private_key_file.as_os_str().is_empty()
+            {
+                AgentNodeTransport::Outbound
+            } else {
+                AgentNodeTransport::Direct
+            }
+        })
+    }
 }
 
 impl AgentNodeConfig {
@@ -57,11 +85,14 @@ impl AgentNodeConfig {
             if control.bind_address.trim().is_empty()
                 || control.tls_certificate_file.as_os_str().is_empty()
                 || control.tls_private_key_file.as_os_str().is_empty()
-                || control.trusted_node_ca_file.as_os_str().is_empty()
+                || control
+                    .trusted_node_ca_file
+                    .as_ref()
+                    .is_some_and(|path| path.as_os_str().is_empty())
             {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
-                    "agent_node.control_plane requires a bind address, TLS identity, and trusted node CA",
+                    "agent_node.control_plane requires a bind address, TLS identity",
                 ));
             }
         }
@@ -70,14 +101,22 @@ impl AgentNodeConfig {
                 || runner.node_id == "embedded"
                 || !runner.control_plane_endpoint.starts_with("https://")
                 || runner.credential_file.as_os_str().is_empty()
-                || runner.trusted_ca_file.as_os_str().is_empty()
-                || runner.bind_address.trim().is_empty()
-                || runner.tls_certificate_file.as_os_str().is_empty()
-                || runner.tls_private_key_file.as_os_str().is_empty()
+                || (runner.transport() == AgentNodeTransport::Direct
+                    && (runner.bind_address.trim().is_empty()
+                        || runner.tls_certificate_file.as_os_str().is_empty()
+                        || runner.tls_private_key_file.as_os_str().is_empty()))
+                || (runner.transport() == AgentNodeTransport::Outbound
+                    && (!runner.bind_address.is_empty()
+                        || !runner.tls_certificate_file.as_os_str().is_empty()
+                        || !runner.tls_private_key_file.as_os_str().is_empty()))
+                || runner
+                    .trusted_ca_file
+                    .as_ref()
+                    .is_some_and(|path| path.as_os_str().is_empty())
             {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
-                    "agent_node.runner requires a node ID, HTTPS control endpoint, credential file, trusted CA, bind address, and TLS identity",
+                    "agent_node.runner requires a node ID, HTTPS control endpoint, credential file, and transport-specific TLS settings",
                 ));
             }
         }

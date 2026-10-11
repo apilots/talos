@@ -1,10 +1,8 @@
+import { getConnectionSettings } from "@/shared/store/app-store";
+import { defaultProductEndpoint } from "@/shared/store/connection-scope";
+
 export function resolveServerBaseUrl(): string {
-  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
-  if (configured) {
-    return configured;
-  }
-  if (typeof window !== "undefined" && window.location.origin !== "null") {
-    return window.location.origin;
-  }
-  return "http://localhost:8080";
+  const connection = getConnectionSettings();
+  return connection.desktopConnectionMode === "cloud" && connection.controlPlaneEndpoint
+    ? connection.controlPlaneEndpoint : defaultProductEndpoint();
 }

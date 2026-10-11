@@ -48,11 +48,11 @@ def free_port():
         return listener.getsockname()[1]
 
 
-def http(url, body=None, token=None, timeout=30):
+def http(url, body=None, token=None, timeout=30, *, method=None):
     headers = {'Content-Type': 'application/json'}
     if token:
         headers['Authorization'] = f'Bearer {token}'
-    request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), headers=headers)
+    request = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), headers=headers, method=method)
     try:
         response = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout)
     except urllib.error.HTTPError as error:
@@ -67,7 +67,9 @@ def data(response):
 
 
 class Cluster:
-    def __init__(self, dream_maintenance=False):
+    def __init__(self, dream_maintenance=False, worker_transport="direct"):
+        require(worker_transport in ("direct", "outbound"), "Invalid Worker transport")
+        self.worker_transport = worker_transport
         self.dream_maintenance = dream_maintenance
         REPORT.mkdir(parents=True, exist_ok=True)
         temporary = ROOT / 'talos-e2e/.tmp'
@@ -157,7 +159,8 @@ class Cluster:
             (home / '.env').chmod(0o600)
         return dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT))
 
-    def start(self):
+    def start_control_plane(self):
+        """Start real Auth and Server without requiring execution Workers or models."""
         cloud_root = Path(os.environ.get('TALOS_CLOUD_REPO', ROOT.parent / 'talos-cloud'))
         cloud_config = self.root / 'cloud.yaml'
         cloud_config.write_text(yaml.safe_dump({
@@ -179,25 +182,31 @@ class Cluster:
             'bind_address': f'127.0.0.1:{self.rpc_port}', 'tls_certificate_file': str(self.cert),
             'tls_private_key_file': str(self.key), 'trusted_node_ca_file': str(self.cert)}})
         self.start_server()
+
+    def start(self):
+        self.start_control_plane()
         # An existing control-plane directory must not override a remote node's
         # implicit working directory. Empty directories also reproduce the bug.
         for user in ('alice', 'bob'):
-            (self.server_home / 'workspace-talos' / self.users[user]['user']['user_id']).mkdir(parents=True)
+            (self.server_home / 'workspace-talos' / self.users[user]['user']['user_id']).mkdir(parents=True, exist_ok=True)
         for name, owner in (('alice-a', 'alice'), ('alice-b', 'alice'), ('bob-a', 'bob')):
             port = free_port()
             response = self.manage(owner, 'CreateNode', {
-                'display_name': name, 'endpoint': f'https://127.0.0.1:{port}',
+                'display_name': name, **({'endpoint': f'https://127.0.0.1:{port}'} if self.worker_transport == 'direct' else {}),
                 'credential_expires_at': int(time.time()) + 3600})
             require('created' in response, f'CreateNode failed: {response}')
             node_id = response['created']['node']['node_id']
             require(str(uuid.UUID(node_id)) == node_id, 'Control plane did not issue a UUID')
             home = self.root / name
             credential = home / 'conf/node.credential'
-            env = self.config(home, {'runner': {
-                'node_id': node_id, 'control_plane_endpoint': f'https://127.0.0.1:{self.rpc_port}',
-                'credential_file': str(credential), 'bind_address': f'127.0.0.1:{port}',
-                'tls_certificate_file': str(self.cert), 'tls_private_key_file': str(self.key),
-                'trusted_ca_file': str(self.cert)}})
+            runner = {'node_id': node_id, 'control_plane_endpoint': f'https://127.0.0.1:{self.rpc_port}',
+                      'credential_file': str(credential), 'trusted_ca_file': str(self.cert)}
+            if self.worker_transport == 'direct':
+                runner.update(bind_address=f'127.0.0.1:{port}', tls_certificate_file=str(self.cert),
+                              tls_private_key_file=str(self.key))
+            else:
+                runner['transport'] = 'outbound'
+            env = self.config(home, {'runner': runner})
             credential.write_text(response['created']['credential']['token'])
             credential.chmod(0o600)
             self.nodes[name] = dict(node_id=node_id, owner=owner, home=home, port=port, env=env, credential=credential)
@@ -233,16 +242,16 @@ class Cluster:
         with sqlite3.connect(f'file:{self.server_home}/data/talos.db?mode=ro', uri=True) as connection:
             return connection.execute(sql, args).fetchall()
 
-    def start_turn(self, user, prompt, session=None, file_ids=()):
+    def start_turn(self, user, prompt, session=None, file_ids=(), node_id=None, project_id=None):
         session = session or f'sess_{uuid.uuid4().hex}'
         response = http(self.url + '/v1/turns/start', {
-            'sessionId': session, 'modelSelection': {'modelRef': {'provider': self.model['provider'], 'id': self.model['id']}, 'reasoningEffort': None},
+            'sessionId': session, **({'nodeId': node_id} if node_id is not None else {}), **({'projectId': project_id} if project_id is not None else {}), 'modelSelection': {'modelRef': {'provider': self.model['provider'], 'id': self.model['id']}, 'reasoningEffort': None},
             'userPermissionMode': 'fullAccess', 'input': {'content': [{'type': 'text', 'text': prompt}] + [{'type': 'file', 'fileId': file_id} for file_id in file_ids]}},
             self.users[user]['access_token'])
         return session, response
 
-    def turn(self, user, prompt, session=None, timeout=90):
-        session, response = self.start_turn(user, prompt, session)
+    def turn(self, user, prompt, session=None, timeout=90, node_id=None, project_id=None):
+        session, response = self.start_turn(user, prompt, session, node_id=node_id, project_id=project_id)
         ack = data(response)
         events = self.events(user, session, ack['turnId'], timeout)
         require(events[-1]['payload']['type'] == 'turnCompleted', f'Turn did not complete: {events[-1]["payload"]}')

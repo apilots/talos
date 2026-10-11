@@ -3,6 +3,7 @@ use talos_types::ProjectInfo;
 
 pub(super) fn project_info_from_record(record: ProjectRecord) -> ProjectInfo {
     ProjectInfo {
+        node_id: record.execution_node_id,
         project_id: record.project_id,
         name: record.name,
         directory: record.directory,

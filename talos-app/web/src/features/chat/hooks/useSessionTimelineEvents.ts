@@ -4,6 +4,8 @@ import { AppProtocol, TalosApiError, TalosStreamTerminatedError, type SessionHis
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
 import { applyStreamEvent, applyTimelineRecovery, clearInactiveTurnSnapshot } from "../stream-events";
 import type { useSessionMessageQueue } from "./useSessionMessageQueue";
+import { useConnectionKey } from "./useChatQueries";
+import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
@@ -21,6 +23,7 @@ export function useSessionTimelineEvents(
     reloadHistory: () => Promise<SessionHistoryResponse>;
   },
 ) {
+  const scope = useConnectionKey();
   const [retryGeneration, setRetryGeneration] = useState(0);
   const onTerminalTurnRef = useRef(onTerminalTurn);
   onTerminalTurnRef.current = onTerminalTurn;
@@ -60,7 +63,7 @@ export function useSessionTimelineEvents(
           await subscribeTimelineEvents(
             sessionId,
             (event) => {
-              if (disposed) return;
+              if (disposed || connectionScope(useAppStore.getState().connection) !== scope) return;
               subscriptionCursor = event.eventId;
               if (event.eventSeq <= (historyOptionsRef.current.stableEventSeq)) return;
               applyStreamEvent(sessionId, event);
@@ -97,10 +100,10 @@ export function useSessionTimelineEvents(
               const history = cursorExpired
                 ? await historyOptionsRef.current.reloadHistory()
                 : undefined;
-              if (disposed) return;
+              if (disposed || connectionScope(useAppStore.getState().connection) !== scope) return;
               if (history) subscriptionCursor = history.lastStableEventId ?? undefined;
               const recovery = await recoverTimelineLiveTail(sessionId, subscriptionCursor);
-              if (disposed) return;
+              if (disposed || connectionScope(useAppStore.getState().connection) !== scope) return;
               if (history) {
                 clearInactiveTurnSnapshot(sessionId);
                 useAppStore.getState().resetLiveResponse(sessionId);
@@ -157,7 +160,7 @@ export function useSessionTimelineEvents(
       }
       finishReconnectDelay?.();
     };
-  }, [enabled, retryGeneration, sessionId]);
+  }, [scope, enabled, retryGeneration, sessionId]);
 
   return {
     retryTimeline: () => setRetryGeneration((generation) => generation + 1),

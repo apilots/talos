@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::InnerModelClient;
 use talos_agent_api::{SubmitTurnInputRequest, SubmitTurnInputResponse};
 use talos_auth::{AuthService, UserService};
-use talos_config::ConfigStore;
 use talos_coordinator::AgentCoordinator;
 use talos_error::TalosError;
 use talos_store::profile::ProfileStore;
@@ -12,64 +11,69 @@ use talos_store::session::{AgentExecutionStore, SessionRecord, SessionStore};
 use talos_types::{
     AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
     MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest, ModelInfo,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
     OptionalCurrentDirectoryPatch, RecoverTimelineRequest,
     RetryTurnRequest as SharedRetryTurnRequest, SendMessageResult, SendSubagentMessageRequest,
     SessionConfigOverridePolicy, SessionInfo, SessionListRequest, SessionPatch,
     SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
     SubagentSpawnResult, SubscribeTimelineRequest, TalosConfig, WaitSubagentRequest,
 };
-use tokio::sync::RwLock;
 
 use super::types::ServiceResult;
 use crate::access::{CreateSessionRequest, ResourceAccessService};
 use crate::file::FileService;
-use crate::fs::FsService;
 use crate::project::ProjectService;
 use crate::session::SessionService;
 use crate::subagent::SubagentService;
 use crate::timeline::TimelineEventId;
 use crate::turn::{StartTurnReservation, TurnRetryParams, TurnService};
 use crate::{
-    AccountService, Actor, ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService,
-    MemoryService, PluginManagerService, ProfileService, SessionHistoryService,
-    SessionMessageQueueService, SkillsService, TimelineEventService, TimelineSubscribeCommand,
-    TimelineSubscription, TimelineSubscriptionService, WorkspaceDocService,
+    AccountService, Actor, ProfileService, SessionHistoryService, SessionMessageQueueService,
+    TimelineEventService, TimelineSubscribeCommand, TimelineSubscription,
+    TimelineSubscriptionService,
 };
 
+#[path = "config.rs"]
+mod config;
+#[path = "environment.rs"]
+mod environment;
 #[path = "interrupt.rs"]
 mod interrupt;
+#[path = "mcp_oauth.rs"]
+mod mcp_oauth;
 #[path = "message_queue.rs"]
 mod message_queue;
+#[path = "plugins.rs"]
+mod plugins;
 #[path = "project_fs.rs"]
 mod project_fs;
 
 #[derive(Clone)]
 pub struct TalosService {
     mode: talos_config::DeploymentMode,
+    oauth_relay_origin: String,
+    oauth_routes:
+        Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], Arc<mcp_oauth::McpRelayRoute>>>>,
+    oauth_capacity: Arc<tokio::sync::Semaphore>,
     access: ResourceAccessService,
     sessions: Arc<SessionService>,
     pub account: AccountService,
+    pub nodes: crate::AgentNodeService,
     pub profile: ProfileService,
     turns: TurnService,
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
     message_queue: SessionMessageQueueService,
     subagents: SubagentService,
-    pub config: ConfigService,
     pub files: Arc<FileService>,
-    fs: FsService,
-    pub memory: MemoryService,
-    pub plugins: PluginManagerService,
-    pub skills: SkillsService,
-    pub workspace_docs: WorkspaceDocService,
-    execution_gate: Arc<RwLock<()>>,
+    execution_gate: Arc<crate::turn::NodeAdmissionGates>,
 }
 
 impl TalosService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         coordinator: Arc<dyn AgentCoordinator>,
+        nodes: crate::AgentNodeService,
         session_store: Arc<dyn SessionStore>,
         agent_execution_store: Arc<dyn AgentExecutionStore>,
         project_store: Arc<dyn ProjectStore>,
@@ -77,16 +81,12 @@ impl TalosService {
         files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         base_config: TalosConfig,
-        plugins: PluginManagerService,
-        memory: MemoryService,
-        config_store: Arc<dyn ConfigStore>,
-        models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
-        reload_hook: ConfigReloadHook,
     ) -> Self {
         Self::assemble(
             coordinator,
+            nodes,
             session_store,
             agent_execution_store,
             project_store,
@@ -94,19 +94,15 @@ impl TalosService {
             files,
             event_service,
             base_config,
-            plugins,
-            memory,
-            config_store,
-            models,
             auth_service,
             user_service,
-            reload_hook,
         )
     }
 
     #[allow(clippy::too_many_arguments)]
     fn assemble(
         coordinator: Arc<dyn AgentCoordinator>,
+        nodes: crate::AgentNodeService,
         session_store: Arc<dyn SessionStore>,
         agent_execution_store: Arc<dyn AgentExecutionStore>,
         project_store: Arc<dyn ProjectStore>,
@@ -114,39 +110,18 @@ impl TalosService {
         files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         base_config: TalosConfig,
-        plugins: PluginManagerService,
-        memory: MemoryService,
-        config_store: Arc<dyn ConfigStore>,
-        models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
-        reload_hook: ConfigReloadHook,
     ) -> Self {
         let sessions = SessionService::new(
             session_store.clone(),
             project_store.clone(),
             base_config.clone(),
+            coordinator.clone(),
         );
         let sessions = Arc::new(sessions);
-        let execution_gate = plugins.execution_gate.clone();
+        let execution_gate = Arc::new(crate::turn::NodeAdmissionGates::default());
         let projects = Arc::new(ProjectService::new(project_store.clone()));
-        let config_reload_hook: ConfigReloadHook = {
-            let sessions = sessions.clone();
-            Arc::new(move |trigger: ConfigReloadTrigger| {
-                let prepared = reload_hook(trigger)?;
-                let reloaded_config = prepared.config().clone();
-                let sessions = sessions.clone();
-                Ok(ConfigReloadPlan::new(reloaded_config.clone(), move || {
-                    prepared.publish();
-                    sessions.update_base_config(reloaded_config);
-                }))
-            })
-        };
-        let skills = SkillsService::new(
-            base_config.agent.kernel.skills.clone(),
-            base_config.agent.kernel.plugins.clone(),
-        )
-        .with_plugin_manager(plugins.clone());
         let message_queue = SessionMessageQueueService::new(
             base_config.agent.message_queue.max_messages_per_session,
         )
@@ -172,6 +147,10 @@ impl TalosService {
 
         Self {
             mode: base_config.mode,
+            oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
+            oauth_routes: Arc::default(),
+            oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
+            nodes,
             access: ResourceAccessService::with_services(
                 coordinator.clone(),
                 sessions.clone(),
@@ -194,22 +173,7 @@ impl TalosService {
             history,
             message_queue,
             subagents,
-            config: ConfigService::new(
-                config_store,
-                models,
-                session_store,
-                execution_gate.clone(),
-                config_reload_hook,
-            ),
             files,
-            fs: FsService::new(
-                base_config.fs.directory_picker.clone(),
-                std::env::var_os("HOME").map(std::path::PathBuf::from),
-            ),
-            memory,
-            plugins,
-            skills,
-            workspace_docs: WorkspaceDocService::new(base_config),
             execution_gate,
         }
     }
@@ -219,17 +183,15 @@ impl TalosService {
         self.mode
     }
 
-    /// Reuses one application-owned User Workspace Memory service across model and document APIs.
+    /// Installs the control-plane model used by the existing reflection policy.
     #[must_use]
-    pub fn with_user_workspace_memory(
+    pub fn with_user_workspace_memory_reflection(
         mut self,
-        memory: Arc<crate::UserWorkspaceMemoryService>,
         inner_model: Arc<InnerModelClient>,
     ) -> Self {
         self.turns = self
             .turns
             .with_user_workspace_memory_reflection(inner_model);
-        self.workspace_docs = self.workspace_docs.with_user_workspace_memory(memory);
         self
     }
 
@@ -239,11 +201,12 @@ impl TalosService {
         session_id: &str,
         patch: SessionPatch,
     ) -> ServiceResult<SessionInfo> {
-        let _execution_guard = self.execution_gate.write().await;
-        if let Some(selection) = patch.model_selection()? {
-            self.config.validate_model_selection_supported(&selection)?;
-        }
         let session = self.access.load_session(actor, session_id).await?;
+        let _execution_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .write_owned()
+            .await;
         let updated = self.access.patch_session(session, patch).await?;
         self.sessions.session_info(&updated)
     }
@@ -314,9 +277,6 @@ impl TalosService {
         idempotency_key: Option<String>,
     ) -> ServiceResult<StartTurnResponse> {
         TurnService::validate_start_turn_request(&request)?;
-        if let Some(selection) = request.model_selection.as_ref() {
-            self.config.validate_model_selection_supported(selection)?;
-        }
         let session_id = request.session_id.clone();
         let existing_session = match self.access.load_session(actor, &session_id).await {
             Ok(session) => Some(session),
@@ -339,6 +299,7 @@ impl TalosService {
                     .create_session(
                         actor,
                         CreateSessionRequest {
+                            node_id: request.node_id.clone(),
                             session_id: session_id.clone(),
                             source,
                             model_selection: request.model_selection.clone(),
@@ -379,6 +340,16 @@ impl TalosService {
         session: SessionRecord,
         request: &StartTurnRequest,
     ) -> ServiceResult<SessionRecord> {
+        if request
+            .node_id
+            .as_ref()
+            .is_some_and(|id| id != &session.execution_node_id)
+        {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Session Worker binding is immutable",
+            ));
+        }
         if request
             .project_id
             .as_deref()
@@ -531,22 +502,34 @@ impl TalosService {
         actor: &Actor,
         session_id: &str,
     ) -> ServiceResult<SessionInfo> {
-        let _execution_guard = self.execution_gate.write().await;
         let session = self.access.load_session(actor, session_id).await?;
+        let _execution_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .write_owned()
+            .await;
         self.ensure_session_write_allowed(session_id).await?;
         self.access.clear_session(session).await
     }
 
     pub async fn close_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {
-        let _execution_guard = self.execution_gate.write().await;
         let session = self.access.load_session(actor, session_id).await?;
+        let _execution_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .write_owned()
+            .await;
         self.ensure_session_write_allowed(session_id).await?;
         self.access.close_session(session).await
     }
 
     pub async fn delete_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<bool> {
-        let _execution_guard = self.execution_gate.write().await;
         let session = self.access.load_session(actor, session_id).await?;
+        let _execution_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .write_owned()
+            .await;
         self.ensure_session_write_allowed(session_id).await?;
         self.subagents.ensure_tree_inactive(session_id).await?;
         let deleted = self.access.delete_session(session).await?;

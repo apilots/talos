@@ -26,7 +26,15 @@ export interface DesktopTimelineEventSource {
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void;
 }
 
+export type TalosRuntimeStateKind = "starting" | "ready" | "restarting" | "stopped" | "error";
+export interface TalosRuntimeState {
+  kind: TalosRuntimeStateKind;
+  message: string | null;
+  error?: AppProtocol.ApiError | null;
+}
+
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
+  onRuntimeState?(handler: (state: TalosRuntimeState) => void): () => void;
   connect?(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke: DesktopTalosInvoke;
   openExternal?(url: string): Promise<void>;

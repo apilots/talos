@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
@@ -22,12 +22,9 @@ import {
 import { activeContextCompaction } from "../timeline-state";
 import { buildQueuedInput, type SendTextOptions } from "../session-input";
 export type { SendTextOptions } from "../session-input";
+import { useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
-import type {
-  PendingInput,
-  SessionInputHistory,
-  SessionInputHistoryItem,
-} from "@/shared/types/ui";
+import { buildSessionInputHistory, sessionInputHistoryHasMessage } from "../session-input-history";
 
 const ACTIVE_TURN_NOT_FOUND_CODES = [
   AppProtocol.ErrorCode.ResourceNotFound,
@@ -39,7 +36,11 @@ export function useChatSession(
   serverMessageCount?: number,
 ) {
   useTranslation("errors");
-  const [draft, setDraft] = useState("");
+  const scope = useProductScope();
+  const draftKey = JSON.stringify([scope, sessionId]);
+  const draft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
+  const saveDraft = useAppStore((state) => state.saveComposerDraft);
+  const setDraft = (text: string) => saveDraft(draftKey, text);
   const sessionAvailable = serverMessageCount !== undefined;
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
@@ -178,6 +179,7 @@ export function useChatSession(
           sessionId,
           content,
           {
+            ...(options.nodeId ? { nodeId: options.nodeId } : {}),
             fileIds,
             modelSelection: options.modelSelection,
             project: options.project,
@@ -214,7 +216,8 @@ export function useChatSession(
             sessionId,
             text,
             {
-              fileIds,
+              ...(options.nodeId ? { nodeId: options.nodeId } : {}),
+            fileIds,
               modelSelection: options.modelSelection,
               project: options.project,
               userPermissionMode: options.userPermissionMode,
@@ -253,56 +256,4 @@ export function useChatSession(
     streamError: streamState?.error ? apiErrorMessage(streamState.error) : undefined,
     sessionHistoryQuery,
   };
-}
-
-export function buildSessionInputHistory(
-  history: ReturnType<typeof useSessionHistoryQuery>["data"] | undefined,
-  pendingInput: PendingInput | undefined,
-): SessionInputHistory {
-  const committed: SessionInputHistoryItem[] = [];
-
-  let itemIndex = 0;
-  (history?.data ?? []).forEach((turn) => {
-    turn.result.result.messages.forEach((message) => {
-      if (message.role !== "user") {
-        return;
-      }
-      const text: string[] = [];
-      const fileIds: string[] = [];
-      message.blocks.forEach((block) => {
-        if (block.content.type !== "userContent") {
-          return;
-        }
-        if (block.content.data.type === "text") {
-          text.push(block.content.data.text);
-        } else if (block.content.data.type === "file") {
-          fileIds.push(block.content.data.fileId);
-        }
-      });
-      if (text.length > 0 || fileIds.length > 0) {
-        committed.push({
-          messageId: message.messageId,
-          itemIndex,
-          text: text.join("\n"),
-          fileIds,
-        });
-        itemIndex += 1;
-      }
-    });
-  });
-
-  return {
-    committed,
-    pendingInput,
-  };
-}
-
-function sessionInputHistoryHasMessage(
-  inputHistory: SessionInputHistory,
-  messageId: string | undefined,
-) {
-  if (!messageId) {
-    return false;
-  }
-  return inputHistory.committed.some((item) => item.messageId === messageId);
 }

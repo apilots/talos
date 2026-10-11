@@ -1,3 +1,4 @@
+import { computerResources } from "./computerResources";
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
 import { errorResources } from "./errorResources";
@@ -7,6 +8,7 @@ import { settingsResources } from "./settingsResources";
 
 export const resources = {
   en: {
+    computers: computerResources.en,
     common: {
       loading: "Loading…", save: "Save",
       cancel: "Cancel", connected: "Connected to server",
@@ -491,6 +493,7 @@ export const resources = {
     },
   },
   "zh-CN": {
+    computers: computerResources["zh-CN"],
     common: {
       loading: "加载中…",
       save: "保存",

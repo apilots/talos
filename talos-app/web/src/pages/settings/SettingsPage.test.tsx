@@ -158,3 +158,8 @@ describe("SettingsPage", () => {
     expect(screen.queryByText("Account content")).toBeNull();
   });
 });
+
+vi.mock("@/features/computers", () => ({ ComputerContext: () => null, useCanManageComputer: () => {
+  const connection = useSettingsPageMock().connection;
+  return connection.authStatus === "open" || connection.deploymentMode === "local" || connection.authRole === "admin";
+} }));

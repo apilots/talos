@@ -1,17 +1,13 @@
 use std::path::Path;
-use std::sync::Arc;
 
-use agent_client::{AgentNodeClient, AgentNodeRunner, AgentSessionDataClient};
+use agent_client::AgentSessionDataClient;
 use agent_pb as pb;
-use agent_protocol::{NodeAuth, Registration};
 use async_trait::async_trait;
 use talos_agent_provider_kernel::KernelMemoryProgressStore;
 use talos_config::Config;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
-
-use crate::{TalosWorker, TalosWorkerResources};
 
 pub async fn run() -> TalosResult<()> {
     let config = Config::load().inspect_err(talos_logging::report_error)?;
@@ -29,66 +25,15 @@ async fn run_with_config(config: Config) -> TalosResult<()> {
             "agent_node.runner is required for talos-worker",
         )
     })?;
-    let credential = read_credential(&runner.credential_file, &config.talos_paths().conf_dir)?;
-    let ca_pem = std::fs::read(&runner.trusted_ca_file).map_err(|error| {
-        TalosError::internal_with_source(
-            "Read Agent node trusted CA; technical details were withheld.",
-            error,
-        )
-    })?;
-    let node_client =
-        AgentNodeClient::connect(&runner.control_plane_endpoint, ca_pem.clone()).await?;
-    let resources = AgentSessionDataClient::connect(
-        &runner.control_plane_endpoint,
-        ca_pem,
-        NodeAuth {
-            node_id: runner.node_id.clone(),
-            token: credential.clone(),
-        },
-    )
-    .await?;
-    let shared_resources = Arc::new(resources.clone());
-    let worker = TalosWorker::build(
-        config.clone(),
-        TalosWorkerResources {
-            session_history_reader: shared_resources.clone(),
-            memory_progress_store: Arc::new(RemoteMemoryProgress(resources.clone())),
-            attachment_reader: shared_resources.clone(),
-            tool_image_store: shared_resources.clone(),
-            agent_control: Some(shared_resources),
-        },
-    )
-    .await?;
-    worker.activate_mcp()?;
-
-    let adapter = talos_agent::AgentHarnessRpcAdapter::new(
-        runner.node_id.clone(),
-        Arc::new(config),
-        worker.harnesses().to_vec(),
-    );
-    let observer_adapter = adapter.clone();
-    let observer_resources = resources;
-    let node = AgentNodeRunner::new(
-        node_client,
-        runner.node_id.clone(),
-        credential,
-        worker.deployments(),
-    )
-    .with_lease_observer(Arc::new(move |update| {
-        let Some(update) = update else {
-            observer_adapter.clear_registration();
-            return Ok(());
-        };
-        observer_resources.update_auth(update.auth.clone())?;
-        observer_adapter.install_registration(
-            Registration {
-                lease_token: update.auth.token,
-                validity: update.validity,
-                owner_user_id: update.owner_user_id,
-            },
-            update.deadline,
-        )
-    }));
+    if runner.transport() == talos_config::AgentNodeTransport::Outbound {
+        let mut worker = crate::RegisteredWorker::start(config).await?;
+        let result =
+            tokio::select! { _ = shutdown_signal() => Ok(()), result = worker.wait() => result };
+        let cleanup = worker.shutdown().await;
+        return result.and(cleanup);
+    }
+    let (worker, adapter, node) =
+        crate::registration::prepare_registered_worker(config, &runner).await?;
     let address = runner.bind_address.parse().map_err(|error| {
         TalosError::from_source(
             ErrorCode::InvalidRequest,
@@ -127,6 +72,9 @@ async fn run_with_config(config: Config) -> TalosResult<()> {
                     error,
                 )
             })?
+            .add_service(
+                pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new(adapter.clone()),
+            )
             .add_service(pb::agent_harness_rpc_server::AgentHarnessRpcServer::new(
                 adapter,
             ))
@@ -193,7 +141,7 @@ async fn drain_harness_server(
     }
 }
 
-struct RemoteMemoryProgress(AgentSessionDataClient);
+pub(crate) struct RemoteMemoryProgress(pub(crate) AgentSessionDataClient);
 
 #[async_trait]
 impl KernelMemoryProgressStore for RemoteMemoryProgress {
@@ -238,7 +186,7 @@ async fn shutdown_signal() {
     }
 }
 
-fn read_credential(path: &Path, conf_dir: &Path) -> TalosResult<String> {
+pub(crate) fn read_credential(path: &Path, conf_dir: &Path) -> TalosResult<String> {
     if !path.is_absolute() {
         return Err(TalosError::new(
             ErrorCode::InvalidRequest,

@@ -2,6 +2,16 @@ import { decodeFileContent } from "./file-content";
 import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
+  ComputerListRequest,
+  ComputerListResponse,
+  NodeInfo,
+  CreatedNode,
+  NodeCredential,
+  CreateNodeRequest,
+  GetNodeRequest,
+  RenameComputerRequest,
+  SetComputerStatusRequest,
+  RotateCredentialRequest,
   DocUpdateRequest,
   ConfigPath,
   ConfigResponse,
@@ -25,6 +35,8 @@ import type {
   MessageQueueReorderRequest,
   MessageQueueStartRequest,
   MessageQueueUpdateRequest,
+  ModelListRequest,
+  WorkspaceInfoRequest,
   ModelListResponse,
   ProfileReadResponse,
   PluginDisableRequest,
@@ -194,11 +206,11 @@ export class TalosClient {
   };
 
   llm = {
-    get: (): Promise<ConfigResponse> => {
-      return this.http.request<ConfigResponse>(this.url("/v1/llm"));
+    get: (target: { nodeId?: string } = {}): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.urlWithQuery("/v1/llm", target));
     },
-    update: (config: LlmConfig): Promise<ConfigResponse> => {
-      return this.http.request<ConfigResponse>(this.url("/v1/llm"), {
+    update: (config: LlmConfig, target: { nodeId?: string } = {}): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.urlWithQuery("/v1/llm", target), {
         method: "PUT",
         body: JSON.stringify(config),
       });
@@ -206,11 +218,12 @@ export class TalosClient {
   };
 
   config = {
-    get: (path: ConfigPath = "llm"): Promise<ConfigResponse> => {
-      return this.http.request<ConfigResponse>(this.url(`/v1/config/${path}`));
+    reload: (target: { nodeId?: string } = {}): Promise<import("./types").ConfigReloadResponse> => this.http.request(this.urlWithQuery("/v1/config/reload", target), { method: "POST" }),
+    get: (path: ConfigPath = "llm", target: { nodeId?: string } = {}): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.urlWithQuery(`/v1/config/${path}`, target));
     },
-    update: (value: ConfigValue): Promise<ConfigResponse> => {
-      return this.http.request<ConfigResponse>(this.url("/v1/config"), {
+    update: (value: ConfigValue, target: { nodeId?: string } = {}): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.urlWithQuery("/v1/config", target), {
         method: "PUT",
         body: JSON.stringify(value),
       });
@@ -218,16 +231,15 @@ export class TalosClient {
   };
 
   models = {
-    list: (): Promise<ModelListResponse> =>
-      this.http.request<ModelListResponse>(this.url("/v1/models")),
+    list: (request: ModelListRequest = {}): Promise<ModelListResponse> =>
+      this.http.request<ModelListResponse>(this.urlWithQuery("/v1/models", request)),
   };
 
   skills = {
     list: (query?: SkillsListRequest): Promise<SkillsListResponse> =>
       this.http.request<SkillsListResponse>(this.urlWithQuery("/v1/skills", query)),
     refresh: (request: SkillsRefreshRequest = {}): Promise<SkillsListResponse> => {
-      void request;
-      return this.http.request<SkillsListResponse>(this.url("/v1/skills/refresh"), {
+      return this.http.request<SkillsListResponse>(this.urlWithQuery("/v1/skills/refresh", request), {
         method: "POST",
       });
     },
@@ -411,11 +423,30 @@ export class TalosClient {
       }),
   };
 
-  projects = {
-    list: (request: ProjectListRequest = {}): Promise<ProjectListResponse> => {
-      void request;
-      return this.http.request<ProjectListResponse>(this.url("/v1/projects"));
+  computers = {
+    list: (request: ComputerListRequest = {}): Promise<ComputerListResponse> => {
+      const query = new URLSearchParams();
+      if (request.query != null) query.set("query", request.query);
+      if (request.cursor != null) query.set("cursor", request.cursor);
+      if (request.limit != null) query.set("limit", String(request.limit));
+      const suffix = query.size ? `?${query}` : "";
+      return this.http.request<ComputerListResponse>(this.url(`/v1/computers${suffix}`));
     },
+    read: (request: GetNodeRequest): Promise<NodeInfo> =>
+      this.http.request<NodeInfo>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}`)),
+    create: (request: CreateNodeRequest): Promise<CreatedNode> =>
+      this.http.request<CreatedNode>(this.url("/v1/computers"), { method: "POST", body: JSON.stringify(request) }),
+    rename: (request: RenameComputerRequest): Promise<NodeInfo> =>
+      this.http.request<NodeInfo>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}/name`), { method: "PATCH", body: JSON.stringify(request) }),
+    setStatus: (request: SetComputerStatusRequest): Promise<NodeInfo> =>
+      this.http.request<NodeInfo>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}/status`), { method: "PUT", body: JSON.stringify(request) }),
+    rotateCredential: (request: RotateCredentialRequest): Promise<NodeCredential> =>
+      this.http.request<NodeCredential>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}/credential`), { method: "POST", body: JSON.stringify(request) }),
+  };
+
+  projects = {
+    list: (request: ProjectListRequest = {}): Promise<ProjectListResponse> =>
+      this.http.request<ProjectListResponse>(this.urlWithQuery("/v1/projects", request)),
     get: (request: ProjectReadRequest): Promise<ProjectReadResponse> =>
       this.http.request<ProjectReadResponse>(this.url(`/v1/projects/${request.project_id}`)),
     getById: (projectId: string): Promise<ProjectReadResponse> =>
@@ -518,6 +549,7 @@ export class TalosClient {
         this.http.request<FsDirectoryReadResponse>(
           this.urlWithQuery("/v1/fs/directory", {
             path: query?.path ?? undefined,
+            nodeId: query?.nodeId ?? undefined,
           }),
         ),
       create: (body: FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> =>
@@ -534,7 +566,7 @@ export class TalosClient {
         this.urlWithQuery("/v1/memory/files", query),
       ),
     get: (request: MemoryFileReadRequest) =>
-      this.http.request<MemoryFileReadResponse>(this.url(`/v1/memory/files/${request.date}`)),
+      this.http.request<MemoryFileReadResponse>(this.urlWithQuery(`/v1/memory/files/${request.date}`, { nodeId: request.nodeId })),
     put: (request: MemoryFileWriteRequest) =>
       this.http.request<MemoryFileWriteResponse>(this.url(`/v1/memory/files/${request.date}`), {
         method: "PUT",
@@ -552,19 +584,19 @@ export class TalosClient {
     },
     getEntry: (request: MemoryGetRequest): Promise<MemoryGetResponse> =>
       this.http.request<MemoryGetResponse>(
-        this.url(`/v1/memory/entries/${encodeURIComponent(request.memoryId)}`),
+        this.urlWithQuery(`/v1/memory/entries/${encodeURIComponent(request.memoryId)}`, { nodeId: request.nodeId }),
       ),
   };
 
   workspaceDocs = {
-    info: (): Promise<WorkspaceInfoResponse> =>
-      this.http.request<WorkspaceInfoResponse>(this.url("/v1/workspace/info")),
-    list: (): Promise<WorkspaceDocListResponse> =>
-      this.http.request<WorkspaceDocListResponse>(this.url("/v1/workspace/docs")),
-    get: (kind: WorkspaceDocKind) =>
-      this.http.request<WorkspaceDocReadResponse>(this.url(`/v1/workspace/docs/${kind}`)),
-    put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
-      this.http.request<WorkspaceDocWriteResponse>(this.url(`/v1/workspace/docs/${kind}`), {
+    info: (request: WorkspaceInfoRequest = {}): Promise<WorkspaceInfoResponse> =>
+      this.http.request<WorkspaceInfoResponse>(this.urlWithQuery("/v1/workspace/info", request)),
+    list: (request: WorkspaceInfoRequest = {}): Promise<WorkspaceDocListResponse> =>
+      this.http.request<WorkspaceDocListResponse>(this.urlWithQuery("/v1/workspace/docs", request)),
+    get: (kind: WorkspaceDocKind, target: WorkspaceInfoRequest = {}) =>
+      this.http.request<WorkspaceDocReadResponse>(this.urlWithQuery(`/v1/workspace/docs/${kind}`, target)),
+    put: (kind: WorkspaceDocKind, request: DocUpdateRequest, target: WorkspaceInfoRequest = {}) =>
+      this.http.request<WorkspaceDocWriteResponse>(this.urlWithQuery(`/v1/workspace/docs/${kind}`, target), {
         method: "PUT",
         body: JSON.stringify(request),
       }),

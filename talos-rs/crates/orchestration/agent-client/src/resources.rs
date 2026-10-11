@@ -22,7 +22,9 @@ use talos_types::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
+use tonic::transport::{Channel, Endpoint};
+
+use crate::AgentTlsTrust;
 
 /// Remote implementation of the existing data ports consumed by Kernel.
 #[derive(Clone)]
@@ -34,7 +36,7 @@ pub struct AgentSessionDataClient {
 impl AgentSessionDataClient {
     pub async fn connect(
         endpoint: &str,
-        trusted_ca_pem: Vec<u8>,
+        trust: AgentTlsTrust,
         auth: NodeAuth,
     ) -> TalosResult<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -50,9 +52,7 @@ impl AgentSessionDataClient {
                 )
             })?
             .connect_timeout(Duration::from_secs(10))
-            .tls_config(
-                ClientTlsConfig::new().ca_certificate(Certificate::from_pem(trusted_ca_pem)),
-            )
+            .tls_config(trust.into_config())
             .map_err(|error| {
                 TalosError::from_source(
                     ErrorCode::InvalidRequest,
@@ -117,7 +117,7 @@ impl AgentSessionDataClient {
                     Duration::from_secs(10),
                 ))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::read_session_history_response::Result::Turns(turns) => turns
@@ -149,11 +149,11 @@ impl AgentSessionDataClient {
                     Duration::from_secs(10),
                 ))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         let mut resolved = Vec::new();
         let mut current: Option<(pb::ResolvedAttachmentMetadata, Vec<u8>)> = None;
-        while let Some(response) = stream.message().await.map_err(status_error)? {
+        while let Some(response) = stream.message().await.map_err(crate::decode_rpc_status)? {
             match response.result.ok_or_else(invalid_response)? {
                 pb::resolve_attachments_response::Result::Metadata(metadata) => {
                     finish_attachment(&mut resolved, current.take())?;
@@ -197,7 +197,7 @@ impl AgentSessionDataClient {
                     Duration::from_secs(10),
                 ))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::read_memory_progress_response::Result::Progress(progress) => {
@@ -229,7 +229,7 @@ impl AgentSessionDataClient {
                     Duration::from_secs(10),
                 ))
                 .await
-                .map_err(status_error)?
+                .map_err(crate::decode_rpc_status)?
                 .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::advance_memory_progress_response::Result::Advanced(_) => Ok(()),
@@ -258,7 +258,7 @@ impl AgentSessionDataClient {
             Duration::from_secs(10),
         ))
         .await
-        .map_err(status_error)?
+        .map_err(crate::decode_rpc_status)?
         .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::spawn_subagent_response::Result::Spawned(value) => {
@@ -292,7 +292,7 @@ impl AgentSessionDataClient {
             Duration::from_secs(10),
         ))
         .await
-        .map_err(status_error)?
+        .map_err(crate::decode_rpc_status)?
         .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::send_subagent_message_response::Result::Sent(value) => {
@@ -325,7 +325,7 @@ impl AgentSessionDataClient {
             deadline,
         ))
         .await
-        .map_err(status_error)?
+        .map_err(crate::decode_rpc_status)?
         .into_inner();
         decode_snapshot_response(response)
     }
@@ -348,7 +348,7 @@ impl AgentSessionDataClient {
             Duration::from_secs(10),
         ))
         .await
-        .map_err(status_error)?
+        .map_err(crate::decode_rpc_status)?
         .into_inner();
         decode_snapshot_response(response)
     }
@@ -372,7 +372,7 @@ impl AgentSessionDataClient {
             Duration::from_secs(10),
         ))
         .await
-        .map_err(status_error)?
+        .map_err(crate::decode_rpc_status)?
         .into_inner();
         decode_snapshot_response(response)
     }
@@ -394,7 +394,7 @@ impl AgentSessionDataClient {
             Duration::from_secs(10),
         ))
         .await
-        .map_err(status_error)?
+        .map_err(crate::decode_rpc_status)?
         .into_inner();
         match response.result.ok_or_else(invalid_response)? {
             pb::list_subagents_response::Result::Tree(value) => {
@@ -455,7 +455,7 @@ impl AgentSessionDataClient {
                     Duration::from_secs(10),
                 ))
                 .await
-                .map_err(status_error);
+                .map_err(crate::decode_rpc_status);
         let upload = upload.await.map_err(|_| transport_closed())?;
         let response = response?.into_inner();
         upload?;
@@ -634,10 +634,6 @@ fn finish_attachment(
         });
     }
     Ok(())
-}
-
-fn status_error(status: tonic::Status) -> TalosError {
-    error_pb::decode_status(status)
 }
 
 fn invalid_response() -> TalosError {

@@ -10,6 +10,14 @@ pub struct Actor {
 }
 
 impl Actor {
+    pub(crate) fn worker_environment_context(&self) -> agent_protocol::WorkerEnvironmentContext {
+        agent_protocol::WorkerEnvironmentContext {
+            user_id: self.user_id.clone(),
+            username: self.username.clone(),
+            workspace_id: None,
+        }
+    }
+
     pub fn new(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),

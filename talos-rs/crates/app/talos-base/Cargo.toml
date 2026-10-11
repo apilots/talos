@@ -6,11 +6,15 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+talos-app-protocol = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }
 opendal = { workspace = true, features = ["reqwest-rustls-tls", "services-fs", "services-s3"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }
 tonic = { workspace = true }
 rustls = { workspace = true }
@@ -42,11 +46,11 @@ talos-upgrade = { workspace = true }
 talos-worker = { workspace = true }
 
 [dev-dependencies]
+talos-plugin = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
 rcgen = "0.14"
 reqwest = { workspace = true }
-serde_json = { workspace = true }
 talos-mcp = { workspace = true }
 tempfile = "3"
 

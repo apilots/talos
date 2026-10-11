@@ -1,32 +1,70 @@
 use super::super::mapping::project_info_from_record;
 use super::{ServiceResult, TalosService};
 use crate::Actor;
-use talos_types::{ProjectInfo, ProjectPatch};
+use agent_protocol::WorkerEnvironment;
+use std::sync::Arc;
+use talos_types::*;
 
 impl TalosService {
-    pub async fn list_projects(&self, actor: &Actor) -> ServiceResult<Vec<ProjectInfo>> {
-        let projects = self.access.list_projects(actor).await?;
-        Ok(projects
-            .into_iter()
-            .map(|project| self.project_info_with_status(project))
-            .collect())
+    pub(crate) async fn worker_environment(
+        &self,
+        actor: &Actor,
+        node_id: Option<&str>,
+    ) -> ServiceResult<Arc<dyn WorkerEnvironment>> {
+        self.access
+            .worker_environment(actor, node_id.unwrap_or("embedded"))
+            .await
     }
-
+    pub async fn workspace_info(
+        &self,
+        actor: &Actor,
+        request: WorkspaceInfoRequest,
+    ) -> ServiceResult<WorkspaceInfoResponse> {
+        self.worker_environment(actor, request.node_id.as_deref())
+            .await?
+            .workspace_info(actor.worker_environment_context())
+            .await
+    }
+    pub async fn list_projects(
+        &self,
+        actor: &Actor,
+        request: ProjectListRequest,
+    ) -> ServiceResult<Vec<ProjectInfo>> {
+        if request
+            .node_id
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
+        {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Node ID cannot be empty",
+            ));
+        }
+        let projects = self.access.list_projects(actor).await?;
+        let mut result = Vec::new();
+        for project in projects {
+            if request
+                .node_id
+                .as_ref()
+                .is_none_or(|node_id| node_id == &project.execution_node_id)
+            {
+                result.push(self.project_info_with_status(actor, project).await?);
+            }
+        }
+        Ok(result)
+    }
     pub async fn get_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<ProjectInfo> {
         let project = self.access.get_project(actor, project_id).await?;
-        Ok(self.project_info_with_status(project))
+        self.project_info_with_status(actor, project).await
     }
-
     pub async fn create_project(
         &self,
         actor: &Actor,
-        name: String,
-        directory: std::path::PathBuf,
+        request: ProjectCreateRequest,
     ) -> ServiceResult<ProjectInfo> {
-        let project = self.access.create_project(actor, name, directory).await?;
-        Ok(self.project_info_with_status(project))
+        let project = self.access.create_project(actor, request).await?;
+        self.project_info_with_status(actor, project).await
     }
-
     pub async fn patch_project(
         &self,
         actor: &Actor,
@@ -34,37 +72,63 @@ impl TalosService {
         patch: ProjectPatch,
     ) -> ServiceResult<ProjectInfo> {
         let project = self.access.patch_project(actor, project_id, patch).await?;
-        Ok(self.project_info_with_status(project))
+        self.project_info_with_status(actor, project).await
     }
-
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<()> {
-        let _project = self.access.get_project(actor, project_id).await?;
+        self.access.get_project(actor, project_id).await?;
         self.files.ensure_project_has_no_files(project_id).await?;
         self.access.delete_project(actor, project_id).await
     }
-
-    fn project_info_with_status(
+    async fn project_info_with_status(
         &self,
+        actor: &Actor,
         mut project: talos_store::project::ProjectRecord,
-    ) -> ProjectInfo {
-        project.status = self.fs.project_status_for_directory(&project.directory);
-        project_info_from_record(project)
+    ) -> ServiceResult<ProjectInfo> {
+        let status = async {
+            self.worker_environment(actor, Some(&project.execution_node_id))
+                .await?
+                .project_status(
+                    actor.worker_environment_context(),
+                    project.directory.clone(),
+                )
+                .await
+        }
+        .await;
+        project.status = match status {
+            Ok(status) => status,
+            Err(error)
+                if matches!(
+                    error.error_code(),
+                    talos_error::ErrorCode::ServiceUnavailable | talos_error::ErrorCode::Timeout
+                ) =>
+            {
+                ProjectStatus {
+                    state: ProjectStatusState::NodeUnavailable,
+                    reason: Some(ProjectUnavailableReason::NodeUnavailable),
+                }
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(project_info_from_record(project))
     }
-
     pub async fn read_fs_directory(
         &self,
         actor: &Actor,
-        path: Option<std::path::PathBuf>,
-    ) -> ServiceResult<talos_types::FsDirectorySnapshot> {
-        self.fs.read_directory(actor, path).await
+        request: FsDirectoryReadRequest,
+    ) -> ServiceResult<FsDirectorySnapshot> {
+        self.worker_environment(actor, request.node_id.as_deref())
+            .await?
+            .read_directory(actor.worker_environment_context(), request)
+            .await
     }
-
     pub async fn create_fs_directory(
         &self,
         actor: &Actor,
-        parent: std::path::PathBuf,
-        name: String,
-    ) -> ServiceResult<talos_types::FsDirectoryCreateResponse> {
-        self.fs.create_directory(actor, parent, name).await
+        request: FsDirectoryCreateRequest,
+    ) -> ServiceResult<FsDirectoryCreateResponse> {
+        self.worker_environment(actor, request.node_id.as_deref())
+            .await?
+            .create_directory(actor.worker_environment_context(), request)
+            .await
     }
 }

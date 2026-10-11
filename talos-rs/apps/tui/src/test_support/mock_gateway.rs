@@ -79,6 +79,7 @@ pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
 impl MockGatewayState {
     pub(super) fn session_info(&self, message_count: u64) -> SessionInfo {
         SessionInfo {
+            node_id: "embedded".into(),
             id: self.session_id.clone(),
             title: "Untitled Session".to_string(),
             user_id: "test-user".to_string(),

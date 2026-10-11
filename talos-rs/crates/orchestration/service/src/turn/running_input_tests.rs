@@ -14,6 +14,7 @@ async fn start_admission_outlives_request_cancellation_before_store_commit() {
                 &service,
                 test_session(),
                 StartTurnRequest {
+                    node_id: None,
                     session_id: "s1".to_string(),
                     input: test_user_input("keep running after disconnect"),
                     model_selection: None,
@@ -67,6 +68,7 @@ async fn running_input_replays_the_committed_response_without_delivering_twice()
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("running"),
             model_selection: None,
@@ -112,6 +114,7 @@ async fn durable_input_delivery_outlives_the_request_owner() {
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("running"),
             model_selection: None,
@@ -183,6 +186,7 @@ async fn queued_input_replays_without_redelivering_or_requiring_the_consumed_mes
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("running"),
             model_selection: None,
@@ -231,6 +235,7 @@ async fn queued_input_returns_durable_acceptance_when_provider_delivery_later_fa
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("running"),
             model_selection: None,
@@ -288,6 +293,7 @@ async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them(
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("running"),
             model_selection: None,

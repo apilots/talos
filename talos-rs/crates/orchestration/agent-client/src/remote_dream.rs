@@ -18,16 +18,17 @@ impl RemoteAgentClient {
                 })
                 .await
                 .map_err(|_| transport_closed())?;
-                let mut stream =
-                    pb::agent_harness_rpc_client::AgentHarnessRpcClient::new(self.channel.clone())
-                        .form_dream_memory(rpc_request(
-                            ReceiverStream::new(rx),
-                            Duration::from_secs(300),
-                        ))
-                        .await
-                        .map_err(transport_error)?
-                        .into_inner();
-                while let Some(frame) = stream.message().await.map_err(transport_error)? {
+                let mut stream = self
+                    .transport
+                    .clone()
+                    .form_dream_memory(rpc_request(
+                        ReceiverStream::new(rx),
+                        Duration::from_secs(300),
+                    ))
+                    .await
+                    .map_err(crate::decode_rpc_status)?
+                    .into_inner();
+                while let Some(frame) = stream.message().await.map_err(crate::decode_rpc_status)? {
                     match frame.result.ok_or_else(invalid_response)? {
                         pb::form_dream_memory_response::Result::ModelPrompt(prompt) => {
                             let reply =

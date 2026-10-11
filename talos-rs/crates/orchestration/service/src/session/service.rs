@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use talos_agent::{AgentContext, AgentSessionContext};
+use talos_agent::AgentContext;
 use talos_agent_api::AgentTurnRef;
-use talos_config::provider_config_for_llm;
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
 use talos_store::session::{
@@ -12,12 +11,14 @@ use talos_store::session::{
 };
 use talos_types::talos::TalosConnectionMode;
 use talos_types::{
-    normalize_current_directory, resolve_default_model_selection, ModelInfo, ModelSelection,
     OptionalCurrentDirectoryPatch, SessionConfigOverridePolicy, SessionInfo, SessionPatch,
     TalosConfig, UserPermissionMode, DEFAULT_SESSION_TITLE,
 };
 
 use super::CreateSessionParams;
+
+#[path = "environment.rs"]
+mod environment;
 
 #[path = "title.rs"]
 mod title;
@@ -27,45 +28,36 @@ pub(crate) struct SessionService {
     session_store: Arc<dyn SessionStore>,
     project_store: Arc<dyn ProjectStore>,
     base_config: Arc<RwLock<TalosConfig>>,
+    coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
 }
 
 impl SessionService {
+    pub(crate) async fn reject_nonterminal_turns(&self, node_id: &str) -> TalosResult<()> {
+        if self
+            .session_store
+            .has_nonterminal_turns(Some(node_id))
+            .await?
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Computer configuration cannot change while an Agent Turn is non-terminal",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn new(
         session_store: Arc<dyn SessionStore>,
         project_store: Arc<dyn ProjectStore>,
         base_config: TalosConfig,
+        coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
     ) -> Self {
         Self {
             session_store,
             project_store,
             base_config: Arc::new(RwLock::new(base_config)),
+            coordinator,
         }
-    }
-
-    fn base_model_selection(&self) -> TalosResult<ModelSelection> {
-        let base_config = self.base_config_snapshot();
-        resolve_default_model_selection(&base_config.llm)
-    }
-
-    fn model_info_for_selection(&self, selection: &ModelSelection) -> TalosResult<ModelInfo> {
-        let llm = &self.base_config_snapshot().llm;
-        let model = provider_config_for_llm(llm, &selection.model_ref.provider)
-            .and_then(|provider| {
-                provider
-                    .models
-                    .iter()
-                    .find(|model| model.id == selection.model_ref.id)
-            })
-            .ok_or_else(|| {
-                TalosError::localized(talos_error::ErrorLocalization::ModelNotConfigured {
-                    provider: selection.model_ref.provider.clone(),
-                    model: selection.model_ref.id.clone(),
-                })
-            })?;
-        let model =
-            ModelInfo::from_provider_model(selection.model_ref.provider.clone(), model.clone());
-        selection.resolve_reasoning(&model)?;
-        Ok(model)
     }
 
     fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
@@ -85,22 +77,8 @@ impl SessionService {
             .clone()
     }
 
-    pub fn update_base_config(&self, config: TalosConfig) {
-        *self
-            .base_config
-            .write()
-            .expect("session base config write lock") = config;
-    }
-
     pub(crate) fn kernel_timezone(&self) -> String {
         self.base_config_snapshot().agent.kernel.timezone
-    }
-
-    /// Return the Workspace selected by the current product routing policy.
-    pub fn default_workspace_id(&self) -> String {
-        self.base_config_snapshot()
-            .default_workspace_id()
-            .to_string()
     }
 
     pub(crate) fn session_info(&self, record: &SessionRecord) -> TalosResult<SessionInfo> {
@@ -114,6 +92,7 @@ impl SessionService {
         let effective_mode =
             SessionConfigOverridePolicy::resolve_user_permission_mode(&base_config, &record.conf);
         Ok(SessionInfo {
+            node_id: record.execution_node_id.clone(),
             id: record.id.clone(),
             title: record.title.clone(),
             user_id: record.user_id.clone(),
@@ -168,7 +147,12 @@ impl SessionService {
         Ok(None)
     }
 
-    async fn validate_project_binding(&self, project_id: &str, user_id: &str) -> TalosResult<()> {
+    async fn validate_project_binding(
+        &self,
+        project_id: &str,
+        user_id: &str,
+        node_id: &str,
+    ) -> TalosResult<()> {
         let project = self
             .project_store
             .get_project(project_id)
@@ -180,6 +164,12 @@ impl SessionService {
                     format!("Project {project_id} was not found."),
                 )
             })?;
+        if project.execution_node_id != node_id {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Session and Project Worker bindings differ",
+            ));
+        }
         if project.project_id.trim().is_empty() {
             return Err(TalosError::internal(
                 "project store returned an empty project_id",
@@ -220,7 +210,7 @@ impl SessionService {
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
         if let Some(project_id) = params.project_id.as_deref() {
-            self.validate_project_binding(project_id, &params.user_id)
+            self.validate_project_binding(project_id, &params.user_id, &params.execution_node_id)
                 .await?;
         }
         let connection_mode = params
@@ -229,9 +219,15 @@ impl SessionService {
             .as_ref()
             .map(|environment| environment.connection_mode)
             .unwrap_or_default();
-        params.current_directory =
-            normalize_current_directory(connection_mode, params.current_directory)?;
-        let record = self.build_session_record(params, tree_identity)?;
+        params.current_directory = self
+            .normalize_current_directory(
+                &params.execution_node_id,
+                &params.user_id,
+                connection_mode,
+                params.current_directory,
+            )
+            .await?;
+        let record = self.build_session_record(params, tree_identity).await?;
         self.session_store.insert_session_record(&record).await?;
         Ok(record)
     }
@@ -276,8 +272,10 @@ impl SessionService {
                 record.id
             ))
         })?;
-        let model = self.model_info_for_selection(&model_selection)?;
-        let session_context = self.build_agent_session_context(record)?;
+        let model = self
+            .model_info_for_selection(&record.execution_node_id, &record.user_id, &model_selection)
+            .await?;
+        let session_context = self.build_agent_session_context(record).await?;
         Ok(AgentContext {
             session: session_context,
             turn_id: identity.turn_id,
@@ -290,28 +288,6 @@ impl SessionService {
                 &self.base_config_snapshot(),
                 &record.conf,
             ),
-        })
-    }
-
-    /// Build the minimal Provider Session-management input from product owners.
-    pub(crate) fn build_agent_session_context(
-        &self,
-        record: &SessionRecord,
-    ) -> TalosResult<AgentSessionContext> {
-        if record.agent_id.trim().is_empty() {
-            return Err(
-                TalosError::internal("Session is missing its Agent binding.").context(format!(
-                    "session '{}' is missing its Agent binding",
-                    record.id
-                )),
-            );
-        }
-        Ok(AgentSessionContext {
-            agent_id: record.agent_id.clone(),
-            session_id: record.id.clone(),
-            workspace: self
-                .base_config_snapshot()
-                .resolve_workspace(&record.workspace_id, &record.user_id)?,
         })
     }
 
@@ -360,7 +336,7 @@ impl SessionService {
         patch: SessionPatch,
     ) -> TalosResult<Option<SessionRecord>> {
         self.validate_persisted_model_selection(&record)?;
-        let patch = self.normalize_session_patch(record.environment.as_ref(), patch)?;
+        let patch = self.normalize_session_patch(&record, patch).await?;
         self.apply_session_patch(record, patch).await
     }
 
@@ -439,40 +415,59 @@ impl SessionService {
         self.session_store.delete_session_record(session_id).await
     }
 
-    fn normalize_session_patch(
+    async fn normalize_session_patch(
         &self,
-        environment: Option<&talos_types::talos::TalosSessionEnvironment>,
+        record: &SessionRecord,
         mut patch: SessionPatch,
     ) -> TalosResult<SessionPatch> {
-        let connection_mode = environment
-            .map(|environment| environment.connection_mode)
+        let mode = record
+            .environment
+            .as_ref()
+            .map(|env| env.connection_mode)
             .unwrap_or_default();
         if let Some(OptionalCurrentDirectoryPatch::Set { path }) = patch.current_directory.as_ref()
         {
-            patch.current_directory =
-                normalize_current_directory(connection_mode, Some(path.clone()))?
-                    .map(|normalized| OptionalCurrentDirectoryPatch::Set { path: normalized });
+            patch.current_directory = self
+                .normalize_current_directory(
+                    &record.execution_node_id,
+                    &record.user_id,
+                    mode,
+                    Some(path.clone()),
+                )
+                .await?
+                .map(|path| OptionalCurrentDirectoryPatch::Set { path });
         }
-        if matches!(connection_mode, TalosConnectionMode::Remote) {
+        if matches!(mode, TalosConnectionMode::Remote) {
             patch.current_directory = None;
         }
         Ok(patch)
     }
 
-    fn build_session_record(
+    async fn build_session_record(
         &self,
         params: CreateSessionParams,
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
-        self.base_config_snapshot()
-            .resolve_workspace(&params.workspace_id, &params.user_id)?;
+        self.worker_environment(&params.execution_node_id, &params.user_id)
+            .await?
+            .workspace_info(Self::environment_context(
+                &params.user_id,
+                Some(params.workspace_id.clone()),
+            ))
+            .await?;
         let session_id = params
             .session_id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let requested_selection = params.model_selection;
         let effective_selection = match requested_selection {
             Some(selection) => selection,
-            None => self.base_model_selection()?,
+            None => {
+                self.worker_environment(&params.execution_node_id, &params.user_id)
+                    .await?
+                    .list_models(Self::environment_context(&params.user_id, None))
+                    .await?
+                    .default_model_selection
+            }
         };
         let base_conf =
             SessionConfigOverridePolicy::single_model_selection_conf(&effective_selection);
@@ -484,7 +479,12 @@ impl SessionService {
         SessionConfigOverridePolicy::validate_conf(&conf)?;
         let stored_selection = SessionConfigOverridePolicy::extract_model_selection(&conf)?
             .unwrap_or(effective_selection);
-        self.model_info_for_selection(&stored_selection)?;
+        self.model_info_for_selection(
+            &params.execution_node_id,
+            &params.user_id,
+            &stored_selection,
+        )
+        .await?;
         let now = chrono::Utc::now().timestamp_millis();
         let source = params.source;
         let record = SessionRecord {
@@ -527,7 +527,8 @@ impl SessionService {
         record.conf = SessionConfigOverridePolicy::merge_conf(&record.conf, &patch_conf);
         let next_selection = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?;
         if let Some(selection) = next_selection.as_ref() {
-            self.model_info_for_selection(selection)?;
+            self.model_info_for_selection(&record.execution_node_id, &record.user_id, selection)
+                .await?;
         }
         let reset_context_usage = next_selection != previous_selection;
         if let Some(current_directory_patch) = &patch.current_directory {
@@ -559,3 +560,7 @@ impl SessionService {
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "worker_binding_tests.rs"]
+mod worker_binding_tests;

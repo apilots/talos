@@ -8,7 +8,11 @@ use talos_agent_api::{
 };
 use tokio::sync::oneshot;
 
-struct RunningHarness(CancellationToken, mpsc::Sender<AgentEvent>);
+struct RunningHarness(
+    CancellationToken,
+    mpsc::Sender<AgentEvent>,
+    AgentInterruptOutcome,
+);
 
 impl AgentHarness for RunningHarness {
     fn start(&self, _: AgentRunParams) -> AgentFuture<'_, TalosResult<AgentRunExecution>> {
@@ -38,7 +42,7 @@ impl AgentHarness for RunningHarness {
             // must be closed before interruption waits for cooperative cleanup.
             self.1.closed().await;
             self.0.cancel();
-            Ok(AgentInterruptOutcome::Cancelled)
+            Ok(self.2.clone())
         })
     }
 }
@@ -48,11 +52,14 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
     for revoke in [true, false] {
         let stopped = CancellationToken::new();
         let (events, receiver) = mpsc::channel(1);
-        let harness: Arc<dyn AgentHarness> =
-            Arc::new(RunningHarness(stopped.clone(), events.clone()));
+        let harness: Arc<dyn AgentHarness> = Arc::new(RunningHarness(
+            stopped.clone(),
+            events.clone(),
+            AgentInterruptOutcome::Cancelled,
+        ));
         let adapter = AgentHarnessRpcAdapter::new(
             "node".into(),
-            Arc::new(Config::default()),
+            Arc::new(std::sync::RwLock::new(Config::default())),
             vec![("agent".into(), harness.clone())],
         );
         adapter
@@ -133,4 +140,67 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
             ));
         }
     }
+}
+
+#[tokio::test]
+async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
+    let (events, receiver) = mpsc::channel(1);
+    let stopped = CancellationToken::new();
+    let harness: Arc<dyn AgentHarness> = Arc::new(RunningHarness(
+        stopped.clone(),
+        events,
+        AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 },
+    ));
+    let adapter = AgentHarnessRpcAdapter::new(
+        "node".into(),
+        Arc::new(std::sync::RwLock::new(Config::default())),
+        vec![("agent".into(), harness.clone())],
+    );
+    adapter
+        .install_registration(
+            Registration {
+                lease_token: "token".into(),
+                owner_user_id: "owner".into(),
+                validity: agent_protocol::LeaseValidity {
+                    server_at: 0,
+                    expires_at: 90,
+                },
+            },
+            Instant::now() + Duration::from_secs(90),
+        )
+        .unwrap();
+    let lease = adapter
+        .authorize(&NodeAuth {
+            node_id: "node".into(),
+            token: "token".into(),
+        })
+        .unwrap();
+    let (_settle, settlement) = oneshot::channel();
+    let (accepted, did_accept) = oneshot::channel();
+    let response = adapter.serve_run(
+        Box::pin(async { Ok(()) }),
+        lease,
+        harness,
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: vec![],
+                permit: AgentAdmissionPermit::new(async move {
+                    accepted.send(()).unwrap();
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(receiver),
+            settlement: AgentRunSettlementReceiver::new(settlement),
+        }),
+        AgentTurnRef::new("session", "turn"),
+        "agent".into(),
+    );
+    did_accept.await.unwrap();
+    drop(response);
+    let error = tokio::time::timeout(Duration::from_secs(2), adapter.drain_disconnected())
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(stopped.is_cancelled());
+    assert!(error.is_code(ErrorCode::RunCleanupUnconfirmed));
 }

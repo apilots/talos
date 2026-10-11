@@ -15,6 +15,7 @@ type RegisteredHarnesses = HashMap<(String, String), Arc<dyn AgentHarness>>;
 #[derive(Clone, Default)]
 pub(crate) struct AgentRegistry {
     registrations: Arc<RwLock<RegisteredHarnesses>>,
+    environments: Arc<RwLock<HashMap<String, Arc<dyn agent_protocol::WorkerEnvironment>>>>,
 }
 
 impl AgentRegistry {
@@ -73,10 +74,36 @@ impl AgentRegistry {
     }
 
     pub(crate) async fn unregister_node(&self, node_id: &str) {
+        self.environments.write().await.remove(node_id);
         self.registrations
             .write()
             .await
             .retain(|(registered_node, _), _| registered_node != node_id);
+    }
+
+    pub(crate) async fn register_environment(
+        &self,
+        node_id: String,
+        environment: Arc<dyn agent_protocol::WorkerEnvironment>,
+    ) {
+        self.environments.write().await.insert(node_id, environment);
+    }
+
+    pub(crate) async fn environment(
+        &self,
+        node_id: &str,
+    ) -> AgentResult<Arc<dyn agent_protocol::WorkerEnvironment>> {
+        self.environments
+            .read()
+            .await
+            .get(node_id)
+            .cloned()
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    "Worker environment is unavailable",
+                )
+            })
     }
 
     /// Resolve a Harness by node and logical Agent id.

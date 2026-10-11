@@ -27,6 +27,15 @@ pub trait ProjectStore: Send + Sync {
         user_id: &str,
     ) -> TalosResult<ProjectRecord>;
 
+    /// Create one immutable owner/node/directory binding after Worker path validation.
+    async fn create_project_on_node(
+        &self,
+        name: &str,
+        directory: &Path,
+        user_id: &str,
+        node_id: &str,
+    ) -> TalosResult<ProjectRecord>;
+
     async fn patch_project(
         &self,
         project_id: &str,
@@ -47,6 +56,7 @@ impl StorageProjectStore {
 
     fn parse_project_record(row: &Row) -> ProjectRecord {
         ProjectRecord {
+            execution_node_id: row.get_string("execution_node_id").unwrap_or_default(),
             project_id: row.get_string("project_id").unwrap_or_default(),
             name: row.get_string("name").unwrap_or_default(),
             user_id: row.get_string("user_id").unwrap_or_default(),
@@ -75,14 +85,14 @@ impl StorageProjectStore {
 #[async_trait]
 impl ProjectStore for StorageProjectStore {
     async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-        let sql = "SELECT p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id GROUP BY p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at ORDER BY p.created_at DESC";
+        let sql = "SELECT p.project_id, p.name, p.user_id, p.execution_node_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id GROUP BY p.project_id, p.name, p.user_id, p.execution_node_id, p.directory, p.created_at, p.updated_at ORDER BY p.created_at DESC";
         let rows = self.storage.query(sql, &[]).await?;
         Ok(rows.iter().map(Self::parse_project_record).collect())
     }
 
     async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
         let sql =
-            "SELECT p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at";
+            "SELECT p.project_id, p.name, p.user_id, p.execution_node_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.user_id, p.execution_node_id, p.directory, p.created_at, p.updated_at";
         let rows = self.storage.query(sql, &[project_id]).await?;
         Ok(rows
             .into_iter()
@@ -118,8 +128,20 @@ impl ProjectStore for StorageProjectStore {
         directory: &Path,
         user_id: &str,
     ) -> TalosResult<ProjectRecord> {
+        self.create_project_on_node(name, directory, user_id, "embedded")
+            .await
+    }
+
+    async fn create_project_on_node(
+        &self,
+        name: &str,
+        directory: &Path,
+        user_id: &str,
+        node_id: &str,
+    ) -> TalosResult<ProjectRecord> {
         let now = chrono::Utc::now().timestamp_millis();
         let record = ProjectRecord {
+            execution_node_id: node_id.to_owned(),
             project_id: uuid::Uuid::now_v7().to_string(),
             name: name.to_string(),
             user_id: user_id.to_string(),
@@ -134,6 +156,7 @@ impl ProjectStore for StorageProjectStore {
                 "project_id".to_string(),
                 "name".to_string(),
                 "user_id".to_string(),
+                "execution_node_id".to_string(),
                 "directory".to_string(),
                 "created_at".to_string(),
                 "updated_at".to_string(),
@@ -142,12 +165,16 @@ impl ProjectStore for StorageProjectStore {
                 serde_json::Value::String(record.project_id.clone()),
                 serde_json::Value::String(record.name.clone()),
                 serde_json::Value::String(record.user_id.clone()),
+                serde_json::Value::String(record.execution_node_id.clone()),
                 serde_json::Value::String(record.directory.display().to_string()),
                 serde_json::Value::Number(now.into()),
                 serde_json::Value::Number(now.into()),
             ],
         );
-        self.storage.insert("projects", &row).await?;
+        self.storage.insert("projects", &row).await.map_err(|error| {
+            let unique = matches!(std::error::Error::source(&error).and_then(|source| source.downcast_ref::<sqlx::Error>()), Some(sqlx::Error::Database(database)) if database.is_unique_violation());
+            if unique { TalosError::from_source(talos_error::ErrorCode::Conflict, "Project directory already exists for this user and Worker", error) } else { error }
+        })?;
         Ok(record)
     }
 

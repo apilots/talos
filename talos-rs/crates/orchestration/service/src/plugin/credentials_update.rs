@@ -1,21 +1,21 @@
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::*;
 
-impl crate::TalosService {
+impl super::PluginManagerService {
     /// Serializes a complete credential change with Plugin/config commits. Network OAuth work is excluded.
     pub async fn update_mcp_credentials(
         &self,
         request: McpCredentialsUpdateRequest,
     ) -> TalosResult<McpAuthenticationResponse> {
-        let _guard = self.plugins.execution_gate.write().await;
-        self.plugins.mcp_context()?.oauth.cancel(&request.server);
+        let _guard = self.commit_guard()?;
+        self.mcp_context()?.oauth.cancel(&request.server);
         let result = self.commit_mcp_credentials(&request.server, request.change);
-        self.plugins.recover_credentials();
+        self.recover_credentials();
         result?;
-        self.plugins
-            .read_mcp_authentication(McpAuthenticationReadRequest {
-                server: request.server,
-            })
+        self.read_mcp_authentication(McpAuthenticationReadRequest {
+            node_id: None,
+            server: request.server,
+        })
     }
 
     fn commit_mcp_credentials(
@@ -23,14 +23,14 @@ impl crate::TalosService {
         owner: &McpDefinitionRef,
         change: McpCredentialsChange,
     ) -> TalosResult<()> {
-        let context = self.plugins.mcp_context()?;
-        let mut server = self.plugins.definition(owner)?;
+        let context = self.mcp_context()?;
+        let mut server = self.definition(owner)?;
         match change {
             McpCredentialsChange::Clear => {
                 if let Some(binding) = &server.credentials {
                     context.runtime.revoke_credentials(owner);
                     context.credentials.remove_for(owner, &binding.reference)?;
-                    return self.plugins.manager.publish_mcp_definitions();
+                    return self.manager.publish_mcp_definitions();
                 }
                 let has_legacy = self.configured_mcp(owner)?.as_ref().is_some_and(|server| {
                     matches!(
@@ -68,7 +68,7 @@ impl crate::TalosService {
         let configured = self.configured_mcp(owner)?;
         match owner {
             McpDefinitionRef::Plugin { install_id } => {
-                self.plugins.manager.set_mcp_credentials(install_id, server)
+                self.manager.set_mcp_credentials(install_id, server)
             }
             McpDefinitionRef::Config { .. } => {
                 let previous = configured.expect("configuration owner was resolved");
@@ -90,7 +90,15 @@ impl crate::TalosService {
                         ))
                     }
                 }
-                self.config.update_mcp_credentials(&previous, &next)
+                self.config_service
+                    .as_ref()
+                    .ok_or_else(|| {
+                        TalosError::new(
+                            ErrorCode::ServiceUnavailable,
+                            "Worker configuration publisher is unavailable",
+                        )
+                    })?
+                    .update_mcp_credentials(&previous, &next)
             }
         }
     }
@@ -98,7 +106,7 @@ impl crate::TalosService {
         &self,
         owner: &McpDefinitionRef,
     ) -> TalosResult<Option<talos_config::McpServerConfig>> {
-        let context = self.plugins.mcp_context()?;
+        let context = self.mcp_context()?;
         Ok(match owner {
             McpDefinitionRef::Config { name } => Some(
                 context

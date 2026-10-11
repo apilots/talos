@@ -12,6 +12,7 @@ use crate::TuiApp;
 
 fn session_info() -> SessionInfo {
     SessionInfo {
+        node_id: "embedded".into(),
         id: "sess-status".to_string(),
         title: "Status Session".to_string(),
         user_id: "status-user".to_string(),

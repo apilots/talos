@@ -4,7 +4,7 @@ import { useConnectionKey } from "@/features/chat";
 import { getProfile } from "../api";
 
 export function profileKey(connectionKey: string) {
-  return ["profile", connectionKey] as const;
+  return ["talos", connectionKey, "profile"] as const;
 }
 
 export function useProfileQuery() {

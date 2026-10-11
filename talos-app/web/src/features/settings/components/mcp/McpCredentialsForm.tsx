@@ -1,3 +1,4 @@
+import { useEnvironmentKey } from "@/features/computers";
 import type { McpDefinitionRef, McpOAuthConfig } from "@talos/sdk-browser";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +9,7 @@ import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiError
 import { FormSection, parseEntries, TextArea, TextInput } from "./McpFormPrimitives";
 
 export function McpCredentialsForm({ server, stdio, onUpdated }: { server: McpDefinitionRef; stdio: boolean; onUpdated?: () => Promise<void> }) {
+  const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("settings");
   const [mode, setMode] = useState<"bearer" | "header" | "oauth">("bearer");
   const initialized = useRef(false);
@@ -18,7 +20,7 @@ export function McpCredentialsForm({ server, stdio, onUpdated }: { server: McpDe
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ type: "entries" } | { type: "api"; cause: unknown } | null>(null);
-  const auth = useQuery({ queryKey: ["talos", "mcp-auth", server], queryFn: () => getTalosClient().mcp.readAuthentication({ server }), refetchInterval: (query) => query.state.data?.state.type === "authorizing" ? 1000 : false });
+  const auth = useQuery({ queryKey: ["talos", environmentKey, "mcp-auth", server], queryFn: () => getTalosClient().mcp.readAuthentication({ server }), refetchInterval: (query) => query.state.data?.state.type === "authorizing" ? 1000 : false });
   useEffect(() => {
     if (!auth.data || !auth.isFetchedAfterMount) return;
     if (!initialized.current) {

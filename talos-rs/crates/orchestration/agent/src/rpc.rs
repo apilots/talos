@@ -15,8 +15,16 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status, Streaming};
+
+#[path = "rpc_connect.rs"]
+mod connect;
+#[path = "rpc_environment.rs"]
+mod environment;
+#[path = "rpc_streams.rs"]
+mod streams;
 
 use crate::{AgentHarness, AgentInterruptParams, AgentRunExecution};
 
@@ -63,24 +71,30 @@ impl Lease {
 #[derive(Clone)]
 pub struct AgentHarnessRpcAdapter {
     node_id: String,
-    config: Arc<Config>,
+    environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
+    registration_revoked: Option<Arc<dyn Fn() + Send + Sync>>,
+    config: Arc<std::sync::RwLock<Config>>,
     harnesses: Arc<Mutex<HashMap<String, Arc<dyn AgentHarness>>>>,
     lease: Arc<Mutex<Option<Lease>>>,
     active: Arc<Mutex<HashSet<TurnKey>>>,
+    cleanup_failure: Arc<Mutex<Option<TalosError>>>,
 }
 
 impl AgentHarnessRpcAdapter {
     pub fn new(
         node_id: String,
-        config: Arc<Config>,
+        config: Arc<std::sync::RwLock<Config>>,
         harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     ) -> Self {
         Self {
             node_id,
+            environment: None,
+            registration_revoked: None,
             config,
             harnesses: Arc::new(Mutex::new(harnesses.into_iter().collect())),
             lease: Arc::new(Mutex::new(None)),
             active: Arc::new(Mutex::new(HashSet::new())),
+            cleanup_failure: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -114,13 +128,26 @@ impl AgentHarnessRpcAdapter {
         }
         if let Some(previous) = current.replace(lease) {
             previous.revoked.cancel();
+            if let Some(revoked) = &self.registration_revoked {
+                revoked();
+            }
         }
         Ok(())
+    }
+
+    /// Hosts attach node-local authorization cancellation to the existing lease lifecycle.
+    #[must_use]
+    pub fn with_registration_revocation_hook(mut self, hook: Arc<dyn Fn() + Send + Sync>) -> Self {
+        self.registration_revoked = Some(hook);
+        self
     }
 
     pub fn clear_registration(&self) {
         if let Some(previous) = self.lease.lock().expect("Agent lease lock poisoned").take() {
             previous.revoked.cancel();
+            if let Some(revoked) = &self.registration_revoked {
+                revoked();
+            }
         }
     }
 
@@ -175,127 +202,13 @@ impl AgentHarnessRpcAdapter {
     ) -> Result<crate::AgentSessionContext, Status> {
         let auth = node_pb::decode_auth(auth).map_err(status_from_error)?;
         let lease = self.authorize(&auth).map_err(status_from_error)?;
-        let context =
-            harness_pb::decode_session_context(context, &self.config).map_err(status_from_error)?;
+        let context = harness_pb::decode_session_context(
+            context,
+            &self.config.read().expect("Worker config lock poisoned"),
+        )
+        .map_err(status_from_error)?;
         Self::check_owner(&lease, &context.workspace.user_id).map_err(status_from_error)?;
         Ok(context)
-    }
-
-    fn serve_run(
-        &self,
-        commit: CommitFuture,
-        lease: Lease,
-        harness: Arc<dyn AgentHarness>,
-        execution: TalosResult<AgentRunExecution>,
-        identity: talos_agent_api::AgentTurnRef,
-        agent_id: String,
-    ) -> Response<RpcStream<pb::RunResponse>> {
-        let (tx, rx) = mpsc::channel(32);
-        let adapter = self.clone();
-        tokio::spawn(async move {
-            let mut execution = match execution {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = lease.send(&tx, Ok(run_failure(error))).await;
-                    return;
-                }
-            };
-            let admission = match harness_pb::encode_admission_events(execution.admission.events) {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = lease.send(&tx, Ok(run_failure(error))).await;
-                    return;
-                }
-            };
-            if lease
-                .send(
-                    &tx,
-                    Ok(pb::RunResponse {
-                        result: Some(pb::run_response::Result::Admission(admission)),
-                    }),
-                )
-                .await
-                .is_err()
-            {
-                return;
-            }
-            if let Err(error) = commit.await {
-                let _ = lease.send(&tx, Ok(run_failure(error))).await;
-                return;
-            }
-            if lease.revoked.is_cancelled() || *lease.deadline.borrow() <= Instant::now() {
-                return;
-            }
-            if let Err(error) = execution.admission.permit.consume().await {
-                let _ = lease.send(&tx, Ok(run_failure(error))).await;
-                return;
-            }
-            adapter
-                .active
-                .lock()
-                .expect("Agent active lock poisoned")
-                .insert((
-                    agent_id.clone(),
-                    identity.session_id.clone(),
-                    identity.turn_id.clone(),
-                ));
-            if lease
-                .send(
-                    &tx,
-                    Ok(pb::RunResponse {
-                        result: Some(pb::run_response::Result::Accepted(pb::Empty {})),
-                    }),
-                )
-                .await
-                .is_err()
-            {
-                drop(execution.events);
-                interrupt_disconnected(&harness, &agent_id, &identity).await;
-                adapter
-                    .active
-                    .lock()
-                    .expect("Agent active lock poisoned")
-                    .remove(&(agent_id, identity.session_id, identity.turn_id));
-                return;
-            }
-            let mut settlement = Box::pin(execution.settlement.recv());
-            let mut events_open = true;
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = lease.ended() => break,
-                    _ = tx.closed() => break,
-                    event = execution.events.recv(), if events_open => {
-                        if let Some(event) = event {
-                            let frame = harness_pb::encode_event(event).map(|value| pb::RunResponse { result: Some(pb::run_response::Result::Progress(value)) });
-                            match frame { Ok(frame) => { if lease.send(&tx, Ok(frame)).await.is_err() { break; } }, Err(error) => { let _ = lease.send(&tx, Ok(run_failure(error))).await; break; } }
-                        } else { events_open = false; }
-                    }
-                    result = &mut settlement, if !events_open => {
-                        let frame = match result.and_then(|settlement| {
-                            if let agent_protocol::AgentRunSettlement::Finished { result: Err(error), .. } = &settlement { talos_logging::report_error(error); }
-                            harness_pb::encode_settlement(settlement)
-                        }) {
-                            Ok(value) => pb::RunResponse { result: Some(pb::run_response::Result::Settlement(value)) },
-                            Err(error) => run_failure(error),
-                        };
-                        let _ = lease.send(&tx, Ok(frame)).await;
-                        adapter.active.lock().expect("Agent active lock poisoned").remove(&(agent_id, identity.session_id, identity.turn_id));
-                        return;
-                    }
-                }
-            }
-            // A disconnected client or revoked lease is never a confirmed
-            // business result. The existing Harness owns cancellation cleanup.
-            drop(execution.events);
-            interrupt_disconnected(&harness, &agent_id, &identity).await;
-            adapter
-                .active
-                .lock()
-                .expect("Agent active lock poisoned")
-                .remove(&(agent_id, identity.session_id, identity.turn_id));
-        });
-        Response::new(Box::pin(ReceiverStream::new(rx)))
     }
 }
 
@@ -310,161 +223,23 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
         &self,
         request: Request<Streaming<pb::StartRequest>>,
     ) -> Result<Response<Self::StartStream>, Status> {
-        let mut inbound = request.into_inner();
-        let first = inbound.message().await?.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing Agent request",
-            ))
-        })?;
-        let auth = node_pb::decode_auth(first.auth).map_err(status_from_error)?;
-        let lease = self.authorize(&auth).map_err(status_from_error)?;
-        let Some(pb::start_params::Body::Run(params)) = first.params.and_then(|value| value.body)
-        else {
-            return Err(status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing run params",
-            )));
-        };
-        let params =
-            harness_pb::decode_run_params(params, &self.config).map_err(status_from_error)?;
-        Self::check_owner(&lease, &params.context.session.workspace.user_id)
-            .map_err(status_from_error)?;
-        let identity = params.context.identity();
-        let agent_id = params.context.session.agent_id.clone();
-        let harness = self.harness(&agent_id).map_err(status_from_error)?;
-        let execution = harness.start(params).await;
-        let commit = Box::pin(read_commit(
-            inbound,
-            start_commit,
-            self.clone(),
-            lease.clone(),
-        ));
-        Ok(self.serve_run(commit, lease, harness, execution, identity, agent_id))
+        self.serve_start(Box::pin(request.into_inner())).await
     }
 
     async fn compact_session(
         &self,
         request: Request<Streaming<pb::CompactSessionRequest>>,
     ) -> Result<Response<Self::CompactSessionStream>, Status> {
-        let mut inbound = request.into_inner();
-        let first = inbound.message().await?.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing Agent request",
-            ))
-        })?;
-        let auth = node_pb::decode_auth(first.auth).map_err(status_from_error)?;
-        let lease = self.authorize(&auth).map_err(status_from_error)?;
-        let Some(pb::compact_session_params::Body::Context(context)) =
-            first.params.and_then(|value| value.body)
-        else {
-            return Err(status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing compaction context",
-            )));
-        };
-        let context =
-            harness_pb::decode_context(Some(context), &self.config).map_err(status_from_error)?;
-        Self::check_owner(&lease, &context.session.workspace.user_id).map_err(status_from_error)?;
-        let identity = context.identity();
-        let agent_id = context.session.agent_id.clone();
-        let harness = self.harness(&agent_id).map_err(status_from_error)?;
-        let execution = harness.compact_session(context).await;
-        let commit = Box::pin(read_commit(
-            inbound,
-            compact_commit,
-            self.clone(),
-            lease.clone(),
-        ));
-        Ok(self.serve_run(commit, lease, harness, execution, identity, agent_id))
+        self.serve_compact_session(Box::pin(request.into_inner()))
+            .await
     }
 
     async fn submit_input(
         &self,
         request: Request<Streaming<pb::SubmitInputRequest>>,
     ) -> Result<Response<Self::SubmitInputStream>, Status> {
-        let mut inbound = request.into_inner();
-        let first = inbound.message().await?.ok_or_else(|| {
-            status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing Agent request",
-            ))
-        })?;
-        let auth = node_pb::decode_auth(first.auth).map_err(status_from_error)?;
-        let lease = self.authorize(&auth).map_err(status_from_error)?;
-        let Some(pb::submit_input_params::Body::Input(params)) =
-            first.params.and_then(|value| value.body)
-        else {
-            return Err(status_from_error(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "missing input params",
-            )));
-        };
-        let params = harness_pb::decode_input_params(params).map_err(status_from_error)?;
-        if !self
-            .active
-            .lock()
-            .expect("Agent active lock poisoned")
-            .contains(&(
-                params.agent_id.clone(),
-                params.identity.session_id.clone(),
-                params.identity.turn_id.clone(),
-            ))
-        {
-            return Err(status_from_error(TalosError::new(
-                ErrorCode::ResourceNotFound,
-                "Agent Turn is not active on this node",
-            )));
-        }
-        let harness = self.harness(&params.agent_id).map_err(status_from_error)?;
-        let admission = harness.submit_input(params).await;
-        let (tx, rx) = mpsc::channel(4);
-        let adapter = self.clone();
-        tokio::spawn(async move {
-            let admission = match admission {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = tx.send(Ok(input_failure(error))).await;
-                    return;
-                }
-            };
-            let events = match harness_pb::encode_admission_events(admission.events) {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = tx.send(Ok(input_failure(error))).await;
-                    return;
-                }
-            };
-            if tx
-                .send(Ok(pb::InputResponse {
-                    result: Some(pb::input_response::Result::Admission(events)),
-                }))
-                .await
-                .is_err()
-            {
-                return;
-            }
-            let commit = read_commit(inbound, input_commit, adapter, lease.clone()).await;
-            if let Err(error) = commit {
-                let _ = tx.send(Ok(input_failure(error))).await;
-                return;
-            }
-            let accepted = tokio::select! {
-                biased;
-                _ = lease.ended() => return,
-                _ = tx.closed() => return,
-                result = admission.permit.consume() => result,
-            };
-            let frame = match accepted {
-                Ok(()) => pb::InputResponse {
-                    result: Some(pb::input_response::Result::Accepted(pb::Empty {})),
-                },
-                Err(error) => input_failure(error),
-            };
-            let _ = tx.send(Ok(frame)).await;
-        });
-        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+        self.serve_submit_input(Box::pin(request.into_inner()))
+            .await
     }
 
     async fn interrupt(
@@ -517,8 +292,11 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
         let request = request.into_inner();
         let auth = node_pb::decode_auth(request.auth).map_err(status_from_error)?;
         let lease = self.authorize(&auth).map_err(status_from_error)?;
-        let params = harness_pb::decode_session_context(request.params, &self.config)
-            .map_err(status_from_error)?;
+        let params = harness_pb::decode_session_context(
+            request.params,
+            &self.config.read().expect("Worker config lock poisoned"),
+        )
+        .map_err(status_from_error)?;
         Self::check_owner(&lease, &params.workspace.user_id).map_err(status_from_error)?;
         let result = self
             .harness(&params.agent_id)
@@ -535,8 +313,11 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
         let request = request.into_inner();
         let auth = node_pb::decode_auth(request.auth).map_err(status_from_error)?;
         let lease = self.authorize(&auth).map_err(status_from_error)?;
-        let params = harness_pb::decode_session_context(request.params, &self.config)
-            .map_err(status_from_error)?;
+        let params = harness_pb::decode_session_context(
+            request.params,
+            &self.config.read().expect("Worker config lock poisoned"),
+        )
+        .map_err(status_from_error)?;
         Self::check_owner(&lease, &params.workspace.user_id).map_err(status_from_error)?;
         let result = self
             .harness(&params.agent_id)
@@ -599,7 +380,8 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
         &self,
         request: Request<Streaming<pb::FormDreamMemoryRequest>>,
     ) -> Result<Response<Self::FormDreamMemoryStream>, Status> {
-        self.serve_dream_memory(request).await
+        self.serve_dream_memory(Box::pin(request.into_inner()))
+            .await
     }
 
     async fn shutdown(
@@ -648,7 +430,7 @@ fn empty_response(result: TalosResult<()>) -> pb::EmptyResponse {
 }
 
 async fn read_commit<T>(
-    mut inbound: Streaming<T>,
+    mut inbound: RpcStream<T>,
     extract: fn(T) -> TalosResult<NodeAuth>,
     adapter: AgentHarnessRpcAdapter,
     original: Lease,
@@ -660,10 +442,10 @@ where
         biased;
         _ = original.ended() => Err(unauthenticated()),
         result = async {
-    let frame = tokio::time::timeout(Duration::from_secs(30), inbound.message())
+    let frame = tokio::time::timeout(Duration::from_secs(30), inbound.next())
         .await
         .map_err(|_| TalosError::new(ErrorCode::Timeout, "Agent admission commit timed out"))?
-        .map_err(transport_error)?
+        .transpose().map_err(transport_error)?
         .ok_or_else(invalid_request)?;
     let auth = extract(frame)?;
     let current = adapter.authorize(&auth)?;
@@ -672,7 +454,7 @@ where
     {
         return Err(unauthenticated());
     }
-    let extra = tokio::time::timeout(Duration::from_secs(30), inbound.message())
+    let extra = tokio::time::timeout(Duration::from_secs(30), inbound.next())
         .await
         .map_err(|_| {
             TalosError::new(
@@ -680,7 +462,7 @@ where
                 "Agent admission commit stream did not close",
             )
         })?
-        .map_err(transport_error)?;
+        .transpose().map_err(transport_error)?;
     if extra.is_some() {
         return Err(invalid_request());
     }
@@ -756,7 +538,7 @@ async fn interrupt_disconnected(
     harness: &Arc<dyn AgentHarness>,
     agent_id: &str,
     identity: &talos_agent_api::AgentTurnRef,
-) {
+) -> TalosResult<()> {
     match harness
         .interrupt(AgentInterruptParams {
             agent_id: agent_id.to_owned(),
@@ -764,14 +546,14 @@ async fn interrupt_disconnected(
         })
         .await
     {
-        Err(error) => talos_logging::report_error(&error),
+        Err(error) => Err(error),
         Ok(talos_agent_api::AgentInterruptOutcome::CleanupUnconfirmed { .. }) => {
-            talos_logging::report_error(&TalosError::new(
+            Err(TalosError::new(
                 ErrorCode::RunCleanupUnconfirmed,
                 "Disconnected Agent Turn cleanup could not be confirmed",
-            ));
+            ))
         }
-        Ok(_) => {}
+        Ok(_) => Ok(()),
     }
 }
 

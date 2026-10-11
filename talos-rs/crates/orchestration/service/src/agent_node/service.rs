@@ -12,8 +12,9 @@ use subtle::ConstantTimeEq;
 use talos_auth::UserRole;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::node::{
-    AgentNodeStore, CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodeRecord,
-    RegisterNodeParams, RenewNodeParams, RotateCredentialParams, UpdateNodeParams,
+    AgentNodeStore, CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams,
+    NodeListScope, NodeRecord, RegisterNodeParams, RenewNodeParams, RotateCredentialParams,
+    UpdateNodeParams,
 };
 use talos_store::session::SessionRecord;
 use tokio::sync::Mutex;
@@ -23,17 +24,29 @@ use crate::Actor;
 
 const LEASE_SECONDS: i64 = 90;
 
+/// Withdraws the live publication installed by the transport owner.
+/// The callback must release only its own registration, and must not reenter NodeService.
+pub type AgentNodeRevocationHook =
+    Arc<dyn Fn() -> agent_protocol::AgentFuture<'static, ()> + Send + Sync>;
+
+#[path = "computers.rs"]
+mod computers;
+#[path = "management.rs"]
+mod management;
+
 /// Owns the node directory and its current in-memory registration. Execution
 /// state and Session/Turn persistence remain with the existing owners.
 #[derive(Clone)]
 pub struct AgentNodeService {
     store: Arc<dyn AgentNodeStore>,
     current: Arc<Mutex<HashMap<String, CurrentRegistration>>>,
+    lifecycle: Arc<Mutex<()>>,
 }
 
 struct CurrentRegistration {
     token_hash: [u8; 32],
-    published: bool,
+    deployments: Vec<agent_protocol::Deployment>,
+    revoke: Option<AgentNodeRevocationHook>,
 }
 
 impl AgentNodeService {
@@ -41,7 +54,14 @@ impl AgentNodeService {
         Self {
             store,
             current: Arc::new(Mutex::new(HashMap::new())),
+            lifecycle: Arc::new(Mutex::new(())),
         }
+    }
+
+    /// Serialize Register/Unregister together with transport publication.
+    /// Directory mutations take this same lock internally. Never hold it during execution.
+    pub async fn lock_lifecycle(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.lifecycle.lock().await
     }
 
     /// Persist the trusted in-process node after composition installs its
@@ -108,7 +128,11 @@ impl AgentNodeService {
 
     /// Marks the current lease executable only after the Coordinator has
     /// installed every advertised remote Harness client.
-    pub async fn mark_registration_published(&self, auth: &NodeAuth) -> TalosResult<()> {
+    pub async fn mark_registration_published(
+        &self,
+        auth: &NodeAuth,
+        revoke: AgentNodeRevocationHook,
+    ) -> TalosResult<()> {
         self.authenticate_lease(auth).await?;
         let actual = hash_token(&auth.token);
         let mut current = self.current.lock().await;
@@ -116,8 +140,71 @@ impl AgentNodeService {
         if !bool::from(registration.token_hash.ct_eq(&actual)) {
             return Err(unauthenticated());
         }
-        registration.published = true;
+        registration.revoke = Some(revoke);
         Ok(())
+    }
+
+    /// Return only the deployments advertised by this current authenticated lease.
+    pub async fn outbound_deployments(
+        &self,
+        auth: &NodeAuth,
+    ) -> TalosResult<Vec<agent_protocol::Deployment>> {
+        self.authenticate_lease(auth).await?;
+        let node = self
+            .store
+            .get(&auth.node_id)
+            .await?
+            .ok_or_else(unauthenticated)?;
+        if node.endpoint.is_some() {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Direct nodes cannot open outbound execution",
+            ));
+        }
+        let current = self.current.lock().await;
+        let registration = current.get(&auth.node_id).ok_or_else(unauthenticated)?;
+        if !bool::from(registration.token_hash.ct_eq(&hash_token(&auth.token))) {
+            return Err(unauthenticated());
+        }
+        Ok(registration.deployments.clone())
+    }
+
+    /// Withdraw the live publication, retaining the authenticated registration.
+    /// Called under lock_lifecycle before replacing clients for the same lease.
+    pub async fn revoke_publication(&self, auth: &NodeAuth) -> TalosResult<()> {
+        self.authenticate_lease(auth).await?;
+        let mut current = self.current.lock().await;
+        let registration = current.get_mut(&auth.node_id).ok_or_else(unauthenticated)?;
+        if !bool::from(registration.token_hash.ct_eq(&hash_token(&auth.token))) {
+            return Err(unauthenticated());
+        }
+        let revoke = registration.revoke.take();
+        drop(current);
+        if let Some(revoke) = revoke {
+            revoke().await;
+        }
+        Ok(())
+    }
+
+    /// A superseded connection must never withdraw the newer publication.
+    pub async fn withdraw_publication(&self, auth: &NodeAuth, expected: &AgentNodeRevocationHook) {
+        let mut current = self.current.lock().await;
+        let revoke = current.get_mut(&auth.node_id).and_then(|registration| {
+            if bool::from(registration.token_hash.ct_eq(&hash_token(&auth.token)))
+                && registration
+                    .revoke
+                    .as_ref()
+                    .is_some_and(|revoke| Arc::ptr_eq(revoke, expected))
+            {
+                registration.revoke.take()
+            } else {
+                None
+            }
+        });
+        drop(current);
+        if let Some(revoke) = revoke {
+            revoke().await;
+        }
     }
 
     async fn authenticated_node(
@@ -162,152 +249,6 @@ impl AgentNodeService {
         Ok(node)
     }
 
-    pub async fn create_node(
-        &self,
-        actor: &Actor,
-        request: CreateNodeRequest,
-    ) -> TalosResult<CreatedNode> {
-        ensure_management_actor(actor)?;
-        let node_id = uuid::Uuid::new_v4().to_string();
-        validate_display_name(&request.display_name)?;
-        validate_endpoint(&request.endpoint)?;
-        let now_at = now();
-        validate_expiry(request.credential_expires_at, now_at)?;
-        let owner_user_id = match request.owner_user_id {
-            Some(owner) if owner != actor.user_id && actor.role != UserRole::Admin => {
-                return Err(TalosError::new(
-                    ErrorCode::PermissionDenied,
-                    "Only an administrator may create another user's Agent node",
-                ));
-            }
-            Some(owner) => owner,
-            None => actor.user_id.clone(),
-        };
-        if owner_user_id.trim().is_empty() {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Agent node owner is required",
-            ));
-        }
-        let token = new_token()?;
-        let record = self
-            .store
-            .create(CreateNodeParams {
-                node_id: node_id.clone(),
-                owner_user_id: Some(owner_user_id),
-                display_name: request.display_name,
-                mode: NodeMode::Remote,
-                endpoint: Some(request.endpoint),
-                credential_hash: Some(hash_token(&token)),
-                credential_expires_at: Some(request.credential_expires_at),
-                now_at,
-            })
-            .await?;
-        Ok(CreatedNode {
-            node: to_info(record),
-            credential: NodeCredential {
-                node_id,
-                token,
-                expires_at: request.credential_expires_at,
-            },
-        })
-    }
-
-    pub async fn get_node(&self, actor: &Actor, request: GetNodeRequest) -> TalosResult<NodeInfo> {
-        let record = if actor.role == UserRole::Admin {
-            ensure_management_actor(actor)?;
-            self.store
-                .get(&request.node_id)
-                .await?
-                .ok_or_else(not_found)?
-        } else {
-            self.owned_node(actor, &request.node_id).await?
-        };
-        Ok(self.node_info(record).await)
-    }
-
-    pub async fn list_nodes(
-        &self,
-        actor: &Actor,
-        request: ListNodesRequest,
-    ) -> TalosResult<NodePage> {
-        ensure_management_actor(actor)?;
-        let owner_user_id = (actor.role != UserRole::Admin).then(|| actor.user_id.clone());
-        let page = self
-            .store
-            .list(ListNodesParams {
-                owner_user_id,
-                cursor: request.cursor,
-                limit: if request.limit == 0 {
-                    50
-                } else {
-                    request.limit
-                },
-            })
-            .await?;
-        let mut data = Vec::with_capacity(page.data.len());
-        for record in page.data {
-            data.push(self.node_info(record).await);
-        }
-        Ok(NodePage {
-            data,
-            next_cursor: page.next_cursor,
-        })
-    }
-
-    pub async fn update_node(
-        &self,
-        actor: &Actor,
-        request: UpdateNodeRequest,
-    ) -> TalosResult<NodeInfo> {
-        validate_display_name(&request.display_name)?;
-        validate_endpoint(&request.endpoint)?;
-        let mut current = self.current.lock().await;
-        let old = self.owned_node(actor, &request.node_id).await?;
-        let revoked = old.endpoint.as_deref() != Some(request.endpoint.as_str())
-            || request.status == NodeStatus::Disabled;
-        let record = self
-            .store
-            .update(UpdateNodeParams {
-                node_id: request.node_id.clone(),
-                display_name: request.display_name,
-                endpoint: Some(request.endpoint),
-                status: request.status,
-                now_at: now(),
-            })
-            .await?;
-        if revoked {
-            current.remove(&request.node_id);
-        }
-        drop(current);
-        Ok(self.node_info(record).await)
-    }
-
-    pub async fn rotate_credential(
-        &self,
-        actor: &Actor,
-        request: RotateCredentialRequest,
-    ) -> TalosResult<NodeCredential> {
-        let mut current = self.current.lock().await;
-        self.owned_node(actor, &request.node_id).await?;
-        validate_expiry(request.expires_at, now())?;
-        let token = new_token()?;
-        self.store
-            .rotate_credential(RotateCredentialParams {
-                node_id: request.node_id.clone(),
-                hash: hash_token(&token),
-                expires_at: request.expires_at,
-                now_at: now(),
-            })
-            .await?;
-        current.remove(&request.node_id);
-        Ok(NodeCredential {
-            node_id: request.node_id,
-            token,
-            expires_at: request.expires_at,
-        })
-    }
-
     pub async fn register(
         &self,
         principal: &NodePrincipal,
@@ -338,13 +279,16 @@ impl AgentNodeService {
                 now_at,
             })
             .await?;
-        current.insert(
+        let previous = current.insert(
             node_id.clone(),
             CurrentRegistration {
                 token_hash,
-                published: false,
+                deployments: params.deployments,
+                revoke: None,
             },
         );
+        drop(current);
+        revoke_registration(previous).await;
         Ok(Registration {
             lease_token: token,
             validity: LeaseValidity {
@@ -438,12 +382,16 @@ impl AgentNodeService {
                 now_at: now(),
             })
             .await?;
-        if current
+        let previous = if current
             .get(node_id)
             .is_some_and(|value| value.token_hash == *token_hash)
         {
-            current.remove(node_id);
-        }
+            current.remove(node_id)
+        } else {
+            None
+        };
+        drop(current);
+        revoke_registration(previous).await;
         Ok(())
     }
 
@@ -459,7 +407,7 @@ impl AgentNodeService {
         {
             let current = self.current.lock().await;
             current.get(&record.node_id).is_some_and(|registration| {
-                registration.published
+                registration.revoke.is_some()
                     && record
                         .lease_token_hash
                         .is_some_and(|stored| bool::from(stored.ct_eq(&registration.token_hash)))
@@ -603,4 +551,10 @@ fn unauthenticated() -> TalosError {
 
 fn not_found() -> TalosError {
     TalosError::new(ErrorCode::ResourceNotFound, "Agent node not found")
+}
+
+async fn revoke_registration(registration: Option<CurrentRegistration>) {
+    if let Some(hook) = registration.and_then(|value| value.revoke) {
+        hook().await;
+    }
 }

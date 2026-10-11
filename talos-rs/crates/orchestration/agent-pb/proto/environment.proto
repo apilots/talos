@@ -1,0 +1,408 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "auth.proto";
+import "environment_config.proto";
+import "environment_plugins.proto";
+import "environment_skills.proto";
+import "environment_memory.proto";
+import "harness.proto";
+import "types.proto";
+message WorkerEnvironmentContext {
+  string user_id = 1;
+  optional string username = 2;
+  optional string workspace_id = 3;
+}
+message WorkspaceInfoParams {
+}
+message WorkspaceInfo {
+  string workspace_id = 1;
+  string root_prefix = 2;
+  string user_workspace_dir = 3;
+}
+message ModelListParams {
+}
+message ModelCatalog {
+  repeated ModelInfo models = 1;
+  ModelSelection default_model_selection = 2;
+}
+message DirectoryReadParams {
+  optional string path = 1;
+}
+message DirectoryCreateParams {
+  string parent = 1;
+  string name = 2;
+}
+enum FsEntryKind {
+  FS_ENTRY_KIND_UNSPECIFIED = 0;
+  FS_ENTRY_KIND_DIRECTORY = 1;
+}
+message DirectoryEntry {
+  string name = 1;
+  string path = 2;
+  FsEntryKind kind = 3;
+  bool readable = 4;
+  bool writable = 5;
+  bool hidden = 6;
+  bool is_symlink = 7;
+}
+message DirectorySnapshot {
+  string path = 1;
+  optional string parent = 2;
+  repeated DirectoryEntry entries = 3;
+  bool readable = 4;
+  bool writable = 5;
+}
+message DirectoryCreated {
+  string path = 1;
+}
+message ProjectDirectoryParams {
+  string directory = 1;
+}
+enum ProjectDirectoryState {
+  PROJECT_DIRECTORY_STATE_UNSPECIFIED = 0;
+  PROJECT_DIRECTORY_STATE_AVAILABLE = 1;
+  PROJECT_DIRECTORY_STATE_MISSING = 2;
+  PROJECT_DIRECTORY_STATE_NOT_DIRECTORY = 3;
+  PROJECT_DIRECTORY_STATE_PERMISSION_DENIED = 4;
+  PROJECT_DIRECTORY_STATE_NODE_UNAVAILABLE = 5;
+}
+enum ProjectDirectoryReason {
+  PROJECT_DIRECTORY_REASON_UNSPECIFIED = 0;
+  PROJECT_DIRECTORY_REASON_PATH_NOT_FOUND = 1;
+  PROJECT_DIRECTORY_REASON_NOT_DIRECTORY = 2;
+  PROJECT_DIRECTORY_REASON_PERMISSION_DENIED = 3;
+  PROJECT_DIRECTORY_REASON_NODE_UNAVAILABLE = 4;
+}
+message ProjectDirectoryStatus {
+  ProjectDirectoryState state = 1;
+  optional ProjectDirectoryReason reason = 2;
+}
+message ValidatedDirectory {
+  string directory = 1;
+}
+message GetWorkspaceInfoRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  WorkspaceInfoParams params = 3;
+}
+message GetWorkspaceInfoResponse {
+  oneof result {
+    WorkspaceInfo info = 1;
+    Failure failure = 2;
+  }
+}
+message ListWorkerModelsRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  ModelListParams params = 3;
+}
+message ListWorkerModelsResponse {
+  oneof result {
+    ModelCatalog catalog = 1;
+    Failure failure = 2;
+  }
+}
+message ReadDirectoryRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  DirectoryReadParams params = 3;
+}
+message ReadDirectoryResponse {
+  oneof result {
+    DirectorySnapshot directory = 1;
+    Failure failure = 2;
+  }
+}
+message CreateDirectoryRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  DirectoryCreateParams params = 3;
+}
+message CreateDirectoryResponse {
+  oneof result {
+    DirectoryCreated created = 1;
+    Failure failure = 2;
+  }
+}
+message GetProjectStatusRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  ProjectDirectoryParams params = 3;
+}
+message GetProjectStatusResponse {
+  oneof result {
+    ProjectDirectoryStatus status = 1;
+    Failure failure = 2;
+  }
+}
+message ValidateProjectDirectoryRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  ProjectDirectoryParams params = 3;
+}
+message ValidateProjectDirectoryResponse {
+  oneof result {
+    ValidatedDirectory directory = 1;
+    Failure failure = 2;
+  }
+}
+enum WorkspaceDocumentKind {
+  WORKSPACE_DOCUMENT_KIND_UNSPECIFIED = 0;
+  WORKSPACE_DOCUMENT_KIND_SOUL = 1;
+  WORKSPACE_DOCUMENT_KIND_IDENTITY = 2;
+  WORKSPACE_DOCUMENT_KIND_USER = 3;
+  WORKSPACE_DOCUMENT_KIND_HEARTBEAT = 4;
+  WORKSPACE_DOCUMENT_KIND_MEMORY = 5;
+}
+message WorkspaceDocListParams {}
+message WorkspaceDocReadParams { WorkspaceDocumentKind kind = 1; }
+message WorkspaceDocWriteParams {
+  WorkspaceDocumentKind kind = 1;
+  string content = 2;
+  optional string expected_version = 3;
+}
+message WorkspaceDocumentSummary {
+  WorkspaceDocumentKind kind = 1;
+  string path = 2;
+  bool exists = 3;
+  optional int64 updated_at = 4;
+  optional string version_token = 5;
+}
+message WorkspaceDocument {
+  WorkspaceDocumentKind kind = 1;
+  string path = 2;
+  bool exists = 3;
+  string content = 4;
+  optional int64 updated_at = 5;
+  optional string version_token = 6;
+}
+message WorkspaceDocuments { repeated WorkspaceDocumentSummary data = 1; }
+message ListWorkspaceDocsRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  WorkspaceDocListParams params = 3;
+}
+message ListWorkspaceDocsResponse {
+  oneof result { WorkspaceDocuments documents = 1; Failure failure = 2; }
+}
+message ReadWorkspaceDocRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  WorkspaceDocReadParams params = 3;
+}
+message ReadWorkspaceDocResponse {
+  oneof result { WorkspaceDocument doc = 1; Failure failure = 2; }
+}
+message WriteWorkspaceDocRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  WorkspaceDocWriteParams params = 3;
+}
+message WriteWorkspaceDocResponse {
+  oneof result { WorkspaceDocument doc = 1; Failure failure = 2; }
+}
+message ListMemoryFilesRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  MemoryFileListParams params = 3;
+}
+message ListMemoryFilesResponse {
+  oneof result { MemoryFiles files = 1; Failure failure = 2; }
+}
+message ReadMemoryFileRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  MemoryFileReadParams params = 3;
+}
+message ReadMemoryFileResponse {
+  oneof result { MemoryFile file = 1; Failure failure = 2; }
+}
+message WriteMemoryFileRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  MemoryFileWriteParams params = 3;
+}
+message WriteMemoryFileResponse {
+  oneof result { MemoryFile file = 1; Failure failure = 2; }
+}
+message SearchMemoryRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  MemorySearchParams params = 3;
+}
+message SearchMemoryResponse {
+  oneof result { MemorySearchHits hits = 1; Failure failure = 2; }
+}
+message GetMemoryRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  MemoryGetParams params = 3;
+}
+message GetMemoryResponse {
+  oneof result { MemoryRecord memory = 1; Failure failure = 2; }
+}
+message ListSkillsRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  SkillsListParams params = 3;
+}
+message ListSkillsResponse {
+  oneof result { Skills skills = 1; Failure failure = 2; }
+}
+message RefreshSkillsRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  SkillsRefreshParams params = 3;
+}
+message RefreshSkillsResponse {
+  oneof result { Skills skills = 1; Failure failure = 2; }
+}
+message SuggestSkillsRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  SkillsSuggestParams params = 3;
+}
+message SuggestSkillsResponse {
+  oneof result { SkillSuggestions suggestions = 1; Failure failure = 2; }
+}
+message ReadSkillRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  SkillsReadParams params = 3;
+}
+message ReadSkillResponse {
+  oneof result { SkillDocument document = 1; Failure failure = 2; }
+}
+message ResolveSkillsRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  SkillsResolveParams params = 3;
+}
+message ResolveSkillsResponse {
+  oneof result { ResolvedSkills skills = 1; Failure failure = 2; }
+}
+message McpOAuthCallbackTarget {
+  oneof target { Empty loopback = 1; string control_plane_relay_uri = 2; }
+}
+message McpAuthenticationCallbackParams {
+  McpDefinitionRef server = 1;
+  string attempt_id = 2;
+  string state = 3;
+  optional string issuer = 4;
+  oneof outcome { string authorization_code = 5; string provider_error_code = 6; }
+}
+message CompleteMcpAuthenticationRequest {
+  NodeAuth auth = 1;
+  WorkerEnvironmentContext context = 2;
+  McpAuthenticationCallbackParams params = 3;
+}
+message CompleteMcpAuthenticationResponse {
+  oneof result { McpAuthenticationResult value = 1; Failure failure = 2; }
+}
+service WorkerEnvironmentRpc {
+  rpc CompleteMcpAuthentication(CompleteMcpAuthenticationRequest) returns (CompleteMcpAuthenticationResponse);
+  rpc StartMcpAuthentication(StartMcpAuthenticationRequest) returns (StartMcpAuthenticationResponse);
+  rpc ImportMcpServer(ImportMcpServerRequest) returns (ImportMcpServerResponse);
+  rpc UpdateMcpCredentials(UpdateMcpCredentialsRequest) returns (UpdateMcpCredentialsResponse);
+  rpc ReadMcpAuthentication(ReadMcpAuthenticationRequest) returns (ReadMcpAuthenticationResponse);
+  rpc ListMcpServers(ListMcpServersRequest) returns (ListMcpServersResponse);
+  rpc DisablePlugin(DisablePluginRequest) returns (DisablePluginResponse);
+  rpc EnablePlugin(EnablePluginRequest) returns (EnablePluginResponse);
+  rpc UninstallPlugin(UninstallPluginRequest) returns (UninstallPluginResponse);
+  rpc UpdatePlugin(UpdatePluginRequest) returns (UpdatePluginResponse);
+  rpc InstallPlugin(InstallPluginRequest) returns (InstallPluginResponse);
+  rpc ReadPlugin(ReadPluginRequest) returns (ReadPluginResponse);
+  rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
+  rpc SearchPlugins(SearchPluginsRequest) returns (SearchPluginsResponse);
+  rpc RemovePluginSource(RemovePluginSourceRequest) returns (RemovePluginSourceResponse);
+  rpc RefreshPluginSource(RefreshPluginSourceRequest) returns (RefreshPluginSourceResponse);
+  rpc AddPluginSource(AddPluginSourceRequest) returns (AddPluginSourceResponse);
+  rpc ListPluginSources(ListPluginSourcesRequest) returns (ListPluginSourcesResponse);
+  rpc ReloadConfig(ReloadConfigRequest) returns (ReloadConfigResponse);
+  rpc DeleteConfig(DeleteConfigRequest) returns (DeleteConfigResponse);
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc ListMemoryFiles(ListMemoryFilesRequest) returns (ListMemoryFilesResponse);
+  rpc ReadMemoryFile(ReadMemoryFileRequest) returns (ReadMemoryFileResponse);
+  rpc WriteMemoryFile(WriteMemoryFileRequest) returns (WriteMemoryFileResponse);
+  rpc SearchMemory(SearchMemoryRequest) returns (SearchMemoryResponse);
+  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+  rpc RefreshSkills(RefreshSkillsRequest) returns (RefreshSkillsResponse);
+  rpc SuggestSkills(SuggestSkillsRequest) returns (SuggestSkillsResponse);
+  rpc ReadSkill(ReadSkillRequest) returns (ReadSkillResponse);
+  rpc ResolveSkills(ResolveSkillsRequest) returns (ResolveSkillsResponse);
+
+  rpc WriteWorkspaceDoc(WriteWorkspaceDocRequest) returns (WriteWorkspaceDocResponse);
+  rpc ReadWorkspaceDoc(ReadWorkspaceDocRequest) returns (ReadWorkspaceDocResponse);
+  rpc ListWorkspaceDocs(ListWorkspaceDocsRequest) returns (ListWorkspaceDocsResponse);
+  rpc GetWorkspaceInfo(GetWorkspaceInfoRequest) returns (GetWorkspaceInfoResponse);
+  rpc ListWorkerModels(ListWorkerModelsRequest) returns (ListWorkerModelsResponse);
+  rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
+  rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
+  rpc GetProjectStatus(GetProjectStatusRequest) returns (GetProjectStatusResponse);
+  rpc ValidateProjectDirectory(ValidateProjectDirectoryRequest) returns (ValidateProjectDirectoryResponse);
+}
+
+message GetConfigRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; ConfigGetParams params = 3; }
+message GetConfigResponse { oneof result { ConfigRead config = 1; Failure failure = 2; } }
+
+message UpdateConfigRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; ConfigUpdateParams params = 3; }
+message UpdateConfigResponse { oneof result { ConfigRead config = 1; Failure failure = 2; } }
+
+message DeleteConfigRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; ConfigDeleteParams params = 3; }
+message DeleteConfigResponse { oneof result { ConfigDeleted deleted = 1; Failure failure = 2; } }
+
+message ReloadConfigRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; Empty params = 3; }
+message ReloadConfigResponse { oneof result { ConfigReloaded reloaded = 1; Failure failure = 2; } }
+
+message ListPluginSourcesRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginSourceListParams params = 3; }
+message ListPluginSourcesResponse { oneof result { PluginSourceListResult value = 1; Failure failure = 2; } }
+
+message AddPluginSourceRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginSourceAddParams params = 3; }
+message AddPluginSourceResponse { oneof result { PluginSourceAddResult value = 1; Failure failure = 2; } }
+
+message RefreshPluginSourceRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginSourceRefreshParams params = 3; }
+message RefreshPluginSourceResponse { oneof result { PluginSourceRefreshResult value = 1; Failure failure = 2; } }
+
+message RemovePluginSourceRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginSourceRemoveParams params = 3; }
+message RemovePluginSourceResponse { oneof result { PluginSourceRemoveResult value = 1; Failure failure = 2; } }
+
+message SearchPluginsRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginSearchParams params = 3; }
+message SearchPluginsResponse { oneof result { PluginSearchResult value = 1; Failure failure = 2; } }
+
+message ListPluginsRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginListParams params = 3; }
+message ListPluginsResponse { oneof result { PluginListResult value = 1; Failure failure = 2; } }
+
+message ReadPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginReadParams params = 3; }
+message ReadPluginResponse { oneof result { PluginReadResult value = 1; Failure failure = 2; } }
+
+message InstallPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginInstallParams params = 3; }
+message InstallPluginResponse { oneof result { PluginInstallResult value = 1; Failure failure = 2; } }
+
+message UpdatePluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginUpdateParams params = 3; }
+message UpdatePluginResponse { oneof result { PluginUpdateResult value = 1; Failure failure = 2; } }
+
+message UninstallPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginUninstallParams params = 3; }
+message UninstallPluginResponse { oneof result { PluginUninstallResult value = 1; Failure failure = 2; } }
+
+message EnablePluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginEnableParams params = 3; }
+message EnablePluginResponse { oneof result { PluginEnableResult value = 1; Failure failure = 2; } }
+
+message DisablePluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginDisableParams params = 3; }
+message DisablePluginResponse { oneof result { PluginDisableResult value = 1; Failure failure = 2; } }
+
+message ListMcpServersRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; McpServerListParams params = 3; }
+message ListMcpServersResponse { oneof result { McpServerListResult value = 1; Failure failure = 2; } }
+
+message ReadMcpAuthenticationRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; McpAuthenticationReadParams params = 3; }
+message ReadMcpAuthenticationResponse { oneof result { McpAuthenticationResult value = 1; Failure failure = 2; } }
+
+message UpdateMcpCredentialsRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; McpCredentialsUpdateParams params = 3; }
+message UpdateMcpCredentialsResponse { oneof result { McpAuthenticationResult value = 1; Failure failure = 2; } }
+
+message ImportMcpServerRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; McpServerImportParams params = 3; }
+message ImportMcpServerResponse { oneof result { PluginInstallResult value = 1; Failure failure = 2; } }
+
+message StartMcpAuthenticationRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; McpAuthenticationStartParams params = 3; McpOAuthCallbackTarget callback_target = 4; }
+message StartMcpAuthenticationResponse { oneof result { McpAuthenticationStartResult value = 1; Failure failure = 2; } }
