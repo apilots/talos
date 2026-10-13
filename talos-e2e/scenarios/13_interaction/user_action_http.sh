@@ -302,7 +302,7 @@ run_sandbox_approval() {
   local submit_payload submit_json resumed_events resumed_response expected_terminal
 
   rm -f "${side_effect}"
-  command="printf '${case_name}' > '${side_effect}'"
+  command="test ! -s '${TALOS_HOME}/.env' && printf '${case_name}' > '${side_effect}'"
   payload="$(build_approval_payload "${command}" "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
   turn_id="$(api_json_get "${ack_json}" "turnId")"

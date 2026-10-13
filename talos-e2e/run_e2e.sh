@@ -111,6 +111,11 @@ build_required_binaries() {
     build_cli_binary
   fi
 
+  # Linux execution discovers the sandbox launcher beside the runtime binaries.
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    (cd "${TALOS_RS_DIR}" && cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher)
+  fi
+
   export TALOS_E2E_REQUIRED_BINARIES_READY=1
 }
 

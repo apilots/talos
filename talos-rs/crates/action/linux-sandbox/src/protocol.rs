@@ -77,7 +77,13 @@ impl LauncherRequest {
             require_directory(root, "writable root")?;
         }
         for root in &self.file_system.denied_roots {
-            require_directory(root, "denied root")?;
+            require_absolute(root, "denied root")?;
+            if !root.is_dir() && !root.is_file() {
+                return Err(format!(
+                    "denied root is not a file or directory: {}",
+                    root.display()
+                ));
+            }
         }
         Ok(())
     }
