@@ -131,6 +131,9 @@ try {
   }
 } finally {
   for (const surface of surfaces.values()) {
+    if (surface.web && surface.child.exitCode === null && surface.child.signalCode === null) {
+      await surface.cdp?.call("Browser.close");
+    }
     surface.cdp?.close();
     surface.main?.close();
     if (surface.child.exitCode === null && surface.child.signalCode === null) {
@@ -139,6 +142,9 @@ try {
       const timeout = setTimeout(() => surface.child.kill("SIGKILL"), 10_000);
       await exited; clearTimeout(timeout);
     }
+    // Browser helpers can inherit the child's pipe descriptors after its exit.
+    surface.child.stdout.destroy();
+    surface.child.stderr.destroy();
     surface.log.end();
   }
   lines.close();
