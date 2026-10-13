@@ -141,6 +141,10 @@ try {
   await evaluate(cdp, "location.hash = '#/'; undefined");
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
   await captureScreenshot(cdp, path.join(artifactDir, "home.png"));
+  await evaluate(cdp, 'document.querySelector(`button[aria-label="Collapse sidebar"]`).focus()');
+  assert(await evaluate(cdp, '(()=>{const style=getComputedStyle(document.querySelector(`button[aria-label="Collapse sidebar"]`));return style.outlineStyle==="none" || style.outlineColor==="rgba(0, 0, 0, 0)";})()'), "Sidebar retained native accent outline.");
+  await captureScreenshot(cdp, path.join(artifactDir, "sidebar-focus.png"));
+  await evaluate(cdp, "document.activeElement.blur()");
 
   const interaction = process.env.TALOS_DESKTOP_SMOKE_INTERACTION === "1"
     ? await runInteractionSmoke(cdp, artifactDir)
@@ -733,7 +737,7 @@ async function captureScreenshot(cdp, outputPath) {
 }
 
 async function clickAnchorByHash(cdp, hash) {
-  const clicked = await evaluate(
+  await waitForExpression(
     cdp,
     `(() => {
       const target = ${JSON.stringify(hash)};
@@ -745,8 +749,8 @@ async function clickAnchorByHash(cdp, hash) {
       anchor.click();
       return true;
     })()`,
+    30_000,
   );
-  assert(clicked, `Anchor not found for hash: ${hash}`);
 }
 
 async function clickAccountMenuSettings(cdp) {
