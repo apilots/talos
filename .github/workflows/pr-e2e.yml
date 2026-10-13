@@ -73,9 +73,14 @@ jobs:
           brew install caddy protobuf
 
       - name: Install MinIO client for Linux S3 E2E
-        if: runner.os == 'Linux'
+        if: ${{ runner.os == 'Linux' && contains(matrix.targets, 'group:12_files') }}
         run: |
-          curl --proto '=https' --tlsv1.2 -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /tmp/mc
+          mc_version=RELEASE.2025-08-13T08-35-41Z
+          mc_sha256=01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            "https://github.com/minio/mc/releases/download/${mc_version}/mc.linux-amd64.${mc_version}" \
+            -o /tmp/mc
+          echo "${mc_sha256}  /tmp/mc" | sha256sum --check --status
           sudo install -m 0755 /tmp/mc /usr/local/bin/mc
 
       - name: Install Rust
