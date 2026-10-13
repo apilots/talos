@@ -1,10 +1,15 @@
 """Actual current-coordinator commands, source files and child resource callbacks."""
 import base64
 import json
+import hashlib
+import queue
 import subprocess
+import time
 import uuid
 from pathlib import Path
-from cluster import REPORT, ROOT, require, wait_for
+import yaml
+from google.protobuf import json_format, message_factory
+from cluster import REPORT, ROOT, Desktop, free_port, require, wait_for
 from turn_helpers import submit, settled
 
 
@@ -22,6 +27,93 @@ def require_successful_wait(history, marker, child_session=None):
 def shared(cluster, session):
     for host in ('Desktop-A', 'Desktop-B', 'G'):
         wait_for(lambda host=host: bool(cluster.history(host, session)['data']), host + ' shared Session')
+
+
+def failed_direct_registration(cluster):
+    mac_config = yaml.safe_load((cluster.nodes['Mac-Worker']['home'] / 'conf/talos.yaml').read_text())
+    mac_port = mac_config['agent_node']['worker_rpc']['bind_address'].rsplit(':', 1)[1]
+    deployments = cluster.manage('alice', 'GetDeployments', {'node_id': cluster.nodes['Mac-Worker']['node_id']})['deployments']['deployments']
+    # The real Mac listener's certificate covers 127.0.0.1, not localhost.
+    for endpoint in (f'https://127.0.0.1:{free_port()}', f'https://localhost:{mac_port}'):
+        created = cluster.manage('alice', 'CreateNode', {
+            'display_name': 'Rejected Direct', 'endpoint': endpoint,
+            'credential_expires_at': int(time.time()) + 3600})['created']
+        node = created['node']['node_id']
+        result = cluster.rpc('AgentNodeControl', 'Register', {
+            'auth': {'node_id': node, 'token': created['credential']['token']},
+            'params': {'deployments': deployments}
+        })
+        require(result.get('failure', {}).get('error', {}).get('code') == 'ERROR_CODE_SERVICE_UNAVAILABLE',
+                'Invalid Direct endpoint was published instead of rejecting registration')
+        require(not cluster.manage('alice', 'GetNode', {'node_id': node})['node'].get('available', False),
+                'Failed Direct registration advertised Connected')
+        cluster.manage('alice', 'SetComputerStatus', {'node_id': node, 'status': 'NODE_STATUS_DISABLED'})
+    print('CASE sync_direct_registration_requires_reverse_tls_reachability PASS', flush=True)
+
+
+def abandoned_cross_coordinator_admission(cluster, node, session):
+    source = cluster.desktops['Desktop-B']
+    peer = cluster.database(source['home'], 'SELECT peer_id FROM sync_identity WHERE singleton = 1')[0][0]
+    agent, workspace, user = cluster.database(cluster.desktops['Desktop-A']['home'],
+        'SELECT agent_id, workspace_id, COALESCE(workspace_user_id, user_id) FROM sessions WHERE session_key = ?', (session,))[0]
+    context = {'agent_id': agent, 'session_id': session, 'workspace_id': workspace, 'user_id': user}
+    marker = cluster.desktops['Desktop-A']['home'] / 'data/worker/session-heads' / (hashlib.sha256(session.encode()).hexdigest() + '.json')
+    wait_for(lambda: json.loads(marker.read_text())['visibility'] == 'Shared', 'Original Worker history is Shared')
+    before = json.loads(marker.read_text())
+    method = cluster.pool.FindMethodByName('talos.agent.v1.AgentCoordinatorRpc.Connect')
+    request_type = message_factory.GetMessageClass(method.input_type)
+    response_type = message_factory.GetMessageClass(method.output_type)
+    sent = queue.Queue()
+    sent.put(json_format.ParseDict({'connect': {'peer_id': peer, 'computer_id': node}}, request_type()))
+    connect = cluster.channel.stream_stream('/talos.agent.v1.AgentCoordinatorRpc/Connect',
+        request_serializer=request_type.SerializeToString, response_deserializer=response_type.FromString)
+    stream = connect(iter(sent.get, None), timeout=30,
+                     metadata=(('authorization', 'Bearer ' + source['token']),))
+    try:
+        require(next(stream).WhichOneof('body') == 'connected', 'B could not open its authenticated Coordinator Connect')
+        # Prevent background sharing from masking a failed reservation rollback.
+        subprocess.run(['docker', 'stop', '--time', '10', cluster.hub_container], check=True, capture_output=True)
+        source['host'].close()
+        turn = str(uuid.uuid4())
+        forbidden = 'abandoned-admission-' + uuid.uuid4().hex
+        now = int(time.time() * 1000)
+        model = cluster.model
+        params = {'context': {'session': context, 'turn_id': turn, 'history_cursor': before['head'],
+                  'model': {'provider': model['provider'], 'id': model['id'], 'name': model['name'],
+                            'context_window': model['context_window'], 'reasoning': model['reasoning'],
+                            'reasoning_effort': 'REASONING_EFFORT_' + model['reasoning_effort'].upper(),
+                            'speed': 'MODEL_SPEED_' + model['speed'].upper(),
+                            'input': ['MODEL_INPUT_KIND_' + kind.upper() for kind in model['input']],
+                            'cost': model['cost']},
+                  'model_selection': {'provider': model['provider'], 'model_id': model['id']},
+                  'permission_mode': 'PERMISSION_MODE_FULL_ACCESS'},
+                  'input': {'message_id': str(uuid.uuid4()), 'turn_id': turn, 'role': 'MESSAGE_ROLE_USER',
+                    'status': 'MESSAGE_STATUS_COMPLETED', 'created_at': now, 'completed_at': now,
+                    'blocks': [{'block_id': str(uuid.uuid4()), 'status': 'BLOCK_STATUS_COMPLETED',
+                                'started_at': now, 'completed_at': now,
+                                'user_content': {'text': 'Use Bash to touch ' + forbidden}}]}}
+        sent.put(json_format.ParseDict({'call': {'call_id': 1, 'sequence': 1, 'timeout_ms': 15000,
+            'response_window': 8, 'start': {'auth': {'node_id': node, 'token': source['token']},
+                                          'params': {'run': params}}}}, request_type()))
+        result = json_format.MessageToDict(next(stream), preserving_proto_field_name=True).get('result', {})
+        require('admission' in result.get('run', {}), 'B did not receive a real paused Harness admission')
+        stream.cancel()
+        sent.put(None)
+        wait_for(lambda: json.loads(marker.read_text()) == before, 'Unconsumed admission restored the complete original Worker marker')
+        require(not list(cluster.desktops['Desktop-A']['home'].rglob(forbidden)), 'Unconsumed admission ran its tool')
+        retry = submit(cluster, 'Desktop-A', node, session, 'Reply exactly ABANDONED_HANDOFF_RECOVERED.')
+        history = wait_for(lambda: settled(cluster, 'Desktop-A', session, retry['turnId']), 'Original coordinator continued with B and H offline', 120)
+        require(len(history) == 2 and 'ABANDONED_HANDOFF_RECOVERED' in json.dumps(history[-1]['result']),
+                'Abandoned admission produced history or blocked the original coordinator')
+    finally:
+        stream.cancel()
+        sent.put(None)
+        subprocess.run(['docker', 'start', cluster.hub_container], check=True, capture_output=True)
+        source['host'] = Desktop(cluster, source['home'], 'Desktop-B')
+        source['token'] = source['host'].call('auth/session/read')['session']['access_token']
+    wait_for(lambda: cluster.desktop('Desktop-B', 'sync/status')['connection'] == 'connected', 'B synchronization resumed')
+    wait_for(lambda: cluster.history('Desktop-A', session)['data'] == cluster.history('Desktop-B', session)['data'], 'Only executed history synchronized after recovery')
+    print('CASE sync_abandoned_cross_coordinator_admission_preserves_original_shared_history PASS', flush=True)
 
 
 def source_files(cluster):
@@ -58,6 +150,7 @@ def commands(cluster):
     first = submit(cluster, 'Desktop-A', node, session, 'Reply exactly SHARED_COMMAND_BASE.', clientRequestId=request_id)
     wait_for(lambda: settled(cluster, 'Desktop-A', session, first['turnId']), 'Initial command settled', 120)
     shared(cluster, session)
+    abandoned_cross_coordinator_admission(cluster, node, session)
     replay = submit(cluster, 'Desktop-B', node, session, 'Reply exactly SHARED_COMMAND_BASE.', clientRequestId=request_id)
     require(replay == first, 'Other coordinator did not replay the exact committed command response')
     started = 'command-started-' + uuid.uuid4().hex

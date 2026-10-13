@@ -61,7 +61,15 @@ impl AgentEnvironmentClient {
                     error,
                 )
             })?
-            .connect_lazy();
+            .connect()
+            .await
+            .map_err(|error| {
+                TalosError::from_source(
+                    ErrorCode::ServiceUnavailable,
+                    "Worker RPC is unavailable",
+                    error,
+                )
+            })?;
         Ok(Self {
             transport: HarnessTransport::Direct(channel),
             auth,

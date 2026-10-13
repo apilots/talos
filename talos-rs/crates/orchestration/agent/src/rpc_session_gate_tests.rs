@@ -112,6 +112,7 @@ fn restart_keeps_last_local_coordinator_and_shared_handoff_requires_the_exact_hi
             RunAdmission::NewTurn
         )
         .is_err());
+    let shared = restarted.read(&context).unwrap();
     drop(
         restarted
             .reserve(
@@ -123,10 +124,25 @@ fn restart_keeps_last_local_coordinator_and_shared_handoff_requires_the_exact_hi
             )
             .unwrap(),
     );
-    assert_eq!(
-        restarted.read(&context).unwrap().coordinator_id.as_deref(),
-        Some(b.as_str())
-    );
+    assert_eq!(restarted.read(&context).unwrap(), shared);
+    let recovered = SessionGate::new(home.path().join("history-cursors"));
+    assert_eq!(recovered.read(&context).unwrap(), shared);
+    let next_identity = AgentTurnRef::new("session", "turn-b");
+    let mut run = recovered
+        .reserve(
+            &context,
+            &next_identity,
+            &b,
+            &history_cursor,
+            RunAdmission::NewTurn,
+        )
+        .unwrap();
+    run.consuming(&next_identity).unwrap();
+    drop(run);
+    let state = recovered.read(&context).unwrap();
+    assert_eq!(state.coordinator_id.as_deref(), Some(b.as_str()));
+    assert_eq!(state.active_turn, Some(next_identity));
+    assert!(!state.handoff_ready);
 }
 #[test]
 fn unconfirmed_restart_blocks_only_that_session_and_cannot_be_overwritten_by_an_old_store() {
@@ -168,10 +184,12 @@ fn unconfirmed_restart_blocks_only_that_session_and_cannot_be_overwritten_by_an_
             HistoryBootstrap::TrustedLocal
         )
         .is_err());
+    let new_session = context("new-session");
+    let initial = restarted.read(&new_session).unwrap();
     drop(
         restarted
             .reserve(
-                &context("new-session"),
+                &new_session,
                 &AgentTurnRef::new("new-session", "turn"),
                 &a,
                 &Default::default(),
@@ -179,6 +197,8 @@ fn unconfirmed_restart_blocks_only_that_session_and_cannot_be_overwritten_by_an_
             )
             .unwrap(),
     );
+    assert_eq!(restarted.read(&new_session).unwrap(), initial);
+    assert!(!restarted.path("new-session").exists());
     std::fs::write(restarted.path("corrupt"), "invalid marker").unwrap();
     assert!(restarted.read(&context("corrupt")).is_err());
 }

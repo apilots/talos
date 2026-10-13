@@ -10,10 +10,21 @@ struct Fixture {
     publisher: RemoteNodePublisher,
     credential: pb::NodeCredential,
     store: Arc<DatabaseAgentNodeStore>,
+    endpoint: Option<String>,
+    _direct_listener: Option<tokio_util::task::AbortOnDropHandle<()>>,
 }
 
 impl Fixture {
     async fn new(endpoint: Option<String>) -> Self {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let listener = if endpoint.is_some() {
+            Some(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap())
+        } else {
+            None
+        };
+        let endpoint = listener
+            .as_ref()
+            .map(|listener| format!("https://{}", listener.local_addr().unwrap()));
         let storage = Arc::new(
             SqliteStorage::new_with_max_connections(":memory:", 1)
                 .await
@@ -28,7 +39,9 @@ impl Fixture {
         let store = Arc::new(DatabaseAgentNodeStore::new(storage.pool().clone()));
         let nodes = AgentNodeService::new(store.clone());
         let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
-        let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+        let certificate =
+            rcgen::generate_simple_self_signed(vec!["127.0.0.1".into(), "localhost".into()])
+                .unwrap();
         let publisher = RemoteNodePublisher {
             coordinator_id: uuid::Uuid::new_v4().to_string(),
             connections: Arc::default(),
@@ -44,13 +57,34 @@ impl Fixture {
             ),
         };
         let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth));
+        let direct_listener = listener.map(|listener| {
+            let management = management.clone();
+            tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                tonic::transport::Server::builder()
+                    .tls_config(tonic::transport::ServerTlsConfig::new().identity(
+                        tonic::transport::Identity::from_pem(
+                            certificate.cert.pem(),
+                            certificate.signing_key.serialize_pem(),
+                        ),
+                    ))
+                    .unwrap()
+                    .add_service(
+                        pb::agent_node_management_server::AgentNodeManagementServer::new(
+                            management,
+                        ),
+                    )
+                    .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                    .await
+                    .unwrap();
+            }))
+        });
         let control = NodeControlRpc::new(nodes, publisher.clone(), CancellationToken::new());
         let created = management
             .create_node(management_request(
                 "user-1",
                 pb::CreateNodeRequest {
                     display_name: "Laptop".into(),
-                    endpoint,
+                    endpoint: endpoint.clone(),
                     owner_user_id: None,
                     credential_expires_at: chrono::Utc::now().timestamp() + 3600,
                 },
@@ -67,6 +101,8 @@ impl Fixture {
             publisher,
             credential: created.credential.unwrap(),
             store,
+            endpoint,
+            _direct_listener: direct_listener,
         }
     }
 
@@ -254,7 +290,7 @@ async fn rename_before_first_heartbeat_keeps_identity_and_executable_registratio
             pb::UpdateNodeRequest {
                 node_id: fixture.credential.node_id.clone(),
                 display_name: "Renamed laptop".into(),
-                endpoint: Some("https://127.0.0.1:18801".into()),
+                endpoint: fixture.endpoint.clone(),
                 status: pb::NodeStatus::Enabled as i32,
             },
         ))
@@ -294,7 +330,10 @@ async fn rename_before_first_heartbeat_keeps_identity_and_executable_registratio
             pb::UpdateNodeRequest {
                 node_id: fixture.credential.node_id.clone(),
                 display_name: "Renamed laptop".into(),
-                endpoint: Some("https://127.0.0.1:18802".into()),
+                endpoint: fixture
+                    .endpoint
+                    .as_ref()
+                    .map(|endpoint| endpoint.replace("127.0.0.1", "localhost")),
                 status: pb::NodeStatus::Enabled as i32,
             },
         ))
@@ -379,7 +418,7 @@ async fn product_status_and_rename_share_registration_revocation_without_replaci
         .await
         .unwrap();
     assert_eq!(info.display_name, "New laptop name");
-    assert_eq!(info.endpoint.as_deref(), Some("https://127.0.0.1:18801"));
+    assert_eq!(info.endpoint, fixture.endpoint);
     assert_eq!(info.status, talos_types::NodeStatus::Disabled);
     assert_eq!(info.lease_expires_at, None);
     assert!(!info.available);

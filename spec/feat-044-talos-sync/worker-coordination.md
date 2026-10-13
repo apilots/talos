@@ -114,7 +114,7 @@ CRDT 收敛和各本地 DB 的 active 行均不能代替 Worker 排他。
 1. 当前B使用本地完整事实；只有缺少所需Shared 历史游标的数据时才catch_up，导入Session/tree/binding、Timeline、memory/幂等完成态。纯本地使用原Store，不访问sync。
 2. agent-client 查询同一 Worker 的 Session 状态。运行或清理未确认时拒绝新 Turn；空闲时核对执行 历史游标。
 3. Start 预留必须原子校验 期望历史游标 + 当前绑定，不能仅“查询 idle 后再调用”。返回原 ActiveTurnRunning/Conflict。
-4. 原 admission events -> B 业务事务/capture -> 原 commit/permit；只有这一条链可开始模型。失败释放未消费 reservation。
+4. 原 admission events -> B 业务事务/capture -> 原 commit/permit；只有这一条链可开始模型。失败释放未消费 reservation，并恢复预留前完整 marker（协调者、Local/Shared、active 与历史游标）；首次预留没有旧 marker 则撤销新 marker。未执行的 B 不能阻止 A/C 按原 Shared 历史游标续跑。已消费后的清理确认与事实提交规则不变。
 5. Worker progress/settlement -> B 原事务；终态不能先于已知 outcome。跨端下一 Turn 需先得到 hub 的持久同步确认。
 6. B通过下面的状态提交释放跨端边界，原子更新Worker最小恢复标记与runtime 历史游标；A/C补齐该历史游标后可成为下一Turn协调者，仍只能调用同一个Worker。
 

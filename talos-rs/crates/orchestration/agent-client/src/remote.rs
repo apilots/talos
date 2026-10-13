@@ -85,8 +85,15 @@ impl RemoteAgentClient {
                     error,
                 )
             })?;
+        let channel = endpoint.connect().await.map_err(|error| {
+            TalosError::from_source(
+                ErrorCode::ServiceUnavailable,
+                "Agent Harness RPC is unavailable",
+                error,
+            )
+        })?;
         Ok(Self {
-            transport: crate::harness_transport::HarnessTransport::Direct(endpoint.connect_lazy()),
+            transport: crate::harness_transport::HarnessTransport::Direct(channel),
             agent_id,
             auth,
             coordinator_id: uuid::Uuid::new_v4().to_string(),

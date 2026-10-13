@@ -22,8 +22,9 @@ deploy/
 `talos-server` 暴露 HTTP API、Web UI 和 SSE Timeline stream。反向代理必须对
 `/v1/sessions/*/events` 禁用响应缓冲和压缩，确保事件增量送达。
 
-Server 镜像同时包含 `talos-worker`。Worker 部署将容器命令覆盖为
-`/opt/talos/bin/talos-worker`，并提供节点注册和 TLS 配置。
+独立 Worker 使用专用 `ghcr.io/apilots/talos-worker` 镜像，通过 outbound
+Connect 注册，不继承 Server 的 HTTP 健康检查。持久目录、节点 UUID/凭据
+和 TLS 信任配置见 [Worker 镜像说明](../build/worker/README.md)。
 
 `caddy/`、`nginx/` 和 `docker/` 下的示例是维护中的起点。投入生产前需要检查认证、
 TLS、持久化、资源限制和 secret 管理。

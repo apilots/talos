@@ -72,7 +72,7 @@ class Cluster:
         self.worker_transport = worker_transport
         self.dream_maintenance = dream_maintenance
         REPORT.mkdir(parents=True, exist_ok=True)
-        temporary = ROOT / 'talos-e2e/.tmp'
+        temporary = Path(os.environ.get('TALOS_E2E_TMP_ROOT', ROOT / 'talos-e2e/.tmp'))
         temporary.mkdir(parents=True, exist_ok=True)
         self.root = Path(tempfile.mkdtemp(prefix='multi-node-', dir=temporary))
         self.processes = []

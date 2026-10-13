@@ -50,6 +50,31 @@ registration recovered, including all four Computers, real hardware, the local
 Computer label and owner settings. Those screenshots remain local validation
 artifacts rather than specification source.
 
+## Pre-merge regression closure (2026-10-13)
+
+Unconsumed Worker admissions now restore the entire previous marker; an abandoned
+first admission removes its marker durably. Consumed executions retain the
+original cleanup and history-commit requirements. Direct clients finish the
+TLS/HTTP2 connection before publication, and deployment guides use the dedicated
+Worker image. Shared theme buttons, MCP actions and unchanged-save states are
+included in the same correction.
+
+- Agent, Client and Base: **96/96 nextest PASS**, 70.012 seconds, zero skipped;
+  scoped `just fix`, strict test-target Clippy and formatting checks passed.
+- Updated **19/05 resource interactions PASS**, with eight observable checks.
+  The new cases reject unreachable/TLS-invalid Direct registration and disconnect
+  B after actual paused admission. With B and H stopped, A resumes the same
+  Session; no abandoned Turn history or tool side effect appears. Original source
+  files, live input/queue/cancel, child callbacks, clear/delete and offline waiting
+  configuration checks also passed.
+- The Save regression confirms login-managed credentials remain read-only and
+  unchanged submission performs no save or model refetch. Light/dark Server and
+  MCP visual checks are preserved in ignored root output.
+
+This is an affected-scenario regression, not a new complete eight-case group run.
+All new logs, candidate files, service homes and screenshots stay in ignored
+root `output/`; no production deployment or standalone Sync code change is included.
+
 ## Verification limits
 
 The complete eight-case run preceded the public Cloud SDK packaging migration

@@ -34,9 +34,8 @@ async fn server(
     let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
     let pem = certificate.cert.pem().into_bytes();
     let identity = Identity::from_pem(&pem, certificate.signing_key.serialize_pem());
-    let socket = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = socket.local_addr().unwrap();
-    drop(socket);
     let endpoint = format!("https://{address}");
     let adapter = AgentHarnessRpcAdapter::new(
         "node-1".into(),
@@ -69,7 +68,10 @@ async fn server(
             .tls_config(ServerTlsConfig::new().identity(identity))
             .unwrap()
             .add_service(AgentHarnessRpcServer::new(adapter_for_server))
-            .serve_with_shutdown(address, server_stop.cancelled())
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::TcpListenerStream::new(socket),
+                server_stop.cancelled(),
+            )
             .await
             .unwrap();
     });
@@ -588,9 +590,37 @@ async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() 
     let harness: Arc<dyn AgentHarness> =
         Arc::new(Harness::new(TEST_AGENT_ID.into(), provider.clone()));
     let (client, _, pem, endpoint, stop, task) = server(harness).await;
+    let untrusted = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
+        .unwrap()
+        .cert
+        .pem()
+        .into_bytes();
+    let auth = NodeAuth {
+        node_id: "node-1".into(),
+        token: "lease-secret".into(),
+    };
+    for result in [
+        RemoteAgentClient::connect(
+            &endpoint,
+            agent_client::AgentTlsTrust::Certificate(untrusted.clone()),
+            TEST_AGENT_ID.into(),
+            auth.clone(),
+        )
+        .await
+        .map(|_| ()),
+        agent_client::AgentEnvironmentClient::connect(
+            &endpoint,
+            agent_client::AgentTlsTrust::Certificate(untrusted),
+            auth.clone(),
+        )
+        .await
+        .map(|_| ()),
+    ] {
+        assert!(result.unwrap_err().is_code(ErrorCode::ServiceUnavailable));
+    }
     let wrong = RemoteAgentClient::connect(
         &endpoint,
-        agent_client::AgentTlsTrust::Certificate(pem),
+        agent_client::AgentTlsTrust::Certificate(pem.clone()),
         TEST_AGENT_ID.into(),
         NodeAuth {
             node_id: "node-1".into(),
@@ -611,10 +641,110 @@ async fn rpc_rejects_wrong_lease_and_dropped_admission_has_no_provider_effect() 
         .await
         .unwrap();
     drop(execution);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let state = client
+                .read_session_execution_state(session_params())
+                .await
+                .unwrap()
+                .unwrap();
+            if state.coordinator_id.is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     assert!(!provider.started.load(Ordering::Acquire));
+
+    let base = client
+        .start(run_params(AgentTurnRef::new("session-1", "base"), "base"))
+        .await
+        .unwrap();
+    base.admission.permit.consume().await.unwrap();
+    provider.wait_started().await;
+    provider.release.notify_one();
+    let history_cursor =
+        commit_received_settlement(&client, base.settlement.recv().await.unwrap()).await;
+    client
+        .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
+            session: session_params(),
+            identity: None,
+            history_cursor: history_cursor.clone(),
+            visibility: agent_protocol::SessionStateVisibility::Shared,
+        })
+        .await
+        .unwrap();
+    let shared = client
+        .read_session_execution_state(session_params())
+        .await
+        .unwrap()
+        .unwrap();
+    provider.started.store(false, Ordering::Release);
+    let other = client
+        .clone()
+        .with_coordinator_id(uuid::Uuid::new_v4().to_string())
+        .unwrap();
+    let mut attempted = run_params(
+        AgentTurnRef::new("session-1", "abandoned"),
+        "must not execute",
+    );
+    attempted.context.history_cursor = Some(history_cursor.clone());
+    drop(other.start(attempted).await.unwrap());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if client
+                .read_session_execution_state(session_params())
+                .await
+                .unwrap()
+                .unwrap()
+                == shared
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!provider.started.load(Ordering::Acquire));
+    drop(other);
+
+    let mut retry = run_params(
+        AgentTurnRef::new("session-1", "retry"),
+        "original coordinator continues",
+    );
+    retry.context.history_cursor = Some(history_cursor);
+    let run = client.start(retry).await.unwrap();
+    run.admission.permit.consume().await.unwrap();
+    provider.wait_started().await;
+    provider.release.notify_one();
+    assert!(matches!(
+        run.settlement.recv().await.unwrap(),
+        AgentRunSettlement::Finished { .. }
+    ));
     stop.cancel();
     task.await.unwrap();
+    for result in [
+        RemoteAgentClient::connect(
+            &endpoint,
+            agent_client::AgentTlsTrust::Certificate(pem.clone()),
+            TEST_AGENT_ID.into(),
+            auth.clone(),
+        )
+        .await
+        .map(|_| ()),
+        agent_client::AgentEnvironmentClient::connect(
+            &endpoint,
+            agent_client::AgentTlsTrust::Certificate(pem),
+            auth,
+        )
+        .await
+        .map(|_| ()),
+    ] {
+        assert!(result.unwrap_err().is_code(ErrorCode::ServiceUnavailable));
+    }
 }
 
 #[tokio::test]

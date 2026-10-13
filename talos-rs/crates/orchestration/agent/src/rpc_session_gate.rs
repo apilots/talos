@@ -71,7 +71,7 @@ pub(super) struct Reservation {
     gate: SessionGate,
     session_id: Option<String>,
     consumed: bool,
-    previous_active: Option<AgentTurnRef>,
+    previous_marker: Option<Marker>,
 }
 impl Drop for Reservation {
     fn drop(&mut self) {
@@ -82,11 +82,22 @@ impl Drop for Reservation {
         };
         state.reserved.remove(session_id);
         if !self.consumed {
-            if let Some(mut marker) = state.markers.get(session_id).cloned() {
-                marker.active = self.previous_active.clone();
+            if let Some(marker) = self.previous_marker.take() {
                 match self.gate.save(session_id, &marker) {
                     Ok(()) => {
                         state.markers.insert(session_id.clone(), marker);
+                    }
+                    Err(error) => talos_logging::report_error(&error),
+                }
+            } else {
+                let removed = talos_fs::remove_file(&self.gate.path(session_id)).and_then(|()| {
+                    std::fs::File::open(&self.gate.root)
+                        .and_then(|directory| directory.sync_all())
+                        .map_err(io_error)
+                });
+                match removed {
+                    Ok(()) => {
+                        state.markers.remove(session_id);
                     }
                     Err(error) => talos_logging::report_error(&error),
                 }
@@ -144,7 +155,7 @@ impl SessionGate {
             gate: self.clone(),
             session_id: None,
             consumed: true,
-            previous_active: None,
+            previous_marker: None,
         })
     }
 
@@ -258,8 +269,8 @@ impl SessionGate {
         if state.configuration_reserved || state.reserved.contains(&context.session_id) {
             return Err(busy());
         }
-        let marker = self.load(&mut state, &context.session_id)?.cloned();
-        match &marker {
+        let previous_marker = self.load(&mut state, &context.session_id)?.cloned();
+        match &previous_marker {
             Some(marker) => {
                 binding(marker, context)?;
                 if &marker.history_cursor != expected {
@@ -287,7 +298,7 @@ impl SessionGate {
             None if expected != &SessionHistoryCursor::default() => return Err(conflict()),
             None => {}
         }
-        let mut marker = marker.unwrap_or_else(|| Marker {
+        let mut marker = previous_marker.clone().unwrap_or_else(|| Marker {
             binding: Binding::from(context),
             history_cursor: expected.clone(),
             coordinator_id: peer.into(),
@@ -295,7 +306,6 @@ impl SessionGate {
             visibility: SessionStateVisibility::Local,
             cleanup_confirmed: true,
         });
-        let previous_active = marker.active.clone();
         marker.coordinator_id = peer.into();
         marker.visibility = SessionStateVisibility::Local;
         marker.active = Some(identity.clone());
@@ -306,7 +316,7 @@ impl SessionGate {
             gate: self.clone(),
             session_id: Some(context.session_id.clone()),
             consumed: false,
-            previous_active,
+            previous_marker,
         })
     }
     pub(super) fn consuming(&self, identity: &AgentTurnRef) -> TalosResult<()> {
@@ -475,7 +485,7 @@ impl SessionGate {
             gate: self.clone(),
             session_id: Some(context.session_id.clone()),
             consumed: true,
-            previous_active: None,
+            previous_marker: None,
         })
     }
 }

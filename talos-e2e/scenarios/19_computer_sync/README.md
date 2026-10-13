@@ -22,7 +22,12 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   Computer and Session remain absent from Alice's Desktop databases while G
   retains both accounts.
 
-- `05_resource_interactions`: original FileService source read/update/delete and
+- `05_resource_interactions`: failed Direct registrations with an unreachable
+  endpoint or invalid TLS hostname never advertise Connected; an actual B
+  Coordinator Connect receives paused admission and disconnects before commit,
+  restoring the complete original Worker marker. With B and H stopped, A still
+  continues the same Session without an abandoned tool side effect or history.
+  Original FileService source read/update/delete and
   explicit source-offline errors; cross-coordinator exact idempotent response,
   admission exclusion, queue/live input/cancellation, waiting answers and real
   child-agent callbacks with immutable Computer affinity and an explicit successful

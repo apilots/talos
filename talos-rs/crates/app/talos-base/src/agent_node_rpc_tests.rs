@@ -200,6 +200,7 @@ fn management_request<T>(token: &str, body: T) -> Request<T> {
 
 #[tokio::test]
 async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
@@ -218,7 +219,9 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         Arc::new(DatabaseSessionStore::new(storage).await.unwrap()),
         store,
     ));
-    let certificate = rcgen::generate_simple_self_signed(vec!["node.example".into()]).unwrap();
+    let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
     let publisher = RemoteNodePublisher {
         coordinator_id: uuid::Uuid::new_v4().to_string(),
         connections: Arc::default(),
@@ -230,14 +233,14 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         ),
     };
     let management = NodeManagementRpc::new(nodes.clone(), Arc::new(TestAuth));
-    let control = NodeControlRpc::new(nodes, publisher, CancellationToken::new());
+    let control = NodeControlRpc::new(nodes.clone(), publisher.clone(), CancellationToken::new());
 
     let created = management
         .create_node(management_request(
             "user-1",
             pb::CreateNodeRequest {
                 display_name: "Laptop".into(),
-                endpoint: Some("https://node.example:18801".into()),
+                endpoint: Some(format!("https://{address}")),
                 owner_user_id: None,
                 credential_expires_at: chrono::Utc::now().timestamp() + 3600,
             },
@@ -282,6 +285,77 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         Some(pb::get_node_response::Result::Failure(failure))
             if failure.error.as_ref().is_some_and(|error| error.code == pb::ErrorCode::Unauthenticated as i32)
     ));
+
+    let stop = CancellationToken::new();
+    let server_stop = stop.clone();
+    let management_service = management.clone();
+    let task = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .tls_config(tonic::transport::ServerTlsConfig::new().identity(
+                tonic::transport::Identity::from_pem(
+                    certificate.cert.pem(),
+                    certificate.signing_key.serialize_pem(),
+                ),
+            ))
+            .unwrap()
+            .add_service(
+                pb::agent_node_management_server::AgentNodeManagementServer::new(
+                    management_service,
+                ),
+            )
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::TcpListenerStream::new(listener),
+                server_stop.cancelled(),
+            )
+            .await
+            .unwrap();
+    });
+    let rejected = NodeControlRpc::new(
+        nodes.clone(),
+        RemoteNodePublisher {
+            trusted_node_ca: agent_client::AgentTlsTrust::Certificate(
+                rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
+                    .unwrap()
+                    .cert
+                    .pem()
+                    .into_bytes(),
+            ),
+            ..publisher
+        },
+        CancellationToken::new(),
+    )
+    .register(Request::new(pb::RegisterRequest {
+        auth: Some(pb::NodeAuth {
+            node_id: node_id.clone(),
+            token: credential.clone(),
+        }),
+        params: Some(pb::RegisterParams {
+            system_info: None,
+            deployments: vec![pb::Deployment {
+                agent_id: "talos".into(),
+            }],
+        }),
+    }))
+    .await
+    .unwrap()
+    .into_inner();
+    assert!(
+        matches!(rejected.result, Some(pb::register_response::Result::Failure(failure))
+        if failure.error.as_ref().is_some_and(|error| error.code == pb::ErrorCode::ServiceUnavailable as i32))
+    );
+    assert!(coordinator.ensure_agent("talos").await.is_err());
+    assert!(
+        !nodes
+            .get_node(
+                &Actor::regular("user-1"),
+                agent_protocol::GetNodeRequest {
+                    node_id: node_id.clone()
+                }
+            )
+            .await
+            .unwrap()
+            .available
+    );
 
     let registered = control
         .register(Request::new(pb::RegisterRequest {
@@ -354,6 +428,8 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
         Some(pb::heartbeat_response::Result::Failure(failure))
             if failure.error.as_ref().is_some_and(|error| error.code == pb::ErrorCode::Unauthenticated as i32)
     ));
+    stop.cancel();
+    task.await.unwrap();
 }
 
 #[tokio::test]
