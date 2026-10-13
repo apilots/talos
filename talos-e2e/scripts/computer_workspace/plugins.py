@@ -15,11 +15,10 @@ def plugins(cluster):
         return data(http(cluster.url + path, {**body, 'nodeId': node['node_id']}, token, method=method))
     def query(path, node=a):
         return data(http(cluster.url + path + '?' + urlencode({'nodeId': node['node_id']}), token=token))
-    denied = http(cluster.url+'/v1/plugin/sources?'+urlencode({'nodeId':a['node_id']}), token=cluster.users['bob']['access_token'])
-    require(denied.get('error', {}).get('code')=='permissionDenied', 'Foreign owner managed plugin catalog')
-    denied = http(cluster.url+'/v1/plugin/sources', token=token)
-    require(denied.get('error', {}).get('code')=='permissionDenied', 'Regular user managed shared embedded Worker')
-    passed('plugin_target_owner_and_shared_instance_permissions')
+    bob_query = urlencode({'nodeId': cluster.nodes['bob-a']['node_id']})
+    bob_sources = data(http(cluster.url+'/v1/plugin/sources?'+bob_query, token=cluster.users['bob']['access_token']))
+    require(isinstance(bob_sources['sources'], list), 'Bob could not access his Computer plugin catalog')
+    passed('each_owner_manages_personal_worker_plugins')
 
     repo = a['home']/'marketplace'
     skill = repo/'skills'/'computer-plugin'

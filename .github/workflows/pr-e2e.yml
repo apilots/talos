@@ -88,6 +88,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
+          cache-on-failure: true
 
       - name: Install just and nextest
         uses: taiki-e/install-action@v2

@@ -1,4 +1,4 @@
-"""Real model execution and callbacks through outbound Workers, reusing legacy scenarios."""
+"""Real model execution and callbacks through outbound Workers, reusing multi-node scenarios."""
 from pathlib import Path
 import subprocess
 import sys

@@ -96,8 +96,24 @@ async function command(request) {
       return evaluate(cdp, web ? 'location.pathname.split("/").at(-1)' : 'location.hash.split("/").at(-1)');
     }
     case "select": {
-      await evaluate(cdp, `(() => {const button=document.querySelector('aside [data-computer-id="${request.params.nodeId}"]');if(button)button.click();else throw new Error("Quick Computer missing");})()`);
-      await waitForExpression(cdp, `${web ? 'location.pathname==="/"' : 'location.hash==="#/"'} && Boolean(document.querySelector("main h1")) && Boolean(document.querySelector('aside [data-computer-id="${request.params.nodeId}"]'))`, 30_000); return true;
+      const railSelector = JSON.stringify(`aside [data-computer-id="${request.params.nodeId}"]`);
+      const overflowSelector = JSON.stringify(`[role=dialog] [data-computer-id="${request.params.nodeId}"]`);
+      const clicked = await evaluate(cdp, `(() => {const button=document.querySelector(${railSelector});if(!button)return false;button.click();return true;})()`);
+      if (!clicked) {
+        await evaluate(cdp, 'document.querySelector("button[aria-haspopup=dialog]").click()');
+        await waitForExpression(cdp, 'Boolean(document.querySelector("[role=dialog] input"))', 30_000);
+        // Use the actual paginated overflow when the target is outside the quick rail.
+        await evaluate(cdp, '(()=>{const input=document.querySelector("[role=dialog] input");Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(input,"");input.dispatchEvent(new Event("input",{bubbles:true}));})()');
+        await waitForExpression(cdp, 'Boolean(document.querySelector("[role=dialog] [data-computer-id]"))', 30_000);
+        while (!await evaluate(cdp, `Boolean(document.querySelector(${overflowSelector}))`)) {
+          const count = await evaluate(cdp, 'document.querySelectorAll("[role=dialog] [data-computer-id]").length');
+          const more = await evaluate(cdp, '(()=>{const button=Array.from(document.querySelectorAll("[role=dialog] button")).find(b=>b.textContent==="Show more"&&!b.disabled);if(!button)return false;button.click();return true;})()');
+          if (!more) throw new Error("Computer missing from full overflow list");
+          await waitForExpression(cdp, `document.querySelectorAll("[role=dialog] [data-computer-id]").length>${count}`, 30_000);
+        }
+        await evaluate(cdp, `document.querySelector(${overflowSelector}).click()`);
+      }
+      await waitForExpression(cdp, `${web ? 'location.pathname==="/"' : 'location.hash==="#/"'} && Boolean(document.querySelector("main h1")) && Boolean(document.querySelector(${railSelector}))`, 30_000); return true;
     }
     default: throw new Error("Unknown UI operation");
   }
@@ -117,7 +133,7 @@ try {
   for (const surface of surfaces.values()) {
     surface.cdp?.close();
     surface.main?.close();
-    if (surface.child.exitCode === null) {
+    if (surface.child.exitCode === null && surface.child.signalCode === null) {
       const exited = new Promise((resolve) => surface.child.once("exit", resolve));
       surface.child.kill("SIGINT");
       const timeout = setTimeout(() => surface.child.kill("SIGKILL"), 10_000);
@@ -125,4 +141,6 @@ try {
     }
     surface.log.end();
   }
+  lines.close();
+  process.stdin.destroy();
 }

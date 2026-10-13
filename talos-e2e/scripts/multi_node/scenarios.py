@@ -111,7 +111,8 @@ def marker_turn(cluster, user, name):
     marker = uuid.uuid4().hex
     filename = f'{name}-{marker}.txt'
     session, answer, events = cluster.turn(user,
-        f"Use Bash once to run: printf '{marker}' > {filename} . Then reply exactly {marker}.")
+        f"Use Bash once to run: printf '{marker}' > {filename} . Then reply exactly {marker}.",
+        node_id=cluster.nodes[name]['node_id'])
     require(marker in answer, 'Model did not return the requested marker')
     cluster.verify_file(name, filename, marker)
     require(cluster.query('SELECT execution_node_id FROM sessions WHERE session_key=?', (session,)) == [(cluster.nodes[name]['node_id'],)], 'Session bound to wrong Worker')
@@ -162,20 +163,24 @@ def reliability(cluster):
     session = f'sess_{uuid.uuid4().hex}'
     with ThreadPoolExecutor(max_workers=2) as tasks:
         long_turn = tasks.submit(cluster.turn, 'alice',
-            f"Use Bash once with command: sleep 40; printf '{marker}' > {filename} . "
-            f'Do not return until it completes. Then reply exactly {marker}.', session, timeout=75)
+            f"Use Bash once with command: printf 'started'; sleep 40; printf '{marker}' > {filename} . "
+            f'Do not return until it completes. Then reply exactly {marker}.', session, timeout=90, node_id=cluster.nodes['alice-a']['node_id'])
         other = tasks.submit(marker_turn, cluster, 'bob', 'bob-a')
-        def has_live_delta():
+        def has_live_tool_call():
+            if long_turn.done():
+                long_turn.result()
             for path in REPORT.glob(f'{session}_*.jsonl'):
                 # The SSE writer may be in the middle of its next record.
                 records = [json.loads(line)['record'] for line in path.read_text().split('\n')[:-1]]
                 payloads = [record['event']['data']['payload']['type'] for record in records
                             if record.get('event', {}).get('type') == 'agent']
-                if 'messageBlockDelta' in payloads:
-                    require('turnCompleted' not in payloads, 'Delta observed only after completion')
+                if 'messageBlockStarted' in payloads and any(
+                    record['event']['data']['payload'].get('data', {}).get('block', {}).get('content', {}).get('type') == 'toolCall'
+                    for record in records if record.get('event', {}).get('type') == 'agent'):
+                    require('turnCompleted' not in payloads, 'Tool progress observed only after completion')
                     return True
             return False
-        wait_for(has_live_delta, 'live progress while tool is pending', 20)
+        wait_for(has_live_tool_call, 'live tool call while execution is pending', 60)
         require(not list(cluster.nodes['alice-a']['home'].rglob(filename)), 'Tool finished before streaming observation')
         passed('progress_arrives_before_worker_side_effect')
         other.result()

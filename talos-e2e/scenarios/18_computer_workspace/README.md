@@ -16,7 +16,7 @@ controlled RPC tests do not replace these scenarios.
 | `10_oauth` | Public relay, real SDK PKCE/issuer/code exchange and MCP tool, Worker-only credentials, restart, stale/duplicate callbacks, disable/disconnect, original ten-minute expiry and logout |
 | `09_plugins` | Real source/install/update/enable/credentials, DeepSeek MCP tool effects, node isolation, concurrent admission, restart and offline rejection |
 | `07_environment` | Two real Workers: same document/date/Memory ID isolation, stale-version rejection, index replacement, Skills operations, real Harness document context, owner/offline rejection and restart preservation |
-| `11_product_ui` | Real Electron A/D and Chrome Web: real login button/polling/local UUID, pending first-registration UUID recovery, local/remote file effects and final replies, shared history, second Desktop/Web dispatch to the first Desktop Worker, running-task switch, rename/disable/recovery, legacy embedded Project continuation and collapsed title after reload, narrow Sidebar/Escape/focus, legacy permissions, model deep link, drafts/reload, 22-node pagination, offline history, keyboard/themes/language and real logout/account isolation |
+| `11_product_ui` | Two isolated real Chrome clients and one central Server: device login, owned Computer selection, real Worker file effects and live final replies, same-Computer continuation, running-task switch, rename/disable/rejoin, owned Project continuation/title/reload, narrow Sidebar/Escape/focus, model settings, drafts, 22-node pagination, offline history, themes/language and logout/account isolation |
 
 Prerequisites: the adjacent `talos-cloud` checkout (or `TALOS_CLOUD_REPO`), Rust,
 Node.js, installed pnpm workspace dependencies, OpenSSL, protoc, Python grpcio,
@@ -29,9 +29,8 @@ may also use the configured inner/vision models; their credentials must work.
 `01_registration` starts real Auth, Server, TLS/HTTP2 ingress and two actual
 Desktop controllers/SDK/app-server hosts. Device approval uses the real Auth API;
 HTTP Computer APIs and node gRPC share the same origin. No fabricated AuthService,
-cached token injection or database mutation is used. The feat-044 target gives both
-Desktop and Server a management DB and an embedded Worker; the original cloud
-bootstrap/UI assertions are migrated in phase 4 and are not feat-044 acceptance.
+cached token injection or database mutation is used. Desktop and Server each retain a management DB and an embedded Worker.
+Independent control planes share business metadata through Sync, covered by group 19.
 Outbound execution becomes available only after Connect
 publication and a healthy heartbeat.
 
@@ -47,12 +46,12 @@ never the report. SQLite assertions are read-only. Shared setup owns cleanup;
 
 To run registration alone: `just e2e-case 18_computer_workspace/01_registration`.
 Registration and all execution/environment slices have passed with real services
-and DeepSeek. Product UI additionally launches actual Electron and Chrome; its
-original 15 user scenarios passed with a Desktop copied from the DMG; later Review repair scenarios are recorded separately in the verification record. Set
-`TALOS_E2E_DESKTOP_APP=/path/to/Talos.app/Contents/MacOS/Talos` to use the installed
-artifact: the driver removes development binary/resource overrides and asserts
-both actual bundled app-server process paths. Without this variable it uses
-development Electron and the current app-server binary.
+and DeepSeek. Current product UI acceptance launches real Chrome against the central Server.
+Desktop registration is covered by `01_registration`; native local Desktop
+interaction is covered by group 13. Multi-control-plane/Desktop data sharing
+requires the real Sync topology and is covered by the explicitly local group 19,
+not by assuming Desktop directly shares the central Server's business DB.
+Earlier packaged Desktop results remain historical evidence in the verification record.
 
 Local smoke uses an isolated copy of DEV YAML with explicit local mode and no
 login. Cloud acceptance retains real authentication. Model credentials copied
@@ -71,6 +70,4 @@ The product UI driver clicks the real login button and lets AuthPage poll and sa
 identity. Approval uses the actual Cloud Auth API. An isolated main-process CDP
 observer replaces only Electron's OS browser opener to avoid opening a user's
 browser; native auth RPCs and persistence are unchanged. Chrome uses its isolated
-profile and actual device-approval tab. The pending-enrollment case creates an
-owned node through the API and preserves only its YAML pending barrier to model a
-lost response/UUID save; recovery occurs through the actual management page.
+profile and actual device-approval tab. Pending enrollment and saved-credential recovery remain covered by the existing registration and host tests.

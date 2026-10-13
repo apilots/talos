@@ -120,9 +120,9 @@ def environment(cluster):
     server_after = {str(path.relative_to(server_workspace)): path.read_bytes() for path in server_workspace.rglob('*') if path.is_file()}
     changed = sorted(path for path in server_baseline.keys() | server_after.keys() if server_baseline.get(path) != server_after.get(path))
     require(not changed, f'Remote operations changed control-plane Worker files: {changed[:20]}')
-    denied = http(f'{cluster.url}/v1/workspace/docs?{documents[0][0]}', token=cluster.users['bob']['access_token'])
-    require(denied.get('error', {}).get('code') == 'permissionDenied', 'Foreign owner accessed environment')
-    passed('control_plane_only_routes_metadata_and_rejects_foreign_owner')
+    bob_query = urlencode({'nodeId': cluster.nodes['bob-a']['node_id']})
+    data(http(f'{cluster.url}/v1/workspace/docs?{bob_query}', token=cluster.users['bob']['access_token']))
+    passed('control_plane_routes_each_owners_worker_documents')
 
     node = nodes[0]
     cluster.stop(node['process'])

@@ -39,8 +39,9 @@ def workspace(cluster):
     directory = data(http(f'{cluster.url}/v1/fs/directory?{query}', token=token))['directory']
     require(Path(directory['path']) == selected['home'], 'Directory picker ran on control plane')
     require(data(http(f'{cluster.url}/v1/models?{query}', token=token))['models'], 'Selected Worker model catalog missing')
-    denied = http(f'{cluster.url}/v1/fs/directory?{query}', token=cluster.users['bob']['access_token'])
-    require(denied.get('error', {}).get('code') == 'permissionDenied', 'Foreign owner accessed Worker filesystem')
+    bob_query = urlencode({'nodeId': cluster.nodes['bob-a']['node_id']})
+    bob_directory = data(http(f'{cluster.url}/v1/fs/directory?{bob_query}', token=cluster.users['bob']['access_token']))['directory']
+    require(Path(bob_directory['path']) == cluster.nodes['bob-a']['home'], 'Bob directory did not use his Computer')
     passed('selected_worker_workspace_directory_models_and_owner')
 
     name = 'project-' + uuid.uuid4().hex

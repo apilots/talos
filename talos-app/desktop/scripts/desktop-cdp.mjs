@@ -69,6 +69,8 @@ export function connectCdp(url) {
           });
         },
         close() {
+          for (const request of pending.values()) request.reject(new Error("CDP connection closed."));
+          pending.clear();
           socket.close();
         },
       });

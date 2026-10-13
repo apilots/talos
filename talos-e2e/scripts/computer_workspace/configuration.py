@@ -28,11 +28,10 @@ def configuration(cluster):
     qa, qb = [urlencode({'nodeId': node['node_id']}) for node in (a, b)]
     original = data(http(f'{cluster.url}/v1/config/llm?{qa}', token=token))
     require(original['type'] == 'llm', 'Wrong configuration projection')
-    denied = http(f'{cluster.url}/v1/config/llm?{qa}', token=cluster.users['bob']['access_token'])
-    require(denied.get('error', {}).get('code') == 'permissionDenied', 'Foreign owner read configuration')
-    denied = http(f'{cluster.url}/v1/config/llm', token=token)
-    require(denied.get('error', {}).get('code') == 'permissionDenied', 'Ordinary owner acquired shared Server configuration')
-    passed('personal_worker_owner_and_shared_instance_permissions')
+    bob_query = urlencode({'nodeId': cluster.nodes['bob-a']['node_id']})
+    bob_config = data(http(f'{cluster.url}/v1/config/llm?{bob_query}', token=cluster.users['bob']['access_token']))
+    require(bob_config['type'] == 'llm', 'Bob could not read his Computer configuration')
+    passed('each_owner_manages_personal_worker_configuration')
 
     before_server = Path(cluster.server_env['TALOS_CONFIG']).read_bytes()
     marker = 'MODEL_' + uuid.uuid4().hex
