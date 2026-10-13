@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   changed-files:
-    if: ${{ github.event_name != 'pull_request' || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association) }}
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.author_association == 'OWNER' || github.event.pull_request.author_association == 'MEMBER' || github.event.pull_request.author_association == 'COLLABORATOR') }}
     name: changed-file-policy
     runs-on: ubuntu-latest
     timeout-minutes: 5
