@@ -70,6 +70,9 @@ pub(super) async fn subscribe_timeline_events_handler(
 
     let stream = ReceiverStream::new(subscription.events).map(|message| {
         match message {
+            TimelineSubscriptionMessage::ActiveTurnChanged(change) => Ok(Event::default()
+                .event("session/activeTurnChanged")
+                .data(serde_json::to_string(&change)?)),
             TimelineSubscriptionMessage::Event(record) => timeline_sse_event(*record),
             TimelineSubscriptionMessage::MessageQueueChanged(change) => {
                 message_queue_changed_sse_event(change)

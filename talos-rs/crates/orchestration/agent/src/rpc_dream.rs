@@ -21,8 +21,19 @@ impl AgentHarnessRpcAdapter {
         let Some(pb::form_dream_memory_request::Body::Context(context)) = first.body else {
             return Err(status_from_error(invalid_request()));
         };
-        let context = self.memory_context(Some(node_pb::encode_auth(auth)), Some(context))?;
+        let context =
+            self.memory_context(Some(node_pb::encode_auth(auth.clone())), Some(context))?;
         let harness = self.harness(&context.agent_id).map_err(status_from_error)?;
+        let peer = self
+            .coordinator_id(first.caller.as_ref(), &context)
+            .map_err(status_from_error)?;
+        let reflection = self
+            .session_gate
+            .reflection(&context, peer)
+            .map_err(status_from_error)?;
+        let resource_guard = self
+            .bind_resources(&auth, &context, first.caller.as_ref())
+            .map_err(status_from_error)?;
         let adapter = self.clone();
         let (tx, rx) = mpsc::channel(2);
         let model_tx = tx.clone();
@@ -72,6 +83,8 @@ impl AgentHarnessRpcAdapter {
             })
         });
         tokio::spawn(async move {
+            let _reflection = reflection;
+            let _resources = resource_guard;
             let result = tokio::select! {
                 biased;
                 _ = lease.ended() => return,

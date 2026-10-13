@@ -47,11 +47,44 @@ pub trait ProjectStore: Send + Sync {
 
 pub struct StorageProjectStore {
     storage: Arc<dyn Storage>,
+    sync: Arc<crate::sync::StoreSyncBindings>,
 }
 
 impl StorageProjectStore {
+    /// Install the authorized capture boundary; imports bypass these workflows.
+    pub fn with_sync(self, sync: Arc<crate::sync::StoreSyncAdapter>) -> Self {
+        self.sync.install(sync).expect("initial Store sync binding");
+        self
+    }
+
+    /// Install a host-verified binding after login; existing transactions keep
+    /// their original association until they commit.
+    pub fn install_sync(
+        &self,
+        adapter: std::sync::Arc<crate::sync::StoreSyncAdapter>,
+    ) -> TalosResult<()> {
+        self.sync.install(adapter)
+    }
+
     pub async fn new(storage: Arc<dyn Storage>) -> TalosResult<Self> {
-        Ok(Self { storage })
+        Ok(Self {
+            storage,
+            sync: Default::default(),
+        })
+    }
+
+    async fn begin_project_transaction(
+        &self,
+        project_id: &str,
+    ) -> TalosResult<Box<dyn talos_storage::StorageTransaction>> {
+        crate::sync::capture::transaction(
+            self.storage.begin_transaction().await?,
+            self.sync.clone(),
+            vec![talos_sync::SyncResourceKey::Project {
+                project_id: project_id.into(),
+            }],
+        )
+        .await
     }
 
     fn parse_project_record(row: &Row) -> ProjectRecord {
@@ -151,30 +184,12 @@ impl ProjectStore for StorageProjectStore {
             updated_at: now,
             session_count: 0,
         };
-        let row = Row::new(
-            vec![
-                "project_id".to_string(),
-                "name".to_string(),
-                "user_id".to_string(),
-                "execution_node_id".to_string(),
-                "directory".to_string(),
-                "created_at".to_string(),
-                "updated_at".to_string(),
-            ],
-            vec![
-                serde_json::Value::String(record.project_id.clone()),
-                serde_json::Value::String(record.name.clone()),
-                serde_json::Value::String(record.user_id.clone()),
-                serde_json::Value::String(record.execution_node_id.clone()),
-                serde_json::Value::String(record.directory.display().to_string()),
-                serde_json::Value::Number(now.into()),
-                serde_json::Value::Number(now.into()),
-            ],
-        );
-        self.storage.insert("projects", &row).await.map_err(|error| {
+        let mut transaction = self.begin_project_transaction(&record.project_id).await?;
+        transaction.execute("INSERT INTO projects(project_id, name, user_id, execution_node_id, directory, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", &[&record.project_id, &record.name, &record.user_id, &record.execution_node_id, &record.directory.to_string_lossy(), &now.to_string(), &now.to_string()]).await.map_err(|error| {
             let unique = matches!(std::error::Error::source(&error).and_then(|source| source.downcast_ref::<sqlx::Error>()), Some(sqlx::Error::Database(database)) if database.is_unique_violation());
             if unique { TalosError::from_source(talos_error::ErrorCode::Conflict, "Project directory already exists for this user and Worker", error) } else { error }
         })?;
+        transaction.commit().await?;
         Ok(record)
     }
 
@@ -190,16 +205,14 @@ impl ProjectStore for StorageProjectStore {
             record.name = name.clone();
         }
         record.updated_at = chrono::Utc::now().timestamp_millis();
-        let row = Row::new(
-            vec!["name".to_string(), "updated_at".to_string()],
-            vec![
-                serde_json::Value::String(record.name.clone()),
-                serde_json::Value::Number(record.updated_at.into()),
-            ],
-        );
-        self.storage
-            .update("projects", &row, "project_id = ?", &[project_id])
+        let mut transaction = self.begin_project_transaction(project_id).await?;
+        transaction
+            .execute(
+                "UPDATE projects SET name = ?, updated_at = ? WHERE project_id = ?",
+                &[&record.name, &record.updated_at.to_string(), project_id],
+            )
             .await?;
+        transaction.commit().await?;
         Ok(Some(record))
     }
 
@@ -211,8 +224,8 @@ impl ProjectStore for StorageProjectStore {
                 format!("project {} still has bound sessions", project_id),
             ));
         }
-        let deleted = self
-            .storage
+        let mut transaction = self.begin_project_transaction(project_id).await?;
+        let deleted = transaction
             .execute(
                 r#"
                 DELETE FROM projects
@@ -227,6 +240,7 @@ impl ProjectStore for StorageProjectStore {
                 &[project_id],
             )
             .await?;
+        transaction.commit().await?;
         if deleted == 0 && self.get_project(project_id).await?.is_some() {
             return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,

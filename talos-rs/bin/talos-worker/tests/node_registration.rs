@@ -112,10 +112,10 @@ async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_si
     std::fs::write(
         &config_path,
         format!(
-            "workspaces:\n  default_workspace_id: default\n  definitions:\n    - workspace_id: default\n      root_prefix: workspace-talos\nagent:\n  name: talos\ngateway:\n  host: 127.0.0.1\n  port: 8080\n  auth: true\nllm:\n  provider: openai\n  model: test\nagent_node:\n  runner:\n    node_id: {node_id}\n    control_plane_endpoint: https://{address}\n    credential_file: {:?}\n    bind_address: {node_address}\n    tls_certificate_file: {:?}\n    tls_private_key_file: {:?}\n    trusted_ca_file: {:?}\n",
-            credential_path.display().to_string(),
+            "workspaces:\n  default_workspace_id: default\n  definitions:\n    - workspace_id: default\n      root_prefix: workspace-talos\nagent:\n  name: talos\ngateway:\n  host: 127.0.0.1\n  port: 8080\n  auth: true\nllm:\n  provider: openai\n  model: test\nagent_node:\n  worker_rpc:\n    bind_address: {node_address}\n    tls:\n      certificate_file: {:?}\n      private_key_file: {:?}\n  runner:\n    transport: direct\n    node_id: {node_id}\n    control_plane_endpoint: https://{address}\n    credential_file: {:?}\n    trusted_ca_file: {:?}\n",
             certificate_path.display().to_string(),
             private_key_path.display().to_string(),
+            credential_path.display().to_string(),
             certificate_path.display().to_string(),
         ),
     )

@@ -17,5 +17,5 @@ fi
 build_server_binary
 build_worker_binary
 MULTI_NODE_CLOUD_ROOT="${TALOS_CLOUD_REPO:-${REPO_ROOT}/../talos-cloud}"
-(cd "${MULTI_NODE_CLOUD_ROOT}/cloud-rs" && cargo build -q -p cloud-server)
+(cd "${MULTI_NODE_CLOUD_ROOT}/cloud-rs" && cargo build -q -p talos-cloud-server)
 python3 "${MULTI_NODE_SCRIPT_DIR}/scenarios.py" "$1"

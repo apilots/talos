@@ -222,7 +222,6 @@ run_linux_docker_tui_install() {
   docker build -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
   docker run --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
-    -v "${REPO_ROOT}/../talos-cloud:/workspace/talos-cloud:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \
     -v "${container_report_dir}:/tmp/talos-e2e-report" \
     -e TALOS_E2E_TMP_ROOT=/tmp/talos-e2e \

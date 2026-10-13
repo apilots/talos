@@ -164,11 +164,19 @@ impl AgentCoordinator for NoopAgentCoordinator {
         unreachable!("Agent compaction is outside this test scenario")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -247,11 +255,23 @@ impl AgentCoordinator for EnvironmentCoordinator {
     async fn compact_session(&self, context: AgentContext) -> TalosResult<AgentRunExecution> {
         self.delegate.compact_session(context).await
     }
-    async fn clear_session(&self, context: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.clear_session(context).await
+    async fn clear_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .clear_session(context, expected_history_cursor)
+            .await
     }
-    async fn close_session(&self, context: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.close_session(context).await
+    async fn close_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .close_session(context, expected_history_cursor)
+            .await
     }
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
         self.delegate.shutdown(timeout).await

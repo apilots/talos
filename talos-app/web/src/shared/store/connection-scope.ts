@@ -9,7 +9,7 @@ export function normalizeEndpoint(endpoint: string) {
 }
 /** Actor and control-plane identity, excluding rotating credentials. */
 export function connectionScope(connection: ConnectionState) {
-  const endpoint = connection.desktopConnectionMode === "local" ? "desktop-local"
+  const endpoint = connection.desktopConnectionMode ? "desktop-host"
     : normalizeEndpoint(connection.controlPlaneEndpoint || defaultProductEndpoint());
   return JSON.stringify([endpoint, connection.userId]);
 }

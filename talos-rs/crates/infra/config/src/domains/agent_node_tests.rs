@@ -11,6 +11,7 @@ fn node_network_configuration_requires_authenticated_tls() {
     let mut config = AgentNodeConfig {
         control_plane: Some(control),
         runner: None,
+        worker_rpc: WorkerRpcConfig::default(),
     };
     let mut gateway = GatewayConfig::default();
     assert!(config.validate(&gateway).is_err());
@@ -22,10 +23,14 @@ fn node_network_configuration_requires_authenticated_tls() {
     assert!(config.validate(&gateway).is_err());
     config.control_plane.as_mut().unwrap().trusted_node_ca_file = Some("node-ca.crt".into());
     let runner: AgentNodeRunnerConfig = serde_yaml::from_str(
-        "node_id: laptop-1\ncontrol_plane_endpoint: http://localhost:18800\ncredential_file: /tmp/node.credential\nbind_address: 127.0.0.1:18801\ntls_certificate_file: node.crt\ntls_private_key_file: node.key\ntrusted_ca_file: ca.crt\n",
+        "transport: direct\nnode_id: laptop-1\ncontrol_plane_endpoint: http://localhost:18800\ncredential_file: /tmp/node.credential\ntrusted_ca_file: ca.crt\n",
     )
     .unwrap();
     config.runner = Some(runner);
+    config.worker_rpc.tls = Some(WorkerRpcTlsConfig {
+        certificate_file: "node.crt".into(),
+        private_key_file: "node.key".into(),
+    });
     assert!(config.validate(&gateway).is_err());
 
     config.runner.as_mut().unwrap().control_plane_endpoint = "https://localhost:18800".to_string();
@@ -39,6 +44,11 @@ fn node_network_configuration_requires_authenticated_tls() {
     .unwrap();
     config.runner = Some(registration_only);
     assert!(config.validate(&gateway).is_ok());
-    config.runner.as_mut().unwrap().bind_address = "127.0.0.1:18801".to_string();
+    config.worker_rpc.bind_address = "127.0.0.1:18801".to_string();
+    assert!(config.validate(&gateway).is_ok());
+    config.worker_rpc.tls = None;
+    config.worker_rpc.bind_address = "0.0.0.0:18801".to_string();
     assert!(config.validate(&gateway).is_err());
+    config.worker_rpc.bind_address = "[::1]:0".to_string();
+    assert!(config.validate(&gateway).is_ok());
 }

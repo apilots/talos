@@ -23,6 +23,7 @@ impl AgentExecutionDriver {
         let mut pending_input: Option<RunningInputCommit> = None;
         let mut input_open = true;
         let mut deliveries = JoinSet::new();
+        let mut progress_batch = Vec::with_capacity(64);
         loop {
             if let Some(mut input) = pending_input.take() {
                 let expected_sequence = input
@@ -83,18 +84,19 @@ impl AgentExecutionDriver {
             }
 
             tokio::select! {
-                event = events.recv() => {
-                    let Some(event) = event else {
+                count = events.recv_many(&mut progress_batch, 64) => {
+                    if count == 0 {
                         break;
-                    };
+                    }
+                    let sequence = progress_batch.last().expect("nonempty progress batch").sequence;
                     match self
                         .execution_store
-                        .commit_progress_event(event.clone(), last_event_seq)
+                        .commit_progress_events(std::mem::take(&mut progress_batch), last_event_seq)
                         .await
                     {
                         Ok(commit) => {
                             last_event_seq = commit.active_turn.last_event_seq;
-                            last_sequence = event.sequence;
+                            last_sequence = sequence;
                             self.event_service.publish_committed(commit.events);
                         }
                         Err(commit_error) => {

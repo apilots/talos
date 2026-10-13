@@ -10,7 +10,7 @@ use super::{AgentNodeService, CreateNodeRequest};
 use crate::Actor;
 
 #[tokio::test]
-async fn computer_directory_scopes_search_and_pagination_without_hiding_embedded_history() {
+async fn computer_directory_scopes_search_and_pagination_without_exposing_private_embedded() {
     let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
         .await
         .unwrap();
@@ -28,7 +28,7 @@ async fn computer_directory_scopes_search_and_pagination_without_hiding_embedded
     let owner = Actor::regular("owner");
     let other = Actor::regular("other");
     let admin = Actor::regular("admin").with_role(UserRole::Admin);
-    let mut own_ids = vec!["embedded".to_string()];
+    let mut own_ids = Vec::new();
     for (actor, name) in [
         (&owner, "Laptop one"),
         (&owner, "Laptop two"),
@@ -66,7 +66,7 @@ async fn computer_directory_scopes_search_and_pagination_without_hiding_embedded
             )
             .await
             .unwrap();
-        assert_eq!(page.total, 4);
+        assert_eq!(page.total, 3);
         assert_eq!(page.data.len(), 1);
         listed.push(page.data[0].node_id.clone());
         cursor = page.next_cursor;

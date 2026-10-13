@@ -12,4 +12,5 @@ pub mod plugins;
 pub mod prompt;
 pub mod skills;
 pub mod storage;
+pub mod sync;
 pub mod tools;

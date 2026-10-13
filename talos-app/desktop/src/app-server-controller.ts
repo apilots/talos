@@ -28,6 +28,8 @@ export interface AppServerBridge {
 
 export interface DesktopAppServerControllerOptions extends AppServerClientOptions {
   bridgeFactory?: (options: AppServerClientOptions) => AppServerBridge;
+  onActiveTurnChanged?: (notification: AppProtocol.SessionActiveTurnChangedNotification) => void;
+  onMessageQueueChanged?: (notification: AppProtocol.MessageQueueChangedNotification) => void;
   onEvent?: (event: AppProtocol.TimelineEvent) => void;
   onSubscriptionTerminated?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
   onRuntimeState?: (state: TalosRuntimeState) => void;
@@ -150,7 +152,11 @@ export class DesktopAppServerController {
 
     const bridge = this.createBridge();
     bridge.onNotification((notification) => {
-      if (this.bridge !== bridge || notification.method !== "desktop/worker/failed") return;
+      if (this.bridge !== bridge) return;
+      if (notification.method === "session/activeTurnChanged") { this.options.onActiveTurnChanged?.(notification.params as AppProtocol.SessionActiveTurnChangedNotification); return; }
+      if (notification.method === "messageQueue/changed") { this.options.onMessageQueueChanged?.(notification.params as AppProtocol.MessageQueueChangedNotification); return; }
+      if (notification.method === "desktop/worker/ready") { this.emitRuntimeState("ready", null); return; }
+      if (notification.method !== "desktop/worker/failed") return;
       try {
         this.options.onRuntimeState?.({ kind: "error", message: null, error: decodeApiError(notification.params) });
       } catch (error) { this.handleError(error); }

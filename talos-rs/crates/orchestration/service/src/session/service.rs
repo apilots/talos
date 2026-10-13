@@ -9,7 +9,6 @@ use talos_store::session::{
     AccumulateSessionUsageParams, PatchSessionParams, SessionQuery, SessionRecord, SessionStore,
     SessionTreeIdentity, SessionTreeScope,
 };
-use talos_types::talos::TalosConnectionMode;
 use talos_types::{
     OptionalCurrentDirectoryPatch, SessionConfigOverridePolicy, SessionInfo, SessionPatch,
     TalosConfig, UserPermissionMode, DEFAULT_SESSION_TITLE,
@@ -23,15 +22,34 @@ mod environment;
 #[path = "title.rs"]
 mod title;
 
+#[path = "execution_boundary.rs"]
+mod execution_boundary;
+
 #[derive(Clone)]
 pub(crate) struct SessionService {
     session_store: Arc<dyn SessionStore>,
     project_store: Arc<dyn ProjectStore>,
     base_config: Arc<RwLock<TalosConfig>>,
     coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
+    sync: Arc<RwLock<execution_boundary::SessionSyncState>>,
 }
 
 impl SessionService {
+    pub(crate) async fn claim_local_history(&self, user_id: &str) -> TalosResult<()> {
+        let records = self
+            .session_store
+            .list_session_records(&talos_store::session::SessionQuery {
+                user_id: Some("anonymous".into()),
+                execution_node_id: Some("embedded".into()),
+                ..Default::default()
+            })
+            .await?;
+        for record in records {
+            self.ensure_worker_idle(&record).await?;
+        }
+        self.session_store.claim_local_history(user_id).await
+    }
+
     pub(crate) async fn reject_nonterminal_turns(&self, node_id: &str) -> TalosResult<()> {
         if self
             .session_store
@@ -57,10 +75,20 @@ impl SessionService {
             project_store,
             base_config: Arc::new(RwLock::new(base_config)),
             coordinator,
+            sync: Default::default(),
         }
     }
 
-    fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
+    async fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
+        if record.conf.model_selection.is_none()
+            && self
+                .session_store
+                .get_shared_session_info(&record.id)
+                .await?
+                .is_some()
+        {
+            return SessionConfigOverridePolicy::validate_conf(&record.conf);
+        }
         record.conf.model_selection.as_ref().ok_or_else(|| {
             TalosError::internal("Session uses an incompatible persisted session format: missing modelSelection.").context(format!(
                 "session '{}' uses an incompatible persisted session format: missing modelSelection",
@@ -81,16 +109,35 @@ impl SessionService {
         self.base_config_snapshot().agent.kernel.timezone
     }
 
-    pub(crate) fn session_info(&self, record: &SessionRecord) -> TalosResult<SessionInfo> {
+    pub(crate) async fn session_info(&self, record: &SessionRecord) -> TalosResult<SessionInfo> {
         let base_config = self.base_config_snapshot();
-        let model_selection = record.conf.model_selection.clone().ok_or_else(|| {
-            TalosError::internal("Session is missing its model selection.").context(format!(
-                "session '{}' is missing its model selection",
-                record.id
-            ))
-        })?;
-        let effective_mode =
-            SessionConfigOverridePolicy::resolve_user_permission_mode(&base_config, &record.conf);
+        let shared = self
+            .session_store
+            .get_shared_session_info(&record.id)
+            .await?;
+        let model_selection = record
+            .conf
+            .model_selection
+            .clone()
+            .or_else(|| shared.as_ref().map(|info| info.model_selection.clone()))
+            .ok_or_else(|| TalosError::internal("Session is missing its model selection."))?;
+        let configured_default_mode = shared.as_ref().map_or_else(
+            || {
+                UserPermissionMode::from(
+                    &base_config
+                        .agent
+                        .kernel
+                        .tools
+                        .sandbox_policy
+                        .user_permission_mode,
+                )
+            },
+            |info| info.configured_default_mode,
+        );
+        let effective_mode = record
+            .conf
+            .user_permission_mode
+            .unwrap_or(configured_default_mode);
         Ok(SessionInfo {
             node_id: record.execution_node_id.clone(),
             id: record.id.clone(),
@@ -99,14 +146,7 @@ impl SessionService {
             source_type: record.source_type.clone(),
             source_provider: record.source_provider.clone(),
             model_selection,
-            configured_default_mode: UserPermissionMode::from(
-                &base_config
-                    .agent
-                    .kernel
-                    .tools
-                    .sandbox_policy
-                    .user_permission_mode,
-            ),
+            configured_default_mode,
             effective_mode,
             created_at: record.created_at,
             last_activity: record.last_activity,
@@ -137,10 +177,7 @@ impl SessionService {
         if project_directory.is_some() {
             return Ok(project_directory);
         }
-        if record.environment.as_ref().is_some_and(|environment| {
-            environment.connection_mode == talos_types::talos::TalosConnectionMode::Embedded
-        }) && record.current_directory.is_some()
-        {
+        if record.current_directory.is_some() {
             return Ok(record.current_directory.clone());
         }
         // The execution node resolves the implicit Workspace from its own configuration.
@@ -213,17 +250,10 @@ impl SessionService {
             self.validate_project_binding(project_id, &params.user_id, &params.execution_node_id)
                 .await?;
         }
-        let connection_mode = params
-            .source
-            .environment
-            .as_ref()
-            .map(|environment| environment.connection_mode)
-            .unwrap_or_default();
         params.current_directory = self
             .normalize_current_directory(
                 &params.execution_node_id,
                 &params.user_id,
-                connection_mode,
                 params.current_directory,
             )
             .await?;
@@ -236,8 +266,8 @@ impl SessionService {
         let records = self.session_store.list_session_records(&query).await?;
         let mut sessions = Vec::with_capacity(records.len());
         for record in &records {
-            self.validate_persisted_model_selection(record)?;
-            sessions.push(self.session_info(record)?);
+            self.validate_persisted_model_selection(record).await?;
+            sessions.push(self.session_info(record).await?);
         }
         Ok(sessions)
     }
@@ -252,6 +282,8 @@ impl SessionService {
         record: &SessionRecord,
         identity: AgentTurnRef,
     ) -> TalosResult<AgentContext> {
+        let prepared = self.prepare_execution(record).await?;
+        let record = &prepared;
         if record.id != identity.session_id {
             return Err(TalosError::internal(
                 "Agent identity does not match its source Session",
@@ -265,18 +297,14 @@ impl SessionService {
                 )),
             );
         }
-        let model_selection = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?
-            .ok_or_else(|| {
-            TalosError::internal("Session is missing its model selection.").context(format!(
-                "session '{}' is missing its model selection",
-                record.id
-            ))
-        })?;
+        let info = self.session_info(record).await?;
+        let model_selection = info.model_selection;
         let model = self
             .model_info_for_selection(&record.execution_node_id, &record.user_id, &model_selection)
             .await?;
         let session_context = self.build_agent_session_context(record).await?;
         Ok(AgentContext {
+            history_cursor: self.session_store.get_history_cursor(&record.id).await?,
             session: session_context,
             turn_id: identity.turn_id,
             project_id: record.project_id.clone(),
@@ -284,11 +312,43 @@ impl SessionService {
             environment: record.environment.clone(),
             model,
             model_selection,
-            permission_mode: SessionConfigOverridePolicy::resolve_user_permission_mode(
-                &self.base_config_snapshot(),
-                &record.conf,
-            ),
+            permission_mode: info.effective_mode,
         })
+    }
+
+    pub(crate) async fn commit_worker_history_cursor(
+        &self,
+        identity: &AgentTurnRef,
+        visibility: agent_protocol::SessionStateVisibility,
+    ) -> TalosResult<()> {
+        let Some(history_cursor) = self
+            .session_store
+            .get_history_cursor(&identity.session_id)
+            .await?
+        else {
+            return Ok(());
+        };
+        if history_cursor.completed_turn_id.as_deref() != Some(identity.turn_id.as_str()) {
+            return Ok(());
+        }
+        let record = self
+            .load_record(&identity.session_id)
+            .await?
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::SessionNotFound,
+                    "Session was not found",
+                )
+            })?;
+        let session = self.build_agent_session_context(&record).await?;
+        self.coordinator
+            .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
+                session,
+                identity: Some(identity.clone()),
+                history_cursor,
+                visibility,
+            })
+            .await
     }
 
     pub(crate) async fn load_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
@@ -335,7 +395,7 @@ impl SessionService {
         record: SessionRecord,
         patch: SessionPatch,
     ) -> TalosResult<Option<SessionRecord>> {
-        self.validate_persisted_model_selection(&record)?;
+        self.validate_persisted_model_selection(&record).await?;
         let patch = self.normalize_session_patch(&record, patch).await?;
         self.apply_session_patch(record, patch).await
     }
@@ -372,7 +432,7 @@ impl SessionService {
         record: SessionRecord,
         usage: &talos_types::talos::TokenUsage,
     ) -> TalosResult<SessionRecord> {
-        self.validate_persisted_model_selection(&record)?;
+        self.validate_persisted_model_selection(&record).await?;
         let last_activity = chrono::Utc::now()
             .timestamp_millis()
             .try_into()
@@ -420,25 +480,16 @@ impl SessionService {
         record: &SessionRecord,
         mut patch: SessionPatch,
     ) -> TalosResult<SessionPatch> {
-        let mode = record
-            .environment
-            .as_ref()
-            .map(|env| env.connection_mode)
-            .unwrap_or_default();
         if let Some(OptionalCurrentDirectoryPatch::Set { path }) = patch.current_directory.as_ref()
         {
             patch.current_directory = self
                 .normalize_current_directory(
                     &record.execution_node_id,
                     &record.user_id,
-                    mode,
                     Some(path.clone()),
                 )
                 .await?
                 .map(|path| OptionalCurrentDirectoryPatch::Set { path });
-        }
-        if matches!(mode, TalosConnectionMode::Remote) {
-            patch.current_directory = None;
         }
         Ok(patch)
     }

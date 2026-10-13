@@ -53,7 +53,9 @@ impl NodeControlRpc {
                 connection.clone(),
                 deployment.agent_id.clone(),
                 auth.clone(),
-            );
+            )
+            .with_coordinator_id(self.remote_publisher.coordinator_id.clone())
+            .map_err(control_status)?;
             if let Err(error) = self
                 .remote_publisher
                 .coordinator
@@ -65,15 +67,13 @@ impl NodeControlRpc {
                 return Err(control_status(error));
             }
         }
+        let environment = Arc::new(agent_client::AgentEnvironmentClient::from_connection(
+            connection.clone(),
+            auth.clone(),
+        ));
         self.remote_publisher
             .coordinator
-            .register_environment(
-                auth.node_id.clone(),
-                Arc::new(agent_client::AgentEnvironmentClient::from_connection(
-                    connection.clone(),
-                    auth.clone(),
-                )),
-            )
+            .register_environment(auth.node_id.clone(), environment.clone())
             .await;
         let coordinator = self.remote_publisher.coordinator.clone();
         let revoke_node = auth.node_id.clone();
@@ -100,6 +100,11 @@ impl NodeControlRpc {
             self.nodes.withdraw_publication(&auth, &revoke).await;
             return Err(control_status(error));
         }
+        self.remote_publisher
+            .connections
+            .lock()
+            .await
+            .insert(auth.node_id.clone(), environment);
         drop(lifecycle);
         let nodes = self.nodes.clone();
         let shutdown = self.shutdown.clone();

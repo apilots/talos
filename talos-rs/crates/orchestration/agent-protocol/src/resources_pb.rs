@@ -119,9 +119,6 @@ pub fn encode_tree(value: AgentTreeSnapshot) -> pb::AgentTree {
 }
 
 pub fn encode_tool_file(value: FileInfo) -> TalosResult<pb::ToolFileInfo> {
-    if value.scope != FileScope::Personal {
-        return Err(invalid());
-    }
     Ok(pb::ToolFileInfo {
         file_id: value.file_id,
         original_filename: value.original_filename,
@@ -131,6 +128,12 @@ pub fn encode_tool_file(value: FileInfo) -> TalosResult<pb::ToolFileInfo> {
         metadata: value.metadata.into_iter().collect(),
         created_at: value.created_at,
         updated_at: value.updated_at,
+        scope: Some(pb::FileScope {
+            scope: Some(match value.scope {
+                FileScope::Personal => pb::file_scope::Scope::Personal(pb::Empty {}),
+                FileScope::Project { project_id } => pb::file_scope::Scope::ProjectId(project_id),
+            }),
+        }),
     })
 }
 
@@ -141,7 +144,17 @@ pub fn decode_tool_file(value: pb::ToolFileInfo) -> TalosResult<FileInfo> {
     }
     Ok(FileInfo {
         file_id: value.file_id,
-        scope: FileScope::Personal,
+        scope: match value
+            .scope
+            .and_then(|scope| scope.scope)
+            .ok_or_else(invalid)?
+        {
+            pb::file_scope::Scope::Personal(_) => FileScope::Personal,
+            pb::file_scope::Scope::ProjectId(project_id) if !project_id.is_empty() => {
+                FileScope::Project { project_id }
+            }
+            _ => return Err(invalid()),
+        },
         original_filename: value.original_filename,
         mime_type: value.mime_type,
         size_bytes: value.size_bytes,

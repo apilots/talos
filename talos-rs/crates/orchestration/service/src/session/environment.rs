@@ -57,11 +57,16 @@ impl SessionService {
         if record.agent_id.trim().is_empty() {
             return Err(TalosError::internal("Session is missing its Agent binding"));
         }
+        let namespace = self
+            .session_store
+            .get_workspace_user_id(&record.id)
+            .await?
+            .unwrap_or_else(|| record.user_id.clone());
         let workspace = self
             .worker_environment(&record.execution_node_id, &record.user_id)
             .await?
             .workspace_info(Self::environment_context(
-                &record.user_id,
+                &namespace,
                 Some(record.workspace_id.clone()),
             ))
             .await?;
@@ -70,7 +75,7 @@ impl SessionService {
             session_id: record.id.clone(),
             workspace: EffectiveWorkspace {
                 workspace_id: workspace.workspace_id,
-                user_id: record.user_id.clone(),
+                user_id: namespace,
                 root: workspace.user_workspace_dir.into(),
             },
         })
@@ -79,12 +84,11 @@ impl SessionService {
         &self,
         node_id: &str,
         user_id: &str,
-        mode: TalosConnectionMode,
         directory: Option<PathBuf>,
     ) -> TalosResult<Option<PathBuf>> {
-        match (mode, directory) {
-            (TalosConnectionMode::Remote, _) | (_, None) => Ok(None),
-            (TalosConnectionMode::Embedded, Some(directory)) => self
+        match directory {
+            None => Ok(None),
+            Some(directory) => self
                 .worker_environment(node_id, user_id)
                 .await?
                 .validate_project_directory(Self::environment_context(user_id, None), directory)

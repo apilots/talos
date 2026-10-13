@@ -28,7 +28,11 @@ impl SubagentService {
         subagent: SubagentRef,
         agent_id: String,
     ) -> TalosResult<SubagentSnapshot> {
-        if let Some(active) = self.timeline.get_active_turn(&subagent.session_id).await? {
+        if let Some(active) = self
+            .timeline
+            .display_active_turn(&subagent.session_id)
+            .await?
+        {
             return self
                 .build_turn_snapshot(
                     subagent,
@@ -59,7 +63,7 @@ impl SubagentService {
     ) -> TalosResult<SubagentSnapshot> {
         let active_state = self
             .timeline
-            .get_active_turn(&subagent.session_id)
+            .display_active_turn(&subagent.session_id)
             .await?
             .filter(|active| active.identity.turn_id == turn_id)
             .map(|active| active.state);

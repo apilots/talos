@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::pool::PoolConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{Column, Pool, Row as SqlxRow, Sqlite, SqliteConnection};
+use sqlx::{Column, Pool, Row as SqlxRow, Sqlite, SqliteConnection, ValueRef};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::str::FromStr;
@@ -267,7 +267,13 @@ fn sqlite_row(row: sqlx::sqlite::SqliteRow) -> Row {
         .collect::<Vec<_>>();
     let values = (0..columns.len())
         .map(|index| {
-            if let Ok(value) = row.try_get::<String, _>(index) {
+            if row
+                .try_get_raw(index)
+                .expect("column indices originate from the same row")
+                .is_null()
+            {
+                Value::Null
+            } else if let Ok(value) = row.try_get::<String, _>(index) {
                 Value::String(value)
             } else if let Ok(value) = row.try_get::<i64, _>(index) {
                 Value::Number(value.into())
@@ -397,3 +403,35 @@ impl Storage for SqliteStorage {
 #[cfg(test)]
 #[path = "sqlite_tests.rs"]
 mod tests;
+
+#[async_trait]
+impl StorageTransaction for SqliteWriteTransaction {
+    async fn query(&mut self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
+        let mut query = sqlx::query(sql);
+        for param in params {
+            query = query.bind(*param);
+        }
+        query
+            .fetch_all(&mut **self)
+            .await
+            .map(SqliteStorage::rows)
+            .map_err(|error| crate::database_error("query the database transaction", error))
+    }
+    async fn execute(&mut self, sql: &str, params: &[&str]) -> TalosResult<u64> {
+        let mut query = sqlx::query(sql);
+        for param in params {
+            query = query.bind(*param);
+        }
+        query
+            .execute(&mut **self)
+            .await
+            .map(|result| result.rows_affected())
+            .map_err(|error| crate::database_error("execute the database transaction", error))
+    }
+    async fn commit(self: Box<Self>) -> TalosResult<()> {
+        (*self).commit().await
+    }
+    async fn rollback(self: Box<Self>) -> TalosResult<()> {
+        (*self).rollback().await
+    }
+}

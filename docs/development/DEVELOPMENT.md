@@ -17,6 +17,12 @@ Install it with `brew install protobuf` on macOS or
 `sudo apt-get install protobuf-compiler` on Debian/Ubuntu before running the
 Rust checks. The Docker builder and source-build CI provision it explicitly.
 
+Rust product builds consume the public `talos-cloud-sdk = "=0.1.3"` and
+`talos-sync-sdk` registry packages. They do not require adjacent private Cloud
+or Sync source checkouts. Real authentication E2E still needs the adjacent
+`talos-cloud` service source (or `TALOS_CLOUD_REPO`) to launch its isolated server;
+this fixture requirement is separate from product SDK dependencies.
+
 Frontend dependencies are managed separately:
 
 ```bash

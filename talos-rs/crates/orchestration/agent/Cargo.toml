@@ -7,10 +7,12 @@ license.workspace = true
 description = "Talos Agent Harness and Provider SPI"
 
 [dependencies]
+talos-fs = { workspace = true }
 talos-memory = { workspace = true }
 bytes = { workspace = true }
 prost = { workspace = true }
 chrono = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 talos-agent-api = { workspace = true }
 agent-protocol = { workspace = true }
@@ -31,6 +33,7 @@ uuid = { workspace = true, features = ["v4"] }
 dashmap = "5.4"
 
 [dev-dependencies]
+tempfile = "3"
 agent-client = { workspace = true }
 rcgen = "0.14"
 

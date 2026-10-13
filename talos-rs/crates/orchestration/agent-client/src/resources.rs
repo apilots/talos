@@ -31,6 +31,7 @@ use crate::AgentTlsTrust;
 pub struct AgentSessionDataClient {
     channel: Channel,
     auth: Arc<RwLock<NodeAuth>>,
+    caller: Option<pb::CoordinatorCallContext>,
 }
 
 impl AgentSessionDataClient {
@@ -63,6 +64,61 @@ impl AgentSessionDataClient {
         Ok(Self {
             channel: endpoint.connect_lazy(),
             auth: Arc::new(RwLock::new(auth)),
+            caller: None,
+        })
+    }
+
+    pub async fn connect_loopback(
+        address: std::net::SocketAddr,
+        auth: NodeAuth,
+    ) -> TalosResult<Self> {
+        Ok(Self {
+            channel: crate::tls::loopback_channel(address).await?,
+            auth: Arc::new(RwLock::new(auth)),
+            caller: None,
+        })
+    }
+    /// Read the current private transport credential for invocation binding.
+    /// It must not be logged, exported to callers or synchronized as metadata.
+    pub fn current_auth(&self) -> NodeAuth {
+        self.auth()
+    }
+    /// Freeze authorization and routing for this invocation. Concurrent Sessions
+    /// never mutate a shared endpoint, callback scope or another invocation's auth.
+    pub fn for_invocation(
+        &self,
+        auth: NodeAuth,
+        session: &agent_protocol::AgentSessionContext,
+        caller: Option<pb::CoordinatorCallContext>,
+    ) -> TalosResult<Self> {
+        let scope = agent_protocol::harness_pb::encode_session_context(session.clone());
+        let caller = match caller {
+            Some(caller)
+                if caller.session.as_ref() == Some(&scope)
+                    && !caller.connection_id.is_empty()
+                    && caller.rpc_call_id != 0 =>
+            {
+                caller
+            }
+            Some(_) => {
+                return Err(TalosError::new(
+                    ErrorCode::PermissionDenied,
+                    "Resource callback scope does not match Session",
+                ))
+            }
+            None => pb::CoordinatorCallContext {
+                coordinator_id: String::new(),
+                connection_id: String::new(),
+                rpc_call_id: 0,
+                session: Some(scope),
+                turn_id: None,
+                project_id: None,
+            },
+        };
+        Ok(Self {
+            channel: self.channel.clone(),
+            auth: Arc::new(RwLock::new(auth)),
+            caller: Some(caller),
         })
     }
 
@@ -107,6 +163,7 @@ impl AgentSessionDataClient {
             pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
                 .read_session_history(rpc_request(
                     pb::ReadSessionHistoryRequest {
+                        caller: self.caller.clone(),
                         auth: Some(node_pb::encode_auth(self.auth())),
                         params: Some(pb::ReadSessionHistoryParams {
                             session_id: params.session_id,
@@ -140,6 +197,7 @@ impl AgentSessionDataClient {
             pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
                 .resolve_attachments(rpc_request(
                     pb::ResolveAttachmentsRequest {
+                        caller: self.caller.clone(),
                         auth: Some(node_pb::encode_auth(self.auth())),
                         params: Some(pb::ResolveAttachmentsParams {
                             project_id: scope.project_id.clone(),
@@ -157,14 +215,19 @@ impl AgentSessionDataClient {
             match response.result.ok_or_else(invalid_response)? {
                 pb::resolve_attachments_response::Result::Metadata(metadata) => {
                     finish_attachment(&mut resolved, current.take())?;
-                    if metadata.order as usize != resolved.len() {
+                    if metadata.order as usize != resolved.len()
+                        || file_ids.get(resolved.len()) != Some(&metadata.file_id)
+                    {
                         return Err(invalid_response());
                     }
                     current = Some((metadata, Vec::new()));
                 }
                 pb::resolve_attachments_response::Result::Chunk(chunk) => {
                     let (metadata, bytes) = current.as_mut().ok_or_else(invalid_response)?;
-                    if metadata.order != chunk.order {
+                    if metadata.order != chunk.order
+                        || chunk.data.len() > 64 * 1024
+                        || bytes.len().saturating_add(chunk.data.len()) as u64 > metadata.size_bytes
+                    {
                         return Err(invalid_response());
                     }
                     bytes.extend_from_slice(&chunk.data);
@@ -189,6 +252,7 @@ impl AgentSessionDataClient {
             pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
                 .read_memory_progress(rpc_request(
                     pb::ReadMemoryProgressRequest {
+                        caller: self.caller.clone(),
                         auth: Some(node_pb::encode_auth(self.auth())),
                         params: Some(pb::ReadMemoryProgressParams {
                             session_id: session_id.to_owned(),
@@ -219,6 +283,7 @@ impl AgentSessionDataClient {
             pb::agent_session_data_rpc_client::AgentSessionDataRpcClient::new(self.channel.clone())
                 .advance_memory_progress(rpc_request(
                     pb::AdvanceMemoryProgressRequest {
+                        caller: self.caller.clone(),
                         auth: Some(node_pb::encode_auth(self.auth())),
                         params: Some(pb::AdvanceMemoryProgressParams {
                             session_id: session_id.to_owned(),
@@ -248,6 +313,7 @@ impl AgentSessionDataClient {
         )
         .spawn_subagent(rpc_request(
             pb::SpawnSubagentRequest {
+                caller: self.caller.clone(),
                 auth: Some(node_pb::encode_auth(self.auth())),
                 params: Some(pb::SpawnSubagentParams {
                     caller: Some(encode_caller(request.caller)),
@@ -282,6 +348,7 @@ impl AgentSessionDataClient {
         )
         .send_subagent_message(rpc_request(
             pb::SendSubagentMessageRequest {
+                caller: self.caller.clone(),
                 auth: Some(node_pb::encode_auth(self.auth())),
                 params: Some(pb::SendSubagentMessageParams {
                     caller: Some(encode_caller(request.caller)),
@@ -315,6 +382,7 @@ impl AgentSessionDataClient {
         )
         .wait_subagent(rpc_request(
             pb::WaitSubagentRequest {
+                caller: self.caller.clone(),
                 auth: Some(node_pb::encode_auth(self.auth())),
                 params: Some(pb::WaitSubagentParams {
                     caller: Some(encode_caller(request.caller)),
@@ -339,6 +407,7 @@ impl AgentSessionDataClient {
         )
         .interrupt_subagent(rpc_request(
             pb::InterruptSubagentRequest {
+                caller: self.caller.clone(),
                 auth: Some(node_pb::encode_auth(self.auth())),
                 params: Some(pb::InterruptSubagentParams {
                     caller: Some(encode_caller(request.caller)),
@@ -362,6 +431,7 @@ impl AgentSessionDataClient {
         )
         .follow_up_subagent(rpc_request(
             pb::FollowUpSubagentRequest {
+                caller: self.caller.clone(),
                 auth: Some(node_pb::encode_auth(self.auth())),
                 params: Some(pb::FollowUpSubagentParams {
                     caller: Some(encode_caller(request.caller)),
@@ -386,6 +456,7 @@ impl AgentSessionDataClient {
         )
         .list_subagents(rpc_request(
             pb::ListSubagentsRequest {
+                caller: self.caller.clone(),
                 auth: Some(node_pb::encode_auth(self.auth())),
                 params: Some(pb::ListSubagentsParams {
                     caller: Some(encode_caller(request.caller)),
@@ -423,9 +494,11 @@ impl AgentSessionDataClient {
         let media_type = image.media_type;
         let size_bytes = image.bytes.len() as u64;
         let bytes = image.bytes;
+        let caller = self.caller.clone();
         let upload = tokio::spawn(async move {
             sender
                 .send(pb::SaveToolImageRequest {
+                    caller: caller.clone(),
                     auth: Some(node_pb::encode_auth(auth.clone())),
                     body: Some(pb::save_tool_image_request::Body::Metadata(
                         pb::SaveToolImageMetadata {
@@ -440,6 +513,7 @@ impl AgentSessionDataClient {
             for chunk in bytes.chunks(CHUNK_BYTES) {
                 sender
                     .send(pb::SaveToolImageRequest {
+                        caller: caller.clone(),
                         auth: Some(node_pb::encode_auth(auth.clone())),
                         body: Some(pb::save_tool_image_request::Body::Chunk(chunk.to_vec())),
                     })

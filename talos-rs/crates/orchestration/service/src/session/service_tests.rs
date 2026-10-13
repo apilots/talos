@@ -312,6 +312,7 @@ async fn agent_context_is_built_once_from_session_authorities() {
     let identity = AgentTurnRef::new(session.id.clone(), "turn-1");
     let model_selection = session.conf.model_selection.clone().unwrap();
     let expected = AgentContext {
+        history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),
             session_id: identity.session_id.clone(),
@@ -409,7 +410,7 @@ async fn create_session_resolves_configured_permission_mode() {
         .create_session(create_session_params(source(), "default", None))
         .await
         .expect("session should be created");
-    let info = service.session_info(&session).unwrap();
+    let info = service.session_info(&session).await.unwrap();
 
     assert_eq!(
         (info.configured_default_mode, info.effective_mode,),
@@ -444,7 +445,7 @@ async fn create_session_permission_override_wins_over_configured_default() {
         .create_session(params)
         .await
         .expect("session should be created");
-    let info = service.session_info(&session).unwrap();
+    let info = service.session_info(&session).await.unwrap();
 
     assert_eq!(
         (

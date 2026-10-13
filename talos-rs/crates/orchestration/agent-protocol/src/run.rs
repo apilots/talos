@@ -114,6 +114,11 @@ pub struct AgentProgressEventReceiver {
 }
 
 impl AgentProgressEventReceiver {
+    /// Receive a bounded batch of already available progress without delaying live events.
+    pub async fn recv_many(&mut self, events: &mut Vec<AgentEvent>, limit: usize) -> usize {
+        self.receiver.recv_many(events, limit).await
+    }
+
     /// Wrap the Harness-owned progress channel for delivery to Service.
     pub fn new(receiver: mpsc::Receiver<AgentEvent>) -> Self {
         Self { receiver }

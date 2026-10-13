@@ -51,6 +51,21 @@ impl AgentHarnessRpcAdapter {
             }};
         }
         match first {
+            Call::ActiveSessionCommand(_)
+            | Call::PeerFileRead(_)
+            | Call::PeerFileUpdate(_)
+            | Call::PeerFileDelete(_)
+            | Call::ReadSessionHistory(_)
+            | Call::ResolveAttachments(_)
+            | Call::ReadMemoryProgress(_)
+            | Call::AdvanceMemoryProgress(_)
+            | Call::SpawnSubagent(_)
+            | Call::SendSubagentMessage(_)
+            | Call::WaitSubagent(_)
+            | Call::InterruptSubagent(_)
+            | Call::FollowUpSubagent(_)
+            | Call::ListSubagents(_)
+            | Call::SaveToolImage(_) => Err(status_from_error(invalid_request())),
             Call::ListPluginSources(value) => unary!(value, list_plugin_sources, ListPluginSources),
             Call::AddPluginSource(value) => unary!(value, add_plugin_source, AddPluginSource),
             Call::RefreshPluginSource(value) => {
@@ -89,6 +104,12 @@ impl AgentHarnessRpcAdapter {
             Call::DeleteConfig(value) => unary!(value, delete_config, DeleteConfig),
             Call::ReloadConfig(value) => unary!(value, reload_config, ReloadConfig),
 
+            Call::ReadSessionExecutionState(value) => {
+                unary!(value, read_session_execution_state, SessionExecutionState)
+            }
+            Call::CommitSessionExecutionState(value) => {
+                unary!(value, commit_session_execution_state, Empty)
+            }
             Call::Start(value) => stream!(value, Start, serve_start, Run),
             Call::SubmitInput(value) => stream!(value, SubmitInput, serve_submit_input, Input),
             Call::CompactSession(value) => {
@@ -148,7 +169,8 @@ impl AgentHarnessRpcAdapter {
                     .active
                     .lock()
                     .expect("Agent active lock poisoned")
-                    .is_empty()
+                    .values()
+                    .all(|owner| *owner == AuthorizationOwner::Host)
                 {
                     return Ok(());
                 }

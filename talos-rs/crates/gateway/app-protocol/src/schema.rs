@@ -20,6 +20,7 @@ pub struct AppProtocolSchemaRoot {
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
     pub error: AppServerErrorBody,
+    pub sync_status_response: talos_types::SyncStatusResponse,
     pub computer_list_response: talos_types::ComputerListResponse,
     pub desktop_connection_response: talos_types::DesktopConnectionResponse,
     pub desktop_worker_identity_response: talos_types::DesktopWorkerIdentityResponse,
@@ -144,6 +145,9 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SandboxApprovalDecision>());
     output.push_str(&export::<talos_types::SessionActiveTurnRequest>());
     output.push_str(&export::<talos_agent_api::SessionActiveTurnResponse>());
+    output.push_str(&export::<
+        talos_agent_api::SessionActiveTurnChangedNotification,
+    >());
     output.push_str(&export::<talos_types::SessionHistoryRequest>());
     output.push_str(&export::<talos_agent_api::SessionHistoryResponse>());
     output.push_str(&export::<talos_agent_api::SessionHistoryTurn>());
@@ -155,6 +159,9 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_agent_api::TimelineCursorStatus>());
     output.push_str(&export::<talos_agent_api::TimelineActiveTurn>());
     output.push_str(&export::<talos_agent_api::ActiveTurnState>());
+    output.push_str(&export::<talos_types::NodeOperatingSystem>());
+    output.push_str(&export::<talos_types::NodeNetworkInterface>());
+    output.push_str(&export::<talos_types::NodeSystemInfo>());
     output.push_str(&export::<talos_types::NodeInfo>());
     output.push_str(&export::<talos_types::NodePage>());
     output.push_str(&export::<talos_types::NodeMode>());
@@ -167,6 +174,9 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ListNodesRequest>());
     output.push_str(&export::<talos_types::UpdateNodeRequest>());
     output.push_str(&export::<talos_types::RotateCredentialRequest>());
+    output.push_str(&export::<talos_types::SyncConnectionState>());
+    output.push_str(&export::<talos_types::SyncStatusResponse>());
+    output.push_str(&export::<talos_types::SyncEnableRequest>());
     output.push_str(&export::<talos_types::ComputerListRequest>());
     output.push_str(&export::<talos_types::ComputerListResponse>());
     output.push_str(&export::<talos_types::RenameComputerRequest>());

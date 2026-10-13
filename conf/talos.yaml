@@ -31,9 +31,19 @@ gateway:
 agent_node:
   control_plane: null
   runner: null
+  # The embedded Worker uses authenticated loopback RPC, independently of cloud enrollment.
+  worker_rpc:
+    bind_address: 127.0.0.1:0
+    tls: null
+
+# Desktop product connection source; Server deployment mode is independent.
+desktop:
+  connection_mode: cloud
 
 cloud:
   api_base_url: "https://api.talos.love"
+  agent_base_url: https://agent.talos.love
+  agent_trusted_ca_file: null
   web_base_url: "https://cloud.talos.love"
   auth:
     introspection_cache_ttl_seconds: 300
@@ -518,3 +528,9 @@ storage:
       - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       - "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+# Account data sharing is independent of Worker RPC and registration.
+sync:
+  # Omitted enabled follows verified login; false keeps sharing disabled.
+  hub_endpoint: wss://sync.talos.love/v1/sync
+  trusted_ca_file: null

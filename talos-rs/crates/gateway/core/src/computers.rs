@@ -8,14 +8,14 @@ impl ServiceGateway {
         actor: &Actor,
         request: talos_types::ComputerListRequest,
     ) -> TalosResult<talos_types::ComputerListResponse> {
-        self.service.nodes.list_computers(actor, request).await
+        self.service.list_computers(actor, request).await
     }
     pub(crate) async fn read_computer(
         &self,
         actor: &Actor,
         request: talos_types::GetNodeRequest,
     ) -> TalosResult<talos_types::NodeInfo> {
-        self.service.nodes.read_computer(actor, request).await
+        self.service.read_computer(actor, request).await
     }
     pub(crate) async fn create_computer(
         &self,

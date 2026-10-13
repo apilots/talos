@@ -56,3 +56,7 @@ pub use workspace_docs::WorkspaceDocService;
 
 mod worker_environment;
 pub use worker_environment::WorkerEnvironmentService;
+
+pub use service::ManagementSync;
+
+pub use agent_node::ComputerManagement;

@@ -7,7 +7,7 @@ controlled RPC tests do not replace these scenarios.
 | Scenario | Observable acceptance |
 | --- | --- |
 | `01_registration` | Real device login, protected identity/cache persistence, same UUID after host/control-plane restart, heartbeat/renewal, disable/recovery, owner isolation and logout |
-| `02_routing` | Three outbound Workers with no TCP listener; owner routing, pinned Sessions, Worker file effects, live Timeline/history and restart recovery |
+| `02_routing` | Three outbound Workers with protected loopback RPC; owner routing, pinned Sessions, Worker file effects, live Timeline/history and restart recovery |
 | `03_reliability` | Real long-running tools across lease renewal, progress before settlement, concurrent owner activity and local cleanup |
 | `04_collaboration` | Real subagent callbacks through the existing control-plane resource RPCs |
 | `05_parity` | Existing attachment/vision, compaction, waiting-input restart and embedded behavior through the outbound carrier |
@@ -29,13 +29,15 @@ may also use the configured inner/vision models; their credentials must work.
 `01_registration` starts real Auth, Server, TLS/HTTP2 ingress and two actual
 Desktop controllers/SDK/app-server hosts. Device approval uses the real Auth API;
 HTTP Computer APIs and node gRPC share the same origin. No fabricated AuthService,
-cached token injection or database mutation is used. Cloud Desktop must not
-create a product DB. Outbound execution becomes available only after Connect
+cached token injection or database mutation is used. The feat-044 target gives both
+Desktop and Server a management DB and an embedded Worker; the original cloud
+bootstrap/UI assertions are migrated in phase 4 and are not feat-044 acceptance.
+Outbound execution becomes available only after Connect
 publication and a healthy heartbeat.
 
 Execution reuses the existing multi-node scenario helpers with outbound node
-configuration: Workers never expose a Harness listener and the Server never
-connects into them. File observations remain on Worker homes; persistent product
+configuration: Workers expose authenticated loopback RPC; remote execution uses
+outbound Connect without public inbound access. File observations remain on Worker homes; persistent product
 state and Timeline observations remain on the control plane.
 
 Evidence lives under `reports/18_computer_workspace/<scenario>/`. Raw credentials

@@ -33,6 +33,12 @@ use crate::{
     TimelineSubscriptionService,
 };
 
+#[path = "sync_management.rs"]
+mod sync_management;
+pub use sync_management::ManagementSync;
+
+#[path = "active_commands.rs"]
+mod active_commands;
 #[path = "config.rs"]
 mod config;
 #[path = "environment.rs"]
@@ -50,6 +56,7 @@ mod project_fs;
 
 #[derive(Clone)]
 pub struct TalosService {
+    sync_management: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementSync>>>>,
     mode: talos_config::DeploymentMode,
     oauth_relay_origin: String,
     oauth_routes:
@@ -67,9 +74,28 @@ pub struct TalosService {
     subagents: SubagentService,
     pub files: Arc<FileService>,
     execution_gate: Arc<crate::turn::NodeAdmissionGates>,
+    active_commands: Arc<std::sync::RwLock<Option<Arc<dyn agent_protocol::ActiveSessionCommands>>>>,
 }
 
 impl TalosService {
+    /// Host composition after authenticating an account. Sync owns transport;
+    /// original Services retain admission, persistence and notification policy.
+    pub fn install_sync_handle(&self, account_id: String, handle: Arc<talos_sync::SyncHandle>) {
+        self.sessions.install_sync_handle(account_id, handle);
+    }
+
+    pub fn remove_sync_handle(&self, account_id: &str) {
+        self.sessions.remove_sync_handle(account_id);
+    }
+
+    pub async fn retry_shared_session_heads(&self, account_id: &str) -> ServiceResult<()> {
+        self.sessions.retry_shared_history_cursors(account_id).await
+    }
+
+    pub fn set_coordinator_id(&self, peer_id: String) {
+        self.sessions.set_coordinator_id(peer_id);
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         coordinator: Arc<dyn AgentCoordinator>,
@@ -146,6 +172,8 @@ impl TalosService {
         );
 
         Self {
+            sync_management: Default::default(),
+            active_commands: Default::default(),
             mode: base_config.mode,
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
             oauth_routes: Arc::default(),
@@ -208,15 +236,23 @@ impl TalosService {
             .write_owned()
             .await;
         let updated = self.access.patch_session(session, patch).await?;
-        self.sessions.session_info(&updated)
+        self.session_for_client(actor, self.sessions.session_info(&updated).await?)
+            .await
     }
 
     pub async fn list_sessions(
         &self,
         actor: &Actor,
-        request: SessionListRequest,
+        mut request: SessionListRequest,
     ) -> ServiceResult<Vec<SessionInfo>> {
-        self.access.list_sessions(actor, request).await
+        if let Some(node) = request.node_id.take() {
+            request.node_id = Some(self.resolve_computer_node(actor, &node).await?);
+        }
+        let mut result = Vec::new();
+        for info in self.access.list_sessions(actor, request).await? {
+            result.push(self.session_for_client(actor, info).await?);
+        }
+        Ok(result)
     }
 
     /// Reads the authenticated user's Profile usage view.
@@ -229,7 +265,8 @@ impl TalosService {
 
     pub async fn get_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<SessionInfo> {
         let record = self.access.load_session(actor, session_id).await?;
-        self.sessions.session_info(&record)
+        self.session_for_client(actor, self.sessions.session_info(&record).await?)
+            .await
     }
 
     pub async fn get_session_history(
@@ -253,11 +290,7 @@ impl TalosService {
         session_id: &str,
     ) -> ServiceResult<talos_agent_api::SessionActiveTurnResponse> {
         let _session = self.access.load_session(actor, session_id).await?;
-        let active_turn = self
-            .events
-            .get_active_turn(session_id)
-            .await?
-            .map(crate::timeline::map_timeline_active_turn);
+        let active_turn = self.events.display_active_turn(session_id).await?;
         let latest_event_id = self
             .events
             .latest_event_id(session_id)
@@ -273,19 +306,30 @@ impl TalosService {
         &self,
         actor: &Actor,
         source: talos_types::talos::SessionSource,
-        request: StartTurnRequest,
+        mut request: StartTurnRequest,
         idempotency_key: Option<String>,
     ) -> ServiceResult<StartTurnResponse> {
         TurnService::validate_start_turn_request(&request)?;
+        // Idempotency describes the public command, before host-local routing aliases.
+        let command_request = request.clone();
+        if let Some(node) = request.node_id.take() {
+            request.node_id = Some(self.connect_selected_computer(actor, &node).await?);
+        }
         let session_id = request.session_id.clone();
         let existing_session = match self.access.load_session(actor, &session_id).await {
             Ok(session) => Some(session),
             Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => None,
             Err(error) => return Err(error),
         };
+        let computer = existing_session
+            .as_ref()
+            .map(|session| session.execution_node_id.as_str())
+            .or(request.node_id.as_deref())
+            .unwrap_or("embedded");
+        self.connect_selected_computer(actor, computer).await?;
         let prepared = match self
             .turns
-            .reserve_start_turn(&request, idempotency_key.as_deref())
+            .reserve_start_turn(&command_request, idempotency_key.as_deref())
             .await?
         {
             StartTurnReservation::Ready(prepared) => prepared,
@@ -582,6 +626,22 @@ impl TalosService {
             .access
             .load_session(actor, &identity.session_id)
             .await?;
+        if let Some(reply) = self
+            .forward_active_command(
+                actor,
+                &session,
+                agent_protocol::ActiveSessionCommand::Input(request.clone()),
+            )
+            .await?
+        {
+            let agent_protocol::ActiveSessionReply::Input(reply) = reply else {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "Current coordinator returned an invalid command result.",
+                ));
+            };
+            return Ok(reply);
+        }
         self.turns.submit_turn_input(session, request).await
     }
 

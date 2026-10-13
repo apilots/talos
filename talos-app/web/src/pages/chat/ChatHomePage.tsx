@@ -16,7 +16,7 @@ import {
   useModelsQuery,
   useProjectsView,
 } from "@/features/chat";
-import { useComputers, useProductScope, ComputerContext } from "@/features/computers";
+import { useComputers, useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type {
@@ -124,7 +124,6 @@ export function ChatHomePage() {
   return (
     <div className="flex h-full flex-col items-center justify-center px-8">
       <div className="w-full max-w-[660px]">
-        <ComputerContext />
         <h1 className="mb-8 text-center text-[26px] font-semibold tracking-tight text-ink">
           {t("chat:startPromptTitle")}
         </h1>

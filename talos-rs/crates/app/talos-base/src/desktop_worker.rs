@@ -3,24 +3,53 @@ use crate::desktop_application::DesktopApplication;
 use agent_client::{AgentNodeClient, AgentTlsTrust};
 use agent_protocol::{CreateNodeRequest, NodeMode, RotateCredentialRequest};
 use talos_auth::CloudSessionCache;
-use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport, DesktopConnectionMode};
+use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::DesktopWorkerIdentityResponse;
 
 // Registration credentials have an explicit lifetime; expired credentials require owner recovery.
 const CREDENTIAL_LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
 
+/// Borrow the existing host resources; enrollment never creates another Worker.
+pub(crate) struct WorkerEnrollment<'a> {
+    pub config: &'a talos_config::Config,
+    pub store: &'a talos_config::YamlConfigStore,
+    pub account: &'a talos_service::AccountService,
+    pub auth: &'a std::sync::Arc<dyn talos_auth::AuthService>,
+    pub worker: &'a std::sync::Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
+    pub execution: &'a talos_worker::TalosWorker,
+    pub rpc: &'a std::sync::Arc<talos_worker::WorkerRpcHost>,
+    pub device_name: &'a str,
+    pub worker_failures: &'a tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
+}
+
 impl DesktopApplication {
     pub(crate) async fn enroll_worker(
         &self,
         recover_node_id: Option<String>,
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
-        if self.config.desktop.connection_mode == DesktopConnectionMode::Local {
-            return Err(TalosError::new(
-                ErrorCode::InvalidRequest,
-                "Switch to cloud mode before enrolling a Worker",
-            ));
+        WorkerEnrollment {
+            config: &self.config,
+            store: &self.store,
+            account: &self.account,
+            auth: &self.auth,
+            worker: &self.worker,
+            execution: &self.execution,
+            rpc: &self.rpc,
+            device_name: &self.device_name,
+            worker_failures: &self.worker_failures,
         }
+        .enroll_worker(recover_node_id, None)
+        .await
+    }
+}
+
+impl WorkerEnrollment<'_> {
+    pub(crate) async fn enroll_worker(
+        &self,
+        recover_node_id: Option<String>,
+        signed_in: Option<&talos_auth::RequestIdentity>,
+    ) -> TalosResult<DesktopWorkerIdentityResponse> {
         // Serialize host enrollment and shutdown; ConfigStore's barrier also prevents a second process creating a duplicate.
         let mut active = self.worker.lock().await;
         if recover_node_id.is_some() {
@@ -28,7 +57,9 @@ impl DesktopApplication {
                 worker.shutdown().await?;
             }
         }
-        let result = self.prepare_worker_identity(recover_node_id).await;
+        let result = self
+            .prepare_worker_identity(recover_node_id, signed_in)
+            .await;
         let config = match result {
             Ok(config) => config,
             Err(error) => {
@@ -52,8 +83,14 @@ impl DesktopApplication {
             self.worker_failures.send_replace(None);
             let failures = self.worker_failures.clone();
             *active = Some(
-                talos_worker::RegisteredWorker::start_with_failure_handler(
-                    config.clone(),
+                talos_worker::RegisteredWorker::attach(
+                    self.execution,
+                    self.rpc.clone(),
+                    config
+                        .agent_node
+                        .runner
+                        .as_ref()
+                        .expect("prepared identity"),
                     Some(std::sync::Arc::new(move |error| {
                         talos_logging::report_error(&error);
                         failures.send_replace(Some(error.to_api_error()));
@@ -72,23 +109,42 @@ impl DesktopApplication {
     async fn prepare_worker_identity(
         &self,
         recover_node_id: Option<String>,
+        signed_in: Option<&talos_auth::RequestIdentity>,
     ) -> TalosResult<talos_config::Config> {
         let cache = CloudSessionCache::for_talos_home(self.config.talos_paths().talos_home);
-        let session = cache
-            .load_candidate(CloudSessionCache::now_ms())?
+        let session = if signed_in.is_none() {
+            let saved = cache
+                .load_candidate(CloudSessionCache::now_ms())?
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::Unauthenticated,
+                        "Log in before enrolling this computer",
+                    )
+                })?;
+            if saved.cloud_api_base_url != self.config.cloud.api_base_url {
+                return Err(TalosError::new(
+                    ErrorCode::Unauthenticated,
+                    "Saved login belongs to another authentication service",
+                ));
+            }
+            Some(saved)
+        } else {
+            None
+        };
+        let token = signed_in
+            .and_then(|actor| actor.access_token.as_deref())
+            .or_else(|| {
+                session
+                    .as_ref()
+                    .map(|session| session.access_token.as_str())
+            })
             .ok_or_else(|| {
                 TalosError::new(
                     ErrorCode::Unauthenticated,
-                    "Log in before enrolling this computer",
+                    "Enrollment requires a signed-in account.",
                 )
             })?;
-        if session.cloud_api_base_url != self.config.cloud.api_base_url {
-            return Err(TalosError::new(
-                ErrorCode::Unauthenticated,
-                "Saved login belongs to another authentication service",
-            ));
-        }
-        let actor = match self.auth.verify_access_token(&session.access_token).await {
+        let actor = match self.auth.verify_access_token(token).await {
             Ok(actor) => actor,
             Err(error) => {
                 if matches!(
@@ -96,30 +152,34 @@ impl DesktopApplication {
                     ErrorCode::Unauthenticated | ErrorCode::ResourceExpired
                 ) {
                     self.account
-                        .clear_rejected_access_token(
-                            &session.access_token,
-                            CloudSessionCache::now_ms(),
-                        )
+                        .clear_rejected_access_token(token, CloudSessionCache::now_ms())
                         .inspect_err(talos_logging::report_error)?;
                 }
                 return Err(error);
             }
         };
-        if actor.auth_disabled || actor.user_id != session.user.user_id {
+        if actor.auth_disabled
+            || actor.user_id
+                != signed_in.map_or_else(
+                    || {
+                        session
+                            .as_ref()
+                            .expect("saved session")
+                            .user
+                            .user_id
+                            .as_str()
+                    },
+                    |actor| actor.user_id.as_str(),
+                )
+        {
             return Err(TalosError::new(
                 ErrorCode::Unauthenticated,
                 "Saved login identity does not match the verified account",
             ));
         }
         self.account
-            .record_verified_access_token_use(&session.access_token, CloudSessionCache::now_ms())?;
+            .record_verified_access_token_use(token, CloudSessionCache::now_ms())?;
         let mut config = self.config.reload()?;
-        if config.desktop.connection_mode != DesktopConnectionMode::Cloud {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "Restart the Desktop host after changing connection mode",
-            ));
-        }
         if config.source_path() != config.talos_paths().config_file {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
@@ -157,7 +217,7 @@ impl DesktopApplication {
             .as_ref()
             .or(existing.as_ref().map(|runner| &runner.node_id));
         let (node, credential) = if let Some(node_id) = node_id {
-            let node = client.get_node(&session.access_token, node_id).await?;
+            let node = client.get_node(token, node_id).await?;
             if node.status == agent_protocol::NodeStatus::Disabled {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,
@@ -192,7 +252,7 @@ impl DesktopApplication {
                 Some(
                     client
                         .rotate_credential(
-                            &session.access_token,
+                            token,
                             RotateCredentialRequest {
                                 node_id: node_id.clone(),
                                 expires_at,
@@ -217,9 +277,9 @@ impl DesktopApplication {
             self.store.begin_node_enrollment(None)?;
             let created = client
                 .create_node(
-                    &session.access_token,
+                    token,
                     CreateNodeRequest {
-                        display_name: self.device_name.clone(),
+                        display_name: self.device_name.to_owned(),
                         endpoint: None,
                         owner_user_id: None,
                         credential_expires_at: expires_at,
@@ -261,9 +321,6 @@ impl DesktopApplication {
                 .talos_paths()
                 .conf_dir
                 .join(format!("{}.credential", node.node_id)),
-            bind_address: String::new(),
-            tls_certificate_file: Default::default(),
-            tls_private_key_file: Default::default(),
             trusted_ca_file: config.cloud.agent_trusted_ca_file.clone(),
         });
         if let Some(credential) = credential {

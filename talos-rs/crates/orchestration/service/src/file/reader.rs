@@ -72,12 +72,18 @@ impl FileService {
                 .filter(|record| authorized_ready_record(record, scope))
                 .ok_or_else(|| file_not_found(file_id))?;
             let expected_size = record.size_bytes.ok_or_else(|| file_not_found(file_id))?;
-            let actual_size = self
-                .operator(&record.storage_id)?
-                .stat(&record.object_key)
-                .await
-                .map_err(|error| opendal_error("stat file object", error))?
-                .content_length();
+            let actual_size = match &record.location {
+                talos_store::file::FileLocation::Local {
+                    storage_id,
+                    object_key,
+                } => self
+                    .operator(storage_id)?
+                    .stat(object_key)
+                    .await
+                    .map_err(|error| opendal_error("stat file object", error))?
+                    .content_length(),
+                talos_store::file::FileLocation::Peer { .. } => expected_size,
+            };
             if actual_size > self.limits.max_upload_bytes {
                 return Err(attachment_limit_error(format!(
                     "file {file_id} exceeds the per-file byte limit"
@@ -137,12 +143,48 @@ impl FileService {
             .mime_type
             .clone()
             .ok_or_else(|| file_not_found(&record.file_id))?;
-        let buffer = self
-            .operator(&record.storage_id)?
-            .read(&record.object_key)
-            .await
-            .map_err(|error| opendal_error("read file object", error))?;
-        let bytes = buffer.to_bytes();
+        let bytes = match &record.location {
+            talos_store::file::FileLocation::Local {
+                storage_id,
+                object_key,
+            } => self
+                .operator(storage_id)?
+                .read(object_key)
+                .await
+                .map_err(|error| opendal_error("read file object", error))?
+                .to_bytes(),
+            talos_store::file::FileLocation::Peer { peer_id } => {
+                let content = self
+                    .peer_access()?
+                    .read(
+                        &record.owner_user_id,
+                        peer_id,
+                        talos_types::FileReadRequest {
+                            file_id: record.file_id.clone(),
+                        },
+                        self.limits
+                            .max_upload_bytes
+                            .min(self.limits.max_turn_file_bytes),
+                    )
+                    .await?;
+                if content.file.file_id != record.file_id
+                    || content.file.scope
+                        != match &record.project_id {
+                            Some(project_id) => talos_types::FileScope::Project {
+                                project_id: project_id.clone(),
+                            },
+                            None => talos_types::FileScope::Personal,
+                        }
+                    || content.file.size_bytes != expected_size
+                {
+                    return Err(TalosError::new(
+                        ErrorCode::Conflict,
+                        "Source file does not match the authorized metadata",
+                    ));
+                }
+                content.bytes
+            }
+        };
         let actual_size = u64::try_from(bytes.len())
             .map_err(|_| attachment_limit_error("file byte count overflow".to_string()))?;
         if actual_size != expected_size {

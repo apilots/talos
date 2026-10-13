@@ -20,7 +20,10 @@ pub use artifacts::FileKernelSessionArtifactStore;
 pub use config::normalize_kernel_config;
 pub use dream_memory::{KernelDreamMemoryParams, KernelDreamMemoryResult};
 pub use history::KernelSessionPromptContextSource;
-pub use provider::{KernelAgentProvider, KernelAgentProviderParams, KernelAgentSession};
+pub use provider::{
+    KernelAgentProvider, KernelAgentProviderParams, KernelAgentSession, KernelExecutionResources,
+    KernelResourceResolver,
+};
 pub use skill_roots::{empty_skill_roots_resolver, EmptySkillRootsResolver, SkillRootsResolver};
 pub use talos_agent_kernel::{KernelMemoryProgressStore, KernelSessionArtifactStore};
 pub use transcript::KernelTranscriptStore;

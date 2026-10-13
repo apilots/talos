@@ -7,7 +7,10 @@ impl AgentHarnessRpcAdapter {
         agent_id: &str,
         identity: &talos_agent_api::AgentTurnRef,
     ) {
-        if let Err(error) = interrupt_disconnected(harness, agent_id, identity).await {
+        if let Err(error) = interrupt_disconnected(harness, agent_id, identity)
+            .await
+            .and_then(|_| self.session_gate.cleaned(identity))
+        {
             talos_logging::report_error(&error);
             self.cleanup_failure
                 .lock()
@@ -22,12 +25,16 @@ impl AgentHarnessRpcAdapter {
         lease: Lease,
         harness: Arc<dyn AgentHarness>,
         execution: TalosResult<AgentRunExecution>,
-        identity: talos_agent_api::AgentTurnRef,
-        agent_id: String,
+        caller: talos_types::AgentCaller,
+        resources: (Box<dyn Send>, super::session_gate::Reservation),
     ) -> Response<RpcStream<pb::RunResponse>> {
+        let (resource_guard, mut reservation) = resources;
+        let identity = caller.turn_ref();
+        let agent_id = caller.agent_id;
         let (tx, rx) = mpsc::channel(32);
         let adapter = self.clone();
         tokio::spawn(async move {
+            let _resources = resource_guard;
             let mut execution = match execution {
                 Ok(value) => value,
                 Err(error) => {
@@ -58,18 +65,25 @@ impl AgentHarnessRpcAdapter {
                 let _ = lease.send(&tx, Ok(run_failure(error))).await;
                 return;
             }
-            if lease.revoked.is_cancelled() || *lease.deadline.borrow() <= Instant::now() {
+            if lease.revoked.is_cancelled() || lease.expired() {
+                return;
+            }
+            if let Err(error) = reservation.consuming(&identity) {
+                let _ = lease.send(&tx, Ok(run_failure(error))).await;
                 return;
             }
             adapter
                 .active
                 .lock()
                 .expect("Agent active lock poisoned")
-                .insert((
-                    agent_id.clone(),
-                    identity.session_id.clone(),
-                    identity.turn_id.clone(),
-                ));
+                .insert(
+                    (
+                        agent_id.clone(),
+                        identity.session_id.clone(),
+                        identity.turn_id.clone(),
+                    ),
+                    lease.owner.clone(),
+                );
             let consumed = tokio::select! {
                 biased;
                 _ = lease.ended() => None,
@@ -142,6 +156,12 @@ impl AgentHarnessRpcAdapter {
                         } else { events_open = false; }
                     }
                     result = &mut settlement, if !events_open => {
+                        let result = result.and_then(|settlement| {
+                            if !matches!(&settlement, agent_protocol::AgentRunSettlement::Finished { result: Err(error), .. } if error.is_code(ErrorCode::RunCleanupUnconfirmed)) {
+                                adapter.session_gate.cleaned(&identity)?;
+                            }
+                            Ok(settlement)
+                        });
                         let frame = match result.and_then(|settlement| {
                             if let agent_protocol::AgentRunSettlement::Finished { result: Err(error), .. } = &settlement { talos_logging::report_error(error); }
                             harness_pb::encode_settlement(settlement)
@@ -149,8 +169,9 @@ impl AgentHarnessRpcAdapter {
                             Ok(value) => pb::RunResponse { result: Some(pb::run_response::Result::Settlement(value)) },
                             Err(error) => run_failure(error),
                         };
-                        let _ = lease.send(&tx, Ok(frame)).await;
                         adapter.active.lock().expect("Agent active lock poisoned").remove(&(agent_id, identity.session_id, identity.turn_id));
+                        drop(reservation);
+                        let _ = lease.send(&tx, Ok(frame)).await;
                         return;
                     }
                 }
@@ -195,19 +216,52 @@ impl AgentHarnessRpcAdapter {
             &self.config.read().expect("Worker config lock poisoned"),
         )
         .map_err(status_from_error)?;
-        Self::check_owner(&lease, &params.context.session.workspace.user_id)
-            .map_err(status_from_error)?;
         let identity = params.context.identity();
         let agent_id = params.context.session.agent_id.clone();
         let harness = self.harness(&agent_id).map_err(status_from_error)?;
+        let session_context = params.context.session.clone();
+        let coordinator = self
+            .coordinator_id(first.caller.as_ref(), &session_context)
+            .map_err(status_from_error)?;
+        let reservation = self
+            .session_gate
+            .reserve(
+                &session_context,
+                &identity,
+                coordinator,
+                &params.context.history_cursor.clone().unwrap_or_default(),
+                if params.continuation.is_some() {
+                    super::session_gate::RunAdmission::Continuation
+                } else {
+                    super::session_gate::RunAdmission::NewTurn
+                },
+            )
+            .map_err(status_from_error)?;
         let execution = harness.start(params).await;
+        let resource_guard = if execution.is_ok() {
+            self.bind_resources(&auth, &session_context, first.caller.as_ref())
+                .map_err(status_from_error)?
+        } else {
+            Box::new(())
+        };
         let commit = Box::pin(read_commit(
             inbound,
             start_commit,
             self.clone(),
             lease.clone(),
         ));
-        Ok(self.serve_run(commit, lease, harness, execution, identity, agent_id))
+        Ok(self.serve_run(
+            commit,
+            lease,
+            harness,
+            execution,
+            talos_types::AgentCaller {
+                session_id: identity.session_id,
+                turn_id: identity.turn_id,
+                agent_id,
+            },
+            (resource_guard, reservation),
+        ))
     }
 
     pub(super) async fn serve_compact_session(
@@ -236,18 +290,48 @@ impl AgentHarnessRpcAdapter {
             &self.config.read().expect("Worker config lock poisoned"),
         )
         .map_err(status_from_error)?;
-        Self::check_owner(&lease, &context.session.workspace.user_id).map_err(status_from_error)?;
         let identity = context.identity();
         let agent_id = context.session.agent_id.clone();
         let harness = self.harness(&agent_id).map_err(status_from_error)?;
+        let session_context = context.session.clone();
+        let coordinator = self
+            .coordinator_id(first.caller.as_ref(), &session_context)
+            .map_err(status_from_error)?;
+        let reservation = self
+            .session_gate
+            .reserve(
+                &session_context,
+                &identity,
+                coordinator,
+                &context.history_cursor.clone().unwrap_or_default(),
+                super::session_gate::RunAdmission::NewTurn,
+            )
+            .map_err(status_from_error)?;
         let execution = harness.compact_session(context).await;
+        let resource_guard = if execution.is_ok() {
+            self.bind_resources(&auth, &session_context, first.caller.as_ref())
+                .map_err(status_from_error)?
+        } else {
+            Box::new(())
+        };
         let commit = Box::pin(read_commit(
             inbound,
             compact_commit,
             self.clone(),
             lease.clone(),
         ));
-        Ok(self.serve_run(commit, lease, harness, execution, identity, agent_id))
+        Ok(self.serve_run(
+            commit,
+            lease,
+            harness,
+            execution,
+            talos_types::AgentCaller {
+                session_id: identity.session_id,
+                turn_id: identity.turn_id,
+                agent_id,
+            },
+            (resource_guard, reservation),
+        ))
     }
 
     pub(super) async fn serve_submit_input(
@@ -272,11 +356,19 @@ impl AgentHarnessRpcAdapter {
             )));
         };
         let params = harness_pb::decode_input_params(params).map_err(status_from_error)?;
+        let peer = first
+            .caller
+            .as_ref()
+            .map(|caller| caller.coordinator_id.as_str())
+            .ok_or_else(|| status_from_error(invalid_request()))?;
+        self.session_gate
+            .authorize_active(&params.agent_id, &params.identity, peer)
+            .map_err(status_from_error)?;
         if !self
             .active
             .lock()
             .expect("Agent active lock poisoned")
-            .contains(&(
+            .contains_key(&(
                 params.agent_id.clone(),
                 params.identity.session_id.clone(),
                 params.identity.turn_id.clone(),

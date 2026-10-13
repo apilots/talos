@@ -1,6 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     for source in [
         "auth.proto",
+        "coordinator.proto",
         "memory.proto",
         "node.proto",
         "connection.proto",
@@ -24,6 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "proto/auth.proto",
+                "proto/coordinator.proto",
                 "proto/memory.proto",
                 "proto/node.proto",
                 "proto/connection.proto",

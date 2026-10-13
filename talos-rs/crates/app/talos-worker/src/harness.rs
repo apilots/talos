@@ -73,11 +73,21 @@ impl AgentHarness for WorkerHarness {
             Ok(guard_execution(execution, guard))
         })
     }
-    fn clear_session(&self, context: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
-        self.execution.clear_session(context)
+    fn clear_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        self.execution
+            .clear_session(context, expected_history_cursor)
     }
-    fn close_session(&self, context: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
-        self.execution.close_session(context)
+    fn close_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        self.execution
+            .close_session(context, expected_history_cursor)
     }
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>> {
         self.execution.shutdown(timeout)
@@ -93,6 +103,7 @@ impl AgentHarness for WorkerHarness {
             let root = context.workspace.root.clone();
             let result = self
                 .provider
+                .resources_for(&context)?
                 .form_dream_memory(
                     talos_agent_provider_kernel::KernelDreamMemoryParams {
                         session_id: context.session_id.clone(),

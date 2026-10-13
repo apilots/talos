@@ -1,6 +1,7 @@
 pub use talos_types::{
     CreateNodeRequest, CreatedNode, GetNodeRequest, ListNodesRequest, NodeCredential, NodeHealth,
-    NodeInfo, NodeMode, NodePage, NodeStatus, RotateCredentialRequest, UpdateNodeRequest,
+    NodeInfo, NodeMode, NodePage, NodeStatus, NodeSystemInfo, RotateCredentialRequest,
+    UpdateNodeRequest,
 };
 
 /// Authentication material carried by every node control or Harness request.
@@ -24,6 +25,7 @@ pub struct Deployment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisterParams {
     pub deployments: Vec<Deployment>,
+    pub system_info: Option<NodeSystemInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

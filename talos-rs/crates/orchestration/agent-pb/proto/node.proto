@@ -15,15 +15,18 @@ service AgentNodeControl {
 service AgentNodeManagement {
   rpc CreateNode(CreateNodeRequest) returns (CreateNodeResponse);
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  rpc GetDeployments(GetNodeRequest) returns (GetDeploymentsResponse);
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc UpdateNode(UpdateNodeRequest) returns (GetNodeResponse);
+  rpc RenameComputer(RenameComputerRequest) returns (GetNodeResponse);
+  rpc SetComputerStatus(SetComputerStatusRequest) returns (GetNodeResponse);
   rpc RotateCredential(RotateCredentialRequest) returns (CredentialResponse);
 }
 enum NodeMode { NODE_MODE_UNSPECIFIED = 0; NODE_MODE_EMBEDDED = 1; NODE_MODE_REMOTE = 2; }
 enum NodeStatus { NODE_STATUS_UNSPECIFIED = 0; NODE_STATUS_ENABLED = 1; NODE_STATUS_DISABLED = 2; }
 enum NodeHealth { NODE_HEALTH_UNSPECIFIED = 0; NODE_HEALTH_UNKNOWN = 1; NODE_HEALTH_HEALTHY = 2; NODE_HEALTH_DEGRADED = 3; }
 message Deployment { string agent_id = 1; }
-message RegisterParams { repeated Deployment deployments = 1; }
+message RegisterParams { repeated Deployment deployments = 1; NodeSystemInfo system_info = 2; }
 message Registration {
   string lease_token = 1; LeaseValidity validity = 2; string owner_user_id = 3;
 }
@@ -48,6 +51,7 @@ message NodeInfo {
   int64 created_at = 9; int64 updated_at = 10;
   optional string owner_user_id = 11; bool available = 12;
   optional int64 credential_expires_at = 13;
+  NodeSystemInfo system_info = 14;
 }
 message NodeCredential { string node_id = 1; string token = 2; int64 expires_at = 3; }
 message CreateNodeRequest {
@@ -61,6 +65,8 @@ message CreatedNode { NodeInfo node = 1; NodeCredential credential = 2; }
 message CreateNodeResponse { oneof result { CreatedNode created = 1; Failure failure = 2; } }
 message GetNodeRequest { string node_id = 1; }
 message GetNodeResponse { oneof result { NodeInfo node = 1; Failure failure = 2; } }
+message NodeDeployments { repeated Deployment deployments = 1; }
+message GetDeploymentsResponse { oneof result { NodeDeployments deployments = 1; Failure failure = 2; } }
 message ListNodesRequest { optional string cursor = 1; uint32 limit = 2; }
 message NodePage { repeated NodeInfo data = 1; optional string next_cursor = 2; }
 message ListNodesResponse { oneof result { NodePage page = 1; Failure failure = 2; } }
@@ -71,3 +77,17 @@ message UpdateNodeRequest {
 }
 message RotateCredentialRequest { string node_id = 1; int64 expires_at = 2; }
 message CredentialResponse { oneof result { NodeCredential credential = 1; Failure failure = 2; } }
+
+// Narrow mutations reuse the product request semantics and avoid replacing unrelated fields.
+message RenameComputerRequest { string node_id = 1; string display_name = 2; }
+message SetComputerStatusRequest { string node_id = 1; NodeStatus status = 2; }
+
+enum NodeOperatingSystem { NODE_OPERATING_SYSTEM_UNSPECIFIED = 0; NODE_OPERATING_SYSTEM_LINUX = 1; NODE_OPERATING_SYSTEM_MAC_OS = 2; }
+message NodeNetworkInterface { string name = 1; string mac_address = 2; }
+message NodeSystemInfo {
+  NodeOperatingSystem os = 1; optional string os_version = 2; string architecture = 3;
+  optional string hostname = 4; optional string cpu_model = 5; uint32 logical_cpu_count = 6;
+  uint64 memory_bytes = 7; optional string board_model = 8;
+  repeated NodeNetworkInterface network_interfaces = 9; repeated string graphics = 10;
+  string worker_version = 11;
+}

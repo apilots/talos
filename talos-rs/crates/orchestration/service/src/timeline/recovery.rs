@@ -1,4 +1,3 @@
-use super::mapping::map_timeline_active_turn;
 use super::subscription::TimelineSubscriptionService;
 use super::TimelineEventId;
 use talos_agent_api::{RecoverTimelineResponse, TimelineCursorStatus, TimelineReplay};
@@ -75,10 +74,10 @@ impl TimelineSubscriptionService {
         limit: usize,
     ) -> TalosResult<RecoverTimelineResponse> {
         let replay = self.replay_after(session_id, after_event_id, limit).await?;
-        let active_turn = self.get_active_turn(session_id).await?;
+        let active_turn = self.event_service().display_active_turn(session_id).await?;
         Ok(RecoverTimelineResponse {
             replay,
-            active_turn: active_turn.map(map_timeline_active_turn),
+            active_turn,
         })
     }
 }

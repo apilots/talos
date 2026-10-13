@@ -120,6 +120,15 @@ pub struct SessionActiveTurnResponse {
     pub latest_event_id: Option<String>,
 }
 
+/// Live invalidation of the existing active Turn projection, without an Agent
+/// event or execution claim. Subscribers recover through the original API.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionActiveTurnChangedNotification {
+    pub session_id: String,
+    pub state: SessionActiveTurnResponse,
+}
+
 /// Closed union of canonical Agent Turn lifecycle events.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
@@ -208,8 +217,14 @@ pub struct AgentMessageBlockCompleted {
     rename_all_fields = "camelCase"
 )]
 pub enum AgentPendingInput {
-    Message { action_id: String, prompt: String },
-    UserAction { action: PendingUserAction },
+    Message {
+        #[schemars(rename = "actionId")]
+        action_id: String,
+        prompt: String,
+    },
+    UserAction {
+        action: PendingUserAction,
+    },
 }
 
 impl AgentPendingInput {

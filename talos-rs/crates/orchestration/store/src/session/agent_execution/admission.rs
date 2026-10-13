@@ -44,7 +44,9 @@ pub(super) async fn commit_initial(
             ));
         }
     }
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let records = append_events(transaction.as_mut(), events).await?;
     let last_event_seq = records
         .last()
@@ -109,7 +111,9 @@ pub(super) async fn commit_maintenance(
         ));
     }
     let identity = event.identity.clone();
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let mut records = append_events(transaction.as_mut(), vec![event]).await?;
     let record = records
         .pop()
@@ -152,10 +156,21 @@ pub(super) async fn commit_progress(
     event: AgentEvent,
     expected_event_seq: i64,
 ) -> TalosResult<AgentEventCommit> {
-    validate_progress_event(&event)?;
+    commit_progress_batch(store, vec![event], expected_event_seq).await
+}
+
+pub(super) async fn commit_progress_batch(
+    store: &DatabaseSessionStore,
+    events: Vec<AgentEvent>,
+    expected_event_seq: i64,
+) -> TalosResult<AgentEventCommit> {
+    super::validate_event_batch(&events)?;
+    for event in &events {
+        validate_progress_event(event)?;
+    }
     commit_running_batch(
         store,
-        vec![event],
+        events,
         expected_event_seq,
         RunningCommitKind::Progress,
         None,
@@ -196,7 +211,9 @@ async fn commit_running_batch(
         .expect("validated Agent event batch is non-empty")
         .identity
         .clone();
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
         .ok_or_else(|| execution_conflict("active Agent Turn does not exist"))?;

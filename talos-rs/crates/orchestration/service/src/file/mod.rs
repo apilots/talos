@@ -1,5 +1,7 @@
 mod cursor;
+mod peer;
 mod reader;
+pub use peer::FilePeerAccess;
 mod service;
 mod upload;
 mod validation;
@@ -29,6 +31,7 @@ pub struct FileContent {
 /// Gateways pass shared request objects and byte streams to this service. The
 /// service does not expose database records, OpenDAL operators, or object keys.
 pub struct FileService {
+    pub(super) peer_access: std::sync::RwLock<Option<Arc<dyn FilePeerAccess>>>,
     pub(super) store: Arc<dyn FileStore>,
     pub(super) projects: Arc<dyn ProjectStore>,
     pub(super) operators: BTreeMap<String, Operator>,

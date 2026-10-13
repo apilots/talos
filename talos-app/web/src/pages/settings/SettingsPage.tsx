@@ -1,4 +1,4 @@
-import { useCanManageComputer, ComputerContext } from "@/features/computers";
+import { useCanManageComputer } from "@/features/computers";
 import { Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
@@ -58,7 +58,6 @@ export function SettingsPage() {
       />
       <div className="min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1040px] px-8 py-7">
-          <ComputerContext />
           <header className="mb-8 flex min-h-8 items-center justify-between gap-4">
             <h1 className="text-sm font-medium text-ink">{t(`sections.${activeSection}`)}</h1>
             {activeSection === "profile" ? (

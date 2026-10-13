@@ -6,6 +6,7 @@ TALOS_E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${TALOS_E2E_DIR}/scripts/common.sh"
 
 timestamp="$(date '+%Y%m%d_%H%M%S')"
+export TALOS_E2E_RUN_ID="${timestamp}-$$"
 report_file="${REPORT_ROOT}/e2e_report_${timestamp}.md"
 latest_file="${REPORT_ROOT}/latest_report.md"
 mkdir -p "${REPORT_ROOT}"

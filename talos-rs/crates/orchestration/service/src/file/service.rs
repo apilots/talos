@@ -47,6 +47,7 @@ impl FileService {
             ));
         }
         Ok(Self {
+            peer_access: std::sync::RwLock::new(None),
             store,
             projects,
             operators,
@@ -143,6 +144,19 @@ impl FileService {
                 "file update must include tags or metadata".to_string(),
             ));
         }
+        let existing = self.ready_file(actor, &request.file_id).await?;
+        if let talos_store::file::FileLocation::Peer { peer_id } = &existing.location {
+            if let Some(tags) = &request.tags {
+                validation::tags(tags.clone(), &self.limits)?;
+            }
+            if let Some(metadata) = &request.metadata {
+                validation::metadata(metadata, &self.limits)?;
+            }
+            return self
+                .peer_access()?
+                .update(&existing.owner_user_id, peer_id, request)
+                .await;
+        }
         let tags = request
             .tags
             .map(|tags| validation::tags(tags, &self.limits))
@@ -173,6 +187,13 @@ impl FileService {
         actor: &Actor,
         request: FileDeleteRequest,
     ) -> TalosResult<FileDeleteResponse> {
+        let existing = self.ready_file(actor, &request.file_id).await?;
+        if let talos_store::file::FileLocation::Peer { peer_id } = &existing.location {
+            return self
+                .peer_access()?
+                .delete(&existing.owner_user_id, peer_id, request)
+                .await;
+        }
         let key = owner_key(actor, &request.file_id);
         let record = self
             .store
@@ -264,8 +285,8 @@ impl FileService {
     }
 
     async fn delete_object_and_record(&self, record: &FileRecord) -> TalosResult<()> {
-        self.operator(&record.storage_id)?
-            .delete(&record.object_key)
+        self.operator(record.local_location()?.0)?
+            .delete(record.local_location()?.1)
             .await
             .map_err(|error| opendal_error("delete file object", error))?;
         self.store.delete_file_record(&record.file_id).await?;

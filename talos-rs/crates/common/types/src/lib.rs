@@ -60,3 +60,12 @@ mod tests;
 
 mod desktop;
 pub use desktop::*;
+
+mod timeline_cursor;
+pub use timeline_cursor::TimelineEventId;
+
+mod session_execution;
+pub use session_execution::SessionHistoryCursor;
+
+mod sync;
+pub use sync::{SyncConnectionState, SyncEnableRequest, SyncStatusResponse};

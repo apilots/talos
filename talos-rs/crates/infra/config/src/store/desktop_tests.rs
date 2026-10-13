@@ -18,9 +18,6 @@ fn identity_survives_restart_and_preserves_other_configuration() {
         node_id: "a03f484f-dfb3-4bf8-8796-35c6ce239d31".into(),
         control_plane_endpoint: "https://agent.talos.love".into(),
         credential_file: conf.join("worker.credential"),
-        bind_address: String::new(),
-        tls_certificate_file: Default::default(),
-        tls_private_key_file: Default::default(),
         trusted_ca_file: None,
     };
     store.begin_node_enrollment(None).unwrap();
@@ -74,4 +71,25 @@ fn failed_credential_save_keeps_uuid_for_recovery() {
         store.load_agent_node().unwrap().runner.unwrap().node_id,
         "stable-uuid"
     );
+}
+
+#[test]
+fn sync_opt_out_survives_restart_without_changing_worker_or_endpoints() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("talos.yaml");
+    std::fs::write(&path, "timezone: Asia/Shanghai\nsync:\n  hub_endpoint: wss://127.0.0.1:9220/v1/sync\ncloud:\n  agent_base_url: https://127.0.0.1:9210\n").unwrap();
+    let store = YamlConfigStore::new(path.clone());
+    assert_eq!(store.load_sync().unwrap().enabled, None);
+    store.save_sync_enabled(false).unwrap();
+    let reopened = YamlConfigStore::new(path.clone());
+    assert_eq!(reopened.load_sync().unwrap().enabled, Some(false));
+    assert_eq!(
+        reopened.load_sync().unwrap().hub_endpoint,
+        "wss://127.0.0.1:9220/v1/sync"
+    );
+    reopened.save_sync_enabled(true).unwrap();
+    let root: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(root["cloud"]["agent_base_url"], "https://127.0.0.1:9210");
+    assert_eq!(reopened.load_sync().unwrap().enabled, Some(true));
 }

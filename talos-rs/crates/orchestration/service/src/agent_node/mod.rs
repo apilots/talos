@@ -13,3 +13,6 @@ mod tests;
 
 #[cfg(test)]
 mod computers_tests;
+
+mod remote_management;
+pub use remote_management::ComputerManagement;

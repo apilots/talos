@@ -26,14 +26,20 @@ use tracing::{info, warn};
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
 mod agent_node_rpc;
+mod local_resource_rpc;
 pub use agent_node_rpc::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
 mod application_automation;
 mod application_runtime;
 mod application_storage;
+mod application_sync;
+mod application_sync_computers;
+mod application_sync_files;
+mod application_sync_management;
+#[cfg(all(test, feature = "e2e"))]
+#[path = "application_sync_tests.rs"]
+mod application_sync_tests;
 mod desktop_application;
-mod desktop_stdio;
 mod desktop_worker;
-use desktop_stdio::run_cloud_desktop;
 mod dream_memory_maintenance;
 mod memory_progress;
 mod startup;
@@ -55,6 +61,8 @@ pub struct TalosServerOptions {
 }
 
 pub struct TalosServerRuntime {
+    _sync_host: Arc<application_sync::ApplicationSyncHost>,
+    sync_stores: Arc<application_sync::ApplicationSyncStores>,
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
     node_rpc_server: Option<agent_node_rpc::NodeRpcServer>,
@@ -64,6 +72,9 @@ pub struct TalosServerRuntime {
     lifecycle: Arc<ServerLifecycle>,
     automation: Automation,
     plugins: PluginManagerService,
+    worker_rpc: Arc<talos_worker::WorkerRpcHost>,
+    resource_rpc: Arc<local_resource_rpc::LocalResourceRpc>,
+    worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
 }
 
 /// Owns the resources created for an in-process app-server runtime.
@@ -77,7 +88,14 @@ pub struct EmbeddedAppServer {
 
 #[derive(Clone)]
 pub struct TalosApplicationRuntime {
+    pub(crate) sync_host: Arc<application_sync::ApplicationSyncHost>,
+    pub(crate) sync: Arc<talos_sync::TalosSync>,
+    pub(crate) sync_stores: Arc<application_sync::ApplicationSyncStores>,
     pub(crate) worker: talos_worker::TalosWorker,
+    pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
+    pub(crate) resource_rpc: Arc<local_resource_rpc::LocalResourceRpc>,
+    pub(crate) worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
+    pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     pub config: Config,
     pub service: Arc<TalosService>,
     pub event_service: Arc<TimelineEventService>,
@@ -94,6 +112,42 @@ pub struct TalosApplicationRuntime {
     pub(crate) agent_control: Arc<dyn talos_tools::AgentControl>,
     pub(crate) tool_image_store: Arc<dyn talos_tools::ToolImageStore>,
     automation: Automation,
+}
+
+impl TalosApplicationRuntime {
+    /// Stable management identity shared with authenticated Connect and sync.
+    pub fn sync_peer_id(&self) -> &str {
+        self.sync.peer_id()
+    }
+
+    /// Compose the original product resource owners for one selected Computer.
+    /// Use only with the authenticated coordinator SDK, which verifies the live
+    /// invocation before dispatch. This handler still checks persisted Session
+    /// ownership and binding; it neither imports data nor owns network reconnect.
+    pub fn coordinator_resource_handler(
+        &self,
+        computer_id: String,
+    ) -> Arc<dyn agent_client::AgentResourceRpcHandler> {
+        Arc::new(agent_node_rpc::CoordinatorResources {
+            service: self.service.clone(),
+            computer_id,
+            data: agent_node_rpc::NodeSessionDataRpc::new(
+                self.node_service.clone(),
+                self.session_store.clone(),
+                self.session_history_reader.clone(),
+                self.attachment_reader.clone(),
+                self.memory_progress_store.clone(),
+            ),
+            images: agent_node_rpc::NodeToolImageRpc::new(
+                self.node_service.clone(),
+                self.tool_image_store.clone(),
+                self.config.storage.files.limits.max_upload_bytes,
+            ),
+            control: self.agent_control.clone(),
+            files: self.service.files.clone(),
+            auth: self.auth_service.clone(),
+        })
+    }
 }
 
 struct ApplicationAgentControl {
@@ -391,6 +445,8 @@ impl TalosServerRuntime {
 
     pub async fn run(self) -> TalosResult<()> {
         let TalosServerRuntime {
+            _sync_host,
+            sync_stores,
             http_server,
             channel_server,
             node_rpc_server,
@@ -400,6 +456,9 @@ impl TalosServerRuntime {
             lifecycle,
             automation,
             plugins,
+            worker_rpc,
+            resource_rpc,
+            worker_registration,
         } = self;
 
         let signal_shutdown = shutdown_token.clone();
@@ -427,6 +486,11 @@ impl TalosServerRuntime {
             let shutdown_token_for_rpc = shutdown_token.clone();
             tasks.spawn(async move { node_rpc_server.run(shutdown_token_for_rpc).await });
         }
+        let transport = worker_rpc.clone();
+        tasks.spawn(async move {
+            transport.stopped().await;
+            transport.shutdown().await
+        });
         let result = match tasks.join_next().await {
             Some(Ok(result)) => result,
             Some(Err(error)) => Err(TalosError::internal_with_source(
@@ -436,6 +500,10 @@ impl TalosServerRuntime {
             None => Ok(()),
         };
         shutdown_token.cancel();
+        let registration = match worker_registration.lock().await.take() {
+            Some(registration) => registration.shutdown().await,
+            None => Ok(()),
+        };
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}
 
@@ -449,7 +517,11 @@ impl TalosServerRuntime {
             &plugins,
         )
         .await;
-        application_automation::combine(result, shutdown_result)
+        let result = application_automation::combine(result, registration);
+        let result = application_automation::combine(result, sync_stores.shutdown().await);
+        let result = application_automation::combine(result, shutdown_result);
+        let result = application_automation::combine(result, worker_rpc.shutdown().await);
+        application_automation::combine(result, resource_rpc.shutdown().await)
     }
 }
 
@@ -498,6 +570,7 @@ async fn start_server_after_startup(
                     runtime.config.storage.files.limits.max_upload_bytes,
                 ),
             )
+            .and_then(|server| server.with_coordinator_id(runtime.sync.peer_id().into()))
         })
         .transpose()?;
 
@@ -537,12 +610,17 @@ async fn start_server_after_startup(
     };
 
     Ok(TalosServerRuntime {
+        _sync_host: runtime.sync_host,
+        sync_stores: runtime.sync_stores,
         coordinator: runtime.coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
         shutdown_token: CancellationToken::new(),
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
         plugins: runtime.worker.plugin_manager(),
+        worker_rpc: runtime.worker_rpc,
+        resource_rpc: runtime.resource_rpc,
+        worker_registration: runtime.worker_registration,
         http_server,
         channel_server,
         node_rpc_server,
@@ -565,20 +643,22 @@ async fn run_json_rpc_stdio_after_startup(
     )
     .unwrap_or(usize::MAX);
     let desktop_host = std::env::var("TALOS_DESKTOP_HOSTNAME").ok();
-    if config.desktop.connection_mode == talos_config::DesktopConnectionMode::Cloud {
-        if let Some(device_name) = &desktop_host {
-            return run_cloud_desktop(config, device_name.clone(), max_incoming_frame_bytes).await;
-        }
+    // Desktop enrollment verifies the current saved login before attaching a
+    // cloud identity. A saved node credential alone must not bypass that check.
+    let mut runtime_config = config.clone();
+    if desktop_host.is_some() {
+        runtime_config.agent_node.runner = None;
     }
-    let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
+    let runtime = build_application_runtime_after_startup(runtime_config, startup_report).await?;
     let automation = runtime.automation.clone();
     let plugins = runtime.worker.plugin_manager();
+    let worker_rpc = runtime.worker_rpc.clone();
     let replay_limit = config.agent.timeline_replay_batch_size.max(1);
     let service = runtime.service.clone();
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(service.clone(), replay_limit)
             .with_drain_provider(Box::new(CoordinatorDrain {
-                coordinator: runtime.coordinator,
+                coordinator: runtime.coordinator.clone(),
             }))
             .with_cloud_api_base_url(config.cloud.api_base_url.clone()),
     );
@@ -588,11 +668,9 @@ async fn run_json_rpc_stdio_after_startup(
     ));
     let app: Arc<dyn talos_app_server::AppServerApplication> = match desktop_host {
         Some(device_name) => Arc::new(desktop_application::DesktopApplication::new(
-            config.clone(),
-            service.account.clone(),
-            runtime.auth_service.clone(),
+            &runtime,
             device_name,
-            Some(app),
+            app,
         )),
         None => app,
     };
@@ -613,7 +691,15 @@ async fn run_json_rpc_stdio_after_startup(
             error,
         )
     });
-    application_automation::finish(result, &automation, &plugins).await
+    let result = application_automation::finish(result, &automation, &plugins).await;
+    let registration = match runtime.worker_registration.lock().await.take() {
+        Some(registration) => registration.shutdown().await,
+        None => Ok(()),
+    };
+    let result = application_automation::combine(result, registration);
+    let result = application_automation::combine(result, worker_rpc.shutdown().await);
+    let result = application_automation::combine(result, runtime.shutdown_sync().await);
+    application_automation::combine(result, runtime.resource_rpc.shutdown().await)
 }
 
 async fn build_application_runtime_after_startup(

@@ -89,6 +89,7 @@ async fn owner_registration_restart_and_credential_rotation() {
         .register(
             &principal,
             RegisterParams {
+                system_info: None,
                 deployments: vec![Deployment {
                     agent_id: "talos".into(),
                 }],

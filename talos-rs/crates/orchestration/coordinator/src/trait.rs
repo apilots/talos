@@ -57,6 +57,20 @@ pub trait AgentCoordinator: Send + Sync {
         ))
     }
 
+    /// Forward causal state without interpreting history, transport or persistence.
+    async fn read_session_execution_state(
+        &self,
+        _session: AgentSessionContext,
+    ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
+        Ok(None)
+    }
+    async fn commit_session_execution_state(
+        &self,
+        _params: agent_protocol::CommitSessionExecutionStateParams,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+
     /// Forward one fresh or continuation Turn admission to its bound Harness.
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution>;
 
@@ -70,10 +84,18 @@ pub trait AgentCoordinator: Send + Sync {
     async fn compact_session(&self, context: AgentContext) -> TalosResult<AgentRunExecution>;
 
     /// Clear reconstructable Provider-owned Session state.
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()>;
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()>;
 
     /// Release Provider-owned live Session resources.
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()>;
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()>;
 
     /// Release the Harness resources owned by this process. Independent nodes keep running.
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()>;

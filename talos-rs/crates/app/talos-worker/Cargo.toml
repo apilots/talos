@@ -7,6 +7,8 @@ license.workspace = true
 description = "Talos Agent execution runtime for embedded and standalone hosts"
 
 [dependencies]
+talos-system-info = { workspace = true }
+serde_json = { workspace = true }
 talos-memory = { workspace = true }
 agent-client = { workspace = true }
 agent-pb = { workspace = true }
@@ -36,8 +38,10 @@ talos-tools-sandbox = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "signal"] }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true, features = ["net"] }
 tonic = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

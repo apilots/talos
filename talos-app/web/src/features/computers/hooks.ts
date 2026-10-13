@@ -5,7 +5,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import { getTalosClient } from "@/shared/api/client";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
 import { useAppStore } from "@/shared/store/app-store";
-import { connectionScope, normalizeEndpoint } from "@/shared/store/connection-scope";
+import { connectionScope } from "@/shared/store/connection-scope";
 
 export function useProductScope() {
   return useAppStore((state) => connectionScope(state.connection));
@@ -18,6 +18,13 @@ export function useEnvironmentKey() {
 export function useSelectedComputerId() {
   return useAppStore((state) => state.selectedComputers[connectionScope(state.connection)]);
 }
+export function useSyncStatus() {
+  const scope = useProductScope();
+  const auth = useAppStore((state) => state.connection.authStatus);
+  return useQuery({ queryKey: ["talos", scope, "sync"], queryFn: () => getTalosClient().sync.status(),
+    enabled: auth === "authenticated" || auth === "open", refetchInterval: 5_000, retry: false });
+}
+
 export function useComputerList(query = "") {
   const scope = useProductScope();
   return useInfiniteQuery({
@@ -40,16 +47,15 @@ export function useComputers() {
   const runtime = connection.workerRuntimeState;
   const identity = useQuery({ queryKey: ["talos", scope, "local-computer"], enabled: Boolean(bridge),
     queryFn: () => createElectronAppServerClient(bridge!).desktop.workerIdentity(), refetchInterval: 5_000 });
-  const localId = bridge && connection.desktopConnectionMode === "local" ? "embedded"
-    : identity.data?.nodeId && identity.data.controlPlaneEndpoint && connection.controlPlaneEndpoint
-      && normalizeEndpoint(identity.data.controlPlaneEndpoint) === normalizeEndpoint(connection.controlPlaneEndpoint)
-      ? identity.data.nodeId : undefined;
+  const sync = useSyncStatus();
+  // Local is relative to the connected management host, for Desktop and Web alike.
+  const localId = sync.data?.localComputerId ?? (bridge && connection.authStatus === "open" ? "embedded" : undefined);
   const list = useComputerList();
   const nodes = list.data?.pages.flatMap((page) => page.data) ?? [];
   useEffect(() => {
-    if (selectedId) return;
-    if (bridge) {
-      if (localId) select(scope, localId);
+    if (selectedId && !(selectedId === "embedded" && localId && localId !== "embedded")) return;
+    if (localId) {
+      select(scope, localId);
     } else if (list.data?.pages[0]?.total === 1 && nodes.length === 1) {
       select(scope, nodes[0].nodeId);
     }
@@ -60,16 +66,21 @@ export function useComputers() {
     .filter((node): node is AppProtocol.NodeInfo => Boolean(node)).map((node) => [node.nodeId, node])).values()].slice(0, 3);
   return { scope, selectedId, selected: selected.data, localId, nodes, quickNodes,
     total: list.data?.pages[0]?.total ?? 0, list, runtime, identity,
-    error: selected.error ?? list.error ?? identity.error,
+    error: selected.error ?? list.error ?? identity.error, sync,
     select: (nodeId: string) => select(scope, nodeId),
   };
 }
 export function useCanManageComputer() {
   const nodeId = useSelectedComputerId();
   const query = useComputer(nodeId);
+  const local = useSyncStatus();
   const data = query.data;
   const connection = useAppStore((state) => state.connection);
-  if (connection.authStatus === "open" || connection.deploymentMode === "local" || connection.authRole === "admin") return true;
   if (query.isPending) return undefined;
-  return Boolean(data?.mode === "remote" && data.ownerUserId === connection.userId);
+  if (!data) return false;
+  if (data.ownerUserId) return data.ownerUserId === connection.userId;
+  // Only the backend's current-host identity grants access to an unregistered
+  // local Worker. Deployment mode is not an ownership or authorization proof.
+  if (data.nodeId !== "embedded") return false;
+  return connection.authStatus === "open" || connection.authRole === "admin" || local.data?.localComputerId === "embedded";
 }

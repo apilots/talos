@@ -41,11 +41,15 @@ pub fn decode_register(params: Option<pb::RegisterParams>) -> TalosResult<Regist
             agent_id: deployment.agent_id,
         });
     }
-    Ok(RegisterParams { deployments })
+    Ok(RegisterParams {
+        deployments,
+        system_info: params.system_info.map(decode_system_info).transpose()?,
+    })
 }
 
 pub fn encode_register(params: RegisterParams) -> pb::RegisterParams {
     pb::RegisterParams {
+        system_info: params.system_info.map(encode_system_info),
         deployments: params
             .deployments
             .into_iter()
@@ -148,6 +152,7 @@ pub fn decode_heartbeat_params(
 
 pub fn encode_info(info: NodeInfo) -> pb::NodeInfo {
     pb::NodeInfo {
+        system_info: info.system_info.map(encode_system_info),
         node_id: info.node_id,
         display_name: info.display_name,
         mode: match info.mode {
@@ -247,6 +252,7 @@ pub fn decode_info(value: pb::NodeInfo) -> TalosResult<NodeInfo> {
         pb::NodeMode::Unspecified => return Err(invalid_response()),
     };
     Ok(NodeInfo {
+        system_info: value.system_info.map(decode_system_info).transpose()?,
         node_id: value.node_id,
         display_name: value.display_name,
         mode,
@@ -281,4 +287,56 @@ pub fn decode_created(value: pb::CreatedNode) -> TalosResult<CreatedNode> {
         return Err(invalid_response());
     }
     Ok(CreatedNode { node, credential })
+}
+
+fn encode_system_info(value: talos_types::NodeSystemInfo) -> pb::NodeSystemInfo {
+    pb::NodeSystemInfo {
+        os: match value.os {
+            talos_types::NodeOperatingSystem::Linux => pb::NodeOperatingSystem::Linux as i32,
+            talos_types::NodeOperatingSystem::MacOs => pb::NodeOperatingSystem::MacOs as i32,
+        },
+        os_version: value.os_version,
+        architecture: value.architecture,
+        hostname: value.hostname,
+        cpu_model: value.cpu_model,
+        logical_cpu_count: value.logical_cpu_count,
+        memory_bytes: value.memory_bytes,
+        board_model: value.board_model,
+        graphics: value.graphics,
+        worker_version: value.worker_version,
+        network_interfaces: value
+            .network_interfaces
+            .into_iter()
+            .map(|n| pb::NodeNetworkInterface {
+                name: n.name,
+                mac_address: n.mac_address,
+            })
+            .collect(),
+    }
+}
+fn decode_system_info(value: pb::NodeSystemInfo) -> TalosResult<talos_types::NodeSystemInfo> {
+    Ok(talos_types::NodeSystemInfo {
+        os: match pb::NodeOperatingSystem::try_from(value.os) {
+            Ok(pb::NodeOperatingSystem::Linux) => talos_types::NodeOperatingSystem::Linux,
+            Ok(pb::NodeOperatingSystem::MacOs) => talos_types::NodeOperatingSystem::MacOs,
+            _ => return Err(invalid_request()),
+        },
+        os_version: value.os_version,
+        architecture: value.architecture,
+        hostname: value.hostname,
+        cpu_model: value.cpu_model,
+        logical_cpu_count: value.logical_cpu_count,
+        memory_bytes: value.memory_bytes,
+        board_model: value.board_model,
+        graphics: value.graphics,
+        worker_version: value.worker_version,
+        network_interfaces: value
+            .network_interfaces
+            .into_iter()
+            .map(|n| talos_types::NodeNetworkInterface {
+                name: n.name,
+                mac_address: n.mac_address,
+            })
+            .collect(),
+    })
 }

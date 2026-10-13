@@ -11,9 +11,10 @@ impl TalosService {
         actor: &Actor,
         node_id: Option<&str>,
     ) -> ServiceResult<Arc<dyn WorkerEnvironment>> {
-        self.access
-            .worker_environment(actor, node_id.unwrap_or("embedded"))
-            .await
+        let node = self
+            .connect_selected_computer(actor, node_id.unwrap_or("embedded"))
+            .await?;
+        self.access.worker_environment(actor, &node).await
     }
     pub async fn workspace_info(
         &self,
@@ -28,7 +29,7 @@ impl TalosService {
     pub async fn list_projects(
         &self,
         actor: &Actor,
-        request: ProjectListRequest,
+        mut request: ProjectListRequest,
     ) -> ServiceResult<Vec<ProjectInfo>> {
         if request
             .node_id
@@ -39,6 +40,9 @@ impl TalosService {
                 talos_error::ErrorCode::InvalidRequest,
                 "Node ID cannot be empty",
             ));
+        }
+        if let Some(node) = request.node_id.take() {
+            request.node_id = Some(self.resolve_computer_node(actor, &node).await?);
         }
         let projects = self.access.list_projects(actor).await?;
         let mut result = Vec::new();
@@ -60,8 +64,12 @@ impl TalosService {
     pub async fn create_project(
         &self,
         actor: &Actor,
-        request: ProjectCreateRequest,
+        mut request: ProjectCreateRequest,
     ) -> ServiceResult<ProjectInfo> {
+        request.node_id = Some(
+            self.connect_selected_computer(actor, request.node_id.as_deref().unwrap_or("embedded"))
+                .await?,
+        );
         let project = self.access.create_project(actor, request).await?;
         self.project_info_with_status(actor, project).await
     }
@@ -109,7 +117,8 @@ impl TalosService {
             }
             Err(error) => return Err(error),
         };
-        Ok(project_info_from_record(project))
+        self.project_for_client(actor, project_info_from_record(project))
+            .await
     }
     pub async fn read_fs_directory(
         &self,

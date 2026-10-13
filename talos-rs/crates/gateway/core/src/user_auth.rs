@@ -22,6 +22,7 @@ impl ServiceGateway {
             .account
             .logout_with_request(actor, request)
             .await?;
+        self.service.suspend_account_sync(actor).await?;
         self.service.invalidate_mcp_callbacks(actor);
         Ok(AuthLogoutResponse { success: true })
     }
@@ -68,6 +69,16 @@ impl ServiceGateway {
         _actor: &Actor,
         request: AuthSessionClearRequest,
     ) -> TalosResult<AuthSessionClearResponse> {
+        if let Some(session) = self
+            .service
+            .account
+            .read_auth_session(&Actor::regular("anonymous"), Default::default())?
+            .session
+        {
+            self.service
+                .suspend_account_sync(&Actor::regular(session.user.user_id))
+                .await?;
+        }
         self.service.account.clear_auth_session(request)?;
         Ok(AuthSessionClearResponse { success: true })
     }

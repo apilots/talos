@@ -28,8 +28,7 @@ pub struct FileRecord {
     pub file_id: String,
     pub owner_user_id: String,
     pub project_id: Option<String>,
-    pub storage_id: String,
-    pub object_key: String,
+    pub location: FileLocation,
     pub original_filename: String,
     pub mime_type: Option<String>,
     pub size_bytes: Option<u64>,
@@ -38,6 +37,32 @@ pub struct FileRecord {
     pub metadata: BTreeMap<String, String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// Body coordinates confined to the FileStore/FileService boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileLocation {
+    Local {
+        storage_id: String,
+        object_key: String,
+    },
+    Peer {
+        peer_id: String,
+    },
+}
+impl FileRecord {
+    pub fn local_location(&self) -> talos_error::TalosResult<(&str, &str)> {
+        match &self.location {
+            FileLocation::Local {
+                storage_id,
+                object_key,
+            } => Ok((storage_id, object_key)),
+            FileLocation::Peer { .. } => Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "File body must be read from its source FileService.",
+            )),
+        }
+    }
 }
 
 /// Identifies a file only within its authenticated owner boundary.

@@ -101,7 +101,12 @@ impl CoordinatorImpl {
                     "Agent Session is not found",
                 )
             })?;
-        if record.agent_id != agent_id || user_id.is_some_and(|user_id| user_id != record.user_id) {
+        let namespace = self
+            .session_store
+            .get_workspace_user_id(session_id)
+            .await?
+            .unwrap_or_else(|| record.user_id.clone());
+        if record.agent_id != agent_id || user_id.is_some_and(|user_id| user_id != namespace) {
             return Err(TalosError::new(
                 talos_error::ErrorCode::PermissionDenied,
                 "Agent Session binding does not match request",
@@ -117,8 +122,9 @@ impl CoordinatorImpl {
             if node.mode != NodeMode::Remote
                 || node.status != NodeStatus::Enabled
                 || node.owner_user_id.as_deref() != Some(record.user_id.as_str())
-                || node.lease_expires_at.is_none_or(|expiry| expiry <= now)
-                || !node_has_recent_heartbeat(&node, now)
+                || (node.credential_hash.is_some()
+                    && (node.lease_expires_at.is_none_or(|expiry| expiry <= now)
+                        || !node_has_recent_heartbeat(&node, now)))
             {
                 return Err(remote_unavailable());
             }
@@ -154,6 +160,7 @@ impl CoordinatorImpl {
         let now = chrono::Utc::now().timestamp();
         if node.status != NodeStatus::Enabled
             || (node_id != EMBEDDED_NODE_ID
+                && node.credential_hash.is_some()
                 && (node.lease_expires_at.is_none_or(|expiry| expiry <= now)
                     || !node_has_recent_heartbeat(&node, now)))
         {
@@ -181,6 +188,21 @@ fn remote_unavailable() -> TalosError {
 
 #[async_trait]
 impl AgentCoordinator for CoordinatorImpl {
+    async fn read_session_execution_state(
+        &self,
+        session: AgentSessionContext,
+    ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
+        let harness = self.session_harness(&session).await?;
+        harness.read_session_execution_state(session).await
+    }
+    async fn commit_session_execution_state(
+        &self,
+        params: agent_protocol::CommitSessionExecutionStateParams,
+    ) -> TalosResult<()> {
+        let harness = self.session_harness(&params.session).await?;
+        harness.commit_session_execution_state(params).await
+    }
+
     async fn worker_environment(
         &self,
         node_id: &str,
@@ -258,8 +280,9 @@ impl AgentCoordinator for CoordinatorImpl {
                 }
                 NodeMode::Remote => {
                     node.owner_user_id.as_deref() == Some(user_id)
-                        && node.lease_expires_at.is_some_and(|expires| expires > now)
-                        && node_has_recent_heartbeat(&node, now)
+                        && (node.credential_hash.is_none()
+                            || (node.lease_expires_at.is_some_and(|expires| expires > now)
+                                && node_has_recent_heartbeat(&node, now)))
                 }
             };
             if eligible && node.status == NodeStatus::Enabled {
@@ -296,7 +319,11 @@ impl AgentCoordinator for CoordinatorImpl {
         harness.compact_session(context).await
     }
 
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         let harness = self
             .harness(
                 &params.agent_id,
@@ -304,10 +331,14 @@ impl AgentCoordinator for CoordinatorImpl {
                 Some(&params.workspace.user_id),
             )
             .await?;
-        harness.clear_session(params).await
+        harness.clear_session(params, expected_history_cursor).await
     }
 
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         let harness = self
             .harness(
                 &params.agent_id,
@@ -315,7 +346,7 @@ impl AgentCoordinator for CoordinatorImpl {
                 Some(&params.workspace.user_id),
             )
             .await?;
-        harness.close_session(params).await
+        harness.close_session(params, expected_history_cursor).await
     }
 
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
@@ -384,6 +415,7 @@ mod affinity_tests {
             .unwrap();
         node_store
             .register(RegisterNodeParams {
+                system_info: None,
                 node_id: "z-laptop".into(),
                 expected_credential_hash: [1; 32],
                 lease_token_hash: [2; 32],

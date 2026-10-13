@@ -7,6 +7,8 @@ import { app, BrowserWindow } from "electron";
 import { resolveAppServerCommand } from "./app-server-binary";
 import { DesktopAppServerController } from "./app-server-controller";
 import {
+  broadcastActiveTurnChanged,
+  broadcastMessageQueueChanged,
   broadcastTimelineEvent,
   broadcastRuntimeState,
   broadcastSubscriptionTerminated,
@@ -38,6 +40,8 @@ async function createController(): Promise<DesktopAppServerController> {
     clientName: "talos-desktop",
     clientVersion: app.getVersion(),
     clientKind: "desktop",
+    onActiveTurnChanged: broadcastActiveTurnChanged,
+    onMessageQueueChanged: broadcastMessageQueueChanged,
     onEvent: (event) => broadcastTimelineEvent(event),
     onSubscriptionTerminated: (notification) => broadcastSubscriptionTerminated(notification),
     onRuntimeState: (state) => broadcastRuntimeState(state),

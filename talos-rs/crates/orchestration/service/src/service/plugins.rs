@@ -13,7 +13,7 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
             .list_plugin_sources(actor.worker_environment_context(), request)
             .await
@@ -27,8 +27,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .add_plugin_source(actor.worker_environment_context(), request)
@@ -43,8 +44,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .refresh_plugin_source(actor.worker_environment_context(), request)
@@ -59,8 +61,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .remove_plugin_source(actor.worker_environment_context(), request)
@@ -75,7 +78,7 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
             .search_plugins(actor.worker_environment_context(), request)
             .await
@@ -89,7 +92,7 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
             .list_plugins(actor.worker_environment_context(), request)
             .await
@@ -103,7 +106,7 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
             .read_plugin(actor.worker_environment_context(), request)
             .await
@@ -117,8 +120,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .install_plugin(actor.worker_environment_context(), request)
@@ -133,8 +137,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .update_plugin(actor.worker_environment_context(), request)
@@ -149,8 +154,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .uninstall_plugin(actor.worker_environment_context(), request)
@@ -165,8 +171,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .enable_plugin(actor.worker_environment_context(), request)
@@ -181,8 +188,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .disable_plugin(actor.worker_environment_context(), request)
@@ -197,7 +205,7 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
             .list_mcp_servers(actor.worker_environment_context(), request)
             .await
@@ -211,7 +219,7 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         environment
             .read_mcp_authentication(actor.worker_environment_context(), request)
             .await
@@ -225,8 +233,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .update_mcp_credentials(actor.worker_environment_context(), request)
@@ -241,8 +250,9 @@ impl TalosService {
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
+        let node = self.resolve_computer_node(actor, &node).await?;
         let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let environment = self.managed_environment(actor, Some(&node)).await?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
         self.sessions.reject_nonterminal_turns(&node).await?;
         environment
             .import_mcp_server(actor.worker_environment_context(), request)

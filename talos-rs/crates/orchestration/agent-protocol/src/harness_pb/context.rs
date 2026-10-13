@@ -58,6 +58,9 @@ pub fn decode_session_context(
 
 pub fn encode_context(value: AgentContext) -> TalosResult<pb::AgentContext> {
     Ok(pb::AgentContext {
+        history_cursor: value
+            .history_cursor
+            .map(crate::execution_state_pb::encode_history_cursor),
         session: Some(encode_session_context(value.session)),
         turn_id: value.turn_id,
         project_id: value.project_id,
@@ -78,6 +81,10 @@ pub fn decode_context(
         return Err(invalid());
     }
     Ok(AgentContext {
+        history_cursor: value
+            .history_cursor
+            .map(crate::execution_state_pb::decode_history_cursor)
+            .transpose()?,
         session: decode_session_context(value.session, config)?,
         turn_id: value.turn_id,
         project_id: value.project_id,
@@ -311,6 +318,7 @@ mod tests {
         let node_home = PathBuf::from("/tmp/talos-remote-node");
         let config = Config::default().with_runtime_paths(TalosPaths::from_home(node_home.clone()));
         let context = AgentContext {
+            history_cursor: None,
             session: AgentSessionContext {
                 agent_id: "talos".into(),
                 session_id: "session-1".into(),

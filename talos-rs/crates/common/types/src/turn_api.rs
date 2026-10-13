@@ -104,3 +104,20 @@ pub struct StartTurnResponse {
     pub turn_id: String,
     pub status: TurnCommandStatus,
 }
+
+/// The current product command that owns one durable idempotency namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum IdempotentCommand {
+    TurnSubmission,
+    TurnInput,
+}
+
+impl IdempotentCommand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TurnSubmission => "turn_submission",
+            Self::TurnInput => "turn_input",
+        }
+    }
+}

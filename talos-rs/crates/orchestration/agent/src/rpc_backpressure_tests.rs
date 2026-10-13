@@ -24,10 +24,18 @@ impl AgentHarness for RunningHarness {
     fn compact_session(&self, _: AgentContext) -> AgentFuture<'_, TalosResult<AgentRunExecution>> {
         unreachable!()
     }
-    fn clear_session(&self, _: AgentSessionContext) -> AgentFuture<'_, TalosResult<()>> {
+    fn clear_session(
+        &self,
+        _: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, TalosResult<()>> {
         unreachable!()
     }
-    fn close_session(&self, _: AgentSessionContext) -> AgentFuture<'_, TalosResult<()>> {
+    fn close_session(
+        &self,
+        _: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, TalosResult<()>> {
         unreachable!()
     }
     fn shutdown(&self, _: Duration) -> AgentFuture<'_, TalosResult<()>> {
@@ -57,9 +65,14 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
             events.clone(),
             AgentInterruptOutcome::Cancelled,
         ));
+        let home = tempfile::tempdir().unwrap();
         let adapter = AgentHarnessRpcAdapter::new(
             "node".into(),
-            Arc::new(std::sync::RwLock::new(Config::default())),
+            Arc::new(std::sync::RwLock::new(
+                Config::default().with_runtime_paths(talos_config::TalosPaths::from_home(
+                    home.path().to_owned(),
+                )),
+            )),
             vec![("agent".into(), harness.clone())],
         );
         adapter
@@ -99,8 +112,33 @@ async fn unread_progress_stream_still_interrupts_on_revocation_and_expiry() {
                 events: AgentProgressEventReceiver::new(receiver),
                 settlement: AgentRunSettlementReceiver::new(settlement),
             }),
-            identity.clone(),
-            "agent".into(),
+            talos_types::AgentCaller {
+                session_id: identity.session_id.clone(),
+                turn_id: identity.turn_id.clone(),
+                agent_id: "agent".into(),
+            },
+            (
+                Box::new(()) as Box<dyn Send>,
+                adapter
+                    .session_gate
+                    .reserve(
+                        &agent_protocol::AgentSessionContext {
+                            agent_id: "agent".into(),
+                            session_id: "session".into(),
+                            workspace: adapter
+                                .config
+                                .read()
+                                .unwrap()
+                                .resolve_workspace("default", "owner")
+                                .unwrap(),
+                        },
+                        &identity,
+                        &uuid::Uuid::new_v4().to_string(),
+                        &Default::default(),
+                        super::session_gate::RunAdmission::NewTurn,
+                    )
+                    .unwrap(),
+            ),
         );
         did_accept.await.unwrap();
         // Keep the response alive without reading. Admission + accepted + 30
@@ -151,9 +189,13 @@ async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
         events,
         AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 },
     ));
+    let home = tempfile::tempdir().unwrap();
     let adapter = AgentHarnessRpcAdapter::new(
         "node".into(),
-        Arc::new(std::sync::RwLock::new(Config::default())),
+        Arc::new(std::sync::RwLock::new(
+            Config::default()
+                .with_runtime_paths(talos_config::TalosPaths::from_home(home.path().to_owned())),
+        )),
         vec![("agent".into(), harness.clone())],
     );
     adapter
@@ -192,8 +234,33 @@ async fn reconnect_remains_blocked_after_unconfirmed_disconnected_cleanup() {
             events: AgentProgressEventReceiver::new(receiver),
             settlement: AgentRunSettlementReceiver::new(settlement),
         }),
-        AgentTurnRef::new("session", "turn"),
-        "agent".into(),
+        talos_types::AgentCaller {
+            session_id: "session".into(),
+            turn_id: "turn".into(),
+            agent_id: "agent".into(),
+        },
+        (
+            Box::new(()) as Box<dyn Send>,
+            adapter
+                .session_gate
+                .reserve(
+                    &agent_protocol::AgentSessionContext {
+                        agent_id: "agent".into(),
+                        session_id: "session".into(),
+                        workspace: adapter
+                            .config
+                            .read()
+                            .unwrap()
+                            .resolve_workspace("default", "owner")
+                            .unwrap(),
+                    },
+                    &AgentTurnRef::new("session", "turn"),
+                    &uuid::Uuid::new_v4().to_string(),
+                    &Default::default(),
+                    super::session_gate::RunAdmission::NewTurn,
+                )
+                .unwrap(),
+        ),
     );
     did_accept.await.unwrap();
     drop(response);

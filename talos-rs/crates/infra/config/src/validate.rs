@@ -84,6 +84,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     use talos_error::TalosError;
 
     crate::parse_timezone(&config.timezone)?;
+    config.sync.validate()?;
     config.workspaces.validate(&config.talos_paths())?;
 
     let profile_retention = &config.automation.profile_usage_retention;

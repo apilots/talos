@@ -37,8 +37,10 @@ impl FileService {
                 talos_types::FileScope::Personal => None,
                 talos_types::FileScope::Project { project_id } => Some(project_id),
             },
-            storage_id: self.default_storage_id.clone(),
-            object_key,
+            location: talos_store::file::FileLocation::Local {
+                storage_id: self.default_storage_id.clone(),
+                object_key,
+            },
             original_filename,
             mime_type: None,
             size_bytes: None,
@@ -50,8 +52,8 @@ impl FileService {
         };
         self.store.create_file(record.clone()).await?;
 
-        let operator = self.operator(&record.storage_id)?;
-        let mut writer = match operator.writer(&record.object_key).await {
+        let operator = self.operator(record.local_location()?.0)?;
+        let mut writer = match operator.writer(record.local_location()?.1).await {
             Ok(writer) => writer,
             Err(error) => {
                 return self
@@ -205,8 +207,8 @@ impl FileService {
             }
         }
         if let Err(error) = self
-            .operator(&record.storage_id)?
-            .delete(&record.object_key)
+            .operator(record.local_location()?.0)?
+            .delete(record.local_location()?.1)
             .await
         {
             if cleanup_error.is_none() {

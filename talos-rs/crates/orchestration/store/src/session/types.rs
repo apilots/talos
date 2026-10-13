@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
+pub use talos_types::SessionTreeIdentity;
+
 use serde::{Deserialize, Serialize};
 use talos_types::{
     talos::{SessionSourceProvider, SessionSourceType, TalosSessionEnvironment, TokenUsage},
-    AgentPath, AgentTurnRef, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE,
+    SessionConf, SessionUsage, DEFAULT_SESSION_TITLE,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -35,19 +37,6 @@ pub struct SessionRecord {
     pub project_id: Option<String>,
     #[serde(default)]
     pub current_directory: Option<PathBuf>,
-}
-
-/// Exhaustive persisted identity of a Primary or Subagent Session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SessionTreeIdentity {
-    #[default]
-    Primary,
-    Subagent {
-        parent: AgentTurnRef,
-        tree_root_session_id: String,
-        path: AgentPath,
-    },
 }
 
 impl SessionRecord {

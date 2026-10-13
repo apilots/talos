@@ -22,7 +22,7 @@ class Desktop:
         self.sequence = 0
         self.login_tokens = []
         self.log = (REPORT / f'{name}.log').open('ab')
-        env = dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(home / 'conf/talos.yaml'),
+        env = dict(os.environ, HOME=str(home), TALOS_HOME=str(home), TALOS_CONFIG=str(home / 'conf/talos.yaml'),
                    TALOS_RESOURCE_DIR=str(ROOT), TALOS_DESKTOP_HOSTNAME=name,
                    TALOS_APP_SERVER_BIN=str(ROOT / 'talos-rs/target/debug/app-server'))
         self.process = subprocess.Popen(['node', str(REPORT / 'desktop-host.mjs')], env=env,
@@ -79,6 +79,9 @@ class Desktop:
             require(self.process.wait(timeout=45) == 0, f'{self.name}: Desktop did not drain cleanly')
         self.selector.close()
         self.log.close()
+        diagnostics = self.home / 'logs/talos.log'
+        if diagnostics.exists():
+            (REPORT / f'{self.name}-app-server.log').write_bytes(diagnostics.read_bytes())
 
 
 def public(cluster, path, user='alice', method='GET', body=None):
@@ -162,7 +165,8 @@ def run(cluster):
     first = Desktop(cluster, home, 'desktop-a')
     second = None
     try:
-        require(first.call('desktop/workerIdentity')['nodeId'] is None, 'Fresh Desktop already has identity')
+        require(first.call('desktop/workerIdentity') == {'nodeId': 'embedded', 'controlPlaneEndpoint': None},
+                'Fresh Desktop must expose only its unregistered embedded Worker')
         first.login('alice')
         identity = first.call('desktop/workerIdentity')
         node_id = identity['nodeId']
@@ -176,7 +180,7 @@ def run(cluster):
         credential = Path(runner['credential_file'])
         require(runner['node_id'] == node_id and runner['control_plane_endpoint'] == cluster.ingress, 'Saved identity mismatch')
         require(credential.parent == home / 'conf' and credential.stat().st_mode & 0o777 == 0o600, 'Worker credential location/permissions')
-        require(not (home / 'data/talos.db').exists(), 'Cloud Desktop created a local product DB')
+        require((home / 'data/talos.db').exists(), 'Desktop management runtime did not create its product DB')
         secrets = [credential.read_text(), json.loads((home / 'auth/cloud-session.json').read_text())['access_token']]
         require(all(secret not in json.dumps(identity) for secret in secrets), 'Safe identity response leaked a credential')
         proof('desktop_real_device_login_saved_registration', node)

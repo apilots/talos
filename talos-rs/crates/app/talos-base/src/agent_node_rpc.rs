@@ -21,6 +21,16 @@ mod resources;
 pub use resources::{NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc};
 #[path = "agent_node_connect.rs"]
 mod connect;
+#[path = "agent_coordinator_rpc.rs"]
+mod coordinator_rpc;
+#[path = "agent_peer_file_rpc.rs"]
+mod peer_file_rpc;
+#[path = "agent_resource_routing.rs"]
+mod resource_routing;
+use resource_routing::ResourceRoutes;
+#[path = "agent_resource_dispatch.rs"]
+mod resource_dispatch;
+pub(crate) use resource_dispatch::CoordinatorResources;
 
 pub struct NodeRpcServer {
     bind_address: SocketAddr,
@@ -77,11 +87,16 @@ impl NodeRpcServer {
                 )
             })?;
         let remote_publisher = RemoteNodePublisher {
+            coordinator_id: uuid::Uuid::new_v4().to_string(),
             coordinator,
             nodes: nodes.clone(),
             trusted_node_ca: trusted_node_ca
                 .map_or(AgentTlsTrust::SystemRoots, AgentTlsTrust::Certificate),
+            connections: Arc::default(),
+            resource_routes: ResourceRoutes::default(),
         };
+        let session_data = session_data.with_routes(remote_publisher.resource_routes.clone());
+        let tool_images = tool_images.with_routes(remote_publisher.resource_routes.clone());
         let subagent_control = NodeSubagentControlRpc::new(session_data.clone(), agent_control);
         Ok(Self {
             bind_address,
@@ -95,6 +110,17 @@ impl NodeRpcServer {
         })
     }
 
+    pub fn with_coordinator_id(mut self, coordinator_id: String) -> TalosResult<Self> {
+        uuid::Uuid::parse_str(&coordinator_id).map_err(|_| {
+            TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Coordinator identity is invalid.",
+            )
+        })?;
+        self.remote_publisher.coordinator_id = coordinator_id;
+        Ok(self)
+    }
+
     pub async fn run(self, shutdown: CancellationToken) -> TalosResult<()> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let control =
@@ -103,9 +129,20 @@ impl NodeRpcServer {
                 self.remote_publisher.clone(),
                 shutdown.clone(),
             ));
-        let management = pb::agent_node_management_server::AgentNodeManagementServer::new(
-            NodeManagementRpc::new(self.nodes, self.auth_service),
+        let management = NodeManagementRpc::new(self.nodes, self.auth_service);
+        let peer_files = pb::agent_peer_file_rpc_server::AgentPeerFileRpcServer::new(
+            peer_file_rpc::PeerFileRpc {
+                management: management.clone(),
+                routes: self.remote_publisher.resource_routes.clone(),
+            },
         );
+        let callers = coordinator_rpc::CoordinatorRpc::new(
+            management.clone(),
+            self.remote_publisher.clone(),
+            shutdown.clone(),
+        );
+        let management =
+            pb::agent_node_management_server::AgentNodeManagementServer::new(management);
         let session_data =
             pb::agent_session_data_rpc_server::AgentSessionDataRpcServer::new(self.session_data);
         let subagent_control =
@@ -124,6 +161,8 @@ impl NodeRpcServer {
             })?
             .add_service(control)
             .add_service(management)
+            .add_service(pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(callers))
+            .add_service(peer_files)
             .add_service(session_data)
             .add_service(subagent_control)
             .add_service(tool_images)
@@ -140,9 +179,18 @@ impl NodeRpcServer {
 
 #[derive(Clone)]
 pub struct RemoteNodePublisher {
+    coordinator_id: String,
     coordinator: Arc<CoordinatorImpl>,
     nodes: AgentNodeService,
     trusted_node_ca: AgentTlsTrust,
+    // Live transport handles belong to the existing publication owner; no
+    // additional persisted registry or execution ledger is introduced.
+    resource_routes: ResourceRoutes,
+    connections: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<String, Arc<agent_client::AgentEnvironmentClient>>,
+        >,
+    >,
 }
 
 impl RemoteNodePublisher {
@@ -178,6 +226,7 @@ impl RemoteNodePublisher {
                 },
             )
             .await?;
+            let client = client.with_coordinator_id(self.coordinator_id.clone())?;
             clients.push((deployment.agent_id.clone(), Arc::new(client)));
         }
         self.coordinator.unregister_remote_node(node_id).await;
@@ -186,19 +235,25 @@ impl RemoteNodePublisher {
                 .replace_remote_agent(node_id.to_owned(), agent_id, client)
                 .await?;
         }
-        let environment = agent_client::AgentEnvironmentClient::connect(
-            &endpoint,
-            self.trusted_node_ca.clone(),
-            NodeAuth {
-                node_id: node_id.to_owned(),
-                token: registration.lease_token.clone(),
-            },
-        )
-        .await?;
+        let environment = Arc::new(
+            agent_client::AgentEnvironmentClient::connect(
+                &endpoint,
+                self.trusted_node_ca.clone(),
+                NodeAuth {
+                    node_id: node_id.to_owned(),
+                    token: registration.lease_token.clone(),
+                },
+            )
+            .await?,
+        );
         self.coordinator
-            .register_environment(node_id.to_owned(), Arc::new(environment))
+            .register_environment(node_id.to_owned(), environment.clone())
             .await;
         let coordinator = self.coordinator.clone();
+        self.connections
+            .lock()
+            .await
+            .insert(node_id.to_owned(), environment.clone());
         let published_node_id = node_id.to_owned();
         self.nodes
             .mark_registration_published(
@@ -208,8 +263,10 @@ impl RemoteNodePublisher {
                 },
                 Arc::new(move || {
                     let coordinator = coordinator.clone();
+                    let environment = environment.clone();
                     let node_id = published_node_id.clone();
                     Box::pin(async move {
+                        environment.close();
                         coordinator.unregister_remote_node(&node_id).await;
                     })
                 }),
@@ -218,6 +275,9 @@ impl RemoteNodePublisher {
     }
 
     async fn unpublish(&self, node_id: &str) {
+        if let Some(connection) = self.connections.lock().await.remove(node_id) {
+            connection.close();
+        }
         self.coordinator.unregister_remote_node(node_id).await;
     }
 }
@@ -395,6 +455,34 @@ impl NodeManagementRpc {
 
 #[tonic::async_trait]
 impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc {
+    async fn get_deployments(
+        &self,
+        request: Request<pb::GetNodeRequest>,
+    ) -> Result<Response<pb::GetDeploymentsResponse>, Status> {
+        let result = async {
+            let actor = self.actor(&request).await?;
+            self.nodes
+                .owned_deployments(&actor, &request.into_inner().node_id)
+                .await
+        }
+        .await;
+        Ok(Response::new(pb::GetDeploymentsResponse {
+            result: Some(match result {
+                Ok(deployments) => {
+                    pb::get_deployments_response::Result::Deployments(pb::NodeDeployments {
+                        deployments: deployments
+                            .into_iter()
+                            .map(|deployment| pb::Deployment {
+                                agent_id: deployment.agent_id,
+                            })
+                            .collect(),
+                    })
+                }
+                Err(error) => pb::get_deployments_response::Result::Failure(failure(error)),
+            }),
+        }))
+    }
+
     async fn create_node(
         &self,
         request: Request<pb::CreateNodeRequest>,
@@ -450,6 +538,57 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
             result: Some(match result {
                 Ok(page) => pb::list_nodes_response::Result::Page(node_pb::encode_page(page)),
                 Err(error) => pb::list_nodes_response::Result::Failure(failure(error)),
+            }),
+        }))
+    }
+
+    async fn rename_computer(
+        &self,
+        request: Request<pb::RenameComputerRequest>,
+    ) -> Result<Response<pb::GetNodeResponse>, Status> {
+        let result = async {
+            let actor = self.actor(&request).await?;
+            let request = request.into_inner();
+            self.nodes
+                .rename_computer(
+                    &actor,
+                    talos_types::RenameComputerRequest {
+                        node_id: request.node_id,
+                        display_name: request.display_name,
+                    },
+                )
+                .await
+        }
+        .await;
+        Ok(Response::new(pb::GetNodeResponse {
+            result: Some(match result {
+                Ok(info) => pb::get_node_response::Result::Node(node_pb::encode_info(info)),
+                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+            }),
+        }))
+    }
+    async fn set_computer_status(
+        &self,
+        request: Request<pb::SetComputerStatusRequest>,
+    ) -> Result<Response<pb::GetNodeResponse>, Status> {
+        let result = async {
+            let actor = self.actor(&request).await?;
+            let request = request.into_inner();
+            self.nodes
+                .set_computer_status(
+                    &actor,
+                    talos_types::SetComputerStatusRequest {
+                        node_id: request.node_id,
+                        status: node_pb::decode_status(request.status)?,
+                    },
+                )
+                .await
+        }
+        .await;
+        Ok(Response::new(pb::GetNodeResponse {
+            result: Some(match result {
+                Ok(info) => pb::get_node_response::Result::Node(node_pb::encode_info(info)),
+                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
             }),
         }))
     }

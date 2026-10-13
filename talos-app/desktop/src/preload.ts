@@ -14,6 +14,14 @@ const bridge: TalosDesktopBridge = {
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ) => ipcRenderer.invoke(TALOS_IPC.invoke, method, params, options) as Promise<AppProtocol.ApiResponse<T>>,
   openExternal: (url: string) => ipcRenderer.invoke(TALOS_IPC.openExternal, url) as Promise<void>,
+  onActiveTurnChanged: (handler) => {
+    const listener = (_event: IpcRendererEvent, notice: AppProtocol.SessionActiveTurnChangedNotification) => handler(notice);
+    ipcRenderer.on(TALOS_IPC.activeTurnChanged, listener); return () => ipcRenderer.off(TALOS_IPC.activeTurnChanged, listener);
+  },
+  onMessageQueueChanged: (handler) => {
+    const listener = (_event: IpcRendererEvent, notice: AppProtocol.MessageQueueChangedNotification) => handler(notice);
+    ipcRenderer.on(TALOS_IPC.messageQueueChanged, listener); return () => ipcRenderer.off(TALOS_IPC.messageQueueChanged, listener);
+  },
   onEvent: (handler) => {
     const listener = (_event: IpcRendererEvent, timelineEvent: AppProtocol.TimelineEvent) => {
       handler(timelineEvent);

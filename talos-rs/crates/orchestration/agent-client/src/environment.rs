@@ -16,8 +16,26 @@ use tonic::{transport::Endpoint, Request};
 pub struct AgentEnvironmentClient {
     transport: HarnessTransport,
     auth: NodeAuth,
+    closed: tokio_util::sync::CancellationToken,
 }
+#[path = "direct_relay.rs"]
+mod direct_relay;
+
 impl AgentEnvironmentClient {
+    pub async fn connect_loopback(
+        address: std::net::SocketAddr,
+        auth: NodeAuth,
+    ) -> TalosResult<Self> {
+        if auth.node_id.is_empty() || auth.token.is_empty() {
+            return Err(wire::invalid());
+        }
+        Ok(Self {
+            transport: HarnessTransport::Direct(crate::tls::loopback_channel(address).await?),
+            auth,
+            closed: tokio_util::sync::CancellationToken::new(),
+        })
+    }
+
     pub async fn connect(
         endpoint: &str,
         trust: AgentTlsTrust,
@@ -47,17 +65,46 @@ impl AgentEnvironmentClient {
         Ok(Self {
             transport: HarnessTransport::Direct(channel),
             auth,
+            closed: tokio_util::sync::CancellationToken::new(),
         })
     }
     pub fn from_connection(connection: Arc<AgentExecutionConnection>, auth: NodeAuth) -> Self {
         Self {
             transport: HarnessTransport::Outbound(connection),
             auth,
+            closed: tokio_util::sync::CancellationToken::new(),
+        }
+    }
+    /// Withdraw this published transport and interrupt its active relays.
+    pub fn close(&self) {
+        self.closed.cancel();
+        if let HarnessTransport::Outbound(connection) = &self.transport {
+            connection.close();
+        }
+    }
+    /// A closed publication cannot be reused after lease revocation.
+    pub fn is_closed(&self) -> bool {
+        self.closed.is_cancelled()
+            || matches!(&self.transport, HarnessTransport::Outbound(connection) if connection.is_closed())
+    }
+    /// Wait for publication withdrawal or an outbound connection failure.
+    pub async fn ended(&self) {
+        tokio::select! {
+            _ = self.closed.cancelled() => {}
+            _ = async {
+                match &self.transport {
+                    HarnessTransport::Outbound(connection) => connection.ended().await,
+                    HarnessTransport::Direct(_) => futures_util::future::pending().await,
+                }
+            } => {}
         }
     }
 }
 macro_rules! invoke {
     ($client:expr, $method:ident, $call:ident, $request:expr, $result:ident, $variant:ident, $decode:ident) => {{
+        if $client.is_closed() {
+            return Err(crate::connection_writer::closed());
+        }
         let mut request = Request::new($request);
         let timeout = match stringify!($method) {
             "add_plugin_source"

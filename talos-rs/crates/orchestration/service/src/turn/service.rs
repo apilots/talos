@@ -157,7 +157,10 @@ impl TurnService {
             .sessions
             .record_compaction_usage(session, &usage)
             .await?;
-        self.execution.sessions.session_info(&record)
+        self.execution
+            .sessions
+            .schedule_shared_history_cursor(record.id.clone());
+        self.execution.sessions.session_info(&record).await
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {

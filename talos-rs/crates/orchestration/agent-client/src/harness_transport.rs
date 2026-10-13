@@ -85,6 +85,24 @@ macro_rules! unary {
     };
 }
 impl HarnessTransport {
+    unary!(
+        read_session_execution_state,
+        ReadSessionExecutionStateRequest,
+        SessionExecutionStateResponse,
+        ReadSessionExecutionState,
+        SessionExecutionState,
+        |_: &pb::ReadSessionExecutionStateRequest| Duration::from_secs(10),
+        Unary
+    );
+    unary!(
+        commit_session_execution_state,
+        CommitSessionExecutionStateRequest,
+        EmptyResponse,
+        CommitSessionExecutionState,
+        Empty,
+        |_: &pb::CommitSessionExecutionStateRequest| Duration::from_secs(10),
+        ControlUnary
+    );
     streaming!(start, StartRequest, RunResponse, Start, Run, 0, Streaming);
     streaming!(
         submit_input,

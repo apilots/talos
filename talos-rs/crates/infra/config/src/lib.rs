@@ -57,6 +57,7 @@ pub use domains::agent::{
 };
 pub use domains::agent_node::{
     AgentNodeConfig, AgentNodeControlConfig, AgentNodeRunnerConfig, AgentNodeTransport,
+    WorkerRpcConfig, WorkerRpcTlsConfig,
 };
 pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
@@ -89,6 +90,7 @@ pub use domains::storage::{
     DatabaseType, FileStorageBackendConfig, FileStorageConfig, FileStorageLimits,
     FsFileStorageConfig, S3FileStorageConfig, StorageBackendConfig,
 };
+pub use domains::sync::SyncConfig;
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
@@ -164,6 +166,9 @@ pub struct Config {
     #[serde(default)]
     pub cloud: CloudConfig,
 
+    #[serde(default)]
+    pub sync: SyncConfig,
+
     /// Filesystem-facing UI capabilities.
     #[serde(default)]
     pub fs: FsConfig,
@@ -220,6 +225,7 @@ impl Default for Config {
             desktop: DesktopConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
+            sync: SyncConfig::default(),
             fs: FsConfig::default(),
             channels: ChannelsConfig::default(),
             logging: LoggingConfig::default(),

@@ -53,9 +53,10 @@ def oauth(cluster):
     params=parse_qs(urlparse(started['authorizationUrl']).query)
     require(params['redirect_uri']==[cluster.ingress+'/v1/mcp/oauth/callback'],'Grant points at Worker loopback instead of public control plane')
     listeners=subprocess.run(['lsof','-nP','-a','-p',str(a['process'].pid),'-iTCP','-sTCP:LISTEN'],capture_output=True,text=True)
-    require(listeners.returncode==1 and not listeners.stdout,'Remote OAuth opened an inbound Worker listener')
+    require(listeners.returncode==0 and listeners.stdout,'Worker RPC listener is missing')
+    require(all('TCP 127.0.0.1:' in line for line in listeners.stdout.splitlines()[1:]),'Remote OAuth opened a non-loopback Worker listener')
     require(not list((a['home']/'mcp-credentials').glob('*.json')), 'Starting authorization persisted tokens before callback')
-    passed('remote_grant_uses_public_relay_and_no_worker_callback_listener')
+    passed('remote_grant_uses_public_relay_and_loopback_worker_rpc')
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self,req,fp,code,msg,headers,newurl): return None

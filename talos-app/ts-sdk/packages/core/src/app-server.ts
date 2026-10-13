@@ -72,6 +72,8 @@ export type AppServerMessageQueueChangedHandler = (
   notification: AppProtocol.MessageQueueChangedNotification,
 ) => void;
 
+export type AppServerActiveTurnChangedHandler = (notification: AppProtocol.SessionActiveTurnChangedNotification) => void;
+
 export type AppServerErrorHandler = (error: Error) => void;
 
 export interface AppServerRequestOptions {
@@ -85,6 +87,7 @@ export interface AppServerTransport {
     options?: AppServerRequestOptions,
   ): Promise<T>;
   onEvent(handler: AppServerEventHandler): () => void;
+  onActiveTurnChanged?(handler: AppServerActiveTurnChangedHandler): () => void;
   onMessageQueueChanged?(handler: AppServerMessageQueueChangedHandler): () => void;
   onSubscriptionTerminated?(handler: AppServerSubscriptionTerminatedHandler): () => void;
   onError?(handler: AppServerErrorHandler): () => void;
@@ -96,6 +99,8 @@ export class AppServerClient {
   onEvent(handler: AppServerEventHandler): () => void {
     return this.transport.onEvent(handler);
   }
+
+  onActiveTurnChanged(handler: AppServerActiveTurnChangedHandler): () => void { return this.transport.onActiveTurnChanged?.(handler) ?? (() => undefined); }
 
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
     return this.transport.onMessageQueueChanged?.(handler) ?? (() => undefined);
@@ -383,6 +388,12 @@ export class AppServerClient {
       replayLimit,
     });
   }
+
+  sync = {
+    status: (): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/status", null),
+    enable: (request: AppProtocol.SyncEnableRequest = { claimLocalHistory: false }): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/enable", request),
+    disable: (): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/disable", null),
+  };
 
   computers = {
     list: (params: AppProtocol.ComputerListRequest = {}): Promise<AppProtocol.ComputerListResponse> =>

@@ -27,38 +27,33 @@ async fn outbound_migration_preserves_registered_nodes_and_security_constraints(
     .run(storage.pool())
     .await
     .unwrap();
-    let nodes = DatabaseAgentNodeStore::new(storage.pool().clone());
-    let direct = CreateNodeParams {
+    // Populate the previous schema through SQL; the current Store requires current migrations.
+    sqlx::query("INSERT INTO agent_nodes(node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, health, created_at, updated_at) VALUES ('existing-node','owner','Existing laptop','remote','https://node.example','enabled',?,300,?,100,'unknown',10,10)")
+        .bind([11u8;32].as_slice()).bind([22u8;32].as_slice()).execute(storage.pool()).await.unwrap();
+    sqlx::query("INSERT INTO agent_nodes(node_id, display_name, mode, status, health, created_at, updated_at) VALUES ('embedded','Embedded Agent','embedded','enabled','unknown',10,10)")
+        .execute(storage.pool()).await.unwrap();
+    let before = NodeRecord {
+        system_info: None,
         node_id: "existing-node".into(),
         owner_user_id: Some("owner".into()),
         display_name: "Existing laptop".into(),
         mode: NodeMode::Remote,
         endpoint: Some("https://node.example".into()),
+        status: NodeStatus::Enabled,
         credential_hash: Some([11; 32]),
         credential_expires_at: Some(300),
-        now_at: 10,
+        lease_token_hash: Some([22; 32]),
+        lease_expires_at: Some(100),
+        last_heartbeat_at: None,
+        health: NodeHealth::Unknown,
+        created_at: 10,
+        updated_at: 10,
     };
-    let direct_id = direct.node_id.clone();
-    nodes.create(direct).await.unwrap();
-    nodes
-        .register(RegisterNodeParams {
-            node_id: direct_id.clone(),
-            expected_credential_hash: [11; 32],
-            lease_token_hash: [22; 32],
-            lease_expires_at: 100,
-            now_at: 10,
-        })
-        .await
-        .unwrap();
-    let before = nodes.get(&direct_id).await.unwrap().unwrap();
-    nodes
-        .upsert_embedded(NodeStatus::Enabled, 10)
-        .await
-        .unwrap();
     crate::migration::run_migrations(storage.pool(), &crate::migration::test_migrations_dir())
         .await
         .unwrap();
-    let after = nodes.get(&direct_id).await.unwrap().unwrap();
+    let nodes = DatabaseAgentNodeStore::new(storage.pool().clone());
+    let after = nodes.get("existing-node").await.unwrap().unwrap();
     assert!(
         after == before,
         "migration must preserve the entire registered node"
@@ -104,6 +99,7 @@ async fn outbound_migration_preserves_registered_nodes_and_security_constraints(
     }
     assert!(nodes
         .register(RegisterNodeParams {
+            system_info: None,
             node_id: "outbound-node".into(),
             expected_credential_hash: [11; 32],
             lease_token_hash: [33; 32],
@@ -146,6 +142,19 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
         .unwrap();
     nodes
         .register(RegisterNodeParams {
+            system_info: Some(talos_types::NodeSystemInfo {
+                os: talos_types::NodeOperatingSystem::MacOs,
+                os_version: Some("macOS test".into()),
+                architecture: "aarch64".into(),
+                hostname: Some("test-laptop".into()),
+                cpu_model: Some("Apple M2 Pro".into()),
+                logical_cpu_count: 12,
+                memory_bytes: 32 * 1024 * 1024 * 1024,
+                board_model: None,
+                network_interfaces: vec![],
+                graphics: vec!["Apple M2 Pro".into()],
+                worker_version: "test".into(),
+            }),
             node_id: "laptop-1".into(),
             expected_credential_hash: credential,
             lease_token_hash: first_lease,
@@ -162,9 +171,15 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
     let previous = nodes.get("laptop-1").await.unwrap().unwrap();
     assert_eq!(previous.owner_user_id.as_deref(), Some("user-1"));
     assert_eq!(previous.lease_token_hash, Some(first_lease));
+    let report = previous
+        .system_info
+        .clone()
+        .expect("registration report persisted");
+    assert_eq!(report.cpu_model.as_deref(), Some("Apple M2 Pro"));
 
     nodes
         .register(RegisterNodeParams {
+            system_info: None,
             node_id: "laptop-1".into(),
             expected_credential_hash: credential,
             lease_token_hash: second_lease,
@@ -195,6 +210,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
         .await
         .unwrap();
     assert_eq!(current.health, NodeHealth::Healthy);
+    assert_eq!(current.system_info, Some(report));
 
     let updated = nodes
         .update(UpdateNodeParams {
@@ -219,6 +235,7 @@ async fn registration_survives_restart_and_stale_tokens_cannot_change_new_lease(
     assert_eq!(
         nodes
             .list(ListNodesParams {
+                exclude_node_id: None,
                 scope: NodeListScope::Owner {
                     user_id: "user-2".into(),
                     include_embedded: false

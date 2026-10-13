@@ -9,10 +9,11 @@ import { evaluate } from "./desktop-smoke-evaluate.mjs";
 const surfaces = new Map();
 async function command(request) {
   if (request.method === "launch") {
-    const { name, port, home, config, resourceDir, report, spki, webUrl, executable, mainPort } = request.params;
+    const { name, port, home, config, resourceDir, report, spki, webUrl, executable, mainPort, headless } = request.params;
     const web = Boolean(webUrl);
     const desktop = path.resolve(import.meta.dirname, "..");
     const args = [`--remote-debugging-port=${port}`, `--ignore-certificate-errors-spki-list=${spki}`];
+    if (web && headless) args.push("--headless=new");
     if (!web && mainPort) args.push(`--inspect=${mainPort}`);
     if (web) args.push(`--user-data-dir=${home}`, "--no-first-run", "--no-default-browser-check", "--window-size=1280,820", webUrl);
     else {
@@ -96,7 +97,7 @@ async function command(request) {
     }
     case "select": {
       await evaluate(cdp, `(() => {const button=document.querySelector('aside [data-computer-id="${request.params.nodeId}"]');if(button)button.click();else throw new Error("Quick Computer missing");})()`);
-      await waitForExpression(cdp, `${web ? 'location.pathname==="/"' : 'location.hash==="#/"'} && Boolean(document.querySelector("main h1")) && Boolean(document.querySelector('[data-testid=computer-context] [data-computer-id="${request.params.nodeId}"]'))`, 30_000); return true;
+      await waitForExpression(cdp, `${web ? 'location.pathname==="/"' : 'location.hash==="#/"'} && Boolean(document.querySelector("main h1")) && Boolean(document.querySelector('aside [data-computer-id="${request.params.nodeId}"]'))`, 30_000); return true;
     }
     default: throw new Error("Unknown UI operation");
   }

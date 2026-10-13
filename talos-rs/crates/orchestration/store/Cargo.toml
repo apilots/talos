@@ -20,6 +20,8 @@ talos-fs = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-storage = { workspace = true }
+talos-sync = { workspace = true }
+talos-sync-types = { workspace = true }
 talos-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util"] }
@@ -27,6 +29,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
+talos-auth.workspace = true
 tempfile = "3.8"
 
 [lints]

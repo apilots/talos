@@ -1,4 +1,6 @@
 use super::*;
+use bytes::Bytes;
+use serde::Serialize;
 use talos_error::ErrorCode;
 
 #[test]

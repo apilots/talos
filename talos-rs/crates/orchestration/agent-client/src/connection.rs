@@ -15,7 +15,7 @@ use std::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tonic::{Status, Streaming};
+use tonic::Status;
 
 type Reply = pb::worker_rpc_result::Response;
 type Call = pb::worker_rpc_call::Request;
@@ -31,6 +31,7 @@ pub(crate) enum RequestMode {
 
 struct Pending {
     sequence: u64,
+    scope: Option<pb::CoordinatorCallContext>,
     sender: mpsc::Sender<Reply>,
     cancel: CancellationToken,
     error: Arc<Mutex<Option<TalosError>>>,
@@ -49,10 +50,14 @@ pub struct AgentExecutionConnection {
 impl AgentExecutionConnection {
     /// Accept an already authenticated lease stream. The ingress owns lease validation
     /// and serializes Registry installation and replacement before acknowledging it.
-    pub fn accept(
+    pub fn accept<S>(
         auth: NodeAuth,
-        mut inbound: Streaming<pb::NodeToControlFrame>,
-    ) -> (Arc<Self>, mpsc::Receiver<pb::ControlToNodeFrame>) {
+        inbound: S,
+    ) -> (Arc<Self>, mpsc::Receiver<pb::ControlToNodeFrame>)
+    where
+        S: Stream<Item = Result<pb::NodeToControlFrame, Status>> + Send + 'static,
+    {
+        let mut inbound = Box::pin(inbound);
         let stop = CancellationToken::new();
         let (writer, output) = Writer::new(stop.clone());
         let connection = Arc::new(Self {
@@ -68,10 +73,10 @@ impl AgentExecutionConnection {
                 let frame = tokio::select! {
                     biased;
                     _ = reader.stop.cancelled() => break,
-                    frame = inbound.message() => frame,
+                    frame = inbound.next() => frame,
                 };
                 match frame {
-                    Ok(Some(pb::NodeToControlFrame {
+                    Some(Ok(pb::NodeToControlFrame {
                         body: Some(pb::node_to_control_frame::Body::Result(result)),
                     })) => {
                         if reader.deliver(result).is_err() {
@@ -102,6 +107,10 @@ impl AgentExecutionConnection {
     /// Wait for loss, revocation or explicit close so the publisher can withdraw this handle.
     pub async fn ended(&self) {
         self.stop.cancelled().await;
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.stop.is_cancelled()
     }
 
     /// Stop admission and fail pending calls; never replay calls or persist execution state.
@@ -162,6 +171,20 @@ impl AgentExecutionConnection {
     where
         S: Stream<Item = Call> + Send + 'static,
     {
+        self.invoke_results(requests.map(Ok), timeout_ms, mode, None)
+            .await
+    }
+
+    async fn invoke_results<S>(
+        self: &Arc<Self>,
+        requests: S,
+        timeout_ms: u64,
+        mode: RequestMode,
+        caller: Option<pb::CoordinatorCallContext>,
+    ) -> Result<RpcStream<Reply>, Status>
+    where
+        S: Stream<Item = Result<Call, Status>> + Send + 'static,
+    {
         if self.stop.is_cancelled() {
             return Err(error_pb::encode_status(&closed()));
         }
@@ -183,7 +206,9 @@ impl AgentExecutionConnection {
         let first = requests
             .next()
             .await
+            .transpose()?
             .ok_or_else(|| error_pb::encode_status(&closed()))?;
+        let scope = agent_protocol::connection_pb::execution_scope(&first);
         let requests_closed = matches!(mode, RequestMode::Unary | RequestMode::ControlUnary);
         let id;
         let cancel = CancellationToken::new();
@@ -211,6 +236,7 @@ impl AgentExecutionConnection {
             self.writer
                 .control(pb::ControlToNodeFrame {
                     body: Some(pb::control_to_node_frame::Body::Call(pb::WorkerRpcCall {
+                        caller: caller.clone(),
                         call_id: id,
                         sequence: 1,
                         requests_closed,
@@ -224,6 +250,7 @@ impl AgentExecutionConnection {
                 id,
                 Pending {
                     sequence: 1,
+                    scope,
                     sender,
                     cancel: cancel.clone(),
                     error: error.clone(),
@@ -269,9 +296,26 @@ impl AgentExecutionConnection {
                         _ = send_stop.cancelled() => break,
                         request = requests.next() => request,
                     };
+                    let request = match request {
+                        Some(Ok(request)) => Some(request),
+                        Some(Err(error)) => {
+                            if let Some(pending) = connection
+                                .calls
+                                .lock()
+                                .expect("Agent connection lock poisoned")
+                                .remove(&id)
+                            {
+                                fail(pending, crate::decode_rpc_status(error));
+                            }
+                            connection.cancel(id);
+                            break;
+                        }
+                        None => None,
+                    };
                     let requests_closed = request.is_none();
                     let frame = pb::ControlToNodeFrame {
                         body: Some(pb::control_to_node_frame::Body::Call(pb::WorkerRpcCall {
+                            caller: None,
                             call_id: id,
                             sequence,
                             requests_closed,
@@ -407,3 +451,9 @@ fn fail(pending: Pending, error: TalosError) {
     *pending.error.lock().expect("Agent call lock poisoned") = Some(error);
     pending.cancel.cancel();
 }
+
+#[path = "connection_relay.rs"]
+mod relay;
+
+#[path = "resource_connection.rs"]
+mod resources;

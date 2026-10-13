@@ -15,7 +15,7 @@
 | settlement | 原 Waiting/Finished 结算 | Client 从响应流重建相同结算 |
 | 持久化/产品输出 | 原 Service 校验、落库、发布 | 完全相同 |
 
-Coordinator 仍是 Service 的唯一执行入口，保留现有方法签名，不要求业务调用者额外传
+Coordinator 仍是 Service 的唯一执行入口，复用现有业务参数；Clear/Close增加原SessionHistoryCursor期望参数，不要求业务调用者额外传
 node_id、token 或传输类型。Coordinator 内部按参数原有 session_id 从已注入的现有
 SessionStore.get_session_record 读取节点绑定，再查询 Registry；这里只读路由字段，
 不写业务事实、不新增 resolver/Store。Server shutdown 只关闭本进程拥有的 embedded Harness；远程 Worker 生命周期独立。
@@ -29,13 +29,13 @@ SessionStore.get_session_record 读取节点绑定，再查询 Registry；这里
 同一 Session 绑定，不另行选择节点。
 
 ```rust
-// Existing AgentCoordinator execution signatures remain unchanged.
+// Execution uses the existing domain model; maintenance checks the same Worker 历史游标.
 async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution>;
 async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission>;
 async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome>;
 async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution>;
-async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()>;
-async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()>;
+async fn clear_session(&self, params: AgentSessionContext, expected_history_cursor: SessionHistoryCursor) -> TalosResult<()>;
+async fn close_session(&self, params: AgentSessionContext, expected_history_cursor: SessionHistoryCursor) -> TalosResult<()>;
 async fn shutdown(&self, timeout: Duration) -> TalosResult<()>;
 ```
 
@@ -51,7 +51,7 @@ permit 适配只负责延迟执行。它不要求 Service 知道是本地释放�
 | continuation | 显式业务续接仍调用 start，传原 checkpoint/continuation，回到同一节点 |
 | interrupt | 按 agent_id + TurnRef 定位；返回原 Cancelled/Completed/CleanupUnconfirmed |
 | compact_session | 复用 maintenance admission，后续仍为 progress/settlement |
-| clear_session / close_session | 直接方法调用，返回原结果，保留既有 Session 互斥 |
+| clear_session / close_session | 本机与远端经同SDK；原SessionRequest携带expected_history_cursor，Worker原Gate锁内核对后维护，返回原结果 |
 | shutdown | 停止 Harness；成功后撤下原句柄，再启动须构造新实例 |
 
 已提交 WaitingForInput 表示上一次执行已完成清理。取消该等待由 Service 持有原 Session

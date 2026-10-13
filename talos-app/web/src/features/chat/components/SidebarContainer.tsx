@@ -14,7 +14,7 @@ import { Sidebar } from "@/widgets/sidebar/Sidebar";
 import type { SidebarProjectGroup } from "@/widgets/sidebar/SidebarProjectSection";
 import type { SidebarSessionItem } from "@/widgets/sidebar/SidebarSessionRow";
 
-export function SidebarContainer() {
+export function SidebarContainer({ computer }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const connection = useAppStore((state) => state.connection);
@@ -61,6 +61,7 @@ export function SidebarContainer() {
 
   return (
     <Sidebar
+      computer={computer}
       showAccount={false}
       chats={chats}
       connection={connection}

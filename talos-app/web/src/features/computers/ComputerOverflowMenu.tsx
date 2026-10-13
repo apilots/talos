@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MonitorCog, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { ComputerItem } from "./ComputerItem";
 import { useComputerList } from "./hooks";
@@ -46,6 +45,5 @@ export function ComputerOverflowMenu({ selectedId, localId, onSelect, onClose }:
       {list.data?.pages[0]?.total === 0 ? <p className="p-3 text-sm text-muted">{t("computers:empty")}</p> : null}
       {list.hasNextPage ? <button type="button" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()} className="w-full p-2 text-sm text-brand">{t("common:showMore")}</button> : null}
     </div>
-    <Link onClick={onClose} to="/computers" className="flex items-center gap-2 border-t border-border px-3 py-3 text-sm"><MonitorCog size={16} />{t("computers:manage")}</Link>
   </div>;
 }

@@ -243,6 +243,70 @@ async fn progress_commit_requires_the_exact_durable_tail() {
 }
 
 #[tokio::test]
+async fn progress_batch_rejects_gaps_atomically_and_preserves_input_admission_order() {
+    let store = store().await;
+    let admission = store
+        .commit_initial_admission(initial_admission(admission()))
+        .await
+        .unwrap();
+    let first = event(
+        3,
+        AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics::default()),
+    );
+    let next = event(
+        4,
+        AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics::default()),
+    );
+    let gap = event(
+        5,
+        AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics::default()),
+    );
+    let tail = admission.active_turn.last_event_seq;
+    assert!(store
+        .commit_progress_events(vec![first.clone(), gap], tail)
+        .await
+        .is_err());
+    assert_eq!(
+        store.get_agent_active_turn("session-1").await.unwrap(),
+        Some(admission.active_turn)
+    );
+    let commit = store
+        .commit_progress_events(vec![first.clone(), next.clone()], tail)
+        .await
+        .unwrap();
+    assert_eq!(
+        commit
+            .events
+            .iter()
+            .map(|record| AgentEvent {
+                identity: record.identity.clone(),
+                sequence: record.sequence,
+                occurred_at: record.occurred_at,
+                payload: record.payload.clone()
+            })
+            .collect::<Vec<_>>(),
+        vec![first, next]
+    );
+    let input = store
+        .commit_running_input_admission(CommitRunningInputAdmissionParams {
+            events: user_admission(5, "message-2"),
+            expected_event_seq: commit.active_turn.last_event_seq,
+            command: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(input.events.first().unwrap().sequence, 5);
+    assert_eq!(
+        store
+            .list_agent_turn_events(&AgentTurnRef::new("session-1", "turn-1"), 10)
+            .await
+            .unwrap()
+            .len(),
+        5
+    );
+}
+
+#[tokio::test]
 async fn running_input_admission_advances_the_same_active_turn() {
     let store = store().await;
     let admission = store

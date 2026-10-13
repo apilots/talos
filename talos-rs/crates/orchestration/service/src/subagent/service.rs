@@ -143,6 +143,14 @@ impl SubagentService {
                 format!("session tree '{tree_root_session_id}' has an active subagent turn"),
             ));
         }
+        for record in self
+            .sessions
+            .list_subagent_tree_records(tree_root_session_id.into(), None)
+            .await?
+        {
+            let record = self.sessions.prepare_execution(&record).await?;
+            self.sessions.ensure_worker_idle(&record).await?;
+        }
         Ok(())
     }
 

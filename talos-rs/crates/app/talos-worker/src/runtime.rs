@@ -24,6 +24,7 @@ use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
 
 use crate::{create_llm_provider, prepare_mcp};
 
+#[derive(Clone)]
 pub struct TalosWorkerResources {
     pub session_history_reader: Arc<dyn SessionHistoryReader>,
     pub memory_progress_store: Arc<dyn KernelMemoryProgressStore>,
@@ -35,6 +36,8 @@ pub struct TalosWorkerResources {
 /// One Agent execution runtime shared by embedded and standalone hosts.
 #[derive(Clone)]
 pub struct TalosWorker {
+    pub(crate) resource_bindings: crate::resource_binding::ResourceBindings,
+    system_info: talos_types::NodeSystemInfo,
     harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     config: Arc<RwLock<Config>>,
     provider_router: Arc<ReloadableLlmProviderRouter>,
@@ -44,7 +47,6 @@ pub struct TalosWorker {
     user_workspace_memory: Arc<UserWorkspaceMemoryService>,
     mcp: Arc<talos_mcp::TalosMcpRuntime>,
     mcp_credentials: McpCredentialStore,
-    collaboration_tools_enabled: bool,
     config_service: talos_service::ConfigService,
 }
 
@@ -129,6 +131,7 @@ impl TalosWorker {
 
         let session_artifact_store: Arc<dyn KernelSessionArtifactStore> =
             Arc::new(FileKernelSessionArtifactStore);
+        let resource_bindings = crate::resource_binding::ResourceBindings::new();
         let mut harnesses = Vec::new();
         let mut providers = Vec::new();
         for definition in AgentDefinitionLoader::load(&config.agent)? {
@@ -156,6 +159,7 @@ impl TalosWorker {
                             AgentUserContentKind::File,
                         ],
                     })?
+                    .with_resource_resolver(resource_bindings.resolver(tool_registry.clone()))
                 }
             };
             providers.push((definition.id.clone(), provider.clone()));
@@ -186,7 +190,10 @@ impl TalosWorker {
             providers,
         );
         let plugin_manager = plugin_manager.with_config_service(config_service.clone());
+        let system_info = talos_system_info::collect().await?;
         Ok(Self {
+            system_info,
+            resource_bindings,
             harnesses,
             config: active_config,
             provider_router,
@@ -196,7 +203,6 @@ impl TalosWorker {
             user_workspace_memory,
             mcp,
             mcp_credentials,
-            collaboration_tools_enabled,
             config_service,
         })
     }
@@ -223,6 +229,10 @@ impl TalosWorker {
         &self.harnesses
     }
 
+    pub fn system_info(&self) -> &talos_types::NodeSystemInfo {
+        &self.system_info
+    }
+
     pub fn deployments(&self) -> Vec<Deployment> {
         self.harnesses
             .iter()
@@ -246,12 +256,6 @@ impl TalosWorker {
 
     pub fn plugin_manager(&self) -> PluginManagerService {
         self.plugin_manager.clone()
-    }
-
-    pub fn install_agent_control(&self, agent_control: Arc<dyn AgentControl>) {
-        if self.collaboration_tools_enabled {
-            self.tool_registry.set_agent_control(agent_control);
-        }
     }
 
     pub fn activate_mcp(&self) -> TalosResult<()> {

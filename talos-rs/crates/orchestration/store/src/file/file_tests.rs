@@ -30,8 +30,10 @@ fn uploading(file_id: &str, owner_user_id: &str, project_id: Option<&str>, at: i
         file_id: file_id.to_string(),
         owner_user_id: owner_user_id.to_string(),
         project_id: project_id.map(str::to_string),
-        storage_id: "local".to_string(),
-        object_key: format!("files/{file_id}/content.pdf"),
+        location: crate::file::FileLocation::Local {
+            storage_id: "local".to_string(),
+            object_key: format!("files/{file_id}/content.pdf"),
+        },
         original_filename: format!("{file_id}.pdf"),
         mime_type: None,
         size_bytes: None,
@@ -243,7 +245,10 @@ async fn incomplete_cursor_project_count_and_storage_ids_are_deterministic() {
     let store = store().await;
     let first = uploading("file-a", "user-1", Some("project-1"), 100);
     let mut second = uploading("file-b", "user-2", Some("project-1"), 200);
-    second.storage_id = "archive".to_string();
+    second.location = crate::file::FileLocation::Local {
+        storage_id: "archive".to_string(),
+        object_key: second.local_location().unwrap().1.to_owned(),
+    };
     store.create_file(first.clone()).await.unwrap();
     store.create_file(second.clone()).await.unwrap();
 

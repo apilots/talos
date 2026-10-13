@@ -6,7 +6,7 @@ use opendal::Operator;
 use talos_config::{Config, FileStorageBackendConfig, FileStorageConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{create_storage, SqliteStorage, StorageConfig};
-use talos_store::file::{DatabaseFileStore, FileStore};
+use talos_store::file::DatabaseFileStore;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 
 /// Connect the SQLite storage used by startup upgrades and application stores.
@@ -28,11 +28,11 @@ pub(crate) fn build_database_stores(
 ) -> (
     Arc<SqliteStorage>,
     Arc<dyn ProfileStore>,
-    Arc<dyn FileStore>,
+    Arc<DatabaseFileStore>,
 ) {
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
-    let file_store: Arc<dyn FileStore> = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
     (storage.clone(), profile_store, file_store)
 }
 

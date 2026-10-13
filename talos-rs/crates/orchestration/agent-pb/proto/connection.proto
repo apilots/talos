@@ -5,6 +5,8 @@ import "harness.proto";
 import "environment.proto";
 import "memory.proto";
 import "types.proto";
+import "resources.proto";
+import "coordinator.proto";
 
 message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; }
 message ConnectNodeResponse {
@@ -32,7 +34,26 @@ message WorkerRpcCall {
   uint64 timeout_ms = 4;
   // First frame only: bounded number of unconsumed response messages.
   uint32 response_window = 5;
+  // Only reverse resource calls carry this context on their first frame.
+  CoordinatorCallContext caller = 6;
   oneof request {
+    ActiveSessionCommandRequest active_session_command = 116;
+    ReadSessionExecutionStateRequest read_session_execution_state = 114;
+    CommitSessionExecutionStateRequest commit_session_execution_state = 115;
+    PeerFileReadRequest peer_file_read = 111;
+    PeerFileUpdateRequest peer_file_update = 112;
+    PeerFileDeleteRequest peer_file_delete = 113;
+    ReadSessionHistoryRequest read_session_history = 100;
+    ResolveAttachmentsRequest resolve_attachments = 101;
+    ReadMemoryProgressRequest read_memory_progress = 102;
+    AdvanceMemoryProgressRequest advance_memory_progress = 103;
+    SpawnSubagentRequest spawn_subagent = 104;
+    SendSubagentMessageRequest send_subagent_message = 105;
+    WaitSubagentRequest wait_subagent = 106;
+    InterruptSubagentRequest interrupt_subagent = 107;
+    FollowUpSubagentRequest follow_up_subagent = 108;
+    ListSubagentsRequest list_subagents = 109;
+    SaveToolImageRequest save_tool_image = 110;
     CompleteMcpAuthenticationRequest complete_mcp_authentication = 77;
     StartMcpAuthenticationRequest start_mcp_authentication = 76;
     ImportMcpServerRequest import_mcp_server = 75;
@@ -93,6 +114,22 @@ message WorkerRpcResult {
   uint64 sequence = 2;
   bool completed = 3;
   oneof response {
+    ActiveSessionCommandResponse active_session_command = 116;
+    SessionExecutionStateResponse session_execution_state = 114;
+    PeerFileReadResponse peer_file_read = 111;
+    PeerFileUpdateResponse peer_file_update = 112;
+    PeerFileDeleteResponse peer_file_delete = 113;
+    ReadSessionHistoryResponse read_session_history = 100;
+    ResolveAttachmentsResponse resolve_attachments = 101;
+    ReadMemoryProgressResponse read_memory_progress = 102;
+    AdvanceMemoryProgressResponse advance_memory_progress = 103;
+    SpawnSubagentResponse spawn_subagent = 104;
+    SendSubagentMessageResponse send_subagent_message = 105;
+    SubagentSnapshotResponse wait_subagent = 106;
+    SubagentSnapshotResponse interrupt_subagent = 107;
+    SubagentSnapshotResponse follow_up_subagent = 108;
+    ListSubagentsResponse list_subagents = 109;
+    SaveToolImageResponse save_tool_image = 110;
     CompleteMcpAuthenticationResponse complete_mcp_authentication = 77;
     StartMcpAuthenticationResponse start_mcp_authentication = 76;
     ImportMcpServerResponse import_mcp_server = 75;
@@ -156,4 +193,30 @@ message AcknowledgeWorkerRpcResult {
   NodeAuth auth = 1;
   uint64 call_id = 2;
   uint64 sequence = 3;
+}
+
+// Each stream binds one Computer; multiple streams share the same HTTP/2 channel.
+// Account Bearer authentication is required before accepting this handshake.
+service AgentCoordinatorRpc {
+  rpc InvokeActiveCommand(ActiveSessionCommandRequest) returns (ActiveSessionCommandResponse);
+  rpc Connect(stream CoordinatorToControlFrame) returns (stream ControlToCoordinatorFrame);
+}
+message ConnectCoordinatorRequest { string peer_id = 1; string computer_id = 2; bool serves_files = 3; }
+message CoordinatorToControlFrame {
+  oneof body {
+    ConnectCoordinatorRequest connect = 1;
+    WorkerRpcCall call = 2;
+    CancelWorkerRpcCall cancel = 3;
+    AcknowledgeWorkerRpcResult acknowledge = 4;
+    WorkerRpcResult resource_result = 5;
+  }
+}
+message ControlToCoordinatorFrame {
+  oneof body {
+    ConnectNodeResponse connected = 1;
+    WorkerRpcResult result = 2;
+    WorkerRpcCall resource_call = 3;
+    CancelWorkerRpcCall resource_cancel = 4;
+    AcknowledgeWorkerRpcResult resource_acknowledge = 5;
+  }
 }

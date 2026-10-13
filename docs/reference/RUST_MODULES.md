@@ -9,7 +9,7 @@ than replacing the manifest.
 | Area | Count | Packages |
 | --- | ---: | --- |
 | Common | 11 | `talos-llm-provider`, provider implementations, `talos-fs`, `talos-knowledge-format`, `talos-prompt`, `talos-types` |
-| Infrastructure | 6 | `talos-error`, `talos-config`, `talos-logging`, `talos-storage`, `talos-auth`, `talos-automation` |
+| Infrastructure | 7 | `talos-error`, `talos-config`, `talos-logging`, `talos-storage`, `talos-auth`, `talos-automation`, `talos-system-info` |
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
 | Action | 10 | `talos-mcp`, `talos-plugin`, `talos-skills`, tools, policy, sandbox SPI, and platform sandboxes |
@@ -30,7 +30,8 @@ than replacing the manifest.
 
 ## Infrastructure and capabilities
 
-- `crates/infra/`: errors, configuration, logging, storage, authentication, and automation.
+- `crates/infra/`: errors, configuration, logging, storage, authentication, automation, and system metadata.
+- `crates/infra/system-info/`: bounded Linux/macOS hardware collection for Worker registration; exposes `collect()` using sysinfo and wgpu. Identity, authorization, and heartbeat remain with their existing owners.
 - `crates/perception/channels/`: external channel adapters.
 - `crates/cognition/memory/`: typed memory documents and reader/writer ports;
   Service owns product policy and Store owns Dream Memory persistence/indexing.

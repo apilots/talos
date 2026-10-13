@@ -37,6 +37,7 @@ fn input_must_be_one_completed_user_message_for_the_same_turn() {
 fn run_params() -> AgentRunParams {
     AgentRunParams {
         context: AgentContext {
+            history_cursor: None,
             session: AgentSessionContext {
                 agent_id: "default".to_owned(),
                 session_id: "session-1".to_owned(),

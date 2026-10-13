@@ -15,5 +15,5 @@ if [[ "$1" == "oauth" ]]; then
 fi
 build_server_binary
 build_worker_binary
-(cd "${TALOS_CLOUD_REPO:-${REPO_ROOT}/../talos-cloud}/cloud-rs" && cargo build -q -p cloud-server)
+(cd "${TALOS_CLOUD_REPO:-${REPO_ROOT}/../talos-cloud}/cloud-rs" && cargo build -q -p talos-cloud-server)
 python3 "${SCRIPT_DIR}/execution.py" "$1"

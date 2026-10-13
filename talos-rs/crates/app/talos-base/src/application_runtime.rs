@@ -42,6 +42,15 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let (storage_impl, profile_store, file_store) =
         application_storage::build_database_stores(&storage_connection);
     let storage: Arc<dyn talos_storage::Storage> = storage_impl;
+    let sync = Arc::new(
+        talos_sync::TalosSync::open(
+            storage.clone(),
+            talos_sync::SyncOptions {
+                hub_endpoint: config.sync.hub_endpoint.clone(),
+            },
+        )
+        .await?,
+    );
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
     let node_store = Arc::new(DatabaseAgentNodeStore::new(
         storage_connection.pool().clone(),
@@ -51,7 +60,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
     let project_store: Arc<dyn ProjectStore> = project_store_impl.clone();
     let file_service = Arc::new(FileService::new(
-        file_store,
+        file_store.clone(),
         project_store.clone(),
         application_storage::build_file_operators(&config.storage.files)?,
         config.storage.files.clone(),
@@ -111,19 +120,82 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let coordinator = Arc::new(CoordinatorImpl::new(
         router,
         session_store.clone(),
-        node_store,
+        node_store.clone(),
     ));
+    let (worker_rpc, local_auth) = worker.start_local_rpc().await?;
     coordinator
-        .register_environment("embedded".into(), worker.environment())
+        .register_environment(
+            "embedded".into(),
+            worker
+                .local_rpc_environment(&worker_rpc, local_auth.clone())
+                .await?,
+        )
         .await;
-    for (agent_id, agent) in worker.harnesses() {
+    for (agent_id, agent) in worker
+        .local_rpc_harnesses(&worker_rpc, &local_auth, sync.peer_id())
+        .await?
+    {
         coordinator
-            .register_agent("embedded".into(), agent_id.clone(), agent.clone())
+            .register_agent("embedded".into(), agent_id, agent)
             .await?;
     }
     node_service
         .register_embedded(!worker.harnesses().is_empty())
         .await?;
+
+    // Upgrade only idle, locally owned Sessions before publishing a cloud entry.
+    // Existing Worker markers (including a newer remote coordinator) always win.
+    for record in session_store
+        .list_session_records(&talos_store::session::SessionQuery {
+            execution_node_id: Some("embedded".into()),
+            ..Default::default()
+        })
+        .await?
+    {
+        if agent_execution_store
+            .get_agent_active_turn(&record.id)
+            .await?
+            .is_some()
+        {
+            continue;
+        }
+        let Some(history_cursor) = session_store.get_history_cursor(&record.id).await? else {
+            continue;
+        };
+        if history_cursor == Default::default() {
+            continue;
+        }
+        let namespace = session_store
+            .get_workspace_user_id(&record.id)
+            .await?
+            .unwrap_or_else(|| record.user_id.clone());
+        let context = agent_protocol::AgentSessionContext {
+            agent_id: record.agent_id.clone(),
+            session_id: record.id.clone(),
+            workspace: config.resolve_workspace(&record.workspace_id, &namespace)?,
+        };
+        let harness =
+            talos_coordinator::AgentCoordinator::session_harness(&*coordinator, &context).await?;
+        let state = harness
+            .read_session_execution_state(context.clone())
+            .await?
+            .ok_or_else(|| {
+                talos_error::TalosError::internal("Worker execution state is unavailable")
+            })?;
+        if state.coordinator_id.is_none() {
+            harness
+                .commit_session_execution_state(agent_protocol::CommitSessionExecutionStateParams {
+                    session: context,
+                    identity: history_cursor
+                        .completed_turn_id
+                        .as_ref()
+                        .map(|turn| talos_types::AgentTurnRef::new(&record.id, turn)),
+                    history_cursor,
+                    visibility: agent_protocol::SessionStateVisibility::Local,
+                })
+                .await?;
+        }
+    }
 
     let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
     let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
@@ -149,9 +221,42 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         )
         .with_user_workspace_memory_reflection(inner_model.clone()),
     );
+    service
+        .account
+        .set_cloud_session_cache(talos_auth::CloudSessionCache::for_talos_home(
+            config.talos_paths().talos_home,
+        ))?;
+    service.set_coordinator_id(sync.peer_id().into());
+    let sync_stores = Arc::new(super::application_sync::ApplicationSyncStores {
+        storage: storage.clone(),
+        sessions: session_store_impl.clone(),
+        projects: project_store_impl,
+        nodes: node_store,
+        files: file_store,
+        handles: Default::default(),
+        credentials: Default::default(),
+        connections: Default::default(),
+    });
     let agent_control: Arc<dyn AgentControl> =
         Arc::new(ApplicationAgentControl::new(service.clone()));
-    worker.install_agent_control(agent_control.clone());
+    let (resource_rpc, resource_client) = super::local_resource_rpc::LocalResourceRpc::start(
+        local_auth,
+        super::agent_node_rpc::NodeSessionDataRpc::new(
+            node_service.clone(),
+            session_store.clone(),
+            session_history_reader.clone(),
+            attachment_reader.clone(),
+            memory_progress_store.clone(),
+        ),
+        super::agent_node_rpc::NodeToolImageRpc::new(
+            node_service.clone(),
+            tool_image_store.clone(),
+            config.storage.files.limits.max_upload_bytes,
+        ),
+        agent_control.clone(),
+    )
+    .await?;
+    worker.use_local_resource_rpc(resource_client);
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
     let dream_memory_maintenance = crate::dream_memory_maintenance::DreamMemoryMaintenance::new(
@@ -173,8 +278,88 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
 
     // No external MCP starts until every fallible assembly step has completed.
     worker.activate_mcp()?;
+    let worker_failures = tokio::sync::watch::channel(None).0;
+    let registration = if let Some(runner) = &config.agent_node.runner {
+        let failures = worker_failures.clone();
+        match talos_worker::RegisteredWorker::attach(
+            &worker,
+            worker_rpc.clone(),
+            runner,
+            Some(Arc::new(move |error| {
+                talos_logging::report_error(&error);
+                failures.send_replace(Some(error.to_api_error()));
+            })),
+        )
+        .await
+        {
+            Ok(registration) => Some(registration),
+            Err(error) => {
+                // Registration failure belongs to the cloud surface. The
+                // already assembled local management runtime remains usable.
+                talos_logging::report_error(&error);
+                worker_failures.send_replace(Some(error.to_api_error()));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let worker_registration = Arc::new(tokio::sync::Mutex::new(registration));
+    let sync_host = Arc::new(super::application_sync::ApplicationSyncHost {
+        config: config.clone(),
+        sync: sync.clone(),
+        sync_stores: sync_stores.clone(),
+        auth_service: auth_service.clone(),
+        service: service.clone(),
+        coordinator: coordinator.clone(),
+        event_service: event_service.clone(),
+        data: super::NodeSessionDataRpc::new(
+            node_service.clone(),
+            session_store.clone(),
+            session_history_reader.clone(),
+            attachment_reader.clone(),
+            memory_progress_store.clone(),
+        ),
+        images: super::NodeToolImageRpc::new(
+            node_service.clone(),
+            tool_image_store.clone(),
+            config.storage.files.limits.max_upload_bytes,
+        ),
+        control: agent_control.clone(),
+        worker: worker.clone(),
+        worker_rpc: worker_rpc.clone(),
+        worker_registration: worker_registration.clone(),
+        worker_failures: worker_failures.clone(),
+        trusted_local_host: std::env::var_os("TALOS_DESKTOP_HOSTNAME").is_some()
+            || (config.mode == talos_config::DeploymentMode::Local
+                && config.agent_node.control_plane.is_none()
+                && matches!(
+                    config.gateway.host.as_str(),
+                    "127.0.0.1" | "::1" | "localhost"
+                )),
+        local_owner: Default::default(),
+        tokens: Default::default(),
+        lifecycle: Default::default(),
+        failures: Default::default(),
+    });
+    sync_host.install_peer_access();
+    for binding in sync.saved_bindings().await? {
+        sync_host.install_capture(binding)?;
+    }
+    let management: Arc<dyn talos_service::ManagementSync> = sync_host.clone();
+    service.set_sync_management(Arc::downgrade(&management));
+    if config.agent_node.control_plane.is_some() {
+        node_service.set_account_sync(Arc::downgrade(&management));
+    }
     Ok(TalosApplicationRuntime {
+        sync_host,
+        sync,
+        sync_stores,
         worker,
+        worker_rpc,
+        resource_rpc,
+        worker_registration,
+        worker_failures,
         config,
         service,
         event_service,

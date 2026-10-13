@@ -44,6 +44,12 @@ pub enum ClientRequestParams {
     DesktopWorkerIdentity(Option<()>),
     #[serde(rename = "desktop/workerEnroll")]
     DesktopWorkerEnroll(talos_types::DesktopWorkerEnrollParams),
+    #[serde(rename = "sync/status")]
+    SyncStatus(Option<()>),
+    #[serde(rename = "sync/enable")]
+    SyncEnable(talos_types::SyncEnableRequest),
+    #[serde(rename = "sync/disable")]
+    SyncDisable(Option<()>),
     #[serde(rename = "computer/list")]
     ComputerList(talos_types::ComputerListRequest),
     #[serde(rename = "computer/read")]
@@ -238,9 +244,10 @@ impl ClientRequest {
     ) -> Result<Self, AppServerErrorBody> {
         let method_kind = ClientMethod::from_str(method)?;
         let params_value = params.unwrap_or_else(|| match method_kind {
-            ClientMethod::DesktopConnectionRead | ClientMethod::DesktopWorkerIdentity => {
-                serde_json::Value::Null
-            }
+            ClientMethod::DesktopConnectionRead
+            | ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::SyncStatus
+            | ClientMethod::SyncDisable => serde_json::Value::Null,
             _ => serde_json::Value::Object(Default::default()),
         });
         let params = match method_kind {
@@ -257,6 +264,9 @@ impl ClientRequest {
             ClientMethod::DesktopWorkerEnroll => {
                 ClientRequestParams::DesktopWorkerEnroll(decode(params_value)?)
             }
+            ClientMethod::SyncStatus => ClientRequestParams::SyncStatus(decode(params_value)?),
+            ClientMethod::SyncEnable => ClientRequestParams::SyncEnable(decode(params_value)?),
+            ClientMethod::SyncDisable => ClientRequestParams::SyncDisable(decode(params_value)?),
             ClientMethod::ComputerList => ClientRequestParams::ComputerList(decode(params_value)?),
             ClientMethod::ComputerRead => ClientRequestParams::ComputerRead(decode(params_value)?),
             ClientMethod::ComputerCreate => {

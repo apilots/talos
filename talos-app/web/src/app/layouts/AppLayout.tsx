@@ -1,19 +1,23 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
-import { ComputerRail, ComputerContext, useSelectedComputerId, useProductScope } from "@/features/computers";
+import { ComputerRail, useComputers, useSelectedComputerId, useProductScope } from "@/features/computers";
 import { SidebarContainer } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { CollapsedSidebarBar } from "./CollapsedSidebarBar";
 
 export function AppLayout() {
   const location = useLocation();
+  const { t } = useTranslation("computers");
+  const { selected: computer } = useComputers();
+  const computerManagement = location.pathname === "/computers";
   const computerId = useSelectedComputerId();
   const scope = useProductScope();
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const settingsRoute = location.pathname.startsWith("/settings");
-  const showMainSidebar = sidebarOpen && !settingsRoute;
+  const showMainSidebar = sidebarOpen && !settingsRoute && !computerManagement;
   const sidebar = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = sidebar.current;
@@ -51,14 +55,13 @@ export function AppLayout() {
             if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setSidebarOpen(false);
           }}
           className="fixed inset-y-0 left-14 m-0 h-screen max-h-none w-[min(296px,calc(100vw-56px))] max-w-none min-w-0 flex-col border-0 bg-sidebar p-0 text-ink shadow-xl backdrop:bg-black/30 open:flex lg:static lg:w-auto lg:shadow-none">
-          <ComputerContext />
-          <div className="min-h-0 flex-1 overflow-hidden"><SidebarContainer /></div>
+          <div className="min-h-0 flex-1 overflow-hidden"><SidebarContainer computer={computer} /></div>
         </dialog>
       ) : null}
       <main className="relative flex h-screen min-w-0 flex-col overflow-hidden">
-        {!sidebarOpen && !settingsRoute ? <CollapsedSidebarBar onOpenSidebar={() => setSidebarOpen(true)} /> : null}
+        {!sidebarOpen && !settingsRoute && !computerManagement && !computerManagement ? <CollapsedSidebarBar onOpenSidebar={() => setSidebarOpen(true)} /> : null}
         <div className="min-h-0 flex-1 overflow-hidden">
-          <div key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : computerId ?? "pending"}`} className="h-full">{computerId || location.pathname === "/computers" || location.pathname.startsWith("/sessions/") ? <Outlet /> : <ComputerContext />}</div>
+          <div key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : computerId ?? "pending"}`} className="h-full">{computerId || location.pathname === "/computers" || location.pathname.startsWith("/sessions/") ? <Outlet /> : <div className="flex h-full items-center justify-center text-sm text-muted">{t("choose")}</div>}</div>
         </div>
       </main>
     </div>

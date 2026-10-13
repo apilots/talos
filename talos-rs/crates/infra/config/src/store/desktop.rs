@@ -4,6 +4,20 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::{FilePermissions, FileSystem, WriteOptions};
 
 impl YamlConfigStore {
+    pub fn load_sync(&self) -> TalosResult<crate::SyncConfig> {
+        decode_section(&parse_yaml_root(&self.read_config_text()?)?, "sync")
+    }
+
+    /// Persist only the user sync choice under the existing configuration lock.
+    pub fn save_sync_enabled(&self, enabled: bool) -> TalosResult<()> {
+        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
+        let mut root = parse_yaml_root(&self.read_config_text()?)?;
+        let mut sync: crate::SyncConfig = decode_section(&root, "sync")?;
+        sync.enabled = Some(enabled);
+        set_section(&mut root, "sync", &sync)?;
+        self.write_desktop_root(&root)
+    }
+
     pub fn load_desktop(&self) -> TalosResult<DesktopConfig> {
         let root = parse_yaml_root(&self.read_config_text()?)?;
         decode_section(&root, "desktop")

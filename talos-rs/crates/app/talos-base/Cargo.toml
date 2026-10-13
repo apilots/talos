@@ -5,7 +5,17 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+# Native cross-project scenario; requires the separately built Sync binary.
+[features]
+e2e = []
+
 [dependencies]
+talos-sync = { workspace = true }
+talos-sync-sdk = { workspace = true }
+talos-sync-types = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 talos-app-protocol = { workspace = true }
@@ -46,6 +56,8 @@ talos-upgrade = { workspace = true }
 talos-worker = { workspace = true }
 
 [dev-dependencies]
+axum = "0.7"
+talos-fs = { workspace = true }
 talos-plugin = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }

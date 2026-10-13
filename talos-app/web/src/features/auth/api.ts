@@ -39,17 +39,13 @@ export async function getCurrentUser(): Promise<UserDto> {
 }
 
 export async function getCurrentUserWithToken(accessToken: string): Promise<UserDto> {
-  let baseUrl = resolveServerBaseUrl();
+  const baseUrl = resolveServerBaseUrl();
   const bridge = getDesktopBridge();
   if (bridge) {
-    const host = await createElectronAppServerClient(bridge).desktop.connection();
-    if (host.connectionMode === "local") {
-      const response = await bridge.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, {
-        actorCredentials: { credential: { type: "existing_session_token", token: accessToken } },
-      });
-      return unwrapTalosApiResponse<AppProtocol.UserCurrentResponse>(response).user;
-    }
-    baseUrl = host.controlPlaneEndpoint;
+    const response = await bridge.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, {
+      actorCredentials: { credential: { type: "existing_session_token", token: accessToken } },
+    });
+    return unwrapTalosApiResponse<AppProtocol.UserCurrentResponse>(response).user;
   }
   const response = await fetch(new URL("/v1/user", baseUrl).toString(), {
     headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
@@ -66,9 +62,6 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
     }
     const serverInfo = await getDesktopServerInfo(bridge);
     const desktopConnection = await createElectronAppServerClient(bridge).desktop.connection();
-    if (desktopConnection.connectionMode === "cloud") {
-      return { ...await readGatewayHealth(desktopConnection.controlPlaneEndpoint), desktopConnection };
-    }
     return {
       desktopConnection,
       status: "ok",

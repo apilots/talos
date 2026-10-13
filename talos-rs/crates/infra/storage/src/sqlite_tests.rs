@@ -3,6 +3,48 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 #[tokio::test]
+async fn nullable_values_remain_absent_in_pool_and_transaction_reads() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    storage
+        .execute(
+            "CREATE TABLE nullable_values (optional_text TEXT, optional_number INTEGER, empty_text TEXT NOT NULL, zero_number INTEGER NOT NULL)",
+            &[],
+        )
+        .await
+        .unwrap();
+    storage
+        .execute(
+            "INSERT INTO nullable_values VALUES (NULL, NULL, '', 0)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    let assert_absent = |row: &Row| {
+        assert_eq!(row.get("optional_text"), Some(&Value::Null));
+        assert_eq!(row.get("optional_number"), Some(&Value::Null));
+        assert_eq!(row.get_string("optional_text"), None);
+        assert_eq!(row.get_i64("optional_number"), None);
+        assert_eq!(row.get_string("empty_text").as_deref(), Some(""));
+        assert_eq!(row.get_i64("zero_number"), Some(0));
+    };
+    let rows = storage
+        .query("SELECT * FROM nullable_values", &[])
+        .await
+        .unwrap();
+    assert_absent(&rows[0]);
+    let mut transaction = storage.begin_transaction().await.unwrap();
+    let rows = transaction
+        .query("SELECT * FROM nullable_values", &[])
+        .await
+        .unwrap();
+    assert_absent(&rows[0]);
+    transaction.commit().await.unwrap();
+}
+
+#[tokio::test]
 async fn test_sqlite_storage() {
     let storage = SqliteStorage::new(":memory:").await.unwrap();
 

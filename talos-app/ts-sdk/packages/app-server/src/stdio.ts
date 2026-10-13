@@ -7,6 +7,7 @@ import {
   AppServerClient,
   type AppServerErrorHandler,
   type AppServerEventHandler,
+  type AppServerActiveTurnChangedHandler,
   type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
@@ -211,6 +212,10 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     return () => this.events.off("event", handler);
   }
 
+  onActiveTurnChanged(handler: AppServerActiveTurnChangedHandler): () => void {
+    this.events.on("activeTurnChanged", handler); return () => this.events.off("activeTurnChanged", handler);
+  }
+
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
     this.events.on("messageQueueChanged", handler);
     return () => this.events.off("messageQueueChanged", handler);
@@ -330,6 +335,9 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       }
       if (isSubscriptionTerminatedNotification(message.params)) {
         this.events.emit("subscriptionTerminated", message.params);
+      }
+      if (message.method === "session/activeTurnChanged" && message.params && typeof message.params === "object" && "sessionId" in message.params && "state" in message.params) {
+        this.events.emit("activeTurnChanged", message.params);
       }
       if (
         message.method === "messageQueue/changed" &&

@@ -557,3 +557,16 @@ fn validate_project_directory_with_label(
     }
     Ok(())
 }
+
+/// Exhaustive persisted identity of a Primary or Subagent Session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionTreeIdentity {
+    #[default]
+    Primary,
+    Subagent {
+        parent: crate::AgentTurnRef,
+        tree_root_session_id: String,
+        path: crate::AgentPath,
+    },
+}

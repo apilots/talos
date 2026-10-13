@@ -2,6 +2,7 @@
 
 Status: implemented. Registration, Desktop identity, Connect/Harness, Worker environment, configuration/plugins/MCP/OAuth and cloud UI composition are implemented. Review fixes and their current acceptance results are recorded in the root implementation plan and [verification](verification.md).
 Parent: [design](design.md). Business ownership remains with the existing Harness and product DTOs.
+Management-host/listener rules below are revised targets for [feature 044](../feat-044-talos-sync/worker-coordination.md), not newly verified behavior. Previous acceptance remains evidence for its original revision.
 
 ## 1. Code API surface
 
@@ -18,7 +19,7 @@ All listed capabilities are implemented. Transport clients preserve the existing
 | talos-base | Existing NodeRpcServer / RemoteNodePublisher extended | Accept Connect, install all advertised Harness handles, publish only after installation; revoke using the same node mutation path. Publish Harness and environment handles together |
 | agent-protocol | WorkerEnvironment | Object-safe typed methods accepting WorkerEnvironmentContext and existing business requests; return existing typed results through AgentFuture/AgentResult |
 | WorkerEnvironment / existing MCP owner | GetWorkspaceInfo / CompleteMcpAuthentication | Resolve target defaults without a Session; deliver a bound OAuth callback to the existing attempt, retaining existing WorkspaceInfo/McpAuthentication results |
-| agent-client / talos-worker | Remote environment client / local implementation | Same port, authenticated RPC or local calls; no upper-layer local/remote branches |
+| agent-client / talos-worker | Environment client / Worker implementation | Same authenticated RPC port for loopback/direct/Connect; no upper-layer local/remote branches |
 | AgentNodeService / AgentNodeStore | Existing list/create/update/lease methods enhanced | Optional endpoint, name search/total, name-only update and shared revocation; no separate Computer Store |
 | SessionStore / ProjectStore | Existing methods enhanced | Node-scoped list, project affinity and has_nonterminal_turns(nodeId); no new execution Store |
 | SDK / Desktop host | computers.* / desktop/workerIdentity | Actor-facing product methods / safe local identity. No node credentials in renderer identity or list responses |
@@ -34,6 +35,8 @@ not read-modify-write of the full UpdateNodeRequest. Domain owners and generated
 ## Desktop host API
 
 These named methods use the existing stdio App Server protocol and its SDK. They are not Agent business PB definitions.
+The connectionMode DTO/read/set entries document the 043 bootstrap surface. Feature 044 updates their SDK/UI configuration
+semantics with the unified management runtime; they must not select a no-database host or destroy local services on login.
 The trusted host performs enrollment through AgentNodeClient's existing management gRPC service with Actor Bearer auth.
 Configuration remains snake_case; host DTOs and their generated schema/TypeScript use camelCase.
 
@@ -50,9 +53,10 @@ The UUID cannot be rebound by account change or hostname matching. Recovery cann
 CreateNode/RotateCredential results stay inside the Rust host. Neither identity IPC nor runtime state contains node secrets.
 `desktop/workerIdentity` is also exposed as a dedicated preload IPC method.
 
-AgentNodeRunnerConfig.transport selects outbound/direct. A missing transport with existing listener/TLS fields preserves
-released direct configs; a missing transport without listener fields selects outbound. Outbound forbids listener identity,
-while direct still requires it. Cloud enrollment always persists explicit outbound. No new node table or RPC state is added.
+AgentNodeRunnerConfig.transport selects the registration carrier. Feature 044 separates WorkerRpcConfig from it:
+embedded/standalone hosts expose the same Worker adapter/listener; outbound Connect requires no public inbound access.
+Desktop defaults to loopback and uses the same agent-client RPC SDK as remote calls. Cloud enrollment does not forbid
+the local listener. No new node table or RPC journal is added.
 
 Electron closes stdio through EOF and waits for host drain with the existing 240-second shutdown budget; forced termination
 is reported as a shutdown failure. Worker enrollment failure is projected separately as ApiError on the existing runtime-state
@@ -64,8 +68,11 @@ the pending marker. It passes the selected UUID to the existing host method; it 
 When stopping a Worker whose registration was rejected or expired, successful execution cleanup reports the original
 registration error without blocking credential recovery or sign-out. The Desktop lifecycle handler consumes and reports
 terminal Runner failures once through the host notification; execution cleanup and task join failures still propagate.
-Without that handler, standalone wait retains the original Result and shutdown propagates unhandled non-auth registration failures. Cloud product calls use the cloud SDK;
-the cloud host rejects local business dispatch and never creates a shadow product database.
+Without that handler, standalone wait retains the original Result and shutdown propagates unhandled non-auth registration failures.
+Desktop and public talos-server both retain Service/Store/Coordinator and one embedded Worker. Desktop keeps its real product
+database/local business dispatch after cloud login; pure Workers and Web/mobile thin clients have no management database.
+Feature 044 replaces runtime cropping and updates SDK/UI connection settings; cloud connectivity does not switch the
+database or bypass the current coordinator's admission.
 
 ## 2. Node control service
 

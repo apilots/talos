@@ -9,6 +9,8 @@ use talos_types::MessageQueueChangedNotification;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ServerNotification {
+    #[serde(rename = "session/activeTurnChanged")]
+    ActiveTurnChanged(talos_agent_api::SessionActiveTurnChangedNotification),
     #[serde(rename = "initialized")]
     Initialized(InitializedNotification),
     #[serde(rename = "timeline/turn/started")]
@@ -39,6 +41,8 @@ pub enum ServerNotification {
     MessageQueueChanged(MessageQueueChangedNotification),
     #[serde(rename = "desktop/worker/failed")]
     DesktopWorkerFailed(talos_error::ApiError),
+    #[serde(rename = "desktop/worker/ready")]
+    DesktopWorkerReady,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

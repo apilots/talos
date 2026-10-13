@@ -25,6 +25,8 @@ pub struct AgentSessionContext {
 /// transport DTO, reloadable global config, or Provider-native session object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentContext {
+    /// Original Store's complete causal history_cursor; Worker compares it atomically at admission.
+    pub history_cursor: Option<talos_types::SessionHistoryCursor>,
     pub session: AgentSessionContext,
     pub turn_id: String,
     pub project_id: Option<String>,

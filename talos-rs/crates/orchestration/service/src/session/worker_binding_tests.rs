@@ -67,7 +67,10 @@ async fn session_uses_worker_catalog_and_saved_workspace_after_default_changes()
         record.conf.model_selection.as_ref().unwrap().model_ref.id,
         "worker-model"
     );
-    assert_eq!(service.session_info(&record).unwrap().node_id, "worker-a");
+    assert_eq!(
+        service.session_info(&record).await.unwrap().node_id,
+        "worker-a"
+    );
     config.write().unwrap().workspaces.default_workspace_id = "other".into();
     let context = service
         .build_agent_context(&record, AgentTurnRef::new(&record.id, "turn-1"))
@@ -90,7 +93,10 @@ async fn session_uses_worker_catalog_and_saved_workspace_after_default_changes()
         .await
         .unwrap_err()
         .is_code(talos_error::ErrorCode::InvalidRequest));
-    assert_eq!(service.session_info(&record).unwrap().id, "remote-session");
+    assert_eq!(
+        service.session_info(&record).await.unwrap().id,
+        "remote-session"
+    );
 }
 
 #[tokio::test]

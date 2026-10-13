@@ -37,6 +37,7 @@ talos-mcp = { workspace = true }
 talos-plugin = { workspace = true }
 talos-skills = { workspace = true }
 talos-store = { workspace = true }
+talos-sync = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

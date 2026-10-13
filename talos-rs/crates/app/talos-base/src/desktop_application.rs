@@ -1,12 +1,12 @@
-//! Desktop host composition. Cloud mode never constructs product Stores or a local Coordinator.
+//! Desktop host policy over the same management runtime in local and cloud modes.
 use async_trait::async_trait;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
 use talos_app_protocol::requests::{ClientRequest, ClientRequestParams};
 use talos_app_server::AppServerApplication;
 use talos_app_server::{ApplicationResponse, ApplicationResult};
-use talos_auth::{AuthService, CloudLoginPersistence};
-use talos_config::{Config, DesktopConnectionMode, YamlConfigStore};
+use talos_auth::AuthService;
+use talos_config::{Config, YamlConfigStore};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{AccountService, Actor, TimelineSubscription};
 use talos_types::{
@@ -20,33 +20,35 @@ pub(crate) struct DesktopApplication {
     pub(crate) store: YamlConfigStore,
     pub(crate) account: AccountService,
     pub(crate) auth: Arc<dyn AuthService>,
-    pub(crate) worker: Mutex<Option<talos_worker::RegisteredWorker>>,
+    pub(crate) worker: Arc<Mutex<Option<talos_worker::RegisteredWorker>>>,
+    pub(crate) execution: talos_worker::TalosWorker,
+    pub(crate) rpc: Arc<talos_worker::WorkerRpcHost>,
     pub(crate) device_name: String,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
-    local: Option<Arc<dyn AppServerApplication>>,
+    local: Arc<dyn AppServerApplication>,
 }
 
 impl DesktopApplication {
     pub(crate) fn new(
-        config: Config,
-        account: AccountService,
-        auth: Arc<dyn AuthService>,
+        runtime: &crate::TalosApplicationRuntime,
         device_name: String,
-        local: Option<Arc<dyn AppServerApplication>>,
+        local: Arc<dyn AppServerApplication>,
     ) -> Self {
         Self {
-            store: YamlConfigStore::new(config.source_path()),
-            config,
-            account,
-            auth,
-            worker: Mutex::new(None),
+            store: YamlConfigStore::new(runtime.config.source_path()),
+            config: runtime.config.clone(),
+            account: runtime.service.account.clone(),
+            auth: runtime.auth_service.clone(),
+            worker: runtime.worker_registration.clone(),
+            execution: runtime.worker.clone(),
+            rpc: runtime.worker_rpc.clone(),
             device_name,
-            worker_failures: tokio::sync::watch::channel(None).0,
+            worker_failures: runtime.worker_failures.clone(),
             local,
         }
     }
 
-    pub(crate) async fn stop_worker(&self) -> TalosResult<()> {
+    pub(crate) async fn stop_registration(&self) -> TalosResult<()> {
         if let Some(worker) = self.worker.lock().await.take() {
             worker.shutdown().await?;
         }
@@ -64,7 +66,7 @@ impl DesktopApplication {
                 control_plane_endpoint: self.config.cloud.agent_base_url.clone(),
             }),
             ClientRequestParams::DesktopConnectionSet(params) => {
-                self.stop_worker().await?;
+                self.stop_registration().await?;
                 self.store.save_desktop_connection(params.connection_mode)?;
                 value(DesktopConnectionResponse {
                     connection_mode: params.connection_mode,
@@ -87,53 +89,21 @@ impl DesktopApplication {
                 }
                 value(self.enroll_worker(params.node_id).await?)
             }
-            ClientRequestParams::AuthLoginStart(params) => value(
-                self.account
-                    .start_cloud_login(params, CloudLoginPersistence::LocalCache)
-                    .await?,
-            ),
-            ClientRequestParams::AuthLoginStatus(params) => {
-                value(self.account.cloud_login_status(params).await?)
-            }
-            ClientRequestParams::AuthLoginCancel(params) => {
-                self.account.cancel_cloud_login(params).await?;
-                value(talos_types::CloudLoginCancelResponse { success: true })
-            }
-            ClientRequestParams::AuthSessionRead(params) => {
-                value(self.account.read_auth_session(actor, params)?)
-            }
-            ClientRequestParams::AuthSessionClear(params) => {
-                let cleanup = self.stop_worker().await;
-                self.account.clear_auth_session(params)?;
-                cleanup?;
-                value(talos_types::AuthSessionClearResponse { success: true })
-            }
-            ClientRequestParams::AuthLogout(params) => {
-                let cleanup = self.stop_worker().await;
-                self.account.logout_with_request(actor, params).await?;
-                cleanup?;
-                value(talos_types::AuthLogoutResponse { success: true })
-            }
-            ClientRequestParams::UserCurrent(params) => value(talos_types::UserCurrentResponse {
-                user: self
-                    .account
-                    .current_user_with_request(actor, params)
-                    .await?,
-            }),
-            _ => Err(cloud_business_unavailable()),
+            _ => Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Unknown Desktop host method",
+            )),
         }
     }
 
     fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
-        if self.config.desktop.connection_mode == DesktopConnectionMode::Local {
-            return Ok(DesktopWorkerIdentityResponse {
-                node_id: Some("embedded".into()),
-                control_plane_endpoint: None,
-            });
-        }
         let runner = self.store.load_agent_node()?.runner;
         Ok(DesktopWorkerIdentityResponse {
-            node_id: runner.as_ref().map(|runner| runner.node_id.clone()),
+            node_id: Some(
+                runner
+                    .as_ref()
+                    .map_or_else(|| "embedded".into(), |runner| runner.node_id.clone()),
+            ),
             control_plane_endpoint: runner.map(|runner| runner.control_plane_endpoint),
         })
     }
@@ -160,9 +130,16 @@ impl AppServerApplication for DesktopApplication {
                 | ClientRequestParams::DesktopWorkerEnroll(_)
         );
         if !host_method {
-            if let Some(local) = &self.local {
-                return local.dispatch(actor, request).await;
+            if matches!(
+                request.params,
+                ClientRequestParams::AuthLogout(_) | ClientRequestParams::AuthSessionClear(_)
+            ) {
+                let cleanup = self.stop_registration().await;
+                let result = self.local.dispatch(actor, request).await;
+                cleanup.map_err(project_error)?;
+                return result;
             }
+            return self.local.dispatch(actor, request).await;
         }
         self.dispatch_host(actor, request)
             .await
@@ -179,10 +156,7 @@ impl AppServerApplication for DesktopApplication {
         source: talos_types::talos::SessionSource,
         request: StartTurnRequest,
     ) -> ApplicationResult<ApplicationResponse> {
-        if let Some(local) = &self.local {
-            return local.start_turn(actor, source, request).await;
-        }
-        Err(project_error(cloud_business_unavailable()))
+        self.local.start_turn(actor, source, request).await
     }
 
     async fn subscribe_timeline_events(
@@ -190,10 +164,7 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         params: SubscribeTimelineRequest,
     ) -> ApplicationResult<TimelineSubscription> {
-        if let Some(local) = &self.local {
-            return local.subscribe_timeline_events(actor, params).await;
-        }
-        Err(project_error(cloud_business_unavailable()))
+        self.local.subscribe_timeline_events(actor, params).await
     }
 
     async fn cancel_active_turn(
@@ -202,18 +173,14 @@ impl AppServerApplication for DesktopApplication {
         session_id: &str,
         turn_id: &str,
     ) -> ApplicationResult<()> {
-        if let Some(local) = &self.local {
-            return local.cancel_active_turn(actor, session_id, turn_id).await;
-        }
-        Err(project_error(cloud_business_unavailable()))
+        self.local
+            .cancel_active_turn(actor, session_id, turn_id)
+            .await
     }
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
-        self.stop_worker().await?;
-        if let Some(local) = &self.local {
-            local.drain_background_tasks(timeout).await?;
-        }
-        Ok(())
+        self.stop_registration().await?;
+        self.local.drain_background_tasks(timeout).await
     }
 }
 
@@ -224,13 +191,6 @@ fn value<T: Serialize>(value: T) -> TalosResult<serde_json::Value> {
             error,
         )
     })
-}
-
-fn cloud_business_unavailable() -> TalosError {
-    TalosError::new(
-        ErrorCode::InvalidRequest,
-        "Cloud product operations must use the cloud product SDK",
-    )
 }
 
 fn project_error(error: TalosError) -> talos_error::ApiError {

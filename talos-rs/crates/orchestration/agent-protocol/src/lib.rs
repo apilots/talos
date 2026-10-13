@@ -4,6 +4,7 @@
 
 mod capability;
 mod checkpoint;
+pub mod connection_pb;
 mod context;
 pub mod dream_pb;
 mod environment;
@@ -47,4 +48,16 @@ pub use environment::{WorkerEnvironment, WorkerEnvironmentContext};
 pub use environment_oauth::{
     McpAuthenticationCallbackParams, McpAuthenticationStartParams, McpOAuthCallbackOutcome,
     McpOAuthCallbackTarget,
+};
+
+mod coordinator_commands;
+pub mod coordinator_commands_pb;
+mod execution_state;
+pub use coordinator_commands::{
+    ActiveSessionCommand, ActiveSessionCommands, ActiveSessionReply, ActiveSessionTarget,
+};
+pub mod execution_state_pb;
+pub use execution_state::{
+    CommitSessionExecutionStateParams, SessionExecutionState, SessionHistoryCursor,
+    SessionStateVisibility,
 };

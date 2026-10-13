@@ -4,7 +4,7 @@ use agent_protocol::{WorkerEnvironment, WorkerEnvironmentContext};
 use talos_types::{FsDirectoryCreateRequest, FsDirectoryReadRequest};
 
 #[tokio::test]
-async fn embedded_direct_and_outbound_environment_share_paths_and_enforce_lease_owner() {
+async fn embedded_direct_and_outbound_environment_share_paths_under_computer_authorization() {
     let fixture = Fixture::new(None).await;
     let response = fixture
         .control
@@ -294,19 +294,35 @@ async fn embedded_direct_and_outbound_environment_share_paths_and_enforce_lease_
             .await
             .unwrap()
     );
-    let foreign = WorkerEnvironmentContext {
-        user_id: "user-2".into(),
+    // The credential authorizes the whole personal Computer. A claimed Session
+    // keeps its original filesystem namespace without treating it as an account.
+    let original_namespace = WorkerEnvironmentContext {
+        user_id: "anonymous".into(),
         ..context.clone()
     };
+    assert_eq!(
+        outbound
+            .workspace_info(original_namespace.clone())
+            .await
+            .unwrap(),
+        direct
+            .workspace_info(original_namespace.clone())
+            .await
+            .unwrap()
+    );
     assert!(outbound
-        .workspace_info(foreign.clone())
+        .workspace_info(original_namespace)
         .await
-        .unwrap_err()
-        .is_code(ErrorCode::PermissionDenied));
-    assert!(direct
-        .workspace_info(foreign)
+        .unwrap()
+        .user_workspace_dir
+        .contains("anonymous"));
+    assert!(fixture
+        .publisher
+        .coordinator
+        .worker_environment(&auth.node_id, "user-2")
         .await
-        .unwrap_err()
+        .err()
+        .unwrap()
         .is_code(ErrorCode::PermissionDenied));
     let saved_missing = WorkerEnvironmentContext {
         workspace_id: Some("removed".into()),

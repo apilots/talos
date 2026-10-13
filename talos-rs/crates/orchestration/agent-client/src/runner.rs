@@ -22,6 +22,7 @@ pub struct AgentNodeRunner {
     node_id: String,
     credential: String,
     deployments: Vec<Deployment>,
+    system_info: Option<talos_types::NodeSystemInfo>,
     lease_observer: Option<AgentNodeLeaseObserver>,
     execution_adapter: Option<talos_agent::AgentHarnessRpcAdapter>,
 }
@@ -49,9 +50,15 @@ impl AgentNodeRunner {
             node_id,
             credential,
             deployments,
+            system_info: None,
             lease_observer: None,
             execution_adapter: None,
         }
+    }
+
+    pub fn with_system_info(mut self, info: talos_types::NodeSystemInfo) -> Self {
+        self.system_info = Some(info);
+        self
     }
 
     pub fn with_lease_observer(mut self, observer: AgentNodeLeaseObserver) -> Self {
@@ -233,6 +240,7 @@ impl AgentNodeRunner {
                         token: self.credential.clone(),
                     },
                     params: RegisterParams {
+                        system_info: self.system_info.clone(),
                         deployments: self.deployments.clone(),
                     },
                 })

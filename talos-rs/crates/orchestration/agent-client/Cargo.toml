@@ -7,6 +7,9 @@ license.workspace = true
 description = "Concrete Agent node and remote Harness clients"
 
 [dependencies]
+uuid = { workspace = true, features = ["v4"] }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 talos-logging = { workspace = true }
 talos-memory = { workspace = true }
 bytes = { workspace = true }

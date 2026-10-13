@@ -319,7 +319,7 @@ def lease_expiry(cluster):
 
 def parity(cluster):
     token = cluster.users['alice']['access_token']
-    models = data(http(cluster.url + '/v1/models', token=token))['models']
+    models = data(http(cluster.url + '/v1/models?nodeId=' + cluster.nodes['alice-a']['node_id'], token=token))['models']
     image_model = os.environ.get('TALOS_E2E_IMAGE_MODEL', 'deepseek-v4-flash-vision-exp')
     cluster.model = next(model for model in models if model['id'] == image_model)
     marker = 'attached_' + uuid.uuid4().hex
@@ -378,7 +378,7 @@ def parity(cluster):
 
     embedded_marker = uuid.uuid4().hex
     embedded_file = f'embedded-{embedded_marker}.txt'
-    embedded_session, _, _ = cluster.turn('admin', f"Use Bash to run printf '{embedded_marker}' > {embedded_file}, then acknowledge.")
+    embedded_session, _, _ = cluster.turn('admin', f"Use Bash to run printf '{embedded_marker}' > {embedded_file}, then acknowledge.", node_id='embedded')
     require(cluster.query('SELECT execution_node_id FROM sessions WHERE session_key=?', (embedded_session,)) == [('embedded',)],
             'User without remote nodes did not retain embedded routing')
     local_files = list(cluster.server_home.rglob(embedded_file))

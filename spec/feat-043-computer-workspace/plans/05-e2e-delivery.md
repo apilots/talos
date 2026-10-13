@@ -1,6 +1,6 @@
 # 阶段 5：真实多 Computer E2E 与交付
 
-Status: Complete。依赖：阶段 1–4。
+Status: Complete（043原版本验收）。依赖：阶段1–4。044阶段1管理runtime/loopback和注册/执行/故障回归已通过；完整多端UI与联合E2E仍按044阶段4–5推进，本文保留043原验收结果。
 目标：真实产品路径验证整个特性，回归旧功能，删除重复实现和无意义测试。
 方案：[design](../design.md)，[现有 E2E 约定](../../../talos-e2e/README.md)。
 
@@ -22,7 +22,7 @@ Status: Complete。依赖：阶段 1–4。
 1. 新增 talos-e2e/scenarios/18_computer_workspace，注册 runner 所需真实 binaries，记录统一 preflight 和入口命令。
    先增加注册场景，再逐阶段加入执行/环境/UI 场景；本阶段做全 group 回归，不把功能验证全部拖到最后。
 2. 经公开 API 创建足够节点覆盖快捷项/浮层；查询设置 limit=2 证明多页搜索/total，不能用八台节点假装覆盖默认50条分页。
-3. 验证登录创建/保存 UUID、改名重启、续租、CP 重启、旧连接替换、停用/轮换/账号隔离；Worker 不开放执行监听端口。
+3. 验证登录创建/保存 UUID、改名重启、续租、CP 重启、旧连接替换、停用/轮换/账号隔离；个人Worker不要求公网入站。044回归更新为实际loopback listener+同一RPC SDK，不保留“Worker完全无listener”断言。
 4. Desktop A 默认本机并产生真实文件，切 B 后远端文件改变；D/Web 选择 A，同一云 Session/Timeline 可见。
    输入/审批/compact/子任务/附件/图片/Dream 回调与实时事件用真实 Provider 验证，不用 fake Provider 冒充。
 5. 目录/项目同路径隔离，Workspace/Memory/插件/MCP/模型配置修改检查实际 Worker 文件与运行时；配置准入竞态按节点验证。
@@ -56,6 +56,7 @@ Status: Complete。依赖：阶段 1–4。
 - fixtures 正常停止并删除；只清理本任务遗留 home/凭据，不改用户配置。保存四份既有 conf 修改，不提交、不部署。
 
 Spec 对照与完整命令范围见 [验收记录](../verification.md)。公网 agent.talos.love、跨物理机器网络和发布签名仍为 Not Verified；这些部署验证不由本地通过结论替代。
+上述结果属043原revision；[044联合验收](../../feat-044-talos-sync/plans/05-e2e-delivery.md)更新管理型Desktop有业务DB/loopback listener断言，保持纯Worker/薄客户端无管理DB，不改写旧PASS为新目标已通过。
 下一步：本期本地实施与验收完成；生产部署和 Git 交付按后续授权执行。
 
 

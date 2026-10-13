@@ -29,6 +29,43 @@ pub enum NodeHealth {
     Degraded,
 }
 
+/// Supported Worker operating systems. Hardware is self-reported presentation metadata.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum NodeOperatingSystem {
+    Linux,
+    MacOs,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct NodeNetworkInterface {
+    pub name: String,
+    pub mac_address: String,
+}
+
+/// Static environment visible to the Worker; unavailable optional information stays null.
+/// No credentials, IP addresses, device serial numbers or execution state belong here.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
+pub struct NodeSystemInfo {
+    pub os: NodeOperatingSystem,
+    pub os_version: Option<String>,
+    pub architecture: String,
+    pub hostname: Option<String>,
+    pub cpu_model: Option<String>,
+    pub logical_cpu_count: u32,
+    #[ts(type = "number")]
+    pub memory_bytes: u64,
+    pub board_model: Option<String>,
+    pub network_interfaces: Vec<NodeNetworkInterface>,
+    pub graphics: Vec<String>,
+    pub worker_version: String,
+}
+
 /// Public node state; credential and lease hashes stay inside the Store.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +89,7 @@ pub struct NodeInfo {
     pub available: bool,
     #[ts(type = "number | null")]
     pub credential_expires_at: Option<i64>,
+    pub system_info: Option<NodeSystemInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

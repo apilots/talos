@@ -1,45 +1,44 @@
-# 统一云控制面与 Computer 工作区
+# Computer注册与工作区
 
 Status: implemented — 阶段 1–5 及本轮 Review 修复/当前源码真实 Electron/Web 验收完成；原阶段 DMG 安装验收单独保留。结果与未验证部署范围见 [验收记录](verification.md)。
+更新边界：管理宿主与统一Worker RPC目标由[联合feat-044](../feat-044-talos-sync/design.md)修订，实现及实际验收见044根PLAN；043历史验证只证明原版本，不证明新目标已实现。
 基础：[feat-042](../feat-042-distributed-agent-execution/design.md)。协议：[接口与 Protobuf](protocol.md)。执行：[注册](plans/01-registration.md)、[执行](plans/02-outbound-execution.md)、[环境](plans/03-workspace-environment.md)、[UI](plans/04-computer-ui.md)、[验收](plans/05-e2e-delivery.md)。
 
 ## 1. 最终目标
 
-联网模式下，Desktop、Web 和独立 Worker 统一使用默认控制面 `https://agent.talos.love`，地址可配置。
-同一控制面、同一账号能看到自己的全部 Computer，选择后在目标 Worker 执行，并实时接收结果。
+Desktop和公网talos-server都有管理职责、自己的业务DB和一个内嵌本机Worker；账号共享注册默认使用`https://agent.talos.love`，地址可配置。
+同账号经独立Sync共享资源；当前管理节点选择Computer并协调执行，结果实时回当前协调者。Web使用其连接管理节点的产品API。
 Desktop 内嵌 Worker 也是其中一台 Computer：首次默认本机，随时可切远端；目录和算力始终在被选中的节点。
 这个地址是拟定产品默认值，不表示公网部署已完成。
 
 本期包含主动连接、Desktop 内嵌 Worker 云注册、统一业务 API、Computer UI 和 Worker 环境管理。
-保留显式纯本地模式；不自动迁移/合并本地与云端历史，不做节点调度、跨控制面目录聚合或原生移动客户端。
+保留不登录/关闭Sync的独立本机使用；共享历史及跨控制面执行由044定义，已有Session固定Computer，不做运行Turn接管或原生移动客户端。
 复用 agent_nodes、AgentNodeService、Registry、AgentHarness 和 Client；不新增 Computer 表、授权表或 RPC 执行账本。
 
-## 2. 两种运行方式
+## 2. 管理宿主与薄客户端
 
 | 方式 | 产品 API / 业务持久化 | Worker 与节点身份 |
 | --- | --- | --- |
-| 联网 Desktop / Web | 都调用所选云控制面的 API；Project、Session、Turn、Timeline 只有该控制面一个写入 owner | Desktop 宿主启动 TalosWorker lib，取得持久 UUID 后主动注册；独立 talos-worker 同样注册 |
-| 显式纯本地 Desktop | 继续使用本地 app-server/stdio 与本地业务数据库 | 本地内嵌 Worker 直接调用，沿用 embedded；不需要云凭据或网络租约 |
-| 管理节点内嵌 Worker | 属于该控制面；继续经同一个 AgentHarness/环境端口调用 | 沿用控制面内 embedded 身份，生命周期随 Server；共享实例按管理员权限展示 |
+| Desktop app-server | 完整Service/Store/Coordinator与自己的业务DB；云登录启注册/共享，不裁剪本地管理能力 | 一个内嵌Worker，独立loopback RPC listener；本机经agent-client SDK调用，共享时另启Connect |
+| 公网 talos-server | 同一管理runtime；协调本机/远端Computer，拥有当前协调任务的业务事实 | 一个内嵌Worker，同SDK/adapter/对象；管理API与Worker listener分离 |
+| Web/移动端薄客户端 | 所连接管理节点的原API，不建立管理业务DB | 不因此启动Worker或协调任务 |
+| 纯 talos-worker | 无Service/Coordinator/产品DB | 同Worker host/adapter，仅执行/环境；按配置listener与Connect |
 
-客户端连接设置明确 `connectionMode: cloud | local`，默认 cloud；这是产品 API 的来源，不改变 Server 的 deploymentMode。
-联网 Desktop 在登录后接入，未登录展示登录入口及显式本地入口；断网不自动切成 local，也不把云 Session 写进本地 DB。
-切换运行方式不得在活动本地任务中销毁宿主；先完成现有退出/中断流程，再切换，草稿和缓存按控制面隔离。
+登录或断网不改变Desktop管理runtime；无agent/sync也可loopback执行和恢复本机历史。共享/匿名历史认领沿044，不隐式改账号/Computer。
+退出仍遵守原drain/取消；云租约与本机入口分离，缓存/草稿按账号和Computer隔离。
 
 ```text
-Desktop / Web -- existing product SDK + Actor auth --> Talos Server @ agent.talos.love
-                                                         |
-                                             Service -> Coordinator -> AgentHarness
-                                                         |
-                                   agent-client -> Worker 主动建立的 gRPC 双向流
-                                                         |
-                       Desktop 内嵌 Worker / PC / VM / 独立 Pod -> 本地 Workspace 与 Provider
-                                                         |
-                            progress / settlement -> 控制面 Timeline -> 各客户端实时订阅
+Desktop / talos-server: Service -> Coordinator -> AgentHarness / agent-client SDK
+                                                     |
+                               loopback / direct / Node Connect RPC
+                                                     |
+                         同一个 Worker adapter -> Workspace / Provider
+                                                     |
+                         progress / settlement -> 当前协调者DB / UI
+各管理节点已提交事实 -> talos-sync-sdk / WSS + Loro -> Sync -> 其他管理节点
 ```
 
-本机任务也经过云控制面分派；其模型、工具和文件 I/O 由本机 Worker 执行。不会启动第二份本机 Worker，
-也不让 UI 直接调用 Harness 绕过云端任务准入、鉴权和历史持久化。
+本机由当前本机Coordinator经同一RPC SDK分派，文件I/O由本机Worker完成；远端使用同接口。UI走原Service准入/鉴权/持久化，不直接调用Harness或启动第二Worker。
 
 ## 3. 职责与代码位置
 
@@ -48,24 +47,22 @@ Desktop / Web -- existing product SDK + Actor auth --> Talos Server @ agent.talo
 | agent-pb | Own only .proto sources, generated service APIs and PB objects. Add Connect transport envelopes; reuse existing Harness/business messages. |
 | agent-protocol | Own AgentHarness, typed node contracts, conversions and the sessionless WorkerEnvironment port. No network lifecycle or Stores. |
 | agent-client | AgentNodeClient/AgentNodeRunner own outbound registration, lease and connection lifecycle; RemoteAgentClient hides direct RPC or reverse-stream transport behind AgentHarness. |
-| talos-worker lib / binary | Compose the same execution and environment runtime. Inject cloud resource clients in cloud mode, existing local resource ports in local mode. No product DB ownership. |
+| talos-worker lib / binary | Compose one execution/environment runtime and RPC adapter. Resource callbacks use the current invocation's client; loopback/remote transport is hidden. No product DB ownership. |
 | talos-base / Talos Server | Host node ingress, the existing publisher and SDK-facing APIs; compose local or remote handles into the existing Registry. |
 | Service / Stores | Authorize targets; own Project/Session/Turn/Timeline and uploaded attachments; perform business admission and configuration policy. |
 | Desktop main / shared UI | Own local process lifecycle, enrollment and safe identity exposure; UI uses product SDK, selected Computer and existing account menu. |
 
 Desktop 继续启动已打包的 app-server，由它组装现有 TalosWorker lib，不额外启动或打包独立 worker 二进制。
 联网模式在这个内嵌 Worker 上安装云资源客户端、注册 Runner 和主动连接；app-server 负责宿主生命周期与既有登录引导，
-产品业务经云 SDK 访问唯一控制面，不组装本地业务数据库来接收云任务。
-纯本地模式继续组装现有本地 Service/Stores 和同一 Worker lib；同一宿主只启动一个 Worker。
+产品业务经本机Service/Stores/Coordinator管理，云登录不切成无DB宿主。内嵌和远端Worker调用内聚在同agent-client SDK，同一宿主只有一个Worker。
 独立 talos-worker 二进制保留给独立部署，复用同一 lib/Runner/adapter；它不是 Desktop 的额外执行进程。
 
 ### Desktop 宿主入口（阶段 1.3）
 
 Electron main 给现有 app-server 传入宿主设备名，仍只启动一个已打包的进程。
-`desktop.connection_mode` 默认 cloud，仅 Desktop 宿主按它选择组装；普通 stdio/Server 沿用原有组装。
+`desktop.connection_mode`不再选择“完整runtime/无DB宿主”分支；044阶段1.2已移除裁剪runtime路径，普通stdio/Server保留完整组装；阶段4继续统一产品连接设置/共享状态。
 cloud 宿主复用 AccountService/CloudSessionCache，登录完成和重启恢复后调用受信任的 `desktop/workerEnroll`；
-app-server 保存身份并用 TalosWorker lib + AgentNodeRunner 注册，无本地 Project/Session/Timeline 数据库。
-local 宿主保留原有完整本地服务；切换模式保存配置后重启同一宿主，不自动切换，不迁移历史。
+app-server保存身份，以同一Worker+Runner注册，同时保留本地Project/Session/Timeline数据库。共享启停不换DB或销毁管理宿主；导入走原Store事务，不迁移Computer。
 
 配置沿用 `TALOS_HOME/conf/talos.yaml`，显式外部 config 路径不能用于 Desktop 自动注册。
 `cloud.agent_trusted_ca_file` 是首次创建节点时可选的私有 CA，随后写入 runner.trusted_ca_file；缺省使用系统根。
@@ -236,7 +233,7 @@ Web 没有最近选择时，一台自动选，多台明确选择；没有节点�
 | features/computers/ComputerRail.tsx / ComputerOverflowMenu.tsx / ComputerItem.tsx | Independent rail, full list, shared device/local/status/selection presentation |
 | pages/computers/ComputersPage.tsx | Node list, connection guide, details, rename, enable/disable and credential recovery |
 | Existing AppLayout / Sidebar / settings / account menu | Compose layout and selected-node views; preserve existing account behavior |
-| Desktop main + existing SDK/IPC composition | Start one Worker host, enroll after login, expose safe identity; cloud product calls use the cloud SDK |
+| Desktop main + existing SDK/IPC composition | Compose one management runtime and Worker; enroll/share after login; retain local business services and safe identity |
 
 账户/控制面/nodeId/资源 ID 隔离缓存、草稿和最近选择；快速切换的旧响应不能覆盖当前节点。
 每台 Desktop 的当前选择独立，云历史共享；关闭窗口不等于注销 Worker，退出 Desktop 才按宿主退出流程释放。

@@ -215,20 +215,24 @@ async fn test_get_and_put_web_search_config_handlers() {
 }
 
 #[tokio::test]
-async fn test_config_handler_rejects_regular_user_updates() {
+async fn test_config_handler_allows_authorized_regular_worker_user_in_cloud_mode() {
     let mut config = test_config();
     config.mode = talos_config::DeploymentMode::Cloud;
     let state = test_state_with_config(config, false).await;
-    let error = put_config_handler(
+    let response = put_config_handler(
         State(state),
         Some(axum::extract::Extension(test_auth())),
         axum::extract::Query(talos_types::WorkspaceInfoRequest::default()),
         Json(talos_types::ConfigValue::WebSearch(Box::default())),
     )
     .await
-    .expect_err("regular users should not update global config");
-
-    assert_eq!(error.into_response().status(), StatusCode::FORBIDDEN);
+    .expect("authorized Worker users can configure their environment in cloud mode");
+    assert_eq!(
+        expect_success(response.0),
+        talos_types::ConfigResponse::WebSearch {
+            config: Box::default()
+        }
+    );
 }
 
 fn admin_auth() -> RequestIdentity {

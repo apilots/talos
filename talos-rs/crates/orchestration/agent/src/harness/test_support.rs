@@ -352,6 +352,7 @@ pub(super) fn user_message(
 
 pub(super) fn context(identity: AgentTurnRef) -> AgentContext {
     AgentContext {
+        history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),
             session_id: identity.session_id,

@@ -55,6 +55,9 @@ impl TurnService {
                 Err(error) => return Err(error),
             }
         };
+        self.execution
+            .publish_active_turn(&identity.session_id)
+            .await?;
         let cleanup = match self
             .execution
             .coordinator
@@ -82,6 +85,9 @@ impl TurnService {
                         return Err(restore_error);
                     }
                 }
+                self.execution
+                    .publish_active_turn(&identity.session_id)
+                    .await?;
                 return Err(error);
             }
         };
@@ -158,12 +164,22 @@ impl TurnService {
                 cleanup.clone(),
             )
             .await?;
-        drop(ownership);
         let AgentRunSettlement::Finished { event, result, .. } = settlement else {
             return Err(TalosError::internal(
                 "terminal recovery returned a waiting settlement",
             ));
         };
+        // Waiting/orphan recovery has no live execution task to commit the
+        // terminal cursor. Retain the original Service exclusion until the same
+        // Worker has acknowledged the already-persisted terminal fact.
+        self.execution
+            .sessions
+            .commit_worker_history_cursor(identity, agent_protocol::SessionStateVisibility::Local)
+            .await?;
+        drop(ownership);
+        self.execution
+            .sessions
+            .schedule_shared_history_cursor(identity.session_id.clone());
         if let Err(error) = result {
             talos_logging::report_error(&error);
         }

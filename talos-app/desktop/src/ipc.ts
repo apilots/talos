@@ -4,6 +4,8 @@ export const TALOS_IPC = {
   connect: "talos:connect",
   workerIdentity: "desktop/workerIdentity",
   event: "talos:event",
+  activeTurnChanged: "talos:active-turn-changed",
+  messageQueueChanged: "talos:message-queue-changed",
   invoke: "talos:invoke",
   openExternal: "talos:open-external",
   runtimeState: "talos:runtime-state",
@@ -22,6 +24,8 @@ export interface TalosDesktopBridge {
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<AppProtocol.ApiResponse<T>>;
   openExternal(url: string): Promise<void>;
+  onActiveTurnChanged(handler: (notification: AppProtocol.SessionActiveTurnChangedNotification) => void): () => void;
+  onMessageQueueChanged(handler: (notification: AppProtocol.MessageQueueChangedNotification) => void): () => void;
   onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void;
   onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void;
   onRuntimeState(handler: (state: TalosRuntimeState) => void): () => void;

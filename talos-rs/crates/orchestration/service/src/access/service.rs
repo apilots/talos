@@ -171,21 +171,40 @@ impl ResourceAccessService {
     }
 
     pub(crate) async fn clear_session(&self, session: SessionRecord) -> TalosResult<SessionInfo> {
+        let session = self.sessions.prepare_execution(&session).await?;
+        let expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
         let context = self.sessions.build_agent_session_context(&session).await?;
-        self.coordinator.clear_session(context).await?;
+        self.coordinator
+            .clear_session(context, expected_history_cursor)
+            .await?;
         let record = self.sessions.clear_session_history(session).await?;
-        self.sessions.session_info(&record)
+        self.sessions.commit_cleared_history(&record).await?;
+        self.sessions
+            .schedule_shared_history_cursor(record.id.clone());
+        self.sessions.session_info(&record).await
     }
 
     pub(crate) async fn close_session(&self, session: SessionRecord) -> TalosResult<()> {
+        let session = self.sessions.prepare_execution(&session).await?;
+        let expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
         let context = self.sessions.build_agent_session_context(&session).await?;
-        self.coordinator.close_session(context).await
+        self.coordinator
+            .close_session(context, expected_history_cursor)
+            .await?;
+        self.sessions.schedule_shared_history_cursor(session.id);
+        Ok(())
     }
 
     pub(crate) async fn delete_session(&self, session: SessionRecord) -> TalosResult<bool> {
+        let session = self.sessions.prepare_execution(&session).await?;
+        let expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
         let context = self.sessions.build_agent_session_context(&session).await?;
-        self.coordinator.clear_session(context.clone()).await?;
-        self.coordinator.close_session(context).await?;
+        self.coordinator
+            .clear_session(context.clone(), expected_history_cursor.clone())
+            .await?;
+        self.coordinator
+            .close_session(context, expected_history_cursor)
+            .await?;
         self.sessions.delete_session(session).await
     }
 

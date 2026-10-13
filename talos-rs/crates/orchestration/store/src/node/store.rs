@@ -11,7 +11,7 @@ use super::{
     RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
 };
 
-const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at";
+const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at, system_info";
 
 #[async_trait]
 pub trait AgentNodeStore: Send + Sync {
@@ -31,37 +31,72 @@ pub trait AgentNodeStore: Send + Sync {
 
 pub struct DatabaseAgentNodeStore {
     pool: SqlitePool,
+    sync: std::sync::Arc<crate::sync::StoreSyncBindings>,
 }
 
 impl DatabaseAgentNodeStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            sync: Default::default(),
+        }
+    }
+    pub fn with_sync(self, sync: std::sync::Arc<crate::sync::StoreSyncAdapter>) -> Self {
+        self.sync.install(sync).expect("initial Store sync binding");
+        self
+    }
+    /// Install a host-verified binding after login; existing transactions keep
+    /// their original association until they commit.
+    pub fn install_sync(
+        &self,
+        adapter: std::sync::Arc<crate::sync::StoreSyncAdapter>,
+    ) -> TalosResult<()> {
+        self.sync.install(adapter)
+    }
+
+    async fn begin_write(
+        &self,
+        node_id: &str,
+    ) -> TalosResult<crate::sync::capture::SqliteCaptureTransaction> {
+        crate::sync::capture::SqliteCaptureTransaction::begin(
+            &self.pool,
+            self.sync.clone(),
+            vec![talos_sync::SyncResourceKey::Computer {
+                computer_id: node_id.into(),
+            }],
+        )
+        .await
     }
 }
 
 #[async_trait]
 impl AgentNodeStore for DatabaseAgentNodeStore {
     async fn upsert_embedded(&self, status: NodeStatus, now_at: i64) -> TalosResult<NodeRecord> {
+        let mut transaction = self.begin_write("embedded").await?;
         let row = sqlx::query(&format!(
             "INSERT INTO agent_nodes (node_id, owner_user_id, display_name, mode, endpoint, status, created_at, updated_at) VALUES ('embedded', NULL, 'Embedded Agent', 'embedded', NULL, ?, ?, ?) ON CONFLICT(node_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at WHERE agent_nodes.mode = 'embedded' RETURNING {NODE_COLUMNS}"
         ))
         .bind(status_text(status))
         .bind(now_at)
         .bind(now_at)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| database_error("register embedded Agent node", error))?;
-        row.first()
+        let record = row
+            .first()
             .ok_or_else(|| {
                 TalosError::new(
                     ErrorCode::Conflict,
                     "Embedded Agent node identity is occupied",
                 )
             })
-            .and_then(record_from_row)
+            .and_then(record_from_row)?;
+        transaction.commit().await?;
+        Ok(record)
     }
 
     async fn create(&self, params: CreateNodeParams) -> TalosResult<NodeRecord> {
+        let mut transaction = self.begin_write(&params.node_id).await?;
         let result = sqlx::query(&format!(
             "INSERT INTO agent_nodes (node_id, owner_user_id, display_name, mode, endpoint, credential_hash, credential_expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING {NODE_COLUMNS}"
         ))
@@ -74,7 +109,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(params.credential_expires_at)
         .bind(params.now_at)
         .bind(params.now_at)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await;
         let rows = result.map_err(|error| {
             if is_unique_violation(&error) {
@@ -83,9 +118,12 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
                 database_error("create Agent node", error)
             }
         })?;
-        rows.first()
+        let record = rows
+            .first()
             .ok_or_else(|| TalosError::internal("Agent node insert returned no row"))
-            .and_then(record_from_row)
+            .and_then(record_from_row)?;
+        transaction.commit().await?;
+        Ok(record)
     }
 
     async fn get(&self, node_id: &str) -> TalosResult<Option<NodeRecord>> {
@@ -109,7 +147,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             } => (false, Some(user_id), include_embedded),
             NodeListScope::Embedded => (false, None, true),
         };
-        let filter = "(? OR owner_user_id = ? OR (? AND mode = 'embedded')) AND (? IS NULL OR instr(lower(display_name), lower(?)) > 0)";
+        let filter = "(? OR owner_user_id = ? OR (? AND mode = 'embedded')) AND (? IS NULL OR node_id <> ?) AND (? IS NULL OR instr(lower(display_name), lower(?)) > 0)";
         let mut transaction = self
             .pool
             .begin()
@@ -121,6 +159,8 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(all)
         .bind(owner.as_deref())
         .bind(embedded)
+        .bind(params.exclude_node_id.as_deref())
+        .bind(params.exclude_node_id.as_deref())
         .bind(params.query.as_deref())
         .bind(params.query.as_deref())
         .bind(params.cursor.as_deref())
@@ -134,6 +174,8 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
                 .bind(all)
                 .bind(owner.as_deref())
                 .bind(embedded)
+                .bind(params.exclude_node_id.as_deref())
+                .bind(params.exclude_node_id.as_deref())
                 .bind(params.query.as_deref())
                 .bind(params.query.as_deref())
                 .fetch_one(&mut *transaction)
@@ -164,19 +206,31 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     }
 
     async fn register(&self, params: RegisterNodeParams) -> TalosResult<NodeRecord> {
+        let system_info = params
+            .system_info
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| {
+                TalosError::internal_with_source("Encode Worker system report.", error)
+            })?;
+        let mut transaction = self.begin_write(&params.node_id).await?;
         let row = sqlx::query(&format!(
-            "UPDATE agent_nodes SET lease_token_hash = ?, lease_expires_at = ?, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ? AND mode = 'remote' AND status = 'enabled' AND credential_hash = ? AND credential_expires_at > ? RETURNING {NODE_COLUMNS}"
+            "UPDATE agent_nodes SET system_info = COALESCE(?, system_info), lease_token_hash = ?, lease_expires_at = ?, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ? AND mode = 'remote' AND status = 'enabled' AND credential_hash = ? AND credential_expires_at > ? RETURNING {NODE_COLUMNS}"
         ))
+        .bind(system_info)
         .bind(params.lease_token_hash.as_slice())
         .bind(params.lease_expires_at)
         .bind(params.now_at)
         .bind(&params.node_id)
         .bind(params.expected_credential_hash.as_slice())
         .bind(params.now_at)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| database_error("register Agent node", error))?;
-        record_or_expired(row.into_iter().next())
+        let record = record_or_expired(row.into_iter().next())?;
+        transaction.commit().await?;
+        Ok(record)
     }
 
     async fn renew(&self, params: RenewNodeParams) -> TalosResult<NodeRecord> {
@@ -230,6 +284,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     }
 
     async fn update(&self, params: UpdateNodeParams) -> TalosResult<NodeRecord> {
+        let mut transaction = self.begin_write(&params.node_id).await?;
         let status = status_text(params.status);
         let disabled = i64::from(params.status == NodeStatus::Disabled);
         let row = sqlx::query(&format!(
@@ -248,10 +303,12 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(disabled)
         .bind(params.now_at)
         .bind(&params.node_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(|error| database_error("update Agent node", error))?;
-        record_or_missing(row.into_iter().next())
+        let record = record_or_missing(row.into_iter().next())?;
+        transaction.commit().await?;
+        Ok(record)
     }
 
     async fn rotate_credential(&self, params: RotateCredentialParams) -> TalosResult<NodeRecord> {
@@ -269,16 +326,20 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     }
 
     async fn rename(&self, params: RenameNodeParams) -> TalosResult<NodeRecord> {
+        let mut transaction = self.begin_write(&params.node_id).await?;
         let row = sqlx::query(&format!(
             "UPDATE agent_nodes SET display_name = ?, updated_at = ? WHERE node_id = ? AND mode = 'remote' RETURNING {NODE_COLUMNS}"
         ))
         .bind(params.display_name).bind(params.now_at).bind(params.node_id)
-        .fetch_optional(&self.pool).await
+        .fetch_optional(&mut *transaction).await
         .map_err(|error| database_error("rename Agent node", error))?;
-        record_or_missing(row)
+        let record = record_or_missing(row)?;
+        transaction.commit().await?;
+        Ok(record)
     }
 
     async fn set_status(&self, params: SetNodeStatusParams) -> TalosResult<NodeRecord> {
+        let mut transaction = self.begin_write(&params.node_id).await?;
         let disabled = params.status == NodeStatus::Disabled;
         let row = sqlx::query(&format!(
             "UPDATE agent_nodes SET status = ?, lease_token_hash = CASE WHEN ? THEN NULL ELSE lease_token_hash END, lease_expires_at = CASE WHEN ? THEN NULL ELSE lease_expires_at END, last_heartbeat_at = CASE WHEN ? THEN NULL ELSE last_heartbeat_at END, health = CASE WHEN ? THEN 'unknown' ELSE health END, updated_at = ? WHERE node_id = ? AND mode = 'remote' RETURNING {NODE_COLUMNS}"
@@ -286,9 +347,11 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .bind(status_text(params.status))
         .bind(disabled).bind(disabled).bind(disabled).bind(disabled)
         .bind(params.now_at).bind(params.node_id)
-        .fetch_optional(&self.pool).await
+        .fetch_optional(&mut *transaction).await
         .map_err(|error| database_error("set Agent node status", error))?;
-        record_or_missing(row)
+        let record = record_or_missing(row)?;
+        transaction.commit().await?;
+        Ok(record)
     }
 }
 
@@ -308,7 +371,16 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<NodeRecord> {
         })
         .transpose()
     };
+    let system_info: Option<String> = row
+        .try_get("system_info")
+        .map_err(|error| database_error("decode Worker system report", error))?;
     Ok(NodeRecord {
+        system_info: system_info
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| {
+                TalosError::internal_with_source("Decode persisted Worker system report.", error)
+            })?,
         node_id: text("node_id")?,
         owner_user_id: row
             .try_get("owner_user_id")

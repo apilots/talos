@@ -7,6 +7,8 @@ license.workspace = true
 description = "Shared Agent Harness and node domain contracts"
 
 [dependencies]
+uuid = { workspace = true }
+serde = { workspace = true }
 talos-llm-provider = { workspace = true }
 prost = { workspace = true }
 tonic = { workspace = true }

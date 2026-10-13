@@ -76,15 +76,15 @@ embedded SDK, and their product transports can all reach it.
 | `@talos/sdk-browser` | HTTP, multipart upload, authentication header, and SSE transport implementation |
 | `@talos/sdk-app-server` | JSON-RPC transport plus Electron main-process and typed preload IPC adapters |
 
-Web and cloud-mode Desktop use `TalosClient` through HTTP/SSE to the same product
-control plane. Desktop main hosts its bundled app-server, which owns one
-`TalosWorker`, persists the UUID/registration credential and connects outward.
-Typed preload IPC supplies host connection settings, safe identity and the existing
-login lifecycle; node secrets never reach the renderer. Explicit local mode uses
-`AppServerClient` through that same IPC/main JSON-RPC stdio path for product APIs. The two facades share generated
-domain and protocol types, but they do not currently implement one common
-TypeScript client interface. Capability parity is therefore enforced through
-API review and parity tests rather than the TypeScript type system alone.
+Web uses `TalosClient` over HTTP/SSE to its selected management service. Desktop
+uses `AppServerClient` through typed preload IPC and JSON-RPC stdio in both local
+and cloud modes. Its bundled app-server retains the original Service, Store and
+Coordinator, plus one `TalosWorker`; cloud mode enables registration and account
+synchronization without replacing that management runtime. Remote dispatch stays
+inside the Rust `agent-client` SDK. Typed preload also exposes the existing login
+lifecycle and safe host identity; node credentials never reach the renderer.
+Shared generated types and parity tests keep the browser and Desktop facades
+aligned on the same business capabilities.
 
 ## Rust SDK and embedded SDK
 
@@ -176,9 +176,10 @@ the existing presenter. Branch on codes/typed parameters, never English sentence
 Show failed Turns even without assistant text. Public error disclosure, report
 ownership and protocol 0.4 migration are defined by [Error contract](ERROR_MODEL.md).
 
-Web and cloud-mode Desktop read `deploymentMode` from the selected control plane's
-health response. Desktop's explicit host `connectionMode` chooses cloud product
-APIs or local stdio; it is separate from server deployment policy. Settings
+Web reads `deploymentMode` from its connected management service. Desktop keeps
+its complete local management runtime; its explicit `connectionMode` controls
+cloud registration, independently of synchronization opt-out and server
+deployment policy. Settings
 navigation and direct routes mirror the [configuration authorization
 matrix](../../deploy/README.md#deployment-mode-and-configuration-access); Gateway
 still enforces access independently of client visibility.
@@ -236,8 +237,12 @@ only together with an authorized product workspace management path.
 ## Computer selection and execution ownership
 
 `features/computers` owns the independent rail, full paginated search, selection
-and management view. Desktop identifies its local Computer by control-plane
-endpoint plus UUID; Web requires an explicit selection when more than one exists.
+and management view. Both clients use `sync/status.localComputerId` to identify
+the connected management host's own Worker. On Desktop this is its local Computer;
+on Web it is the Server's embedded Worker, not the browser's physical machine.
+Ordinary accounts on a shared center do not see the center's private embedded
+Worker. An authorized local Worker is selected by default; otherwise the saved
+selection or an explicit Computer selection applies.
 The existing account menu remains the account owner. Cloud/local is an explicit
 host setting and an offline Computer never redirects execution elsewhere.
 
@@ -253,3 +258,11 @@ Worker owns config, MCP credentials and Workspace files. Remote MCP OAuth callba
 use the control-plane relay to the original bounded Worker attempt; only transient
 state-hash routing lives on the control plane. SDK and the generated PB projection
 reuse the canonical business types.
+
+`ComputerDetails` presents the canonical `NodeInfo.systemInfo` report together
+with existing owner, identity, heartbeat and registration metadata. The Worker
+collects it once through `talos-system-info::collect()`, and the original Node
+registration/store/sync paths carry that typed object. Missing optional hardware
+stays unavailable. The report never decides permissions, identity or availability.
+Computer management and synchronization controls stay on the dedicated right-hand
+page; the business sidebar only shows the selected Computer and its resources.

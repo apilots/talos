@@ -255,6 +255,7 @@ message SessionContext {
 }
 message SessionEnvironment { string directory = 1; ConnectionMode connection_mode = 2; }
 message AgentContext {
+  SessionHistoryCursor history_cursor = 9;
   SessionContext session = 1; string turn_id = 2; optional string project_id = 3;
   optional string working_directory = 4; SessionEnvironment environment = 5;
   ModelInfo model = 6; ModelSelection model_selection = 7; PermissionMode permission_mode = 8;
@@ -410,4 +411,10 @@ message AgentEvent {
     AgentMessage message_completed = 15; PendingInput waiting_for_input = 16; RunMetrics metrics_updated = 17;
     StopReason turn_completed = 18; TurnFailed turn_failed = 19;
   }
+}
+
+message SessionHistoryCursor {
+  uint64 history_generation = 1;
+  optional string completed_turn_id = 2;
+  uint64 completed_event_sequence = 3;
 }

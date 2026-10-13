@@ -29,6 +29,8 @@ const LEASE_SECONDS: i64 = 90;
 pub type AgentNodeRevocationHook =
     Arc<dyn Fn() -> agent_protocol::AgentFuture<'static, ()> + Send + Sync>;
 
+#[path = "account_sync.rs"]
+mod account_sync;
 #[path = "computers.rs"]
 mod computers;
 #[path = "management.rs"]
@@ -39,6 +41,9 @@ mod management;
 #[derive(Clone)]
 pub struct AgentNodeService {
     store: Arc<dyn AgentNodeStore>,
+    pub(super) remote_management:
+        Arc<std::sync::RwLock<Option<Arc<dyn super::ComputerManagement>>>>,
+    account_sync: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn crate::ManagementSync>>>>,
     current: Arc<Mutex<HashMap<String, CurrentRegistration>>>,
     lifecycle: Arc<Mutex<()>>,
 }
@@ -53,6 +58,8 @@ impl AgentNodeService {
     pub fn new(store: Arc<dyn AgentNodeStore>) -> Self {
         Self {
             store,
+            remote_management: Default::default(),
+            account_sync: Default::default(),
             current: Arc::new(Mutex::new(HashMap::new())),
             lifecycle: Arc::new(Mutex::new(())),
         }
@@ -169,6 +176,40 @@ impl AgentNodeService {
         Ok(registration.deployments.clone())
     }
 
+    /// Discover current advertised Harnesses using account ownership, without
+    /// disclosing a node credential or copying its registration to another host.
+    pub async fn owned_deployments(
+        &self,
+        actor: &Actor,
+        node_id: &str,
+    ) -> TalosResult<Vec<agent_protocol::Deployment>> {
+        let node = self
+            .get_node(
+                actor,
+                GetNodeRequest {
+                    node_id: node_id.into(),
+                },
+            )
+            .await?;
+        if !node.available {
+            return Err(TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Computer is unavailable.",
+            ));
+        }
+        self.current
+            .lock()
+            .await
+            .get(node_id)
+            .map(|registration| registration.deployments.clone())
+            .ok_or_else(|| {
+                TalosError::new(
+                    ErrorCode::ServiceUnavailable,
+                    "Computer registration is unavailable.",
+                )
+            })
+    }
+
     /// Withdraw the live publication, retaining the authenticated registration.
     /// Called under lock_lifecycle before replacing clients for the same lease.
     pub async fn revoke_publication(&self, auth: &NodeAuth) -> TalosResult<()> {
@@ -272,6 +313,7 @@ impl AgentNodeService {
         let registered = self
             .store
             .register(RegisterNodeParams {
+                system_info: params.system_info,
                 node_id: node_id.clone(),
                 expected_credential_hash: *credential_hash,
                 lease_token_hash: token_hash,
@@ -441,6 +483,7 @@ enum CredentialKind {
 
 fn to_info(record: NodeRecord) -> NodeInfo {
     NodeInfo {
+        system_info: record.system_info,
         node_id: record.node_id,
         display_name: record.display_name,
         mode: record.mode,
@@ -458,6 +501,37 @@ fn to_info(record: NodeRecord) -> NodeInfo {
 }
 
 fn validate_deployments(params: &RegisterParams) -> TalosResult<()> {
+    if let Some(info) = &params.system_info {
+        let text_valid = |text: &str| {
+            !text.is_empty() && text.len() <= 1024 && !text.chars().any(char::is_control)
+        };
+        if !text_valid(&info.architecture)
+            || !text_valid(&info.worker_version)
+            || [
+                &info.os_version,
+                &info.hostname,
+                &info.cpu_model,
+                &info.board_model,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|text| !text_valid(text))
+            || info.network_interfaces.len() > 32
+            || info.graphics.len() > 16
+            || info
+                .network_interfaces
+                .iter()
+                .any(|n| !text_valid(&n.name) || !text_valid(&n.mac_address))
+            || info.graphics.iter().any(|text| !text_valid(text))
+            || info.logical_cpu_count > 65_536
+            || info.memory_bytes > 9_007_199_254_740_991
+        {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Worker system report is malformed or too large.",
+            ));
+        }
+    }
     let mut agent_ids = HashSet::new();
     if params.deployments.is_empty()
         || params.deployments.iter().any(|deployment| {

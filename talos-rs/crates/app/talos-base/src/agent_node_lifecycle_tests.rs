@@ -30,6 +30,9 @@ impl Fixture {
         let sessions = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let publisher = RemoteNodePublisher {
+            coordinator_id: uuid::Uuid::new_v4().to_string(),
+            connections: Arc::default(),
+            resource_routes: ResourceRoutes::default(),
             coordinator: Arc::new(CoordinatorImpl::new(
                 Arc::new(talos_router::RouterImpl::new()),
                 sessions,
@@ -71,6 +74,7 @@ impl Fixture {
         Request::new(pb::RegisterRequest {
             auth: Some(self.credential_auth()),
             params: Some(pb::RegisterParams {
+                system_info: None,
                 deployments: agent_ids
                     .iter()
                     .map(|id| pb::Deployment {
@@ -175,6 +179,9 @@ async fn outbound_registration_renews_without_publishing_and_preserves_uuid_on_r
     // A new control service uses persisted identity and credentials, but has no live connection.
     let restarted_nodes = AgentNodeService::new(fixture.store.clone());
     let restarted_publisher = RemoteNodePublisher {
+        coordinator_id: uuid::Uuid::new_v4().to_string(),
+        connections: Arc::default(),
+        resource_routes: ResourceRoutes::default(),
         nodes: restarted_nodes.clone(),
         ..fixture.publisher.clone()
     };

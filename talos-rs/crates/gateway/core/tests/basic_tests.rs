@@ -30,8 +30,8 @@ use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionSto
 use talos_types::talos::SessionSource;
 use talos_types::{AgentUserContent, AgentUserInput};
 use talos_types::{
-    ConfigGetRequest, ConfigPath, ConfigUpdateRequest, ConfigValue, SessionPatchRequest,
-    StartTurnRequest, TalosConfig, TurnCommandStatus,
+    ConfigGetRequest, ConfigPath, ConfigResponse, ConfigUpdateRequest, ConfigValue,
+    SessionPatchRequest, StartTurnRequest, TalosConfig, TurnCommandStatus,
 };
 
 struct RecordingHandler;
@@ -152,11 +152,19 @@ impl AgentCoordinator for RecordingHandler {
         unreachable!("gateway test does not compact Sessions")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -352,10 +360,12 @@ async fn gateway_start_turn_rejects_invalid_request() {
 }
 
 #[tokio::test]
-async fn gateway_cloud_config_requires_admin_for_regular_auth() {
+async fn gateway_cloud_config_allows_authorized_worker_owner() {
     let gateway = test_gateway_for_mode(DeploymentMode::Cloud).await;
 
-    let read_error = gateway
+    // RecordingHandler grants access to the target Worker environment.
+    // Deployment mode must not override that Computer's owner authorization.
+    let config = gateway
         .get_config(
             &Actor::regular("user-1"),
             ConfigGetRequest {
@@ -364,20 +374,21 @@ async fn gateway_cloud_config_requires_admin_for_regular_auth() {
             },
         )
         .await
-        .expect_err("regular users should not read global config");
-    assert!(read_error.is_code(talos_error::ErrorCode::PermissionDenied));
+        .expect("authorized owner should read Worker config");
+    assert!(matches!(config, ConfigResponse::WebSearch { .. }));
 
-    let update_error = gateway
+    let expected = Box::<talos_types::WebSearchToolConfig>::default();
+    let updated = gateway
         .update_config(
             &Actor::regular("user-1"),
             ConfigUpdateRequest {
                 node_id: None,
-                value: ConfigValue::WebSearch(Box::default()),
+                value: ConfigValue::WebSearch(expected.clone()),
             },
         )
         .await
-        .expect_err("regular users should not update global config");
-    assert!(update_error.is_code(talos_error::ErrorCode::PermissionDenied));
+        .expect("authorized owner should update Worker config");
+    assert_eq!(updated, ConfigResponse::WebSearch { config: expected });
 }
 
 #[tokio::test]

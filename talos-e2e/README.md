@@ -51,6 +51,7 @@ single case during development and the owning group before handoff.
 | `15` | Release bundle installation and installed TUI startup |
 | `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
 | `18` | Computer workspace: real Desktop device login, durable UUID, outbound registration and renewal |
+| `19` | Multi-control-plane sync: two native Mac Desktop runtimes, native and Docker Workers, Docker WSS hub, real auth and model tasks |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 There is no current group `04`; use the scenario directory rather than assuming
@@ -88,6 +89,15 @@ Caddy (`TALOS_E2E_CADDY_BIN`), Node.js and pnpm dependencies; no model key requi
 The full group also requires funded execution/inner/vision providers. Real
 execution acceptance has resumed after provider funding. See the
 [scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
+
+Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
+Mac with Docker, the adjacent `talos-sync` and `talos-cloud` sources, and the same
+protobuf/Python/Node prerequisites. The group builds current Worker and Sync
+images, starts isolated real services, and checks owner isolation, hardware
+registration, realtime history, same-Computer continuation, offline outbox,
+and restart recovery. Only execution/recovery cases need funded model access;
+registration does not. See the [scenario contract](scenarios/19_computer_sync/README.md).
+The Cloud frontend is not required: the fixture uses real device authorization APIs.
 
 ## Evidence and temporary data
 

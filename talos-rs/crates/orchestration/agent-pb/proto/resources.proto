@@ -31,7 +31,7 @@ message ReadSessionHistoryParams {
   optional int64 completed_event_seq = 2;
   uint32 limit = 3;
 }
-message ReadSessionHistoryRequest { NodeAuth auth = 1; ReadSessionHistoryParams params = 2; }
+message ReadSessionHistoryRequest { NodeAuth auth = 1; ReadSessionHistoryParams params = 2; CoordinatorCallContext caller = 3; }
 message HistoryRunOutput { repeated AgentMessage messages = 1; RunMetrics metrics = 2; StopReason stop_reason = 3; }
 message HistoryRunFailure { repeated AgentMessage messages = 1; RunMetrics metrics = 2; TurnFailed failure = 3; }
 message HistoryRunResult { oneof result { HistoryRunOutput completed = 1; HistoryRunFailure failed = 2; } }
@@ -48,7 +48,7 @@ message SessionHistoryTurns { repeated SessionHistoryTurn data = 1; }
 message ReadSessionHistoryResponse { oneof result { SessionHistoryTurns turns = 1; Failure failure = 2; } }
 
 message ResolveAttachmentsParams { optional string project_id = 1; repeated string file_ids = 2; }
-message ResolveAttachmentsRequest { NodeAuth auth = 1; ResolveAttachmentsParams params = 2; }
+message ResolveAttachmentsRequest { NodeAuth auth = 1; ResolveAttachmentsParams params = 2; CoordinatorCallContext caller = 3; }
 message ResolvedAttachmentMetadata {
   uint32 order = 1; string file_id = 2; string filename = 3; string media_type = 4; uint64 size_bytes = 5;
 }
@@ -59,41 +59,62 @@ message ResolveAttachmentsResponse {
 }
 
 message ReadMemoryProgressParams { string session_id = 1; }
-message ReadMemoryProgressRequest { NodeAuth auth = 1; ReadMemoryProgressParams params = 2; }
+message ReadMemoryProgressRequest { NodeAuth auth = 1; ReadMemoryProgressParams params = 2; CoordinatorCallContext caller = 3; }
 message MemoryProgress { uint64 processed_until_event_seq = 1; }
 message ReadMemoryProgressResponse { oneof result { MemoryProgress progress = 1; Failure failure = 2; } }
 message AdvanceMemoryProgressParams {
   string session_id = 1; uint64 expected_until_seq = 2; uint64 next_until_seq = 3;
 }
-message AdvanceMemoryProgressRequest { NodeAuth auth = 1; AdvanceMemoryProgressParams params = 2; }
+message AdvanceMemoryProgressRequest { NodeAuth auth = 1; AdvanceMemoryProgressParams params = 2; CoordinatorCallContext caller = 3; }
 message AdvanceMemoryProgressResponse { oneof result { Empty advanced = 1; Failure failure = 2; } }
 
 message AgentCaller { string session_id = 1; string turn_id = 2; string agent_id = 3; }
 message AgentTarget { oneof target { string direct_child_name = 1; string descendant_path = 2; } }
 message SpawnSubagentParams { AgentCaller caller = 1; string task_name = 2; string prompt = 3; }
-message SpawnSubagentRequest { NodeAuth auth = 1; SpawnSubagentParams params = 2; }
+message SpawnSubagentRequest { NodeAuth auth = 1; SpawnSubagentParams params = 2; CoordinatorCallContext caller = 3; }
 message SpawnSubagentResponse { oneof result { SubagentSpawnResult spawned = 1; Failure failure = 2; } }
 message SendSubagentMessageParams { AgentCaller caller = 1; AgentTarget target = 2; string message = 3; }
-message SendSubagentMessageRequest { NodeAuth auth = 1; SendSubagentMessageParams params = 2; }
+message SendSubagentMessageRequest { NodeAuth auth = 1; SendSubagentMessageParams params = 2; CoordinatorCallContext caller = 3; }
 message SendSubagentMessageResponse { oneof result { SendMessageResult sent = 1; Failure failure = 2; } }
 message WaitSubagentParams { AgentCaller caller = 1; AgentTarget target = 2; uint64 timeout_ms = 3; }
-message WaitSubagentRequest { NodeAuth auth = 1; WaitSubagentParams params = 2; }
+message WaitSubagentRequest { NodeAuth auth = 1; WaitSubagentParams params = 2; CoordinatorCallContext caller = 3; }
 message InterruptSubagentParams { AgentCaller caller = 1; AgentTarget target = 2; }
-message InterruptSubagentRequest { NodeAuth auth = 1; InterruptSubagentParams params = 2; }
+message InterruptSubagentRequest { NodeAuth auth = 1; InterruptSubagentParams params = 2; CoordinatorCallContext caller = 3; }
 message FollowUpSubagentParams { AgentCaller caller = 1; AgentTarget target = 2; string prompt = 3; }
-message FollowUpSubagentRequest { NodeAuth auth = 1; FollowUpSubagentParams params = 2; }
+message FollowUpSubagentRequest { NodeAuth auth = 1; FollowUpSubagentParams params = 2; CoordinatorCallContext caller = 3; }
 message SubagentSnapshotResponse { oneof result { SubagentSnapshot snapshot = 1; Failure failure = 2; } }
 message ListSubagentsParams { AgentCaller caller = 1; }
-message ListSubagentsRequest { NodeAuth auth = 1; ListSubagentsParams params = 2; }
+message ListSubagentsRequest { NodeAuth auth = 1; ListSubagentsParams params = 2; CoordinatorCallContext caller = 3; }
 message ListSubagentsResponse { oneof result { AgentTree tree = 1; Failure failure = 2; } }
 
 message SaveToolImageMetadata { string filename = 1; string media_type = 2; uint64 size_bytes = 3; }
 message SaveToolImageRequest {
   NodeAuth auth = 1;
+  CoordinatorCallContext caller = 4;
   oneof body { SaveToolImageMetadata metadata = 2; bytes chunk = 3; }
 }
 message ToolFileInfo {
   string file_id = 1; string original_filename = 2; string mime_type = 3; uint64 size_bytes = 4;
-  repeated string tags = 5; map<string, string> metadata = 6; int64 created_at = 7; int64 updated_at = 8;
+  repeated string tags = 5; map<string, string> metadata = 6; int64 created_at = 7; int64 updated_at = 8; FileScope scope = 9;
 }
 message SaveToolImageResponse { oneof result { ToolFileInfo file = 1; Failure failure = 2; } }
+
+// Original FileService product operations, independent of an active Turn.
+// Gateway authenticates the account; sourcePeer selects an owned live host.
+service AgentPeerFileRpc {
+  rpc ReadFile(PeerFileReadRequest) returns (stream PeerFileReadResponse);
+  rpc UpdateFile(PeerFileUpdateRequest) returns (PeerFileUpdateResponse);
+  rpc DeleteFile(PeerFileDeleteRequest) returns (PeerFileDeleteResponse);
+}
+message FileScope { oneof scope { Empty personal = 1; string project_id = 2; } }
+message OptionalTags { repeated string values = 1; }
+message OptionalFileMetadata { map<string, string> values = 1; }
+message PeerFileReadParams { string file_id = 1; }
+message PeerFileUpdateParams { string file_id = 1; OptionalTags tags = 2; OptionalFileMetadata metadata = 3; }
+message PeerFileDeleteParams { string file_id = 1; }
+message PeerFileReadRequest { NodeAuth auth = 1; PeerFileReadParams params = 2; string source_peer_id = 3; }
+message PeerFileUpdateRequest { NodeAuth auth = 1; PeerFileUpdateParams params = 2; string source_peer_id = 3; }
+message PeerFileDeleteRequest { NodeAuth auth = 1; PeerFileDeleteParams params = 2; string source_peer_id = 3; }
+message PeerFileReadResponse { oneof result { ToolFileInfo file = 1; bytes chunk = 2; Empty completed = 3; Failure failure = 4; } }
+message PeerFileUpdateResponse { oneof result { ToolFileInfo file = 1; Failure failure = 2; } }
+message PeerFileDeleteResponse { oneof result { string file_id = 1; Failure failure = 2; } }

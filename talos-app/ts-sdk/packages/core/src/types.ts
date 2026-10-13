@@ -1,4 +1,5 @@
 export type {
+  SyncEnableRequest, SyncStatusResponse, SyncConnectionState,
   ComputerListRequest,
   ComputerListResponse,
   NodeInfo,
@@ -76,6 +77,7 @@ export type {
   UserPermissionMode,
   RecoverTimelineRequest,
   SessionActiveTurnResponse,
+  SessionActiveTurnChangedNotification,
   SessionHistoryRequest,
   SessionHistoryResponse,
   TalosToolProgressKind,

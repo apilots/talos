@@ -10,7 +10,9 @@ impl RemoteAgentClient {
             tokio::time::timeout(Duration::from_secs(300), async move {
                 self.check_agent(&context.agent_id)?;
                 let (tx, rx) = mpsc::channel(2);
+                let caller = self.execution_caller(&context, None, None);
                 tx.send(pb::FormDreamMemoryRequest {
+                    caller: Some(caller),
                     auth: Some(node_pb::encode_auth(self.auth.clone())),
                     body: Some(pb::form_dream_memory_request::Body::Context(
                         harness_pb::encode_session_context(context),
@@ -48,6 +50,7 @@ impl RemoteAgentClient {
                                     }
                                 };
                             tx.send(pb::FormDreamMemoryRequest {
+                                caller: None,
                                 auth: Some(node_pb::encode_auth(self.auth.clone())),
                                 body: Some(reply),
                             })

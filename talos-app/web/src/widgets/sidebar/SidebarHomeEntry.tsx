@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
-export function SidebarHomeEntry() {
-  const { t } = useTranslation("common");
+export function SidebarHomeEntry({ computer }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo }) {
+  const { t } = useTranslation("computers");
 
   return (
     <Link
@@ -22,8 +22,8 @@ export function SidebarHomeEntry() {
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold leading-5">Talos</span>
         <span className="mt-0.5 flex items-center gap-2 text-xs leading-4 text-muted">
-          {t("connected")}
-          <span className="size-2 rounded-full bg-success" />
+          <span className="truncate" title={computer?.displayName}>{computer ? t(computer.available ? "connectedTo" : "offlineComputer", { name: computer.displayName }) : t("choose")}</span>
+          <span className={`size-1.5 shrink-0 rounded-full ${computer?.available ? "bg-success" : "bg-muted/50"}`} />
         </span>
       </span>
     </Link>

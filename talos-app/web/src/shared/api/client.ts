@@ -1,4 +1,3 @@
-import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { createBrowserTalosClient } from "@talos/sdk-browser";
 
 import { connectionScope } from "@/shared/store/connection-scope";
@@ -12,6 +11,7 @@ type Methods<T, K extends keyof T> = Pick<T, K>;
 
 /** Transport-neutral API surface consumed by the Web application. */
 export type TalosWebClient = {
+  sync: Methods<BrowserTalosClient["sync"], "status" | "enable" | "disable">;
   computers: Methods<BrowserTalosClient["computers"], "list" | "read" | "rename" | "setStatus">;
   auth: Methods<BrowserTalosClient["auth"], "logout">;
   user: Methods<BrowserTalosClient["user"], "current">;
@@ -61,15 +61,7 @@ let clientFactory: TalosClientFactory | undefined;
 function createDefaultBrowserClient() {
   const token = getAuthTokenForRequests();
   const desktopBridge = getDesktopBridge();
-  if (desktopBridge) {
-    const mode = getConnectionSettings().desktopConnectionMode;
-    if (mode === "local") return createDesktopTalosClient(desktopBridge, () => token);
-    if (mode !== "cloud") throw new TalosApiError({
-      code: AppProtocol.ErrorCode.ServiceUnavailable,
-      message: "The desktop connection is still initializing.",
-      localization: null,
-    });
-  }
+  if (desktopBridge) return createDesktopTalosClient(desktopBridge, () => token);
 
   return createBrowserTalosClient({
     baseUrl: resolveServerBaseUrl(),

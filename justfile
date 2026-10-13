@@ -115,3 +115,17 @@ clean-release:
 # Show target directory disk usage by top-level bucket.
 target-size:
     du -sh target/* 2>/dev/null | sort -h
+
+# Product images consume the public synchronization SDK through Cargo.lock.
+docker-server-build image="talos-server:local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ..
+    docker build -f build/server/Dockerfile -t "{{image}}" ..
+
+# Standalone execution image; no WebUI or Server process is included.
+docker-worker-build image="talos-worker:local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ..
+    docker build -f build/worker/Dockerfile -t "{{image}}" ..

@@ -8,6 +8,14 @@ impl AgentNodeService {
         actor: &Actor,
         request: CreateNodeRequest,
     ) -> TalosResult<CreatedNode> {
+        let remote = self
+            .remote_management
+            .read()
+            .expect("Computer management lock")
+            .clone();
+        if let Some(remote) = remote {
+            return remote.create(actor, request).await;
+        }
         ensure_management_actor(actor)?;
         let node_id = uuid::Uuid::new_v4().to_string();
         validate_display_name(&request.display_name)?;
@@ -46,6 +54,7 @@ impl AgentNodeService {
                 now_at,
             })
             .await?;
+        self.observe_account(actor);
         Ok(CreatedNode {
             node: to_info(record),
             credential: NodeCredential {
@@ -66,6 +75,7 @@ impl AgentNodeService {
         } else {
             self.owned_node(actor, &request.node_id).await?
         };
+        self.observe_account(actor);
         Ok(self.node_info(record).await)
     }
 
@@ -86,6 +96,7 @@ impl AgentNodeService {
         let page = self
             .store
             .list(ListNodesParams {
+                exclude_node_id: None,
                 scope,
                 query: None,
                 cursor: request.cursor,
@@ -111,6 +122,14 @@ impl AgentNodeService {
         actor: &Actor,
         request: UpdateNodeRequest,
     ) -> TalosResult<NodeInfo> {
+        let remote = self
+            .remote_management
+            .read()
+            .expect("Computer management lock")
+            .clone();
+        if let Some(remote) = remote {
+            return remote.update(actor, request).await;
+        }
         validate_display_name(&request.display_name)?;
         if let Some(endpoint) = &request.endpoint {
             validate_endpoint(endpoint)?;
@@ -144,6 +163,15 @@ impl AgentNodeService {
         actor: &Actor,
         request: RotateCredentialRequest,
     ) -> TalosResult<NodeCredential> {
+        let remote = self
+            .remote_management
+            .read()
+            .expect("Computer management lock")
+            .clone();
+        if let Some(remote) = remote {
+            return remote.rotate_credential(actor, request).await;
+        }
+
         let _lifecycle = self.lock_lifecycle().await;
         let mut current = self.current.lock().await;
         self.owned_node(actor, &request.node_id).await?;

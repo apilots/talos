@@ -905,7 +905,7 @@
       "oneOf": [
         {
           "properties": {
-            "action_id": {
+            "actionId": {
               "type": "string"
             },
             "prompt": {
@@ -919,7 +919,7 @@
             }
           },
           "required": [
-            "action_id",
+            "actionId",
             "prompt",
             "type"
           ],
@@ -1160,7 +1160,7 @@
       "oneOf": [
         {
           "properties": {
-            "json_fragment": {
+            "jsonFragment": {
               "type": "string"
             },
             "state": {
@@ -1171,7 +1171,7 @@
             }
           },
           "required": [
-            "json_fragment",
+            "jsonFragment",
             "state"
           ],
           "type": "object"
@@ -1389,7 +1389,7 @@
         },
         {
           "properties": {
-            "file_id": {
+            "fileId": {
               "type": "string"
             },
             "type": {
@@ -1400,14 +1400,14 @@
             }
           },
           "required": [
-            "file_id",
+            "fileId",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "mime_type": {
+            "mimeType": {
               "type": [
                 "string",
                 "null"
@@ -1431,7 +1431,7 @@
         },
         {
           "properties": {
-            "mime_type": {
+            "mimeType": {
               "type": [
                 "string",
                 "null"
@@ -1455,7 +1455,7 @@
         },
         {
           "properties": {
-            "action_id": {
+            "actionId": {
               "type": "string"
             },
             "response": {
@@ -1469,7 +1469,7 @@
             }
           },
           "required": [
-            "action_id",
+            "actionId",
             "response",
             "type"
           ],
@@ -1801,6 +1801,60 @@
             },
             "params": {
               "$ref": "#/definitions/DesktopWorkerEnrollParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "sync/status"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "sync/enable"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SyncEnableRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "sync/disable"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
             }
           },
           "required": [
@@ -6273,6 +6327,16 @@
         "status": {
           "$ref": "#/definitions/NodeStatus"
         },
+        "systemInfo": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NodeSystemInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "updatedAt": {
           "format": "int64",
           "type": "integer"
@@ -6297,12 +6361,107 @@
       ],
       "type": "string"
     },
+    "NodeNetworkInterface": {
+      "additionalProperties": false,
+      "properties": {
+        "macAddress": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "macAddress",
+        "name"
+      ],
+      "type": "object"
+    },
+    "NodeOperatingSystem": {
+      "description": "Supported Worker operating systems. Hardware is self-reported presentation metadata.",
+      "enum": [
+        "linux",
+        "macOs"
+      ],
+      "type": "string"
+    },
     "NodeStatus": {
       "enum": [
         "enabled",
         "disabled"
       ],
       "type": "string"
+    },
+    "NodeSystemInfo": {
+      "additionalProperties": false,
+      "description": "Static environment visible to the Worker; unavailable optional information stays null. No credentials, IP addresses, device serial numbers or execution state belong here.",
+      "properties": {
+        "architecture": {
+          "type": "string"
+        },
+        "boardModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "graphics": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hostname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logicalCpuCount": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "memoryBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "networkInterfaces": {
+          "items": {
+            "$ref": "#/definitions/NodeNetworkInterface"
+          },
+          "type": "array"
+        },
+        "os": {
+          "$ref": "#/definitions/NodeOperatingSystem"
+        },
+        "osVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workerVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "architecture",
+        "graphics",
+        "logicalCpuCount",
+        "memoryBytes",
+        "networkInterfaces",
+        "os",
+        "workerVersion"
+      ],
+      "type": "object"
     },
     "OptionalCurrentDirectoryPatch": {
       "oneOf": [
@@ -7215,7 +7374,7 @@
       "oneOf": [
         {
           "properties": {
-            "option_id": {
+            "optionId": {
               "type": "string"
             },
             "type": {
@@ -7226,7 +7385,7 @@
             }
           },
           "required": [
-            "option_id",
+            "optionId",
             "type"
           ],
           "type": "object"
@@ -7495,7 +7654,7 @@
             "cwd": {
               "type": "string"
             },
-            "risk_summary": {
+            "riskSummary": {
               "default": null,
               "type": [
                 "string",
@@ -7630,6 +7789,24 @@
     },
     "ServerNotification": {
       "oneOf": [
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session/activeTurnChanged"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionActiveTurnChangedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "method": {
@@ -7899,6 +8076,20 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/worker/ready"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "method"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7924,6 +8115,23 @@
         }
       ]
     },
+    "SessionActiveTurnChangedNotification": {
+      "additionalProperties": false,
+      "description": "Live invalidation of the existing active Turn projection, without an Agent event or execution claim. Subscribers recover through the original API.",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/SessionActiveTurnResponse"
+        }
+      },
+      "required": [
+        "sessionId",
+        "state"
+      ],
+      "type": "object"
+    },
     "SessionActiveTurnRequest": {
       "additionalProperties": false,
       "properties": {
@@ -7934,6 +8142,30 @@
       "required": [
         "sessionId"
       ],
+      "type": "object"
+    },
+    "SessionActiveTurnResponse": {
+      "additionalProperties": false,
+      "description": "Canonical response for querying the current nonterminal Turn of a Session.",
+      "properties": {
+        "activeTurn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TimelineActiveTurn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestEventId": {
+          "description": "Latest durable Session event, including terminal facts and product notices. Idle clients use changes to refresh history; this is not a history boundary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "SessionClearRequest": {
@@ -9015,6 +9247,77 @@
         "slow_consumer"
       ],
       "type": "string"
+    },
+    "SyncConnectionState": {
+      "enum": [
+        "disabled",
+        "connecting",
+        "connected",
+        "disconnected"
+      ],
+      "type": "string"
+    },
+    "SyncEnableRequest": {
+      "properties": {
+        "claimLocalHistory": {
+          "description": "Explicitly claim this trusted local host's anonymous history. Omission means false.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SyncStatusResponse": {
+      "properties": {
+        "canClaimLocalHistory": {
+          "description": "True only for a trusted local host; cloud users cannot claim shared anonymous data.",
+          "type": "boolean"
+        },
+        "configuredEnabled": {
+          "description": "Null follows verified login; false persists an explicit opt-out.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "connection": {
+          "$ref": "#/definitions/SyncConnectionState"
+        },
+        "lastAcknowledgedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastError": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApiError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "localComputerId": {
+          "description": "This management host's accessible Computer UUID, or embedded before enrollment. Null means the signed-in account does not own this shared host's private Worker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pendingChanges": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "canClaimLocalHistory",
+        "connection",
+        "pendingChanges"
+      ],
+      "type": "object"
     },
     "SystemNoticeContent": {
       "description": "Notice presentation retains text, nonfatal prompt warnings, or the shared error contract. Add variants only for distinct presentation semantics, never domain error categories.",
@@ -10470,6 +10773,9 @@
     "subscribe_timeline_response": {
       "$ref": "#/definitions/SubscribeTimelineResponse"
     },
+    "sync_status_response": {
+      "$ref": "#/definitions/SyncStatusResponse"
+    },
     "timeline_event": {
       "$ref": "#/definitions/TimelineEvent"
     },
@@ -10532,6 +10838,7 @@
     "submit_turn_input_response",
     "subscribe_timeline_request",
     "subscribe_timeline_response",
+    "sync_status_response",
     "timeline_event",
     "timeline_recovery_response",
     "user_current_response"

@@ -212,11 +212,19 @@ impl AgentCoordinator for RecordingAgentCoordinator {
         unreachable!("not used in turn service tests")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -599,12 +607,24 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
         self.delegate.compact_session(params).await
     }
 
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.clear_session(params).await
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .clear_session(params, expected_history_cursor)
+            .await
     }
 
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.close_session(params).await
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .close_session(params, expected_history_cursor)
+            .await
     }
 
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {

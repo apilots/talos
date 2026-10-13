@@ -4,6 +4,8 @@ Status: implemented — 基线验收见[阶段 8](plans/08-execution-boundaries.
 
 ## 1. 核心设计
 
+当前边界：原内嵌直调/本地ports组装已由[联合044统一RPC](../feat-044-talos-sync/worker-coordination.md)替代：Desktop/Server都内嵌Worker，本机也经agent-client SDK/loopback RPC。044阶段1改造已完成，以下保留042基线设计/历史结果；当前调用链以联合044契约和验证记录为准。
+
 一个控制面管理多个执行节点。上层始终调用同一个 `AgentHarness`：内嵌模式直接调用
 进程内实现，远程模式调用 `agent-client` 的实现。两者提供相同的 Params、事件、Result
 和错误契约。Harness 负责执行与本地 Workspace，Service 负责 Session/Turn 和业务持久化。

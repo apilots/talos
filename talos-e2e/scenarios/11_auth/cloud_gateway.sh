@@ -94,7 +94,7 @@ wait_for_cloud() {
 
 start_cloud_server() {
   [[ -d "${CLOUD_RS_DIR}" ]] || fail_case "missing talos-cloud repo: ${CLOUD_RS_DIR}"
-  (cd "${CLOUD_RS_DIR}" && cargo build -q -p cloud-server)
+  (cd "${CLOUD_RS_DIR}" && cargo build -q -p talos-cloud-server)
 cat >"${CLOUD_CONFIG_PATH}" <<EOF
 server:
   bind_addr: "${CLOUD_BIND_ADDR}"

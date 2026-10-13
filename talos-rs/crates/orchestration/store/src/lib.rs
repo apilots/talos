@@ -5,3 +5,5 @@ pub mod node;
 pub mod profile;
 pub mod project;
 pub mod session;
+
+pub mod sync;

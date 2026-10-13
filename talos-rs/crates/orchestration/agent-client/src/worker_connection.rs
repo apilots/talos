@@ -28,6 +28,7 @@ struct Pending {
 
 struct Invocation {
     id: u64,
+    caller: Option<pb::CoordinatorCallContext>,
     timeout_ms: u64,
     cancel: CancellationToken,
     failed: watch::Receiver<Option<TalosError>>,
@@ -83,10 +84,129 @@ impl AgentNodeClient {
             })) => return Err(error_pb::decode_failure(error)?),
             _ => return Err(invalid_frame()),
         }
-        let mut calls = HashMap::<u64, Pending>::new();
-        let mut newest_call = 0;
-        let mut tasks = JoinSet::new();
-        let result = async {
+        serve_calls(Box::pin(input), writer, stop, Dispatcher::Worker(adapter)).await
+    }
+}
+
+pub(crate) enum Dispatcher {
+    Worker(AgentHarnessRpcAdapter),
+    Relay {
+        connection: Arc<super::AgentEnvironmentClient>,
+        auth: NodeAuth,
+        peer_id: String,
+        coordinator_id: String,
+    },
+    Resources {
+        handler: Arc<dyn super::AgentResourceRpcHandler>,
+        auth: NodeAuth,
+        invocation: std::sync::Weak<super::AgentExecutionConnection>,
+    },
+}
+impl Dispatcher {
+    fn authorize(&self, supplied: &NodeAuth) -> TalosResult<()> {
+        match self {
+            Self::Worker(adapter) => adapter.validate_connection_auth(supplied),
+            Self::Relay { auth, .. } | Self::Resources { auth, .. }
+                if auth.node_id == supplied.node_id
+                    && token_matches(&auth.token, &supplied.token) =>
+            {
+                Ok(())
+            }
+            Self::Relay { .. } | Self::Resources { .. } => Err(TalosError::new(
+                ErrorCode::Unauthenticated,
+                "Coordinator credential does not match this connection",
+            )),
+        }
+    }
+    async fn dispatch(
+        &self,
+        requests: super::transport_stream::RpcStream<Call>,
+        timeout_ms: u64,
+        call_id: u64,
+        caller: Option<pb::CoordinatorCallContext>,
+    ) -> Result<super::transport_stream::RpcStream<pb::worker_rpc_result::Response>, tonic::Status>
+    {
+        match self {
+            Self::Worker(adapter) => Ok(super::transport_stream::RpcStream::new(
+                adapter.dispatch_connect(requests.stream).await?,
+            )),
+            Self::Relay {
+                connection,
+                peer_id,
+                coordinator_id,
+                ..
+            } => {
+                let mut requests = requests.stream;
+                let first = requests
+                    .next()
+                    .await
+                    .transpose()?
+                    .ok_or_else(|| error_pb::encode_status(&invalid_frame()))?;
+                let caller =
+                    agent_protocol::connection_pb::execution_scope(&first).map(|mut scope| {
+                        scope.coordinator_id = coordinator_id.clone();
+                        scope.connection_id = peer_id.clone();
+                        scope.rpc_call_id = call_id;
+                        scope
+                    });
+                connection
+                    .forward(
+                        Box::pin(tokio_stream::once(Ok(first)).chain(requests)),
+                        timeout_ms,
+                        caller,
+                    )
+                    .await
+            }
+            Self::Resources {
+                handler,
+                invocation,
+                ..
+            } => {
+                let caller = caller.ok_or_else(|| error_pb::encode_status(&invalid_frame()))?;
+                let mut requests = requests.stream;
+                let first = requests
+                    .next()
+                    .await
+                    .transpose()?
+                    .ok_or_else(|| error_pb::encode_status(&invalid_frame()))?;
+                if agent_protocol::connection_pb::is_management_peer_call(&first) {
+                    if !handler.serves_files()
+                        || caller.session.is_some()
+                        || caller.turn_id.is_some()
+                        || caller.project_id.is_some()
+                        || caller.rpc_call_id != 0
+                    {
+                        return Err(error_pb::encode_status(&invalid_frame()));
+                    }
+                } else {
+                    invocation
+                        .upgrade()
+                        .ok_or_else(|| error_pb::encode_status(&closed()))?
+                        .validate_resource_caller(&caller)
+                        .map_err(|error| error_pb::encode_status(&error))?;
+                }
+                let requests = Box::pin(tokio_stream::once(Ok(first)).chain(requests));
+                Ok(super::transport_stream::RpcStream::new(
+                    handler.dispatch(caller, requests).await?,
+                ))
+            }
+        }
+    }
+}
+
+pub(crate) async fn serve_calls(
+    mut input: std::pin::Pin<
+        Box<dyn futures_util::Stream<Item = Result<pb::ControlToNodeFrame, tonic::Status>> + Send>,
+    >,
+    writer: Arc<Writer<pb::NodeToControlFrame>>,
+    stop: CancellationToken,
+    dispatcher: Dispatcher,
+) -> TalosResult<()> {
+    let dispatcher = Arc::new(dispatcher);
+    let mut calls = HashMap::<u64, Pending>::new();
+    let mut newest_call = 0;
+    let mut tasks = JoinSet::new();
+    let result = async {
             loop {
                 let frame = tokio::select! {
                     biased;
@@ -97,15 +217,15 @@ impl AgentNodeClient {
                         result?;
                         continue;
                     }
-                    frame = input.message() => frame.map_err(crate::decode_rpc_status)?.ok_or_else(closed)?,
+                    frame = input.next() => frame.ok_or_else(closed)?.map_err(crate::decode_rpc_status)?,
                 };
                 match frame.body {
                     Some(pb::control_to_node_frame::Body::Acknowledge(acknowledgement)) => {
-                        adapter.validate_connection_auth(&node_pb::decode_auth(acknowledgement.auth)?)?;
+                        dispatcher.authorize(&node_pb::decode_auth(acknowledgement.auth)?)?;
                         if let Some(pending) = calls.get(&acknowledgement.call_id) { pending.response_window.acknowledge(acknowledgement.sequence)?; }
                     }
                     Some(pb::control_to_node_frame::Body::Cancel(cancel)) => {
-                        adapter.validate_connection_auth(&node_pb::decode_auth(cancel.auth)?)?;
+                        dispatcher.authorize(&node_pb::decode_auth(cancel.auth)?)?;
                         if let Some(pending) = calls.remove(&cancel.call_id) { pending.cancel.cancel(); }
                     }
                     Some(pb::control_to_node_frame::Body::Call(frame)) => {
@@ -126,11 +246,12 @@ impl AgentNodeClient {
                             let (failure, failed) = watch::channel(None);
                             calls.insert(frame.call_id, Pending { sequence: 1, response_window: response_window.clone(), sender: Some(sender), cancel: cancel.clone(), failure });
                             let out = writer.call(frame.call_id)?;
-                            let adapter = adapter.clone();
+                            let dispatcher = dispatcher.clone();
                             let id = frame.call_id;
                             let timeout = frame.timeout_ms;
+                            let caller = frame.caller.clone();
                             tasks.spawn(async move {
-                                let result = dispatch(adapter, receiver, out, Invocation { id, timeout_ms: timeout, cancel, failed, window: response_window }).await;
+                                let result = dispatch(dispatcher, receiver, out, Invocation { id, caller, timeout_ms: timeout, cancel, failed, window: response_window }).await;
                                 (id, result)
                             });
                         }
@@ -139,6 +260,7 @@ impl AgentNodeClient {
                         if frame.sequence != pending.sequence || pending.sender.is_none() { return Err(invalid_frame()); }
                         pending.sequence += 1;
                         if let Some(request) = frame.request {
+                            dispatcher.authorize(&node_pb::decode_auth(agent_protocol::connection_pb::auth(&request).cloned())?)?;
                             if pending.sender.as_ref().expect("open requests").try_send(Ok(request)).is_err() {
                                 pending.failure.send_replace(Some(overloaded()));
                                 pending.sender.take();
@@ -151,34 +273,34 @@ impl AgentNodeClient {
                 }
             }
         }.await;
-        stop.cancel();
-        calls.clear();
-        while let Some(joined) = tasks.join_next().await {
-            let (_, drained) = joined.map_err(|error| {
-                TalosError::internal_with_source(
-                    "Drain Agent invocation task; technical details were withheld.",
-                    error,
-                )
-            })?;
-            // Closing a peer may already have closed its ordered result queue.
-            if let Err(error) = drained {
-                if !error.is_code(ErrorCode::ServiceUnavailable) {
-                    return Err(error);
-                }
+    stop.cancel();
+    calls.clear();
+    while let Some(joined) = tasks.join_next().await {
+        let (_, drained) = joined.map_err(|error| {
+            TalosError::internal_with_source(
+                "Drain Agent invocation task; technical details were withheld.",
+                error,
+            )
+        })?;
+        // Closing a peer may already have closed its ordered result queue.
+        if let Err(error) = drained {
+            if !error.is_code(ErrorCode::ServiceUnavailable) {
+                return Err(error);
             }
         }
-        result
     }
+    result
 }
 
 async fn dispatch(
-    adapter: AgentHarnessRpcAdapter,
+    dispatcher: Arc<Dispatcher>,
     requests: mpsc::Receiver<Result<Call, tonic::Status>>,
     out: mpsc::Sender<pb::NodeToControlFrame>,
     invocation: Invocation,
 ) -> TalosResult<()> {
     let Invocation {
         id,
+        caller,
         timeout_ms,
         cancel,
         mut failed,
@@ -198,9 +320,8 @@ async fn dispatch(
         _ = deadline => Err(TalosError::new(ErrorCode::Timeout, "Agent invocation timed out")),
         _ = failed.changed() => Err(failed.borrow().clone().unwrap_or_else(closed)),
         result = async {
-            let mut replies = adapter.dispatch_connect(Box::pin(ReceiverStream::new(requests))).await.map_err(crate::decode_rpc_status)?;
-            while let Some(reply) = replies.next().await {
-                let reply = reply.map_err(crate::decode_rpc_status)?;
+            let mut replies = dispatcher.dispatch(super::transport_stream::RpcStream::new(ReceiverStream::new(requests)), timeout_ms, id, caller).await.map_err(crate::decode_rpc_status)?;
+            while let Some(reply) = replies.message().await.map_err(crate::decode_rpc_status)? {
                 window.reserve().await?;
                 // Reserve one terminal slot, so an overload failure never overtakes prior frames.
                 let permits = tokio::time::timeout(Duration::from_secs(5), out.reserve_many(2)).await
@@ -254,4 +375,12 @@ fn send_failure(
 }
 fn invalid_frame() -> TalosError {
     TalosError::new(ErrorCode::InvalidRequest, "Agent Connect frame is invalid")
+}
+
+fn token_matches(expected: &str, supplied: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+    let expected: [u8; 32] = Sha256::digest(expected.as_bytes()).into();
+    let supplied: [u8; 32] = Sha256::digest(supplied.as_bytes()).into();
+    bool::from(expected.ct_eq(&supplied))
 }

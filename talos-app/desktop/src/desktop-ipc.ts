@@ -63,3 +63,10 @@ export function broadcastRuntimeState(state: TalosRuntimeState): void {
     window.webContents.send(TALOS_IPC.runtimeState, state);
   }
 }
+
+export function broadcastActiveTurnChanged(notification: AppProtocol.SessionActiveTurnChangedNotification): void {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TALOS_IPC.activeTurnChanged, notification);
+}
+export function broadcastMessageQueueChanged(notification: AppProtocol.MessageQueueChangedNotification): void {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TALOS_IPC.messageQueueChanged, notification);
+}

@@ -37,7 +37,7 @@ pub use provider::{
     SessionTurnResult,
 };
 pub use reducer::AgentEventReducer;
-pub use rpc::AgentHarnessRpcAdapter;
+pub use rpc::{AgentHarnessRpcAdapter, AgentInvocationResourceBinder};
 
 /// Compose one provider-neutral Agent Harness around a concrete Provider.
 ///

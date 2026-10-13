@@ -18,6 +18,7 @@ type AuthConnectionState = {
 };
 
 interface SidebarProps {
+  computer?: import("@talos/sdk-core").AppProtocol.NodeInfo;
   showAccount?: boolean;
   chats: SidebarSessionItem[];
   connection: AuthConnectionState;
@@ -36,6 +37,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  computer,
   showAccount = true,
   chats,
   connection,
@@ -59,7 +61,7 @@ export function Sidebar({
       <div className="absolute right-4 top-4 z-20">
         <SidebarCollapseButton onCollapse={onCollapse} />
       </div>
-      <SidebarHomeEntry />
+      <SidebarHomeEntry computer={computer} />
       <SidebarPrimaryNav onCreateThread={onCreateThread} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">

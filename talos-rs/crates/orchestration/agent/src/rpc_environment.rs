@@ -14,7 +14,6 @@ impl AgentHarnessRpcAdapter {
     ) -> TalosResult<(Lease, WorkerEnvironmentContext, Arc<dyn WorkerEnvironment>)> {
         let lease = self.authorize(&node_pb::decode_auth(auth)?)?;
         let context = wire::decode_context(context)?;
-        Self::check_owner(&lease, &context.user_id)?;
         let environment = self.environment.clone().ok_or_else(|| {
             TalosError::new(
                 ErrorCode::ServiceUnavailable,
@@ -33,6 +32,13 @@ macro_rules! environment_rpc {
             let result = async {
                 let (lease, context, environment) = self.environment_context(request.auth, request.context)?;
                 let params = wire::$decode(request.params)?;
+                let _configuration = match stringify!($method) {
+                    "update_config" | "delete_config" | "reload_config"
+                    | "add_plugin_source" | "refresh_plugin_source" | "remove_plugin_source"
+                    | "install_plugin" | "update_plugin" | "uninstall_plugin" | "enable_plugin" | "disable_plugin"
+                    | "update_mcp_credentials" | "import_mcp_server" => Some(self.session_gate.reserve_configuration()?),
+                    _ => None,
+                };
                 let operation = environment.$method(context, params);
                 let value = tokio::select! { biased; _ = lease.ended() => return Err(unauthenticated()), value = operation => value? };
                 wire::$encode(value)

@@ -2,6 +2,7 @@ import { decodeFileContent } from "./file-content";
 import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
+  SyncEnableRequest, SyncStatusResponse,
   ComputerListRequest,
   ComputerListResponse,
   NodeInfo,
@@ -116,6 +117,7 @@ import type {
   SessionGetRequest,
   SessionGetResponse,
   SessionActiveTurnResponse,
+  SessionActiveTurnChangedNotification,
   SessionHistoryRequest,
   SessionHistoryResponse,
   SessionListRequest,
@@ -147,6 +149,7 @@ export interface SessionEventStreamOptions {
   persistent?: boolean;
   onOpen?: () => void;
   onMessageQueueChanged?: (notification: MessageQueueChangedNotification) => void;
+  onActiveTurnChanged?: (notification: SessionActiveTurnChangedNotification) => void;
 }
 
 export class TalosStreamTerminatedError extends Error {
@@ -185,6 +188,12 @@ export class TalosClient {
     const serialized = params.toString();
     return serialized ? `${this.url(path)}?${serialized}` : this.url(path);
   }
+
+  sync = {
+    status: (): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/status")),
+    enable: (request: SyncEnableRequest = { claimLocalHistory: false }): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/enable"), { method: "POST", body: JSON.stringify(request) }),
+    disable: (): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/disable"), { method: "POST" }),
+  };
 
   auth = {
     logout: async (): Promise<void> => {
@@ -703,6 +712,10 @@ export class TalosClient {
             return;
           }
           const payload = parseTalosJson(data);
+          if (event === "session/activeTurnChanged") {
+            options?.onActiveTurnChanged?.(payload as SessionActiveTurnChangedNotification);
+            return;
+          }
           if (event === "messageQueue/changed") {
             options?.onMessageQueueChanged?.(payload as MessageQueueChangedNotification);
             return;

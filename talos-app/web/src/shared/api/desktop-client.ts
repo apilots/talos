@@ -65,6 +65,7 @@ export function createDesktopTalosClient(
   };
 
   return {
+    sync: client.sync,
     computers: client.computers,
     auth: {
       logout: () => client.authLogout().then(() => undefined),
@@ -214,7 +215,7 @@ function streamTimelineEvents(
   return streamUntilTerminal(client, sessionId, signal, (event) => {
     onEvent(event);
   }, options?.onOpen, sinceEventId, null, !options?.persistent, !options?.persistent,
-  options?.onMessageQueueChanged);
+  options?.onMessageQueueChanged, options?.onActiveTurnChanged);
 }
 
 function streamUntilTerminal(
@@ -231,6 +232,7 @@ function streamUntilTerminal(
   closeWhenIdle = false,
   closeOnTerminal = false,
   onMessageQueueChanged?: (notification: AppProtocol.MessageQueueChangedNotification) => void,
+  onActiveTurnChanged?: (notification: AppProtocol.SessionActiveTurnChangedNotification) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -288,6 +290,9 @@ function streamUntilTerminal(
     });
     cleanupFns.push(unsubscribe);
 
+    if (onActiveTurnChanged) {
+      cleanupFns.push(client.onActiveTurnChanged((notice) => { if (notice.sessionId === sessionId) onActiveTurnChanged(notice); }));
+    }
     if (onMessageQueueChanged) {
       const unsubscribeQueueChanges = client.onMessageQueueChanged((notification) => {
         if (notification.sessionId === sessionId) {

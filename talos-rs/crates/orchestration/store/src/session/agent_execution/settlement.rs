@@ -21,7 +21,9 @@ pub(super) async fn commit_waiting(
     let action_id = waiting_action_id(&event)?.to_string();
     validate_nonempty("Provider continuation opaque_id", &continuation.opaque_id)?;
     let identity = event.identity.clone();
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
         .ok_or_else(|| execution_conflict("active Agent Turn does not exist"))?;
@@ -97,7 +99,9 @@ pub(super) async fn commit_terminal(
         ));
     }
     let identity = event.identity.clone();
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
         .ok_or_else(|| execution_conflict("active Agent Turn does not exist"))?;

@@ -67,7 +67,7 @@ def data(response):
 
 
 class Cluster:
-    def __init__(self, dream_maintenance=False, worker_transport="direct"):
+    def __init__(self, dream_maintenance=False, worker_transport="direct", certificate_san="IP:127.0.0.1"):
         require(worker_transport in ("direct", "outbound"), "Invalid Worker transport")
         self.worker_transport = worker_transport
         self.dream_maintenance = dream_maintenance
@@ -87,7 +87,7 @@ class Cluster:
         self.key = self.root / 'tls.key'
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
                         '-keyout', str(self.key), '-out', str(self.cert), '-days', '1',
-                        '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1',
+                        '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=' + certificate_san,
                         '-addext', 'basicConstraints=critical,CA:FALSE',
                         '-addext', 'keyUsage=critical,digitalSignature,keyEncipherment',
                         '-addext', 'extendedKeyUsage=serverAuth'], check=True, capture_output=True)
@@ -143,7 +143,8 @@ class Cluster:
         conf.mkdir(parents=True, exist_ok=True)
         document = yaml.safe_load((ROOT / 'conf/talos-dev.yaml').read_text())
         document['gateway'].update(port=self.http_port, host='127.0.0.1', auth=True)
-        document['cloud'].update(api_base_url=self.cloud_url, web_base_url=self.cloud_url)
+        document['cloud'].update(api_base_url=self.cloud_url, web_base_url=self.cloud_url,
+                                 agent_base_url=f'https://127.0.0.1:{self.rpc_port}', agent_trusted_ca_file=str(self.cert))
         document['agent_node'] = node_config
         if self.dream_maintenance:
             timezone = 'Pacific/Honolulu' if 'control_plane' in node_config else 'Pacific/Kiritimati'
@@ -201,12 +202,11 @@ class Cluster:
             credential = home / 'conf/node.credential'
             runner = {'node_id': node_id, 'control_plane_endpoint': f'https://127.0.0.1:{self.rpc_port}',
                       'credential_file': str(credential), 'trusted_ca_file': str(self.cert)}
+            runner['transport'] = self.worker_transport
+            worker_rpc = {'bind_address': f'127.0.0.1:{port}'}
             if self.worker_transport == 'direct':
-                runner.update(bind_address=f'127.0.0.1:{port}', tls_certificate_file=str(self.cert),
-                              tls_private_key_file=str(self.key))
-            else:
-                runner['transport'] = 'outbound'
-            env = self.config(home, {'runner': runner})
+                worker_rpc['tls'] = {'certificate_file': str(self.cert), 'private_key_file': str(self.key)}
+            env = self.config(home, {'runner': runner, 'worker_rpc': worker_rpc})
             credential.write_text(response['created']['credential']['token'])
             credential.chmod(0o600)
             self.nodes[name] = dict(node_id=node_id, owner=owner, home=home, port=port, env=env, credential=credential)
@@ -215,7 +215,7 @@ class Cluster:
         if self.nodes['alice-a']['node_id'] > self.nodes['alice-b']['node_id']:
             self.nodes['alice-a'], self.nodes['alice-b'] = self.nodes['alice-b'], self.nodes['alice-a']
         self.healthy_all()
-        models = data(http(self.url + '/v1/models', token=self.users['alice']['access_token']))['models']
+        models = data(http(self.url + '/v1/models?nodeId=' + self.nodes['alice-a']['node_id'], token=self.users['alice']['access_token']))['models']
         preferred = os.environ.get('TALOS_E2E_PREFERRED_MODELS', 'deepseek-v4-flash').split(',')
         self.model = next((model for identifier in preferred for model in models if model['id'] == identifier), models[0])
 
@@ -243,6 +243,8 @@ class Cluster:
             return connection.execute(sql, args).fetchall()
 
     def start_turn(self, user, prompt, session=None, file_ids=(), node_id=None, project_id=None):
+        if node_id is None and session is None:
+            node_id = next(node['node_id'] for node in self.nodes.values() if node['owner'] == user)
         session = session or f'sess_{uuid.uuid4().hex}'
         response = http(self.url + '/v1/turns/start', {
             'sessionId': session, **({'nodeId': node_id} if node_id is not None else {}), **({'projectId': project_id} if project_id is not None else {}), 'modelSelection': {'modelRef': {'provider': self.model['provider'], 'id': self.model['id']}, 'reasoningEffort': None},

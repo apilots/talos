@@ -487,12 +487,20 @@ impl AgentCoordinator for TestAgentCoordinator {
         })
     }
 
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         let _ = params;
         Ok(())
     }
 
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         let _ = params;
         Ok(())
     }

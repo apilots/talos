@@ -4,6 +4,7 @@ use agent_protocol::{NodeHealth, NodeMode, NodeStatus};
 /// returned from the public node management API.
 #[derive(Clone, PartialEq, Eq)]
 pub struct NodeRecord {
+    pub system_info: Option<talos_types::NodeSystemInfo>,
     pub node_id: String,
     pub owner_user_id: Option<String>,
     pub display_name: String,
@@ -32,6 +33,7 @@ pub struct CreateNodeParams {
 }
 
 pub struct RegisterNodeParams {
+    pub system_info: Option<talos_types::NodeSystemInfo>,
     pub node_id: String,
     pub expected_credential_hash: [u8; 32],
     pub lease_token_hash: [u8; 32],
@@ -80,6 +82,7 @@ pub enum NodeListScope {
 }
 
 pub struct ListNodesParams {
+    pub exclude_node_id: Option<String>,
     pub scope: NodeListScope,
     pub query: Option<String>,
     pub cursor: Option<String>,

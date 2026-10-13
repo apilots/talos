@@ -220,6 +220,9 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
     ));
     let certificate = rcgen::generate_simple_self_signed(vec!["node.example".into()]).unwrap();
     let publisher = RemoteNodePublisher {
+        coordinator_id: uuid::Uuid::new_v4().to_string(),
+        connections: Arc::default(),
+        resource_routes: ResourceRoutes::default(),
         coordinator: coordinator.clone(),
         nodes: nodes.clone(),
         trusted_node_ca: agent_client::AgentTlsTrust::Certificate(
@@ -287,6 +290,7 @@ async fn rpc_adapter_enforces_user_owner_and_node_lease_boundaries() {
                 token: credential,
             }),
             params: Some(pb::RegisterParams {
+                system_info: None,
                 deployments: vec![pb::Deployment {
                     agent_id: "talos".into(),
                 }],
@@ -603,3 +607,6 @@ mod lifecycle;
 
 #[path = "desktop_registration_tests.rs"]
 mod desktop_registration_tests;
+
+#[path = "agent_resource_tests.rs"]
+mod resources;

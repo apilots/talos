@@ -2,15 +2,15 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use cloud_sdk_rs::cloud_types::{
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use talos_cloud_sdk::talos_cloud_types::{
     AuthResponseDto, CurrentUserDto, DeviceClientKindDto, DeviceLoginCancelRequestDto,
     DeviceLoginPollRequestDto, DeviceLoginPollResponseDto, DeviceLoginStartRequestDto,
     IntrospectionRequestDto, IntrospectionResponseDto, LogoutResponseDto, UserRoleDto,
     UserStatusDto, UserTypeDto,
 };
-use cloud_sdk_rs::{CloudSdkError, TalosCloudClient};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use talos_cloud_sdk::{CloudSdkError, TalosCloudClient};
 use talos_error::{TalosError, TalosResult};
 use ts_rs::TS;
 

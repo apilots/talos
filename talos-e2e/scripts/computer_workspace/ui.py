@@ -131,13 +131,13 @@ def run(cluster):
             wait_for(lambda: data(public(cluster, f'/v1/computers/{identity["nodeId"]}'))["available"], "Desktop Connect publication and healthy heartbeat", seconds=60)
             if name == 'a': local_id = identity['nodeId']
             require(driver.call(name, 'evaluate', expression='document.querySelector("[data-computer-id][aria-pressed=true]").getAttribute("data-computer-id")') == identity['nodeId'], 'Desktop did not default to its actual local UUID')
-            require(not (target_home / 'data/talos.db').exists(), 'Cloud Desktop created a business database')
+            require((target_home / 'data/talos.db').exists(), 'Desktop management runtime did not create its product DB')
         if os.environ.get('TALOS_E2E_DESKTOP_APP'):
             bundled = str(Path(os.environ['TALOS_E2E_DESKTOP_APP']).resolve().parent.parent / 'Resources/app-server/app-server')
             children = [line.strip() for line in subprocess.check_output(['ps', '-axo', 'pid,command'], text=True).splitlines() if line.endswith(bundled)]
             require(len(children) == 2, 'Installed Desktop did not launch both bundled app-server processes')
             (REPORT / 'bundled-app-server-processes.log').write_text('\n'.join(children) + '\n')
-        passed('real_electron_login_ui_polling_default_local_uuid_and_no_business_db')
+        passed('real_electron_login_ui_polling_default_local_uuid_and_management_db')
 
         workspace = data(public(cluster, f'/v1/workspace/info?nodeId={local_id}'))
         local_file = Path(workspace['userWorkspaceDir']) / 'electron-local-proof.txt'
@@ -154,7 +154,7 @@ def run(cluster):
         driver.call('a', 'evaluate', expression='document.querySelector("button[aria-haspopup=dialog]").click()')
         driver.call('a', 'wait', expression=f'Boolean(document.querySelector(\'[role=dialog] [data-computer-id="{remote_id}"]\'))')
         driver.call('a', 'evaluate', expression=f'document.querySelector(\'[role=dialog] [data-computer-id="{remote_id}"]\').click()')
-        driver.call('a', 'wait', expression=f'Boolean(document.querySelector(\'[data-testid=computer-context] [data-computer-id="{remote_id}"]\'))')
+        driver.call('a', 'wait', expression=f'Boolean(document.querySelector(\'aside [data-computer-id="{remote_id}"]\'))')
         workspace = data(public(cluster, f'/v1/workspace/info?nodeId={remote_id}'))
         remote_file = Path(workspace['userWorkspaceDir']) / 'electron-remote-proof.txt'
         driver.call('a', 'draft', text=f'Use Bash to write ELECTRON_REMOTE_OK to {remote_file}. Then reply ELECTRON_REMOTE_OK.')
@@ -354,8 +354,9 @@ def run(cluster):
         driver.close()
 
 
-cluster = ProductCluster(worker_transport='outbound')
-try:
-    run(cluster)
-finally:
-    cluster.close()
+if __name__ == '__main__':
+    cluster = ProductCluster(worker_transport='outbound')
+    try:
+        run(cluster)
+    finally:
+        cluster.close()

@@ -392,6 +392,9 @@ impl GatewayClient for EmbeddedServerClient {
         let task = tokio::spawn(async move {
             while let Some(message) = events.recv().await {
                 match message {
+                    // Match the App Server SDK's timeline-only contract; callers
+                    // read volatile display state through get_active_turn.
+                    TimelineSubscriptionMessage::ActiveTurnChanged(_) => {}
                     TimelineSubscriptionMessage::Event(event) => {
                         if tx.send(*event).await.is_err() {
                             return;

@@ -66,21 +66,27 @@ pub(super) async fn append(
     let persisted_at = chrono::Utc::now().timestamp().to_string();
     let occurred_at = notice.occurred_at.to_string();
     // Existence and insertion share one statement, including concurrent Session deletion.
-    let rows = store.storage.query(
+    let mut transaction = store
+        .begin_session_transaction(&notice.identity.session_id)
+        .await?;
+    let rows = transaction.query(
         "INSERT INTO agent_events (session_id, turn_id, sequence, occurred_at, persisted_at, payload_json) SELECT ?, ?, NULL, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL) RETURNING *",
         &[&notice.identity.session_id, &notice.identity.turn_id, &occurred_at, &persisted_at, &raw, &notice.identity.session_id, &notice.identity.turn_id],
     ).await?;
-    rows.first()
+    let result = rows
+        .first()
         .ok_or_else(|| {
             TalosError::new(
                 ErrorCode::ResourceNotFound,
                 "The notice target Turn no longer exists.",
             )
         })
-        .and_then(parse)
+        .and_then(parse)?;
+    transaction.commit().await?;
+    Ok(result)
 }
 
-pub(super) fn parse(row: &Row) -> TalosResult<TimelineEventRecord> {
+pub(crate) fn parse(row: &Row) -> TalosResult<TimelineEventRecord> {
     if row.get_i64("sequence").is_some() {
         let record = parse_event_record(row)?;
         return Ok(TimelineEventRecord {

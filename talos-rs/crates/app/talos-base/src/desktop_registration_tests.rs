@@ -1,5 +1,6 @@
 use super::*;
 use crate::desktop_application::DesktopApplication;
+use agent_protocol::WorkerEnvironment;
 use talos_auth::{
     CloudSessionCache, CloudSessionCacheEntry, CloudSessionUserSnapshot, OpenModeUserService,
     UserType,
@@ -11,13 +12,20 @@ struct DesktopFixture {
     home: tempfile::TempDir,
     config: Config,
     nodes: AgentNodeService,
+    coordinator: Arc<CoordinatorImpl>,
+    runtime: crate::TalosApplicationRuntime,
     stop: CancellationToken,
     server: tokio::task::JoinHandle<TalosResult<()>>,
 }
 
 impl DesktopFixture {
     async fn new() -> Self {
-        let home = tempfile::tempdir().unwrap();
+        // The actual Worker directory picker is confined to the process HOME.
+        // Keep all product state in an owned temporary child of that boundary.
+        let home = tempfile::Builder::new()
+            .prefix(".talos-desktop-test-")
+            .tempdir_in(std::env::var_os("HOME").unwrap())
+            .unwrap();
         let paths = TalosPaths::from_home(home.path().to_path_buf());
         paths.ensure_base_dirs().unwrap();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
@@ -56,7 +64,7 @@ impl DesktopFixture {
             },
             nodes.clone(),
             Arc::new(TestAuth),
-            coordinator,
+            coordinator.clone(),
             NodeSessionDataRpc::new(
                 nodes.clone(),
                 sessions,
@@ -78,6 +86,17 @@ impl DesktopFixture {
         .await
         .unwrap();
         let mut config = Config::default().with_runtime_paths(paths);
+        config.apply_derived_paths();
+        config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+            id: config.llm.model.clone(),
+            name: config.llm.model.clone(),
+            context_window: 32768,
+            reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: Vec::new(),
+            cost: Default::default(),
+        }];
         config.cloud.agent_base_url = format!("https://{address}");
         config.cloud.agent_trusted_ca_file = Some(cert);
         let mut persisted = serde_json::to_value(&config).unwrap();
@@ -91,7 +110,21 @@ impl DesktopFixture {
             serde_json::to_string_pretty(&persisted).unwrap(),
         )
         .unwrap();
+        let mut runtime = crate::build_application_runtime_with_migration_dir(
+            config.clone(),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
+        )
+        .await
+        .unwrap();
+        runtime.auth_service = Arc::new(TestAuth);
+        runtime
+            .service
+            .account
+            .set_cloud_session_cache(CloudSessionCache::for_talos_home(home.path()))
+            .unwrap();
         Self {
+            runtime,
+            coordinator,
             home,
             config,
             nodes,
@@ -130,17 +163,17 @@ impl DesktopFixture {
         account
             .set_cloud_session_cache(CloudSessionCache::for_talos_home(self.home.path()))
             .unwrap();
-        DesktopApplication::new(
-            self.config.clone(),
-            account,
-            Arc::new(TestAuth),
-            device_name.into(),
-            None,
-        )
+        let app = Arc::new(talos_app_server::TalosApplicationAdapter::new(
+            self.runtime.service.clone(),
+            128,
+        ));
+        let mut host = DesktopApplication::new(&self.runtime, device_name.into(), app);
+        host.account = account;
+        host
     }
 
     async fn registered(&self, node_id: &str) -> agent_protocol::NodeInfo {
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
             loop {
                 let info = self
                     .nodes
@@ -152,7 +185,7 @@ impl DesktopFixture {
                     )
                     .await
                     .unwrap();
-                if info.lease_expires_at.is_some() {
+                if info.available {
                     return info;
                 }
                 tokio::task::yield_now().await;
@@ -199,8 +232,76 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
     let info = fixture.registered(&node_id).await;
     assert_eq!(info.display_name, "Original laptop");
     assert_eq!(info.endpoint, None);
-    assert!(!info.available);
-    assert!(!fixture.config.talos_paths().sqlite_db.exists());
+    assert!(info.available);
+    assert!(fixture.config.talos_paths().sqlite_db.exists());
+    let context = agent_protocol::WorkerEnvironmentContext {
+        user_id: "user-1".into(),
+        username: None,
+        workspace_id: None,
+    };
+    let local = fixture
+        .runtime
+        .coordinator
+        .worker_environment("embedded", "user-1")
+        .await
+        .unwrap();
+    let remote = fixture
+        .coordinator
+        .worker_environment(&node_id, "user-1")
+        .await
+        .unwrap();
+    let gateway = agent_client::AgentNodeClient::connect(
+        &fixture.config.cloud.agent_base_url,
+        agent_client::AgentTlsTrust::Certificate(
+            std::fs::read(fixture.config.cloud.agent_trusted_ca_file.as_ref().unwrap()).unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(gateway
+        .connect_coordinator("user-2", &uuid::Uuid::new_v4().to_string(), &node_id)
+        .await
+        .is_err());
+    let (peer, auth) = gateway
+        .connect_coordinator("user-1", &uuid::Uuid::new_v4().to_string(), &node_id)
+        .await
+        .unwrap();
+    let caller = agent_client::AgentEnvironmentClient::from_connection(peer.clone(), auth);
+    remote
+        .create_directory(
+            context.clone(),
+            talos_types::FsDirectoryCreateRequest {
+                node_id: None,
+                parent: fixture.home.path().into(),
+                name: "same-worker".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let directory = talos_types::FsDirectoryReadRequest {
+        node_id: None,
+        path: Some(fixture.home.path().join("same-worker")),
+    };
+    assert_eq!(
+        local
+            .read_directory(context.clone(), directory.clone())
+            .await
+            .unwrap(),
+        remote
+            .read_directory(context.clone(), directory.clone())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        caller
+            .read_directory(context.clone(), directory.clone())
+            .await
+            .unwrap(),
+        local
+            .read_directory(context.clone(), directory.clone())
+            .await
+            .unwrap()
+    );
     let yaml = std::fs::read_to_string(fixture.config.source_path()).unwrap();
     assert!(yaml.contains(&node_id));
     let saved = YamlConfigStore::new(fixture.config.source_path())
@@ -267,14 +368,23 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         )
         .await
         .unwrap();
-    host.stop_worker().await.unwrap();
+    host.stop_registration().await.unwrap();
+    assert!(!host.rpc.is_finished());
+    assert!(local
+        .read_directory(context.clone(), directory.clone())
+        .await
+        .is_ok());
+    assert!(remote
+        .read_directory(context.clone(), directory.clone())
+        .await
+        .is_err());
     let restarted = fixture.host("Changed hostname");
     assert_eq!(restarted.enroll_worker(None).await.unwrap(), identity);
     assert_eq!(
         fixture.registered(&node_id).await.display_name,
         "User renamed laptop"
     );
-    restarted.stop_worker().await.unwrap();
+    restarted.stop_registration().await.unwrap();
     std::fs::remove_file(&saved.credential_file).unwrap();
     assert!(restarted.enroll_worker(None).await.is_err());
     assert_eq!(
@@ -324,6 +434,7 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .await
         .unwrap();
     assert_eq!(nodes.data.len(), 1);
+    fixture.runtime.shutdown().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }
@@ -337,7 +448,7 @@ async fn desktop_observes_revoked_saved_registration_and_recovers_same_uuid() {
     let identity = first.enroll_worker(None).await.unwrap();
     let node_id = identity.node_id.clone().unwrap();
     fixture.registered(&node_id).await;
-    first.stop_worker().await.unwrap();
+    first.stop_registration().await.unwrap();
     fixture
         .nodes
         .rotate_credential(
@@ -386,13 +497,19 @@ async fn desktop_observes_revoked_saved_registration_and_recovers_same_uuid() {
     })
     .await
     .unwrap();
-    let notification = tokio::time::timeout(std::time::Duration::from_secs(5), replies.next_line())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    let notification: serde_json::Value = serde_json::from_str(&notification).unwrap();
-    assert_eq!(notification["method"], "desktop/worker/failed");
+    let notification = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let line = replies.next_line().await.unwrap().unwrap();
+            let notification: serde_json::Value = serde_json::from_str(&line).unwrap();
+            match notification["method"].as_str() {
+                Some("desktop/worker/failed") => break notification,
+                Some("desktop/worker/ready") => {}
+                other => panic!("Unexpected lifecycle notice: {other:?}"),
+            }
+        }
+    })
+    .await
+    .unwrap();
     let error: talos_error::ApiError =
         serde_json::from_value(notification["params"].clone()).unwrap();
     assert_eq!(error, failures.borrow().clone().unwrap());
@@ -408,10 +525,11 @@ async fn desktop_observes_revoked_saved_registration_and_recovers_same_uuid() {
         restored.enroll_worker(Some(node_id)).await.unwrap(),
         identity
     );
-    restored.stop_worker().await.unwrap();
+    restored.stop_registration().await.unwrap();
     assert!(failures.borrow().is_none());
     requests.shutdown().await.unwrap();
     host_task.await.unwrap().unwrap();
+    fixture.runtime.shutdown().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }
@@ -452,7 +570,7 @@ async fn desktop_pending_first_enrollment_requires_explicit_owned_uuid() {
     );
     assert!(!store.load_desktop().unwrap().enrollment_pending);
     fixture.registered(&created.node.node_id).await;
-    host.stop_worker().await.unwrap();
+    host.stop_registration().await.unwrap();
     assert_eq!(
         fixture
             .nodes
@@ -469,6 +587,164 @@ async fn desktop_pending_first_enrollment_requires_explicit_owned_uuid() {
             .len(),
         1
     );
+    fixture.runtime.shutdown().await.unwrap();
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn desktop_source_files_cross_outgoing_peer_stream_without_session_and_keep_permissions() {
+    let fixture = DesktopFixture::new().await;
+    fixture.login("user-1");
+    let host = fixture.host("Source laptop");
+    let node_id = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    fixture.registered(&node_id).await;
+    let gateway = agent_client::AgentNodeClient::connect(
+        &fixture.config.cloud.agent_base_url,
+        agent_client::AgentTlsTrust::Certificate(
+            std::fs::read(fixture.config.cloud.agent_trusted_ca_file.as_ref().unwrap()).unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let peer_id = uuid::Uuid::new_v4().to_string();
+    let (peer, _) = gateway
+        .connect_coordinator_with_resources(
+            "user-1",
+            &peer_id,
+            &node_id,
+            fixture
+                .runtime
+                .coordinator_resource_handler(node_id.clone()),
+        )
+        .await
+        .unwrap();
+    let image = Attachment::new(
+        AttachmentKind::Image,
+        "source.png",
+        "image/png",
+        Vec::from(&b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"[..]).into(),
+    );
+    let owned = fixture
+        .runtime
+        .tool_image_store
+        .save("user-1", vec![image.clone()])
+        .await
+        .unwrap()
+        .remove(0);
+    let foreign = fixture
+        .runtime
+        .tool_image_store
+        .save("user-2", vec![image.clone()])
+        .await
+        .unwrap()
+        .remove(0);
+    let read = talos_types::FileReadRequest {
+        file_id: owned.file_id.clone(),
+    };
+    let (file, bytes) = gateway
+        .read_peer_file("user-1", &peer_id, read.clone(), 1024)
+        .await
+        .unwrap();
+    assert_eq!(file, owned);
+    assert_eq!(bytes, image.bytes);
+    assert!(gateway
+        .read_peer_file("user-1", &peer_id, read.clone(), 1)
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::AttachmentLimitExceeded));
+    assert!(gateway
+        .read_peer_file("user-2", &peer_id, read.clone(), 1024)
+        .await
+        .is_err());
+    assert!(gateway
+        .read_peer_file(
+            "user-1",
+            &peer_id,
+            talos_types::FileReadRequest {
+                file_id: foreign.file_id
+            },
+            1024
+        )
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::ResourceNotFound));
+    let updated = gateway
+        .update_peer_file(
+            "user-1",
+            &peer_id,
+            talos_types::FileUpdateRequest {
+                file_id: owned.file_id.clone(),
+                tags: Some(vec!["shared".into()]),
+                metadata: Some(std::collections::BTreeMap::from([(
+                    "origin".into(),
+                    "source".into(),
+                )])),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.file.tags, ["shared"]);
+    let cleared = gateway
+        .update_peer_file(
+            "user-1",
+            &peer_id,
+            talos_types::FileUpdateRequest {
+                file_id: owned.file_id.clone(),
+                tags: Some(vec![]),
+                metadata: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(cleared.file.tags.is_empty());
+    assert_eq!(cleared.file.metadata["origin"], "source");
+    assert_eq!(
+        fixture
+            .runtime
+            .service
+            .files
+            .read(&Actor::regular("user-1"), read.clone())
+            .await
+            .unwrap()
+            .file,
+        cleared.file
+    );
+    let deleted = gateway
+        .delete_peer_file(
+            "user-1",
+            &peer_id,
+            talos_types::FileDeleteRequest {
+                file_id: owned.file_id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted.file_id, owned.file_id);
+    assert!(fixture
+        .runtime
+        .service
+        .files
+        .read(&Actor::regular("user-1"), read.clone())
+        .await
+        .is_err());
+    peer.close();
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let error = gateway
+                .read_peer_file("user-1", &peer_id, read.clone(), 1024)
+                .await
+                .unwrap_err();
+            if error.is_code(ErrorCode::ServiceUnavailable) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    host.stop_registration().await.unwrap();
+    fixture.runtime.shutdown().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }

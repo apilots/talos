@@ -12,8 +12,8 @@ pub trait AgentHarness: Send + Sync {
     fn submit_input(&self, p: AgentInputParams) -> AgentFuture<'_, AgentResult<AgentAdmission>>;
     fn interrupt(&self, p: AgentInterruptParams) -> AgentFuture<'_, AgentResult<AgentInterruptOutcome>>;
     fn compact_session(&self, p: AgentContext) -> AgentFuture<'_, AgentResult<AgentRunExecution>>;
-    fn clear_session(&self, p: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>>;
-    fn close_session(&self, p: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>>;
+    fn clear_session(&self, p: AgentSessionContext, expected_history_cursor: SessionHistoryCursor) -> AgentFuture<'_, AgentResult<()>>;
+    fn close_session(&self, p: AgentSessionContext, expected_history_cursor: SessionHistoryCursor) -> AgentFuture<'_, AgentResult<()>>;
     fn shutdown(&self, timeout: Duration) -> AgentFuture<'_, AgentResult<()>>;
 }
 ```
@@ -25,6 +25,7 @@ pub trait AgentHarness: Send + Sync {
 | AgentInterruptParams | 同文件：agent_id、identity |
 | AgentContext | [context.rs](../../../talos-rs/crates/orchestration/agent-protocol/src/context.rs)：session、turn_id、project_id、working_directory、environment、model、model_selection、permission_mode |
 | AgentSessionContext | 同文件：agent_id、session_id、EffectiveWorkspace |
+| SessionHistoryCursor | [session_execution.rs](../../../talos-rs/crates/common/types/src/session_execution.rs)：原history_generation、completed_turn_id、completed_event_sequence；Clear/Close复用该对象进行Worker维护准入，不新增业务上下文 |
 | AgentRunCheckpoint | [checkpoint.rs](../../../talos-rs/crates/orchestration/agent-protocol/src/checkpoint.rs)：last_sequence、messages、metrics |
 | AgentMessage / AgentEvent / AgentRunMetrics | [agent-api](../../../talos-rs/crates/orchestration/agent-api/src/lib.rs) 中现有规范模型；保留原定义 |
 | AgentCapabilities | [capability.rs](../../../talos-rs/crates/orchestration/agent-protocol/src/capability.rs)；保留 Provider/Harness 内的能力判断，注册不重复广告无消费者的字段 |

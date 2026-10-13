@@ -3,6 +3,7 @@ mod auth;
 mod auth_session;
 mod computers;
 mod errors;
+mod sync;
 
 #[cfg(test)]
 #[path = "error_contract_tests.rs"]
@@ -199,6 +200,7 @@ impl HttpServer {
                 get(read_directory_handler).post(create_directory_handler),
             )
             .merge(computers::routes())
+            .merge(sync::routes())
             .route("/v1/sessions", get(list_sessions_handler))
             .route(
                 "/v1/projects",

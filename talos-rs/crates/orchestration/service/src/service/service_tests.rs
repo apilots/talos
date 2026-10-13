@@ -97,7 +97,7 @@ impl TalosService {
         params: CreateSessionRequest,
     ) -> ServiceResult<SessionInfo> {
         let record = self.access.create_session(actor, params).await?;
-        self.sessions.session_info(&record)
+        self.sessions.session_info(&record).await
     }
 }
 
@@ -349,11 +349,19 @@ impl AgentCoordinator for TestAgentCoordinator {
         })
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -458,12 +466,24 @@ impl AgentCoordinator for TestExecutionCoordinator {
         self.delegate.compact_session(params).await
     }
 
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.clear_session(params).await
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .clear_session(params, expected_history_cursor)
+            .await
     }
 
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.close_session(params).await
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .close_session(params, expected_history_cursor)
+            .await
     }
 
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
@@ -946,7 +966,7 @@ async fn assert_session_creation_rolled_back(
     assert_eq!(recovery.active_turn, None);
     assert!(service
         .events
-        .get_active_turn(session_id)
+        .display_active_turn(session_id)
         .await
         .expect("active turn lookup should succeed")
         .is_none());

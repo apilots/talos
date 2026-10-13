@@ -29,6 +29,22 @@ pub type DreamMemoryModelCall = Arc<
 /// bounded Provider lifecycle. They must not own product persistence, queues,
 /// complete Session aggregates, transport DTOs, or Provider-native APIs.
 pub trait AgentHarness: Send + Sync {
+    /// Read the Worker's causal boundary; no history or execution claim is returned.
+    fn read_session_execution_state(
+        &self,
+        _session: AgentSessionContext,
+    ) -> AgentFuture<'_, AgentResult<Option<crate::SessionExecutionState>>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// Publish a committed terminal boundary. In-process Provider hosts have no
+    /// transport gate; the product always uses the Worker RPC implementation.
+    fn commit_session_execution_state(
+        &self,
+        _params: crate::CommitSessionExecutionStateParams,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Admit one fresh or continued logical Turn.
     fn start(&self, params: AgentRunParams) -> AgentFuture<'_, AgentResult<AgentRunExecution>>;
 
@@ -51,10 +67,18 @@ pub trait AgentHarness: Send + Sync {
     ) -> AgentFuture<'_, AgentResult<AgentRunExecution>>;
 
     /// Delete reconstructable Provider-owned state for one idle Session.
-    fn clear_session(&self, params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>>;
+    fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>>;
 
     /// Release Provider-owned live resources for one idle Session.
-    fn close_session(&self, params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>>;
+    fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>>;
 
     /// Access the Session's execution-node memory using the existing memory contract.
     /// Hosts without Workspace memory fail explicitly; transport implementations preserve this result.

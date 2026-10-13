@@ -8,6 +8,7 @@ description = "Talos - Configuration Management"
 repository.workspace = true
 
 [dependencies]
+url = "2"
 # Serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

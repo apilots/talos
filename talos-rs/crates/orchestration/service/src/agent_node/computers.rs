@@ -19,6 +19,14 @@ impl AgentNodeService {
         actor: &Actor,
         request: ComputerListRequest,
     ) -> TalosResult<ComputerListResponse> {
+        self.list_computers_excluding(actor, request, None).await
+    }
+    pub(crate) async fn list_computers_excluding(
+        &self,
+        actor: &Actor,
+        request: ComputerListRequest,
+        excluded: Option<String>,
+    ) -> TalosResult<ComputerListResponse> {
         if !actor.auth_disabled {
             ensure_management_actor(actor)?;
         }
@@ -28,7 +36,9 @@ impl AgentNodeService {
         } else {
             NodeListScope::Owner {
                 user_id: actor.user_id.clone(),
-                include_embedded: true,
+                // G has no shared personal Computer. The private Worker is shown only
+                // after the host has mapped its registered UUID for this owner.
+                include_embedded: excluded.is_some() || actor.role == talos_auth::UserRole::Admin,
             }
         };
         let query = request
@@ -38,6 +48,7 @@ impl AgentNodeService {
         let page = self
             .store
             .list(ListNodesParams {
+                exclude_node_id: excluded.filter(|id| id != "embedded"),
                 scope,
                 query,
                 cursor: request.cursor,
@@ -85,6 +96,14 @@ impl AgentNodeService {
         actor: &Actor,
         request: RenameComputerRequest,
     ) -> TalosResult<NodeInfo> {
+        let remote = self
+            .remote_management
+            .read()
+            .expect("Computer management lock")
+            .clone();
+        if let Some(remote) = remote {
+            return remote.rename(actor, request).await;
+        }
         validate_display_name(&request.display_name)?;
         self.owned_node(actor, &request.node_id).await?;
         let record = self
@@ -104,6 +123,14 @@ impl AgentNodeService {
         actor: &Actor,
         request: SetComputerStatusRequest,
     ) -> TalosResult<NodeInfo> {
+        let remote = self
+            .remote_management
+            .read()
+            .expect("Computer management lock")
+            .clone();
+        if let Some(remote) = remote {
+            return remote.set_status(actor, request).await;
+        }
         let _lifecycle = self.lock_lifecycle().await;
         let mut current = self.current.lock().await;
         self.owned_node(actor, &request.node_id).await?;

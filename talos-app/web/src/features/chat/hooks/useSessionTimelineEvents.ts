@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AppProtocol, TalosApiError, TalosStreamTerminatedError, type SessionHistoryResponse } from "@talos/sdk-browser";
 
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
-import { applyStreamEvent, applyTimelineRecovery, clearInactiveTurnSnapshot } from "../stream-events";
+import { applyStreamEvent, applyTimelineRecovery, applyActiveTurnSnapshot, clearInactiveTurnSnapshot } from "../stream-events";
 import type { useSessionMessageQueue } from "./useSessionMessageQueue";
 import { useConnectionKey } from "./useChatQueries";
 import { connectionScope } from "@/shared/store/connection-scope";
@@ -82,6 +82,12 @@ export function useSessionTimelineEvents(
                 reconciliationError = error;
                 controller.abort();
               }),
+              onActiveTurnChanged: (notice) => {
+                if (disposed || connectionScope(useAppStore.getState().connection) !== scope) return;
+                if (notice.state.activeTurn) applyActiveTurnSnapshot(sessionId, notice.state.activeTurn);
+                else clearInactiveTurnSnapshot(sessionId);
+                void onTerminalTurnRef.current?.();
+              },
               onMessageQueueChanged: (change) => queueRef.current?.onMessageQueueChanged(change),
             },
           );
