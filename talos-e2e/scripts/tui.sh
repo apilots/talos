@@ -19,8 +19,7 @@ tui_send_command() {
   local session_name="$1"
   local command="$2"
   tui_send_input "${session_name}" "${command}"
-  # The first Enter may accept command autocomplete; the second executes it.
-  tmux send-keys -t "${session_name}" C-m >/dev/null
+  # Bracketed paste disables autocomplete, so the input's Enter executes directly.
 }
 
 tui_wait_for_text() {
