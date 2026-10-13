@@ -669,9 +669,9 @@ async function waitForPendingUserAction(cdp, sessionId, timeoutMs) {
       afterEventId: null,
       replayLimit: null
     }).then((response) => response.replay.events
-      .map((entry) => entry.event.payload)
+      .map((entry) => entry.event.data.payload)
       .reverse()
-      .find((payload) => payload.type === 'waitingForInput' && payload.data.type === 'userAction')
+      .find((payload) => payload.type === 'waitingForInput' && payload.data?.type === 'userAction')
       ?.data.action ?? null)`,
     timeoutMs,
   );

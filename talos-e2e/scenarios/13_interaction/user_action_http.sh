@@ -130,7 +130,7 @@ with open(os.environ["EVENTS_PATH"], encoding="utf-8") as handle:
             continue
         record = json.loads(line[6:])
         event = record.get("event") or {}
-        payload = event.get("payload") or {}
+        payload = (event.get("data") or {}).get("payload") or {}
         data = payload.get("data") or {}
         if payload.get("type") == "waitingForInput" and data.get("type") == "userAction":
             pending = {"eventId": record.get("eventId"), "action": data.get("action")}
@@ -256,7 +256,7 @@ active = recovery["activeTurn"]
 assert active["identity"]["turnId"] == os.environ["TURN_ID"], active
 assert active["state"] == "waitingForInput", active
 assert any(
-    item["event"]["payload"]["type"] == "waitingForInput"
+    item["event"]["data"]["payload"]["type"] == "waitingForInput"
     for item in recovery["replay"]["events"]
 ), recovery
 PY
