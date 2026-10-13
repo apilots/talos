@@ -155,6 +155,7 @@ jobs:
             echo "Firecrawl and Tavily Actions secrets are required for group 06." >&2
             exit 1
           fi
+          scenario_result=0
           while IFS= read -r target; do
             [[ -n "${target}" ]] || continue
             kind="${target%%:*}"
@@ -164,18 +165,49 @@ jobs:
                 docker info >/dev/null
               fi
               if [[ "${RUNNER_OS}" == "Linux" ]]; then
-                xvfb-run -a ./talos-e2e/run_e2e.sh --group "${value}"
+                xvfb-run -a ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
               else
-                ./talos-e2e/run_e2e.sh --group "${value}"
+                ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
               fi
             else
               if [[ "${RUNNER_OS}" == "Linux" ]]; then
-                xvfb-run -a ./talos-e2e/run_e2e.sh --case "${value}"
+                xvfb-run -a ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
               else
-                ./talos-e2e/run_e2e.sh --case "${value}"
+                ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
               fi
             fi
           done <<<"${E2E_TARGETS}"
+          exit "${scenario_result}"
+
+      - name: Show redacted failed-scenario diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          secrets = [value for key, value in os.environ.items()
+                     if re.search(r"KEY|TOKEN|PASSWORD|SECRET", key) and len(value) >= 8]
+          def redact(text):
+              for secret in sorted(secrets, key=len, reverse=True):
+                  text = text.replace(secret, "<redacted>")
+              text = re.sub(r"(?i)(bearer\s+)\S+", r"\1<redacted>", text)
+              text = re.sub(r"eyJ[\w-]+\.[\w-]+\.[\w-]+", "<redacted>", text)
+              text = re.sub(r"(?i)([\"']?(?:\w*(?:token|password|secret|api_?key|credentials?)\w*)"
+                            r"[\"']?\s*[:=]\s*)([\"'])(.*?)\2", r"\1\2<redacted>\2", text)
+              return text
+
+          for report in sorted(Path("talos-e2e/reports").glob("e2e_report_*.md")):
+              for section in report.read_text(errors="replace").split("### 场景 ")[1:]:
+                  if "- 状态: FAIL\n" not in section:
+                      continue
+                  name = section.splitlines()[0]
+                  log = section.split("```text\n", 1)[-1].rsplit("```", 1)[0]
+                  print(f"Failed scenario: {name}")
+                  print(redact("\n".join(log.splitlines()[-80:])))
+          PY
 
   gate:
     if: ${{ always() }}
