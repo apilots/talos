@@ -849,7 +849,7 @@ current = {"id": "", "event": "", "data": []}
 
 def agent_event(record):
     event = record.get("event")
-    return event.get("data", {}) if isinstance(event, dict) else {}
+    return event.get("data", {}) if isinstance(event, dict) and event.get("type") == "agent" else {}
 
 def reset():
     current["id"] = ""
@@ -867,6 +867,9 @@ def flush(handle):
         reset()
         return False
     event_record = agent_event(record)
+    if not event_record:
+        reset()
+        return False
     identity = event_record.get("identity") or {}
     if identity.get("turnId") != turn_id:
         raise RuntimeError(f"received event for unexpected turn: {identity.get('turnId')}")
@@ -937,7 +940,7 @@ metrics = None
 
 def agent_event(record):
     event = record.get("event")
-    return event.get("data", {}) if isinstance(event, dict) else {}
+    return event.get("data", {}) if isinstance(event, dict) and event.get("type") == "agent" else {}
 
 def upsert_block(message_id, block):
     if not message_id or not isinstance(block, dict):

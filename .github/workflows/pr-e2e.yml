@@ -71,23 +71,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bubblewrap build-essential curl libssl-dev pkg-config \
-            protobuf-compiler sqlite3 tmux xvfb
+            protobuf-compiler ripgrep sqlite3 tmux xvfb
+          # The disposable Ubuntu runner must permit bubblewrap user namespaces.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
 
       - name: Install macOS system dependencies
         if: runner.os == 'macOS'
         run: |
           brew install caddy protobuf
-
-      - name: Install MinIO client for Linux S3 E2E
-        if: ${{ runner.os == 'Linux' && contains(matrix.targets, 'group:12_files') }}
-        run: |
-          mc_version=RELEASE.2025-08-13T08-35-41Z
-          mc_sha256=01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891
-          curl --proto '=https' --tlsv1.2 -fsSL \
-            "https://github.com/minio/mc/releases/download/${mc_version}/mc.linux-amd64.${mc_version}" \
-            -o /tmp/mc
-          echo "${mc_sha256}  /tmp/mc" | sha256sum --check --status
-          sudo install -m 0755 /tmp/mc /usr/local/bin/mc
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -135,6 +127,7 @@ jobs:
           token: ${{ secrets.TALOS_SOURCE_READ_TOKEN }}
 
       - name: Install Chrome for Linux MCP E2E
+        id: chrome
         if: runner.os == 'Linux'
         uses: browser-actions/setup-chrome@v1
 
@@ -142,8 +135,8 @@ jobs:
         shell: bash
         env:
           E2E_TARGETS: ${{ matrix.targets }}
-          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ runner.os == 'Linux' && 'google-chrome' || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }}
-          TALOS_E2E_CHROME_BIN: ${{ runner.os == 'Linux' && 'google-chrome' || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }}
+          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ runner.os == 'Linux' && steps.chrome.outputs.chrome-path || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }}
+          TALOS_E2E_CHROME_BIN: ${{ runner.os == 'Linux' && steps.chrome.outputs.chrome-path || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }}
         run: |
           set -euo pipefail
           if [[ -z "${TALOS_LLM_DEEPSEEK_API_KEY}" ]]; then
@@ -207,6 +200,9 @@ jobs:
                   log = section.split("```text\n", 1)[-1].rsplit("```", 1)[0]
                   print(f"Failed scenario: {name}")
                   print(redact("\n".join(log.splitlines()[-80:])))
+          for artifact in sorted(Path(".tmp/desktop-smoke").glob("*/desktop-smoke-error.log")):
+              print(f"Desktop startup diagnostics: {artifact}")
+              print(redact("\n".join(artifact.read_text(errors="replace").splitlines()[-80:])))
           PY
 
   gate:

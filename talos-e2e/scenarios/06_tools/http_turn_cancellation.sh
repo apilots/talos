@@ -230,7 +230,9 @@ for line in Path(os.environ["EVENTS_PATH"]).read_text().splitlines():
     if not line.startswith("data: "):
         continue
     record = json.loads(line[6:])
-    stream_events.append(record.get("event", {}))
+    event = record.get("event", {})
+    if event.get("type") == "agent":
+        stream_events.append(event.get("data", {}))
 
 bash_call_indexes = [
     index

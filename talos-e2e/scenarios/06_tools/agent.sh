@@ -154,7 +154,7 @@ for line in path.read_text(encoding="utf-8").splitlines():
         continue
     raw_record = json.loads(line[6:])
     event = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else {}
-    payload = event.get("payload") or {}
+    payload = (event.get("data") or {}).get("payload") or {}
     if payload.get("type") != "messageBlockCompleted":
         continue
     block = (payload.get("data") or {}).get("block") or {}

@@ -71,7 +71,8 @@ native platform runners and the Linux Docker install case.
 | Base server, CLI, and TUI | Rust toolchain and repository test tools |
 | Web and Desktop | Node.js, pnpm dependencies, and platform UI prerequisites |
 | Real model or MCP flows | Network access and the provider credentials required by the scenario preflight |
-| Cloud auth and S3 | Explicit cloud test credentials and isolated resources |
+| Cloud auth | Explicit cloud test credentials and isolated resources |
+| S3 files | curl with SigV4 support; pinned Versity Gateway v1.8.0 (downloaded and checksum-verified by group 12) |
 | Linux sandbox supplements | Docker on a supported host |
 | Release installation | Native target environment; Docker supplements Linux only |
 
@@ -119,3 +120,8 @@ the location. These directories are generated output, not source documentation.
 - Use real services only in scenarios that explicitly own that integration.
 - Reuse shared runner helpers and fixtures instead of duplicating setup.
 - Preserve logs or reports that prove the critical behavior when manual evidence is required.
+
+Group `12_files` retains Local attachment and S3 upload/list/read/delete coverage.
+Its S3 helper owns a standalone Versity Gateway process and temporary directory
+under `scenarios/12_files/.tmp/`; the scenario EXIT trap stops the process and
+removes the directory, including on failure. No Docker or MinIO client is needed.
