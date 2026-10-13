@@ -219,7 +219,7 @@ run_linux_docker_tui_install() {
   container_report_dir="${SCENARIO_REPORT_DIR}/container"
   local cargo_lock_file="${target_dir}/Cargo.lock"
   mkdir -p "${target_dir}" "${container_report_dir}"
-  cp "${REPO_ROOT}/talos-rs/Cargo.lock" "${cargo_lock_file}"
+  : >"${cargo_lock_file}"
   mkdir -p "${REPO_ROOT}/talos-rs/target"
 
   docker build -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
