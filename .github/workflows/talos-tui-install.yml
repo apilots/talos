@@ -87,8 +87,21 @@ jobs:
         with:
           workspaces: talos-rs
 
+      - name: Fetch native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo fetch --manifest-path talos-rs/Cargo.toml; then
+              exit 0
+            fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 10
+          done
+
       - name: Run native installation E2E case
         env:
+          CARGO_NET_OFFLINE: "true"
           TUI_INSTALL_EXPECTED_PLATFORM: ${{ matrix.platform }}
           TUI_INSTALL_EXPECTED_ARCH: ${{ matrix.arch }}
         run: talos-e2e/run_e2e.sh --case 15_tui_install/01_native_install
