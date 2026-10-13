@@ -37,3 +37,9 @@ For unfamiliar ownership, consult the relevant entry in [Rust modules](docs/refe
 - Choose checks for the affected behavior. Fix failures caused by the change and continue through authorized implementation and verification; a first implementation or successful compile alone is not completion. Broaden or repeat checks only for changed behavior, failures, or unresolved risk.
 - Review the requested diff for missing behavior and unnecessary code, fixtures, conversions, or workarounds. Remove obsolete paths introduced or replaced by the change; leave no TODO without an associated issue or plan. Preserve unrelated user work.
 - Do not disable tests, lint, or hooks to pass checks. Report unavailable verification and its impact rather than claiming completion. If user input is required, finish independent authorized work and present the concrete unresolved decision.
+
+## E2E quality gates
+
+- Agent capabilities and product behavior must have meaningful E2E coverage in the GitHub-hosted PR quality gate when they fit the supported runner environment.
+- Real multi-control-plane, multi-machine, synchronization, or other unusually resource-intensive topologies may use local acceptance. Mark those scenarios explicitly in the task plan and E2E documentation, and report their local result separately; never silently skip them or label them as passing CI checks.
+- Local-only topology acceptance does not replace focused gated coverage for the product behavior it exercises. Keep that behavior covered by a representative scenario that can run on GitHub-hosted runners.

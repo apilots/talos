@@ -55,11 +55,13 @@ collect_group_cases() {
   fi
 
   while IFS= read -r scenario; do
-    if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" && "$(uname -s)" != "Darwin" ]]; then
-      continue
+    if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" ]]; then
+      if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        continue
+      fi
     fi
     if [[ "${group_name}" == "15_tui_install" && "$(basename "${scenario}")" == "02_linux_docker.sh" ]]; then
-      if [[ "$(uname -s)" != "Darwin" ]] || ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+      if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
         continue
       fi
     fi

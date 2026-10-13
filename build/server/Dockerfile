@@ -43,7 +43,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.title="Talos Server" \
       org.opencontainers.image.description="Talos HTTP API and WebUI server" \
-      org.opencontainers.image.source="https://github.com/apilots/talos-releases" \
+      org.opencontainers.image.source="https://github.com/apilots/talos" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
 

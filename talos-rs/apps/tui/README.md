@@ -12,7 +12,7 @@ Install the latest target-specific release bundle:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh
+  https://github.com/apilots/talos/releases/latest/download/install.sh | sh
 ```
 
 The installer keeps immutable release resources outside `$TALOS_HOME`. See

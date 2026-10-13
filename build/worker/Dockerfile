@@ -23,7 +23,7 @@ ARG REVISION=unknown
 ARG DEBIAN_FRONTEND=noninteractive
 LABEL org.opencontainers.image.title="Talos Worker" \
       org.opencontainers.image.description="User-owned Talos execution Worker" \
-      org.opencontainers.image.source="https://github.com/apilots/talos-releases" \
+      org.opencontainers.image.source="https://github.com/apilots/talos" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
 RUN TZ=Etc/UTC apt-get update && TZ=Etc/UTC apt-get install -y --no-install-recommends \

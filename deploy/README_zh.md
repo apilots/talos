@@ -24,7 +24,8 @@ deploy/
 
 独立 Worker 使用专用 `ghcr.io/apilots/talos-worker` 镜像，通过 outbound
 Connect 注册，不继承 Server 的 HTTP 健康检查。持久目录、节点 UUID/凭据
-和 TLS 信任配置见 [Worker 镜像说明](../build/worker/README.md)。
+和 TLS 信任配置见 [Worker 镜像说明](../build/worker/README.md)。Talos Release 会发布
+`linux/amd64` 和 `linux/arm64` 的 Server、Worker 镜像。
 
 `caddy/`、`nginx/` 和 `docker/` 下的示例是维护中的起点。投入生产前需要检查认证、
 TLS、持久化、资源限制和 secret 管理。

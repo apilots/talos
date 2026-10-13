@@ -57,6 +57,13 @@ Inspect `scenarios/` for the current case list; it is the source of truth.
 There is no current group `04`; use the scenario directory rather than assuming
 that group numbers are contiguous.
 
+The GitHub PR quality gate runs all existing E2E cases and groups except
+`19_computer_sync`. That group needs a Mac host plus multiple Docker services and
+is a local topology acceptance. It must be run and reported locally; its exclusion
+does not waive gated coverage for agent or product behavior.
+Group `15_tui_install` is covered by the separate TUI install gate, including four
+native platform runners and the Linux Docker install case.
+
 ## Environment requirements
 
 | Scope | Additional requirement |

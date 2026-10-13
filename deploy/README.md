@@ -24,7 +24,8 @@ proxies must disable response buffering and compression for
 Deploy standalone Workers with the dedicated `ghcr.io/apilots/talos-worker`
 image, which uses outbound Connect and does not inherit the Server HTTP
 healthcheck. Supply its persistent home, node UUID/credential and TLS trust as
-described in the [Worker image guide](../build/worker/README.md).
+described in the [Worker image guide](../build/worker/README.md). Talos releases
+publish Server and Worker images for both `linux/amd64` and `linux/arm64`.
 
 The examples under `caddy/`, `nginx/`, and `docker/` are the maintained starting
 points. Review authentication, TLS, persistence, resource limits, and secrets

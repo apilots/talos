@@ -10,8 +10,8 @@ Examples:
   ./release.sh 0.1.3 --notes /tmp/talos-v0.1.3.md
   ./release.sh v0.1.3 --notes CHANGELOG.md --watch
 
-This script creates the annotated source tag and canonical GitHub Release.
-Artifact publishing is handled by workflows triggered by the source Release.
+This script creates the annotated source tag with canonical release notes.
+The tag workflow validates, builds, and publishes the GitHub Release and artifacts.
 EOF
 }
 
@@ -103,7 +103,7 @@ confirm_release() {
     return
   fi
   echo
-  read -r -p "Proceed with tagging ${TAG} and creating the canonical GitHub Release? [y/N] " answer
+  read -r -p "Proceed with tagging ${TAG} and starting the release workflow? [y/N] " answer
   [[ "${answer}" == "y" || "${answer}" == "Y" ]] || die "release cancelled"
 }
 
@@ -202,21 +202,18 @@ EOF
 confirm_release
 
 if [[ "${TAG_ACTION}" == "create" ]]; then
-  run git tag -a "${TAG}" -m "Release ${TAG}"
+  run git tag -a "${TAG}" -F "${NOTES_FILE}"
 fi
 if [[ "${TAG_ACTION}" != "reuse" ]]; then
   run git push origin "${TAG}"
 else
   echo "+ reuse existing remote tag ${TAG} at ${HEAD_SHA}"
 fi
-run gh release create "${TAG}" --title "Talos ${TAG}" --notes-file "${NOTES_FILE}"
-
 if [[ "${DRY_RUN}" == "1" ]]; then
   echo "Dry run complete."
   exit 0
 fi
 
 echo
-echo "Release created:"
-gh release view "${TAG}" --json tagName,name,url,isDraft,isPrerelease,publishedAt
+echo "Release workflow started by pushing ${TAG}."
 watch_release_runs

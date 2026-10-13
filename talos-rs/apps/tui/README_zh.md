@@ -11,7 +11,7 @@ command mode，两者使用同一个 embedded Talos Runtime 和 Rust SDK adapter
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh
+  https://github.com/apilots/talos/releases/latest/download/install.sh | sh
 ```
 
 Installer 将不可变 release 资源放在 `$TALOS_HOME` 之外。版本固定、路径和安装 E2E
