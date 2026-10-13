@@ -19,7 +19,6 @@ on:
 
 jobs:
   frontend-app-quality:
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.author_association == 'OWNER' || github.event.pull_request.author_association == 'MEMBER' || github.event.pull_request.author_association == 'COLLABORATOR') }}
     name: frontend-app-quality
     runs-on: ubuntu-latest
     timeout-minutes: 15

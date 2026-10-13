@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   close-untrusted:
-    if: ${{ (github.event.pull_request.author_association != 'OWNER' && github.event.pull_request.author_association != 'MEMBER' && github.event.pull_request.author_association != 'COLLABORATOR') }}
     runs-on: ubuntu-latest
     steps:
       - name: Close pull requests from outside contributors
@@ -17,6 +16,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
         run: |
+          case "${AUTHOR_ASSOCIATION}" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Trusted pull request author: ${AUTHOR_ASSOCIATION}."
+              exit 0
+              ;;
+          esac
+
           gh pr close "${PR_NUMBER}" --repo "${REPOSITORY}" \
             --comment "This repository does not accept pull requests from outside collaborators."
