@@ -217,13 +217,16 @@ run_linux_docker_tui_install() {
   docker_arch="$(docker info --format '{{.Architecture}}')"
   target_dir="${TALOS_E2E_TMP_ROOT}/tui-install-linux-target-${docker_arch}"
   container_report_dir="${SCENARIO_REPORT_DIR}/container"
+  local cargo_lock_file="${target_dir}/Cargo.lock"
   mkdir -p "${target_dir}" "${container_report_dir}"
+  cp "${REPO_ROOT}/talos-rs/Cargo.lock" "${cargo_lock_file}"
   mkdir -p "${REPO_ROOT}/talos-rs/target"
 
   docker build -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
   docker run --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \
+    -v "${cargo_lock_file}:/workspace/talos/talos-rs/Cargo.lock" \
     -v "${container_report_dir}:/tmp/talos-e2e-report" \
     -e TALOS_E2E_TMP_ROOT=/tmp/talos-e2e \
     -e TALOS_SCENARIO_REPORT_DIR=/tmp/talos-e2e-report \
