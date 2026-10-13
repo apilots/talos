@@ -6,6 +6,7 @@ pub(super) fn start_turn_request(
     client_request_id: Option<String>,
 ) -> StartTurnRequest {
     StartTurnRequest {
+        node_id: None,
         session_id: session_id.to_string(),
         input: AgentUserInput {
             content: vec![AgentUserContent::Text {

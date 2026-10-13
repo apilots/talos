@@ -6,12 +6,7 @@ concurrency:
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "talos-rs/**"
-      - "scripts/check_error_contract*.py"
-      - "justfile"
-      - ".github/workflows/talos-rust.yml"
+  pull_request: {}
   push:
     branches:
       - main
@@ -33,16 +28,6 @@ jobs:
       - name: Checkout Talos
         uses: actions/checkout@v6
 
-      - name: Checkout Talos Cloud SDK
-        uses: actions/checkout@v6
-        with:
-          repository: apilots/talos-cloud
-          path: talos-cloud
-          token: ${{ secrets.TALOS_SOURCE_READ_TOKEN || github.token }}
-
-      - name: Link Talos Cloud SDK path dependency
-        run: ln -sfn "${GITHUB_WORKSPACE}/talos-cloud" "${GITHUB_WORKSPACE}/../talos-cloud"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -52,6 +37,11 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Install Protocol Buffer compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
 
       - name: Check error contract guardrails
         run: |

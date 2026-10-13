@@ -5,6 +5,23 @@ import type { DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import { createDesktopTalosClient } from "./desktop-client";
 
 describe("createDesktopTalosClient", () => {
+  it("preserves the selected Worker across directory, environment and metadata calls", async () => {
+    const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
+    const client = createDesktopTalosClient(bridgeWithInvoke(async function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
+      calls.push({ method, params }); return {} as T;
+    }));
+    const target = { nodeId: "worker-b" };
+    await client.fs.directory.read({ path: null, ...target });
+    await client.fs.directory.create({ parent: "/workspace", name: "project", ...target });
+    await client.models.list(target);
+    await client.projects.list(target);
+    await client.sessions.list({ projectId: null, limit: null, offset: null, ...target });
+    await client.workspaceDocs.info(target);
+    await client.config.get("webSearch", target);
+    expect(calls).toHaveLength(7);
+    for (const call of calls) expect(call.params).toMatchObject(target);
+  });
+
   it("submits typed Turn input through the app-server transport", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
     const bridge = bridgeWithInvoke(async function <T>(

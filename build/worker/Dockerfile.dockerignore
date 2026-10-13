@@ -1,0 +1,7 @@
+**
+!talos/
+!talos/conf/
+!talos/conf/**
+!talos/talos-rs/
+!talos/talos-rs/**
+talos/talos-rs/target/

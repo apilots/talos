@@ -16,10 +16,11 @@ use talos_types::{
     UserPermissionMode,
 };
 
-use super::{CreateSessionParams, SessionService};
+use super::CreateSessionParams;
 
 fn project_record(project_id: &str, user_id: &str) -> ProjectRecord {
     ProjectRecord {
+        execution_node_id: "embedded".into(),
         project_id: project_id.to_string(),
         name: "Project".to_string(),
         user_id: user_id.to_string(),
@@ -117,7 +118,7 @@ impl SessionStore for RecordingSessionStore {
         Ok(false)
     }
 
-    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self, _node_id: Option<&str>) -> TalosResult<bool> {
         Ok(false)
     }
 
@@ -281,6 +282,7 @@ fn create_session_params(
         source,
         user_id: "user-1".to_string(),
         target_agent: target_agent.to_string(),
+        execution_node_id: "embedded".to_string(),
         model_selection,
         conf: None,
         workspace_id: "default".to_string(),
@@ -293,7 +295,7 @@ fn create_session_params(
 async fn agent_context_is_built_once_from_session_authorities() {
     let config = config_with_model("anthropic", "global-model");
     let expected_workspace = config.resolve_workspace("default", "user-1").unwrap();
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new().with_project(project_record("project-1", "user-1"))),
         config,
@@ -310,6 +312,7 @@ async fn agent_context_is_built_once_from_session_authorities() {
     let identity = AgentTurnRef::new(session.id.clone(), "turn-1");
     let model_selection = session.conf.model_selection.clone().unwrap();
     let expected = AgentContext {
+        history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),
             session_id: identity.session_id.clone(),
@@ -335,7 +338,7 @@ async fn agent_context_is_built_once_from_session_authorities() {
         expected
     );
     assert_eq!(
-        service.build_agent_session_context(&session).unwrap(),
+        service.build_agent_session_context(&session).await.unwrap(),
         AgentSessionContext {
             agent_id: session.agent_id.clone(),
             session_id: session.id.clone(),
@@ -347,7 +350,7 @@ async fn agent_context_is_built_once_from_session_authorities() {
 #[tokio::test]
 async fn create_session_without_selection_uses_global_default() {
     let base_config = config_with_model("anthropic", "global-model");
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         base_config,
@@ -371,7 +374,7 @@ async fn create_session_persists_configured_default_reasoning_effort() {
     let mut config = config_with_model("anthropic", "reasoning-model");
     config.llm.anthropic.models[0].reasoning = true;
     config.llm.anthropic.models[0].reasoning_effort = talos_config::ReasoningEffort::High;
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         config,
@@ -397,7 +400,7 @@ async fn create_session_resolves_configured_permission_mode() {
         .tools
         .sandbox_policy
         .user_permission_mode = talos_config::ToolUserPermissionModeConfig::ApproveForMe;
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         config,
@@ -407,7 +410,7 @@ async fn create_session_resolves_configured_permission_mode() {
         .create_session(create_session_params(source(), "default", None))
         .await
         .expect("session should be created");
-    let info = service.session_info(&session).unwrap();
+    let info = service.session_info(&session).await.unwrap();
 
     assert_eq!(
         (info.configured_default_mode, info.effective_mode,),
@@ -427,7 +430,7 @@ async fn create_session_permission_override_wins_over_configured_default() {
         .tools
         .sandbox_policy
         .user_permission_mode = talos_config::ToolUserPermissionModeConfig::ApproveForMe;
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         config,
@@ -442,7 +445,7 @@ async fn create_session_permission_override_wins_over_configured_default() {
         .create_session(params)
         .await
         .expect("session should be created");
-    let info = service.session_info(&session).unwrap();
+    let info = service.session_info(&session).await.unwrap();
 
     assert_eq!(
         (
@@ -461,10 +464,19 @@ async fn create_session_permission_override_wins_over_configured_default() {
 #[tokio::test]
 async fn runtime_config_reload_changes_new_session_default_model() {
     let base_config = config_with_model("anthropic", "old-model");
-    let service = SessionService::new(
+    let worker_config = Arc::new(std::sync::RwLock::new(base_config.clone()));
+    let coordinator = crate::test_support::with_worker_environment(
+        Arc::new(crate::test_support::NoopAgentCoordinator),
+        Arc::new(crate::WorkerEnvironmentService::new(
+            worker_config.clone(),
+            Some(std::env::temp_dir()),
+        )),
+    );
+    let service = super::SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         base_config,
+        coordinator,
     );
     let llm = talos_config::LlmConfig {
         provider: "openai".to_string(),
@@ -478,7 +490,7 @@ async fn runtime_config_reload_changes_new_session_default_model() {
 
     let mut reloaded_config = config_with_model("openai", "new-model");
     reloaded_config.llm = llm;
-    service.update_base_config(reloaded_config);
+    *worker_config.write().unwrap() = reloaded_config.clone();
     let session = service
         .create_session(create_session_params(source(), "default", None))
         .await
@@ -499,10 +511,19 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
     base_config.llm.provider = "anthropic".to_string();
     base_config.llm.model = "old-default".to_string();
     base_config.llm.anthropic.models = vec![provider_model("old-default")];
-    let service = SessionService::new(
+    let worker_config = Arc::new(std::sync::RwLock::new(base_config.clone()));
+    let coordinator = crate::test_support::with_worker_environment(
+        Arc::new(crate::test_support::NoopAgentCoordinator),
+        Arc::new(crate::WorkerEnvironmentService::new(
+            worker_config.clone(),
+            Some(std::env::temp_dir()),
+        )),
+    );
+    let service = super::SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         base_config,
+        coordinator,
     );
     let mut llm = talos_config::LlmConfig {
         provider: "anthropic".to_string(),
@@ -516,7 +537,7 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
 
     let mut reloaded_config = talos_types::TalosConfig::default();
     reloaded_config.llm = llm;
-    service.update_base_config(reloaded_config);
+    *worker_config.write().unwrap() = reloaded_config.clone();
     let session = service
         .create_session(create_session_params(
             source(),
@@ -543,7 +564,7 @@ async fn create_session_persists_one_model_selection_in_conf() {
     let mut base_config = config_with_model("anthropic", "default-model");
     base_config.llm.openai.models = vec![provider_model("conf-model")];
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         base_config,
@@ -577,7 +598,8 @@ async fn create_session_persists_one_model_selection_in_conf() {
 async fn existing_session_keeps_persisted_selection_when_default_changes() {
     let base_config = config_with_model("anthropic", "old-default");
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(store, Arc::new(MockProjectStore::new()), base_config);
+    let mut service =
+        crate::test_support::session_service(store, Arc::new(MockProjectStore::new()), base_config);
 
     let original = service
         .create_session(create_session_params(source(), "default", None))
@@ -596,7 +618,10 @@ async fn existing_session_keeps_persisted_selection_when_default_changes() {
     llm.anthropic.models = vec![provider_model("old-default"), provider_model("new-default")];
     let mut reloaded_config = config_with_model("anthropic", "new-default");
     reloaded_config.llm = llm;
-    service.update_base_config(reloaded_config);
+    service.coordinator = crate::test_support::with_environment(
+        Arc::new(crate::test_support::NoopAgentCoordinator),
+        reloaded_config,
+    );
 
     let reloaded = service
         .load_record(&original.id)
@@ -613,7 +638,7 @@ async fn existing_session_keeps_persisted_selection_when_default_changes() {
 #[tokio::test]
 async fn session_without_explicit_model_selection_is_rejected_without_writing() {
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "current-model"),
@@ -644,7 +669,7 @@ async fn session_without_explicit_model_selection_is_rejected_without_writing() 
 
 #[tokio::test]
 async fn create_session_preserves_required_default_workspace_binding() {
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "claude-3-5-sonnet"),
@@ -671,7 +696,7 @@ async fn create_session_uses_a_non_default_configured_workspace_definition() {
             "workspace-team",
         )],
     };
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         config,
@@ -679,7 +704,14 @@ async fn create_session_uses_a_non_default_configured_workspace_definition() {
 
     let session = service
         .create_session(CreateSessionParams {
-            workspace_id: service.default_workspace_id(),
+            workspace_id: service
+                .worker_environment("embedded", "user-1")
+                .await
+                .unwrap()
+                .workspace_info(super::SessionService::environment_context("user-1", None))
+                .await
+                .unwrap()
+                .workspace_id,
             ..create_session_params(source(), "default", None)
         })
         .await
@@ -690,7 +722,7 @@ async fn create_session_uses_a_non_default_configured_workspace_definition() {
 
 #[tokio::test]
 async fn create_session_rejects_an_empty_workspace_binding() {
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "claude-3-5-sonnet"),
@@ -711,7 +743,7 @@ async fn create_session_rejects_an_empty_workspace_binding() {
 async fn create_session_persists_an_optional_owned_project_binding() {
     let store = Arc::new(RecordingSessionStore::default());
     let projects = MockProjectStore::new().with_project(project_record("project-1", "user-1"));
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(projects),
         config_with_model("anthropic", "claude-3-5-sonnet"),
@@ -732,7 +764,7 @@ async fn create_session_persists_an_optional_owned_project_binding() {
 async fn create_session_rejects_missing_or_cross_user_project_bindings() {
     let store = Arc::new(RecordingSessionStore::default());
     let projects = MockProjectStore::new().with_project(project_record("project-1", "user-2"));
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(projects),
         config_with_model("anthropic", "claude-3-5-sonnet"),
@@ -750,7 +782,7 @@ async fn create_session_rejects_missing_or_cross_user_project_bindings() {
 #[tokio::test]
 async fn reset_clears_the_complete_session_history_summary() {
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "current-model"),
@@ -796,7 +828,11 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
     let mut config = config_with_model("anthropic", "model-a");
     config.llm.anthropic.models.push(provider_model("model-b"));
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(store.clone(), Arc::new(MockProjectStore::new()), config);
+    let service = crate::test_support::session_service(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config,
+    );
     let session = service
         .create_session(create_session_params(source(), "default", None))
         .await
@@ -833,7 +869,7 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
 #[tokio::test]
 async fn compaction_usage_preserves_the_measured_context_snapshot() {
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "current-model"),
@@ -877,7 +913,7 @@ async fn compaction_usage_preserves_the_measured_context_snapshot() {
 #[tokio::test]
 async fn ordinary_delete_rejects_a_subagent_session() {
     let store = Arc::new(RecordingSessionStore::default());
-    let service = SessionService::new(
+    let service = crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config_with_model("anthropic", "current-model"),
@@ -907,4 +943,29 @@ async fn ordinary_delete_rejects_a_subagent_session() {
         .unwrap()
         .iter()
         .all(|record| record.id != child_id));
+}
+
+#[tokio::test]
+async fn existing_control_plane_workspace_is_not_an_implicit_working_directory() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = config_with_model("anthropic", "global-model").with_workspace_definition(
+        talos_config::WorkspaceDefinition::new("default", directory.path()),
+    );
+    let workspace = config.resolve_workspace("default", "user-1").unwrap();
+    std::fs::create_dir_all(&workspace.root).unwrap();
+    let service = crate::test_support::session_service(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config,
+    );
+    let session = service
+        .create_session(create_session_params(source(), "agent-1", None))
+        .await
+        .unwrap();
+    let context = service
+        .build_agent_context(&session, AgentTurnRef::new(&session.id, "turn-1"))
+        .await
+        .unwrap();
+    assert_eq!(context.session.workspace, workspace);
+    assert_eq!(context.working_directory, None);
 }

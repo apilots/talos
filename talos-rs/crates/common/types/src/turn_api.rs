@@ -10,6 +10,10 @@ use ts_rs::TS;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct StartTurnRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
     pub session_id: String,
     pub input: AgentUserInput,
     #[serde(default)]
@@ -99,4 +103,21 @@ pub struct StartTurnResponse {
     pub session_id: String,
     pub turn_id: String,
     pub status: TurnCommandStatus,
+}
+
+/// The current product command that owns one durable idempotency namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum IdempotentCommand {
+    TurnSubmission,
+    TurnInput,
+}
+
+impl IdempotentCommand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TurnSubmission => "turn_submission",
+            Self::TurnInput => "turn_input",
+        }
+    }
 }

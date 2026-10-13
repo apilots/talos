@@ -1,0 +1,89 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "types.proto";
+import "auth.proto";
+import "memory.proto";
+
+// Ordinary per-method gRPC. Each node serves its existing local Harness instances.
+service AgentHarnessRpc {
+  rpc ReadSessionExecutionState(ReadSessionExecutionStateRequest) returns (SessionExecutionStateResponse);
+  rpc CommitSessionExecutionState(CommitSessionExecutionStateRequest) returns (EmptyResponse);
+  rpc Start(stream StartRequest) returns (stream RunResponse);
+  rpc SubmitInput(stream SubmitInputRequest) returns (stream InputResponse);
+  rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+  rpc CompactSession(stream CompactSessionRequest) returns (stream RunResponse);
+  rpc ClearSession(SessionRequest) returns (EmptyResponse);
+  rpc CloseSession(SessionRequest) returns (EmptyResponse);
+  rpc ReadWorkspaceMemory(SessionRequest) returns (WorkspaceMemoryResponse);
+  rpc UpdateWorkspaceMemory(UpdateWorkspaceMemoryRequest) returns (WorkspaceMemoryResponse);
+  rpc FormDreamMemory(stream FormDreamMemoryRequest) returns (stream FormDreamMemoryResponse);
+  rpc Shutdown(ShutdownRequest) returns (EmptyResponse);
+}
+// First frame supplies business params. Exactly one commit follows admission.
+// Dropping the request stream before commit releases the unconsumed local permit.
+message StartRequest { NodeAuth auth = 1; StartParams params = 2; CoordinatorCallContext caller = 3; }
+message StartParams { oneof body { RunParams run = 1; Empty commit = 2; } }
+message CompactSessionRequest { NodeAuth auth = 1; CompactSessionParams params = 2; CoordinatorCallContext caller = 3; }
+message CompactSessionParams { oneof body { AgentContext context = 1; Empty commit = 2; } }
+message SubmitInputRequest { NodeAuth auth = 1; SubmitInputParams params = 2; CoordinatorCallContext caller = 3; }
+message SubmitInputParams { oneof body { InputParams input = 1; Empty commit = 2; } }
+message Admission { repeated AgentEvent events = 1; }
+message RunResponse {
+  oneof result {
+    Admission admission = 1;
+    AgentEvent progress = 2;
+    Settlement settlement = 3;
+    Failure failure = 4;
+    // Result of the existing AgentAdmissionPermit.consume(), not a business ACK.
+    Empty accepted = 5;
+  }
+}
+message InputResponse {
+  oneof result { Admission admission = 1; Empty accepted = 2; Failure failure = 3; }
+}
+message InterruptParams { string agent_id = 1; TurnRef identity = 2; }
+message InterruptRequest { NodeAuth auth = 1; InterruptParams params = 2; CoordinatorCallContext caller = 3; }
+message InterruptResponse { oneof result { InterruptResult interrupted = 1; Failure failure = 2; } }
+message InterruptResult {
+  oneof outcome { Empty cancelled = 1; Empty completed = 2; uint32 unconfirmed_task_count = 3; }
+}
+// Clear/Close require the original Store history_cursor; memory reads omit it.
+message SessionRequest { NodeAuth auth = 1; SessionContext params = 2; CoordinatorCallContext caller = 3; SessionHistoryCursor expected_history_cursor = 4; }
+message ShutdownParams { string agent_id = 1; uint64 timeout_ms = 2; }
+message ShutdownRequest { NodeAuth auth = 1; ShutdownParams params = 2; }
+message EmptyResponse { oneof result { Empty completed = 1; Failure failure = 2; } }
+message WaitingSettlement { AgentEvent event = 1; ContinuationRef continuation = 2; RunMetrics metrics = 3; }
+message FinishedSettlement {
+  AgentEvent event = 1; repeated AgentMessage messages = 2; RunMetrics metrics = 3;
+  oneof result { Empty success = 4; Failure failure = 5; }
+}
+message Settlement {
+  oneof result { WaitingSettlement waiting = 1; FinishedSettlement finished = 2; }
+}
+
+// Invocation-scoped model callback, not a generic LLM transport. These fields
+// project exactly the text/usage consumed by the existing formation algorithm.
+// Model selection and accounting run on the control plane; policy/files on node.
+message DreamMemoryModelPrompt { string system = 1; string user = 2; }
+message DreamMemoryModelReply { string content = 1; TokenUsage usage = 2; }
+message FormDreamMemoryRequest {
+  NodeAuth auth = 1;
+  CoordinatorCallContext caller = 5;
+  oneof body { SessionContext context = 2; DreamMemoryModelReply model_reply = 3; Failure model_failure = 4; }
+}
+message DreamMemoryFormation { optional uint64 covers_until_seq = 1; }
+message FormDreamMemoryResponse {
+  oneof result { DreamMemoryModelPrompt model_prompt = 1; DreamMemoryFormation formed = 2; Failure failure = 3; }
+}
+
+enum SessionStateVisibility { SESSION_STATE_VISIBILITY_UNSPECIFIED = 0; LOCAL = 1; SHARED = 2; }
+message SessionExecutionState {
+  SessionHistoryCursor history_cursor = 1;
+  optional TurnRef active_turn = 2;
+  optional string coordinator_id = 3;
+  bool handoff_ready = 4;
+}
+message ReadSessionExecutionStateRequest { NodeAuth auth = 1; SessionContext params = 2; CoordinatorCallContext caller = 3; }
+message SessionExecutionStateResponse { oneof result { SessionExecutionState state = 1; Failure failure = 2; } }
+message CommitSessionExecutionStateParams { SessionContext session = 1; TurnRef identity = 2; SessionHistoryCursor history_cursor = 3; SessionStateVisibility visibility = 4; }
+message CommitSessionExecutionStateRequest { NodeAuth auth = 1; CommitSessionExecutionStateParams params = 2; CoordinatorCallContext caller = 3; }

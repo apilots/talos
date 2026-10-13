@@ -179,6 +179,7 @@ export function useChatSessionComposer({
         );
         return chat.sendTurn({
           modelSelection: modelSelectionForRef(models, currentModelRef, currentReasoningLevel),
+          nodeId: locationState?.initialNodeId,
           project: selectedProject,
           userPermissionMode: permissionMode.value,
           ...fileOptions,

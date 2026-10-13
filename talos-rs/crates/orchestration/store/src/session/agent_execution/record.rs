@@ -139,7 +139,7 @@ pub(super) async fn load_event_range(
     rows.iter().map(parse_event_record).collect()
 }
 
-pub(super) fn parse_event_record(row: &Row) -> TalosResult<AgentEventRecord> {
+pub(crate) fn parse_event_record(row: &Row) -> TalosResult<AgentEventRecord> {
     let payload = row
         .get_string("payload_json")
         .ok_or_else(|| TalosError::internal("Agent event record is missing payload"))
@@ -166,7 +166,7 @@ pub(super) fn parse_event_record(row: &Row) -> TalosResult<AgentEventRecord> {
     })
 }
 
-pub(super) fn parse_active_turn(row: &Row) -> TalosResult<AgentActiveTurnRecord> {
+pub(crate) fn parse_active_turn(row: &Row) -> TalosResult<AgentActiveTurnRecord> {
     let state = match required_string(row, "state")?.as_str() {
         "running" => ActiveTurnState::Running,
         "waiting_for_input" => ActiveTurnState::WaitingForInput,
@@ -195,7 +195,7 @@ pub(super) fn parse_active_turn(row: &Row) -> TalosResult<AgentActiveTurnRecord>
     })
 }
 
-pub(super) fn parse_continuation_binding(row: &Row) -> TalosResult<AgentContinuationBindingRecord> {
+pub(crate) fn parse_continuation_binding(row: &Row) -> TalosResult<AgentContinuationBindingRecord> {
     let claim_id = row
         .get_string("claim_id")
         .filter(|value| !value.trim().is_empty());

@@ -54,7 +54,19 @@ impl ProjectStore for MockProjectStore {
         directory: &Path,
         user_id: &str,
     ) -> TalosResult<ProjectRecord> {
+        self.create_project_on_node(name, directory, user_id, "embedded")
+            .await
+    }
+
+    async fn create_project_on_node(
+        &self,
+        name: &str,
+        directory: &Path,
+        user_id: &str,
+        node_id: &str,
+    ) -> TalosResult<ProjectRecord> {
         Ok(ProjectRecord {
+            execution_node_id: node_id.to_owned(),
             project_id: "project-mock".to_string(),
             name: name.to_string(),
             user_id: user_id.to_string(),

@@ -19,6 +19,9 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub(super) enum FakeMode {
     Release,
+    ProgressThenRelease,
+    FloodProgress,
+    BurstProgress,
     Input,
     PendingInput,
     RejectInput,
@@ -173,6 +176,35 @@ impl AgentSession for FakeSession {
                     () = turn.control.cancellation().requested() => interrupted(),
                 }
             }
+            FakeMode::FloodProgress | FakeMode::BurstProgress => {
+                for count in 1..=128 {
+                    tokio::select! {
+                        () = turn.control.cancellation().requested() => return interrupted(),
+                        result = turn.events.update_metrics(talos_agent_api::AgentRunMetrics {
+                            usage: TokenUsage { input_tokens: count, total_tokens: count, ..TokenUsage::default() },
+                            ..talos_agent_api::AgentRunMetrics::default()
+                        }) => result?,
+                    }
+                }
+                match self.provider.mode {
+                    FakeMode::FloodProgress => {
+                        turn.control.cancellation().requested().await;
+                        interrupted()
+                    }
+                    FakeMode::BurstProgress => completed(),
+                    _ => unreachable!("progress mode"),
+                }
+            }
+            FakeMode::ProgressThenRelease => {
+                let message = turn.events.start_message(AgentMessageRole::Agent).await?;
+                tokio::select! {
+                    () = self.provider.release.notified() => {
+                        turn.events.complete_message(&message, talos_agent_api::AgentMessageStatus::Completed).await?;
+                        completed()
+                    },
+                    () = turn.control.cancellation().requested() => interrupted(),
+                }
+            }
             FakeMode::Input => {
                 tokio::select! {
                     delivery = turn.input.receive() => {
@@ -320,6 +352,7 @@ pub(super) fn user_message(
 
 pub(super) fn context(identity: AgentTurnRef) -> AgentContext {
     AgentContext {
+        history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),
             session_id: identity.session_id,

@@ -42,6 +42,10 @@ pub(super) async fn shutdown_signal() {
 
 impl TalosApplicationRuntime {
     pub async fn shutdown(&self) -> TalosResult<()> {
+        let registration_result = match self.worker_registration.lock().await.take() {
+            Some(registration) => registration.shutdown().await,
+            None => Ok(()),
+        };
         let automation_result = self.automation.shutdown().await;
         let drain_result = self
             .coordinator
@@ -55,7 +59,10 @@ impl TalosApplicationRuntime {
                 Err(error)
             }
         };
-        combine(result, self.service.plugins.shutdown_mcp().await)
+        let result = combine(result, registration_result);
+        let result = combine(result, self.worker.plugin_manager().shutdown_mcp().await);
+        let result = combine(result, self.worker_rpc.shutdown().await);
+        combine(result, self.resource_rpc.shutdown().await)
     }
 }
 

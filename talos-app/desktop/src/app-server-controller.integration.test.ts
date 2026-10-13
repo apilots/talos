@@ -35,6 +35,10 @@ class RecordingBridge implements AppServerBridge {
     return this.inner.invoke<T>(method, params);
   }
 
+  onNotification(handler: (notification: AppProtocol.JsonRpcNotification) => void): () => void {
+    return this.inner.onNotification(handler);
+  }
+
   onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void {
     return this.inner.onEvent(handler);
   }

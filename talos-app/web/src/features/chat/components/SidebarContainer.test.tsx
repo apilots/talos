@@ -93,6 +93,7 @@ vi.mock("../hooks/useChatQueries", () => ({
 }));
 
 vi.mock("@/features/auth", () => ({
+  useLogout: () => vi.fn(),
   logoutUser: vi.fn(),
 }));
 

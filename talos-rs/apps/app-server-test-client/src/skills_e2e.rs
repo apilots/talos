@@ -19,6 +19,7 @@ async fn configured_root_skill_e2e(client: &mut AppServerClient) -> Result<()> {
     eprintln!("skills-e2e configured suggest");
     let suggestions = client
         .suggest_skills(SkillsSuggestRequest {
+            node_id: None,
             query: "localizer".to_string(),
             limit: Some(8),
         })
@@ -30,6 +31,7 @@ async fn configured_root_skill_e2e(client: &mut AppServerClient) -> Result<()> {
         .ok_or_else(|| anyhow!("e2e-localizer skill was not suggested"))?;
     let listed = client
         .list_skills(SkillsListRequest {
+            node_id: None,
             include_disabled: false,
         })
         .await?;
@@ -61,6 +63,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     let source_repo = plugin_marketplace_fixture_path()?;
     let added = client
         .add_plugin_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: source_repo,
                 sparse_paths: vec!["skills".to_string()],
@@ -72,6 +75,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     eprintln!("skills-e2e plugin source refresh");
     let refreshed = client
         .refresh_plugin_source(PluginSourceRefreshRequest {
+            node_id: None,
             source_id: added.source.id.clone(),
         })
         .await?;
@@ -85,6 +89,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     eprintln!("skills-e2e plugin search");
     let search = client
         .search_plugins(PluginSearchRequest {
+            node_id: None,
             query: Some("localizer".to_string()),
             source_id: Some(added.source.id),
             kind: Some(PluginKind::Skill),
@@ -126,6 +131,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     eprintln!("skills-e2e plugin read");
     let plugin_document = client
         .read_plugin(PluginReadRequest {
+            node_id: None,
             plugin_id: plugin.id.clone(),
         })
         .await?;
@@ -146,6 +152,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     eprintln!("skills-e2e plugin install");
     let installed = client
         .install_plugin(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: plugin.id.clone(),
                 expected_source_commit: plugin.source_commit.clone(),
@@ -158,6 +165,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     eprintln!("skills-e2e plugin skills.list");
     let listed = client
         .list_skills(SkillsListRequest {
+            node_id: None,
             include_disabled: false,
         })
         .await?;
@@ -187,6 +195,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     eprintln!("skills-e2e plugin skills.read");
     let document = client
         .read_skill(SkillsReadRequest {
+            node_id: None,
             selector: SkillSelector {
                 name: Some(skill.name.clone()),
                 path: Some(skill.path.clone()),
@@ -224,6 +233,7 @@ async fn ensure_skill_resolves(client: &mut AppServerClient, skill: &SkillSummar
     eprintln!("skills-e2e resolve {}", skill.name);
     let resolved = client
         .resolve_skills(SkillsResolveRequest {
+            node_id: None,
             text: format!("Use ${}.", skill.name),
             selected: vec![SkillSelector {
                 name: Some(skill.name.clone()),
@@ -257,6 +267,7 @@ async fn run_selected_skill_turn(
     let session_id = super::new_session_id(client).await?;
     client
         .start_turn(StartTurnRequest {
+            node_id: None,
             session_id: session_id.clone(),
             input: AgentUserInput {
                 content: vec![

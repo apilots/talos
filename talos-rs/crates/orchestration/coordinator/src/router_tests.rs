@@ -55,7 +55,7 @@ fn test_router(policy_target: Option<&str>) -> (AgentRouter, AgentRegistry) {
 
 async fn register_agent(registry: &AgentRegistry, id: &str) {
     registry
-        .register(id.to_string(), Arc::new(TestHarness))
+        .register("embedded".into(), id.to_string(), Arc::new(TestHarness))
         .await
         .expect("agent should register");
 }

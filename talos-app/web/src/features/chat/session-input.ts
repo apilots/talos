@@ -8,6 +8,7 @@ import type {
 import type { ProjectView } from "@/shared/types/ui";
 
 export interface SendTextOptions {
+  nodeId?: string;
   modelSelection?: ModelSelection;
   userPermissionMode?: UserPermissionMode;
   project?: ProjectView;

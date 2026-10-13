@@ -7,6 +7,7 @@ import {
   AppServerClient,
   type AppServerErrorHandler,
   type AppServerEventHandler,
+  type AppServerActiveTurnChangedHandler,
   type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
@@ -62,6 +63,7 @@ export class AppServerProtocolError extends Error {
 export class JsonRpcStdioTransport implements AppServerTransport {
   private child?: ChildProcessWithoutNullStreams;
   private stdout?: ReadlineInterface;
+  private closing?: Promise<void>;
   private nextId = 1;
   private readonly pending = new Map<AppProtocol.RequestId, PendingRequest>();
   private readonly events = new EventEmitter();
@@ -70,6 +72,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
   constructor(private readonly options: JsonRpcStdioTransportOptions = {}) {}
 
   start(): void {
+    if (this.closing) { throw new Error("App-server is closing."); }
     if (this.child) {
       return;
     }
@@ -80,6 +83,10 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    child.stdin.on("error", (error) => {
+      this.rejectPending(error);
+      if (!this.closing) { this.events.emit("transportError", error); }
+    });
     child.stderr.on("data", (chunk: Buffer) => {
       this.events.emit("stderr", chunk.toString("utf8"));
     });
@@ -110,20 +117,39 @@ export class JsonRpcStdioTransport implements AppServerTransport {
   }
 
   async close(): Promise<void> {
+    if (this.closing) { return this.closing; }
     const child = this.child;
-    if (!child) {
-      return;
-    }
-
-    this.child = undefined;
-    this.stdout?.close();
-    this.stdout = undefined;
-    child.stdin.end();
-    await new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-      child.kill("SIGTERM");
-      setTimeout(resolve, 2_000).unref();
+    if (!child) { return; }
+    this.rejectPending(new Error("App-server connection is closing."));
+    // EOF lets the backend unregister the Worker and drain MCP before exiting.
+    // The timeout covers the existing server shutdown budget, not a second lifecycle protocol.
+    this.closing = new Promise<void>((resolve, reject) => {
+      let forced = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const timer = setTimeout(() => {
+        forced = true;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => child.kill("SIGKILL"), 2_000);
+      }, 240_000);
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        if (killTimer) { clearTimeout(killTimer); }
+        if (error) { reject(error); }
+        else if (forced) { reject(new Error("App-server graceful shutdown timed out.")); }
+        else { resolve(); }
+      };
+      child.once("exit", (code, signal) => finish(code === 0 && signal === null ? undefined :
+        new Error("App-server exited before graceful shutdown completed.", { cause: { code, signal } })));
+      child.once("error", finish);
+      child.stdin.end();
     });
+    try { await this.closing; }
+    finally {
+      this.stdout?.close();
+      this.stdout = undefined;
+      this.child = undefined;
+      this.closing = undefined;
+    }
   }
 
   terminate(signal: NodeJS.Signals = "SIGTERM"): boolean {
@@ -184,6 +210,10 @@ export class JsonRpcStdioTransport implements AppServerTransport {
   onEvent(handler: AppServerEventHandler): () => void {
     this.events.on("event", handler);
     return () => this.events.off("event", handler);
+  }
+
+  onActiveTurnChanged(handler: AppServerActiveTurnChangedHandler): () => void {
+    this.events.on("activeTurnChanged", handler); return () => this.events.off("activeTurnChanged", handler);
   }
 
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
@@ -305,6 +335,9 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       }
       if (isSubscriptionTerminatedNotification(message.params)) {
         this.events.emit("subscriptionTerminated", message.params);
+      }
+      if (message.method === "session/activeTurnChanged" && message.params && typeof message.params === "object" && "sessionId" in message.params && "state" in message.params) {
+        this.events.emit("activeTurnChanged", message.params);
       }
       if (
         message.method === "messageQueue/changed" &&

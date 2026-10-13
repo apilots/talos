@@ -1,3 +1,4 @@
+import { useEnvironmentKey } from "@/features/computers";
 import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useQuery } from "@tanstack/react-query";
 import type { Plugin, McpServerInfo } from "@talos/sdk-browser";
@@ -28,17 +29,18 @@ type McpFormState =
     };
 
 export function SettingsMcpServersSection() {
+  const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("settings");
   const [actionError, setActionError] = useState<unknown>(null);
   const [configOpen, setConfigOpen] = useState<string | null>(null);
   const [formState, setFormState] = useState<McpFormState | null>(null);
   const [actionPluginId, setActionPluginId] = useState<string | null>(null);
   const pluginsQuery = useQuery({
-    queryKey: ["talos", "settings", "mcp-servers"],
+    queryKey: ["talos", environmentKey, "settings", "mcp-servers"],
     queryFn: listManagedMcpPlugins,
   });
   const connectionsQuery = useQuery({
-    queryKey: ["talos", "settings", "mcp-connections"],
+    queryKey: ["talos", environmentKey, "settings", "mcp-connections"],
     queryFn: async () => {
       const servers: McpServerInfo[] = [];
       let cursor: string | undefined;

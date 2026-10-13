@@ -1,7 +1,7 @@
+mod codec;
+use codec::{decode_file_upload_data, talos_error_to_api_error, to_value};
+
 use async_trait::async_trait;
-use base64::Engine;
-use bytes::Bytes;
-use serde::Serialize;
 use serde_json::Value;
 use talos_agent_api::AgentTurnRef;
 use talos_app_protocol::errors::AppServerErrorBody;
@@ -16,7 +16,7 @@ use talos_types::{
 
 use std::sync::Arc;
 use std::time::Duration;
-use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
+use talos_error::{ApiError, ErrorCode, TalosResult};
 
 /// Abstraction for draining application-owned background tasks during shutdown.
 #[async_trait::async_trait]
@@ -51,6 +51,11 @@ pub struct ApplicationResponse {
 
 #[async_trait]
 pub trait AppServerApplication: Send + Sync {
+    /// Desktop-only terminal registration feedback; never a product event or durable state.
+    fn subscribe_worker_failures(&self) -> Option<tokio::sync::watch::Receiver<Option<ApiError>>> {
+        None
+    }
+
     async fn dispatch(
         &self,
         actor: &Actor,
@@ -207,6 +212,66 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(talos_error_to_api_error)?;
                 to_value(snapshot)
             }
+            ClientRequestParams::DesktopConnectionRead(_)
+            | ClientRequestParams::DesktopConnectionSet(_)
+            | ClientRequestParams::DesktopWorkerIdentity(_)
+            | ClientRequestParams::DesktopWorkerEnroll(_) => {
+                Err(ApiError::new(ErrorCode::InvalidRequest))
+            }
+            ClientRequestParams::SyncStatus(_) => to_value(
+                self.app
+                    .sync_status(actor)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::SyncEnable(params) => to_value(
+                self.app
+                    .enable_sync(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::SyncDisable(_) => to_value(
+                self.app
+                    .disable_sync(actor)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerList(params) => to_value(
+                self.gateway
+                    .list_computers(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerRead(params) => to_value(
+                self.gateway
+                    .read_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerCreate(params) => to_value(
+                self.gateway
+                    .create_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerRename(params) => to_value(
+                self.gateway
+                    .rename_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerSetStatus(params) => to_value(
+                self.gateway
+                    .set_computer_status(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerRotateCredential(params) => to_value(
+                self.gateway
+                    .rotate_computer_credential(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::ProjectCreate(params) => to_value(
                 self.gateway
                     .create_project(actor, params)
@@ -315,10 +380,10 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::EventUnsubscribe(_) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest))
             }
-            ClientRequestParams::ModelList(_) => {
+            ClientRequestParams::ModelList(params) => {
                 let models = self
                     .gateway
-                    .list_models(actor, talos_types::ModelListRequest::default())
+                    .list_models(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?;
                 to_value(models)
@@ -711,62 +776,6 @@ impl TalosApplicationAdapter {
             .await
             .map_err(talos_error_to_api_error)
     }
-}
-
-fn to_value<T: Serialize>(value: T) -> ApplicationResult<ApplicationResponse> {
-    serde_json::to_value(value)
-        .map(|body| ApplicationResponse {
-            body,
-            started_turn: None,
-        })
-        .map_err(|error| {
-            talos_error_to_api_error(TalosError::internal_with_source(
-                "Failed to encode the app-server application response.",
-                error,
-            ))
-        })
-}
-
-fn decode_file_upload_data(data_base64: &str, max_upload_bytes: u64) -> ApplicationResult<Bytes> {
-    let max_encoded_len = max_upload_bytes
-        .saturating_add(2)
-        .saturating_div(3)
-        .saturating_mul(4);
-    let encoded_len = u64::try_from(data_base64.len()).map_err(|error| {
-        talos_error_to_api_error(TalosError::from_source(
-            ErrorCode::UploadTooLarge,
-            "The encoded file upload exceeds the configured size limit.",
-            error,
-        ))
-    })?;
-    if encoded_len > max_encoded_len {
-        return Err(talos_error_to_api_error(TalosError::new(
-            ErrorCode::UploadTooLarge,
-            "The encoded file upload exceeds the configured size limit.",
-        )));
-    }
-
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(data_base64)
-        .map_err(|error| {
-            talos_error_to_api_error(TalosError::from_source(
-                ErrorCode::InvalidRequest,
-                "The file upload is not valid standard Base64.",
-                error,
-            ))
-        })?;
-    if decoded.len() as u64 > max_upload_bytes {
-        return Err(talos_error_to_api_error(TalosError::new(
-            ErrorCode::UploadTooLarge,
-            "The decoded file upload exceeds the configured size limit.",
-        )));
-    }
-    Ok(Bytes::from(decoded))
-}
-
-fn talos_error_to_api_error(error: TalosError) -> ApiError {
-    talos_logging::report_error(&error);
-    error.to_api_error()
 }
 
 #[cfg(test)]

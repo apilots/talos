@@ -313,15 +313,30 @@ pub struct SkillWarning {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
 pub struct SkillsListRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     #[serde(default)]
     pub include_disabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
-pub struct SkillsRefreshRequest {}
+pub struct SkillsRefreshRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
 pub struct SkillsSuggestRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     #[serde(default)]
     pub query: String,
     #[serde(default)]
@@ -330,11 +345,21 @@ pub struct SkillsSuggestRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct SkillsReadRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub selector: SkillSelector,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
 pub struct SkillsResolveRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     #[serde(default)]
     pub text: String,
     #[serde(default)]

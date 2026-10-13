@@ -10,6 +10,24 @@ import { DesktopAppServerController } from "./app-server-controller";
 import type { TalosRuntimeState } from "./ipc";
 
 describe("DesktopAppServerController", () => {
+  it("forwards real-time active and queue notices and clears an old Worker failure after recovery", async () => {
+    const bridge = new FakeBridge();
+    const onActiveTurnChanged = vi.fn();
+    const onMessageQueueChanged = vi.fn();
+    const onRuntimeState = vi.fn();
+    const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onActiveTurnChanged, onMessageQueueChanged, onRuntimeState });
+    await controller.connect();
+    const active = { sessionId: "shared", state: { activeTurn: null, latestEventId: null } };
+    bridge.emitNotification({ jsonrpc: "2.0", method: "session/activeTurnChanged", params: active });
+    bridge.emitNotification({ jsonrpc: "2.0", method: "messageQueue/changed", params: { sessionId: "shared", revision: 2 } });
+    bridge.emitNotification({ jsonrpc: "2.0", method: "desktop/worker/failed", params: { code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Computer unavailable", localization: null } });
+    bridge.emitNotification({ jsonrpc: "2.0", method: "desktop/worker/ready", params: null });
+    expect(onActiveTurnChanged).toHaveBeenCalledWith(active);
+    expect(onMessageQueueChanged).toHaveBeenCalledWith({ sessionId: "shared", revision: 2 });
+    expect(onRuntimeState.mock.calls.at(-1)).toEqual([{ kind: "ready", message: null }]);
+    await controller.close();
+  });
+
   it("terminates subscriptions when background reconnect fails without a waiting request", async () => {
     vi.useFakeTimers();
     const bridge = new FakeBridge();

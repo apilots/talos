@@ -6,6 +6,8 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+agent-protocol = { workspace = true }
+url = "2"
 talos-logging = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-gateway = { path = "../core" }

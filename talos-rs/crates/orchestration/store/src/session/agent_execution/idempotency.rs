@@ -25,7 +25,9 @@ pub(super) async fn reserve(
     requested: CommandReservation,
 ) -> TalosResult<IdempotencyReservation> {
     validate_reservation(&requested)?;
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&requested.session_id)
+        .await?;
     let existing = load(
         transaction.as_mut(),
         &requested.session_id,
@@ -119,7 +121,7 @@ pub(super) async fn reserve(
 
 pub(super) async fn release(store: &DatabaseSessionStore, lease: CommandLease) -> TalosResult<()> {
     validate_lease(&lease)?;
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store.begin_session_transaction(&lease.session_id).await?;
     let query = match lease.command {
         IdempotentCommand::TurnSubmission => {
             r#"

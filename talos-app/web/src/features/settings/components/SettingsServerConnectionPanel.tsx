@@ -28,6 +28,7 @@ export function SettingsServerConnectionPanel({
 }: SettingsServerConnectionProps) {
   const { t } = useTranslation(["settings", "common"]);
   const desktopRuntime = isDesktopRuntime();
+  const hasChanges = draft.authToken !== connection.authToken;
 
   return (
     <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/88 p-6">
@@ -49,6 +50,7 @@ export function SettingsServerConnectionPanel({
         className="mt-6 space-y-5"
         onSubmit={(event) => {
           event.preventDefault();
+          if (!hasChanges) return;
           setConnection(draft);
           void models.refetch();
         }}
@@ -67,7 +69,7 @@ export function SettingsServerConnectionPanel({
           >
             {t("settings:reset")}
           </Button>
-          <Button type="submit">
+          <Button disabled={!hasChanges} type="submit">
             <CheckCircle2 size={16} />
             {t("common:save")}
           </Button>

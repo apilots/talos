@@ -49,10 +49,20 @@ single case during development and the owning group before handoff.
 | `11`-`13` | Cloud auth, files, and durable user interaction |
 | `14` | Unified sandbox and permission enforcement |
 | `15` | Release bundle installation and installed TUI startup |
+| `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
+| `18` | Computer workspace: real Desktop device login, durable UUID, outbound registration and renewal |
+| `19` | Multi-control-plane sync: two native Mac Desktop runtimes, native and Docker Workers, Docker WSS hub, real auth and model tasks |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 There is no current group `04`; use the scenario directory rather than assuming
 that group numbers are contiguous.
+
+The GitHub PR quality gate runs all existing E2E cases and groups except
+`19_computer_sync`. That group needs a Mac host plus multiple Docker services and
+is a local topology acceptance. It must be run and reported locally; its exclusion
+does not waive gated coverage for agent or product behavior.
+Group `15_tui_install` is covered by the separate TUI install gate, including four
+native platform runners and the Linux Docker install case.
 
 ## Environment requirements
 
@@ -61,12 +71,41 @@ that group numbers are contiguous.
 | Base server, CLI, and TUI | Rust toolchain and repository test tools |
 | Web and Desktop | Node.js, pnpm dependencies, and platform UI prerequisites |
 | Real model or MCP flows | Network access and the provider credentials required by the scenario preflight |
-| Cloud auth and S3 | Explicit cloud test credentials and isolated resources |
+| Cloud auth | Explicit cloud test credentials and isolated resources |
+| S3 files | curl with SigV4 support; pinned Versity Gateway v1.8.0 (downloaded and checksum-verified by group 12) |
 | Linux sandbox supplements | Docker on a supported host |
 | Release installation | Native target environment; Docker supplements Linux only |
 
 Each scenario owns its preflight and reports missing variables or tools. Read
 the selected script before running a credentialed or external-service group.
+
+`just e2e-group 17_multi_node` starts a real Cloud Auth server, one Talos Server,
+and three Talos Workers in isolated homes. It requires the adjacent `talos-cloud`
+checkout (or `TALOS_CLOUD_REPO`), `protoc`, and Python `grpcio`, `protobuf` and
+`PyYAML`. Execution scenarios also require a real provider key in `.env`. The attachment
+scenario uses `deepseek-v4-flash-vision-exp` by default; `TALOS_E2E_IMAGE_MODEL`
+can select another configured, accessible vision model.
+Management uses the existing protobuf descriptors and public RPCs; SQLite is
+opened read-only for persistence assertions. No fake Provider or direct database
+registration is used. Set `TALOS_MULTI_NODE_KEEP_TMP=1` to retain fixture data
+for diagnosis; retained homes contain test credentials. A failed acceptance
+scenario is reported as FAIL even when it exposes a known implementation bug.
+
+Computer registration and outbound execution use `18_computer_workspace`.
+Registration alone: `just e2e-case 18_computer_workspace/01_registration`, with
+Caddy (`TALOS_E2E_CADDY_BIN`), Node.js and pnpm dependencies; no model key required.
+The full group also requires funded execution/inner/vision providers. Real
+execution acceptance has resumed after provider funding. See the
+[scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
+
+Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
+Mac with Docker, the adjacent `talos-sync` and `talos-cloud` sources, and the same
+protobuf/Python/Node prerequisites. The group builds current Worker and Sync
+images, starts isolated real services, and checks owner isolation, hardware
+registration, realtime history, same-Computer continuation, offline outbox,
+and restart recovery. Only execution/recovery cases need funded model access;
+registration does not. See the [scenario contract](scenarios/19_computer_sync/README.md).
+The Cloud frontend is not required: the fixture uses real device authorization APIs.
 
 ## Evidence and temporary data
 
@@ -81,3 +120,8 @@ the location. These directories are generated output, not source documentation.
 - Use real services only in scenarios that explicitly own that integration.
 - Reuse shared runner helpers and fixtures instead of duplicating setup.
 - Preserve logs or reports that prove the critical behavior when manual evidence is required.
+
+Group `12_files` retains Local attachment and S3 upload/list/read/delete coverage.
+Its S3 helper owns a standalone Versity Gateway process and temporary directory
+under `scenarios/12_files/.tmp/`; the scenario EXIT trap stops the process and
+removes the directory, including on failure. No Docker or MinIO client is needed.

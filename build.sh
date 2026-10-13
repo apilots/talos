@@ -17,7 +17,7 @@ Usage: ./build.sh [all|server|server-bin|server-webui|tui|webui|desktop|desktop-
 Targets:
   all      Build deployable server+WebUI, TUI, and packaged Desktop products.
   server   Build a deployable server+WebUI tarball, and optionally a Docker image.
-  server-bin  Build only the Talos server binary.
+  server-bin  Build the Talos server and worker binaries.
   server-webui  Compatibility alias for server.
   tui      Build the terminal UI binary.
   webui    Build the browser WebUI bundle.
@@ -68,9 +68,11 @@ require_docker() {
   }
 }
 
-cargo_profile_args() {
+cargo_build() {
   if [[ "${PROFILE}" == "release" ]]; then
-    echo "--release"
+    cargo build "$@" --release
+  else
+    cargo build "$@"
   fi
 }
 
@@ -183,27 +185,32 @@ tui_package_version() {
 create_tui_tarball() {
   local package_dir="$1"
   local version="$2"
-  local archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
+  local archive_path
+  archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
   tar -czf "${archive_path}" -C "${package_dir}" bin conf
 }
 
 build_server() {
-  echo "Building Talos server..."
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-server --bin talos-server $(cargo_profile_args)
+  echo "Building Talos server and worker..."
+  cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-server --bin talos-server
+  cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-worker-bin --bin talos-worker
   copy_rust_binary_as "talos-server" "${PRODUCT_DIR}/server/talos-server"
+  copy_rust_binary_as "talos-worker" "${PRODUCT_DIR}/server/talos-worker"
   copy_conf_resource "${PRODUCT_DIR}/server"
 }
 
 build_server_webui() {
   echo "Building deployable Talos server+WebUI package..."
   require_pnpm
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-server --bin talos-server $(cargo_profile_args)
+  cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-server --bin talos-server
+  cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-worker-bin --bin talos-worker
   pnpm --dir "${REPO_ROOT}/talos-app" --filter talos-web build
 
   local version="${SERVER_PACKAGE_VERSION:-$(workspace_version)}"
   local archive_dir="${PRODUCT_DIR}/server"
   local staging_dir="${PRODUCT_DIR}/.staging/talos-server"
-  local archive_path="${archive_dir}/Talos-Server-${version}-$(package_platform)-$(package_arch).tar.gz"
+  local archive_path
+  archive_path="${archive_dir}/Talos-Server-${version}-$(package_platform)-$(package_arch).tar.gz"
   rm -rf "${staging_dir}" "${archive_dir}"
   mkdir -p "${staging_dir}/bin" "${staging_dir}/webui" "${archive_dir}"
 
@@ -212,6 +219,7 @@ build_server_webui() {
     rm -f "${staging_dir}/Dockerfile" "${staging_dir}/Dockerfile.dockerignore"
   fi
   copy_rust_binary_as "talos-server" "${staging_dir}/bin/talos-server"
+  copy_rust_binary_as "talos-worker" "${staging_dir}/bin/talos-worker"
   copy_conf_resource "${staging_dir}"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${staging_dir}/webui/"
   tar -czf "${archive_path}" -C "${staging_dir}" .
@@ -274,7 +282,7 @@ build_tui() {
   local version
   version="$(tui_package_version)"
   echo "Building Talos TUI..."
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-tui --bin talos $(cargo_profile_args)
+  cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-tui --bin talos
   rm -rf "${PRODUCT_DIR}/tui"
   mkdir -p "${PRODUCT_DIR}/tui"
   copy_rust_binary_as "talos" "${PRODUCT_DIR}/tui/bin/talos"

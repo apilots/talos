@@ -157,6 +157,9 @@ pub struct McpServerInfo {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpServerListRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     #[ts(optional)]
     pub cursor: Option<String>,
     #[ts(optional)]

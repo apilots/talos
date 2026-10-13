@@ -63,7 +63,12 @@ impl AgentRouter {
                     "no Agent routing binding matched the Session source",
                 )
             })?;
-        self.registry.get(&agent_id).await?;
+        if !self.registry.contains_agent(&agent_id).await {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                agent_id,
+            ));
+        }
         Ok(agent_id)
     }
 }

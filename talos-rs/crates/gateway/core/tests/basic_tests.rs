@@ -13,18 +13,16 @@ use talos_agent_api::{
     AgentEventPayload, AgentInterruptOutcome, AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
 };
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserRole, UserService};
-use talos_config::{ConfigStore, DeploymentMode, InMemoryLlmConfigStore, ProviderModelConfig};
+use talos_config::{DeploymentMode, InMemoryLlmConfigStore, ProviderModelConfig};
 use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_service::TimelineEventService;
 use talos_service::{
-    Actor, ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, FileService, MemoryService,
-    TalosService,
+    Actor, ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, FileService, TalosService,
 };
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
-use talos_store::memory::MemoryStore;
 use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::{ProjectStore, StorageProjectStore};
@@ -32,8 +30,8 @@ use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionSto
 use talos_types::talos::SessionSource;
 use talos_types::{AgentUserContent, AgentUserInput};
 use talos_types::{
-    ConfigGetRequest, ConfigPath, ConfigUpdateRequest, ConfigValue, SessionPatchRequest,
-    StartTurnRequest, TalosConfig, TurnCommandStatus,
+    ConfigGetRequest, ConfigPath, ConfigResponse, ConfigUpdateRequest, ConfigValue,
+    SessionPatchRequest, StartTurnRequest, TalosConfig, TurnCommandStatus,
 };
 
 struct RecordingHandler;
@@ -55,7 +53,7 @@ fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
             }
         }
         let active = active.clone();
-        Ok(ConfigReloadPlan::new(next.clone(), move || {
+        Ok(ConfigReloadPlan::new(move || {
             *active
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
@@ -65,12 +63,41 @@ fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
 
 #[async_trait]
 impl AgentCoordinator for RecordingHandler {
+    async fn worker_environment(
+        &self,
+        _node_id: &str,
+        _user_id: &str,
+    ) -> TalosResult<Arc<dyn talos_coordinator::WorkerEnvironment>> {
+        let config = test_config();
+        let service = talos_service::ConfigService::new(
+            Arc::new(InMemoryLlmConfigStore::new(config.llm.clone())),
+            Arc::new(tokio::sync::RwLock::new(())),
+            test_config_reload_hook(config.clone()),
+        );
+        Ok(Arc::new(
+            talos_service::WorkerEnvironmentService::new(
+                Arc::new(std::sync::RwLock::new(config)),
+                Some(std::env::temp_dir()),
+            )
+            .with_config_service(service),
+        ))
+    }
+
     async fn resolve_agent(&self, _params: AgentSelectionParams) -> TalosResult<String> {
         Ok("default".to_string())
     }
 
     async fn ensure_agent(&self, _agent_id: &str) -> TalosResult<()> {
         Ok(())
+    }
+
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
     }
 
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
@@ -125,11 +152,19 @@ impl AgentCoordinator for RecordingHandler {
         unreachable!("gateway test does not compact Sessions")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -206,6 +241,9 @@ async fn test_gateway_with_coordinator(
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
+    let nodes = talos_service::AgentNodeService::new(Arc::new(
+        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+    ));
     let project_store_impl = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let session_store: Arc<dyn SessionStore> = store.clone();
     let project_store: Arc<dyn ProjectStore> = project_store_impl.clone();
@@ -222,23 +260,12 @@ async fn test_gateway_with_coordinator(
         .unwrap(),
     );
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
-    let config_store: Arc<dyn ConfigStore> =
-        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
-    let memory = MemoryService::new(
-        config.clone(),
-        Arc::new(MemoryStore::in_memory().await.unwrap()),
-    )
-    .unwrap();
-    let reload_hook = test_config_reload_hook(config.clone());
-    let plugins = talos_service::PluginManagerService::new(
-        config.agent.kernel.plugins.clone(),
-        config.agent.kernel.skills.clone(),
-    );
     let service = Arc::new(TalosService::new(
         coordinator,
+        nodes,
         session_store,
         store.clone() as Arc<dyn AgentExecutionStore>,
         project_store,
@@ -246,13 +273,8 @@ async fn test_gateway_with_coordinator(
         files,
         event_service,
         config,
-        plugins,
-        memory,
-        config_store,
-        Vec::new(),
         auth_service,
         user_service,
-        reload_hook,
     ));
     ServiceGateway::new(service)
 }
@@ -289,6 +311,7 @@ async fn gateway_start_turn_delegates_to_service() {
             &Actor::regular("user-1"),
             request_source(),
             StartTurnRequest {
+                node_id: None,
                 session_id: "session-1".to_string(),
                 input: AgentUserInput {
                     content: vec![AgentUserContent::Text {
@@ -318,6 +341,7 @@ async fn gateway_start_turn_rejects_invalid_request() {
             &Actor::regular("user-1"),
             request_source(),
             StartTurnRequest {
+                node_id: None,
                 session_id: "session-1".to_string(),
                 input: AgentUserInput {
                     content: Vec::new(),
@@ -336,30 +360,35 @@ async fn gateway_start_turn_rejects_invalid_request() {
 }
 
 #[tokio::test]
-async fn gateway_cloud_config_requires_admin_for_regular_auth() {
+async fn gateway_cloud_config_allows_authorized_worker_owner() {
     let gateway = test_gateway_for_mode(DeploymentMode::Cloud).await;
 
-    let read_error = gateway
+    // RecordingHandler grants access to the target Worker environment.
+    // Deployment mode must not override that Computer's owner authorization.
+    let config = gateway
         .get_config(
             &Actor::regular("user-1"),
             ConfigGetRequest {
+                node_id: None,
                 path: ConfigPath::WebSearch,
             },
         )
         .await
-        .expect_err("regular users should not read global config");
-    assert!(read_error.is_code(talos_error::ErrorCode::PermissionDenied));
+        .expect("authorized owner should read Worker config");
+    assert!(matches!(config, ConfigResponse::WebSearch { .. }));
 
-    let update_error = gateway
+    let expected = Box::<talos_types::WebSearchToolConfig>::default();
+    let updated = gateway
         .update_config(
             &Actor::regular("user-1"),
             ConfigUpdateRequest {
-                value: ConfigValue::WebSearch(Box::default()),
+                node_id: None,
+                value: ConfigValue::WebSearch(expected.clone()),
             },
         )
         .await
-        .expect_err("regular users should not update global config");
-    assert!(update_error.is_code(talos_error::ErrorCode::PermissionDenied));
+        .expect("authorized owner should update Worker config");
+    assert_eq!(updated, ConfigResponse::WebSearch { config: expected });
 }
 
 #[tokio::test]
@@ -370,6 +399,7 @@ async fn gateway_cloud_config_allows_admin_and_auth_disabled() {
         .get_config(
             &Actor::regular("admin-1").with_role(UserRole::Admin),
             ConfigGetRequest {
+                node_id: None,
                 path: ConfigPath::WebSearch,
             },
         )
@@ -380,6 +410,7 @@ async fn gateway_cloud_config_allows_admin_and_auth_disabled() {
         .update_config(
             &Actor::auth_disabled(),
             ConfigUpdateRequest {
+                node_id: None,
                 value: ConfigValue::WebSearch(Box::default()),
             },
         )
@@ -395,6 +426,7 @@ async fn gateway_local_config_allows_regular_auth() {
         .get_config(
             &Actor::regular("user-1"),
             ConfigGetRequest {
+                node_id: None,
                 path: ConfigPath::WebSearch,
             },
         )

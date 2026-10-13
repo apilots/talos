@@ -102,6 +102,11 @@ impl TurnService {
         session: talos_store::session::SessionRecord,
         active: AgentActiveTurnRecord,
     ) -> TalosResult<()> {
+        let _admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         let binding = self
             .execution
             .execution_store

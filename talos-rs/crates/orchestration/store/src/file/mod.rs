@@ -3,8 +3,8 @@ mod types;
 
 pub use store::{DatabaseFileStore, FileStore};
 pub use types::{
-    FileIncompleteCursor, FileListCursor, FileListQuery, FileOwnerKey, FileReadyUpdate, FileRecord,
-    FileRecordUpdate, FileStatus,
+    FileIncompleteCursor, FileListCursor, FileListQuery, FileLocation, FileOwnerKey,
+    FileReadyUpdate, FileRecord, FileRecordUpdate, FileStatus,
 };
 
 #[cfg(test)]

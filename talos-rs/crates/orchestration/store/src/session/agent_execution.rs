@@ -4,14 +4,15 @@ use talos_agent_api::{
     AgentRunMetrics, AgentTurnRef,
 };
 use talos_error::{TalosError, TalosResult};
+pub use talos_types::IdempotentCommand;
 use talos_types::TurnCommandStatus;
 
 mod admission;
 mod cancellation;
 mod continuation;
 mod idempotency;
-mod notice;
-mod record;
+pub(crate) mod notice;
+pub(crate) mod record;
 mod settlement;
 mod sqlite;
 
@@ -75,22 +76,6 @@ pub struct AgentContinuationBindingRecord {
     pub provider_ref: AgentContinuationRef,
     pub expected_event_seq: i64,
     pub status: AgentContinuationBindingStatus,
-}
-
-/// The current product command that owns one durable idempotency namespace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IdempotentCommand {
-    TurnSubmission,
-    TurnInput,
-}
-
-impl IdempotentCommand {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::TurnSubmission => "turn_submission",
-            Self::TurnInput => "turn_input",
-        }
-    }
 }
 
 /// Stable identities allocated before one idempotent command reaches the Agent runtime.
@@ -235,6 +220,14 @@ pub trait AgentExecutionStore: Send + Sync {
         expected_event_seq: i64,
     ) -> TalosResult<AgentEventCommit>;
 
+    /// Atomically append a nonempty contiguous progress batch and CAS the active tail.
+    /// All events retain their original identity and sequence; capture shares this transaction.
+    async fn commit_progress_events(
+        &self,
+        events: Vec<AgentEvent>,
+        expected_event_seq: i64,
+    ) -> TalosResult<AgentEventCommit>;
+
     /// Atomically append one accepted live-input admission and advance the tail.
     async fn commit_running_input_admission(
         &self,
@@ -323,6 +316,14 @@ pub trait AgentExecutionStore: Send + Sync {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<AgentActiveTurnRecord>>;
+
+    /// Shared display only. Never install this projection as a local active claim.
+    async fn get_shared_active_turn(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
+        Ok(None)
+    }
 
     /// Read the current continuation ownership for one exact logical Turn.
     async fn get_agent_continuation_binding(

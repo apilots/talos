@@ -1,3 +1,4 @@
+import { useCanManageComputer } from "@/features/computers";
 import { Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
@@ -35,11 +36,14 @@ export function SettingsPage() {
   } = useSettingsPage();
   const requestedSection = params.section;
   const activeSection: SettingsSection = isSettingsSection(requestedSection) ? requestedSection : "profile";
-  const canManageConfig =
-    connection.authStatus === "open" || connection.deploymentMode === "local" || connection.authRole === "admin";
+  const managementPermission = useCanManageComputer();
+  const canManageConfig = managementPermission === true;
 
   if (requestedSection && !isSettingsSection(requestedSection)) {
     return <Navigate replace to="/settings" />;
+  }
+  if ((activeSection === "models" || activeSection === "web-search") && managementPermission === undefined) {
+    return <div className="p-8 text-sm text-muted">{t("common:loading")}</div>;
   }
   if ((activeSection === "models" || activeSection === "web-search") && !canManageConfig) {
     return <Navigate replace to="/settings" />;

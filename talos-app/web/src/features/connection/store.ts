@@ -5,6 +5,9 @@ import type { AuthStatus } from "@/shared/types/account";
 type UserRole = "user" | "admin";
 
 export interface ConnectionState {
+  workerRuntimeState?: import("@talos/sdk-app-server/desktop").TalosRuntimeState;
+  desktopConnectionMode?: import("@talos/sdk-core").AppProtocol.DesktopConnectionMode;
+  controlPlaneEndpoint?: string;
   authError?: import("@talos/sdk-core").AppProtocol.ApiError;
   authToken: string;
   authStatus: AuthStatus;

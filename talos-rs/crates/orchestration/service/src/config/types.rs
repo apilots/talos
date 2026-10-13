@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use talos_config::Config;
 use talos_error::TalosResult;
 use talos_types::ConfigValue;
 
@@ -17,28 +16,20 @@ pub enum ConfigReloadTrigger {
 
 /// Prepared application-component replacement built before configuration persistence.
 pub struct ConfigReloadPlan {
-    config: Config,
     publish: Box<dyn FnOnce() + Send>,
 }
 
 impl ConfigReloadPlan {
-    /// Captures one validated configuration and its infallible publication.
-    pub fn new(config: Config, publish: impl FnOnce() + Send + 'static) -> Self {
+    /// Captures the infallible publication of an already validated replacement.
+    pub fn new(publish: impl FnOnce() + Send + 'static) -> Self {
         Self {
-            config,
             publish: Box::new(publish),
         }
     }
 
-    /// Returns the configuration that will become active after publication.
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
-    /// Publishes the already prepared replacement and returns its active configuration.
-    pub(crate) fn publish(self) -> Config {
+    /// Publishes the already prepared replacement.
+    pub fn publish(self) {
         (self.publish)();
-        self.config
     }
 }
 

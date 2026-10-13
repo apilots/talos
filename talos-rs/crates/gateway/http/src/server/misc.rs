@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::response::Json;
 use axum::Json as BodyJson;
 use serde_json::{json, Value};
@@ -28,6 +28,7 @@ pub(super) async fn health_handler(State(state): State<Arc<HttpApiState>>) -> Js
 }
 
 pub(super) async fn list_models_handler(
+    Query(request): Query<ModelListRequest>,
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
 ) -> Result<JsonResponse<ModelListResponse>, ApiError> {
@@ -36,7 +37,7 @@ pub(super) async fn list_models_handler(
         .unwrap_or_else(RequestIdentity::auth_disabled);
     let response = state
         .gateway
-        .list_models(&shared_actor(&actor), ModelListRequest::default())
+        .list_models(&shared_actor(&actor), request)
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))
@@ -45,13 +46,20 @@ pub(super) async fn list_models_handler(
 pub(super) async fn get_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
+    Query(target): Query<talos_types::WorkspaceInfoRequest>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
         .map(|Extension(identity)| identity)
         .unwrap_or_else(RequestIdentity::auth_disabled);
     let llm = state
         .gateway
-        .get_config(&shared_actor(&actor), ConfigGetRequest::default())
+        .get_config(
+            &shared_actor(&actor),
+            ConfigGetRequest {
+                node_id: target.node_id,
+                ..Default::default()
+            },
+        )
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(llm))
@@ -60,6 +68,7 @@ pub(super) async fn get_llm_handler(
 pub(super) async fn get_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
+    Query(target): Query<talos_types::WorkspaceInfoRequest>,
     Path(path): Path<String>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
@@ -70,6 +79,7 @@ pub(super) async fn get_config_handler(
         .get_config(
             &shared_actor(&actor),
             ConfigGetRequest {
+                node_id: target.node_id,
                 path: parse_config_path(&path)?,
             },
         )
@@ -81,6 +91,7 @@ pub(super) async fn get_config_handler(
 pub(super) async fn put_config_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
+    Query(target): Query<talos_types::WorkspaceInfoRequest>,
     BodyJson(value): BodyJson<ConfigValue>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
@@ -88,7 +99,13 @@ pub(super) async fn put_config_handler(
         .unwrap_or_else(RequestIdentity::auth_disabled);
     let result = state
         .gateway
-        .update_config(&shared_actor(&actor), ConfigUpdateRequest { value })
+        .update_config(
+            &shared_actor(&actor),
+            ConfigUpdateRequest {
+                node_id: target.node_id,
+                value,
+            },
+        )
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(result))
@@ -97,6 +114,7 @@ pub(super) async fn put_config_handler(
 pub(super) async fn put_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
+    Query(target): Query<talos_types::WorkspaceInfoRequest>,
     BodyJson(llm): BodyJson<LlmConfig>,
 ) -> Result<JsonResponse<ConfigResponse>, ApiError> {
     let actor = actor
@@ -107,6 +125,7 @@ pub(super) async fn put_llm_handler(
         .update_config(
             &shared_actor(&actor),
             ConfigUpdateRequest {
+                node_id: target.node_id,
                 value: ConfigValue::Llm(Box::new(llm)),
             },
         )
@@ -124,6 +143,22 @@ fn parse_config_path(path: &str) -> Result<ConfigPath, ApiError> {
             format!("unsupported config path: {}", other),
         ))),
     }
+}
+
+pub(super) async fn reload_config_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: Option<Extension<RequestIdentity>>,
+    Query(request): Query<talos_types::ConfigReloadRequest>,
+) -> Result<JsonResponse<talos_types::ConfigReloadResponse>, ApiError> {
+    let actor = actor
+        .map(|Extension(identity)| identity)
+        .unwrap_or_else(RequestIdentity::auth_disabled);
+    let result = state
+        .gateway
+        .reload_config(&shared_actor(&actor), request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(result))
 }
 
 /// Handle shutdown signals.

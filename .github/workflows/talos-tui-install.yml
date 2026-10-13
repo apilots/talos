@@ -6,26 +6,12 @@ concurrency:
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/talos-tui-install.yml"
-      - ".github/workflows/dispatch-release.yml"
-      - "build.sh"
-      - "build/scripts/verify-release-artifacts.sh"
-      - "conf/**"
-      - "deploy/install/**"
-      - "talos-e2e/lib/**"
-      - "talos-e2e/run_e2e.sh"
-      - "talos-e2e/scripts/tui_install.sh"
-      - "talos-e2e/scenarios/15_tui_install/**"
-      - "talos-e2e/tests/tui_install_target_test.sh"
-      - "talos-rs/Cargo.toml"
+  pull_request: {}
   push:
     branches:
       - main
     paths:
       - ".github/workflows/talos-tui-install.yml"
-      - ".github/workflows/dispatch-release.yml"
       - "build.sh"
       - "build/scripts/verify-release-artifacts.sh"
       - "conf/**"
@@ -62,7 +48,6 @@ jobs:
 
   native-install-e2e:
     name: Install ${{ matrix.platform }}-${{ matrix.arch }}
-    if: ${{ github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
       matrix:
@@ -85,26 +70,38 @@ jobs:
       - name: Checkout Talos
         uses: actions/checkout@v6
 
-      - name: Checkout Talos Cloud SDK
-        uses: actions/checkout@v6
-        with:
-          repository: apilots/talos-cloud
-          path: talos-cloud
-          token: ${{ secrets.TALOS_SOURCE_READ_TOKEN || github.token }}
-
-      - name: Link Talos Cloud SDK path dependency
-        run: ln -sfn "${GITHUB_WORKSPACE}/talos-cloud" "${GITHUB_WORKSPACE}/../talos-cloud"
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Protocol Buffer compiler
+        run: |
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            brew install protobuf
+          else
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
 
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
 
+      - name: Fetch native build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo fetch --manifest-path talos-rs/Cargo.toml; then
+              exit 0
+            fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 10
+          done
+
       - name: Run native installation E2E case
         env:
+          CARGO_NET_OFFLINE: "true"
           TUI_INSTALL_EXPECTED_PLATFORM: ${{ matrix.platform }}
           TUI_INSTALL_EXPECTED_ARCH: ${{ matrix.arch }}
         run: talos-e2e/run_e2e.sh --case 15_tui_install/01_native_install
@@ -119,3 +116,49 @@ jobs:
             talos-e2e/reports/15_tui_install/01_native_install/
           if-no-files-found: warn
           retention-days: 7
+
+  linux-docker-install-e2e:
+    name: Linux Docker installer E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Talos
+        uses: actions/checkout@v6
+
+      - name: Run Linux Docker installation scenario
+        run: talos-e2e/run_e2e.sh --case 15_tui_install/02_linux_docker
+
+      - name: Upload Linux Docker installation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-install-linux-docker
+          path: |
+            talos-e2e/reports/e2e_report_*.md
+            talos-e2e/reports/15_tui_install/02_linux_docker/
+          if-no-files-found: warn
+          retention-days: 7
+
+  gate:
+    if: ${{ always() }}
+    name: talos-tui-install-gate
+    runs-on: ubuntu-latest
+    needs:
+      - installer-tests
+      - native-install-e2e
+      - linux-docker-install-e2e
+    steps:
+      - name: Require every installer check
+        env:
+          INSTALLER_TESTS: ${{ needs.installer-tests.result }}
+          NATIVE_INSTALL: ${{ needs.native-install-e2e.result }}
+          DOCKER_INSTALL: ${{ needs.linux-docker-install-e2e.result }}
+        run: |
+          set -euo pipefail
+          for result in "${INSTALLER_TESTS}" "${NATIVE_INSTALL}" "${DOCKER_INSTALL}"; do
+            if [[ "${result}" != "success" ]]; then
+              echo "Installer acceptance did not pass: ${result}" >&2
+              exit 1
+            fi
+          done
+          echo "Installer shell, native-platform, and Linux Docker checks passed."

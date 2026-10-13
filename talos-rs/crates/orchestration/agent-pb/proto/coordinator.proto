@@ -1,0 +1,34 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "auth.proto";
+import "types.proto";
+import "harness.proto";
+
+// Transport projections of the existing product Input/Interrupt/queue API.
+message ProductUserInput { repeated UserContent content = 1; }
+message CoordinatorTurnInput {
+  optional string client_request_id = 1;
+  oneof input { ProductUserInput message = 2; string queued_message_id = 3; ActionResponse action_response = 4; }
+}
+message CoordinatorQueueMessage { ProductUserInput input = 1; string message_id = 2; }
+message CoordinatorQueueOrder { repeated string message_ids = 1; }
+message CoordinatorQueueStart { optional string message_id = 1; }
+message ActiveSessionCommandRequest {
+  NodeAuth auth = 1; string computer_id = 2; string source_peer_id = 3; TurnRef identity = 4;
+  oneof command {
+    CoordinatorTurnInput input = 10; Empty interrupt = 11;
+    ProductUserInput add_message = 12; Empty list_messages = 13;
+    CoordinatorQueueMessage update_message = 14; string delete_message = 15;
+    CoordinatorQueueOrder reorder_messages = 16; CoordinatorQueueStart start_message = 17;
+  }
+}
+message CoordinatorInputResult { string request_id = 1; TurnRef identity = 2; string message_id = 3; }
+message CoordinatorInterruptResult { TurnRef identity = 1; InterruptResult outcome = 2; }
+message CoordinatorMessageQueue { uint64 revision = 1; uint32 max_messages = 2; repeated CoordinatorQueueMessage messages = 3; }
+enum ProductTurnCommandStatus { PRODUCT_TURN_COMMAND_STATUS_UNSPECIFIED = 0; PRODUCT_TURN_COMMAND_STATUS_ACCEPTED = 1; PRODUCT_TURN_COMMAND_STATUS_PENDING = 2; PRODUCT_TURN_COMMAND_STATUS_FAILED = 3; PRODUCT_TURN_COMMAND_STATUS_FAILED_NO_FIRST_EVENT = 4; }
+message CoordinatorStartedTurn {
+  string request_id = 1; optional string message_id = 2; string session_id = 3; string turn_id = 4; ProductTurnCommandStatus status = 5;
+}
+message ActiveSessionCommandResponse {
+  oneof result { CoordinatorInputResult input = 1; CoordinatorInterruptResult interrupted = 2; CoordinatorMessageQueue queue = 3; CoordinatorStartedTurn started = 4; Failure failure = 5; }
+}

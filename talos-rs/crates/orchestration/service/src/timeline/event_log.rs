@@ -22,6 +22,7 @@ const MAX_TIMELINE_READ_LIMIT: usize = 10_000;
 pub struct TimelineEventService {
     execution_store: Arc<dyn AgentExecutionStore>,
     live_tx: broadcast::Sender<TimelineEvent>,
+    pub(super) active_tx: broadcast::Sender<talos_agent_api::SessionActiveTurnChangedNotification>,
 }
 
 impl TimelineEventService {
@@ -29,6 +30,7 @@ impl TimelineEventService {
         Self {
             execution_store,
             live_tx: broadcast::channel(1_024).0,
+            active_tx: broadcast::channel(128).0,
         }
     }
 
@@ -143,6 +145,40 @@ impl TimelineEventService {
         self.live_tx.subscribe()
     }
 
+    /// Wake existing subscribers after synchronized facts commit. The durable
+    /// local Timeline remains authoritative; its existing gap replay fills all
+    /// intervening records instead of publishing a second business event model.
+    pub async fn publish_imported(&self, session_id: &str) -> TalosResult<()> {
+        if let Some(seq) = self
+            .execution_store
+            .get_latest_timeline_event_seq(session_id)
+            .await?
+        {
+            if let Some(record) = self.execution_store.get_timeline_event(seq).await? {
+                let _ = self.live_tx.send(map_timeline_record(record));
+            }
+        }
+        self.publish_active_turn(session_id).await
+    }
+
+    pub(crate) async fn publish_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        let active_turn = self.display_active_turn(session_id).await?;
+        let latest_event_id = self
+            .latest_event_id(session_id)
+            .await?
+            .map(|id| id.to_string());
+        let _ = self
+            .active_tx
+            .send(talos_agent_api::SessionActiveTurnChangedNotification {
+                session_id: session_id.into(),
+                state: talos_agent_api::SessionActiveTurnResponse {
+                    active_turn,
+                    latest_event_id,
+                },
+            });
+        Ok(())
+    }
+
     /// Commit a product notice before publishing it on the existing Session stream.
     pub(crate) async fn publish_notice(
         &self,
@@ -153,6 +189,18 @@ impl TimelineEventService {
         // No current subscribers is normal; replay retains the committed notice.
         let _ = self.live_tx.send(event.clone());
         Ok(event)
+    }
+
+    pub(crate) async fn display_active_turn(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
+        if let Some(active) = self.get_active_turn(session_id).await? {
+            return Ok(Some(super::mapping::map_timeline_active_turn(active)));
+        }
+        self.execution_store
+            .get_shared_active_turn(session_id)
+            .await
     }
 
     pub(crate) async fn get_active_turn(

@@ -104,17 +104,17 @@ PY
 
 extract_output_text() {
   local response_json="$1"
-  RESPONSE_JSON="${response_json}" python3 - <<'PY'
+  printf '%s' "${response_json}" | python3 -c '
 import json
-import os
+import sys
 
-response = json.loads(os.environ["RESPONSE_JSON"])
+response = json.load(sys.stdin)
 print("".join(
     item.get("text", "")
     for item in response.get("output", [])
     if item.get("type") == "output_text"
 ))
-PY
+'
 }
 
 pending_action_from_events() {
@@ -130,7 +130,7 @@ with open(os.environ["EVENTS_PATH"], encoding="utf-8") as handle:
             continue
         record = json.loads(line[6:])
         event = record.get("event") or {}
-        payload = event.get("payload") or {}
+        payload = (event.get("data") or {}).get("payload") or {}
         data = payload.get("data") or {}
         if payload.get("type") == "waitingForInput" and data.get("type") == "userAction":
             pending = {"eventId": record.get("eventId"), "action": data.get("action")}
@@ -159,16 +159,19 @@ assert_terminal_turn() {
   local case_name="$1"
   local turn_id="$2"
   local expected_status="$3"
-  local active_json history_json
+  local active_json history_json history_file
   active_json="$(get_active_turn_json)"
   history_json="$(get_session_history_json)"
-  ACTIVE_JSON="${active_json}" HISTORY_JSON="${history_json}" TURN_ID="${turn_id}" EXPECTED_STATUS="${expected_status}" python3 - <<'PY'
+  history_file="$(scenario_report_path "${case_name}_history.json")"
+  printf '%s' "${history_json}" > "${history_file}"
+  ACTIVE_JSON="${active_json}" HISTORY_JSON_FILE="${history_file}" TURN_ID="${turn_id}" EXPECTED_STATUS="${expected_status}" python3 - <<'PY'
 import json
 import os
+from pathlib import Path
 
 active = json.loads(os.environ["ACTIVE_JSON"])["activeTurn"]
 assert active is None, active
-history = json.loads(os.environ["HISTORY_JSON"])
+history = json.loads(Path(os.environ["HISTORY_JSON_FILE"]).read_text())
 turns = [
     turn for turn in history["data"]
     if turn["identity"]["turnId"] == os.environ["TURN_ID"]
@@ -221,7 +224,7 @@ run_question() {
   local answer_json="$2"
   local marker="$3"
   local payload ack_json turn_id waiting_events waiting_response pending action_id waiting_event_id
-  local recovery_json submit_payload submit_json resumed_events resumed_response
+  local recovery_json recovery_file submit_payload submit_json resumed_events resumed_response
 
   payload="$(build_question_payload "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
@@ -230,11 +233,13 @@ run_question() {
   collect_timeline_events "${session_id}" "${turn_id}" "${waiting_events}" "" "waitingForInput,turnFailed"
   waiting_response="$(message_response_from_events "${ack_json}" "${waiting_events}")"
   pending="$(pending_action_from_events "${waiting_events}")"
-  PENDING="${pending}" RESPONSE="${waiting_response}" python3 - <<'PY'
+  printf '%s' "${waiting_response}" > "$(scenario_report_path "${case_name}_waiting.json")"
+  PENDING="${pending}" RESPONSE_FILE="$(scenario_report_path "${case_name}_waiting.json")" python3 - <<'PY'
 import json
 import os
+from pathlib import Path
 
-response = json.loads(os.environ["RESPONSE"])
+response = json.loads(Path(os.environ["RESPONSE_FILE"]).read_text())
 assert response["stop_reason"] == "waiting_user_action", response
 action = json.loads(os.environ["PENDING"])["action"]
 assert action["state"] == "pending", action
@@ -247,16 +252,19 @@ PY
   assert_active_waiting "${turn_id}"
 
   recovery_json="$(api_data_json "$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/timeline/recovery")")"
-  RECOVERY_JSON="${recovery_json}" TURN_ID="${turn_id}" python3 - <<'PY'
+  recovery_file="$(scenario_report_path "${case_name}_recovery.json")"
+  printf '%s' "${recovery_json}" > "${recovery_file}"
+  RECOVERY_FILE="${recovery_file}" TURN_ID="${turn_id}" python3 - <<'PY'
 import json
 import os
+from pathlib import Path
 
-recovery = json.loads(os.environ["RECOVERY_JSON"])
+recovery = json.loads(Path(os.environ["RECOVERY_FILE"]).read_text())
 active = recovery["activeTurn"]
 assert active["identity"]["turnId"] == os.environ["TURN_ID"], active
 assert active["state"] == "waitingForInput", active
 assert any(
-    item["event"]["payload"]["type"] == "waitingForInput"
+    item["event"]["data"]["payload"]["type"] == "waitingForInput"
     for item in recovery["replay"]["events"]
 ), recovery
 PY
@@ -302,7 +310,7 @@ run_sandbox_approval() {
   local submit_payload submit_json resumed_events resumed_response expected_terminal
 
   rm -f "${side_effect}"
-  command="printf '${case_name}' > '${side_effect}'"
+  command="test ! -s '${TALOS_HOME}/.env' && printf '${case_name}' > '${side_effect}'"
   payload="$(build_approval_payload "${command}" "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
   turn_id="$(api_json_get "${ack_json}" "turnId")"
@@ -310,11 +318,13 @@ run_sandbox_approval() {
   collect_timeline_events "${session_id}" "${turn_id}" "${waiting_events}" "" "waitingForInput,turnFailed"
   waiting_response="$(message_response_from_events "${ack_json}" "${waiting_events}")"
   pending="$(pending_action_from_events "${waiting_events}")"
-  PENDING="${pending}" RESPONSE="${waiting_response}" COMMAND="${command}" python3 - <<'PY'
+  printf '%s' "${waiting_response}" > "$(scenario_report_path "${case_name}_waiting.json")"
+  PENDING="${pending}" RESPONSE_FILE="$(scenario_report_path "${case_name}_waiting.json")" COMMAND="${command}" python3 - <<'PY'
 import json
 import os
+from pathlib import Path
 
-response = json.loads(os.environ["RESPONSE"])
+response = json.loads(Path(os.environ["RESPONSE_FILE"]).read_text())
 assert response["stop_reason"] == "waiting_user_action", response
 action = json.loads(os.environ["PENDING"])["action"]
 params = action["params"]

@@ -1,5 +1,6 @@
 mod access;
 mod account;
+mod agent_node;
 mod config;
 pub mod file;
 mod fs;
@@ -26,6 +27,10 @@ mod test_support;
 
 pub use access::Actor;
 pub use account::AccountService;
+pub use agent_node::{
+    AgentNodeRevocationHook, AgentNodeService, CreateNodeRequest, GetNodeRequest, ListNodesRequest,
+    NodePrincipal, RotateCredentialRequest, UpdateNodeRequest,
+};
 pub use config::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService};
 pub use file::{FileByteStream, FileContent, FileService};
 pub use history::SessionHistoryService;
@@ -34,7 +39,9 @@ pub use inner_model::{
 };
 pub use memory::MemoryService;
 pub use message_queue::SessionMessageQueueService;
-pub use plugin::{mcp_definition_from_config, McpCredentialStore, PluginManagerService};
+pub use plugin::{
+    mcp_definition_from_config, mcp_relay_callback_uri, McpCredentialStore, PluginManagerService,
+};
 pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};
 pub use skills::SkillsService;
@@ -46,3 +53,10 @@ pub use timeline::{
 pub use user_workspace_memory::UserWorkspaceMemoryService;
 pub use workspace::{EffectiveUserWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;
+
+mod worker_environment;
+pub use worker_environment::WorkerEnvironmentService;
+
+pub use service::ManagementSync;
+
+pub use agent_node::ComputerManagement;

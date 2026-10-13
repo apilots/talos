@@ -7,18 +7,18 @@ import {
   useSessionsQuery,
   useUpdateProjectNameMutation,
 } from "../hooks/useChatQueries";
-import { logoutUser } from "@/features/auth";
+import { useLogout } from "@/features/auth";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus, isUnboundProject } from "@/shared/types/domain";
 import { Sidebar } from "@/widgets/sidebar/Sidebar";
 import type { SidebarProjectGroup } from "@/widgets/sidebar/SidebarProjectSection";
 import type { SidebarSessionItem } from "@/widgets/sidebar/SidebarSessionRow";
 
-export function SidebarContainer() {
+export function SidebarContainer({ computer }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const connection = useAppStore((state) => state.connection);
-  const setConnection = useAppStore((state) => state.setConnection);
+  const handleLogout = useLogout();
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const aliases = useAppStore((state) => state.sessionAliases);
   const statuses = useAppStore((state) => state.transientStatuses);
@@ -59,24 +59,10 @@ export function SidebarContainer() {
       sessions: threads.filter((thread) => thread.projectId === project.id),
     }));
 
-  async function handleLogout() {
-    try {
-      await logoutUser();
-    } finally {
-      setConnection({
-        authToken: "",
-        authStatus: "logged_out",
-        authRole: "user",
-        accountType: "Free",
-        authUsername: "Anonymous",
-        userId: "anonymous",
-      });
-      navigate("/auth/logout");
-    }
-  }
-
   return (
     <Sidebar
+      computer={computer}
+      showAccount={false}
       chats={chats}
       connection={connection}
       currentPath={location.pathname}

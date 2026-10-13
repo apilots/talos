@@ -18,6 +18,8 @@ use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct MemoryFilesQuery {
+    #[serde(default, rename = "nodeId")]
+    node_id: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
     #[serde(default)]
@@ -31,6 +33,8 @@ pub(super) struct MemoryFilesQuery {
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MemorySearchHttpQuery {
+    #[serde(default)]
+    node_id: Option<String>,
     query: String,
     #[serde(default)]
     limit: Option<u32>,
@@ -49,6 +53,7 @@ pub(super) async fn list_memory_files_handler(
 ) -> Result<JsonResponse<MemoryFileListResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemoryFileListRequest {
+        node_id: query.node_id,
         limit: query.limit,
         before_date: query.before_date,
         date_from: query.date_from,
@@ -63,6 +68,7 @@ pub(super) async fn list_memory_files_handler(
 }
 
 pub(super) async fn get_memory_file_handler(
+    Query(target): Query<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
@@ -70,7 +76,13 @@ pub(super) async fn get_memory_file_handler(
     let actor = shared_actor(&auth.0);
     let detail = state
         .gateway
-        .read_memory_file(&actor, MemoryFileReadRequest { date })
+        .read_memory_file(
+            &actor,
+            MemoryFileReadRequest {
+                node_id: target.node_id,
+                date,
+            },
+        )
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(detail))
@@ -101,6 +113,7 @@ pub(super) async fn search_memory_files_handler(
 ) -> Result<JsonResponse<MemorySearchResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemorySearchRequest {
+        node_id: query.node_id,
         query: query.query,
         limit: query.limit,
         kinds: query
@@ -136,6 +149,7 @@ fn parse_memory_kinds(value: &str) -> Result<Vec<MemoryKind>, ApiError> {
 }
 
 pub(super) async fn get_memory_handler(
+    Query(target): Query<talos_types::WorkspaceInfoRequest>,
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(memory_id): Path<String>,
@@ -143,7 +157,13 @@ pub(super) async fn get_memory_handler(
     let actor = shared_actor(&auth.0);
     let response = state
         .gateway
-        .get_memory(&actor, MemoryGetRequest { memory_id })
+        .get_memory(
+            &actor,
+            MemoryGetRequest {
+                node_id: target.node_id,
+                memory_id,
+            },
+        )
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))

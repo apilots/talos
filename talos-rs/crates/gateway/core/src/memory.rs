@@ -1,64 +1,41 @@
+use crate::gateway_service::ServiceGateway;
 use talos_error::TalosResult;
 use talos_service::Actor;
-use talos_types::{
-    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse,
-};
-
-use crate::gateway_service::ServiceGateway;
-
+use talos_types::*;
 impl ServiceGateway {
     pub(crate) async fn list_memory_files(
         &self,
         actor: &Actor,
         request: MemoryFileListRequest,
     ) -> TalosResult<MemoryFileListResponse> {
-        self.service
-            .memory
-            .list_files_with_request(actor, request)
-            .await
+        self.service.list_memory_files(actor, request).await
     }
-
     pub(crate) async fn read_memory_file(
         &self,
         actor: &Actor,
         request: MemoryFileReadRequest,
     ) -> TalosResult<MemoryFileReadResponse> {
-        let file = self
-            .service
-            .memory
-            .read_file_with_request(actor, request)
-            .await?;
-        Ok(MemoryFileReadResponse { file })
+        self.service.read_memory_file(actor, request).await
     }
-
     pub(crate) async fn write_memory_file(
         &self,
         actor: &Actor,
         request: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileWriteResponse> {
-        let file = self
-            .service
-            .memory
-            .write_file_with_request(actor, request)
-            .await?;
-        Ok(MemoryFileWriteResponse { file })
+        self.service.write_memory_file(actor, request).await
     }
-
     pub(crate) async fn search_memory(
         &self,
         actor: &Actor,
         request: MemorySearchRequest,
     ) -> TalosResult<MemorySearchResponse> {
-        self.service.memory.search(actor, request).await
+        self.service.search_memory(actor, request).await
     }
-
     pub(crate) async fn get_memory(
         &self,
         actor: &Actor,
         request: MemoryGetRequest,
     ) -> TalosResult<MemoryGetResponse> {
-        self.service.memory.get(actor, request).await
+        self.service.get_memory(actor, request).await
     }
 }

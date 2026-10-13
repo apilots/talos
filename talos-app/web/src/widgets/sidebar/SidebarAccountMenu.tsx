@@ -5,6 +5,7 @@ import { NavLink } from "react-router-dom";
 import type { AccountType, AuthStatus } from "@/shared/types/account";
 
 interface SidebarAccountMenuProps {
+  compact?: boolean;
   accountType: AccountType;
   authStatus: AuthStatus;
   authUsername: string;
@@ -12,6 +13,7 @@ interface SidebarAccountMenuProps {
 }
 
 export function SidebarAccountMenu({
+  compact = false,
   accountType,
   authStatus,
   authUsername,
@@ -45,10 +47,11 @@ export function SidebarAccountMenu({
   }, [open]);
 
   return (
-    <div className="mt-4 border-t border-border/80 pt-4">
+    <div className={compact ? "mt-2" : "mt-4 border-t border-border/80 pt-4"}>
       <div className="relative" ref={menuRef}>
         {open ? (
           <AccountPopover
+            compact={compact}
             accountLabel={accountLabel}
             authStatus={authStatus}
             authUsername={authUsername}
@@ -57,15 +60,17 @@ export function SidebarAccountMenu({
           />
         ) : null}
         <button
+          title={authUsername}
+          aria-label={authUsername}
           aria-expanded={open}
-          className="flex w-full items-center gap-3 rounded-[0.95rem] px-3 py-2 text-left transition hover:bg-selected/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+          className={`flex items-center rounded-[0.95rem] py-2 text-left transition hover:bg-selected/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 ${compact ? "size-10 justify-center" : "w-full gap-3 px-3"}`}
           onClick={() => setOpen((value) => !value)}
           type="button"
         >
           <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-background/85 text-xs font-semibold text-ink">
             {avatarLabel}
           </div>
-          <div className="min-w-0">
+          <div className={compact ? "hidden" : "min-w-0"}>
             <div className="truncate text-[13px] font-medium leading-4 text-ink">{authUsername}</div>
             <div className="mt-0.5 text-[11px] leading-4 text-muted">{accountLabel}</div>
           </div>
@@ -76,12 +81,14 @@ export function SidebarAccountMenu({
 }
 
 function AccountPopover({
+  compact,
   accountLabel,
   authStatus,
   authUsername,
   onClose,
   onLogout,
 }: {
+  compact?: boolean;
   accountLabel: string;
   authStatus: SidebarAccountMenuProps["authStatus"];
   authUsername: string;
@@ -89,7 +96,7 @@ function AccountPopover({
   onLogout: SidebarAccountMenuProps["onLogout"];
 }) {
   return (
-    <div className="absolute bottom-[calc(100%+0.65rem)] left-0 right-0 z-30 overflow-hidden rounded-[1.1rem] border border-border bg-card px-3 py-2 shadow-panel">
+    <div className={`absolute bottom-[calc(100%+0.65rem)] z-50 overflow-hidden rounded-[1.1rem] border border-border bg-card px-3 py-2 shadow-panel ${compact ? "left-0 w-60" : "left-0 right-0"}`}>
       <AccountMenuSection>
         <MenuStaticRow icon={<UserCircle aria-hidden="true" size={16} />} label={authUsername} muted />
         <MenuStaticRow icon={<Settings2 aria-hidden="true" size={16} />} label={`${accountLabel} account`} muted />

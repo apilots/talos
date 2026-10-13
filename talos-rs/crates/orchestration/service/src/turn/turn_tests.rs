@@ -1,5 +1,4 @@
 use super::*;
-use crate::session::SessionService;
 use crate::test_support::{
     canonical_user_admission, commit_test_running_turn, run_test_migrations, test_user_input,
 };
@@ -181,6 +180,15 @@ impl AgentCoordinator for RecordingAgentCoordinator {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         unreachable!("execution is delegated by the scenario Coordinator")
     }
@@ -204,11 +212,19 @@ impl AgentCoordinator for RecordingAgentCoordinator {
         unreachable!("not used in turn service tests")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -225,6 +241,17 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
 
     async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
         self.delegate.ensure_agent(agent_id).await
+    }
+
+    async fn select_execution_node(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        self.delegate
+            .select_execution_node(agent_id, user_id, preferred_node_id)
+            .await
     }
 
     async fn start(&self, request: AgentRunParams) -> TalosResult<AgentRunExecution> {
@@ -580,12 +607,24 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
         self.delegate.compact_session(params).await
     }
 
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.clear_session(params).await
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .clear_session(params, expected_history_cursor)
+            .await
     }
 
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.close_session(params).await
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .close_session(params, expected_history_cursor)
+            .await
     }
 
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
@@ -609,6 +648,7 @@ async fn submit_start_turn_preserves_executor_error_semantics() {
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("hello"),
             model_selection: None,
@@ -669,7 +709,7 @@ async fn test_service_with_storage(
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let config = test_config();
-    let sessions = Arc::new(SessionService::new(
+    let sessions = Arc::new(crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config.clone(),
@@ -686,7 +726,7 @@ async fn test_service_with_storage(
             profile_store,
             message_queue.clone(),
             config,
-            Arc::new(tokio::sync::RwLock::new(())),
+            Arc::new(crate::turn::NodeAdmissionGates::default()),
         ),
         event_service,
         store,
@@ -860,6 +900,7 @@ fn test_session() -> SessionRecord {
     SessionRecord {
         id: "s1".to_string(),
         agent_id: "default".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: SessionTreeIdentity::Primary,
         workspace_id: "default".to_string(),
         title: "Untitled Session".to_string(),

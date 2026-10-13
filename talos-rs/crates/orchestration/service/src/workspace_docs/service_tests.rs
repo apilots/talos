@@ -166,35 +166,3 @@ async fn memory_doc_write_requires_canonical_okf_but_read_preserves_invalid_raw_
     assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     let _ = talos_fs::remove_directory(&workspace_dir).await;
 }
-
-#[test]
-fn workspace_info_resolves_configured_default_for_each_actor_without_writing() {
-    let config = TalosConfig::default().with_workspace_definition(
-        talos_config::WorkspaceDefinition::new("team", "workspace-team"),
-    );
-    let prefix = config.workspace_root_prefix("team").unwrap();
-    let service = WorkspaceDocService::new(config);
-    for user_id in ["alice", "bob"] {
-        let info = service
-            .workspace_info(
-                &Actor::regular(user_id),
-                talos_types::WorkspaceInfoRequest {},
-            )
-            .unwrap();
-        assert_eq!(
-            info,
-            talos_types::WorkspaceInfoResponse {
-                workspace_id: "team".into(),
-                root_prefix: prefix.to_string_lossy().into_owned(),
-                user_workspace_dir: prefix.join(user_id).to_string_lossy().into_owned(),
-            }
-        );
-    }
-    let error = service
-        .workspace_info(
-            &Actor::regular("../other"),
-            talos_types::WorkspaceInfoRequest {},
-        )
-        .unwrap_err();
-    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
-}

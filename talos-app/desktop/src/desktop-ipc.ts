@@ -6,6 +6,7 @@ import { assertDesktopRendererInvoke } from "./ipc-guard";
 import { TALOS_IPC, type TalosRuntimeState } from "./ipc";
 
 export function registerDesktopIpcHandlers(runtime: DesktopAppServerController): void {
+  ipcMain.handle(TALOS_IPC.workerIdentity, () => ipcResponse(() => runtime.invoke("desktop/workerIdentity", null)));
   ipcMain.handle(TALOS_IPC.connect, () => ipcResponse(() => runtime.connect()));
   ipcMain.handle(
     TALOS_IPC.invoke,
@@ -61,4 +62,11 @@ export function broadcastRuntimeState(state: TalosRuntimeState): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send(TALOS_IPC.runtimeState, state);
   }
+}
+
+export function broadcastActiveTurnChanged(notification: AppProtocol.SessionActiveTurnChangedNotification): void {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TALOS_IPC.activeTurnChanged, notification);
+}
+export function broadcastMessageQueueChanged(notification: AppProtocol.MessageQueueChangedNotification): void {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TALOS_IPC.messageQueueChanged, notification);
 }

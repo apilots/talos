@@ -34,11 +34,19 @@ impl AgentHarness for TestHarness {
         Box::pin(async { panic!("registry test Harness cannot compact a Session") })
     }
 
-    fn clear_session(&self, _params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
+    fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
         Box::pin(async { panic!("registry test Harness cannot clear a Session") })
     }
 
-    fn close_session(&self, _params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
+    fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
         Box::pin(async { panic!("registry test Harness cannot close a Session") })
     }
 

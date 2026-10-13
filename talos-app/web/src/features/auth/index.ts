@@ -16,3 +16,5 @@ export {
   type PreparedExternalWindow,
 } from "./navigation";
 export { storeWebAuthToken } from "./web-auth-session";
+
+export { useLogout } from "./hooks/useLogout";

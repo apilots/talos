@@ -42,9 +42,10 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
             .await
             .unwrap();
     let imported = runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .import_mcp_server(McpServerImportRequest {
+            node_id: None,
             json: json!({"name":"oauth_http","url":url}).to_string(),
             name: None,
             enable: Some(true),
@@ -59,6 +60,7 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     let callback_port = callback_listener.local_addr().unwrap().port();
     drop(callback_listener);
     let request = || McpAuthenticationStartRequest {
+        node_id: None,
         server: owner.clone(),
         config: McpOAuthConfig {
             scopes: vec!["read".into()],
@@ -71,10 +73,11 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap();
+    let plugins = runtime.worker.plugin_manager();
     let replacements = tokio::join!(
-        runtime.service.start_mcp_authentication(request()),
-        runtime.service.start_mcp_authentication(request()),
-        runtime.service.start_mcp_authentication(request())
+        plugins.start_mcp_authentication(request()),
+        plugins.start_mcp_authentication(request()),
+        plugins.start_mcp_authentication(request())
     );
     let mut started = None;
     for result in [replacements.0, replacements.1, replacements.2] {
@@ -126,9 +129,10 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     super::mcp_tests::available(&runtime, "oauth_http").await;
     invoke(&runtime).await;
     let read = runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: imported.plugin.id.clone(),
         })
         .unwrap();
@@ -158,18 +162,20 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         .contains("refreshed-private-access"));
 
     runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
         .unwrap();
     fs::write(workspace.join("changed-resource"), "").unwrap();
     runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
@@ -177,8 +183,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let state = runtime
-                .service
-                .plugins
+                .worker
+                .plugin_manager()
                 .list_mcp_servers(McpServerListRequest::default())
                 .unwrap();
             if state.data.iter().any(|server| {
@@ -197,17 +203,19 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         .is_tool_available("mcp__oauth_http__inspect"));
     fs::remove_file(workspace.join("changed-resource")).unwrap();
     runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
         .unwrap();
     runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
@@ -216,15 +224,18 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     invoke(&runtime).await;
 
     let stale = runtime
-        .service
+        .worker
+        .plugin_manager()
         .start_mcp_authentication(request())
         .await
         .unwrap();
     let grant = http.get(&stale.authorization_url).send().await.unwrap();
     let stale_callback = grant.headers()["location"].to_str().unwrap().to_string();
     runtime
-        .service
+        .worker
+        .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
+            node_id: None,
             server: owner.clone(),
             change: McpCredentialsChange::Clear,
         })
@@ -234,9 +245,10 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     assert!(!credential_file.exists());
     assert!(matches!(
         runtime
-            .service
-            .plugins
+            .worker
+            .plugin_manager()
             .read_mcp_authentication(McpAuthenticationReadRequest {
+                node_id: None,
                 server: owner.clone()
             })
             .unwrap()
@@ -245,7 +257,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     ));
 
     let restarted = runtime
-        .service
+        .worker
+        .plugin_manager()
         .start_mcp_authentication(request())
         .await
         .unwrap();
@@ -257,9 +270,10 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     super::mcp_tests::available(&runtime, "oauth_http").await;
     invoke(&runtime).await;
     let read = runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: imported.plugin.id.clone(),
         })
         .unwrap();
@@ -298,8 +312,8 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let page = runtime
-                .service
-                .plugins
+                .worker
+                .plugin_manager()
                 .list_mcp_servers(McpServerListRequest::default())
                 .unwrap();
             if let Some(server) = page.data.iter().find(|server| server.name == "oauth_http") {
@@ -315,17 +329,19 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     .unwrap();
     fs::remove_dir(&refresh_lock).unwrap();
     runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
         .unwrap();
     runtime
-        .service
-        .plugins
+        .worker
+        .plugin_manager()
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: imported.install.id.clone(),
         })
         .await
@@ -358,8 +374,10 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     });
     wait_file(&workspace.join("refresh-count")).await;
     runtime
-        .service
+        .worker
+        .plugin_manager()
         .update_mcp_credentials(McpCredentialsUpdateRequest {
+            node_id: None,
             server: owner.clone(),
             change: McpCredentialsChange::Clear,
         })
@@ -373,7 +391,7 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     );
     assert!(source.store.load().await.unwrap().is_none());
     fs::write(workspace.join("hold-discovery"), "").unwrap();
-    let service = runtime.service.clone();
+    let service = runtime.worker.plugin_manager();
     let request = request();
     let discovering = tokio::spawn(async move { service.start_mcp_authentication(request).await });
     wait_file(&workspace.join("discovery-started")).await;

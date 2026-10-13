@@ -24,8 +24,21 @@ gateway:
   port: 8080
   host: 0.0.0.0
   auth: false
+agent_node:
+  control_plane: null
+  runner: null
+  # The embedded Worker uses authenticated loopback RPC, independently of cloud enrollment.
+  worker_rpc:
+    bind_address: 127.0.0.1:0
+    tls: null
+# Desktop product connection source; Server deployment mode is independent.
+desktop:
+  connection_mode: cloud
+
 cloud:
   api_base_url: http://127.0.0.1:8787
+  agent_base_url: https://127.0.0.1:9210
+  agent_trusted_ca_file: null
   web_base_url: http://127.0.0.1:3000
   auth:
     introspection_cache_ttl_seconds: 300
@@ -526,3 +539,9 @@ storage:
       - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       - "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+# Account data sharing is independent of Worker RPC and registration.
+sync:
+  enabled: false
+  hub_endpoint: wss://127.0.0.1:9220/v1/sync
+  trusted_ca_file: null

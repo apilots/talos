@@ -1,0 +1,17 @@
+[package]
+name = "talos-system-info"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Worker-owned Linux and macOS system metadata collection"
+
+[dependencies]
+sysinfo = { workspace = true }
+wgpu = { workspace = true }
+talos-types = { workspace = true }
+talos-error = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

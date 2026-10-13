@@ -1,3 +1,4 @@
+mod computers;
 mod config;
 mod file;
 mod fs;

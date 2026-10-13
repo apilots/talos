@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
-pub struct PluginSourceListRequest {}
+pub struct PluginSourceListRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSourceListResponse {
@@ -17,6 +21,9 @@ pub struct PluginSourceListResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSourceAddRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub source: MarketplaceSourceInput,
     #[serde(default)]
     pub refresh: bool,
@@ -31,6 +38,9 @@ pub struct PluginSourceAddResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSourceRefreshRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub source_id: MarketplaceSourceId,
 }
 
@@ -43,6 +53,9 @@ pub struct PluginSourceRefreshResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSourceRemoveRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub source_id: MarketplaceSourceId,
 }
 
@@ -54,6 +67,9 @@ pub struct PluginSourceRemoveResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginListRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub kind: Option<PluginKind>,
     pub status: Option<PluginListStatusFilter>,
     pub source_id: Option<MarketplaceSourceId>,
@@ -78,6 +94,9 @@ pub struct PluginListResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginReadRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub plugin_id: PluginId,
 }
 
@@ -98,6 +117,9 @@ pub struct PluginDocument {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSearchRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub query: Option<String>,
     pub source_id: Option<MarketplaceSourceId>,
     pub kind: Option<PluginKind>,
@@ -132,6 +154,9 @@ pub struct PluginSearchResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginInstallRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub target: PluginInstallTarget,
     pub enable: Option<bool>,
     pub conflict_policy: PluginInstallConflictPolicy,
@@ -166,6 +191,9 @@ pub struct PluginInstallResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginUpdateRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub install_id: PluginInstallId,
     pub expected_source_commit: Option<String>,
     pub conflict_policy: PluginUpdateConflictPolicy,
@@ -186,6 +214,9 @@ pub struct PluginUpdateResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginUninstallRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub install_id: PluginInstallId,
 }
 
@@ -197,6 +228,9 @@ pub struct PluginUninstallResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginEnableRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub install_id: PluginInstallId,
 }
 
@@ -207,6 +241,9 @@ pub struct PluginEnableResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginDisableRequest {
+    #[serde(rename = "nodeId")]
+    #[ts(optional)]
+    pub node_id: Option<String>,
     pub install_id: PluginInstallId,
 }
 

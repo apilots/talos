@@ -86,6 +86,17 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
         self.delegate.ensure_agent(agent_id).await
     }
 
+    async fn select_execution_node(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        self.delegate
+            .select_execution_node(agent_id, user_id, preferred_node_id)
+            .await
+    }
+
     async fn start(&self, request: AgentRunParams) -> TalosResult<AgentRunExecution> {
         self.execution
             .requests
@@ -217,12 +228,24 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
         self.delegate.compact_session(params).await
     }
 
-    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.clear_session(params).await
+    async fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .clear_session(params, expected_history_cursor)
+            .await
     }
 
-    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
-        self.delegate.close_session(params).await
+    async fn close_session(
+        &self,
+        params: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .close_session(params, expected_history_cursor)
+            .await
     }
 
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
@@ -253,6 +276,15 @@ impl AgentCoordinator for RecordingAgentCoordinator {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         unreachable!("execution is delegated by the scenario Coordinator")
     }
@@ -279,11 +311,19 @@ impl AgentCoordinator for RecordingAgentCoordinator {
         unreachable!("not used by spawn")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -329,7 +369,7 @@ async fn test_services_uninitialized() -> TestServices {
         talos_config::DEFAULT_WORKSPACE_ID,
         workspace.path().to_path_buf(),
     ));
-    let sessions = Arc::new(SessionService::new(
+    let sessions = Arc::new(crate::test_support::session_service(
         store.clone(),
         Arc::new(MockProjectStore::new()),
         config.clone(),
@@ -353,7 +393,7 @@ async fn test_services_uninitialized() -> TestServices {
         profile_store,
         SessionMessageQueueService::new(10).expect("queue service should initialize"),
         config,
-        Arc::new(tokio::sync::RwLock::new(())),
+        Arc::new(crate::turn::NodeAdmissionGates::default()),
     ));
     let subagents = SubagentService::new(sessions.clone(), turns, event_service.clone());
     TestServices {
@@ -415,6 +455,7 @@ async fn create_parent_with_agent(
             },
             user_id: "user-1".to_string(),
             target_agent: agent_id.to_string(),
+            execution_node_id: "embedded".to_string(),
             model_selection: Some(ModelSelection::without_reasoning(ModelRef {
                 provider: "anthropic".to_string(),
                 id: "test-model".to_string(),
@@ -501,6 +542,7 @@ async fn create_live_running_child(
         .submit_subagent_turn(
             child.clone(),
             talos_types::StartTurnRequest {
+                node_id: None,
                 session_id: child.id.clone(),
                 input: crate::test_support::test_user_input("running child"),
                 model_selection: None,
@@ -543,6 +585,7 @@ async fn create_child_session(
                 },
                 user_id: "user-1".to_string(),
                 target_agent: "reviewer".to_string(),
+                execution_node_id: "embedded".to_string(),
                 model_selection: Some(ModelSelection::without_reasoning(ModelRef {
                     provider: "anthropic".to_string(),
                     id: "test-model".to_string(),
@@ -828,6 +871,7 @@ async fn spawn_rejects_an_initial_prompt_over_the_hard_byte_cap() {
 #[tokio::test]
 async fn spawn_supports_recursive_child_parent() {
     let services = test_services().await;
+    *services.executor.hold_running_turn.lock().unwrap() = true;
     let parent = create_parent(&services).await;
     let child_result = services
         .subagents

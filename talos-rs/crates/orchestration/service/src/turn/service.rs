@@ -16,11 +16,11 @@ use talos_types::{
     ModelRef, ModelUsageKind, SessionInfo, StartTurnRequest, StartTurnResponse, TalosConfig,
     TurnCommandStatus, UserActionResponse, UserActionState,
 };
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::oneshot;
 use {tracing::error, uuid::Uuid};
 
 use crate::message_queue::MessageQueueReservation;
-use crate::{InnerModelClient, SessionMessageQueueService, UserWorkspaceMemoryService};
+use crate::{InnerModelClient, SessionMessageQueueService};
 
 use super::{
     auto_dispatch_session_from_event, retry_idempotency_key,
@@ -47,7 +47,7 @@ pub(crate) struct TurnService {
     profile_store: Arc<dyn ProfileStore>,
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
-    execution_gate: Arc<RwLock<()>>,
+    execution_gate: Arc<super::NodeAdmissionGates>,
 }
 
 struct TurnSubmission {
@@ -62,7 +62,7 @@ impl TurnService {
         profile_store: Arc<dyn ProfileStore>,
         message_queue: SessionMessageQueueService,
         base_config: TalosConfig,
-        execution_gate: Arc<RwLock<()>>,
+        execution_gate: Arc<super::NodeAdmissionGates>,
     ) -> Self {
         Self {
             execution,
@@ -75,16 +75,16 @@ impl TurnService {
 
     pub(crate) fn with_user_workspace_memory_reflection(
         mut self,
-        memory: Arc<UserWorkspaceMemoryService>,
         inner_model: Arc<InnerModelClient>,
     ) -> Self {
         let sessions = self.execution.sessions.clone();
+        let coordinator = self.execution.coordinator.clone();
         self.execution = self.execution.with_inner_model(
             inner_model.clone(),
             Arc::new(
                 crate::user_workspace_memory::UserWorkspaceMemoryReflection::new(
                     inner_model,
-                    memory,
+                    coordinator,
                     sessions,
                 ),
             ),
@@ -113,7 +113,11 @@ impl TurnService {
         request_id: String,
         identity: AgentTurnRef,
     ) -> TalosResult<SessionInfo> {
-        let _admission_guard = self.execution_gate.read().await;
+        let _admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         let context = self
             .execution
             .sessions
@@ -153,7 +157,10 @@ impl TurnService {
             .sessions
             .record_compaction_usage(session, &usage)
             .await?;
-        self.execution.sessions.session_info(&record)
+        self.execution
+            .sessions
+            .schedule_shared_history_cursor(record.id.clone());
+        self.execution.sessions.session_info(&record).await
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {
@@ -274,7 +281,11 @@ impl TurnService {
         prepared: Option<PreparedTurnSubmission>,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<StartTurnResponse> {
-        let _admission_guard = self.execution_gate.read().await;
+        let _admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         validate_user_input(&submission.input)?;
         let session_id = session.id.clone();
         let request_hash = turn_submission_hash(&session_id, &submission.input)?;

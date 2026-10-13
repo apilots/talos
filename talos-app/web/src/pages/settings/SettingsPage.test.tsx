@@ -8,6 +8,7 @@ import "@/shared/i18n/setup";
 import { SettingsPage } from "./SettingsPage";
 
 const useSettingsPageMock = vi.fn();
+const managementPermission = vi.fn();
 
 vi.mock("@/features/settings", async () => {
   const actual = await vi.importActual<typeof import("@/features/settings")>("@/features/settings");
@@ -58,7 +59,9 @@ function renderSettings(
   authStatus: "authenticated" | "open" = "authenticated",
   authRole: "user" | "admin" = "user",
   deploymentMode: "local" | "cloud" = "local",
+  ownsComputer = true,
 ) {
+  managementPermission.mockReturnValue(ownsComputer);
   useSettingsPageMock.mockReturnValue(buildSettingsState(authStatus, authRole, deploymentMode));
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
@@ -137,17 +140,23 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("link", { name: "Models" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("redirects regular users away from config management sections", () => {
-    renderSettings("/settings/web-search", "authenticated", "user", "cloud");
+  it("redirects users who do not own the selected Computer away from config management sections", () => {
+    renderSettings("/settings/web-search", "authenticated", "user", "cloud", false);
 
     expect(screen.getByText("Profile content")).toBeTruthy();
     expect(screen.queryByText("Web Search content")).toBeNull();
   });
 
+  it("allows a regular owner to configure Models and Web Search in Cloud mode", () => {
+    renderSettings("/settings/models", "authenticated", "user", "cloud");
+    expect(screen.getByText("Models content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Web Search" })).toBeTruthy();
+  });
+
   it("renders the general settings section", () => {
     renderSettings("/settings/general", "authenticated", "user", "cloud");
 
-    expect(screen.queryByText("Models")).toBeNull();
+    expect(screen.getByRole("link", { name: "Models" })).toBeTruthy();
     expect(screen.getByText("General content")).toBeTruthy();
   });
 
@@ -158,3 +167,5 @@ describe("SettingsPage", () => {
     expect(screen.queryByText("Account content")).toBeNull();
   });
 });
+
+vi.mock("@/features/computers", () => ({ ComputerContext: () => null, useCanManageComputer: () => managementPermission() }));

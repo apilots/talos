@@ -6,6 +6,7 @@ TALOS_E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${TALOS_E2E_DIR}/scripts/common.sh"
 
 timestamp="$(date '+%Y%m%d_%H%M%S')"
+export TALOS_E2E_RUN_ID="${timestamp}-$$"
 report_file="${REPORT_ROOT}/e2e_report_${timestamp}.md"
 latest_file="${REPORT_ROOT}/latest_report.md"
 mkdir -p "${REPORT_ROOT}"
@@ -54,11 +55,13 @@ collect_group_cases() {
   fi
 
   while IFS= read -r scenario; do
-    if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" && "$(uname -s)" != "Darwin" ]]; then
-      continue
+    if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" ]]; then
+      if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        continue
+      fi
     fi
     if [[ "${group_name}" == "15_tui_install" && "$(basename "${scenario}")" == "02_linux_docker.sh" ]]; then
-      if [[ "$(uname -s)" != "Darwin" ]] || ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+      if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
         continue
       fi
     fi
@@ -106,6 +109,11 @@ build_required_binaries() {
 
   if [[ "${needs_cli}" == "1" ]]; then
     build_cli_binary
+  fi
+
+  # Linux execution discovers the sandbox launcher beside the runtime binaries.
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    (cd "${TALOS_RS_DIR}" && cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher)
   fi
 
   export TALOS_E2E_REQUIRED_BINARIES_READY=1

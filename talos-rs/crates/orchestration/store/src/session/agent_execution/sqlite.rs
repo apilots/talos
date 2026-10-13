@@ -15,6 +15,70 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    async fn get_shared_active_turn(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
+        let mut tx = self.storage.begin_transaction().await?;
+        let Some(adapter) = self
+            .sync
+            .resource(
+                &mut *tx,
+                &talos_sync::SyncResourceKey::Session {
+                    session_id: session_id.into(),
+                },
+            )
+            .await?
+        else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        let rows = tx.query("SELECT * FROM agent_events WHERE session_id = ? AND sequence IS NOT NULL ORDER BY event_seq DESC LIMIT 1", &[session_id]).await?;
+        let Some(row) = rows.first() else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        let last = parse_event_record(row)?;
+        if matches!(
+            last.payload,
+            talos_agent_api::AgentEventPayload::TurnCompleted(_)
+                | talos_agent_api::AgentEventPayload::TurnFailed(_)
+        ) {
+            tx.commit().await?;
+            return Ok(None);
+        }
+        let metadata = adapter
+            .sync
+            .active_turn_metadata(&mut *tx, adapter.binding(), &last.identity)
+            .await?;
+        let key =
+            crate::sync::session::key_at(&adapter, &mut *tx, session_id, last.event_seq).await?;
+        let (state, updated_at) =
+            match metadata.filter(|meta| Some(&meta.last_event) == key.as_ref()) {
+                Some(meta) => (meta.state, meta.updated_at),
+                None => (
+                    if matches!(
+                        last.payload,
+                        talos_agent_api::AgentEventPayload::WaitingForInput(_)
+                    ) {
+                        talos_agent_api::ActiveTurnState::WaitingForInput
+                    } else {
+                        talos_agent_api::ActiveTurnState::Running
+                    },
+                    last.persisted_at,
+                ),
+            };
+        let initial_message = tx.query("SELECT json_extract(payload_json, '$.data.messageId') AS message_id FROM agent_events WHERE session_id = ? AND turn_id = ? AND json_extract(payload_json, '$.type') = 'messageCompleted' AND json_extract(payload_json, '$.data.role') = 'user' ORDER BY sequence LIMIT 1", &[session_id, &last.identity.turn_id]).await?.first().and_then(|r| r.get_string("message_id"));
+        tx.commit().await?;
+        Ok(Some(talos_agent_api::TimelineActiveTurn {
+            identity: last.identity,
+            initial_message_id: initial_message,
+            state,
+            last_event_id: talos_types::TimelineEventId::from_seq(last.event_seq).to_string(),
+            updated_at,
+        }))
+    }
+
     async fn append_timeline_notice(
         &self,
         notice: talos_agent_api::TimelineSystemNotice,
@@ -100,6 +164,14 @@ impl AgentExecutionStore for DatabaseSessionStore {
         event: AgentEvent,
     ) -> TalosResult<AgentEventCommit> {
         admission::commit_maintenance(self, event).await
+    }
+
+    async fn commit_progress_events(
+        &self,
+        events: Vec<AgentEvent>,
+        expected_event_seq: i64,
+    ) -> TalosResult<AgentEventCommit> {
+        admission::commit_progress_batch(self, events, expected_event_seq).await
     }
 
     async fn commit_running_input_admission(

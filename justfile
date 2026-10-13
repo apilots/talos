@@ -48,6 +48,10 @@ build *args:
 dev-server *args:
     TALOS_RESOURCE_DIR="$PWD/.." cargo run -p talos-server --bin talos-server "$@"
 
+# Run the standalone Agent worker with repository resources.
+dev-worker *args:
+    TALOS_RESOURCE_DIR="$PWD/.." cargo run -p talos-worker-bin --bin talos-worker "$@"
+
 # Run the development Web UI with repository resources in the process environment.
 dev-web *args:
     TALOS_RESOURCE_DIR="$PWD/.." pnpm --dir ../talos-app dev "$@"
@@ -111,3 +115,17 @@ clean-release:
 # Show target directory disk usage by top-level bucket.
 target-size:
     du -sh target/* 2>/dev/null | sort -h
+
+# Product images consume the public synchronization SDK through Cargo.lock.
+docker-server-build image="talos-server:local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ..
+    docker build -f build/server/Dockerfile -t "{{image}}" ..
+
+# Standalone execution image; no WebUI or Server process is included.
+docker-worker-build image="talos-worker:local":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ..
+    docker build -f build/worker/Dockerfile -t "{{image}}" ..

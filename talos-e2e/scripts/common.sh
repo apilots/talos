@@ -548,6 +548,17 @@ build_server_binary() {
   export TALOS_SERVER_BINARY_READY=1
 }
 
+build_worker_binary() {
+  if [[ "${TALOS_WORKER_BINARY_READY:-}" == "1" ]] \
+    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-worker" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${REPORT_ROOT}"
+  (cd "${TALOS_RS_DIR}" && cargo build -p talos-worker-bin >/dev/null)
+  export TALOS_WORKER_BINARY_READY=1
+}
+
 build_cli_binary() {
   if [[ "${TALOS_CLI_BINARY_READY:-}" == "1" ]] \
     && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
@@ -589,12 +600,11 @@ build_app_server_binaries() {
 
 api_data_json() {
   local json="$1"
-  JSON_INPUT="$json" python3 - <<'PY'
+  printf '%s' "$json" | python3 -c '
 import json
-import os
 import sys
 
-raw = os.environ.get("JSON_INPUT", "")
+raw = sys.stdin.read()
 try:
     data = json.loads(raw)
 except Exception as exc:
@@ -606,19 +616,18 @@ if not (isinstance(data, dict) and data.get("status") == "success" and "data" in
     sys.exit(1)
 
 print(json.dumps(data["data"], ensure_ascii=False, separators=(",", ":")))
-PY
+'
 }
 
 json_get() {
   local json="$1"
   local key="$2"
-  JSON_INPUT="$json" python3 - "$key" <<'PY'
+  printf '%s' "$json" | python3 -c '
 import json
-import os
 import sys
 
 key = sys.argv[1]
-raw = os.environ.get("JSON_INPUT", "")
+raw = sys.stdin.read()
 if not raw:
     print("")
     sys.exit(0)
@@ -642,7 +651,7 @@ elif isinstance(node, (dict,list)):
     print(json.dumps(node))
 else:
     print(node)
-PY
+' "$key"
 }
 
 api_json_get() {
@@ -780,6 +789,9 @@ send_message_ack() {
   if [[ -n "${idempotency_key}" ]]; then
     args+=(-H "Idempotency-Key: ${idempotency_key}")
   fi
+  if [[ -n "${TALOS_E2E_BEARER_TOKEN:-}" ]]; then
+    args+=(-H "Authorization: Bearer ${TALOS_E2E_BEARER_TOKEN}")
+  fi
   curl "${args[@]}" -d "${payload}"
 }
 
@@ -796,6 +808,7 @@ collect_timeline_events() {
   AFTER_EVENT_ID="${after_event_id}" \
   STOP_PAYLOAD_TYPES="${stop_payload_types}" \
   GATEWAY_URL="${GATEWAY_URL}" \
+  TALOS_E2E_BEARER_TOKEN="${TALOS_E2E_BEARER_TOKEN:-}" \
   python3 - <<'PY'
 import json
 import os
@@ -821,6 +834,11 @@ request = urllib.request.Request(
     url,
     headers={
         "Accept": "text/event-stream",
+        **(
+            {"Authorization": f"Bearer {os.environ['TALOS_E2E_BEARER_TOKEN']}"}
+            if os.environ.get("TALOS_E2E_BEARER_TOKEN")
+            else {}
+        ),
     },
 )
 
@@ -829,7 +847,7 @@ current = {"id": "", "event": "", "data": []}
 
 def agent_event(record):
     event = record.get("event")
-    return event.get("data", {}) if isinstance(event, dict) else {}
+    return event.get("data", {}) if isinstance(event, dict) and event.get("type") == "agent" else {}
 
 def reset():
     current["id"] = ""
@@ -847,6 +865,9 @@ def flush(handle):
         reset()
         return False
     event_record = agent_event(record)
+    if not event_record:
+        reset()
+        return False
     identity = event_record.get("identity") or {}
     if identity.get("turnId") != turn_id:
         raise RuntimeError(f"received event for unexpected turn: {identity.get('turnId')}")
@@ -917,7 +938,7 @@ metrics = None
 
 def agent_event(record):
     event = record.get("event")
-    return event.get("data", {}) if isinstance(event, dict) else {}
+    return event.get("data", {}) if isinstance(event, dict) and event.get("type") == "agent" else {}
 
 def upsert_block(message_id, block):
     if not message_id or not isinstance(block, dict):

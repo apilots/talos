@@ -15,6 +15,7 @@ fn failed_save_recovers_files_only_when_original_records_are_confirmed() {
     let installed = fixture
         .manager
         .install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: source.plugins[0].id.clone(),
                 expected_source_commit: None,

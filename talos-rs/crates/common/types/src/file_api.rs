@@ -21,6 +21,11 @@ pub struct DocUpdateRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct MemoryFileListRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     #[serde(default)]
     #[ts(optional)]
     pub limit: Option<usize>,
@@ -42,6 +47,11 @@ pub struct MemoryFileListResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemoryFileReadRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub date: String,
 }
 
@@ -52,6 +62,11 @@ pub struct MemoryFileReadResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemoryFileWriteRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub date: String,
     pub content: String,
     #[serde(default)]
@@ -67,6 +82,11 @@ pub struct MemoryFileWriteResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemorySearchRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub query: String,
     #[serde(default)]
     #[ts(optional)]
@@ -107,6 +127,11 @@ pub struct MemorySearchHit {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryGetRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub memory_id: String,
 }
 
@@ -221,9 +246,14 @@ impl WorkspaceDocKind {
 /// This is not a Session workspace selector and accepts no client path or user ID.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 #[serde(deny_unknown_fields)]
-pub struct WorkspaceInfoRequest {}
+pub struct WorkspaceInfoRequest {
+    /// Omitted or null preserves the existing target selection.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+}
 
-/// Read-only server storage locations resolved by configuration. Available to the
+/// Read-only target Worker locations resolved by its configuration. Available to the
 /// same authenticated actor as workspace documents; no filesystem write is implied.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -234,7 +264,12 @@ pub struct WorkspaceInfoResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct WorkspaceDocListRequest {}
+pub struct WorkspaceDocListRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct WorkspaceDocListResponse {
@@ -243,6 +278,11 @@ pub struct WorkspaceDocListResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct WorkspaceDocReadRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub kind: WorkspaceDocKind,
 }
 
@@ -253,6 +293,11 @@ pub struct WorkspaceDocReadResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct WorkspaceDocWriteRequest {
+    /// Omitted or null selects the embedded Worker.
+    #[serde(default, rename = "nodeId")]
+    #[ts(rename = "nodeId", optional)]
+    pub node_id: Option<String>,
+
     pub kind: WorkspaceDocKind,
     pub content: String,
     #[serde(default)]

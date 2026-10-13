@@ -357,11 +357,14 @@ async fn kernel_provider_clear_session_deletes_only_private_artifacts() {
         provider_with_store(temp_dir.path(), artifact_store.clone()),
     );
     harness
-        .clear_session(AgentSessionContext {
-            agent_id: "agent-1".to_string(),
-            session_id: "session-1".to_string(),
-            workspace: workspace(temp_dir.path()),
-        })
+        .clear_session(
+            AgentSessionContext {
+                agent_id: "agent-1".to_string(),
+                session_id: "session-1".to_string(),
+                workspace: workspace(temp_dir.path()),
+            },
+            Default::default(),
+        )
         .await
         .unwrap();
 
@@ -464,6 +467,7 @@ fn rich_input() -> Vec<AgentUserContentKind> {
 
 fn context(identity: AgentTurnRef, workspace_root: &Path) -> AgentContext {
     AgentContext {
+        history_cursor: None,
         session: AgentSessionContext {
             agent_id: "agent-1".to_string(),
             session_id: identity.session_id,

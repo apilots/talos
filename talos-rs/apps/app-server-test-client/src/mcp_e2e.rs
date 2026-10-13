@@ -20,6 +20,24 @@ const SCREENSHOT_TOOL_SUFFIX: &str = "browser_take_screenshot";
 
 pub(super) async fn mcp_e2e(client: &mut AppServerClient) -> Result<()> {
     let install_id = plugin_lifecycle_e2e(client).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        loop {
+            let page = client.list_mcp_servers(Default::default()).await?;
+            if let Some(server) = page.data.iter().find(|server| server.name == SERVER_NAME) {
+                match &server.status {
+                    talos_sdk::McpServerStatus::Ready => return Ok::<_, anyhow::Error>(()),
+                    talos_sdk::McpServerStatus::Failed { error }
+                    | talos_sdk::McpServerStatus::Exited { error } => {
+                        return Err(anyhow!("MCP startup failed: {:?}", error.code))
+                    }
+                    _ => {}
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("MCP connection did not become ready")??;
     playwright_mcp_tool_e2e(client).await?;
     uninstall_mcp_plugin(client, install_id).await?;
     Ok(())
@@ -30,6 +48,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     let source_repo = plugin_marketplace_fixture_path()?;
     let added = client
         .add_plugin_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: source_repo,
                 sparse_paths: vec!["mcp".to_string()],
@@ -41,6 +60,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin source refresh");
     let refreshed = client
         .refresh_plugin_source(PluginSourceRefreshRequest {
+            node_id: None,
             source_id: added.source.id.clone(),
         })
         .await?;
@@ -54,6 +74,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin search");
     let search = client
         .search_plugins(PluginSearchRequest {
+            node_id: None,
             query: Some("playwright".to_string()),
             source_id: Some(added.source.id.clone()),
             kind: Some(PluginKind::McpServer),
@@ -106,6 +127,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin read");
     let read = client
         .read_plugin(PluginReadRequest {
+            node_id: None,
             plugin_id: plugin.id.clone(),
         })
         .await?;
@@ -136,6 +158,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin install");
     let installed = client
         .install_plugin(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: plugin.id.clone(),
                 expected_source_commit: plugin.source_commit.clone(),
@@ -156,6 +179,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin list installed");
     let listed = client
         .list_plugins(PluginListRequest {
+            node_id: None,
             kind: Some(PluginKind::McpServer),
             status: Some(PluginListStatusFilter::Installed),
             source_id: Some(added.source.id),
@@ -173,6 +197,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin disable");
     let disabled = client
         .disable_plugin(talos_sdk::PluginDisableRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
         })
         .await?;
@@ -189,6 +214,7 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
     eprintln!("mcp-e2e plugin enable");
     let enabled = client
         .enable_plugin(talos_sdk::PluginEnableRequest {
+            node_id: None,
             install_id: installed.install.id.clone(),
         })
         .await?;
@@ -211,7 +237,10 @@ async fn uninstall_mcp_plugin(
 ) -> Result<()> {
     eprintln!("mcp-e2e plugin uninstall");
     let uninstalled = client
-        .uninstall_plugin(PluginUninstallRequest { install_id })
+        .uninstall_plugin(PluginUninstallRequest {
+            node_id: None,
+            install_id,
+        })
         .await?;
     if !uninstalled.uninstalled {
         return Err(anyhow!("MCP plugin uninstall did not report success"));
@@ -242,6 +271,7 @@ async fn playwright_mcp_tool_e2e(client: &mut AppServerClient) -> Result<()> {
     eprintln!("mcp-e2e collect events");
     let events = collect_until_mcp_artifact(client).await?;
 
+    super::ensure_turn_event_flow(&events)?;
     let called_tools = called_mcp_tools_from_events(&events);
     ensure_tool_called(&called_tools, NAVIGATE_TOOL_SUFFIX)?;
     ensure_tool_called(&called_tools, SCREENSHOT_TOOL_SUFFIX)?;
@@ -317,9 +347,10 @@ async fn collect_until_mcp_artifact(client: &mut AppServerClient) -> Result<Vec<
 
 fn observed_required_mcp_artifact(events: &[TimelineEvent]) -> Result<bool> {
     let called_tools = called_mcp_tools_from_events(events);
-    Ok(called_tools
-        .iter()
-        .any(|tool| tool.ends_with(NAVIGATE_TOOL_SUFFIX))
+    Ok(events.iter().any(super::is_terminal_event)
+        && called_tools
+            .iter()
+            .any(|tool| tool.ends_with(NAVIGATE_TOOL_SUFFIX))
         && called_tools
             .iter()
             .any(|tool| tool.ends_with(SCREENSHOT_TOOL_SUFFIX))

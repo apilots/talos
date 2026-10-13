@@ -7,22 +7,20 @@ export TALOS_TEST_PORT="${TALOS_FILES_S3_E2E_TALOS_PORT:-18083}"
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 require_command curl
-require_command docker
-require_command mc
+require_command tar
 require_command python3
 
-TMP_DIR="$(make_e2e_temp_dir "talos-files-s3")"
+# Keep the fixture binary, process logs and storage inside this group.
+mkdir -p "${SCRIPT_DIR}/.tmp"
+TMP_DIR="$(mktemp -d "${SCRIPT_DIR}/.tmp/s3.XXXXXX")"
 CONFIG_TEMPLATE="${TMP_DIR}/talos.yaml"
 FIXTURE_PATH="${REPO_ROOT}/build/desktop/icons/icon.png"
-MINIO_CONFIG_DIR="${TMP_DIR}/mc"
-MINIO_CONTAINER="talos-files-e2e-$$"
-MINIO_IMAGE="${TALOS_FILES_E2E_MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}"
-MINIO_ACCESS_KEY="talos-files-e2e"
-MINIO_SECRET_KEY="talos-files-e2e-secret"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/helpers/s3_gateway.bash"
 
 cleanup() {
   stop_server
-  docker rm -f "${MINIO_CONTAINER}" >/dev/null 2>&1 || true
+  stop_s3_gateway
   if [[ "${TALOS_FILES_E2E_KEEP_TMP:-0}" != "1" ]]; then
     rm -rf "${TMP_DIR}"
   else
@@ -30,33 +28,16 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-docker run -d --rm \
-  --name "${MINIO_CONTAINER}" \
-  -e "MINIO_ROOT_USER=${MINIO_ACCESS_KEY}" \
-  -e "MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}" \
-  -p 127.0.0.1::9000 \
-  "${MINIO_IMAGE}" server /data >/dev/null
-MINIO_ADDRESS="$(docker port "${MINIO_CONTAINER}" 9000/tcp | head -n 1)"
-MINIO_ENDPOINT="http://${MINIO_ADDRESS}"
-
-for _ in $(seq 1 120); do
-  if curl -fsS "${MINIO_ENDPOINT}/minio/health/live" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.25
-done
-curl -fsS "${MINIO_ENDPOINT}/minio/health/live" >/dev/null
-mc alias set --config-dir "${MINIO_CONFIG_DIR}" files-e2e \
-  "${MINIO_ENDPOINT}" "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" >/dev/null
-mc mb --config-dir "${MINIO_CONFIG_DIR}" --ignore-existing files-e2e/talos-files >/dev/null
-echo "CASE minio_start PASS image=${MINIO_IMAGE}"
+start_s3_gateway
 
 BASE_CONFIG="${REPO_ROOT}/conf/talos-dev.yaml" \
 CONFIG_TEMPLATE="${CONFIG_TEMPLATE}" \
-MINIO_ENDPOINT="${MINIO_ENDPOINT}" \
-MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" \
-MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
+S3_ENDPOINT="${S3_ENDPOINT}" \
+S3_ACCESS_KEY="${S3_ACCESS_KEY}" \
+S3_SECRET_KEY="${S3_SECRET_KEY}" \
 python3 - <<'PY'
 import json
 import os
@@ -70,16 +51,16 @@ storage = f'''storage:
   database_type: sqlite
   max_connections: 5
   files:
-    default: "minio"
+    default: "s3"
     backends:
-      minio:
+      s3:
         type: "s3"
         root: "/talos-e2e"
         bucket: "talos-files"
         region: "us-east-1"
-        endpoint: {json.dumps(os.environ["MINIO_ENDPOINT"])}
-        access_key_id: {json.dumps(os.environ["MINIO_ACCESS_KEY"])}
-        secret_access_key: {json.dumps(os.environ["MINIO_SECRET_KEY"])}
+        endpoint: {json.dumps(os.environ["S3_ENDPOINT"])}
+        access_key_id: {json.dumps(os.environ["S3_ACCESS_KEY"])}
+        secret_access_key: {json.dumps(os.environ["S3_SECRET_KEY"])}
 '''
 Path(os.environ["CONFIG_TEMPLATE"]).write_text(
     text[:start] + storage,
@@ -117,9 +98,9 @@ assert [item["fileId"] for item in data["data"]] == [os.environ["FILE_ID"]]
 PY
 echo "CASE s3_file_list PASS file_id=${file_id}"
 
-object_path="files-e2e/talos-files/talos-e2e/${file_id}/content.png"
+object_path="talos-files/talos-e2e/${file_id}/content.png"
 stored_fixture="${TMP_DIR}/stored.png"
-mc cat --config-dir "${MINIO_CONFIG_DIR}" "${object_path}" >"${stored_fixture}"
+s3_request GET "${object_path}" >"${stored_fixture}"
 if ! cmp -s "${FIXTURE_PATH}" "${stored_fixture}"; then
   echo "CASE s3_object_content FAIL object=${object_path}"
   exit 1
@@ -130,12 +111,34 @@ if find "${TALOS_HOME}/data/files" -type f -print -quit 2>/dev/null | grep -q .;
 fi
 echo "CASE s3_object_content PASS object=${object_path}"
 
+curl -fsS "${GATEWAY_URL}/v1/files/${file_id}/content" -o "${TMP_DIR}/api-content.json"
+python3 - "${TMP_DIR}/api-content.json" "${TMP_DIR}/api-content.png" <<'PY'
+import base64
+import json
+import sys
+from pathlib import Path
+response = json.loads(Path(sys.argv[1]).read_text())
+assert response['status'] == 'success', response
+Path(sys.argv[2]).write_bytes(base64.b64decode(response['data']['dataBase64'], validate=True))
+PY
+if ! cmp -s "${FIXTURE_PATH}" "${TMP_DIR}/api-content.png"; then
+  echo "CASE s3_file_content FAIL content_mismatch=true"
+  exit 1
+fi
+echo "CASE s3_file_content PASS file_id=${file_id}"
+
 delete_body="$(curl -sS -X DELETE "${GATEWAY_URL}/v1/files/${file_id}")"
 if [[ "$(api_json_get "${delete_body}" "fileId")" != "${file_id}" ]]; then
   echo "CASE s3_file_delete FAIL body=${delete_body}"
   exit 1
 fi
-if mc stat --config-dir "${MINIO_CONFIG_DIR}" "${object_path}" >/dev/null 2>&1; then
+list_body="$(curl -fsS "${GATEWAY_URL}/v1/files?tag=s3-e2e")"
+LIST_BODY="${list_body}" python3 - <<'PY'
+import json
+import os
+assert json.loads(os.environ["LIST_BODY"])["data"]["data"] == []
+PY
+if [[ -f "${TMP_DIR}/objects/${object_path}" ]]; then
   echo "CASE s3_file_delete FAIL object_still_exists=${object_path}"
   exit 1
 fi

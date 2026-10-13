@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getTalosClient } from "@/shared/api/client";
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { AppProtocol, TalosApiError, type MemoryFileDetail } from "@talos/sdk-browser";
 
@@ -53,7 +53,7 @@ export function formatMemoryDate(updatedAt?: number | null) {
 }
 
 export function useMemoryPage() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");

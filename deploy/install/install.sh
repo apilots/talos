@@ -2,8 +2,10 @@
 set -eu
 
 PROGRAM_NAME="talos-install"
-DEFAULT_RELEASE_BASE_URL="https://github.com/apilots/talos-releases/releases"
-release_base_url="${TALOS_RELEASE_BASE_URL:-${DEFAULT_RELEASE_BASE_URL}}"
+DEFAULT_RELEASE_BASE_URL="https://github.com/apilots/talos/releases"
+LEGACY_RELEASE_BASE_URL="https://github.com/apilots/talos-releases/releases"
+release_url_override="${TALOS_RELEASE_BASE_URL:-}"
+release_base_url="${release_url_override:-${DEFAULT_RELEASE_BASE_URL}}"
 requested_version="${TALOS_VERSION:-}"
 temp_dir=""
 staging_dir=""
@@ -71,15 +73,25 @@ resolve_latest_version() {
   case "${latest_url}" in
     https://*)
       effective_url="$(curl --proto '=https' --tlsv1.2 -fsSL \
-        -o /dev/null -w '%{url_effective}' "${latest_url}")"
+        -o /dev/null -w '%{url_effective}' "${latest_url}")" || return 1
       ;;
-    *) die "latest version resolution requires an https release URL" ;;
+    *) return 1 ;;
   esac
   latest_tag="${effective_url%/}"
   latest_tag="${latest_tag##*/}"
   case "${latest_tag}" in
     v?*) printf '%s\n' "${latest_tag#v}" ;;
-    *) die "could not resolve a v-prefixed release tag from ${effective_url}" ;;
+    *) return 1 ;;
+  esac
+}
+
+try_download_file() {
+  url="$1"
+  output="$2"
+  case "${url}" in
+    https://*) curl --proto '=https' --tlsv1.2 -fsSL "${url}" -o "${output}" ;;
+    file://*) curl -fsSL "${url}" -o "${output}" ;;
+    *) return 1 ;;
   esac
 }
 
@@ -243,7 +255,15 @@ else
 fi
 
 if [ -z "${requested_version}" ]; then
-  requested_version="$(resolve_latest_version)"
+  if [ -n "${release_url_override}" ]; then
+    requested_version="$(resolve_latest_version)" \
+      || die "could not resolve the latest version from ${release_base_url}"
+  elif ! requested_version="$(resolve_latest_version)"; then
+    printf 'Talos releases are not available yet; checking archived releases.\n' >&2
+    release_base_url="${LEGACY_RELEASE_BASE_URL}"
+    requested_version="$(resolve_latest_version)" \
+      || die "could not resolve the latest version from ${release_base_url}"
+  fi
 fi
 version="${requested_version#v}"
 [ -n "${version}" ] || die "release version must not be empty"
@@ -267,7 +287,7 @@ command_path="${bin_dir}/talos"
 version_name="${version}-${platform}-${arch}"
 version_dir="${install_root}/versions/${version_name}"
 asset_name="Talos-TUI-${version}-${platform}-${arch}.tar.gz"
-download_base="${release_base_url}/download/v${version}"
+  download_base="${release_base_url}/download/v${version}"
 
 acquire_install_lock
 if [ -e "${command_path}" ] || [ -L "${command_path}" ]; then
@@ -290,8 +310,18 @@ else
   archive_path="${temp_dir}/${asset_name}"
 
   printf 'Downloading Talos TUI %s for %s-%s...\n' "${version}" "${platform}" "${arch}"
-  download_file "${download_base}/checksums.txt" "${checksums_path}"
-  download_file "${download_base}/${asset_name}" "${archive_path}"
+  if [ -n "${release_url_override}" ]; then
+    download_file "${download_base}/checksums.txt" "${checksums_path}"
+    download_file "${download_base}/${asset_name}" "${archive_path}"
+  elif ! try_download_file "${download_base}/checksums.txt" "${checksums_path}" \
+    || ! try_download_file "${download_base}/${asset_name}" "${archive_path}"; then
+    rm -f "${checksums_path}" "${archive_path}"
+    printf 'Talos release v%s is not available; checking the archived release.\n' "${version}" >&2
+    release_base_url="${LEGACY_RELEASE_BASE_URL}"
+    download_base="${release_base_url}/download/v${version}"
+    download_file "${download_base}/checksums.txt" "${checksums_path}"
+    download_file "${download_base}/${asset_name}" "${archive_path}"
+  fi
 
   expected_checksum="$(awk -v target="${asset_name}" '
     {

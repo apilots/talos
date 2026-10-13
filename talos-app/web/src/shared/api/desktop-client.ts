@@ -65,6 +65,8 @@ export function createDesktopTalosClient(
   };
 
   return {
+    sync: client.sync,
+    computers: client.computers,
     auth: {
       logout: () => client.authLogout().then(() => undefined),
     },
@@ -75,19 +77,20 @@ export function createDesktopTalosClient(
       read: () => client.readProfile(),
     },
     llm: {
-      get: (): Promise<ConfigResponse> => client.getLlmConfig(),
-      update: (config: LlmConfig): Promise<ConfigResponse> => client.updateLlmConfig(config),
+      get: (target = {}): Promise<ConfigResponse> => client.configGet("llm", target),
+      update: (config: LlmConfig, target = {}): Promise<ConfigResponse> => client.configUpdate({ type: "llm", value: config }, target),
     },
     config: {
-      get: (path: ConfigPath = "llm"): Promise<ConfigResponse> => client.configGet(path),
-      update: (value: ConfigValue): Promise<ConfigResponse> => client.configUpdate(value),
+      get: (path: ConfigPath = "llm", target = {}): Promise<ConfigResponse> => client.configGet(path, target),
+      update: (value: ConfigValue, target = {}): Promise<ConfigResponse> => client.configUpdate(value, target),
     },
     models: {
-      list: () => client.listModels(),
+      list: (target = {}) => client.listModels(target),
     },
     sessions: {
       list: (query?: SessionListRequest) =>
         client.listSessions({
+          nodeId: query?.nodeId,
           projectId: query?.projectId ?? null,
           limit: query?.limit ?? null,
           offset: query?.offset ?? null,
@@ -127,7 +130,7 @@ export function createDesktopTalosClient(
     },
     messageQueue: client.messageQueue,
     projects: {
-      list: () => client.listProjects({}),
+      list: (query = {}) => client.listProjects(query),
       create: (body: Parameters<TalosWebClient["projects"]["create"]>[0]) =>
         client.createProject(body),
       patch: (request: Parameters<TalosWebClient["projects"]["patch"]>[0]) =>
@@ -138,9 +141,9 @@ export function createDesktopTalosClient(
     files: client.files,
     fs: {
       directory: {
-        read: (query?: { path?: string | null }) =>
-          client.readFsDirectory({ path: query?.path ?? null }),
-        create: (body: { parent: string; name: string }) =>
+        read: (query?: Parameters<TalosWebClient["fs"]["directory"]["read"]>[0]) =>
+          client.readFsDirectory({ ...query, path: query?.path ?? null }),
+        create: (body: Parameters<TalosWebClient["fs"]["directory"]["create"]>[0]) =>
           client.createFsDirectory(body),
       },
     },
@@ -153,11 +156,11 @@ export function createDesktopTalosClient(
       getEntry: (request: MemoryGetRequest) => client.getMemory(request),
     },
     workspaceDocs: {
-      info: () => client.workspaceInfo(),
-      get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind),
-      put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
+      info: (target = {}) => client.workspaceInfo(target),
+      get: (kind: WorkspaceDocKind, target = {}) => client.readWorkspaceDoc(kind, target),
+      put: (kind: WorkspaceDocKind, request: DocUpdateRequest, target = {}) =>
         client
-          .writeWorkspaceDoc(kind, request.content, expectedVersionToken(request))
+          .writeWorkspaceDoc(kind, request.content, expectedVersionToken(request), target)
           .then((response) => response),
     },
     skills: {
@@ -212,7 +215,7 @@ function streamTimelineEvents(
   return streamUntilTerminal(client, sessionId, signal, (event) => {
     onEvent(event);
   }, options?.onOpen, sinceEventId, null, !options?.persistent, !options?.persistent,
-  options?.onMessageQueueChanged);
+  options?.onMessageQueueChanged, options?.onActiveTurnChanged);
 }
 
 function streamUntilTerminal(
@@ -229,6 +232,7 @@ function streamUntilTerminal(
   closeWhenIdle = false,
   closeOnTerminal = false,
   onMessageQueueChanged?: (notification: AppProtocol.MessageQueueChangedNotification) => void,
+  onActiveTurnChanged?: (notification: AppProtocol.SessionActiveTurnChangedNotification) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -286,6 +290,9 @@ function streamUntilTerminal(
     });
     cleanupFns.push(unsubscribe);
 
+    if (onActiveTurnChanged) {
+      cleanupFns.push(client.onActiveTurnChanged((notice) => { if (notice.sessionId === sessionId) onActiveTurnChanged(notice); }));
+    }
     if (onMessageQueueChanged) {
       const unsubscribeQueueChanges = client.onMessageQueueChanged((notification) => {
         if (notification.sessionId === sessionId) {

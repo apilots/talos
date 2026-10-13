@@ -1,0 +1,384 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "types.proto";
+message OptionalStringMap { map<string, string> values = 1; }
+message ContentDigest {
+  ContentDigestAlgorithm algorithm = 1;
+  string value = 2;
+  uint64 file_count = 3;
+  uint64 total_size_bytes = 4;
+}
+enum ContentDigestAlgorithm { CONTENT_DIGEST_ALGORITHM_UNSPECIFIED = 0; CONTENT_DIGEST_ALGORITHM_SHA256 = 1; }
+enum FeatureKind { FEATURE_KIND_UNSPECIFIED = 0; FEATURE_KIND_UI = 1; FEATURE_KIND_RUNTIME = 2; FEATURE_KIND_INTEGRATION = 3; }
+message FeaturePlugin {
+  string name = 1;
+  FeatureKind feature_kind = 2;
+  string manifest_path = 3;
+}
+message MarketplaceSource {
+  string id = 1;
+  MarketplaceSourceType source_type = 2;
+  MarketplaceSourceKind kind = 3;
+  string display_name = 4;
+  MarketplaceSourceLocation location = 5;
+  repeated string sparse_paths = 6;
+  optional string last_checked_commit = 7;
+  optional int64 last_checked_at_ms = 8;
+  int64 created_at_ms = 9;
+  int64 updated_at_ms = 10;
+}
+message MarketplaceSourceInputGit {
+  string url = 1;
+  string reference = 2;
+  repeated string sparse_paths = 3;
+}
+message MarketplaceSourceInputLocalFolder {
+  string path = 1;
+  repeated string sparse_paths = 2;
+}
+message MarketplaceSourceInput { oneof value { MarketplaceSourceInputGit git = 1; MarketplaceSourceInputLocalFolder local_folder = 2; } }
+enum MarketplaceSourceKind { MARKETPLACE_SOURCE_KIND_UNSPECIFIED = 0; MARKETPLACE_SOURCE_KIND_GIT = 1; MARKETPLACE_SOURCE_KIND_LOCAL_FOLDER = 2; }
+message MarketplaceSourceLocationGit {
+  string url = 1;
+  string reference = 2;
+}
+message MarketplaceSourceLocationLocalFolder {
+  string path = 1;
+}
+message MarketplaceSourceLocation { oneof value { MarketplaceSourceLocationGit git = 1; MarketplaceSourceLocationLocalFolder local_folder = 2; } }
+enum MarketplaceSourceType { MARKETPLACE_SOURCE_TYPE_UNSPECIFIED = 0; MARKETPLACE_SOURCE_TYPE_OFFICIAL = 1; MARKETPLACE_SOURCE_TYPE_USER = 2; }
+message McpAuthenticationOAuth {
+  McpOAuthConfig config = 1;
+}
+message McpAuthenticationHeader {
+  string name = 1;
+}
+message McpAuthentication { oneof value { Empty none = 1; McpAuthenticationOAuth o_auth = 2; Empty bearer = 3; McpAuthenticationHeader header = 4; } }
+message McpAuthenticationReadParams {
+  McpDefinitionRef server = 1;
+}
+message McpAuthenticationResult {
+  McpDefinitionRef server = 1;
+  McpAuthentication authentication = 2;
+  McpAuthenticationState state = 3;
+}
+message McpAuthenticationStartParams {
+  McpDefinitionRef server = 1;
+  McpOAuthConfig config = 2;
+  optional string client_secret = 3;
+}
+message McpAuthenticationStartResult {
+  McpDefinitionRef server = 1;
+  string attempt_id = 2;
+  string authorization_url = 3;
+  int64 expires_at = 4;
+}
+message McpAuthenticationStateAuthorizing {
+  string attempt_id = 1;
+  int64 expires_at = 2;
+}
+message McpAuthenticationStateFailed {
+  ApiError error = 1;
+}
+message McpAuthenticationState { oneof value { McpAuthenticationStateAuthorizing authorizing = 1; Empty authenticated = 2; Empty expired = 3; Empty unconfigured = 4; Empty credentials_stored = 5; Empty missing = 6; McpAuthenticationStateFailed failed = 7; } }
+message McpCredentialBinding {
+  string reference = 1;
+  McpAuthentication authentication = 2;
+}
+message McpCredentialValues {
+  McpAuthentication authentication = 1;
+  optional string token = 2;
+  OptionalStringMap env = 3;
+  OptionalStringMap headers = 4;
+}
+message McpCredentialsChangeReplace {
+  McpCredentialValues credentials = 1;
+}
+message McpCredentialsChange { oneof value { McpCredentialsChangeReplace replace = 1; Empty clear = 2; } }
+message McpCredentialsUpdateParams {
+  McpDefinitionRef server = 1;
+  McpCredentialsChange change = 2;
+}
+message McpDefinitionRefPlugin {
+  string install_id = 1;
+}
+message McpDefinitionRefConfig {
+  string name = 1;
+}
+message McpDefinitionRef { oneof value { McpDefinitionRefPlugin plugin = 1; McpDefinitionRefConfig config = 2; } }
+message McpOAuthConfig {
+  optional string client_id = 1;
+  optional string client_metadata_url = 2;
+  optional uint32 callback_port = 3;
+  repeated string scopes = 4;
+}
+message McpServerDefinition {
+  McpCredentialBinding credentials = 1;
+  string name = 2;
+  optional string display_name = 3;
+  optional string description = 4;
+  McpTransportDefinition transport = 5;
+}
+message McpServerImportParams {
+  string json = 1;
+  optional string name = 2;
+  optional bool enable = 3;
+  PluginInstallConflictPolicy conflict_policy = 4;
+}
+message McpServerInfo {
+  string name = 1;
+  optional string display_name = 2;
+  McpServerSource source = 3;
+  McpTransportKind transport = 4;
+  McpServerStatus status = 5;
+  uint64 tool_count = 6;
+}
+message McpServerListParams {
+  optional string cursor = 1;
+  optional uint64 limit = 2;
+}
+message McpServerListResult {
+  repeated McpServerInfo data = 1;
+  optional string next_cursor = 2;
+}
+message McpServerPlugin {
+  McpServerDefinition server = 1;
+  string manifest_path = 2;
+}
+message McpServerSourcePlugin {
+  string plugin_id = 1;
+  string install_id = 2;
+}
+message McpServerSource { oneof value { Empty config = 1; McpServerSourcePlugin plugin = 2; } }
+message McpServerStatusFailed {
+  ApiError error = 1;
+}
+message McpServerStatusExited {
+  ApiError error = 1;
+}
+message McpServerStatus { oneof value { Empty not_started = 1; Empty starting = 2; Empty ready = 3; McpServerStatusFailed failed = 4; McpServerStatusExited exited = 5; } }
+message McpTransportDefinitionStdio {
+  string command = 1;
+  repeated string args = 2;
+  map<string, string> env = 3;
+  optional string cwd = 4;
+}
+message McpTransportDefinitionStreamableHttp {
+  string url = 1;
+  map<string, string> headers = 2;
+}
+message McpTransportDefinition { oneof value { McpTransportDefinitionStdio stdio = 1; McpTransportDefinitionStreamableHttp streamable_http = 2; } }
+enum McpTransportKind { MCP_TRANSPORT_KIND_UNSPECIFIED = 0; MCP_TRANSPORT_KIND_STDIO = 1; MCP_TRANSPORT_KIND_STREAMABLE_HTTP = 2; }
+enum PackageKind { PACKAGE_KIND_UNSPECIFIED = 0; PACKAGE_KIND_NPM = 1; PACKAGE_KIND_PYTHON = 2; PACKAGE_KIND_BINARY = 3; }
+message PackagePlugin {
+  string name = 1;
+  PackageKind package_kind = 2;
+  string manifest_path = 3;
+}
+message Plugin {
+  string id = 1;
+  PluginKind kind = 2;
+  PluginMetadata metadata = 3;
+  repeated PluginDocumentRef documents = 4;
+  optional string source_id = 5;
+  optional string path_in_source = 6;
+  optional string source_commit = 7;
+  PluginStatus status = 8;
+  PluginDefinition definition = 9;
+  repeated PluginWarning warnings = 10;
+}
+enum PluginConflictReason { PLUGIN_CONFLICT_REASON_UNSPECIFIED = 0; PLUGIN_CONFLICT_REASON_INVALID_MANIFEST = 1; PLUGIN_CONFLICT_REASON_SAME_NAME_DIFFERENT_SOURCE = 2; PLUGIN_CONFLICT_REASON_TARGET_PATH_EXISTS = 3; PLUGIN_CONFLICT_REASON_TARGET_PATH_MISSING = 4; PLUGIN_CONFLICT_REASON_LOCAL_CHANGES_DETECTED = 5; PLUGIN_CONFLICT_REASON_UNSUPPORTED_KIND = 6; }
+message PluginDefinition { oneof value { SkillPlugin skill = 1; McpServerPlugin mcp_server = 2; PackagePlugin package = 3; FeaturePlugin feature = 4; } }
+message PluginDisableParams {
+  string install_id = 1;
+}
+message PluginDisableResult {
+  Plugin plugin = 1;
+}
+message PluginDocument {
+  PluginDocumentRole role = 1;
+  string path = 2;
+  string title = 3;
+  PluginDocumentMediaType media_type = 4;
+  string contents = 5;
+}
+enum PluginDocumentMediaType { PLUGIN_DOCUMENT_MEDIA_TYPE_UNSPECIFIED = 0; PLUGIN_DOCUMENT_MEDIA_TYPE_MARKDOWN = 1; PLUGIN_DOCUMENT_MEDIA_TYPE_JSON = 2; PLUGIN_DOCUMENT_MEDIA_TYPE_TEXT = 3; }
+message PluginDocumentRef {
+  PluginDocumentRole role = 1;
+  string path = 2;
+  string title = 3;
+  PluginDocumentMediaType media_type = 4;
+}
+enum PluginDocumentRole { PLUGIN_DOCUMENT_ROLE_UNSPECIFIED = 0; PLUGIN_DOCUMENT_ROLE_PRIMARY = 1; PLUGIN_DOCUMENT_ROLE_README = 2; PLUGIN_DOCUMENT_ROLE_MANIFEST = 3; }
+message PluginEnableParams {
+  string install_id = 1;
+}
+message PluginEnableResult {
+  Plugin plugin = 1;
+}
+message PluginInstall {
+  string id = 1;
+  string plugin_id = 2;
+  PluginKind kind = 3;
+  string name = 4;
+  string installed_path = 5;
+  bool enabled = 6;
+  PluginInstallSource source = 7;
+  ContentDigest content_digest = 8;
+  int64 installed_at_ms = 9;
+  int64 updated_at_ms = 10;
+}
+enum PluginInstallConflictPolicy { PLUGIN_INSTALL_CONFLICT_POLICY_UNSPECIFIED = 0; PLUGIN_INSTALL_CONFLICT_POLICY_REJECT = 1; PLUGIN_INSTALL_CONFLICT_POLICY_REPLACE = 2; }
+message PluginInstallParams {
+  PluginInstallTarget target = 1;
+  optional bool enable = 2;
+  PluginInstallConflictPolicy conflict_policy = 3;
+}
+message PluginInstallResult {
+  Plugin plugin = 1;
+  PluginInstall install = 2;
+}
+message PluginInstallSourceMarketplace {
+  string source_id = 1;
+  string url = 2;
+  string reference = 3;
+  string commit = 4;
+  string path_in_source = 5;
+}
+message PluginInstallSourceLocalPath {
+  string source_id = 1;
+  string path = 2;
+  string path_in_source = 3;
+}
+message PluginInstallSource { oneof value { PluginInstallSourceMarketplace marketplace = 1; PluginInstallSourceLocalPath local_path = 2; Empty manual = 3; } }
+message PluginInstallTargetManualMcpServer {
+  McpServerDefinition server = 1;
+  McpCredentialValues credentials = 2;
+}
+message PluginInstallTargetPlugin {
+  string plugin_id = 1;
+  optional string expected_source_commit = 2;
+}
+message PluginInstallTarget { oneof value { PluginInstallTargetManualMcpServer manual_mcp_server = 1; PluginInstallTargetPlugin plugin = 2; } }
+enum PluginKind { PLUGIN_KIND_UNSPECIFIED = 0; PLUGIN_KIND_SKILL = 1; PLUGIN_KIND_MCP_SERVER = 2; PLUGIN_KIND_PACKAGE = 3; PLUGIN_KIND_FEATURE = 4; }
+message PluginListParams {
+  optional PluginKind kind = 1;
+  optional PluginListStatusFilter status = 2;
+  optional string source_id = 3;
+  bool include_disabled = 4;
+}
+message PluginListResult {
+  repeated Plugin plugins = 1;
+  repeated PluginWarning warnings = 2;
+}
+enum PluginListStatusFilter { PLUGIN_LIST_STATUS_FILTER_UNSPECIFIED = 0; PLUGIN_LIST_STATUS_FILTER_INSTALLED = 1; PLUGIN_LIST_STATUS_FILTER_DISABLED = 2; PLUGIN_LIST_STATUS_FILTER_UPDATE_AVAILABLE = 3; PLUGIN_LIST_STATUS_FILTER_SOURCE_MISSING = 4; PLUGIN_LIST_STATUS_FILTER_CONFLICT = 5; }
+message PluginMetadata {
+  string name = 1;
+  optional string display_name = 2;
+  string description = 3;
+  optional string short_description = 4;
+  optional string icon = 5;
+  optional string license = 6;
+}
+message PluginReadParams {
+  string plugin_id = 1;
+}
+message PluginReadResult {
+  Plugin plugin = 1;
+  repeated PluginDocument documents = 2;
+}
+enum PluginSearchRefreshPolicy { PLUGIN_SEARCH_REFRESH_POLICY_UNSPECIFIED = 0; PLUGIN_SEARCH_REFRESH_POLICY_CACHE_ONLY = 1; PLUGIN_SEARCH_REFRESH_POLICY_REFRESH_STALE = 2; PLUGIN_SEARCH_REFRESH_POLICY_FORCE_REFRESH = 3; }
+message PluginSearchParams {
+  optional string query = 1;
+  optional string source_id = 2;
+  optional PluginKind kind = 3;
+  optional PluginSearchStatusFilter status = 4;
+  PluginSearchRefreshPolicy refresh = 5;
+  optional uint64 limit = 6;
+}
+message PluginSearchResult {
+  repeated Plugin plugins = 1;
+  repeated PluginWarning warnings = 2;
+}
+enum PluginSearchStatusFilter { PLUGIN_SEARCH_STATUS_FILTER_UNSPECIFIED = 0; PLUGIN_SEARCH_STATUS_FILTER_ANY = 1; PLUGIN_SEARCH_STATUS_FILTER_NOT_INSTALLED = 2; PLUGIN_SEARCH_STATUS_FILTER_INSTALLED = 3; PLUGIN_SEARCH_STATUS_FILTER_UPDATE_AVAILABLE = 4; PLUGIN_SEARCH_STATUS_FILTER_CONFLICT = 5; }
+message PluginSourceAddParams {
+  MarketplaceSourceInput source = 1;
+  bool refresh = 2;
+}
+message PluginSourceAddResult {
+  MarketplaceSource source = 1;
+  repeated Plugin plugins = 2;
+  repeated PluginWarning warnings = 3;
+}
+message PluginSourceListParams {
+
+}
+message PluginSourceListResult {
+  repeated MarketplaceSource sources = 1;
+}
+message PluginSourceRefreshParams {
+  string source_id = 1;
+}
+message PluginSourceRefreshResult {
+  MarketplaceSource source = 1;
+  repeated Plugin plugins = 2;
+  repeated PluginWarning warnings = 3;
+}
+message PluginSourceRemoveParams {
+  string source_id = 1;
+}
+message PluginSourceRemoveResult {
+  string source_id = 1;
+  bool removed = 2;
+}
+message PluginStatusInstalled {
+  string install_id = 1;
+  string installed_path = 2;
+  optional string installed_commit = 3;
+  bool enabled = 4;
+}
+message PluginStatusUpdateAvailable {
+  string install_id = 1;
+  string installed_path = 2;
+  optional string installed_commit = 3;
+  string latest_commit = 4;
+  bool enabled = 5;
+}
+message PluginStatusSourceMissing {
+  string install_id = 1;
+  string installed_path = 2;
+  optional string installed_commit = 3;
+  bool enabled = 4;
+}
+message PluginStatusConflict {
+  PluginConflictReason reason = 1;
+}
+message PluginStatus { oneof value { Empty not_installed = 1; PluginStatusInstalled installed = 2; PluginStatusUpdateAvailable update_available = 3; PluginStatusSourceMissing source_missing = 4; PluginStatusConflict conflict = 5; } }
+message PluginUninstallParams {
+  string install_id = 1;
+}
+message PluginUninstallResult {
+  string install_id = 1;
+  bool uninstalled = 2;
+}
+enum PluginUpdateConflictPolicy { PLUGIN_UPDATE_CONFLICT_POLICY_UNSPECIFIED = 0; PLUGIN_UPDATE_CONFLICT_POLICY_REJECT_LOCAL_CHANGES = 1; PLUGIN_UPDATE_CONFLICT_POLICY_REPLACE_LOCAL_CHANGES = 2; }
+message PluginUpdateParams {
+  string install_id = 1;
+  optional string expected_source_commit = 2;
+  PluginUpdateConflictPolicy conflict_policy = 3;
+}
+message PluginUpdateResult {
+  Plugin plugin = 1;
+  PluginInstall install = 2;
+}
+message PluginWarning {
+  PluginWarningCode code = 1;
+  string message = 2;
+  optional PluginKind kind = 3;
+  optional string source_id = 4;
+  optional string path = 5;
+}
+enum PluginWarningCode { PLUGIN_WARNING_CODE_UNSPECIFIED = 0; PLUGIN_WARNING_CODE_INVALID_MANIFEST = 1; PLUGIN_WARNING_CODE_MISSING_REQUIRED_FIELD = 2; PLUGIN_WARNING_CODE_UNSUPPORTED_PLUGIN_KIND = 3; PLUGIN_WARNING_CODE_NESTED_PLUGIN = 4; PLUGIN_WARNING_CODE_PATH_ESCAPED_SOURCE = 5; PLUGIN_WARNING_CODE_INVALID_SOURCE_LAYOUT = 6; PLUGIN_WARNING_CODE_ORPHAN_INSTALL_DIRECTORY = 7; PLUGIN_WARNING_CODE_SOURCE_REFRESH_FAILED = 8; }
+message SkillPlugin {
+  string skill_md_path = 1;
+}

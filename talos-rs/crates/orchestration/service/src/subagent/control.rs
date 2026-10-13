@@ -175,6 +175,7 @@ impl SubagentService {
             .submit_subagent_turn(
                 child,
                 StartTurnRequest {
+                    node_id: None,
                     session_id: subagent.session_id.clone(),
                     input: AgentUserInput {
                         content: vec![AgentUserContent::Text {

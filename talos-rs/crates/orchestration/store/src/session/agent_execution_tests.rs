@@ -126,6 +126,7 @@ fn session_record() -> SessionRecord {
     SessionRecord {
         id: "session-1".to_string(),
         agent_id: "default".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: SessionTreeIdentity::Primary,
         workspace_id: "default".to_string(),
         title: "Agent execution".to_string(),
@@ -238,6 +239,70 @@ async fn progress_commit_requires_the_exact_durable_tail() {
             .unwrap()
             .len(),
         3
+    );
+}
+
+#[tokio::test]
+async fn progress_batch_rejects_gaps_atomically_and_preserves_input_admission_order() {
+    let store = store().await;
+    let admission = store
+        .commit_initial_admission(initial_admission(admission()))
+        .await
+        .unwrap();
+    let first = event(
+        3,
+        AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics::default()),
+    );
+    let next = event(
+        4,
+        AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics::default()),
+    );
+    let gap = event(
+        5,
+        AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics::default()),
+    );
+    let tail = admission.active_turn.last_event_seq;
+    assert!(store
+        .commit_progress_events(vec![first.clone(), gap], tail)
+        .await
+        .is_err());
+    assert_eq!(
+        store.get_agent_active_turn("session-1").await.unwrap(),
+        Some(admission.active_turn)
+    );
+    let commit = store
+        .commit_progress_events(vec![first.clone(), next.clone()], tail)
+        .await
+        .unwrap();
+    assert_eq!(
+        commit
+            .events
+            .iter()
+            .map(|record| AgentEvent {
+                identity: record.identity.clone(),
+                sequence: record.sequence,
+                occurred_at: record.occurred_at,
+                payload: record.payload.clone()
+            })
+            .collect::<Vec<_>>(),
+        vec![first, next]
+    );
+    let input = store
+        .commit_running_input_admission(CommitRunningInputAdmissionParams {
+            events: user_admission(5, "message-2"),
+            expected_event_seq: commit.active_turn.last_event_seq,
+            command: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(input.events.first().unwrap().sequence, 5);
+    assert_eq!(
+        store
+            .list_agent_turn_events(&AgentTurnRef::new("session-1", "turn-1"), 10)
+            .await
+            .unwrap()
+            .len(),
+        5
     );
 }
 
@@ -757,4 +822,42 @@ async fn missing_session_rolls_back_the_terminal_fact_and_nonterminal_deletion()
             .map(|active| active.identity),
         Some(AgentTurnRef::new("session-1", "turn-1"))
     );
+}
+
+#[tokio::test]
+async fn config_admission_checks_nonterminal_turns_only_on_the_target_node() {
+    let store = store().await;
+    let mut session = session_record();
+    session.execution_node_id = "computer-a".into();
+    store.insert_session_record(&session).await.unwrap();
+    let admitted = store
+        .commit_initial_admission(initial_admission(admission()))
+        .await
+        .unwrap();
+    assert!(store
+        .has_nonterminal_turns(Some("computer-a"))
+        .await
+        .unwrap());
+    assert!(!store
+        .has_nonterminal_turns(Some("computer-b"))
+        .await
+        .unwrap());
+    assert!(store.has_nonterminal_turns(None).await.unwrap());
+    store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: event(
+                3,
+                AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            ),
+            expected_event_seq: admitted.active_turn.last_event_seq,
+            completed_turn_metrics: Some(AgentRunMetrics::default()),
+        })
+        .await
+        .unwrap();
+    assert!(!store
+        .has_nonterminal_turns(Some("computer-a"))
+        .await
+        .unwrap());
 }

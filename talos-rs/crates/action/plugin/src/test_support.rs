@@ -30,6 +30,7 @@ impl LocalSkillSourceFixture {
     pub(crate) fn add_source(&self, refresh: bool) -> PluginSourceAddResponse {
         self.manager
             .add_source(PluginSourceAddRequest {
+                node_id: None,
                 source: MarketplaceSourceInput::LocalFolder {
                     path: self.repo.clone(),
                     sparse_paths: vec!["skills".to_string()],

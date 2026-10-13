@@ -27,7 +27,9 @@ pub(super) async fn claim(
     validate_nonempty("action_id", &action_id)?;
     validate_nonempty("claim_id", &claim_id)?;
     validate_command(command.as_ref(), &identity, &message_id)?;
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
         .ok_or_else(|| execution_conflict("active Agent Turn does not exist"))?;

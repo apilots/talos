@@ -84,6 +84,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     use talos_error::TalosError;
 
     crate::parse_timezone(&config.timezone)?;
+    config.sync.validate()?;
     config.workspaces.validate(&config.talos_paths())?;
 
     let profile_retention = &config.automation.profile_usage_retention;
@@ -533,6 +534,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "cloud.auth.introspection_cache_ttl_seconds must be > 0".to_string(),
         ));
     }
+    config.agent_node.validate(&config.gateway)?;
 
     if config.logging.level.trim().is_empty() || is_unresolved_placeholder(&config.logging.level) {
         return Err(TalosError::new(

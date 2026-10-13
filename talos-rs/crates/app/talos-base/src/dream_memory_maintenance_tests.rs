@@ -1,18 +1,15 @@
 use super::*;
 use async_trait::async_trait;
 use opendal::{services::Memory, Operator};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use talos_agent::{AgentUserContentKind, AttachmentReader, ResolvedAttachment, TurnFileScope};
 use talos_agent_api::{
     AgentEvent, AgentEventPayload, AgentMessage, AgentMessageBlock, AgentMessageBlockCompleted,
     AgentMessageBlockContent, AgentMessageBlockStarted, AgentMessageBlockStatus, AgentMessageRole,
     AgentMessageStarted, AgentMessageStatus, AgentStopReason, AgentTurnCompleted, AgentTurnRef,
     AgentTurnStarted,
 };
-use talos_agent_provider_kernel::{empty_skill_roots_resolver, KernelAgentProviderParams};
 use talos_auth::{AuthService, OpenModeUserService, RequestIdentity};
-use talos_config::InMemoryLlmConfigStore;
 use talos_coordinator::CoordinatorImpl;
 use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter,
@@ -22,7 +19,6 @@ use talos_memory::{
     DreamMemoryDate, DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryProvenance,
     MemoryAgentId, MemoryTimezone, MemoryUserId,
 };
-use talos_service::MemoryService;
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
 use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
@@ -31,22 +27,8 @@ use talos_store::session::{
     AgentExecutionStore, CommitInitialAdmissionParams, CommitTerminalSettlementParams,
     DatabaseSessionStore, SessionRecord,
 };
-use talos_tools::ToolRegistry;
 use talos_types::talos::{SessionSourceProvider, SessionSourceType};
 
-struct EmptyAttachmentReader;
-
-impl AttachmentReader for EmptyAttachmentReader {
-    fn read<'a>(
-        &'a self,
-        _scope: &'a TurnFileScope,
-        _file_ids: &'a [String],
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = TalosResult<Vec<ResolvedAttachment>>> + Send + 'a>,
-    > {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-}
 use talos_types::{
     resolve_default_model_selection, resolve_model_catalog, ModelRef, ModelSelection,
     ModelUsageKind, SessionConf, TalosConfig,
@@ -118,7 +100,7 @@ impl LlmProviderRouter for TestRouter {
 }
 
 #[tokio::test]
-async fn dream_maintenance_processes_two_user_scopes() {
+async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     let workspace = tempfile::tempdir().expect("workspace");
     let mut config =
         TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
@@ -126,7 +108,7 @@ async fn dream_maintenance_processes_two_user_scopes() {
             workspace.path().to_path_buf(),
         ));
     let mut agent_kernel = config.agent.kernel.clone();
-    agent_kernel.timezone = "Asia/Shanghai".to_string();
+    agent_kernel.timezone = "Pacific/Kiritimati".to_string();
     config.agent.agents = vec![talos_config::AgentDefinitionConfig {
         id: "dream-agent".to_string(),
         name: "Dream Agent".to_string(),
@@ -177,7 +159,6 @@ async fn dream_maintenance_processes_two_user_scopes() {
             .await
             .expect("session store"),
     );
-    let artifacts = Arc::new(talos_agent_provider_kernel::FileKernelSessionArtifactStore);
     let memory_progress = Arc::new(crate::memory_progress::SessionMemoryProgress::new(
         sessions.clone(),
     ));
@@ -202,15 +183,6 @@ async fn dream_maintenance_processes_two_user_scopes() {
         )
         .await;
     }
-    let memory = MemoryService::new(
-        config.clone(),
-        Arc::new(
-            talos_store::memory::MemoryStore::in_memory()
-                .await
-                .expect("memory store"),
-        ),
-    )
-    .expect("memory service");
     let provider: Arc<dyn LlmProvider> = Arc::new(TestProvider {
         responses: Mutex::new(VecDeque::from([
             candidate_response("first"),
@@ -234,23 +206,9 @@ async fn dream_maintenance_processes_two_user_scopes() {
             .build()
             .expect("inner model client"),
     );
-    let kernel_provider = KernelAgentProvider::new(KernelAgentProviderParams {
-        agent_id: "dream-agent".to_string(),
-        name: "Dream Agent".to_string(),
-        description: String::new(),
-        llm_provider_router: router.clone(),
-        tool_registry: Arc::new(ToolRegistry::new()),
-        kernel_config: agent_kernel.clone(),
-        skill_roots_resolver: empty_skill_roots_resolver(),
-        session_artifact_store: artifacts,
-        session_history_reader: history,
-        memory_progress_store: memory_progress,
-        dream_memory_store: Arc::new(memory.clone()),
-        user_workspace_memory_reader: Arc::new(talos_service::UserWorkspaceMemoryService::new()),
-        attachment_reader: Arc::new(EmptyAttachmentReader),
-        rich_input: vec![AgentUserContentKind::File],
-    })
-    .expect("Kernel Provider");
+    let nodes = talos_service::AgentNodeService::new(Arc::new(
+        talos_store::node::DatabaseAgentNodeStore::new(storage.pool().clone()),
+    ));
     let project_store = Arc::new(
         StorageProjectStore::new(storage.clone())
             .await
@@ -269,23 +227,43 @@ async fn dream_maintenance_processes_two_user_scopes() {
         )
         .expect("file service"),
     );
-    let coordinator = Arc::new(CoordinatorImpl::new(Arc::new(
-        talos_router::RouterImpl::new(),
-    )));
+    let coordinator = Arc::new(CoordinatorImpl::new(
+        Arc::new(talos_router::RouterImpl::new()),
+        sessions.clone(),
+        Arc::new(talos_store::node::DatabaseAgentNodeStore::new(
+            storage.pool().clone(),
+        )),
+    ));
+    let runtime_home = tempfile::tempdir().unwrap();
+    let mut worker_config = config.clone();
+    worker_config.agent.kernel.timezone = agent_kernel.timezone.clone();
+    // The control plane need not instantiate the Agent that owns this Session.
+    config.agent.agents.clear();
+    config.agent.kernel.timezone = "Pacific/Honolulu".into();
+    let worker = talos_worker::TalosWorker::build(
+        worker_config.with_runtime_paths(talos_config::TalosPaths::from_home(
+            runtime_home.path().to_path_buf(),
+        )),
+        talos_worker::TalosWorkerResources {
+            session_history_reader: history,
+            memory_progress_store: memory_progress,
+            attachment_reader: file_service.clone(),
+            tool_image_store: Arc::new(crate::tool_images::ToolImages(file_service.clone())),
+            agent_control: None,
+        },
+    )
+    .await
+    .unwrap();
+    for (id, harness) in worker.harnesses() {
+        coordinator
+            .register_agent("embedded".into(), id.clone(), harness.clone())
+            .await
+            .unwrap();
+    }
     let auth = Arc::new(TestAuthService);
-    let reload_config = config.clone();
-    let reload_hook: talos_service::ConfigReloadHook = Arc::new(move |_trigger| {
-        Ok(talos_service::ConfigReloadPlan::new(
-            reload_config.clone(),
-            || {},
-        ))
-    });
-    let plugins = talos_service::PluginManagerService::new(
-        config.agent.kernel.plugins.clone(),
-        config.agent.kernel.skills.clone(),
-    );
     let service = Arc::new(talos_service::TalosService::new(
-        coordinator,
+        coordinator.clone(),
+        nodes,
         sessions.clone(),
         sessions.clone(),
         project_store,
@@ -293,21 +271,15 @@ async fn dream_maintenance_processes_two_user_scopes() {
         file_service,
         Arc::new(talos_service::TimelineEventService::new(sessions.clone())),
         config.clone(),
-        plugins,
-        memory,
-        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone())),
-        resolve_model_catalog(&config.llm),
         auth,
         Arc::new(OpenModeUserService),
-        reload_hook,
     ));
     let maintenance = DreamMemoryMaintenance::new(
         sessions.clone(),
         service,
-        HashMap::from([("dream-agent".to_string(), kernel_provider)]),
+        coordinator,
         inner_model,
-        config.workspaces.clone(),
-        config.talos_paths(),
+        &config,
         DreamMemoryMaintenanceConfig {
             batch_size: 1,
             max_batches: 2,
@@ -524,6 +496,7 @@ fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> Sessio
     SessionRecord {
         id: session_id.to_string(),
         agent_id: "dream-agent".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         workspace_id: "default".to_string(),
         title: "Memory test".to_string(),

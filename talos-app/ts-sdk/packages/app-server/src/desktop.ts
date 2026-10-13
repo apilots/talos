@@ -4,6 +4,7 @@ import {
   AppServerClient,
   unwrapTalosApiResponse,
   type AppServerEventHandler,
+  type AppServerActiveTurnChangedHandler,
   type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
@@ -22,11 +23,20 @@ export interface DesktopTalosInvoke {
 
 export interface DesktopTimelineEventSource {
   onEvent(handler: AppServerEventHandler): () => void;
+  onActiveTurnChanged?(handler: AppServerActiveTurnChangedHandler): () => void;
   onMessageQueueChanged?(handler: AppServerMessageQueueChangedHandler): () => void;
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void;
 }
 
+export type TalosRuntimeStateKind = "starting" | "ready" | "restarting" | "stopped" | "error";
+export interface TalosRuntimeState {
+  kind: TalosRuntimeStateKind;
+  message: string | null;
+  error?: AppProtocol.ApiError | null;
+}
+
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
+  onRuntimeState?(handler: (state: TalosRuntimeState) => void): () => void;
   connect?(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke: DesktopTalosInvoke;
   openExternal?(url: string): Promise<void>;
@@ -61,6 +71,8 @@ class DesktopRendererTransport implements AppServerTransport {
   onEvent(handler: AppServerEventHandler): () => void {
     return this.bridge.onEvent(handler);
   }
+
+  onActiveTurnChanged(handler: AppServerActiveTurnChangedHandler): () => void { return this.bridge.onActiveTurnChanged?.(handler) ?? (() => undefined); }
 
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
     return this.bridge.onMessageQueueChanged?.(handler) ?? (() => undefined);

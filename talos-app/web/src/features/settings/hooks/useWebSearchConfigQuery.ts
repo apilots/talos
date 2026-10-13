@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { getWebSearchConfig } from "@/features/settings/api";
 
 export function webSearchConfigKey(connectionKey: string) {
-  return ["web-search-config", connectionKey] as const;
+  return ["talos", connectionKey, "web-search-config"] as const;
 }
 
 export function useWebSearchConfigQuery() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
 
   return useQuery({
     queryKey: webSearchConfigKey(connectionKey),

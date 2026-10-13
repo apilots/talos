@@ -243,3 +243,11 @@ mod management_tests;
 #[cfg(test)]
 #[path = "harness/test_support.rs"]
 mod test_support;
+
+#[cfg(test)]
+#[path = "rpc_tests.rs"]
+mod rpc_tests;
+
+#[cfg(test)]
+#[path = "rpc_connect_tests.rs"]
+mod rpc_connect_tests;

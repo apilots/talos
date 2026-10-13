@@ -10,8 +10,6 @@
 !talos/talos-app/**
 !talos/talos-rs/
 !talos/talos-rs/**
-!talos-cloud/
-!talos-cloud/**
 
 talos/.git/
 talos/.github/
@@ -22,5 +20,3 @@ talos/talos-app/node_modules/
 talos/talos-app/**/dist/
 talos/talos-app/**/node_modules/
 talos/talos-rs/target/
-talos-cloud/.git/
-talos-cloud/**/target/

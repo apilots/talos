@@ -23,6 +23,7 @@ impl AgentExecutionDriver {
         let mut pending_input: Option<RunningInputCommit> = None;
         let mut input_open = true;
         let mut deliveries = JoinSet::new();
+        let mut progress_batch = Vec::with_capacity(64);
         loop {
             if let Some(mut input) = pending_input.take() {
                 let expected_sequence = input
@@ -83,18 +84,19 @@ impl AgentExecutionDriver {
             }
 
             tokio::select! {
-                event = events.recv() => {
-                    let Some(event) = event else {
+                count = events.recv_many(&mut progress_batch, 64) => {
+                    if count == 0 {
                         break;
-                    };
+                    }
+                    let sequence = progress_batch.last().expect("nonempty progress batch").sequence;
                     match self
                         .execution_store
-                        .commit_progress_event(event.clone(), last_event_seq)
+                        .commit_progress_events(std::mem::take(&mut progress_batch), last_event_seq)
                         .await
                     {
                         Ok(commit) => {
                             last_event_seq = commit.active_turn.last_event_seq;
-                            last_sequence = event.sequence;
+                            last_sequence = sequence;
                             self.event_service.publish_committed(commit.events);
                         }
                         Err(commit_error) => {
@@ -155,7 +157,12 @@ impl AgentExecutionDriver {
                         "Agent compaction cannot wait for User input",
                     );
                     return self
-                        .recover_failed_execution(&active, expected_event_seq, &error)
+                        .settle_failed_execution(
+                            &active,
+                            expected_event_seq,
+                            &error,
+                            AgentInterruptOutcome::Completed,
+                        )
                         .await;
                 }
                 self.execution_store
@@ -230,8 +237,16 @@ impl AgentExecutionDriver {
                 {
                     talos_logging::report_error(error);
                 }
-                self.recover_failed_execution(&active, expected_event_seq, &commit_error)
-                    .await
+                // A canonical settlement is emitted only after Harness cleanup is
+                // confirmed. Preserve that fact even if persistence fails; an RPC
+                // client need not retain another completed-Turn ledger.
+                self.settle_failed_execution(
+                    &active,
+                    expected_event_seq,
+                    &commit_error,
+                    AgentInterruptOutcome::Completed,
+                )
+                .await
             }
         }
     }
@@ -261,6 +276,17 @@ impl AgentExecutionDriver {
                 return Err(interrupt_error);
             }
         };
+        self.settle_failed_execution(active, expected_event_seq, commit_error, cleanup)
+            .await
+    }
+
+    async fn settle_failed_execution(
+        &self,
+        active: &ActiveTimelineStream,
+        expected_event_seq: i64,
+        commit_error: &TalosError,
+        cleanup: AgentInterruptOutcome,
+    ) -> TalosResult<AgentRunSettlement> {
         let failure = AgentRunFailure::from(
             commit_error
                 .clone()

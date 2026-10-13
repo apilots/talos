@@ -68,6 +68,7 @@ impl super::PluginManagerService {
             _ => return Err(invalid("Use either stdio command fields or Streamable HTTP URL fields. Legacy SSE is unsupported.")),
         };
         self.install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::ManualMcpServer {
                 server: Box::new(McpServerDefinition {
                     name,

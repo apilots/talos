@@ -15,97 +15,97 @@ use crate::gateway_service::ServiceGateway;
 impl ServiceGateway {
     pub(crate) async fn list_plugin_sources(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginSourceListRequest,
     ) -> TalosResult<PluginSourceListResponse> {
-        self.service.plugins.list_sources(request)
+        self.service.list_plugin_sources(actor, request).await
     }
 
     pub(crate) async fn add_plugin_source(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        self.service.plugins.add_source(request)
+        self.service.add_plugin_source(actor, request).await
     }
 
     pub(crate) async fn refresh_plugin_source(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginSourceRefreshRequest,
     ) -> TalosResult<PluginSourceRefreshResponse> {
-        self.service.plugins.refresh_source(request)
+        self.service.refresh_plugin_source(actor, request).await
     }
 
     pub(crate) async fn remove_plugin_source(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginSourceRemoveRequest,
     ) -> TalosResult<PluginSourceRemoveResponse> {
-        self.service.plugins.remove_source(request)
+        self.service.remove_plugin_source(actor, request).await
     }
 
     pub(crate) async fn search_plugins(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginSearchRequest,
     ) -> TalosResult<PluginSearchResponse> {
-        self.service.plugins.search(request)
+        self.service.search_plugins(actor, request).await
     }
 
     pub(crate) async fn list_plugins(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginListRequest,
     ) -> TalosResult<PluginListResponse> {
-        self.service.plugins.list_plugins(request)
+        self.service.list_plugins(actor, request).await
     }
 
     pub(crate) async fn read_plugin(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginReadRequest,
     ) -> TalosResult<PluginReadResponse> {
-        self.service.plugins.read(request)
+        self.service.read_plugin(actor, request).await
     }
 
     pub(crate) async fn install_plugin(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
-        self.service.plugins.install(request).await
+        self.service.install_plugin(actor, request).await
     }
 
     pub(crate) async fn update_plugin(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginUpdateRequest,
     ) -> TalosResult<PluginUpdateResponse> {
-        self.service.plugins.update(request).await
+        self.service.update_plugin(actor, request).await
     }
 
     pub(crate) async fn uninstall_plugin(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        self.service.plugins.uninstall(request).await
+        self.service.uninstall_plugin(actor, request).await
     }
 
     pub(crate) async fn enable_plugin(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginEnableRequest,
     ) -> TalosResult<PluginEnableResponse> {
-        self.service.plugins.enable(request).await
+        self.service.enable_plugin(actor, request).await
     }
 
     pub(crate) async fn disable_plugin(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        self.service.plugins.disable(request).await
+        self.service.disable_plugin(actor, request).await
     }
 }

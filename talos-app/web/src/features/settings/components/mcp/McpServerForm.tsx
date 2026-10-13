@@ -2,6 +2,7 @@ import type { Plugin } from "@talos/sdk-browser";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getTalosClient } from "@/shared/api/client";
+import { Button } from "@/shared/ui/Button";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { mcpServerDefinition, pluginEnabled, pluginTitle } from "@/features/plugins/lib/pluginDisplay";
 import { FormSection, TextInput, TextArea, formatEntries, parseEntries } from "./McpFormPrimitives";
@@ -75,7 +76,7 @@ export function McpServerForm(props: McpServerFormProps) {
         </>}
       </fieldset>
       {error ? <p className="mt-3 text-sm text-danger" role="alert">{error.type === "entries" ? t("mcpServers.invalidEntries") : userVisibleErrorMessage(error.cause, t("mcpServers.saveError"))}</p> : null}
-      {!readOnly ? <div className="mt-4 flex justify-end"><button className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={busy} type="submit">{t(plugin ? "mcpServers.replaceDefinition" : "mcpServers.save")}</button></div> : null}
+      {!readOnly ? <div className="mt-4 flex justify-end"><Button className="px-5 font-semibold" disabled={busy} type="submit">{t(plugin ? "mcpServers.replaceDefinition" : "mcpServers.save")}</Button></div> : null}
     </form>
     {installId ? <McpCredentialsForm onUpdated={props.onSaved} server={{ type: "plugin", installId }} stdio={definition?.transport.type === "stdio"} /> : null}
   </div>;

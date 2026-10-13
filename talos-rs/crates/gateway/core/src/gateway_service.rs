@@ -77,6 +77,49 @@ pub(crate) fn require_non_empty(value: &str, field: &str) -> TalosResult<()> {
 
 #[async_trait]
 impl Gateway for ServiceGateway {
+    async fn list_computers(
+        &self,
+        actor: &Actor,
+        request: talos_types::ComputerListRequest,
+    ) -> TalosResult<talos_types::ComputerListResponse> {
+        ServiceGateway::list_computers(self, actor, request).await
+    }
+    async fn read_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::GetNodeRequest,
+    ) -> TalosResult<talos_types::NodeInfo> {
+        ServiceGateway::read_computer(self, actor, request).await
+    }
+    async fn create_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::CreateNodeRequest,
+    ) -> TalosResult<talos_types::CreatedNode> {
+        ServiceGateway::create_computer(self, actor, request).await
+    }
+    async fn rename_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::RenameComputerRequest,
+    ) -> TalosResult<talos_types::NodeInfo> {
+        ServiceGateway::rename_computer(self, actor, request).await
+    }
+    async fn set_computer_status(
+        &self,
+        actor: &Actor,
+        request: talos_types::SetComputerStatusRequest,
+    ) -> TalosResult<talos_types::NodeInfo> {
+        ServiceGateway::set_computer_status(self, actor, request).await
+    }
+    async fn rotate_computer_credential(
+        &self,
+        actor: &Actor,
+        request: talos_types::RotateCredentialRequest,
+    ) -> TalosResult<talos_types::NodeCredential> {
+        ServiceGateway::rotate_computer_credential(self, actor, request).await
+    }
+
     async fn read_profile(
         &self,
         actor: &Actor,
@@ -433,42 +476,42 @@ impl Gateway for ServiceGateway {
 
     async fn import_mcp_server(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: talos_types::McpServerImportRequest,
     ) -> TalosResult<talos_types::PluginInstallResponse> {
-        self.service.plugins.import_mcp_server(request).await
+        self.service.import_mcp_server(actor, request).await
     }
 
     async fn start_mcp_authentication(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: talos_types::McpAuthenticationStartRequest,
     ) -> TalosResult<talos_types::McpAuthenticationStartResponse> {
-        self.service.start_mcp_authentication(request).await
+        self.service.start_mcp_authentication(actor, request).await
     }
 
     async fn read_mcp_authentication(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: talos_types::McpAuthenticationReadRequest,
     ) -> TalosResult<talos_types::McpAuthenticationResponse> {
-        self.service.plugins.read_mcp_authentication(request)
+        self.service.read_mcp_authentication(actor, request).await
     }
 
     async fn update_mcp_credentials(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: talos_types::McpCredentialsUpdateRequest,
     ) -> TalosResult<talos_types::McpAuthenticationResponse> {
-        self.service.update_mcp_credentials(request).await
+        self.service.update_mcp_credentials(actor, request).await
     }
 
     async fn list_mcp_servers(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: talos_types::McpServerListRequest,
     ) -> TalosResult<talos_types::McpServerListResponse> {
-        self.service.plugins.list_mcp_servers(request)
+        self.service.list_mcp_servers(actor, request).await
     }
 
     async fn list_plugins(

@@ -13,7 +13,7 @@ use talos_config::{AgentKernelConfig, ToolUserPermissionModeConfig};
 use talos_error::TalosError;
 use talos_llm_provider::LlmProviderRouter;
 use talos_memory::{DreamMemoryFormationStore, UserWorkspaceMemoryReader};
-use talos_tools::ToolRegistry;
+use talos_tools::{ToolExecutorPort, ToolRegistry};
 
 use crate::{
     normalize_kernel_config, KernelSessionPromptContextSource, KernelTranscriptStore,
@@ -52,6 +52,21 @@ pub struct KernelAgentProviderParams {
     pub rich_input: Vec<AgentUserContentKind>,
 }
 
+/// The existing product-owned ports bound for one invocation. Workspace files,
+/// model routing and private artifacts remain owned by the Worker.
+#[derive(Clone)]
+pub struct KernelExecutionResources {
+    pub session_history_reader: Arc<dyn SessionHistoryReader>,
+    pub memory_progress_store: Arc<dyn KernelMemoryProgressStore>,
+    pub attachment_reader: Arc<dyn AttachmentReader>,
+    pub tool_executor: Arc<dyn ToolExecutorPort>,
+}
+/// A Worker resolves an immutable set of ports before each invocation. The
+/// Provider does not interpret RPC routes, credentials or coordinator identity.
+pub type KernelResourceResolver = Arc<
+    dyn Fn(&AgentSessionContext) -> AgentResult<Option<KernelExecutionResources>> + Send + Sync,
+>;
+
 /// Built-in Provider adapter that exclusively owns Agent API/Kernel mapping.
 #[derive(Clone)]
 pub struct KernelAgentProvider {
@@ -60,7 +75,7 @@ pub struct KernelAgentProvider {
     pub(crate) description: String,
     pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
     pub(crate) tool_registry: Arc<ToolRegistry>,
-    pub(crate) base_kernel_config: AgentKernelConfig,
+    pub(crate) base_kernel_config: Arc<std::sync::RwLock<AgentKernelConfig>>,
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     pub(crate) session_artifact_store: Arc<dyn KernelSessionArtifactStore>,
     pub(crate) session_history_reader: Arc<dyn SessionHistoryReader>,
@@ -68,6 +83,8 @@ pub struct KernelAgentProvider {
     pub(crate) dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     pub(crate) user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
     pub(crate) attachment_reader: Arc<dyn AttachmentReader>,
+    resource_resolver: Option<KernelResourceResolver>,
+    tool_executor: Arc<dyn ToolExecutorPort>,
     capabilities: AgentCapabilities,
 }
 
@@ -91,8 +108,12 @@ impl KernelAgentProvider {
             name: params.name,
             description: params.description,
             llm_provider_router: params.llm_provider_router,
+            tool_executor: params.tool_registry.clone(),
             tool_registry: params.tool_registry,
-            base_kernel_config: normalize_kernel_config(params.kernel_config),
+            resource_resolver: None,
+            base_kernel_config: Arc::new(std::sync::RwLock::new(normalize_kernel_config(
+                params.kernel_config,
+            ))),
             skill_roots_resolver: params.skill_roots_resolver,
             session_artifact_store: params.session_artifact_store,
             session_history_reader: params.session_history_reader,
@@ -101,6 +122,76 @@ impl KernelAgentProvider {
             user_workspace_memory_reader: params.user_workspace_memory_reader,
             attachment_reader: params.attachment_reader,
             capabilities,
+        })
+    }
+
+    /// Install the Worker's invocation resolver. Cached Session handles retain
+    /// their binding and artifacts while each execution gets its own port handles.
+    #[must_use]
+    pub fn with_resource_resolver(mut self, resolver: KernelResourceResolver) -> Self {
+        self.resource_resolver = Some(resolver);
+        self
+    }
+
+    /// Snapshot the already-bound ports for this Session invocation. The Worker
+    /// resolver owns routing and reports failures; this Provider retains its
+    /// original ports when no binding is configured and creates no transport.
+    pub fn resources_for(&self, context: &AgentSessionContext) -> AgentResult<Self> {
+        let mut provider = self.clone();
+        if let Some(resources) = self
+            .resource_resolver
+            .as_ref()
+            .map(|resolve| resolve(context))
+            .transpose()?
+            .flatten()
+        {
+            provider.session_history_reader = resources.session_history_reader;
+            provider.memory_progress_store = resources.memory_progress_store;
+            provider.attachment_reader = resources.attachment_reader;
+            provider.tool_executor = resources.tool_executor;
+        }
+        Ok(provider)
+    }
+
+    /// Publishes a validated node-local configuration between invocations.
+    /// The Worker must hold its execution write gate across preparation and publication.
+    /// Existing Session handles share this configuration; no Session history is replaced.
+    pub fn reload_kernel_config(&self, config: AgentKernelConfig) {
+        *self
+            .base_kernel_config
+            .write()
+            .expect("Kernel config lock poisoned") = normalize_kernel_config(config);
+    }
+
+    fn build_session(&self, context: AgentSessionContext) -> AgentResult<KernelAgentSession> {
+        self.validate_agent_id(&context.agent_id)?;
+        let transcript = Arc::new(KernelTranscriptStore::new(
+            self.session_artifact_store.clone(),
+            context.workspace.root.clone(),
+        ));
+        let prompt_context = Arc::new(KernelSessionPromptContextSource::new(
+            self.session_history_reader.clone(),
+            self.session_artifact_store.clone(),
+            context.workspace.root.clone(),
+            context.session_id.clone(),
+        ));
+        let kernel = AgentKernel::new(AgentKernelDependencies {
+            agent_name: self.name.clone(),
+            agent_description: self.description.clone(),
+            llm_provider_router: self.llm_provider_router.clone(),
+            tool_definition_provider: self.tool_registry.clone(),
+            tool_executor: self.tool_executor.clone(),
+            dream_memory_store: self.dream_memory_store.clone(),
+            transcript,
+            artifacts: self.session_artifact_store.clone(),
+            prompt_context: prompt_context.clone(),
+            memory_progress: self.memory_progress_store.clone(),
+        });
+        Ok(KernelAgentSession {
+            provider: self.clone(),
+            context,
+            kernel,
+            prompt_context,
         })
     }
 
@@ -115,7 +206,11 @@ impl KernelAgentProvider {
     }
 
     pub(crate) fn effective_kernel_config(&self, context: &AgentContext) -> AgentKernelConfig {
-        let mut config = self.base_kernel_config.clone();
+        let mut config = self
+            .base_kernel_config
+            .read()
+            .expect("Kernel config lock poisoned")
+            .clone();
         config.workspace_dir = context
             .session
             .workspace
@@ -172,35 +267,7 @@ impl AgentProvider for KernelAgentProvider {
         context: AgentSessionContext,
         _control: AgentOperationControl,
     ) -> AgentResult<Self::Session> {
-        self.validate_agent_id(&context.agent_id)?;
-        let transcript = Arc::new(KernelTranscriptStore::new(
-            self.session_artifact_store.clone(),
-            context.workspace.root.clone(),
-        ));
-        let prompt_context = Arc::new(KernelSessionPromptContextSource::new(
-            self.session_history_reader.clone(),
-            self.session_artifact_store.clone(),
-            context.workspace.root.clone(),
-            context.session_id.clone(),
-        ));
-        let kernel = AgentKernel::new(AgentKernelDependencies {
-            agent_name: self.name.clone(),
-            agent_description: self.description.clone(),
-            llm_provider_router: self.llm_provider_router.clone(),
-            tool_definition_provider: self.tool_registry.clone(),
-            tool_executor: self.tool_registry.clone(),
-            dream_memory_store: self.dream_memory_store.clone(),
-            transcript,
-            artifacts: self.session_artifact_store.clone(),
-            prompt_context: prompt_context.clone(),
-            memory_progress: self.memory_progress_store.clone(),
-        });
-        Ok(KernelAgentSession {
-            provider: self.clone(),
-            context,
-            kernel,
-            prompt_context,
-        })
+        self.build_session(context)
     }
 
     async fn shutdown(&self, _control: AgentOperationControl) -> AgentResult<()> {
@@ -211,7 +278,9 @@ impl AgentProvider for KernelAgentProvider {
 impl AgentSession for KernelAgentSession {
     async fn turn(&self, turn: SessionTurnParams) -> AgentResult<SessionTurnResult> {
         self.validate_context(&turn.context)?;
-        crate::execution::execute(self, turn).await
+        let provider = self.provider.resources_for(&self.context)?;
+        let session = provider.build_session(self.context.clone())?;
+        crate::execution::execute(&session, turn).await
     }
 
     async fn compact(
@@ -219,7 +288,9 @@ impl AgentSession for KernelAgentSession {
         params: SessionCompactionParams,
     ) -> AgentResult<SessionCompactionResult> {
         self.validate_context(&params.context)?;
-        crate::compaction::compact_session(self, params).await
+        let provider = self.provider.resources_for(&self.context)?;
+        let session = provider.build_session(self.context.clone())?;
+        crate::compaction::compact_session(&session, params).await
     }
 
     async fn clear(&self, _control: AgentOperationControl) -> AgentResult<()> {

@@ -15,7 +15,7 @@ import {
   useWebSearchConfigQuery,
   webSearchConfigKey,
 } from "@/features/settings/hooks/useWebSearchConfigQuery";
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 import {
@@ -38,7 +38,7 @@ function configured(provider: WebSearchProviderRuntimeConfig | undefined): boole
 
 export function SettingsWebSearchConfigEditor() {
   const { t } = useTranslation("settings");
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const queryClient = useQueryClient();
   const [activeProvider, setActiveProvider] = useState<WebSearchProviderKey>("firecrawl");
   const [draft, setDraft] = useState<WebSearchToolConfig | null>(null);

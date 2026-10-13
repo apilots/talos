@@ -1,3 +1,5 @@
+mod admission;
+pub(crate) use admission::NodeAdmissionGates;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use talos_agent_api::{AgentEvent, AgentEventPayload, AgentUserContent, AgentUserInput};

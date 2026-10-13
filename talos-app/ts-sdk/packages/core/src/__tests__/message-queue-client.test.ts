@@ -46,4 +46,17 @@ describe("TalosClient message queue", () => {
     expect(onMessageQueueChanged).toHaveBeenCalledWith({ sessionId: "s1", revision: 4 });
     expect(onEvent).not.toHaveBeenCalled();
   });
+
+  it("delivers synchronized active display without inventing a timeline event", async () => {
+    const onEvent = vi.fn();
+    const onActiveTurnChanged = vi.fn();
+    const change = { sessionId: "s1", state: { activeTurn: null, latestEventId: "event:7" } };
+    const stream = vi.fn().mockImplementation(async (_url, _options, onMessage) => {
+      onMessage(JSON.stringify(change), "session/activeTurnChanged");
+    });
+    const client = new TalosClient({ request: vi.fn() }, { stream }, "http://localhost:8080");
+    await client.turns.events("s1", undefined, onEvent, undefined, { onActiveTurnChanged });
+    expect(onActiveTurnChanged).toHaveBeenCalledWith(change);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
 });

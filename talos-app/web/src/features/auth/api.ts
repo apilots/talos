@@ -1,7 +1,7 @@
 import type { AppProtocol } from "@talos/sdk-core";
 import { unwrapTalosApiResponse, parseTalosApiErrorBody, parseTalosJson, TalosApiError } from "@talos/sdk-core";
 import type { UserDto } from "@talos/sdk-browser";
-import { getDesktopServerInfo } from "@talos/sdk-app-server/desktop";
+import { createElectronAppServerClient, getDesktopServerInfo } from "@talos/sdk-app-server/desktop";
 
 import { getTalosClient } from "@/shared/api/client";
 import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
@@ -10,6 +10,7 @@ import { clearWebAuthToken } from "./web-auth-session";
 import type { DeploymentMode } from "@/shared/types/ui";
 
 export interface HealthResponse {
+  desktopConnection?: AppProtocol.DesktopConnectionResponse;
   status: string;
   service: string;
   timestamp: string;
@@ -38,31 +39,16 @@ export async function getCurrentUser(): Promise<UserDto> {
 }
 
 export async function getCurrentUserWithToken(accessToken: string): Promise<UserDto> {
-  if (isDesktopRuntime()) {
-    const bridge = getDesktopBridge();
-    if (!bridge) {
-      throw new Error("Desktop runtime bridge is not available.");
-    }
-    const response = await bridge.invoke<AppProtocol.UserCurrentResponse>(
-      "user/current",
-      {},
-      {
-        actorCredentials: {
-          credential: {
-            type: "existing_session_token",
-            token: accessToken,
-          },
-        },
-      },
-    );
+  const baseUrl = resolveServerBaseUrl();
+  const bridge = getDesktopBridge();
+  if (bridge) {
+    const response = await bridge.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, {
+      actorCredentials: { credential: { type: "existing_session_token", token: accessToken } },
+    });
     return unwrapTalosApiResponse<AppProtocol.UserCurrentResponse>(response).user;
   }
-
-  const response = await fetch(new URL("/v1/user", resolveServerBaseUrl()).toString(), {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
+  const response = await fetch(new URL("/v1/user", baseUrl).toString(), {
+    headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
   });
   await assertAuthResponse(response);
   return unwrapTalosApiResponse<AppProtocol.UserCurrentResponse>(parseTalosJson(await response.text())).user;
@@ -75,7 +61,9 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
       throw new Error("Desktop runtime bridge is not available.");
     }
     const serverInfo = await getDesktopServerInfo(bridge);
+    const desktopConnection = await createElectronAppServerClient(bridge).desktop.connection();
     return {
+      desktopConnection,
       status: "ok",
       service: serverInfo.name,
       timestamp: new Date().toISOString(),
@@ -85,7 +73,11 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
     };
   }
 
-  const response = await fetch(new URL("/health", resolveServerBaseUrl()).toString(), {
+  return readGatewayHealth(resolveServerBaseUrl());
+}
+
+async function readGatewayHealth(baseUrl: string): Promise<HealthResponse> {
+  const response = await fetch(new URL("/health", baseUrl).toString(), {
     headers: {
       Accept: "application/json",
     },

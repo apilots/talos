@@ -43,7 +43,6 @@ impl SubagentService {
         Self::validate_request(&request)?;
         let caller = self.authorize_caller(&request.caller).await?;
         let agent_id = caller.agent_id.clone();
-        self.turns.validate_subagent_agent(&agent_id).await?;
         let child_path = caller.path.join(&request.task_name)?;
         let parent = self
             .sessions
@@ -55,6 +54,9 @@ impl SubagentService {
                     format!("parent session {}", request.caller.session_id),
                 )
             })?;
+        self.turns
+            .validate_subagent_agent(&agent_id, &parent.user_id, &parent.execution_node_id)
+            .await?;
         let mut child_source = SessionSource::system();
         child_source.environment = parent.environment.clone();
         let child = self
@@ -65,6 +67,7 @@ impl SubagentService {
                     source: child_source,
                     user_id: parent.user_id.clone(),
                     target_agent: agent_id.clone(),
+                    execution_node_id: parent.execution_node_id.clone(),
                     model_selection: parent.conf.model_selection.clone(),
                     conf: None,
                     workspace_id: parent.workspace_id.clone(),
@@ -84,6 +87,7 @@ impl SubagentService {
             .submit_subagent_turn(
                 child,
                 StartTurnRequest {
+                    node_id: None,
                     session_id: child_id.clone(),
                     input: AgentUserInput {
                         content: vec![AgentUserContent::Text {
@@ -138,6 +142,14 @@ impl SubagentService {
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!("session tree '{tree_root_session_id}' has an active subagent turn"),
             ));
+        }
+        for record in self
+            .sessions
+            .list_subagent_tree_records(tree_root_session_id.into(), None)
+            .await?
+        {
+            let record = self.sessions.prepare_execution(&record).await?;
+            self.sessions.ensure_worker_idle(&record).await?;
         }
         Ok(())
     }

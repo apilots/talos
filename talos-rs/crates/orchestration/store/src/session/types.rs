@@ -1,15 +1,18 @@
 use std::path::PathBuf;
 
+pub use talos_types::SessionTreeIdentity;
+
 use serde::{Deserialize, Serialize};
 use talos_types::{
     talos::{SessionSourceProvider, SessionSourceType, TalosSessionEnvironment, TokenUsage},
-    AgentPath, AgentTurnRef, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE,
+    SessionConf, SessionUsage, DEFAULT_SESSION_TITLE,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionRecord {
     pub id: String,
     pub agent_id: String,
+    pub execution_node_id: String,
     pub tree_identity: SessionTreeIdentity,
     pub workspace_id: String,
     pub title: String,
@@ -36,19 +39,6 @@ pub struct SessionRecord {
     pub current_directory: Option<PathBuf>,
 }
 
-/// Exhaustive persisted identity of a Primary or Subagent Session.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SessionTreeIdentity {
-    #[default]
-    Primary,
-    Subagent {
-        parent: AgentTurnRef,
-        tree_root_session_id: String,
-        path: AgentPath,
-    },
-}
-
 impl SessionRecord {
     pub fn has_real_title(&self) -> bool {
         let normalized = self.title.trim();
@@ -69,6 +59,7 @@ pub enum SessionTreeScope {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionQuery {
+    pub execution_node_id: Option<String>,
     pub tree_scope: SessionTreeScope,
     pub user_id: Option<String>,
     pub channel_id: Option<String>,

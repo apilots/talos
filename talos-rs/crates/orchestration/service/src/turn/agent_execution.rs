@@ -134,6 +134,9 @@ pub(crate) struct AgentExecutionDriver {
 }
 
 impl AgentExecutionDriver {
+    pub(super) async fn publish_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        self.event_service.publish_active_turn(session_id).await
+    }
     pub(crate) fn new(
         coordinator: Arc<dyn AgentCoordinator>,
         execution_store: Arc<dyn AgentExecutionStore>,

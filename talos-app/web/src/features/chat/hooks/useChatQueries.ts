@@ -25,6 +25,8 @@ import {
   updateSessionPermissionMode,
 } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
+import { connectionScope } from "@/shared/store/connection-scope";
+import { useSelectedComputerId, useEnvironmentKey, useProductScope } from "@/features/computers";
 import { normalizeProjects } from "@/shared/store/ui-slice";
 import type { ProjectView } from "@/shared/types/ui";
 
@@ -43,24 +45,27 @@ export const chatKeys = {
 
 export function useConnectionKey() {
   return useAppStore((state) =>
-    `${state.connection.authToken}|${state.connection.userId}`,
+    connectionScope(state.connection),
   );
 }
 
-export function useModelsQuery() {
-  const connectionKey = useConnectionKey();
+export function useModelsQuery(nodeId?: string) {
+  const selected = useSelectedComputerId();
+  const connectionKey = JSON.stringify([useProductScope(), nodeId ?? selected]);
   return useQuery({
     queryKey: chatKeys.models(connectionKey),
-    queryFn: listModels,
+    queryFn: () => listModels(nodeId ?? selected),
+    enabled: Boolean(nodeId ?? selected),
     staleTime: 60_000,
   });
 }
 
 export function useSessionsQuery() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const query = useQuery({
     queryKey: chatKeys.sessions(connectionKey),
     queryFn: listSessions,
+    refetchInterval: 4_000,
   });
 
   const data = [...(query.data ?? [])].sort(
@@ -73,11 +78,12 @@ export function useSessionsQuery() {
   };
 }
 
-export function useProjectsQuery() {
-  const connectionKey = useConnectionKey();
+export function useProjectsQuery(nodeId?: string) {
+  const selected = useSelectedComputerId();
+  const connectionKey = JSON.stringify([useProductScope(), nodeId ?? selected]);
   return useQuery({
     queryKey: chatKeys.projects(connectionKey),
-    queryFn: listProjects,
+    queryFn: () => listProjects(nodeId ?? selected),
   });
 }
 
@@ -126,13 +132,16 @@ export function useSessionHistoryQuery(sessionId: string, enabled = true) {
 }
 
 export function useCreateProjectMutation() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
+  const scope = useProductScope();
+  const nodeId = useSelectedComputerId();
   const queryClient = useQueryClient();
-  const mergeProjects = useAppStore((state) => state.mergeProjects);
+  const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
   return useMutation({
     mutationFn: createProject,
     onSuccess: async (project) => {
-      mergeProjects([project], project.id);
+      const state = useAppStore.getState();
+      if (connectionScope(state.connection) === scope && state.selectedComputers[scope] === nodeId && state.activeProjectId === normalizeProjects()[0].id) setActiveProjectId(project.id);
       queryClient.setQueryData<ProjectView[]>(chatKeys.projects(connectionKey), (current) =>
         normalizeProjects([...(current ?? []), project]),
       );
@@ -142,7 +151,7 @@ export function useCreateProjectMutation() {
 }
 
 export function useDeleteProjectMutation() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteProject,
@@ -153,14 +162,12 @@ export function useDeleteProjectMutation() {
 }
 
 export function useUpdateProjectNameMutation() {
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const queryClient = useQueryClient();
-  const mergeProjects = useAppStore((state) => state.mergeProjects);
   return useMutation({
     mutationFn: ({ projectId, name }: { projectId: string; name: string }) =>
       updateProjectName(projectId, name),
     onSuccess: async (project) => {
-      mergeProjects([project], project.id);
       queryClient.setQueryData<ProjectView[]>(chatKeys.projects(connectionKey), (current) =>
         normalizeProjects([...(current ?? []), project]),
       );
@@ -202,7 +209,7 @@ export function useUpdateSessionModelMutation(sessionId: string) {
       if (queryClient.isMutating({ mutationKey }) > 1) {
         return;
       }
-      await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
+      await queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
       await queryClient.invalidateQueries({ queryKey: sessionKey });
     },
   });
@@ -258,7 +265,7 @@ export function useDeleteSessionMutation() {
   return useMutation({
     mutationFn: deleteSession,
     onSuccess: async (_, sessionId) => {
-      await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
+      await queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
       queryClient.removeQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
       queryClient.removeQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
     },
@@ -273,14 +280,14 @@ export function useSessionActions(sessionId: string) {
       chatKeys.session(connectionKey, sessionId),
       session,
     );
-    await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
+    await queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
     await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
   };
   return {
     cancelTurn: useMutation({
       mutationFn: (turnId: string) => cancelActiveTurn(sessionId, turnId),
       onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
+        await queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
       },
     }),
     compact: useMutation({

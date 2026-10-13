@@ -155,7 +155,7 @@ where
 {
     async fn list_models(&self) -> TalosResult<ModelListResponse> {
         let mut client = self.lock().await;
-        SdkGatewayClient::list_models(&mut *client, ModelListRequest {}).await
+        SdkGatewayClient::list_models(&mut *client, ModelListRequest { node_id: None }).await
     }
 
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {
@@ -168,6 +168,7 @@ where
         SdkGatewayClient::suggest_skills(
             &mut *client,
             SkillsSuggestRequest {
+                node_id: None,
                 query: query.to_string(),
                 limit: Some(8),
             },

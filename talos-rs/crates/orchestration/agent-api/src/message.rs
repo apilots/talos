@@ -123,8 +123,13 @@ pub struct AgentToolCall {
     rename_all_fields = "camelCase"
 )]
 pub enum AgentToolCallArguments {
-    Streaming { json_fragment: String },
-    Complete { value: ToolArguments },
+    Streaming {
+        #[schemars(rename = "jsonFragment")]
+        json_fragment: String,
+    },
+    Complete {
+        value: ToolArguments,
+    },
 }
 
 /// One typed progress observation for a running Tool call.

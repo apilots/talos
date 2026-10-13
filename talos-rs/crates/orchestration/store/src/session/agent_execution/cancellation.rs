@@ -9,7 +9,9 @@ pub(super) async fn begin(
     store: &DatabaseSessionStore,
     identity: &talos_agent_api::AgentTurnRef,
 ) -> TalosResult<AgentCancellationAdmission> {
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&identity.session_id)
+        .await?;
     let active = load_active_turn(transaction.as_mut(), &identity.session_id)
         .await?
         .ok_or_else(|| execution_conflict("active Agent Turn does not exist"))?;
@@ -58,7 +60,9 @@ pub(super) async fn restore(
             "cancellation restore requires a valid cancellation admission",
         ));
     }
-    let mut transaction = store.storage.begin_transaction().await?;
+    let mut transaction = store
+        .begin_session_transaction(&admission.active_turn.identity.session_id)
+        .await?;
     let current = load_active_turn(
         transaction.as_mut(),
         &admission.active_turn.identity.session_id,

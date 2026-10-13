@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 042 |
+| `feat` | 045 |
 | `fix` | 007 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,7 +15,9 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| — | — | — |
+| feat-042 | `feat-042-distributed-agent-execution` | implemented |
+| feat-043 | `feat-043-computer-workspace` | implemented |
+| feat-044 | [Talos integration](feat-044-talos-sync/design.md); [independent Sync](https://github.com/apilots/talos-sync/blob/2009733813c9a5416a8b1530580809af1385ec75/spec/feat-044-talos-sync/design.md) | implemented — [acceptance](feat-044-talos-sync/verification-account-sdk.md) |
 
 ## Archived Specs
 

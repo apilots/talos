@@ -116,6 +116,14 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
         Err(out_of_scope())
     }
 
+    async fn commit_progress_events(
+        &self,
+        _events: Vec<AgentEvent>,
+        _expected_event_seq: i64,
+    ) -> TalosResult<AgentEventCommit> {
+        Err(out_of_scope())
+    }
+
     async fn commit_running_input_admission(
         &self,
         _params: CommitRunningInputAdmissionParams,

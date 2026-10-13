@@ -1,0 +1,80 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "memory.proto";
+
+// Projections of the existing talos-types business objects.
+message MemoryKindFilter { repeated MemoryKind values = 1; }
+enum MemoryImportance {
+  MEMORY_IMPORTANCE_UNSPECIFIED = 0;
+  MEMORY_IMPORTANCE_LOW = 1;
+  MEMORY_IMPORTANCE_NORMAL = 2;
+  MEMORY_IMPORTANCE_HIGH = 3;
+}
+message MemoryFileListParams {
+  optional uint64 limit = 1;
+  optional string before_date = 2;
+  optional string date_from = 3;
+  optional string date_to = 4;
+}
+message MemoryFileReadParams {
+  string date = 1;
+}
+message MemoryFileWriteParams {
+  string date = 1;
+  string content = 2;
+  optional string expected_version = 3;
+}
+message MemorySearchParams {
+  string query = 1;
+  optional uint32 limit = 2;
+  MemoryKindFilter kinds = 3;
+  optional int64 since_at = 4;
+  optional int64 until_at = 5;
+}
+message MemoryGetParams {
+  string memory_id = 1;
+}
+message MemoryFileSummary {
+  string date = 1;
+  uint64 section_count = 2;
+  optional int64 updated_at = 3;
+  string version_token = 4;
+}
+message MemoryFile {
+  string date = 1;
+  uint64 section_count = 2;
+  string content = 3;
+  optional int64 updated_at = 4;
+  string version_token = 5;
+}
+message MemoryFiles {
+  repeated MemoryFileSummary data = 1;
+}
+message MemoryRecordSource {
+  string date = 1;
+  optional string session_id = 2;
+  optional uint64 from_seq = 3;
+  optional uint64 until_seq = 4;
+}
+message MemoryRecord {
+  string memory_id = 1;
+  string title = 2;
+  string body = 3;
+  MemoryKind kind = 4;
+  MemoryImportance importance = 5;
+  int64 occurred_at = 6;
+  MemoryRecordSource source = 7;
+}
+message MemorySearchHit {
+  string memory_id = 1;
+  string title = 2;
+  string preview = 3;
+  MemoryKind kind = 4;
+  MemoryImportance importance = 5;
+  int64 occurred_at = 6;
+  uint32 rank = 7;
+  MemoryRecordSource source = 8;
+}
+message MemorySearchHits {
+  repeated MemorySearchHit data = 1;
+}

@@ -10,7 +10,7 @@ use super::{
     FileRecordUpdate, FileStatus,
 };
 
-const FILE_COLUMNS: &str = "file_id, owner_user_id, project_id, storage_id, object_key, original_filename, mime_type, size_bytes, status, metadata_json, created_at, updated_at";
+const FILE_COLUMNS: &str = "file_id, owner_user_id, project_id, storage_id, object_key, storage_peer_id, original_filename, mime_type, size_bytes, status, metadata_json, created_at, updated_at";
 
 /// Persists file lifecycle records without exposing SQL or storage objects.
 ///
@@ -62,11 +62,42 @@ pub trait FileStore: Send + Sync {
 /// SQLite-backed file repository.
 pub struct DatabaseFileStore {
     pool: SqlitePool,
+    sync: std::sync::Arc<crate::sync::StoreSyncBindings>,
 }
 
 impl DatabaseFileStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            sync: Default::default(),
+        }
+    }
+
+    pub fn with_sync(self, sync: std::sync::Arc<crate::sync::StoreSyncAdapter>) -> Self {
+        self.sync.install(sync).expect("initial Store sync binding");
+        self
+    }
+    /// Install a host-verified binding after login; existing transactions keep
+    /// their original association until they commit.
+    pub fn install_sync(
+        &self,
+        adapter: std::sync::Arc<crate::sync::StoreSyncAdapter>,
+    ) -> TalosResult<()> {
+        self.sync.install(adapter)
+    }
+
+    async fn begin_write(
+        &self,
+        file_id: &str,
+    ) -> TalosResult<crate::sync::capture::SqliteCaptureTransaction> {
+        crate::sync::capture::SqliteCaptureTransaction::begin(
+            &self.pool,
+            self.sync.clone(),
+            vec![talos_sync::SyncResourceKey::File {
+                file_id: file_id.into(),
+            }],
+        )
+        .await
     }
 
     async fn load_records<'a>(
@@ -120,7 +151,7 @@ impl DatabaseFileStore {
     }
 
     async fn insert_tags(
-        transaction: &mut sqlx::Transaction<'_, Sqlite>,
+        transaction: &mut sqlx::SqliteConnection,
         file_id: &str,
         tags: &[String],
     ) -> TalosResult<()> {
@@ -128,7 +159,7 @@ impl DatabaseFileStore {
             sqlx::query("INSERT INTO file_tags (file_id, tag) VALUES (?, ?)")
                 .bind(file_id)
                 .bind(tag)
-                .execute(&mut **transaction)
+                .execute(&mut *transaction)
                 .await
                 .map_err(|error| storage_error("insert file tag", error))?;
         }
@@ -139,6 +170,7 @@ impl DatabaseFileStore {
 #[async_trait]
 impl FileStore for DatabaseFileStore {
     async fn create_file(&self, record: FileRecord) -> TalosResult<()> {
+        let (storage_id, object_key) = record.local_location()?;
         let metadata_json = serde_json::to_string(&record.metadata).map_err(|error| {
             TalosError::internal_with_source(
                 "serialize file metadata; technical details were withheld.",
@@ -146,11 +178,7 @@ impl FileStore for DatabaseFileStore {
             )
         })?;
         let size_bytes = record.size_bytes.map(size_to_i64).transpose()?;
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| storage_error("begin file create", error))?;
+        let mut transaction = self.begin_write(&record.file_id).await?;
         let query = if record.project_id.is_some() {
             sqlx::query(
                 r#"
@@ -180,8 +208,8 @@ impl FileStore for DatabaseFileStore {
             .bind(&record.file_id)
             .bind(&record.owner_user_id)
             .bind(&record.project_id)
-            .bind(&record.storage_id)
-            .bind(&record.object_key)
+            .bind(storage_id)
+            .bind(object_key)
             .bind(&record.original_filename)
             .bind(&record.mime_type)
             .bind(size_bytes)
@@ -205,10 +233,7 @@ impl FileStore for DatabaseFileStore {
             ));
         }
         Self::insert_tags(&mut transaction, &record.file_id, &record.tags).await?;
-        transaction
-            .commit()
-            .await
-            .map_err(|error| storage_error("commit file create", error))?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -285,6 +310,7 @@ impl FileStore for DatabaseFileStore {
     }
 
     async fn mark_ready(&self, update: FileReadyUpdate) -> TalosResult<bool> {
+        let mut transaction = self.begin_write(&update.file_id).await?;
         let result = sqlx::query(
             "UPDATE files SET mime_type = ?, size_bytes = ?, status = 'ready', updated_at = ? WHERE file_id = ? AND status = 'uploading'",
         )
@@ -292,9 +318,10 @@ impl FileStore for DatabaseFileStore {
         .bind(size_to_i64(update.size_bytes)?)
         .bind(update.updated_at)
         .bind(update.file_id)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| storage_error("mark file ready", error))?;
+        transaction.commit().await?;
         Ok(result.rows_affected() == 1)
     }
 
@@ -303,11 +330,7 @@ impl FileStore for DatabaseFileStore {
         key: &FileOwnerKey,
         update: FileRecordUpdate,
     ) -> TalosResult<Option<FileRecord>> {
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| storage_error("begin file update", error))?;
+        let mut transaction = self.begin_write(&key.file_id).await?;
         let metadata_json = update
             .metadata
             .as_ref()
@@ -344,10 +367,7 @@ impl FileStore for DatabaseFileStore {
         }
         .map_err(|error| storage_error("update file metadata", error))?;
         if result.rows_affected() != 1 {
-            transaction
-                .rollback()
-                .await
-                .map_err(|error| storage_error("rollback file update", error))?;
+            transaction.rollback().await?;
             return Ok(None);
         }
         if let Some(tags) = update.tags {
@@ -358,10 +378,7 @@ impl FileStore for DatabaseFileStore {
                 .map_err(|error| storage_error("clear file tags", error))?;
             Self::insert_tags(&mut transaction, &key.file_id, &tags).await?;
         }
-        transaction
-            .commit()
-            .await
-            .map_err(|error| storage_error("commit file update", error))?;
+        transaction.commit().await?;
         self.get_file_for_owner(key).await
     }
 
@@ -370,15 +387,17 @@ impl FileStore for DatabaseFileStore {
         key: &FileOwnerKey,
         updated_at: i64,
     ) -> TalosResult<Option<FileRecord>> {
+        let mut transaction = self.begin_write(&key.file_id).await?;
         sqlx::query(
             "UPDATE files SET status = 'deleting', updated_at = ? WHERE file_id = ? AND owner_user_id = ? AND status = 'ready'",
         )
         .bind(updated_at)
         .bind(&key.file_id)
         .bind(&key.owner_user_id)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .map_err(|error| storage_error("mark file deleting", error))?;
+        transaction.commit().await?;
         Ok(self
             .get_file_for_owner(key)
             .await?
@@ -386,11 +405,13 @@ impl FileStore for DatabaseFileStore {
     }
 
     async fn delete_file_record(&self, file_id: &str) -> TalosResult<()> {
+        let mut transaction = self.begin_write(file_id).await?;
         sqlx::query("DELETE FROM files WHERE file_id = ? AND status IN ('uploading', 'deleting')")
             .bind(file_id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .map_err(|error| storage_error("delete file record", error))?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -430,7 +451,7 @@ impl FileStore for DatabaseFileStore {
 
     async fn list_storage_ids(&self) -> TalosResult<BTreeSet<String>> {
         let ids = sqlx::query_scalar::<_, String>(
-            "SELECT DISTINCT storage_id FROM files ORDER BY storage_id",
+            "SELECT DISTINCT storage_id FROM files WHERE storage_id IS NOT NULL ORDER BY storage_id",
         )
         .fetch_all(&self.pool)
         .await
@@ -473,8 +494,16 @@ fn parse_record(row: &sqlx::sqlite::SqliteRow) -> TalosResult<FileRecord> {
         project_id: row
             .try_get("project_id")
             .map_err(|error| storage_error("read file project", error))?,
-        storage_id: read_string(row, "storage_id")?,
-        object_key: read_string(row, "object_key")?,
+        location: match row
+            .try_get::<Option<String>, _>("storage_peer_id")
+            .map_err(|error| storage_error("read file location", error))?
+        {
+            Some(peer_id) => super::FileLocation::Peer { peer_id },
+            None => super::FileLocation::Local {
+                storage_id: read_string(row, "storage_id")?,
+                object_key: read_string(row, "object_key")?,
+            },
+        },
         original_filename: read_string(row, "original_filename")?,
         mime_type: row
             .try_get("mime_type")

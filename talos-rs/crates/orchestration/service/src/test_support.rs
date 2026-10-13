@@ -139,6 +139,15 @@ impl AgentCoordinator for NoopAgentCoordinator {
         Ok(())
     }
 
+    async fn select_execution_node(
+        &self,
+        _agent_id: &str,
+        _user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        Ok(preferred_node_id.unwrap_or("embedded").to_string())
+    }
+
     async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         unreachable!("Agent execution is outside this test scenario")
     }
@@ -155,15 +164,126 @@ impl AgentCoordinator for NoopAgentCoordinator {
         unreachable!("Agent compaction is outside this test scenario")
     }
 
-    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn clear_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+    async fn close_session(
+        &self,
+        _params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
     async fn shutdown(&self, _timeout: Duration) -> TalosResult<()> {
         Ok(())
     }
+}
+
+/// Reuse the actual environment owner with deterministic fixture config and host paths.
+pub(crate) fn with_environment(
+    delegate: std::sync::Arc<dyn AgentCoordinator>,
+    config: talos_types::TalosConfig,
+) -> std::sync::Arc<dyn AgentCoordinator> {
+    with_worker_environment(
+        delegate,
+        std::sync::Arc::new(crate::WorkerEnvironmentService::new(
+            std::sync::Arc::new(std::sync::RwLock::new(config)),
+            Some(std::env::temp_dir()),
+        )),
+    )
+}
+
+pub(crate) fn session_service(
+    store: std::sync::Arc<dyn talos_store::session::SessionStore>,
+    projects: std::sync::Arc<dyn talos_store::project::ProjectStore>,
+    config: talos_types::TalosConfig,
+) -> crate::session::SessionService {
+    let coordinator = with_environment(std::sync::Arc::new(NoopAgentCoordinator), config.clone());
+    crate::session::SessionService::new(store, projects, config, coordinator)
+}
+
+struct EnvironmentCoordinator {
+    delegate: std::sync::Arc<dyn AgentCoordinator>,
+    environment: std::sync::Arc<dyn agent_protocol::WorkerEnvironment>,
+}
+#[async_trait]
+impl AgentCoordinator for EnvironmentCoordinator {
+    async fn worker_environment(
+        &self,
+        _node_id: &str,
+        _user_id: &str,
+    ) -> TalosResult<std::sync::Arc<dyn agent_protocol::WorkerEnvironment>> {
+        Ok(self.environment.clone())
+    }
+    async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
+        self.delegate.resolve_agent(params).await
+    }
+    async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
+        self.delegate.ensure_agent(agent_id).await
+    }
+    async fn select_execution_node(
+        &self,
+        agent_id: &str,
+        user_id: &str,
+        preferred_node_id: Option<&str>,
+    ) -> TalosResult<String> {
+        self.delegate
+            .select_execution_node(agent_id, user_id, preferred_node_id)
+            .await
+    }
+    async fn session_harness(
+        &self,
+        context: &AgentSessionContext,
+    ) -> TalosResult<std::sync::Arc<dyn talos_agent::AgentHarness>> {
+        self.delegate.session_harness(context).await
+    }
+    async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        self.delegate.start(params).await
+    }
+    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        self.delegate.submit_input(params).await
+    }
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.delegate.interrupt(params).await
+    }
+    async fn compact_session(&self, context: AgentContext) -> TalosResult<AgentRunExecution> {
+        self.delegate.compact_session(context).await
+    }
+    async fn clear_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .clear_session(context, expected_history_cursor)
+            .await
+    }
+    async fn close_session(
+        &self,
+        context: AgentSessionContext,
+        expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> TalosResult<()> {
+        self.delegate
+            .close_session(context, expected_history_cursor)
+            .await
+    }
+    async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
+        self.delegate.shutdown(timeout).await
+    }
+}
+
+pub(crate) fn with_worker_environment(
+    delegate: std::sync::Arc<dyn AgentCoordinator>,
+    environment: std::sync::Arc<dyn agent_protocol::WorkerEnvironment>,
+) -> std::sync::Arc<dyn AgentCoordinator> {
+    std::sync::Arc::new(EnvironmentCoordinator {
+        delegate,
+        environment,
+    })
 }

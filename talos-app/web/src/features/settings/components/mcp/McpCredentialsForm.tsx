@@ -1,13 +1,16 @@
+import { useEnvironmentKey } from "@/features/computers";
 import type { McpDefinitionRef, McpOAuthConfig } from "@talos/sdk-browser";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { closePreparedExternalWindow, prepareExternalAuthWindow, redirectToExternalUrl } from "@/features/auth/navigation";
 import { getTalosClient } from "@/shared/api/client";
+import { Button } from "@/shared/ui/Button";
 import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { FormSection, parseEntries, TextArea, TextInput } from "./McpFormPrimitives";
 
 export function McpCredentialsForm({ server, stdio, onUpdated }: { server: McpDefinitionRef; stdio: boolean; onUpdated?: () => Promise<void> }) {
+  const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("settings");
   const [mode, setMode] = useState<"bearer" | "header" | "oauth">("bearer");
   const initialized = useRef(false);
@@ -18,7 +21,7 @@ export function McpCredentialsForm({ server, stdio, onUpdated }: { server: McpDe
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ type: "entries" } | { type: "api"; cause: unknown } | null>(null);
-  const auth = useQuery({ queryKey: ["talos", "mcp-auth", server], queryFn: () => getTalosClient().mcp.readAuthentication({ server }), refetchInterval: (query) => query.state.data?.state.type === "authorizing" ? 1000 : false });
+  const auth = useQuery({ queryKey: ["talos", environmentKey, "mcp-auth", server], queryFn: () => getTalosClient().mcp.readAuthentication({ server }), refetchInterval: (query) => query.state.data?.state.type === "authorizing" ? 1000 : false });
   useEffect(() => {
     if (!auth.data || !auth.isFetchedAfterMount) return;
     if (!initialized.current) {
@@ -90,7 +93,7 @@ export function McpCredentialsForm({ server, stdio, onUpdated }: { server: McpDe
       </> : <TextArea aria-label={t("mcpServers.secretEnvironment")} onChange={(event) => setSecret(event.target.value)} placeholder="API_KEY=value" value={secret} />}
       {error ? <p role="alert" className="text-sm text-danger">{error.type === "entries" ? t("mcpServers.invalidEntries") : userVisibleErrorMessage(error.cause, t("mcpServers.saveError"))}</p> : null}
       <div className="flex gap-3">
-        <button className="rounded-lg bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={busy || (mode !== "oauth" && (!secret || (!stdio && mode === "header" && !header)))} onClick={() => void (mode === "oauth" && !stdio ? authorize() : save(false))} type="button">{t(mode === "oauth" && !stdio ? "mcpServers.oauthAuthorize" : "mcpServers.replaceCredentials")}</button>
+        <Button className="px-4" disabled={busy || (mode !== "oauth" && (!secret || (!stdio && mode === "header" && !header)))} onClick={() => void (mode === "oauth" && !stdio ? authorize() : save(false))} type="button">{t(mode === "oauth" && !stdio ? "mcpServers.oauthAuthorize" : "mcpServers.replaceCredentials")}</Button>
         <button className="rounded-lg border border-border px-4 py-2 text-sm text-danger disabled:opacity-50" disabled={busy || !status || status.type === "unconfigured" || status.type === "missing"} onClick={() => void save(true)} type="button">{t("mcpServers.clearCredentials")}</button>
       </div>
     </FormSection>

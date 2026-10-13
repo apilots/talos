@@ -1,0 +1,27 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "types.proto";
+enum ConfigPath { CONFIG_PATH_UNSPECIFIED = 0; CONFIG_PATH_LLM = 1; CONFIG_PATH_WEB_SEARCH = 2; }
+enum LlmProtocol { LLM_PROTOCOL_UNSPECIFIED = 0; LLM_PROTOCOL_CHAT = 1; LLM_PROTOCOL_RESPONSES = 2; LLM_PROTOCOL_MESSAGES = 3; }
+enum WebSearchProvider { WEB_SEARCH_PROVIDER_UNSPECIFIED = 0; WEB_SEARCH_PROVIDER_FIRECRAWL = 1; WEB_SEARCH_PROVIDER_BRAVE = 2; WEB_SEARCH_PROVIDER_TAVILY = 3; }
+message ProviderConfig {
+  optional string api_key = 1; optional string base_url = 2; optional LlmProtocol protocol = 3;
+  repeated ModelInfo models = 4;
+}
+message LlmConfig {
+  string provider = 1; string model = 2;
+  ProviderConfig anthropic = 3; ProviderConfig openai = 4; ProviderConfig bailian = 5;
+  ProviderConfig deepseek = 6; ProviderConfig ollama = 7; ProviderConfig openrouter = 8;
+}
+message WebSearchProviderConfig { optional string api_key = 1; optional string base_url = 2; uint64 timeout_ms = 3; }
+message WebSearchConfig { WebSearchProvider provider = 1; WebSearchProviderConfig firecrawl = 2; WebSearchProviderConfig brave = 3; WebSearchProviderConfig tavily = 4; }
+message ConfigGetParams { ConfigPath path = 1; }
+message ConfigUpdateParams { oneof value { LlmConfig llm = 1; WebSearchConfig web_search = 2; } }
+message ConfigDeleteParams { string path = 1; }
+message ModelReadiness { bool ready = 1; string provider = 2; string model = 3; repeated string issues = 4; }
+message ProviderKeyStatus { bool api_key_configured = 1; }
+message ProviderProtocolCapabilities { LlmProtocol default_protocol = 1; repeated LlmProtocol protocols = 2; }
+message LlmConfigRead { LlmConfig config = 1; ModelReadiness model_readiness = 2; map<string, ProviderKeyStatus> provider_keys = 3; map<string, ProviderProtocolCapabilities> provider_capabilities = 4; }
+message ConfigRead { oneof value { LlmConfigRead llm = 1; WebSearchConfig web_search = 2; } }
+message ConfigDeleted { bool success = 1; }
+message ConfigReloaded { bool success = 1; }

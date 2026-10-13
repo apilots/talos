@@ -19,14 +19,14 @@ not a substitute for parity tests.
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| TS TalosClient   |  | TS AppServer     |  | Rust SDK         |  | Rust SDK         |
+| TS TalosClient   |  | TS product SDK   |  | Rust SDK         |  | Rust SDK         |
 | shared types     |  | Client + types   |  | GatewayClient    |  | GatewayClient    |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| Browser adapter  |  | Typed preload    |  | EmbeddedServer   |  | Rust AppServer   |
-| HTTP + SSE       |  | IPC -> main      |  | Client           |  | Client           |
+| Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer   |  | Rust AppServer   |
+| HTTP + SSE       |  | cloud/local mode |  | Client           |  | Client           |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          +---------------------+-----------+---------+---------------------+
@@ -54,6 +54,7 @@ responses, errors, and stream behavior:
 
 ```text
 Authentication and profile
+Computer directory, owner management and availability
 Models and configuration
 Sessions, Turns, history, compaction, retry, and interruption
 Timeline subscription, replay, recovery, and terminal state
@@ -75,12 +76,15 @@ embedded SDK, and their product transports can all reach it.
 | `@talos/sdk-browser` | HTTP, multipart upload, authentication header, and SSE transport implementation |
 | `@talos/sdk-app-server` | JSON-RPC transport plus Electron main-process and typed preload IPC adapters |
 
-Web uses `TalosClient` through the browser transport. Desktop uses the
-TypeScript `AppServerClient` through typed preload IPC and an Electron
-main-process transport that owns JSON-RPC stdio. The two facades share generated
-domain and protocol types, but they do not currently implement one common
-TypeScript client interface. Capability parity is therefore enforced through
-API review and parity tests rather than the TypeScript type system alone.
+Web uses `TalosClient` over HTTP/SSE to its selected management service. Desktop
+uses `AppServerClient` through typed preload IPC and JSON-RPC stdio in both local
+and cloud modes. Its bundled app-server retains the original Service, Store and
+Coordinator, plus one `TalosWorker`; cloud mode enables registration and account
+synchronization without replacing that management runtime. Remote dispatch stays
+inside the Rust `agent-client` SDK. Typed preload also exposes the existing login
+lifecycle and safe host identity; node credentials never reach the renderer.
+Shared generated types and parity tests keep the browser and Desktop facades
+aligned on the same business capabilities.
 
 ## Rust SDK and embedded SDK
 
@@ -172,10 +176,11 @@ the existing presenter. Branch on codes/typed parameters, never English sentence
 Show failed Turns even without assistant text. Public error disclosure, report
 ownership and protocol 0.4 migration are defined by [Error contract](ERROR_MODEL.md).
 
-Web reads `deploymentMode` from server health. Local/cloud deployment is not a
-runtime selector; the unused `runtimeMode` control has been removed. Desktop
-currently reports local mode without adding an app-server mode negotiation.
-Settings navigation and direct routes mirror the [configuration authorization
+Web reads `deploymentMode` from its connected management service. Desktop keeps
+its complete local management runtime; its explicit `connectionMode` controls
+cloud registration, independently of synchronization opt-out and server
+deployment policy. Settings
+navigation and direct routes mirror the [configuration authorization
 matrix](../../deploy/README.md#deployment-mode-and-configuration-access); Gateway
 still enforces access independently of client visibility.
 
@@ -228,3 +233,36 @@ propagates configuration/identity errors through the unified error contract.
 Existing sessions retain their own workspace bindings; this endpoint neither
 selects a session's workspace nor manages workspace definitions. Extend selection
 only together with an authorized product workspace management path.
+
+## Computer selection and execution ownership
+
+`features/computers` owns the independent rail, full paginated search, selection
+and management view. Both clients use `sync/status.localComputerId` to identify
+the connected management host's own Worker. On Desktop this is its local Computer;
+on Web it is the Server's embedded Worker, not the browser's physical machine.
+Ordinary accounts on a shared center do not see the center's private embedded
+Worker. An authorized local Worker is selected by default; otherwise the saved
+selection or an explicit Computer selection applies.
+The existing account menu remains the account owner. Cloud/local is an explicit
+host setting and an offline Computer never redirects execution elsewhere.
+
+Product requests reuse canonical optional `nodeId` fields. The UI binds environment
+APIs once at composition; Session operations retain their saved identity. Query
+caches use account/control-plane/resource identity, with Computer identity for
+environment and list views. Drafts/recent selection are client-owned and scoped;
+Projects, Sessions and Timeline remain on the control plane. A Computer switch
+unsubscribes observations without cancelling its running Turn.
+
+`AgentHarness` and `WorkerEnvironment` hide embedded/direct/outbound transport.
+Worker owns config, MCP credentials and Workspace files. Remote MCP OAuth callbacks
+use the control-plane relay to the original bounded Worker attempt; only transient
+state-hash routing lives on the control plane. SDK and the generated PB projection
+reuse the canonical business types.
+
+`ComputerDetails` presents the canonical `NodeInfo.systemInfo` report together
+with existing owner, identity, heartbeat and registration metadata. The Worker
+collects it once through `talos-system-info::collect()`, and the original Node
+registration/store/sync paths carry that typed object. Missing optional hardware
+stays unavailable. The report never decides permissions, identity or availability.
+Computer management and synchronization controls stay on the dedicated right-hand
+page; the business sidebar only shows the selected Computer and its resources.

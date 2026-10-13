@@ -1,10 +1,4 @@
-export function resolveServerBaseUrl(): string {
-  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
-  if (configured) {
-    return configured;
-  }
-  if (typeof window !== "undefined" && window.location.origin !== "null") {
-    return window.location.origin;
-  }
-  return "http://localhost:8080";
-}
+import { defaultProductEndpoint } from "@/shared/store/connection-scope";
+
+/** Web addresses its selected management service. Desktop uses the stdio host. */
+export function resolveServerBaseUrl(): string { return defaultProductEndpoint(); }

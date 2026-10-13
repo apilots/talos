@@ -1,6 +1,8 @@
 pub mod agent;
+pub mod agent_node;
 pub mod automation;
 pub mod cloud;
+pub mod desktop;
 pub mod fs;
 pub mod kernel;
 pub mod mcp_auth;
@@ -10,4 +12,5 @@ pub mod plugins;
 pub mod prompt;
 pub mod skills;
 pub mod storage;
+pub mod sync;
 pub mod tools;

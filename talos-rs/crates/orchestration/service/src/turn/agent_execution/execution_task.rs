@@ -35,6 +35,7 @@ impl AgentExecutionDriver {
         self.event_service.publish_committed(commit.events);
         let driver = self.clone();
         let task_active = active.clone();
+        let share_after_completion = matches!(purpose, ExecutionPurpose::Turn);
         let task = tokio::spawn(async move {
             match admission.permit.consume().await {
                 Ok(()) => {
@@ -58,7 +59,7 @@ impl AgentExecutionDriver {
         });
         let driver = self.clone();
         tokio::spawn(async move {
-            let result = match task.await {
+            let mut result = match task.await {
                 Ok(result) => result,
                 Err(source) => {
                     let error = TalosError::internal_with_source(
@@ -83,7 +84,29 @@ impl AgentExecutionDriver {
                     }
                 }
             };
+            if !matches!(result, Ok(AgentRunSettlement::WaitingForInput { .. })) {
+                if let Err(error) = driver
+                    .sessions
+                    .commit_worker_history_cursor(
+                        &identity,
+                        agent_protocol::SessionStateVisibility::Local,
+                    )
+                    .await
+                {
+                    if let Err(original) = result {
+                        talos_logging::report_error(&original);
+                    }
+                    result = Err(error);
+                }
+            }
             driver.remove_live_execution(&identity);
+            if share_after_completion
+                && !matches!(result, Ok(AgentRunSettlement::WaitingForInput { .. }))
+            {
+                driver
+                    .sessions
+                    .schedule_shared_history_cursor(identity.session_id.clone());
+            }
             // A cancelled receiver no longer owns reporting; committed facts remain intact.
             if let Err(result) = completion_tx.send(result) {
                 match result {

@@ -31,7 +31,6 @@ run_linux_docker_sandbox_case() {
   docker build -t "${SANDBOX_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
   docker run --rm --privileged \
     -v "${REPO_ROOT}:/workspace/talos" \
-    -v "${REPO_ROOT}/../talos-cloud:/workspace/talos-cloud:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \
     "${SANDBOX_DOCKER_IMAGE}" \
     bash -lc "cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher && SHELL=/bin/sh TALOS_LINUX_SANDBOX_HELPER=/workspace/talos/talos-rs/target/debug/talos-linux-sandbox-launcher just test -p talos-tools sandbox_e2e_tests::${case_name} --no-capture --run-ignored ignored-only"
@@ -45,7 +44,6 @@ run_linux_docker_sandbox_group() {
   docker build -t "${SANDBOX_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
   docker run --rm --privileged \
     -v "${REPO_ROOT}:/workspace/talos" \
-    -v "${REPO_ROOT}/../talos-cloud:/workspace/talos-cloud:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \
     "${SANDBOX_DOCKER_IMAGE}" \
     bash -lc "cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher && SHELL=/bin/sh TALOS_LINUX_SANDBOX_HELPER=/workspace/talos/talos-rs/target/debug/talos-linux-sandbox-launcher just test -p talos-tools sandbox_e2e_tests --no-capture --run-ignored ignored-only"

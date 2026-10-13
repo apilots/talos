@@ -340,3 +340,5 @@ describe("ChatSessionPage", () => {
     expect(screen.queryByText("Session history failed to load.")).toBeNull();
   });
 });
+
+vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: "embedded", select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));

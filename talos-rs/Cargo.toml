@@ -20,6 +20,7 @@ members = [
     "crates/infra/storage",
     "crates/infra/auth",
     "crates/infra/automation",
+    "crates/infra/system-info",
     # Perception
     "crates/perception/channels",
     # Cognition
@@ -37,11 +38,15 @@ members = [
     "crates/action/windows-sandbox",
     # Orchestration
     "crates/orchestration/agent-api",
+    "crates/orchestration/agent-pb",
+    "crates/orchestration/agent-client",
+    "crates/orchestration/agent-protocol",
     "crates/orchestration/run-control",
     "crates/orchestration/agent-kernel",
     "crates/orchestration/agent-provider-kernel",
     "crates/orchestration/agent",
     "crates/orchestration/store",
+    "crates/orchestration/sync",
     "crates/orchestration/service",
     "crates/orchestration/router",
     "crates/orchestration/coordinator",
@@ -53,6 +58,7 @@ members = [
     # App
     "crates/app/talos-upgrade",
     "crates/app/talos-base",
+    "crates/app/talos-worker",
     # Apps
     "apps/sdk",
     "apps/sdk-embedded",
@@ -61,6 +67,7 @@ members = [
     # Binary
     "bin/app-server",
     "bin/talos-server",
+    "bin/talos-worker",
 ]
 
 [workspace.package]
@@ -73,10 +80,19 @@ description = "Talos - AI Agent Framework"
 
 [workspace.dependencies]
 # Async
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "metal", "vulkan"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system", "network"] }
+talos-system-info = { path = "crates/infra/system-info" }
 tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 tokio-util = "0.7"
+tokio-stream = "0.1"
 async-trait = "0.1"
 bytes = "1"
+prost = "0.14"
+tonic = { version = "0.14", features = ["transport", "tls-native-roots"] }
+rustls = "0.23"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
 libc = "0.2.182"
 seccompiler = "0.5.0"
 
@@ -120,6 +136,8 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 sha2 = "0.10"
+getrandom = "0.2"
+subtle = "2"
 moka = { version = "0.12", features = ["sync"] }
 okf-core = "=0.2.4"
 okf-validator = "=0.2.4"
@@ -129,7 +147,7 @@ reqwest = { version = "0.12", features = ["json"] }
 firecrawl = "2.11"
 tavily = "2.1"
 rmcp = { version = "3.2.0", default-features = false }
-cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
+talos-cloud-sdk = "=0.1.3"
 
 # Internal crates
 talos-error = { path = "crates/infra/error" }
@@ -155,9 +173,15 @@ talos-app-server = { path = "crates/gateway/app-server" }
 talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
 talos-agent-provider-kernel = { path = "crates/orchestration/agent-provider-kernel" }
 talos-agent-api = { path = "crates/orchestration/agent-api" }
+agent-pb = { path = "crates/orchestration/agent-pb" }
+agent-client = { path = "crates/orchestration/agent-client" }
+agent-protocol = { path = "crates/orchestration/agent-protocol" }
 talos-agent = { path = "crates/orchestration/agent" }
 talos-run-control = { path = "crates/orchestration/run-control" }
 talos-store = { path = "crates/orchestration/store" }
+talos-sync = { path = "crates/orchestration/sync" }
+talos-sync-types = "=0.1.0"
+talos-sync-sdk = "=0.1.0"
 talos-service = { path = "crates/orchestration/service" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
@@ -174,6 +198,7 @@ talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-sdk-embedded = { path = "apps/sdk-embedded" }
 talos-base = { path = "crates/app/talos-base" }
+talos-worker = { path = "crates/app/talos-worker" }
 talos-upgrade = { path = "crates/app/talos-upgrade" }
 
 [workspace.lints.rust]

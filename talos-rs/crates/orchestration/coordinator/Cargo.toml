@@ -10,9 +10,15 @@ talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 talos-agent-api = { workspace = true }
 talos-agent = { workspace = true }
+agent-protocol = { workspace = true }
 talos-router = { path = "../router" }
+talos-store = { workspace = true }
+chrono = { workspace = true }
 tokio = { workspace = true }
 async-trait = "0.1"
+
+[dev-dependencies]
+talos-storage = { workspace = true }
 
 [lints]
 workspace = true

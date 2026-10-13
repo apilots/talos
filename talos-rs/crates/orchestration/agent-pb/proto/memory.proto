@@ -1,0 +1,33 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "types.proto";
+import "auth.proto";
+
+// Projections of talos-memory objects. File paths are resolved only by the Worker.
+message WorkspaceMemorySnapshot {
+  oneof state { string missing_template = 1; WorkspaceMemoryFile valid = 2; InvalidWorkspaceMemoryFile invalid = 3; }
+}
+message WorkspaceMemoryFile { string content = 1; optional int64 updated_at = 2; string version_token = 3; }
+message InvalidWorkspaceMemoryFile { WorkspaceMemoryFile file = 1; string diagnostic = 2; }
+message WorkspaceMemoryResponse { oneof result { WorkspaceMemorySnapshot snapshot = 1; Failure failure = 2; } }
+enum MemoryKind { MEMORY_KIND_UNSPECIFIED = 0; MEMORY_KIND_PREFERENCE = 1; MEMORY_KIND_FACT = 2; MEMORY_KIND_DECISION = 3; MEMORY_KIND_TASK = 4; MEMORY_KIND_EPISODE = 5; }
+enum WorkspaceMemorySection { WORKSPACE_MEMORY_SECTION_UNSPECIFIED = 0; WORKSPACE_MEMORY_SECTION_INTERACTION_GUIDANCE = 1; WORKSPACE_MEMORY_SECTION_KEY_KNOWLEDGE = 2; WORKSPACE_MEMORY_SECTION_ACTIVE_CONTEXT = 3; }
+message WorkspaceMemoryEntry {
+  string key = 1; WorkspaceMemorySection section = 2; string title = 3; MemoryKind kind = 4; string summary = 5;
+  optional string why = 6; optional string apply = 7; optional string status = 8; optional string next = 9;
+}
+message OptionalMemoryField { oneof action { Empty unchanged = 1; string set = 2; Empty clear = 3; } }
+message WorkspaceMemoryEntryUpdate {
+  optional WorkspaceMemorySection section = 1; optional string title = 2; optional MemoryKind kind = 3; optional string summary = 4;
+  OptionalMemoryField why = 5; OptionalMemoryField apply = 6; OptionalMemoryField status = 7; OptionalMemoryField next = 8;
+}
+message UpdateMemoryEntry { string key = 1; WorkspaceMemoryEntryUpdate update = 2; }
+message ReplaceMemoryDocument { string content = 1; oneof base_version { Empty must_not_exist = 2; string match_version = 3; } }
+message WorkspaceMemoryUpdate {
+  oneof operation {
+    WorkspaceMemoryEntry create_entry = 1; UpdateMemoryEntry update_entry = 2; WorkspaceMemoryEntry upsert_entry = 3;
+    WorkspaceMemoryEntry replace_entry = 4; string remove_entry = 5; ReplaceMemoryDocument replace_document = 6;
+  }
+}
+message UpdateWorkspaceMemoryParams { SessionContext context = 1; WorkspaceMemoryUpdate update = 2; }
+message UpdateWorkspaceMemoryRequest { NodeAuth auth = 1; UpdateWorkspaceMemoryParams params = 2; }

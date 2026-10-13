@@ -97,8 +97,17 @@ fn build_bubblewrap_argv(request: &LauncherRequest) -> Result<Vec<String>, Strin
         push_mount(&mut args, "--bind", root);
     }
     for root in &request.file_system.denied_roots {
-        args.push("--tmpfs".to_string());
-        args.push(path_arg(root)?);
+        if root.is_file() {
+            // Mask file contents with a read-only empty device; tmpfs requires a directory.
+            args.extend([
+                "--ro-bind".to_string(),
+                "/dev/null".to_string(),
+                path_arg(root)?,
+            ]);
+        } else {
+            args.push("--tmpfs".to_string());
+            args.push(path_arg(root)?);
+        }
     }
 
     args.push("--clearenv".to_string());

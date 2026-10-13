@@ -50,7 +50,7 @@ fn recording_session_service(
         input: Vec::new(),
         cost: Default::default(),
     }];
-    Arc::new(crate::session::SessionService::new(
+    Arc::new(crate::test_support::session_service(
         store.clone(),
         store,
         config,
@@ -63,7 +63,23 @@ fn recording_access_service(
 ) -> ResourceAccessService {
     let sessions = recording_session_service(store.clone());
     let projects = Arc::new(crate::project::ProjectService::new(store));
-    ResourceAccessService::with_services(coordinator, sessions, projects)
+    let mut config = TalosConfig::default();
+    config.llm.model = "default".into();
+    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        id: "default".into(),
+        name: "Default test model".into(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
+    ResourceAccessService::with_services(
+        crate::test_support::with_environment(coordinator, config),
+        sessions,
+        projects,
+    )
 }
 
 #[async_trait]
@@ -172,7 +188,7 @@ impl SessionStore for RecordingSessionStore {
         Ok(false)
     }
 
-    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self, _node_id: Option<&str>) -> TalosResult<bool> {
         Ok(false)
     }
 
@@ -312,6 +328,20 @@ impl ProjectStore for RecordingSessionStore {
         unreachable!("not used in this test")
     }
 
+    async fn create_project_on_node(
+        &self,
+        name: &str,
+        directory: &Path,
+        user_id: &str,
+        node_id: &str,
+    ) -> TalosResult<ProjectRecord> {
+        let mut project = self
+            .create_project_for_owner(name, directory, user_id)
+            .await?;
+        project.execution_node_id = node_id.to_owned();
+        Ok(project)
+    }
+
     async fn patch_project(
         &self,
         _project_id: &str,
@@ -341,6 +371,7 @@ fn record_for(
     SessionRecord {
         id: session_id.to_string(),
         agent_id: "default".to_string(),
+        execution_node_id: "embedded".to_string(),
         tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
@@ -450,6 +481,7 @@ async fn creating_session_uses_actor_user_id() {
         .create_session(
             &Actor::regular("member-user"),
             CreateSessionRequest {
+                node_id: None,
                 session_id: "session-created".to_string(),
                 source,
                 model_selection: None,
@@ -462,5 +494,6 @@ async fn creating_session_uses_actor_user_id() {
         .expect("session should be created");
 
     assert_eq!(session.user_id, "member-user");
+    assert_eq!(session.execution_node_id, "embedded");
     assert_eq!(store.records.lock().unwrap()[0].user_id, "member-user");
 }

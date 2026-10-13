@@ -46,6 +46,7 @@ export function useChatSessionTimelineLifecycle({
   // History owns completed Turns; the subscription only fills the unfinished tail.
   const shouldSubscribeTimeline =
     Boolean(streamState?.isStreaming && streamState.activeMessageId && !streamedTurnIsComplete) ||
+    (sessionAvailable && sessionHistoryQuery.isSuccess) ||
     (sessionHistoryQuery.isSuccess && hasRemoteActiveTurn) ||
     observedMaintenanceSessionId === sessionId;
   const { retryTimeline } = useSessionTimelineEvents(

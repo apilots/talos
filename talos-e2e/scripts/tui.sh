@@ -9,7 +9,9 @@ tui_send_input() {
   local session_name="$1"
   local text="$2"
   tmux send-keys -t "${session_name}" C-u >/dev/null
-  tmux send-keys -t "${session_name}" -l "${text}" >/dev/null
+  # Exercise the terminal's real bracketed paste instead of thousands of key events.
+  tmux set-buffer -b "${session_name}" -- "${text}"
+  tmux paste-buffer -p -d -b "${session_name}" -t "${session_name}" >/dev/null
   tmux send-keys -t "${session_name}" C-m >/dev/null
 }
 
@@ -17,8 +19,7 @@ tui_send_command() {
   local session_name="$1"
   local command="$2"
   tui_send_input "${session_name}" "${command}"
-  # The first Enter may accept command autocomplete; the second executes it.
-  tmux send-keys -t "${session_name}" C-m >/dev/null
+  # Bracketed paste disables autocomplete, so the input's Enter executes directly.
 }
 
 tui_wait_for_text() {

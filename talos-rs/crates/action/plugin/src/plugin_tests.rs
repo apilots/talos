@@ -18,7 +18,7 @@ fn lists_default_official_source_and_user_sources() {
     let manager = PluginManager::with_state_store(PluginsRuntimeConfig::default(), state);
 
     let sources = manager
-        .list_sources(PluginSourceListRequest {})
+        .list_sources(PluginSourceListRequest { node_id: None })
         .expect("sources should list")
         .sources;
 
@@ -62,6 +62,7 @@ fn refresh_scans_local_mcp_source_and_rejects_unsupported_transport() {
     let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
     let added = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: vec!["mcp".to_string()],
@@ -120,6 +121,7 @@ fn adds_and_removes_user_git_source() {
 
     let added = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::Git {
                 url: "https://github.com/apilots/skills".to_string(),
                 reference: "main".to_string(),
@@ -145,6 +147,7 @@ fn adds_and_removes_user_git_source() {
 
     let removed = manager
         .remove_source(PluginSourceRemoveRequest {
+            node_id: None,
             source_id: added.source.id.clone(),
         })
         .expect("source should remove");
@@ -174,6 +177,7 @@ fn configured_sources_cannot_be_removed() {
 
     let err = manager
         .remove_source(PluginSourceRemoveRequest {
+            node_id: None,
             source_id: source.id,
         })
         .expect_err("configured source removal should fail");
@@ -189,6 +193,7 @@ fn refresh_updates_user_source_timestamp() {
     let manager = manager_with_state(PluginStateStore::new(temp.path()));
     let added = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: Vec::new(),
@@ -199,6 +204,7 @@ fn refresh_updates_user_source_timestamp() {
 
     let refreshed = manager
         .refresh_source(PluginSourceRefreshRequest {
+            node_id: None,
             source_id: added.source.id,
         })
         .expect("source should refresh");
@@ -255,6 +261,7 @@ Use this skill for docx files.
     let search = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: Some("word".to_string()),
             source_id: Some(added.source.id),
             kind: Some(PluginKind::Skill),
@@ -291,6 +298,7 @@ Expected marker: plugin-read-visible
     let marketplace_doc = fixture
         .manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: plugin.id.clone(),
         })
         .expect("marketplace plugin should read");
@@ -326,6 +334,7 @@ Expected marker: plugin-read-visible
     fixture
         .manager
         .install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: plugin.id.clone(),
                 expected_source_commit: plugin.source_commit.clone(),
@@ -337,6 +346,7 @@ Expected marker: plugin-read-visible
     let installed_doc = fixture
         .manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: plugin.id.clone(),
         })
         .expect("installed plugin should read");
@@ -387,6 +397,7 @@ fn reads_marketplace_and_installed_mcp_manifest() {
     let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
     let added = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: vec!["mcp".to_string()],
@@ -398,6 +409,7 @@ fn reads_marketplace_and_installed_mcp_manifest() {
 
     let marketplace_doc = manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: plugin.id.clone(),
         })
         .expect("marketplace MCP plugin should read");
@@ -440,6 +452,7 @@ fn reads_marketplace_and_installed_mcp_manifest() {
 
     manager
         .install(PluginInstallRequest {
+            node_id: None,
             target: PluginInstallTarget::Plugin {
                 plugin_id: plugin.id.clone(),
                 expected_source_commit: plugin.source_commit.clone(),
@@ -450,6 +463,7 @@ fn reads_marketplace_and_installed_mcp_manifest() {
         .expect("MCP plugin should install");
     let installed_doc = manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: plugin.id.clone(),
         })
         .expect("installed MCP plugin should read");
@@ -496,6 +510,7 @@ This document is intentionally longer than the test limit.
     let manager = manager_with_state(fixture.state.clone()).with_max_skill_md_bytes(32);
     let added = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: fixture.repo.clone(),
                 sparse_paths: vec!["skills".to_string()],
@@ -506,6 +521,7 @@ This document is intentionally longer than the test limit.
 
     let err = manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: added.plugins[0].id.clone(),
         })
         .expect_err("oversized skill document should be rejected");
@@ -587,6 +603,7 @@ Broken skill.
     let search = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: None,
             source_id: Some(added.source.id),
             kind: Some(PluginKind::Skill),
@@ -630,6 +647,7 @@ Second skill.
     let cache_only = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: None,
             source_id: Some(added.source.id.clone()),
             kind: Some(PluginKind::Skill),
@@ -643,6 +661,7 @@ Second skill.
     let refresh_stale = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: None,
             source_id: Some(added.source.id.clone()),
             kind: Some(PluginKind::Skill),
@@ -656,6 +675,7 @@ Second skill.
     let forced = fixture
         .manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: None,
             source_id: Some(added.source.id),
             kind: Some(PluginKind::Skill),
@@ -699,6 +719,7 @@ Manual body.
     );
     manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: vec!["skills".to_string()],
@@ -709,6 +730,7 @@ Manual body.
 
     let search = manager
         .search(PluginSearchRequest {
+            node_id: None,
             query: Some("manual".to_string()),
             source_id: None,
             kind: Some(PluginKind::Skill),
@@ -751,6 +773,7 @@ Escaped skill.
     let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
     let err = manager
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
                 sparse_paths: vec!["linked".to_string()],

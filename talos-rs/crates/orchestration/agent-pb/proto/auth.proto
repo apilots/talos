@@ -1,0 +1,24 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "types.proto";
+
+// Always required at node RPC ingress. Never log this object or its parent request.
+// Register accepts a provisioned credential; Worker ingress accepts its lease token.
+// An authenticated Coordinator carrier uses its own account credential until the
+// Gateway replaces it with the target Worker lease; it never exposes that lease.
+message NodeAuth {
+  string node_id = 1;
+  string token = 2;
+}
+message LeaseValidity {
+  int64 expires_at = 1;
+  int64 server_at = 2;
+}
+
+// Invocation transport correlation, injected by an authenticated Gateway.
+// Business Context/Params are unchanged; this object never grants authority.
+message CoordinatorCallContext {
+  string connection_id = 1; uint64 rpc_call_id = 2;
+  string coordinator_id = 6;
+  SessionContext session = 3; optional string turn_id = 4; optional string project_id = 5;
+}

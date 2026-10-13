@@ -2,8 +2,8 @@
 
 [Chinese](README_zh.md)
 
-This directory owns deployment examples for `talos-server` and installation
-assets for the released `talos` terminal bundle.
+This directory owns deployment examples for `talos-server`, the standalone
+`talos-worker`, and installation assets for the released `talos` terminal bundle.
 
 ## Layout
 
@@ -20,6 +20,12 @@ deploy/
 `talos-server` exposes HTTP APIs, the Web UI, and SSE Timeline streams. Reverse
 proxies must disable response buffering and compression for
 `/v1/sessions/*/events` so events are delivered incrementally.
+
+Deploy standalone Workers with the dedicated `ghcr.io/apilots/talos-worker`
+image, which uses outbound Connect and does not inherit the Server HTTP
+healthcheck. Supply its persistent home, node UUID/credential and TLS trust as
+described in the [Worker image guide](../build/worker/README.md). Talos releases
+publish Server and Worker images for both `linux/amd64` and `linux/arm64`.
 
 The examples under `caddy/`, `nginx/`, and `docker/` are the maintained starting
 points. Review authentication, TLS, persistence, resource limits, and secrets

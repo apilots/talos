@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::TimelineEventService;
 use talos_agent_api::TimelineEvent;
 use talos_error::TalosResult;
-use talos_store::session::AgentActiveTurnRecord;
 use talos_types::MessageQueueChangedNotification;
 use tokio::sync::{broadcast, mpsc};
 
@@ -44,6 +43,7 @@ impl TimelineSubscriptionService {
         queue_changes: Option<broadcast::Receiver<MessageQueueChangedNotification>>,
     ) -> TalosResult<TimelineSubscription> {
         let live_events = self.subscribe_live_events();
+        let active_changes = self.inner.active_tx.subscribe();
         let high_water_mark_event_id = self.latest_event_id(&params.session_id).await?;
         let last_consumed_seq = params
             .after_event_id
@@ -75,6 +75,7 @@ impl TimelineSubscriptionService {
             high_water_mark_event_id: high_water_mark_event_id.clone(),
             last_consumed_seq,
             live_events,
+            active_changes,
             has_live_turn,
             close_when_idle: params.close_when_idle,
             close_on_terminal: params.close_on_terminal,
@@ -94,11 +95,11 @@ impl TimelineSubscriptionService {
         self.inner.subscribe_live_events()
     }
 
-    pub(crate) async fn get_active_turn(
+    pub(crate) async fn display_active_turn(
         &self,
         session_id: &str,
-    ) -> TalosResult<Option<AgentActiveTurnRecord>> {
-        self.inner.get_active_turn(session_id).await
+    ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
+        self.inner.display_active_turn(session_id).await
     }
 
     pub async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
@@ -106,7 +107,7 @@ impl TimelineSubscriptionService {
     }
 
     pub async fn has_live_turn(&self, session_id: &str) -> TalosResult<bool> {
-        Ok(self.get_active_turn(session_id).await?.is_some())
+        Ok(self.inner.display_active_turn(session_id).await?.is_some())
     }
 
     pub(super) fn event_service(&self) -> &TimelineEventService {
@@ -124,6 +125,7 @@ struct SubscriptionStreamParams {
     high_water_mark_event_id: Option<TimelineEventId>,
     last_consumed_seq: i64,
     live_events: TimelineEventStream,
+    active_changes: broadcast::Receiver<talos_agent_api::SessionActiveTurnChangedNotification>,
     has_live_turn: bool,
     close_when_idle: bool,
     close_on_terminal: bool,
@@ -145,6 +147,7 @@ fn spawn_subscription_stream(
             high_water_mark_event_id,
             last_consumed_seq,
             mut live_events,
+            mut active_changes,
             has_live_turn,
             close_when_idle,
             close_on_terminal,
@@ -214,6 +217,18 @@ fn spawn_subscription_stream(
 
         loop {
             tokio::select! {
+            change = active_changes.recv() => {
+                match change {
+                    Ok(change) if change.session_id == session_id => {
+                        if tx.send(TimelineSubscriptionMessage::ActiveTurnChanged(change)).await.is_err() { return; }
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        let _ = send_subscription_closed(&tx, TimelineSubscriptionCloseReason::Lagged, "active Turn display requires recovery").await;
+                        return;
+                    }
+                }
+            },
             timeline_event = live_events.recv() => match timeline_event {
                 Ok(record) => {
                     if record.event.identity().session_id != session_id || record.event_seq <= last_sent_seq {

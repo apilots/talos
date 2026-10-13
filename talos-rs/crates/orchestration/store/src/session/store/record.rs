@@ -1,4 +1,4 @@
-//! Decode persisted Session records without exposing storage diagnostics to callers.
+//! Read and encode persisted Session records without exposing storage diagnostics to callers.
 
 use super::DatabaseSessionStore;
 use crate::session::{SessionRecord, SessionTreeIdentity};
@@ -9,7 +9,7 @@ use talos_types::talos::{SessionSourceProvider, SessionSourceType, TalosSessionE
 use talos_types::{AgentPath, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE};
 
 impl DatabaseSessionStore {
-    pub(super) fn parse_session_record(row: &Row) -> TalosResult<SessionRecord> {
+    pub(crate) fn parse_session_record(row: &Row) -> TalosResult<SessionRecord> {
         let message_count = row
             .get_i64("message_count")
             .unwrap_or_default()
@@ -89,6 +89,14 @@ impl DatabaseSessionStore {
                 TalosError::internal("Session is missing its agent binding.")
                     .context(format!("session '{id}' is missing its agent binding"))
             })?;
+        let execution_node_id = Self::normalized_optional_string(
+            row.get_string("execution_node_id"),
+        )
+        .ok_or_else(|| {
+            TalosError::internal("Session is missing its execution node binding.").context(format!(
+                "session '{id}' is missing its execution node binding"
+            ))
+        })?;
 
         let workspace_id = Self::normalized_optional_string(row.get_string("workspace_id"))
             .ok_or_else(|| {
@@ -99,6 +107,7 @@ impl DatabaseSessionStore {
         Ok(SessionRecord {
             id,
             agent_id,
+            execution_node_id,
             tree_identity,
             workspace_id,
             title: row
@@ -182,5 +191,57 @@ impl DatabaseSessionStore {
             )
             .context(diagnostic)
         })
+    }
+}
+
+impl DatabaseSessionStore {
+    pub(super) fn build_conf_json(conf: &SessionConf) -> TalosResult<String> {
+        serde_json::to_string(conf).map_err(|e| {
+            talos_error::TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                e,
+            )
+        })
+    }
+
+    pub(super) fn build_environment_json(
+        environment: Option<&TalosSessionEnvironment>,
+    ) -> TalosResult<String> {
+        serde_json::to_string(&environment).map_err(|error| {
+            TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                error,
+            )
+        })
+    }
+
+    pub(super) fn build_usage_json(usage: &SessionUsage) -> TalosResult<String> {
+        serde_json::to_string(usage).map_err(|e| {
+            talos_error::TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                e,
+            )
+        })
+    }
+}
+
+impl DatabaseSessionStore {
+    pub(super) async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
+        let sql = "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let rows = self.storage.query(sql, &[session_key]).await?;
+        Ok(rows.into_iter().next())
+    }
+
+    pub(super) async fn fetch_session_in_transaction(
+        transaction: &mut dyn talos_storage::StorageTransaction,
+        session_id: &str,
+    ) -> TalosResult<Option<SessionRecord>> {
+        let rows = transaction
+            .query(
+                "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?",
+                &[session_id],
+            )
+            .await?;
+        rows.first().map(Self::parse_session_record).transpose()
     }
 }

@@ -5,15 +5,9 @@ import type { HttpAdapter, StreamAdapter } from "../adapters";
 import type { AgentEvent, StartTurnRequest, TimelineEvent } from "../types";
 
 describe("TalosClient", () => {
-  it("uses normalized absolute URLs for workspace info and model requests", async () => {
-    const info = { workspaceId: "team", rootPrefix: "/srv/team", userWorkspaceDir: "/srv/team/alice" };
-    const request = vi.fn().mockResolvedValue(info);
-    const client = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080/");
-    await expect(client.workspaceDocs.info()).resolves.toEqual(info);
-    await client.models.list();
-    expect(request).toHaveBeenNthCalledWith(1, "http://localhost:8080/v1/workspace/info");
-    expect(request).toHaveBeenNthCalledWith(2, "http://localhost:8080/v1/models");
-  });
+
+
+
 
   it("reads and writes llm config through the user config route", async () => {
     const request = vi.fn().mockResolvedValue({ provider: "anthropic", model: "claude-sonnet-4" });
@@ -294,38 +288,9 @@ describe("TalosClient", () => {
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions?projectId=project-1");
   });
 
-  it("reads and writes memory files through request objects", async () => {
-    const request = vi.fn().mockResolvedValue({ file: { date: "2026-06-24" } });
-    const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
-    const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.memory.get({ date: "2026-06-24" });
-    await client.memory.put({
-      date: "2026-06-24",
-      content: "# Memory",
-      expected_version: "memory-token",
-    });
 
-    expect(request).toHaveBeenNthCalledWith(
-      1,
-      "http://localhost:8080/v1/memory/files/2026-06-24",
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      "http://localhost:8080/v1/memory/files/2026-06-24",
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          date: "2026-06-24",
-          content: "# Memory",
-          expected_version: "memory-token",
-        }),
-      },
-    );
-  });
+
 
   it("writes workspace docs through the workspace docs route", async () => {
     const request = vi.fn().mockResolvedValue({

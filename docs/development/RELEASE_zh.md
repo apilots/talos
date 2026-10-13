@@ -2,8 +2,9 @@
 
 [English](RELEASE.md)
 
-Talos 的每个版本发布在两个仓库中。源码仓库负责 tag 和唯一的 Release Notes；
-`apilots/talos-releases` 原样复用该内容，不再重复生成，并附加发布制品。
+Talos 负责版本 tag、唯一的 Release Notes、准出检查、产品制品、容器镜像和 GitHub
+Release。`apilots/talos-releases` 中已经发布的版本和下载制品继续作为历史归档保留；
+后续发布不再依赖该仓库。
 
 ## 提交信息
 
@@ -51,8 +52,9 @@ main 整体合入。需要共享修复时 cherry-pick 对应提交。
 共享校验器拒绝准备提交之后的非 fix 提交；提交分类只是守卫，review 仍须判断内容
 是否偷偷引入新特性。
 
-从上一个正式 tag 到最终 release 提交生成英文 Notes，并人工编辑。Talos 源码 Release
-是唯一 Notes 来源；发布仓库原样复用。生成器按提交类型归类，排除 merge、正式版本准备和下一开发版本提交，历史无类型提交保留在 Other Changes，未知类型报错，空分类不输出。
+从上一个正式 tag 到最终 release 提交生成英文 Notes，并人工编辑。annotated tag 中的
+Notes 是唯一发布正文。生成器按提交类型归类，排除 merge、正式版本准备和下一开发版本提交，
+历史无类型提交保留在 Other Changes，未知类型报错，空分类不输出。
 
 ```bash
 scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.9.md
@@ -60,44 +62,45 @@ scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.
 ./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --yes
 ```
 
-工作区必须干净，分支必须与同名远端同步。脚本创建 annotated tag 和源码 Release。
-源码 Release 保存源码与 Notes；可下载产品要等公开流水线通过后才发布。
-若 tag 已创建但源码 Release 创建失败，只要 tag 仍指向 HEAD 且源码 Release 不存在，
-可重跑原命令继续发布。已经发布的 tag 不得移动，也不能以修改后的代码重新出同名包。
+工作区必须干净，分支必须与同名远端同步。脚本创建并推送 annotated tag，tag 正文就是
+唯一的 Release Notes。推送 tag 后由 Talos 的 release workflow 执行准出；只有源码校验、
+质量检查、产品构建、TUI 原生安装验收和镜像发布都成功后，才创建 GitHub Release。
+若 workflow 失败，修复工作流或 runner 问题后可对同一个不可变 tag 重跑 `release.yml`；
+不得移动已发布的 tag，也不能用修改后的代码重出同名版本。
 
 ## 统一准出与发包
 
-`apilots/talos-releases` 的自动调度和手动调度执行同一条流程：
+`apilots/talos` 中的 `release.yml` 在推送 `v*` tag 时执行以下流程，也支持维护者手动重跑：
 
-1. 将 tag 解析为精确源码 SHA，校验正式版本、准备与修复历史、源码 Release 和非空 Notes。
+1. 将不可变 tag 解析为精确源码 SHA，校验正式版本、准备与修复历史，以及 annotated tag
+   中非空的唯一 Notes。
 2. 从该源码运行 `bash scripts/check-release.sh`：提交与 Notes 契约、Rust 格式/检查/测试、
    前端流水线、安装器契约测试。
-3. 从验证后的 SHA 构建产品和镜像。四个平台的 TUI 上传前必须通过原生安装 E2E；
-   通过 `TUI_INSTALL_PRODUCT_DIR` 复用刚构建的包，不重复打包。
-4. 所有产品构建与原生安装通过后，才发布镜像 tag、准备最终资产；资产契约通过后
-   发布制品 Release。
-5. 比较发布后的双仓 Notes。下载校验、manifest 和 latest 核验按收尾步骤人工完成。
+3. 从验证后的 SHA 构建原有 Desktop、WebUI 和四平台 TUI 产品。TUI 上传前都必须通过原生
+   安装 E2E，并通过 `TUI_INSTALL_PRODUCT_DIR` 复用刚构建的包。
+4. 构建并发布 `linux/amd64` 与 `linux/arm64` 的 Server、Worker 镜像，生成 checksums 和
+   release manifest，再验证最终安装器制品。
+5. 所有必需 job 成功后才创建 Talos GitHub Release，正文原样取自 tag Notes；可选 R2
+   镜像上传继续保留。
 
-Talos 维护检查脚本和 E2E，公开仓库只负责 runner 环境和编排。源码仓库的调度任务
-不重复跑准出。没有 skip-gate 参数，也不再用本地验证替代公开准出。
-若私有 runner 无法启动轻量调度任务，可直接调用同一公开 workflow：
+所有 release job 使用 GitHub-hosted runner。没有跳过准出的输入，也不能用本地验证代替。
+要重跑已有 tag 的 release workflow 时执行：
 
 ```bash
-gh workflow run release.yml --repo apilots/talos-releases \
+gh workflow run release.yml --repo apilots/talos \
   -f tag=v0.1.9 -f publish_latest=true
 ```
 
-这只改变触发方式，全部公开准出仍必须通过。连续发布时先完成旧版，旧版使用
-`publish_latest=false`，最新版使用 true。公开工作流串行执行发布，并以当前公开
-GitHub latest 版本为基准，阻止旧版倒退 latest。日常小修仅验证受影响场景，发布准出统一
+连续发布时先完成旧版，旧版使用 `publish_latest=false`，最新版使用 true。工作流串行执行，
+并以当前 GitHub latest 版本为基准，阻止旧版倒退 latest。日常小修仅验证受影响场景，发布准出统一
 运行完整检查。本地验证输出保存在忽略目录 `output/release-<version>/`；未运行的
 真实账号场景必须记录为未验证，不能由单测或构建成功推断其通过。
 
 ## 发布后收尾
 
 下载公开资产，Linux 使用 `sha256sum --check checksums.txt`，macOS 使用
-`shasum -a 256 -c checksums.txt`。验证双仓 Notes 字节一致、manifest 精确源码 SHA、
-镜像包含 `linux/amd64` 与 `linux/arm64`，最新版本还要验证 latest 引用。
+`shasum -a 256 -c checksums.txt`。验证 Release Notes 与 annotated tag 一致、manifest
+源码 SHA 对应不可变 tag、镜像包含 `linux/amd64` 与 `linux/arm64`，最新版本还要验证 latest 引用。
 
 发布成功后将 release 分支合回 main。发生版本冲突时保留 main 已进入的下一开发
 版本，不能将 main 降回正式版本，也不能用 release 整棵文件树覆盖正在进行的开发。

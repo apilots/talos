@@ -1,11 +1,14 @@
+mod notifications;
+use notifications::{
+    map_subscription_close_reason, send_active_turn_changed, send_event,
+    send_message_queue_changed, send_subscription_terminated,
+};
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use talos_app_protocol::errors::{AppServerErrorBody, AppServerErrorCode, ALREADY_INITIALIZED};
-use talos_app_protocol::events::{
-    timeline_event_method, SubscriptionTerminatedNotification, SubscriptionTerminatedReason,
-    TimelineEventNotification,
-};
+use talos_app_protocol::events::SubscriptionTerminatedReason;
 use talos_app_protocol::jsonrpc::{
     parse_message_line, JsonRpcErrorResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, RequestId,
@@ -17,9 +20,7 @@ use talos_app_protocol::requests::{
 use talos_app_protocol::version::ProtocolVersion;
 use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
 use talos_logging::report_error;
-use talos_service::{
-    Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
-};
+use talos_service::{Actor, TimelineSubscription, TimelineSubscriptionMessage};
 use talos_types::{ApiResponse, EventUnsubscribeResponse};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
@@ -126,9 +127,34 @@ where
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
     let mut writer_finished = false;
+    let mut worker_failures = app.subscribe_worker_failures();
 
     loop {
         tokio::select! {
+            changed = async {
+                match &mut worker_failures {
+                    Some(receiver) => receiver.changed().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                if changed.is_err() {
+                    worker_failures = None;
+                } else if let Some(error) = worker_failures.as_ref().and_then(|receiver| receiver.borrow().clone()) {
+                    let params = match serde_json::to_value(error) {
+                        Ok(params) => params,
+                        Err(source) => {
+                            report_error(&TalosError::internal_with_source("Serialize Worker registration failure.", source));
+                            break;
+                        }
+                    };
+                    if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
+                        "desktop/worker/failed", Some(params),
+                    ))).await.is_err() { break; }
+                } else if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
+                    "desktop/worker/ready", None,
+                ))).await.is_err() { break; }
+            }
+
             line_result = read_bounded_line(
                 &mut reader,
                 &mut line,
@@ -537,7 +563,11 @@ async fn resolve_request_actor(
 
     if matches!(
         method,
-        ClientMethod::AuthLoginStart
+        ClientMethod::DesktopConnectionRead
+            | ClientMethod::DesktopConnectionSet
+            | ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::DesktopWorkerEnroll
+            | ClientMethod::AuthLoginStart
             | ClientMethod::AuthLoginStatus
             | ClientMethod::AuthLoginCancel
             | ClientMethod::AuthSessionRead
@@ -565,6 +595,14 @@ fn spawn_subscription(
         let session_id = source.session_id.clone();
         while let Some(message) = source.events.recv().await {
             match message {
+                TimelineSubscriptionMessage::ActiveTurnChanged(change) => {
+                    if send_active_turn_changed(change, &outgoing_tx)
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
                 TimelineSubscriptionMessage::Event(record) => {
                     if send_event(&subscription_id, *record, &outgoing_tx)
                         .await
@@ -603,90 +641,6 @@ fn spawn_subscription(
         )
         .await;
     })
-}
-
-async fn send_message_queue_changed(
-    change: talos_types::MessageQueueChangedNotification,
-    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
-) -> Result<(), ()> {
-    let params = serde_json::to_value(change).map_err(|err| {
-        report_error(&TalosError::internal_with_source(
-            "failed to serialize message queue change",
-            err,
-        ));
-    })?;
-    outgoing_tx
-        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
-            "messageQueue/changed",
-            Some(params),
-        )))
-        .await
-        .map_err(|_| ())
-}
-
-fn map_subscription_close_reason(
-    reason: TimelineSubscriptionCloseReason,
-) -> SubscriptionTerminatedReason {
-    match reason {
-        TimelineSubscriptionCloseReason::Completed => SubscriptionTerminatedReason::Completed,
-        TimelineSubscriptionCloseReason::ServerShutdown => {
-            SubscriptionTerminatedReason::ServerShutdown
-        }
-        TimelineSubscriptionCloseReason::Lagged => SubscriptionTerminatedReason::Lagged,
-    }
-}
-
-async fn send_event(
-    subscription_id: &str,
-    record: talos_agent_api::TimelineEvent,
-    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
-) -> Result<(), ()> {
-    let method = timeline_event_method(&record.event);
-    let params = serde_json::to_value(TimelineEventNotification {
-        subscription_id: subscription_id.to_string(),
-        event: record,
-    })
-    .map_err(|err| {
-        report_error(&TalosError::internal_with_source(
-            "failed to serialize app-server event",
-            err,
-        ));
-    })?;
-    outgoing_tx
-        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
-            method,
-            Some(params),
-        )))
-        .await
-        .map_err(|_| ())
-}
-
-async fn send_subscription_terminated(
-    subscription_id: &str,
-    session_id: &str,
-    reason: SubscriptionTerminatedReason,
-    message: &str,
-    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
-) -> Result<(), ()> {
-    let params = serde_json::to_value(SubscriptionTerminatedNotification {
-        subscription_id: subscription_id.to_string(),
-        session_id: session_id.to_string(),
-        reason,
-        message: message.to_string(),
-    })
-    .map_err(|err| {
-        report_error(&TalosError::internal_with_source(
-            "failed to serialize app-server subscription termination",
-            err,
-        ));
-    })?;
-    outgoing_tx
-        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
-            "subscription/terminated",
-            Some(params),
-        )))
-        .await
-        .map_err(|_| ())
 }
 
 async fn send_result(

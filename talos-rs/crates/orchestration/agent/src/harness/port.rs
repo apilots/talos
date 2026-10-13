@@ -38,11 +38,19 @@ where
         Box::pin(Harness::compact_session(self, context))
     }
 
-    fn clear_session(&self, params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
+    fn clear_session(
+        &self,
+        params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
         Box::pin(Harness::clear_session(self, params))
     }
 
-    fn close_session(&self, params: AgentSessionContext) -> AgentFuture<'_, AgentResult<()>> {
+    fn close_session(
+        &self,
+        params: AgentSessionContext,
+        _expected_history_cursor: talos_types::SessionHistoryCursor,
+    ) -> AgentFuture<'_, AgentResult<()>> {
         Box::pin(Harness::close_session(self, params))
     }
 

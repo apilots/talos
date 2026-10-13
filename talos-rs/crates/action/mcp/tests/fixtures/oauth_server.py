@@ -51,6 +51,10 @@ class OAuthPeer(Peer):
                 digest = base64.urlsafe_b64encode(hashlib.sha256(body['code_verifier'][0].encode()).digest()).decode().rstrip('=')
                 assert digest == params['code_challenge'][0]
                 assert body['redirect_uri'] == params['redirect_uri']
+                count=int((root/'exchange-count').read_text())+1 if (root/'exchange-count').exists() else 1
+                (root/'exchange-count').write_text(str(count))
+                while (root/'hold-exchange').exists():
+                    time.sleep(.01)
                 token = 'first-private-access'
                 expires = 3600
             else:

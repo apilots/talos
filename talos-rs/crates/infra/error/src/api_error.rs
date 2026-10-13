@@ -99,6 +99,32 @@ impl ErrorLocalization {
 }
 
 impl ApiError {
+    /// Validate a received public failure without repairing malformed wire data.
+    pub fn from_wire_parts(
+        code: ErrorCode,
+        message: String,
+        localization: Option<ErrorLocalization>,
+    ) -> crate::TalosResult<Self> {
+        if message.trim().is_empty() || message.chars().count() > MAX_MESSAGE_CHARS {
+            return Err(crate::TalosError::internal(
+                "Public error message is invalid",
+            ));
+        }
+        if localization
+            .as_ref()
+            .is_some_and(|value| !value.is_valid() || value.code() != code)
+        {
+            return Err(crate::TalosError::internal(
+                "Public error localization is invalid",
+            ));
+        }
+        Ok(Self {
+            code,
+            message,
+            localization,
+        })
+    }
+
     /// Use the code's standard explanation only when it fully describes the failure.
     pub fn new(code: ErrorCode) -> Self {
         Self::with_message(code, code.default_message())
@@ -156,19 +182,8 @@ impl<'de> Deserialize<'de> for ApiError {
             localization: Option<ErrorLocalization>,
         }
         let wire = Wire::deserialize(deserializer)?;
-        if wire.message.trim().is_empty() || wire.message.chars().count() > MAX_MESSAGE_CHARS {
-            return Err(serde::de::Error::custom("invalid public error message"));
-        }
-        if let Some(localization) = &wire.localization {
-            if !localization.is_valid() || localization.code() != wire.code {
-                return Err(serde::de::Error::custom("invalid error localization"));
-            }
-        }
-        Ok(Self {
-            code: wire.code,
-            message: wire.message,
-            localization: wire.localization,
-        })
+        Self::from_wire_parts(wire.code, wire.message, wire.localization)
+            .map_err(|error| serde::de::Error::custom(error.to_api_error().message))
     }
 }
 

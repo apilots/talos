@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { useConnectionKey } from "@/features/chat";
+import { useEnvironmentKey } from "@/features/computers";
 import { getTalosClient } from "@/shared/api/client";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 /** Inspect server-owned storage for the current actor's default workspace. */
 export function AgentWorkspaceGeneralPanel() {
   const { t } = useTranslation("settings");
-  const connectionKey = useConnectionKey();
+  const connectionKey = useEnvironmentKey();
   const query = useQuery({
     queryKey: ["talos", connectionKey, "workspace-info"],
     queryFn: () => getTalosClient().workspaceDocs.info(),

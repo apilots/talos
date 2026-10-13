@@ -5,6 +5,7 @@ export class FakeBridge implements AppServerBridge {
   connected = false;
   closed = false;
   readonly requests: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
+  private notificationHandler?: (notification: AppProtocol.JsonRpcNotification) => void;
   private eventHandler?: (event: AppProtocol.TimelineEvent) => void;
   private subscriptionTerminatedHandler?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
   private exitHandler?: (status: { code: number | null; signal: NodeJS.Signals | null }) => void;
@@ -42,6 +43,13 @@ export class FakeBridge implements AppServerBridge {
     }
     return Promise.resolve({} as T);
   }
+
+  onNotification(handler: (notification: AppProtocol.JsonRpcNotification) => void): () => void {
+    this.notificationHandler = handler;
+    return () => { this.notificationHandler = undefined; };
+  }
+
+  emitNotification(notification: AppProtocol.JsonRpcNotification): void { this.notificationHandler?.(notification); }
 
   onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void {
     this.eventHandler = handler;

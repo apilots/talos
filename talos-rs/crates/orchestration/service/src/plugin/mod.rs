@@ -16,3 +16,5 @@ mod mcp_import;
 mod redaction;
 
 mod oauth;
+
+pub use oauth::mcp_relay_callback_uri;

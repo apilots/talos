@@ -27,17 +27,21 @@ pub enum AgentUserContent {
         path: String,
     },
     File {
+        #[schemars(rename = "fileId")]
         file_id: String,
     },
     Audio {
         source: AgentMediaSource,
+        #[schemars(rename = "mimeType")]
         mime_type: Option<String>,
     },
     Video {
         source: AgentMediaSource,
+        #[schemars(rename = "mimeType")]
         mime_type: Option<String>,
     },
     UserActionResponse {
+        #[schemars(rename = "actionId")]
         action_id: String,
         response: UserActionResponse,
     },

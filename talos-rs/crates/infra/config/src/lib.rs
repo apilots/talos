@@ -55,10 +55,15 @@ pub enum DeploymentMode {
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentProviderConfig, MessageQueueConfig, PlannerMode,
 };
+pub use domains::agent_node::{
+    AgentNodeConfig, AgentNodeControlConfig, AgentNodeRunnerConfig, AgentNodeTransport,
+    WorkerRpcConfig, WorkerRpcTlsConfig,
+};
 pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
+pub use domains::desktop::{DesktopConfig, DesktopConnectionMode};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
@@ -85,6 +90,7 @@ pub use domains::storage::{
     DatabaseType, FileStorageBackendConfig, FileStorageConfig, FileStorageLimits,
     FsFileStorageConfig, S3FileStorageConfig, StorageBackendConfig,
 };
+pub use domains::sync::SyncConfig;
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
@@ -144,6 +150,14 @@ pub struct Config {
     #[serde(default)]
     pub agent: AgentConfig,
 
+    /// Distributed Agent node control and runner configuration.
+    #[serde(default)]
+    pub agent_node: AgentNodeConfig,
+
+    /// Desktop product connection settings; ignored by Server and CLI hosts.
+    #[serde(default)]
+    pub desktop: DesktopConfig,
+
     /// Gateway 配置
     #[serde(default)]
     pub gateway: GatewayConfig,
@@ -151,6 +165,9 @@ pub struct Config {
     /// Cloud control-plane configuration.
     #[serde(default)]
     pub cloud: CloudConfig,
+
+    #[serde(default)]
+    pub sync: SyncConfig,
 
     /// Filesystem-facing UI capabilities.
     #[serde(default)]
@@ -204,8 +221,11 @@ impl Default for Config {
             memory: MemoryConfig::default(),
             workspaces: WorkspaceConfig::default(),
             agent: AgentConfig::default(),
+            agent_node: AgentNodeConfig::default(),
+            desktop: DesktopConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
+            sync: SyncConfig::default(),
             fs: FsConfig::default(),
             channels: ChannelsConfig::default(),
             logging: LoggingConfig::default(),

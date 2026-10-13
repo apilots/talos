@@ -19,9 +19,9 @@ export const AppServerErrorCode = {
 
 export type AppServerErrorBody = { code: AppServerErrorCode, message: string, };
 
-export type ClientMethod = "initialize" | "profile/read" | "session/list" | "session/get" | "session/patch" | "session/delete" | "session/close" | "session/compact" | "session/clear" | "session/active_turn" | "session/history" | "timeline/recover" | "project/create" | "project/list" | "project/read" | "project/patch" | "project/delete" | "fs/directory/read" | "fs/directory/create" | "turn/start" | "turn/interrupt" | "turn/input" | "turn/retry" | "messageQueue/add" | "messageQueue/list" | "messageQueue/update" | "messageQueue/delete" | "messageQueue/reorder" | "messageQueue/start" | "event/subscribe" | "event/unsubscribe" | "model/list" | "config/get" | "config/update" | "config/delete" | "config/reload" | "file/upload" | "file/list" | "file/read" | "file/content" | "file/update" | "file/delete" | "memory/file/list" | "memory/file/read" | "memory/file/write" | "workspace/info" | "workspace/doc/list" | "workspace/doc/read" | "workspace/doc/write" | "skills/list" | "skills/refresh" | "skills/suggest" | "skills/read" | "skills/resolve" | "plugin/source/list" | "plugin/source/add" | "plugin/source/refresh" | "plugin/source/remove" | "plugin/search" | "mcp/server/list" | "mcp/server/credentials/update" | "mcp/server/auth/start" | "mcp/server/auth/read" | "mcp/server/import" | "plugin/list" | "plugin/read" | "plugin/install" | "plugin/update" | "plugin/uninstall" | "plugin/enable" | "plugin/disable" | "auth/logout" | "auth/login/start" | "auth/login/status" | "auth/login/cancel" | "auth/session/read" | "auth/session/clear" | "user/current" | "memory/search" | "memory/get";
+export type ClientMethod = "initialize" | "desktop/connection/read" | "desktop/connection/set" | "desktop/workerIdentity" | "desktop/workerEnroll" | "sync/status" | "sync/enable" | "sync/disable" | "computer/list" | "computer/read" | "computer/create" | "computer/rename" | "computer/setStatus" | "computer/rotateCredential" | "profile/read" | "session/list" | "session/get" | "session/patch" | "session/delete" | "session/close" | "session/compact" | "session/clear" | "session/active_turn" | "session/history" | "timeline/recover" | "project/create" | "project/list" | "project/read" | "project/patch" | "project/delete" | "fs/directory/read" | "fs/directory/create" | "turn/start" | "turn/interrupt" | "turn/input" | "turn/retry" | "messageQueue/add" | "messageQueue/list" | "messageQueue/update" | "messageQueue/delete" | "messageQueue/reorder" | "messageQueue/start" | "event/subscribe" | "event/unsubscribe" | "model/list" | "config/get" | "config/update" | "config/delete" | "config/reload" | "file/upload" | "file/list" | "file/read" | "file/content" | "file/update" | "file/delete" | "memory/file/list" | "memory/file/read" | "memory/file/write" | "workspace/info" | "workspace/doc/list" | "workspace/doc/read" | "workspace/doc/write" | "skills/list" | "skills/refresh" | "skills/suggest" | "skills/read" | "skills/resolve" | "plugin/source/list" | "plugin/source/add" | "plugin/source/refresh" | "plugin/source/remove" | "plugin/search" | "mcp/server/list" | "mcp/server/credentials/update" | "mcp/server/auth/start" | "mcp/server/auth/read" | "mcp/server/import" | "plugin/list" | "plugin/read" | "plugin/install" | "plugin/update" | "plugin/uninstall" | "plugin/enable" | "plugin/disable" | "auth/logout" | "auth/login/start" | "auth/login/status" | "auth/login/cancel" | "auth/session/read" | "auth/session/clear" | "user/current" | "memory/search" | "memory/get";
 
-export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "profile/read", "params": ProfileReadRequest } | { "method": "session/list", "params": SessionListRequest } | { "method": "session/get", "params": SessionGetRequest } | { "method": "session/patch", "params": SessionPatchRequest } | { "method": "session/delete", "params": SessionDeleteRequest } | { "method": "session/close", "params": SessionCloseRequest } | { "method": "session/compact", "params": SessionCompactRequest } | { "method": "session/clear", "params": SessionClearRequest } | { "method": "session/active_turn", "params": SessionActiveTurnRequest } | { "method": "session/history", "params": SessionHistoryRequest } | { "method": "timeline/recover", "params": RecoverTimelineRequest } | { "method": "project/create", "params": ProjectCreateRequest } | { "method": "project/list", "params": ProjectListRequest } | { "method": "project/read", "params": ProjectReadRequest } | { "method": "project/patch", "params": ProjectPatchRequest } | { "method": "project/delete", "params": ProjectDeleteRequest } | { "method": "fs/directory/read", "params": FsDirectoryReadRequest } | { "method": "fs/directory/create", "params": FsDirectoryCreateRequest } | { "method": "turn/start", "params": StartTurnRequest } | { "method": "turn/interrupt", "params": InterruptTurnRequest } | { "method": "turn/input", "params": SubmitTurnInputRequest } | { "method": "turn/retry", "params": RetryTurnRequest } | { "method": "messageQueue/add", "params": MessageQueueAddRequest } | { "method": "messageQueue/list", "params": MessageQueueListRequest } | { "method": "messageQueue/update", "params": MessageQueueUpdateRequest } | { "method": "messageQueue/delete", "params": MessageQueueDeleteRequest } | { "method": "messageQueue/reorder", "params": MessageQueueReorderRequest } | { "method": "messageQueue/start", "params": MessageQueueStartRequest } | { "method": "event/subscribe", "params": SubscribeTimelineRequest } | { "method": "event/unsubscribe", "params": EventUnsubscribeRequest } | { "method": "model/list", "params": ModelListRequest } | { "method": "config/get", "params": ConfigGetRequest } | { "method": "config/update", "params": ConfigUpdateRequest } | { "method": "config/delete", "params": ConfigDeleteRequest } | { "method": "config/reload", "params": ConfigReloadRequest } | { "method": "file/upload", "params": FileUploadParams } | { "method": "file/list", "params": FileListRequest } | { "method": "file/read", "params": FileReadRequest } | { "method": "file/content", "params": FileReadRequest } | { "method": "file/update", "params": FileUpdateRequest } | { "method": "file/delete", "params": FileDeleteRequest } | { "method": "memory/file/list", "params": MemoryFileListRequest } | { "method": "memory/file/read", "params": MemoryFileReadRequest } | { "method": "memory/file/write", "params": MemoryFileWriteRequest } | { "method": "workspace/info", "params": WorkspaceInfoRequest } | { "method": "workspace/doc/list", "params": WorkspaceDocListRequest } | { "method": "workspace/doc/read", "params": WorkspaceDocReadRequest } | { "method": "workspace/doc/write", "params": WorkspaceDocWriteRequest } | { "method": "skills/list", "params": SkillsListRequest } | { "method": "skills/refresh", "params": SkillsRefreshRequest } | { "method": "skills/suggest", "params": SkillsSuggestRequest } | { "method": "skills/read", "params": SkillsReadRequest } | { "method": "skills/resolve", "params": SkillsResolveRequest } | { "method": "plugin/source/list", "params": PluginSourceListRequest } | { "method": "plugin/source/add", "params": PluginSourceAddRequest } | { "method": "plugin/source/refresh", "params": PluginSourceRefreshRequest } | { "method": "plugin/source/remove", "params": PluginSourceRemoveRequest } | { "method": "plugin/search", "params": PluginSearchRequest } | { "method": "mcp/server/list", "params": McpServerListRequest } | { "method": "mcp/server/credentials/update", "params": McpCredentialsUpdateRequest } | { "method": "mcp/server/auth/start", "params": McpAuthenticationStartRequest } | { "method": "mcp/server/auth/read", "params": McpAuthenticationReadRequest } | { "method": "mcp/server/import", "params": McpServerImportRequest } | { "method": "plugin/list", "params": PluginListRequest } | { "method": "plugin/read", "params": PluginReadRequest } | { "method": "plugin/install", "params": PluginInstallRequest } | { "method": "plugin/update", "params": PluginUpdateRequest } | { "method": "plugin/uninstall", "params": PluginUninstallRequest } | { "method": "plugin/enable", "params": PluginEnableRequest } | { "method": "plugin/disable", "params": PluginDisableRequest } | { "method": "auth/logout", "params": AuthLogoutRequest } | { "method": "auth/login/start", "params": CloudLoginStartRequest } | { "method": "auth/login/status", "params": CloudLoginStatusRequest } | { "method": "auth/login/cancel", "params": CloudLoginCancelRequest } | { "method": "auth/session/read", "params": AuthSessionReadRequest } | { "method": "auth/session/clear", "params": AuthSessionClearRequest } | { "method": "user/current", "params": UserCurrentRequest } | { "method": "memory/search", "params": MemorySearchRequest } | { "method": "memory/get", "params": MemoryGetRequest };
+export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "desktop/connection/read", "params": null | null } | { "method": "desktop/connection/set", "params": DesktopConnectionSetParams } | { "method": "desktop/workerIdentity", "params": null | null } | { "method": "desktop/workerEnroll", "params": DesktopWorkerEnrollParams } | { "method": "sync/status", "params": null | null } | { "method": "sync/enable", "params": SyncEnableRequest } | { "method": "sync/disable", "params": null | null } | { "method": "computer/list", "params": ComputerListRequest } | { "method": "computer/read", "params": GetNodeRequest } | { "method": "computer/create", "params": CreateNodeRequest } | { "method": "computer/rename", "params": RenameComputerRequest } | { "method": "computer/setStatus", "params": SetComputerStatusRequest } | { "method": "computer/rotateCredential", "params": RotateCredentialRequest } | { "method": "profile/read", "params": ProfileReadRequest } | { "method": "session/list", "params": SessionListRequest } | { "method": "session/get", "params": SessionGetRequest } | { "method": "session/patch", "params": SessionPatchRequest } | { "method": "session/delete", "params": SessionDeleteRequest } | { "method": "session/close", "params": SessionCloseRequest } | { "method": "session/compact", "params": SessionCompactRequest } | { "method": "session/clear", "params": SessionClearRequest } | { "method": "session/active_turn", "params": SessionActiveTurnRequest } | { "method": "session/history", "params": SessionHistoryRequest } | { "method": "timeline/recover", "params": RecoverTimelineRequest } | { "method": "project/create", "params": ProjectCreateRequest } | { "method": "project/list", "params": ProjectListRequest } | { "method": "project/read", "params": ProjectReadRequest } | { "method": "project/patch", "params": ProjectPatchRequest } | { "method": "project/delete", "params": ProjectDeleteRequest } | { "method": "fs/directory/read", "params": FsDirectoryReadRequest } | { "method": "fs/directory/create", "params": FsDirectoryCreateRequest } | { "method": "turn/start", "params": StartTurnRequest } | { "method": "turn/interrupt", "params": InterruptTurnRequest } | { "method": "turn/input", "params": SubmitTurnInputRequest } | { "method": "turn/retry", "params": RetryTurnRequest } | { "method": "messageQueue/add", "params": MessageQueueAddRequest } | { "method": "messageQueue/list", "params": MessageQueueListRequest } | { "method": "messageQueue/update", "params": MessageQueueUpdateRequest } | { "method": "messageQueue/delete", "params": MessageQueueDeleteRequest } | { "method": "messageQueue/reorder", "params": MessageQueueReorderRequest } | { "method": "messageQueue/start", "params": MessageQueueStartRequest } | { "method": "event/subscribe", "params": SubscribeTimelineRequest } | { "method": "event/unsubscribe", "params": EventUnsubscribeRequest } | { "method": "model/list", "params": ModelListRequest } | { "method": "config/get", "params": ConfigGetRequest } | { "method": "config/update", "params": ConfigUpdateRequest } | { "method": "config/delete", "params": ConfigDeleteRequest } | { "method": "config/reload", "params": ConfigReloadRequest } | { "method": "file/upload", "params": FileUploadParams } | { "method": "file/list", "params": FileListRequest } | { "method": "file/read", "params": FileReadRequest } | { "method": "file/content", "params": FileReadRequest } | { "method": "file/update", "params": FileUpdateRequest } | { "method": "file/delete", "params": FileDeleteRequest } | { "method": "memory/file/list", "params": MemoryFileListRequest } | { "method": "memory/file/read", "params": MemoryFileReadRequest } | { "method": "memory/file/write", "params": MemoryFileWriteRequest } | { "method": "workspace/info", "params": WorkspaceInfoRequest } | { "method": "workspace/doc/list", "params": WorkspaceDocListRequest } | { "method": "workspace/doc/read", "params": WorkspaceDocReadRequest } | { "method": "workspace/doc/write", "params": WorkspaceDocWriteRequest } | { "method": "skills/list", "params": SkillsListRequest } | { "method": "skills/refresh", "params": SkillsRefreshRequest } | { "method": "skills/suggest", "params": SkillsSuggestRequest } | { "method": "skills/read", "params": SkillsReadRequest } | { "method": "skills/resolve", "params": SkillsResolveRequest } | { "method": "plugin/source/list", "params": PluginSourceListRequest } | { "method": "plugin/source/add", "params": PluginSourceAddRequest } | { "method": "plugin/source/refresh", "params": PluginSourceRefreshRequest } | { "method": "plugin/source/remove", "params": PluginSourceRemoveRequest } | { "method": "plugin/search", "params": PluginSearchRequest } | { "method": "mcp/server/list", "params": McpServerListRequest } | { "method": "mcp/server/credentials/update", "params": McpCredentialsUpdateRequest } | { "method": "mcp/server/auth/start", "params": McpAuthenticationStartRequest } | { "method": "mcp/server/auth/read", "params": McpAuthenticationReadRequest } | { "method": "mcp/server/import", "params": McpServerImportRequest } | { "method": "plugin/list", "params": PluginListRequest } | { "method": "plugin/read", "params": PluginReadRequest } | { "method": "plugin/install", "params": PluginInstallRequest } | { "method": "plugin/update", "params": PluginUpdateRequest } | { "method": "plugin/uninstall", "params": PluginUninstallRequest } | { "method": "plugin/enable", "params": PluginEnableRequest } | { "method": "plugin/disable", "params": PluginDisableRequest } | { "method": "auth/logout", "params": AuthLogoutRequest } | { "method": "auth/login/start", "params": CloudLoginStartRequest } | { "method": "auth/login/status", "params": CloudLoginStatusRequest } | { "method": "auth/login/cancel", "params": CloudLoginCancelRequest } | { "method": "auth/session/read", "params": AuthSessionReadRequest } | { "method": "auth/session/clear", "params": AuthSessionClearRequest } | { "method": "user/current", "params": UserCurrentRequest } | { "method": "memory/search", "params": MemorySearchRequest } | { "method": "memory/get", "params": MemoryGetRequest };
 
 export type InitializeParams = { client_info: ClientInfo, capabilities: ClientCapabilities, actor_credentials: ActorCredentials | null, };
 
@@ -41,6 +41,20 @@ export type ActorCredential = { "type": "existing_session_token", token: string,
 
 export type FileUploadParams = { request: FileUploadRequest, dataBase64: string, };
 
+export type DesktopConnectionMode = "cloud" | "local";
+
+export type DesktopConnectionResponse = { connectionMode: DesktopConnectionMode, controlPlaneEndpoint: string, };
+
+export type DesktopConnectionSetParams = { connectionMode: DesktopConnectionMode, };
+
+export type DesktopWorkerIdentityResponse = { nodeId: string | null, controlPlaneEndpoint: string | null, };
+
+export type DesktopWorkerEnrollParams = {
+/**
+ * Explicit UUID for credential recovery. Omitted/null enrolls or reuses saved identity.
+ */
+nodeId?: string | null, };
+
 export type ProfileReadRequest = Record<string, never>;
 
 export type ProfileReadResponse = { sessionCount: number, messageCount: number, projectCount: number, usage: TokenUsage, usageAvailable: boolean, usageSessionCount: number, usageStartedAt: number | null, asOfDate: string, dailyUsage: Array<ProfileDailyUsage>, modelUsage: Array<ProfileModelUsage>, };
@@ -49,7 +63,11 @@ export type ProfileDailyUsage = { date: string, usage: TokenUsage, usageAvailabl
 
 export type ProfileModelUsage = { modelRef: ModelRef, turnCount: number, usage: TokenUsage, usageAvailable: boolean, };
 
-export type SessionListRequest = { projectId: string | null, limit: number | null, offset: number | null, };
+export type SessionListRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, projectId: string | null, limit: number | null, offset: number | null, };
 
 export type SessionListResponse = { sessions: Array<SessionInfo>, };
 
@@ -77,7 +95,7 @@ export type SessionClearRequest = { sessionId: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { id: string, title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
+export type SessionInfo = { nodeId: string, id: string, title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
 
 export type SessionUsage = { tokens: TokenUsage, context: ContextUsage | null, };
 
@@ -124,6 +142,8 @@ export type SessionActiveTurnResponse = { activeTurn: TimelineActiveTurn | null,
  */
 latestEventId: string | null, };
 
+export type SessionActiveTurnChangedNotification = { sessionId: string, state: SessionActiveTurnResponse, };
+
 export type SessionHistoryRequest = { sessionId: string, cursor: string | null, limit: number | null, };
 
 export type SessionHistoryResponse = { data: Array<SessionHistoryTurn>, nextCursor: string | null,
@@ -156,11 +176,88 @@ export type TimelineActiveTurn = { identity: AgentTurnRef, initialMessageId: str
 
 export type ActiveTurnState = "running" | "waitingForInput" | "cancelling";
 
-export type ProjectCreateRequest = { name: string, directory: string, };
+export type NodeOperatingSystem = "linux" | "macOs";
+
+export type NodeNetworkInterface = { name: string, macAddress: string, };
+
+export type NodeSystemInfo = { os: NodeOperatingSystem, osVersion: string | null, architecture: string, hostname: string | null, cpuModel: string | null, logicalCpuCount: number, memoryBytes: number, boardModel: string | null, networkInterfaces: Array<NodeNetworkInterface>, graphics: Array<string>, workerVersion: string, };
+
+export type NodeInfo = { nodeId: string, displayName: string, mode: NodeMode, endpoint: string | null, status: NodeStatus, health: NodeHealth, leaseExpiresAt: number | null, lastHeartbeatAt: number | null, createdAt: number, updatedAt: number, ownerUserId: string | null, available: boolean, credentialExpiresAt: number | null, systemInfo: NodeSystemInfo | null, };
+
+export type NodePage = { data: Array<NodeInfo>, nextCursor: string | null, };
+
+export type NodeMode = "embedded" | "remote";
+
+export type NodeStatus = "enabled" | "disabled";
+
+export type NodeHealth = "unknown" | "healthy" | "degraded";
+
+export type NodeCredential = { nodeId: string, token: string, expiresAt: number, };
+
+export type CreatedNode = { node: NodeInfo, credential: NodeCredential, };
+
+export type CreateNodeRequest = { displayName: string,
+/**
+ * None selects an outbound connection; Some requires a nonempty HTTPS origin.
+ */
+endpoint?: string | null, ownerUserId?: string | null, credentialExpiresAt: number, };
+
+export type GetNodeRequest = { nodeId: string, };
+
+export type ListNodesRequest = { cursor?: string | null, limit: number, };
+
+export type UpdateNodeRequest = { nodeId: string, displayName: string,
+/**
+ * None selects an outbound connection; Some requires a nonempty HTTPS origin.
+ */
+endpoint?: string | null, status: NodeStatus, };
+
+export type RotateCredentialRequest = { nodeId: string, expiresAt: number, };
+
+export type SyncConnectionState = "disabled" | "connecting" | "connected" | "disconnected";
+
+export type SyncStatusResponse = {
+/**
+ * Null follows verified login; false persists an explicit opt-out.
+ */
+configuredEnabled: boolean | null, connection: SyncConnectionState, pendingChanges: number, lastAcknowledgedAt: number | null, lastError: ApiError | null,
+/**
+ * This management host's accessible Computer UUID, or embedded before enrollment.
+ * Null means the signed-in account does not own this shared host's private Worker.
+ */
+localComputerId: string | null,
+/**
+ * True only for a trusted local host; cloud users cannot claim shared anonymous data.
+ */
+canClaimLocalHistory: boolean, };
+
+export type SyncEnableRequest = {
+/**
+ * Explicitly claim this trusted local host's anonymous history. Omission means false.
+ */
+claimLocalHistory: boolean, };
+
+export type ComputerListRequest = { query?: string | null, cursor?: string | null, limit?: number | null, };
+
+export type ComputerListResponse = { data: Array<NodeInfo>, nextCursor: string | null, total: number, };
+
+export type RenameComputerRequest = { nodeId: string, displayName: string, };
+
+export type SetComputerStatusRequest = { nodeId: string, status: NodeStatus, };
+
+export type ProjectCreateRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, name: string, directory: string, };
 
 export type ProjectCreateResponse = { project: ProjectInfo, };
 
-export type ProjectListRequest = Record<string, never>;
+export type ProjectListRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, };
 
 export type ProjectListResponse = { projects: Array<ProjectInfo>, };
 
@@ -176,21 +273,29 @@ export type ProjectDeleteRequest = { project_id: string, };
 
 export type ProjectDeleteResponse = { success: boolean, };
 
-export type ProjectInfo = { project_id: string, name: string, directory: string, status: ProjectStatus, created_at: number, updated_at: number, session_count: number, };
+export type ProjectInfo = { nodeId: string, project_id: string, name: string, directory: string, status: ProjectStatus, created_at: number, updated_at: number, session_count: number, };
 
 export type ProjectStatus = { state: ProjectStatusState, reason: ProjectUnavailableReason | null, };
 
-export type ProjectStatusState = "available" | "missing" | "not_directory" | "permission_denied";
+export type ProjectStatusState = "available" | "missing" | "not_directory" | "permission_denied" | "nodeUnavailable";
 
-export type ProjectUnavailableReason = "path_not_found" | "not_directory" | "permission_denied";
+export type ProjectUnavailableReason = "path_not_found" | "not_directory" | "permission_denied" | "nodeUnavailable";
 
 export type ProjectPatch = { name?: string, };
 
-export type FsDirectoryReadRequest = { path: string | null, };
+export type FsDirectoryReadRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, path: string | null, };
 
 export type FsDirectoryReadResponse = { directory: FsDirectorySnapshot, };
 
-export type FsDirectoryCreateRequest = { parent: string, name: string, };
+export type FsDirectoryCreateRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, parent: string, name: string, };
 
 export type FsDirectorySnapshot = { path: string, parent: string | null, entries: Array<FsDirectoryEntry>, readable: boolean, writable: boolean, };
 
@@ -200,7 +305,11 @@ export type FsEntryKind = "directory";
 
 export type FsDirectoryCreateResponse = { path: string, };
 
-export type StartTurnRequest = { sessionId: string, input: AgentUserInput,
+export type StartTurnRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, sessionId: string, input: AgentUserInput,
 /**
  * Explicit model selection for this turn; absent means use the session or configured default.
  */
@@ -264,7 +373,11 @@ export type EventUnsubscribeRequest = { subscriptionId: string, };
 
 export type EventUnsubscribeResponse = { subscriptionId: string, unsubscribed: boolean, };
 
-export type ModelListRequest = Record<string, never>;
+export type ModelListRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, };
 
 export type ModelListResponse = { models: Array<ModelInfo>, defaultModelSelection: ModelSelection, };
 
@@ -354,17 +467,17 @@ export type WebSearchProviderRuntimeConfig = { api_key?: string, base_url?: stri
 
 export type ConfigPath = "llm" | "webSearch";
 
-export type ConfigGetRequest = { path: ConfigPath, };
+export type ConfigGetRequest = { nodeId: string | null, path: ConfigPath, };
 
-export type ConfigUpdateRequest = { value: ConfigValue, };
+export type ConfigUpdateRequest = { nodeId: string | null, value: ConfigValue, };
 
 export type ConfigResponse = { "type": "llm", config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, } | { "type": "webSearch", config: WebSearchToolConfig, };
 
-export type ConfigDeleteRequest = { path: string, };
+export type ConfigDeleteRequest = { nodeId: string | null, path: string, };
 
 export type ConfigDeleteResponse = { success: boolean, };
 
-export type ConfigReloadRequest = Record<string, never>;
+export type ConfigReloadRequest = { nodeId: string | null, };
 
 export type ConfigReloadResponse = { success: boolean, };
 
@@ -406,15 +519,27 @@ export type ExpectedFileVersion = { "mode": "must_not_exist" } | { "mode": "matc
 
 export type DocUpdateRequest = { content: string, base_version: ExpectedFileVersion, };
 
-export type MemoryFileListRequest = { limit?: number, before_date?: string, date_from?: string, date_to?: string, };
+export type MemoryFileListRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, limit?: number, before_date?: string, date_from?: string, date_to?: string, };
 
 export type MemoryFileListResponse = { data: Array<MemoryFileSummary>, };
 
-export type MemoryFileReadRequest = { date: string, };
+export type MemoryFileReadRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, date: string, };
 
 export type MemoryFileReadResponse = { file: MemoryFileDetail, };
 
-export type MemoryFileWriteRequest = { date: string, content: string, expected_version?: string, };
+export type MemoryFileWriteRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, date: string, content: string, expected_version?: string, };
 
 export type MemoryFileWriteResponse = { file: MemoryFileDetail, };
 
@@ -436,19 +561,35 @@ export type MemoryInfo = { memoryId: string, title: string, body: string, kind: 
 
 export type MemoryGetResponse = { memory: MemoryInfo, };
 
-export type WorkspaceInfoRequest = Record<string, never>;
+export type WorkspaceInfoRequest = {
+/**
+ * Omitted or null preserves the existing target selection.
+ */
+nodeId?: string, };
 
 export type WorkspaceInfoResponse = { workspaceId: string, rootPrefix: string, userWorkspaceDir: string, };
 
-export type WorkspaceDocListRequest = Record<string, never>;
+export type WorkspaceDocListRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, };
 
 export type WorkspaceDocListResponse = { data: Array<WorkspaceDocSummary>, };
 
-export type WorkspaceDocReadRequest = { kind: WorkspaceDocKind, };
+export type WorkspaceDocReadRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, kind: WorkspaceDocKind, };
 
 export type WorkspaceDocReadResponse = { doc: WorkspaceDocInfo, };
 
-export type WorkspaceDocWriteRequest = { kind: WorkspaceDocKind, content: string, expected_version?: string, };
+export type WorkspaceDocWriteRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, kind: WorkspaceDocKind, content: string, expected_version?: string, };
 
 export type WorkspaceDocWriteResponse = { doc: WorkspaceDocInfo, };
 
@@ -458,15 +599,35 @@ export type WorkspaceDocSummary = { kind: WorkspaceDocKind, path: string, exists
 
 export type WorkspaceDocInfo = { kind: WorkspaceDocKind, path: string, exists: boolean, content: string, updated_at: number | null, version_token: string | null, };
 
-export type SkillsListRequest = { include_disabled: boolean, };
+export type SkillsListRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, include_disabled: boolean, };
 
-export type SkillsRefreshRequest = Record<string, never>;
+export type SkillsRefreshRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, };
 
-export type SkillsSuggestRequest = { query: string, limit: number | null, };
+export type SkillsSuggestRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, query: string, limit: number | null, };
 
-export type SkillsReadRequest = { selector: SkillSelector, };
+export type SkillsReadRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, selector: SkillSelector, };
 
-export type SkillsResolveRequest = { text: string, selected: Array<SkillSelector>, };
+export type SkillsResolveRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, text: string, selected: Array<SkillSelector>, };
 
 export type SkillSelector = { name: string | null, path: string | null, };
 
@@ -496,23 +657,23 @@ export type SkillsSuggestResponse = { data: Array<SkillSuggestion>, };
 
 export type SkillsResolveResponse = { data: Array<SkillSummary>, warnings: Array<SkillWarning>, };
 
-export type PluginSourceListRequest = Record<string, never>;
+export type PluginSourceListRequest = { nodeId?: string, };
 
 export type PluginSourceListResponse = { sources: Array<MarketplaceSource>, };
 
-export type PluginSourceAddRequest = { source: MarketplaceSourceInput, refresh: boolean, };
+export type PluginSourceAddRequest = { nodeId?: string, source: MarketplaceSourceInput, refresh: boolean, };
 
 export type PluginSourceAddResponse = { source: MarketplaceSource, plugins: Array<Plugin>, warnings: Array<PluginWarning>, };
 
-export type PluginSourceRefreshRequest = { source_id: MarketplaceSourceId, };
+export type PluginSourceRefreshRequest = { nodeId?: string, source_id: MarketplaceSourceId, };
 
 export type PluginSourceRefreshResponse = { source: MarketplaceSource, plugins: Array<Plugin>, warnings: Array<PluginWarning>, };
 
-export type PluginSourceRemoveRequest = { source_id: MarketplaceSourceId, };
+export type PluginSourceRemoveRequest = { nodeId?: string, source_id: MarketplaceSourceId, };
 
 export type PluginSourceRemoveResponse = { source_id: MarketplaceSourceId, removed: boolean, };
 
-export type PluginSearchRequest = { query: string | null, source_id: MarketplaceSourceId | null, kind: PluginKind | null, status: PluginSearchStatusFilter | null, refresh: PluginSearchRefreshPolicy, limit: number | null, };
+export type PluginSearchRequest = { nodeId?: string, query: string | null, source_id: MarketplaceSourceId | null, kind: PluginKind | null, status: PluginSearchStatusFilter | null, refresh: PluginSearchRefreshPolicy, limit: number | null, };
 
 export type PluginSearchResponse = { plugins: Array<Plugin>, warnings: Array<PluginWarning>, };
 
@@ -520,13 +681,13 @@ export type PluginSearchStatusFilter = "any" | "not_installed" | "installed" | "
 
 export type PluginSearchRefreshPolicy = "cache_only" | "refresh_stale" | "force_refresh";
 
-export type PluginListRequest = { kind: PluginKind | null, status: PluginListStatusFilter | null, source_id: MarketplaceSourceId | null, include_disabled: boolean, };
+export type PluginListRequest = { nodeId?: string, kind: PluginKind | null, status: PluginListStatusFilter | null, source_id: MarketplaceSourceId | null, include_disabled: boolean, };
 
 export type PluginListResponse = { plugins: Array<Plugin>, warnings: Array<PluginWarning>, };
 
 export type PluginListStatusFilter = "installed" | "disabled" | "update_available" | "source_missing" | "conflict";
 
-export type PluginReadRequest = { plugin_id: PluginId, };
+export type PluginReadRequest = { nodeId?: string, plugin_id: PluginId, };
 
 export type PluginReadResponse = { plugin: Plugin, documents: Array<PluginDocument>, };
 
@@ -538,7 +699,7 @@ export type PluginDocumentRole = "primary" | "readme" | "manifest";
 
 export type PluginDocumentMediaType = "markdown" | "json" | "text";
 
-export type PluginInstallRequest = { target: PluginInstallTarget, enable: boolean | null, conflict_policy: PluginInstallConflictPolicy, };
+export type PluginInstallRequest = { nodeId?: string, target: PluginInstallTarget, enable: boolean | null, conflict_policy: PluginInstallConflictPolicy, };
 
 export type PluginInstallResponse = { plugin: Plugin, install: PluginInstall, };
 
@@ -546,21 +707,21 @@ export type PluginInstallTarget = { "kind": "manual_mcp_server", server: McpServ
 
 export type PluginInstallConflictPolicy = "reject" | "replace";
 
-export type PluginUpdateRequest = { install_id: PluginInstallId, expected_source_commit: string | null, conflict_policy: PluginUpdateConflictPolicy, };
+export type PluginUpdateRequest = { nodeId?: string, install_id: PluginInstallId, expected_source_commit: string | null, conflict_policy: PluginUpdateConflictPolicy, };
 
 export type PluginUpdateResponse = { plugin: Plugin, install: PluginInstall, };
 
 export type PluginUpdateConflictPolicy = "reject_local_changes" | "replace_local_changes";
 
-export type PluginUninstallRequest = { install_id: PluginInstallId, };
+export type PluginUninstallRequest = { nodeId?: string, install_id: PluginInstallId, };
 
 export type PluginUninstallResponse = { install_id: PluginInstallId, uninstalled: boolean, };
 
-export type PluginEnableRequest = { install_id: PluginInstallId, };
+export type PluginEnableRequest = { nodeId?: string, install_id: PluginInstallId, };
 
 export type PluginEnableResponse = { plugin: Plugin, };
 
-export type PluginDisableRequest = { install_id: PluginInstallId, };
+export type PluginDisableRequest = { nodeId?: string, install_id: PluginInstallId, };
 
 export type PluginDisableResponse = { plugin: Plugin, };
 
@@ -618,7 +779,7 @@ export type McpCredentialBinding = { reference: string, authentication: McpAuthe
 
 export type McpOAuthConfig = { clientId?: string, clientMetadataUrl?: string, callbackPort?: number, scopes: Array<string>, };
 
-export type McpAuthenticationStartRequest = { server: McpDefinitionRef, config: McpOAuthConfig, clientSecret?: string, };
+export type McpAuthenticationStartRequest = { nodeId?: string, server: McpDefinitionRef, config: McpOAuthConfig, clientSecret?: string, };
 
 export type McpAuthenticationStartResponse = { server: McpDefinitionRef, attemptId: string, authorizationUrl: string,
 /**
@@ -634,17 +795,17 @@ export type McpCredentialValues = { authentication: McpAuthentication, token?: s
 
 export type McpCredentialsChange = { "type": "replace", credentials: McpCredentialValues, } | { "type": "clear" };
 
-export type McpCredentialsUpdateRequest = { server: McpDefinitionRef, change: McpCredentialsChange, };
+export type McpCredentialsUpdateRequest = { nodeId?: string, server: McpDefinitionRef, change: McpCredentialsChange, };
 
-export type McpAuthenticationReadRequest = { server: McpDefinitionRef, };
+export type McpAuthenticationReadRequest = { nodeId?: string, server: McpDefinitionRef, };
 
 export type McpAuthenticationResponse = { server: McpDefinitionRef, authentication: McpAuthentication, state: McpAuthenticationState, };
 
 export type McpAuthenticationState = { "type": "authorizing", attemptId: string, expiresAt: bigint, } | { "type": "authenticated" } | { "type": "expired" } | { "type": "unconfigured" } | { "type": "credentialsStored" } | { "type": "missing" } | { "type": "failed", error: ApiError, };
 
-export type McpServerImportRequest = { json: string, name?: string, enable?: boolean, conflictPolicy: PluginInstallConflictPolicy, };
+export type McpServerImportRequest = { nodeId?: string, json: string, name?: string, enable?: boolean, conflictPolicy: PluginInstallConflictPolicy, };
 
-export type McpServerListRequest = { cursor?: string, limit?: number, };
+export type McpServerListRequest = { nodeId?: string, cursor?: string, limit?: number, };
 
 export type McpServerListResponse = { data: Array<McpServerInfo>, nextCursor: string | null, };
 
@@ -720,9 +881,17 @@ export type UserCurrentRequest = Record<string, never>;
 
 export type UserCurrentResponse = { user: UserDto, };
 
-export type MemorySearchRequest = { query: string, limit?: number, kinds?: Array<MemoryKind>, sinceAt?: number | null, untilAt?: number | null, };
+export type MemorySearchRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, query: string, limit?: number, kinds?: Array<MemoryKind>, sinceAt?: number | null, untilAt?: number | null, };
 
-export type MemoryGetRequest = { memoryId: string, };
+export type MemoryGetRequest = {
+/**
+ * Omitted or null selects the embedded Worker.
+ */
+nodeId?: string, memoryId: string, };
 
 export type UserRole = "user" | "admin";
 
@@ -964,7 +1133,7 @@ export type SubscriptionTerminatedEvent = { reason: SubscriptionTerminatedReason
 
 export type SubscriptionTerminatedReason = "completed" | "interrupted" | "server_shutdown" | "session_deleted" | "lagged" | "slow_consumer";
 
-export type ServerNotification = { "method": "initialized", "params": InitializedNotification } | { "method": "timeline/turn/started", "params": TimelineEventNotification } | { "method": "timeline/message/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/delta", "params": TimelineEventNotification } | { "method": "timeline/message/block/completed", "params": TimelineEventNotification } | { "method": "timeline/message/completed", "params": TimelineEventNotification } | { "method": "timeline/waiting_for_input", "params": TimelineEventNotification } | { "method": "timeline/metrics/updated", "params": TimelineEventNotification } | { "method": "timeline/turn/completed", "params": TimelineEventNotification } | { "method": "timeline/turn/failed", "params": TimelineEventNotification } | { "method": "timeline/systemNotice", "params": TimelineEventNotification } | { "method": "subscription/terminated", "params": SubscriptionTerminatedNotification } | { "method": "messageQueue/changed", "params": MessageQueueChangedNotification };
+export type ServerNotification = { "method": "session/activeTurnChanged", "params": SessionActiveTurnChangedNotification } | { "method": "initialized", "params": InitializedNotification } | { "method": "timeline/turn/started", "params": TimelineEventNotification } | { "method": "timeline/message/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/delta", "params": TimelineEventNotification } | { "method": "timeline/message/block/completed", "params": TimelineEventNotification } | { "method": "timeline/message/completed", "params": TimelineEventNotification } | { "method": "timeline/waiting_for_input", "params": TimelineEventNotification } | { "method": "timeline/metrics/updated", "params": TimelineEventNotification } | { "method": "timeline/turn/completed", "params": TimelineEventNotification } | { "method": "timeline/turn/failed", "params": TimelineEventNotification } | { "method": "timeline/systemNotice", "params": TimelineEventNotification } | { "method": "subscription/terminated", "params": SubscriptionTerminatedNotification } | { "method": "messageQueue/changed", "params": MessageQueueChangedNotification } | { "method": "desktop/worker/failed", "params": ApiError } | { "method": "desktop/worker/ready" };
 
 export type InitializedNotification = { protocol_version: ProtocolVersion, };
 

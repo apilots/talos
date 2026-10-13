@@ -166,10 +166,7 @@ if [[ "${stream_started_count}" -lt 1 || "${stream_tool_progress_count}" -lt 1 |
   echo "CASE messages_tool_exec_stream FAIL started=${stream_started_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_result=${stream_tool_result_count} final=${stream_final_count} completed=${stream_completed_count}"
   exit 1
 fi
-if [[ "${stream_reasoning_count}" -lt 1 && "${stream_summary_count}" -lt 1 ]]; then
-  echo "CASE messages_tool_exec_stream FAIL missing_thinking_or_summary reasoning=${stream_reasoning_count} summary=${stream_summary_count}"
-  exit 1
-fi
+# Reasoning/summary are provider-dependent; require the tool lifecycle and visible final reply.
 stream_tool_call_check="$(python3 - "${stream_tool_log}" <<'PY'
 import json
 import sys
@@ -183,7 +180,7 @@ for line in path.read_text().splitlines():
         continue
     raw_record = json.loads(line[6:])
     event = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else {}
-    payload = event.get("payload") or {}
+    payload = (event.get("data") or {}).get("payload") or {}
     if payload.get("type") != "messageBlockCompleted":
         continue
     block = (payload.get("data") or {}).get("block") or {}

@@ -5,13 +5,32 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+# Native cross-project scenario; requires the separately built Sync binary.
+[features]
+e2e = []
+
 [dependencies]
+talos-sync = { workspace = true }
+talos-sync-sdk = { workspace = true }
+talos-sync-types = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+talos-app-protocol = { workspace = true }
 futures-util = { workspace = true }
 async-trait = { workspace = true }
 opendal = { workspace = true, features = ["reqwest-rustls-tls", "services-fs", "services-s3"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 tracing = { workspace = true }
+tonic = { workspace = true }
+rustls = { workspace = true }
+agent-pb = { workspace = true }
+agent-client = { workspace = true }
+agent-protocol = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
 talos-agent-api = { workspace = true }
 talos-agent-provider-kernel = { workspace = true }
@@ -25,29 +44,26 @@ talos-error = { workspace = true }
 talos-app-server = { workspace = true }
 talos-gateway = { path = "../../gateway/core" }
 talos-gateway-http = { path = "../../gateway/http" }
-talos-llm-anthropic = { workspace = true }
-talos-llm-bailian = { workspace = true }
-talos-llm-deepseek = { workspace = true }
-talos-llm-ollama = { workspace = true }
-talos-llm-openai = { workspace = true }
-talos-llm-openrouter = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-memory = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
 talos-store = { workspace = true }
-talos-skills = { workspace = true }
 talos-storage = { workspace = true }
-talos-plugin = { workspace = true }
-talos-mcp = { workspace = true }
 talos-tools = { workspace = true }
-talos-tools-sandbox = { workspace = true }
 talos-types = { workspace = true }
 talos-upgrade = { workspace = true }
+talos-worker = { workspace = true }
 
 [dev-dependencies]
+axum = "0.7"
+talos-fs = { workspace = true }
+talos-plugin = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+rcgen = "0.14"
 reqwest = { workspace = true }
-serde_json = { workspace = true }
+talos-mcp = { workspace = true }
 tempfile = "3"
 
 [lints]

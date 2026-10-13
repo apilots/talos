@@ -31,6 +31,7 @@ export function isActiveTurnRunningError(error: unknown) {
 function mapProjectView(project: ApiProjectInfo): ProjectView {
   return {
     id: project.project_id,
+    nodeId: project.nodeId,
     name: project.name,
     directory: project.directory,
     status: project.status,
@@ -46,12 +47,12 @@ interface CreateProjectInput {
   directory: string;
 }
 
-export async function listModels() {
-  return getTalosClient().models.list();
+export async function listModels(nodeId?: string) {
+  return getTalosClient(nodeId).models.list();
 }
 
-export async function listProjects() {
-  const response = await getTalosClient().projects.list({});
+export async function listProjects(nodeId?: string) {
+  const response = await getTalosClient(nodeId).projects.list({});
   return response.projects.map(mapProjectView);
 }
 
@@ -73,6 +74,7 @@ export function generateSessionId() {
 }
 
 interface InitialTurnOptions {
+  nodeId?: string;
   fileIds?: string[];
   modelSelection?: ModelSelection;
   project?: ProjectView;
@@ -91,6 +93,7 @@ export function createInitialTurnRequest(
   ];
   const input: AgentUserInput = { content };
   return {
+    nodeId: options.nodeId ?? options.project?.nodeId,
     sessionId,
     input,
     modelSelection: options.modelSelection ?? null,

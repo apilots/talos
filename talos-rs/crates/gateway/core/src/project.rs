@@ -12,9 +12,9 @@ impl ServiceGateway {
     pub(crate) async fn list_projects(
         &self,
         actor: &Actor,
-        _request: ProjectListRequest,
+        request: ProjectListRequest,
     ) -> TalosResult<ProjectListResponse> {
-        let projects = self.service.list_projects(actor).await?;
+        let projects = self.service.list_projects(actor, request).await?;
         Ok(ProjectListResponse {
             projects: projects.into_iter().collect(),
         })
@@ -35,10 +35,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: ProjectCreateRequest,
     ) -> TalosResult<ProjectCreateResponse> {
-        let project = self
-            .service
-            .create_project(actor, request.name, request.directory)
-            .await?;
+        let project = self.service.create_project(actor, request).await?;
         Ok(ProjectCreateResponse { project })
     }
 

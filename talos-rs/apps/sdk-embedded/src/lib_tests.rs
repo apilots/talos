@@ -5,6 +5,7 @@ use talos_types::{AgentUserContent, AgentUserInput};
 
 fn start_turn_request(current_directory: Option<PathBuf>) -> StartTurnRequest {
     StartTurnRequest {
+        node_id: None,
         session_id: "session-1".to_string(),
         input: AgentUserInput {
             content: vec![AgentUserContent::Text {

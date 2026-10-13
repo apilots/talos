@@ -11,6 +11,7 @@ fn manual_mcp_uses_installed_manifest_and_existing_replacement_transaction() {
         "transport": { "type": "stdio", "command": "npx", "args": ["--yes", "fixture-mcp"], "env": {"PUBLIC_MODE": "test"}, "cwd": temp.path() }
     })).unwrap();
     let request = |server: McpServerDefinition, conflict_policy| PluginInstallRequest {
+        node_id: None,
         target: PluginInstallTarget::ManualMcpServer {
             server: Box::new(server),
             credentials: None,
@@ -28,6 +29,7 @@ fn manual_mcp_uses_installed_manifest_and_existing_replacement_transaction() {
     ));
     let read = manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: first.plugin.id.clone(),
         })
         .unwrap();
@@ -47,6 +49,7 @@ fn manual_mcp_uses_installed_manifest_and_existing_replacement_transaction() {
         .is_err());
     assert!(!manager
         .read(PluginReadRequest {
+            node_id: None,
             plugin_id: first.plugin.id.clone()
         })
         .unwrap()
@@ -78,18 +81,21 @@ fn manual_mcp_uses_installed_manifest_and_existing_replacement_transaction() {
         .is_err());
     manager
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: first.install.id.clone(),
         })
         .unwrap();
     assert!(manager.mcp_servers().unwrap().servers.is_empty());
     manager
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: first.install.id.clone(),
         })
         .unwrap();
     assert_eq!(manager.mcp_servers().unwrap().servers.len(), 1);
     manager
         .uninstall(PluginUninstallRequest {
+            node_id: None,
             install_id: first.install.id,
         })
         .unwrap();

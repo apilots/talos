@@ -20,6 +20,8 @@ mod mcp_e2e;
 mod memory_e2e;
 mod message_queue_e2e;
 mod request;
+mod resource_matrix;
+use resource_matrix::resource_matrix;
 mod scenario;
 mod skills_e2e;
 use mcp_e2e::{mcp_e2e, prepare_mcp_fixture};
@@ -184,156 +186,6 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
     }
 }
 
-async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("resource-matrix config/model list");
-    list_models(client).await?;
-    get_config(client).await?;
-
-    eprintln!("resource-matrix memory roundtrip");
-    let memory_date = "2099-12-31";
-    let memory_content = memory_e2e::canonical_dream_memory_document(memory_date)?;
-    let memory_expected_version = match read_memory_file(client, memory_date).await {
-        Ok(existing) => Some(existing.file.version_token),
-        Err(error) if error.is_code(talos_sdk::ErrorCode::ResourceNotFound) => None,
-        Err(error) => return Err(error.into()),
-    };
-    let written_memory =
-        write_memory_file(client, memory_date, memory_content, memory_expected_version)
-            .await?
-            .file;
-    if !written_memory
-        .content
-        .contains("app-server resource parity")
-    {
-        return Err(anyhow!("memory write did not persist expected content"));
-    }
-    let read_memory = read_memory_file(client, memory_date).await?.file;
-    if read_memory.version_token != written_memory.version_token {
-        return Err(anyhow!("memory read returned a different version token"));
-    }
-    expect_conflict(
-        write_memory_file(
-            client,
-            memory_date,
-            "stale write".to_string(),
-            Some("stale-version-token".to_string()),
-        )
-        .await,
-        "memory stale write should conflict",
-    )?;
-    expect_validation(
-        read_memory_file(client, "not-a-date.md").await,
-        "invalid memory date should validate",
-    )?;
-    list_memory_files(client).await?;
-
-    eprintln!("resource-matrix workspace memory canonical create/read/conflict");
-    let mut read_workspace = read_workspace_doc(client, WorkspaceDocKind::Memory)
-        .await?
-        .doc;
-    if !read_workspace.exists {
-        let template = memory_e2e::canonical_memory_template()?;
-        read_workspace = write_workspace_doc(
-            client,
-            WorkspaceDocKind::Memory,
-            template,
-            ExpectedFileVersion::MustNotExist,
-        )
-        .await?
-        .doc;
-    }
-    memory_e2e::validate_memory_markdown(&read_workspace.content)?;
-    expect_conflict(
-        write_workspace_doc(
-            client,
-            WorkspaceDocKind::Memory,
-            "blind overwrite".to_string(),
-            ExpectedFileVersion::MustNotExist,
-        )
-        .await,
-        "workspace blind overwrite should conflict",
-    )?;
-    list_workspace_docs(client).await?;
-
-    eprintln!("resource-matrix project roundtrip");
-    let project_dir = std::env::temp_dir().join(format!(
-        "talos-app-server-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
-    std::fs::create_dir_all(&project_dir)
-        .with_context(|| format!("create project test directory {}", project_dir.display()))?;
-    let project_name = format!("App Server {}", uuid::Uuid::new_v4().simple());
-    let project = client
-        .create_project(talos_sdk::ProjectCreateRequest {
-            name: project_name.clone(),
-            directory: project_dir.clone(),
-        })
-        .await?
-        .project;
-    let read_project = get_project_by_id(client, &project.project_id)
-        .await?
-        .project;
-    if read_project.directory != project_dir {
-        return Err(anyhow!("project.read returned a different directory"));
-    }
-    let listed_projects = list_all_projects(client).await?.projects;
-    if !listed_projects
-        .iter()
-        .any(|candidate| candidate.project_id == project.project_id)
-    {
-        return Err(anyhow!("project.list did not include created project"));
-    }
-    let patched_name = format!("{project_name} patched");
-    let patched_project = client
-        .patch_project(talos_sdk::ProjectPatchRequest {
-            project_id: project.project_id.clone(),
-            name: Some(patched_name.clone()),
-        })
-        .await?
-        .project;
-    if patched_project.name != patched_name {
-        return Err(anyhow!("project.patch did not update name"));
-    }
-    delete_project_by_id(client, &project.project_id).await?;
-    expect_not_found(
-        get_project_by_id(client, &project.project_id).await,
-        "deleted project should map to not found",
-    )?;
-
-    eprintln!("resource-matrix session error mapping");
-    let session_id = new_session_id(client).await?;
-    start_turn(client, &session_id).await?;
-    let listed_sessions = client.list_sessions(Default::default()).await?;
-    if !listed_sessions
-        .sessions
-        .iter()
-        .any(|candidate| candidate.id == session_id)
-    {
-        return Err(anyhow!("session.list did not include created session"));
-    }
-    let _snapshot = recover_timeline_after(client, &session_id, None).await?;
-    expect_not_found(
-        get_session_by_id(client, "missing-session").await,
-        "missing session should map to not found",
-    )?;
-    expect_not_found(
-        recover_timeline_after(client, "missing-session", None).await,
-        "missing timeline recovery should map to not found",
-    )?;
-    expect_not_found(
-        submit_dynamic_tool_result_for_missing_session(
-            client,
-            "missing-session",
-            "result".to_string(),
-            true,
-        )
-        .await,
-        "missing dynamic tool result session should map to not found",
-    )?;
-
-    Ok(())
-}
-
 async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
     let _ = client;
     Ok(uuid::Uuid::new_v4().to_string())
@@ -342,7 +194,7 @@ async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
 async fn list_models(
     client: &mut AppServerClient,
 ) -> talos_sdk::TalosResult<talos_sdk::ModelListResponse> {
-    GatewayClient::list_models(client, ModelListRequest {}).await
+    GatewayClient::list_models(client, ModelListRequest { node_id: None }).await
 }
 
 async fn get_config(
@@ -357,6 +209,7 @@ async fn list_memory_files(
     GatewayClient::list_memory_files(
         client,
         MemoryFileListRequest {
+            node_id: None,
             limit: Some(32),
             before_date: None,
             date_from: None,
@@ -370,7 +223,14 @@ async fn read_memory_file(
     client: &mut AppServerClient,
     date: impl Into<String>,
 ) -> talos_sdk::TalosResult<talos_sdk::MemoryFileReadResponse> {
-    GatewayClient::read_memory_file(client, MemoryFileReadRequest { date: date.into() }).await
+    GatewayClient::read_memory_file(
+        client,
+        MemoryFileReadRequest {
+            node_id: None,
+            date: date.into(),
+        },
+    )
+    .await
 }
 
 async fn write_memory_file(
@@ -382,6 +242,7 @@ async fn write_memory_file(
     GatewayClient::write_memory_file(
         client,
         MemoryFileWriteRequest {
+            node_id: None,
             date: date.into(),
             content,
             expected_version,
@@ -393,14 +254,21 @@ async fn write_memory_file(
 async fn list_workspace_docs(
     client: &mut AppServerClient,
 ) -> talos_sdk::TalosResult<talos_sdk::WorkspaceDocListResponse> {
-    GatewayClient::list_workspace_docs(client, WorkspaceDocListRequest {}).await
+    GatewayClient::list_workspace_docs(client, WorkspaceDocListRequest { node_id: None }).await
 }
 
 async fn read_workspace_doc(
     client: &mut AppServerClient,
     kind: WorkspaceDocKind,
 ) -> talos_sdk::TalosResult<talos_sdk::WorkspaceDocReadResponse> {
-    GatewayClient::read_workspace_doc(client, WorkspaceDocReadRequest { kind }).await
+    GatewayClient::read_workspace_doc(
+        client,
+        WorkspaceDocReadRequest {
+            node_id: None,
+            kind,
+        },
+    )
+    .await
 }
 
 async fn write_workspace_doc(
@@ -412,6 +280,7 @@ async fn write_workspace_doc(
     GatewayClient::write_workspace_doc(
         client,
         WorkspaceDocWriteRequest {
+            node_id: None,
             kind,
             content,
             expected_version: expected_file_version_token(expected_version),
@@ -423,7 +292,7 @@ async fn write_workspace_doc(
 async fn list_all_projects(
     client: &mut AppServerClient,
 ) -> talos_sdk::TalosResult<talos_sdk::ProjectListResponse> {
-    GatewayClient::list_projects(client, ProjectListRequest {}).await
+    GatewayClient::list_projects(client, ProjectListRequest { node_id: None }).await
 }
 
 async fn get_project_by_id(
@@ -561,16 +430,19 @@ async fn collect_until_terminal(
     client: &mut AppServerClient,
     _subscription_id: &str,
 ) -> Result<Vec<TimelineEvent>> {
-    let mut events = Vec::new();
-    for _ in 0..1024 {
-        let event = next_event_with_timeout(client).await?;
-        let terminal = is_terminal_event(&event);
-        events.push(event);
-        if terminal {
-            return Ok(events);
+    tokio::time::timeout(std::time::Duration::from_secs(180), async {
+        let mut events = Vec::new();
+        loop {
+            let event = next_event_with_timeout(client).await?;
+            let terminal = is_terminal_event(&event);
+            events.push(event);
+            if terminal {
+                return Ok(events);
+            }
         }
-    }
-    Err(anyhow!("timed out waiting for terminal event"))
+    })
+    .await
+    .map_err(|_| anyhow!("timed out waiting for terminal event"))?
 }
 
 async fn collect_events(

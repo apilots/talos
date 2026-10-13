@@ -65,16 +65,23 @@ set -euo pipefail
 
 latest_url="https://fixtures.invalid/releases/latest"
 for argument in "$@"; do
-  if [ "${argument}" = "${latest_url}" ]; then
-    printf '%s' "https://fixtures.invalid/releases/tag/v4.0.0"
-    exit 0
-  fi
+  case "${argument}" in
+    "${latest_url}"|https://github.com/apilots/talos-releases/releases/latest)
+      printf '%s' "https://fixtures.invalid/releases/tag/v4.0.0"
+      exit 0
+      ;;
+    https://github.com/apilots/talos/releases/latest) exit 22 ;;
+  esac
 done
 
 mapped_args=()
 for argument in "$@"; do
   case "${argument}" in
     =https) argument="=https,file" ;;
+    https://github.com/apilots/talos/releases/download/*) exit 22 ;;
+    https://github.com/apilots/talos-releases/releases/download/*)
+      argument="file://${MOCK_RELEASE_ROOT}/${argument#https://github.com/apilots/talos-releases/releases/}"
+      ;;
     https://fixtures.invalid/releases/download/*)
       argument="file://${MOCK_RELEASE_ROOT}/${argument#https://fixtures.invalid/releases/}"
       ;;
@@ -289,6 +296,39 @@ test_installs_latest_release_by_default() {
     "talos 4.0.0 linux-amd64" "latest release launcher"
 }
 
+test_falls_back_to_archived_releases_before_and_after_migration() {
+  local case_root="${TEST_ROOT}/legacy-fallback"
+  local release_root="${case_root}/releases"
+  local mock_bin="${case_root}/mock-bin"
+  create_release_bundle "${release_root}" "4.0.0" "linux" "amd64"
+  write_mock_uname "${mock_bin}"
+  write_mock_release_curl "${mock_bin}"
+
+  HOME="${case_root}/home-latest" \
+    PATH="${mock_bin}:${PATH}" \
+    MOCK_UNAME_S="Linux" \
+    MOCK_UNAME_M="x86_64" \
+    MOCK_RELEASE_ROOT="${release_root}" \
+    REAL_CURL="${REAL_CURL}" \
+    TALOS_INSTALL_ROOT="${case_root}/install-latest" \
+    TALOS_BIN_DIR="${case_root}/bin-latest" \
+    "${INSTALLER}"
+  assert_eq "$("${case_root}/bin-latest/talos")" \
+    "talos 4.0.0 linux-amd64" "archived latest release fallback"
+
+  HOME="${case_root}/home-version" \
+    PATH="${mock_bin}:${PATH}" \
+    MOCK_UNAME_S="Linux" \
+    MOCK_UNAME_M="x86_64" \
+    MOCK_RELEASE_ROOT="${release_root}" \
+    REAL_CURL="${REAL_CURL}" \
+    TALOS_INSTALL_ROOT="${case_root}/install-version" \
+    TALOS_BIN_DIR="${case_root}/bin-version" \
+    "${INSTALLER}" --version "4.0.0"
+  assert_eq "$("${case_root}/bin-version/talos")" \
+    "talos 4.0.0 linux-amd64" "archived explicit version fallback"
+}
+
 test_rejects_unsupported_platform() {
   local case_root="${TEST_ROOT}/unsupported"
   local release_root="${case_root}/releases"
@@ -408,6 +448,7 @@ test_installs_macos_arm64_bundle
 test_maps_remaining_target_aliases
 test_checksum_failure_preserves_current_version
 test_installs_latest_release_by_default
+test_falls_back_to_archived_releases_before_and_after_migration
 test_rejects_unsupported_platform
 test_rejects_active_install_lock
 test_rejects_relative_install_paths

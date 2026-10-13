@@ -127,8 +127,13 @@ pub struct QuestionOption {
     rename_all_fields = "camelCase"
 )]
 pub enum QuestionAnswer {
-    SelectedOption { option_id: String },
-    FreeForm { text: String },
+    SelectedOption {
+        #[schemars(rename = "optionId")]
+        option_id: String,
+    },
+    FreeForm {
+        text: String,
+    },
 }
 
 /// Server-authored sandbox approval presented to the user.
@@ -164,6 +169,7 @@ pub enum SandboxApprovalPresentation {
         cwd: String,
         #[serde(default)]
         #[ts(optional)]
+        #[schemars(rename = "riskSummary")]
         risk_summary: Option<String>,
     },
     FileSystem {

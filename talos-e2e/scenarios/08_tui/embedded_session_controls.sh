@@ -18,7 +18,7 @@ export TALOS_TEST_CONTEXT_COMPACTION_MAX_BYTES=1024
 prepare_talos_home
 
 WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
-USER_WORKSPACE_DIR="${WORKSPACE_DIR}/local"
+USER_WORKSPACE_DIR="${WORKSPACE_DIR}/anonymous"
 DATABASE_PATH="${TALOS_HOME}/data/talos.db"
 TALOS_LOG_FILE="${TALOS_HOME}/logs/talos.log"
 PANE_SNAPSHOT="$(scenario_report_path "tui_session_controls_pane.txt")"
@@ -39,6 +39,7 @@ dump_failure_context() {
   capture_tui >"${PANE_SNAPSHOT}" || true
   echo "CASE embedded_tui_session_controls DEBUG talos_home=${TALOS_HOME}"
   echo "CASE embedded_tui_session_controls DEBUG pane_snapshot=${PANE_SNAPSHOT}"
+  cat "${PANE_SNAPSHOT}" || true
   echo "CASE embedded_tui_session_controls DEBUG state_snapshot=${SESSION_STATE_SNAPSHOT}"
   if [[ -f "${TALOS_LOG_FILE}" ]]; then
     echo "CASE embedded_tui_session_controls DEBUG talos_log_tail_begin"

@@ -39,6 +39,11 @@ impl TurnService {
         session: talos_store::session::SessionRecord,
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse> {
+        let _admission_guard = self
+            .execution_gate
+            .for_node(&session.execution_node_id)
+            .read_owned()
+            .await;
         if session.id != request.identity.session_id {
             return Err(TalosError::new(
                 ErrorCode::ResourceNotFound,

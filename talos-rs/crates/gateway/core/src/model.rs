@@ -8,8 +8,8 @@ impl ServiceGateway {
     pub(crate) async fn list_models(
         &self,
         actor: &Actor,
-        _request: ModelListRequest,
+        request: ModelListRequest,
     ) -> TalosResult<ModelListResponse> {
-        self.service.list_models(actor).await
+        self.service.list_models(actor, request).await
     }
 }

@@ -67,7 +67,7 @@ pub(super) async fn auth_middleware(
 }
 
 fn is_public_route(path: &str) -> bool {
-    path == "/health" || is_cloud_login_route(path)
+    path == "/health" || path == "/v1/mcp/oauth/callback" || is_cloud_login_route(path)
 }
 
 fn is_webui_route(path: &str) -> bool {

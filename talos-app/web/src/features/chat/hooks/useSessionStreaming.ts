@@ -1,6 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 
 import { cancelActiveTurn, isActiveTurnRunningError, retryTimelineTurn, startTimelineTurn } from "../api";
+import { useConnectionKey } from "./useChatQueries";
+import { connectionScope } from "@/shared/store/connection-scope";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
@@ -10,6 +12,8 @@ import type { StartTurnRequest } from "@talos/sdk-browser";
 export function useSessionStreaming(
   sessionId: string,
 ) {
+  const scope = useConnectionKey();
+  const currentActor = () => connectionScope(useAppStore.getState().connection) === scope;
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const resetStream = useAppStore((state) => state.resetStream);
@@ -29,6 +33,7 @@ export function useSessionStreaming(
       await invalidateSessionQueries();
     },
     onError: (error) => {
+      if (!currentActor()) return;
       useAppStore.getState().setStreamError(
         sessionId,
         userVisibleError(error, "Failed to stop response."),
@@ -76,10 +81,11 @@ export function useSessionStreaming(
         currentDirectory: null,
         clientRequestId: null,
       }, (messageId) => {
-        markPendingInputAccepted(sessionId, clientMessageId, messageId);
+        if (currentActor()) markPendingInputAccepted(sessionId, clientMessageId, messageId);
       });
     },
     onError: async (error) => {
+      if (!currentActor()) return;
       const currentStream = useAppStore.getState().streams[sessionId];
       if (isActiveTurnRunningError(error)) {
         useAppStore.getState().setPendingInput(sessionId, undefined);
@@ -158,10 +164,11 @@ export function useSessionStreaming(
           ],
         },
       }, (messageId) => {
-        markPendingInputAccepted(sessionId, clientMessageId, messageId);
+        if (currentActor()) markPendingInputAccepted(sessionId, clientMessageId, messageId);
       });
     },
     onError: async (error) => {
+      if (!currentActor()) return;
       useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,

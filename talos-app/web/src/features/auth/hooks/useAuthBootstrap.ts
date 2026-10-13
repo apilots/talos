@@ -39,7 +39,13 @@ export function useAuthBootstrap() {
         if (canceled) {
           return;
         }
-        setConnection({ deploymentMode: health.mode });
+        setConnection({
+          deploymentMode: health.mode,
+          ...(health.desktopConnection ? {
+            desktopConnectionMode: health.desktopConnection.connectionMode,
+            controlPlaneEndpoint: health.desktopConnection.controlPlaneEndpoint,
+          } : {}),
+        });
         if (!health.auth_enabled) {
           clearWebAuthToken();
           attemptedKeyRef.current = attemptKey;

@@ -164,6 +164,52 @@ fn upgrade_adds_missing_current_defaults() {
 }
 
 #[test]
+fn upgrade_preserves_configured_agent_node_listener() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let paths = TalosPaths::from_home(dir.path().join(".talos"));
+    let template_path = dir.path().join("talos.yaml.template");
+    let mut template = template_yaml();
+    set_path_for_test(&mut template, &["gateway", "auth"], YamlValue::Bool(true));
+    std::fs::write(
+        &template_path,
+        serde_yaml::to_string(&template).expect("template should encode"),
+    )
+    .expect("template should be written");
+    let mut old = template;
+    set_path_for_test(
+        &mut old,
+        &["agent_node", "control_plane"],
+        serde_yaml::from_str(
+            r#"
+bind_address: 127.0.0.1:18800
+tls_certificate_file: /tmp/control.crt
+tls_private_key_file: /tmp/control.key
+trusted_node_ca_file: /tmp/node-ca.crt
+"#,
+        )
+        .expect("Agent node listener should encode"),
+    );
+    write_existing(&paths, &old);
+
+    let report = upgrade_default_config_from_template(&paths, &template_path)
+        .expect("config should upgrade");
+
+    assert!(!report
+        .removed_paths
+        .iter()
+        .any(|path| path.starts_with("agent_node")));
+    let normalized = read_yaml_file(&paths.config_file).expect("normalized config should read");
+    assert_eq!(
+        get_path_for_test(
+            &normalized,
+            &["agent_node", "control_plane", "bind_address"]
+        ),
+        Some(&YamlValue::String("127.0.0.1:18800".to_string()))
+    );
+    validate_config_value(&normalized).expect("normalized config should strict-load");
+}
+
+#[test]
 fn refresh_template_copies_source_when_target_is_missing() {
     let dir = tempfile::tempdir().expect("temp dir should be created");
     let paths = TalosPaths::from_home(dir.path().join(".talos"));

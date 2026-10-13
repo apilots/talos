@@ -63,7 +63,7 @@ fn unreadable_credentials_publish_a_failed_server_status() {
     let runtime = talos_mcp::TalosMcpRuntime::new();
     let credentials = talos_service::McpCredentialStore::new(credentials_root);
 
-    crate::application_mcp::prepare(&runtime, &config, vec![], &credentials)
+    talos_worker::prepare_mcp(&runtime, &config, vec![], &credentials)
         .unwrap()
         .publish();
 
@@ -108,9 +108,10 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
             "name": name, "transport": {"type":"stdio", "command":"/usr/bin/python3", "args":["server.py", workspace.join(name), "normal"]}
         })).unwrap()).unwrap();
     }
-    let plugins = &runtime.service.plugins;
+    let plugins = &runtime.worker.plugin_manager();
     let added = plugins
         .add_source(PluginSourceAddRequest {
+            node_id: None,
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo.clone(),
                 sparse_paths: vec![],
@@ -119,6 +120,7 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         })
         .unwrap();
     let install = |name: &str| PluginInstallRequest {
+        node_id: None,
         target: PluginInstallTarget::Plugin {
             plugin_id: added
                 .plugins
@@ -146,6 +148,7 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
     .unwrap();
     plugins
         .update(PluginUpdateRequest {
+            node_id: None,
             install_id: healthy.install.id.clone(),
             expected_source_commit: None,
             conflict_policy: PluginUpdateConflictPolicy::RejectLocalChanges,
@@ -177,6 +180,7 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
     save(&config);
     plugins
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: healthy.install.id.clone(),
         })
         .await
@@ -186,6 +190,7 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .is_tool_available("mcp__healthy__inspect"));
     plugins
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: healthy.install.id.clone(),
         })
         .await
@@ -193,9 +198,9 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
     available(&runtime, "healthy").await;
     assert_eq!(
         runtime
-            .service
-            .config
-            .reload_config(ConfigReloadRequest {})
+            .worker
+            .config_service()
+            .reload_config(ConfigReloadRequest { node_id: None })
             .await
             .unwrap_err()
             .error_code(),
@@ -212,9 +217,9 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
     )
     .unwrap();
     runtime
-        .service
-        .config
-        .reload_config(ConfigReloadRequest {})
+        .worker
+        .config_service()
+        .reload_config(ConfigReloadRequest { node_id: None })
         .await
         .unwrap();
     available(&runtime, "static").await;
@@ -226,6 +231,7 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .is_tool_available("mcp__damaged__inspect"));
     let listed = plugins
         .list_plugins(PluginListRequest {
+            node_id: None,
             kind: Some(PluginKind::McpServer),
             status: None,
             source_id: None,
@@ -238,24 +244,28 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .any(|warning| warning.code == PluginWarningCode::InvalidManifest));
     plugins
         .disable(PluginDisableRequest {
+            node_id: None,
             install_id: damaged.install.id.clone(),
         })
         .await
         .unwrap();
     assert!(plugins
         .enable(PluginEnableRequest {
+            node_id: None,
             install_id: damaged.install.id.clone()
         })
         .await
         .is_err());
     plugins
         .uninstall(PluginUninstallRequest {
+            node_id: None,
             install_id: damaged.install.id,
         })
         .await
         .unwrap();
     plugins
         .uninstall(PluginUninstallRequest {
+            node_id: None,
             install_id: healthy.install.id,
         })
         .await

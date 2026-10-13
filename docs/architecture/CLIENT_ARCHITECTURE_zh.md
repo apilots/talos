@@ -20,14 +20,14 @@
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| TS TalosClient   |  | TS AppServer     |  | Rust SDK        |  | Rust SDK        |
+| TS TalosClient   |  | TS product SDK   |  | Rust SDK        |  | Rust SDK        |
 | shared types     |  | Client + types   |  | GatewayClient   |  | GatewayClient   |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
-| Browser adapter  |  | Typed preload    |  | EmbeddedServer  |  | Rust AppServer   |
-| HTTP + SSE       |  | IPC -> main      |  | Client          |  | Client           |
+| Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer  |  | Rust AppServer   |
+| HTTP + SSE       |  | cloud/local mode |  | Client          |  | Client           |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          +---------------------+----------+----------+---------------------+
@@ -69,9 +69,10 @@ optional 语义和终态必须一致。只有 TypeScript SDK facade、Rust SDK�
 | `@talos/sdk-browser` | HTTP、multipart upload、认证 header 和 SSE transport 实现 |
 | `@talos/sdk-app-server` | JSON-RPC transport、Electron main process 和 typed preload IPC adapter |
 
-Web 通过 Browser transport 使用 `TalosClient`。Desktop 通过 typed preload IPC 和
-负责 JSON-RPC stdio 的 Electron main-process transport 使用 TypeScript
-`AppServerClient`。两个 facade 共享生成领域与协议类型，但当前没有实现同一个
+Web 和云模式 Desktop 通过 Browser transport 使用 `TalosClient`，访问同一控制面的
+HTTP/SSE 产品 API。Desktop 的 typed preload IPC 和 Electron main-process stdio
+通过 `AppServerClient` 管理已打包的 Worker 宿主、登录和节点身份；纯本地模式也使用这条
+IPC/stdio 路径访问产品 API。两个 facade 共享生成领域与协议类型，但当前没有实现同一个
 TypeScript client interface。因此能力对齐依赖 API review 和 parity test，而不能只依赖
 TypeScript 类型系统。
 
@@ -139,3 +140,16 @@ JSON-RPC 使用相同契约；Rust SDK/TUI 的历史读取方可忽略该字段�
 Rust trait 当前强制 app-server 与 embedded 实现对齐。TypeScript Browser 和 App Server
 facade 是独立 API，因此需要显式 parity review。相关路径和测试未对齐前，文档不能把
 新能力描述为完成。
+
+## Computer 选择与执行归属
+
+联网 Desktop 与 Web 共用 HTTP/SSE 产品 SDK，连接同一控制面。Desktop main 仍通过
+现有 IPC/stdio 管理已打包 app-server 内的一个 TalosWorker，保存 UUID/注册凭据并主动
+Connect；renderer 只读取控制面配置和安全身份，不持有节点密钥。明确选择纯本地模式时，
+产品 API 使用原 IPC/stdio 路径，离线不会自动切回本地。
+
+features/computers 提供独立栏、完整搜索/分页、选择与管理页；本机匹配控制面地址和 UUID，
+Web 多台时明确选择。环境和列表携带目标 nodeId，已有 Session 保持原归属。缓存按账号、
+控制面、资源隔离，环境/列表再按 Computer 隔离；草稿和最近选择由客户端保存，切换不取消
+运行中的 Turn。控制面保存业务元数据与 Timeline，Worker 保存配置、MCP 凭据和 Workspace
+文件；Harness/WorkerEnvironment 屏蔽传输，远端 OAuth 回到原 Worker attempt。

@@ -10,6 +10,7 @@ import { useAppStore } from "@/shared/store/app-store";
 import { createDefaultProjects } from "@/shared/types/domain";
 import { ChatHomePage } from "./ChatHomePage";
 
+let testProjects = createDefaultProjects();
 const createProjectMutateAsync = vi.fn();
 const setActiveProjectIdMock = vi.fn((projectId: string) => {
   useAppStore.setState({ activeProjectId: projectId });
@@ -88,7 +89,7 @@ vi.mock("@/features/chat", () => ({
   }),
   useProjectsView: () => ({
     activeProjectId: useAppStore.getState().activeProjectId,
-    projects: useAppStore.getState().projects,
+    projects: testProjects,
     setActiveProjectId: setActiveProjectIdMock,
   }),
 }));
@@ -120,9 +121,7 @@ describe("ChatHomePage", () => {
     });
 
     const [unboundProject] = createDefaultProjects();
-    useAppStore.setState((state) => ({
-      ...state,
-      projects: [
+    testProjects = [
         unboundProject,
         {
           id: "project-1",
@@ -133,9 +132,10 @@ describe("ChatHomePage", () => {
           origin: "server",
           sessionCount: 1,
         },
-      ],
+      ];
+    useAppStore.setState({
       activeProjectId: "missing-project",
-    }));
+    });
   });
 
   it("restores the active project when persisted selection is stale", async () => {
@@ -174,9 +174,12 @@ describe("ChatHomePage", () => {
 
     await waitFor(() => {
       expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}")).toMatchObject({
+        initialNodeId: "embedded",
         initialPrompt: "hello",
         initialPermissionMode: "approveForMe",
       });
     });
   });
 });
+
+vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: "embedded", selected: { available: true } }), useProductScope: () => "test-scope", ComputerContext: () => null }));

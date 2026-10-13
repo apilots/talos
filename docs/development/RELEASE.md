@@ -2,9 +2,10 @@
 
 [Chinese](RELEASE_zh.md)
 
-Talos publishes each version in two repositories. The source repository owns the
-tag and canonical Release Notes. `apilots/talos-releases` reuses that body without
-regenerating it and attaches the published product artifacts.
+Talos owns version tags, canonical Release Notes, build checks, product artifacts,
+container images, and GitHub Releases. Existing releases and download assets in
+`apilots/talos-releases` remain available as historical archives; new releases do
+not depend on that repository.
 
 ## Commit subjects
 
@@ -69,44 +70,42 @@ scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.
 ```
 
 The branch must be clean and synchronized with its matching remote. The script
-creates an annotated tag and source Release. That Release records source and
-Notes; downloadable products become available only after the public pipeline
-passes. If tagging succeeds but source Release creation fails, rerun the same
-command while the tag still points to HEAD and the source Release is absent.
-Existing published tags must never be moved or rebuilt with changed code.
+creates and pushes an annotated tag whose message is the canonical Release Notes.
+Pushing the tag starts Talos's release workflow. It publishes the GitHub Release
+only after source validation, quality checks, product builds, native TUI installation
+checks, and image publication succeed. If a workflow run fails, rerun `release.yml`
+for the same immutable tag after fixing the workflow or runner issue; never move a
+published tag or rebuild it from changed code.
 
 ## One release gate
 
-`apilots/talos-releases` executes this sequence for both repository dispatch and
-manual workflow dispatch:
+The `release.yml` workflow in `apilots/talos` runs this sequence when a `v*` tag
+is pushed, or when a maintainer manually retries an existing tag:
 
-1. Resolve the tag to a source SHA; validate formal versions, preparation/fix
-   history, source Release and nonempty canonical Notes.
+1. Resolve the immutable tag to a source SHA; validate formal versions,
+   preparation/fix history, and nonempty canonical Notes stored in the annotated tag.
 2. Run `bash scripts/check-release.sh` from that source: commit and Notes contract
    tests, Rust format/check/tests, frontend pipeline, and installer contract tests.
-3. Build products and images from the validated source SHA. Run native installation
-   E2E on each of the four TUI products before uploading it, reusing its built bundle
-   through `TUI_INSTALL_PRODUCT_DIR` rather than rebuilding it.
-4. After all product builds and native checks pass, publish image tags and prepare
-   final assets; validate asset contracts before publishing the artifact Release.
-5. Compare the published source and artifact Notes. Complete the remaining
-   download, manifest, and latest checks under Finish manually.
+3. Build the existing Desktop, WebUI, and four-platform TUI products. Run native
+   installation E2E on each TUI product before uploading it, reusing its built bundle
+   through `TUI_INSTALL_PRODUCT_DIR`.
+4. Build and publish Server and Worker images for `linux/amd64` and `linux/arm64`;
+   prepare checksums and the release manifest, then validate the final installer assets.
+5. Create the Talos GitHub Release only after every required job succeeds, using the
+   tag's canonical Notes unchanged. Optional R2 mirroring remains available.
 
-Talos owns the checks and E2E implementation. The public repository only provisions
-runners and orchestrates them. Source-side dispatch does not duplicate the gate.
-There is no skip-gate input or local-validation substitute. If private runners
-cannot start the lightweight dispatch job, invoke the same public workflow directly:
+All release jobs use GitHub-hosted runners. There is no skip-gate input or local
+validation substitute. To retry the workflow for an existing tag:
 
 ```bash
-gh workflow run release.yml --repo apilots/talos-releases \
+gh workflow run release.yml --repo apilots/talos \
   -f tag=v0.1.9 -f publish_latest=true
 ```
 
-This changes only the trigger; all public gates remain mandatory. Publish consecutive
-versions serially, using `publish_latest=false` for older versions. The public
-workflow serializes release runs and prevents older versions from moving latest
-backward relative to the current public GitHub latest release. Local bug fixes
-need only affected scenario checks; the full suite runs once as the release gate.
+Publish consecutive versions serially, using `publish_latest=false` for older
+versions. The workflow serializes release runs and prevents older versions from
+moving latest backward relative to the current GitHub latest release. Local bug
+fixes need only affected scenario checks; the full release suite runs once as the gate.
 Keep local verification output in ignored `output/release-<version>/`; record
 unavailable external-account scenarios as unverified. Never infer their success
 from unit tests or artifact builds.
@@ -114,9 +113,9 @@ from unit tests or artifact builds.
 ## Finish
 
 Download public assets and check `checksums.txt` using `sha256sum --check` on Linux
-or `shasum -a 256 -c` on macOS. Verify byte-identical source/artifact Notes, manifest
-source SHA, and both `linux/amd64` and `linux/arm64` image platforms. Verify latest
-references for the newest release.
+or `shasum -a 256 -c` on macOS. Verify the release Notes match the annotated tag,
+the manifest source SHA matches the immutable tag, and both `linux/amd64` and
+`linux/arm64` image platforms are present. Verify latest references for the newest release.
 
 After successful publication, merge the release branch into `main`. Preserve main's
 next development version when resolving version conflicts; never reset main to the

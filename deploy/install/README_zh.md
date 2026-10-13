@@ -9,14 +9,14 @@ checksum，安装不可变产品资源并启用稳定 launcher。
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh
+  https://github.com/apilots/talos/releases/latest/download/install.sh | sh
 ```
 
 安装指定版本：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/apilots/talos-releases/releases/latest/download/install.sh \
+  https://github.com/apilots/talos/releases/latest/download/install.sh \
   | sh -s -- --version 0.1.7
 ```
 

@@ -24,6 +24,8 @@ use crate::Actor;
 use super::{FileByteStream, FileService};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+#[path = "peer_tests.rs"]
+mod peer_tests;
 const CSV: &[u8] = b"name,severity\nfire,high\nsmoke,medium\n";
 // Derived from calamine's MIT-licensed empty_sheet.xlsx fixture.
 const XLSX_BASE64: &str = concat!(
@@ -153,10 +155,10 @@ async fn local_files_complete_the_public_lifecycle_without_exposing_storage_deta
         .unwrap()
         .unwrap();
     assert_eq!(
-        record.object_key,
+        record.local_location().unwrap().1,
         format!("{}/content.png", uploaded.file_id)
     );
-    let object = std::fs::read(files.root.path().join(&record.object_key)).unwrap();
+    let object = std::fs::read(files.root.path().join(record.local_location().unwrap().1)).unwrap();
     let listed = files
         .service
         .list(&actor, FileListRequest::default())
@@ -216,7 +218,11 @@ async fn local_files_complete_the_public_lifecycle_without_exposing_storage_deta
         .await
         .unwrap();
     assert_eq!(deleted.file_id, updated.file.file_id);
-    assert!(!files.operator.exists(&record.object_key).await.unwrap());
+    assert!(!files
+        .operator
+        .exists(record.local_location().unwrap().1)
+        .await
+        .unwrap());
 }
 
 #[tokio::test]
@@ -522,7 +528,10 @@ async fn project_file_relation_is_preserved_by_store_writes() {
         .store
         .create_file(talos_store::file::FileRecord {
             file_id: "file-after-project-delete".to_string(),
-            object_key: "file-after-project-delete/content.png".to_string(),
+            location: talos_store::file::FileLocation::Local {
+                storage_id: record.local_location().unwrap().0.to_owned(),
+                object_key: "file-after-project-delete/content.png".to_string(),
+            },
             mime_type: None,
             size_bytes: None,
             status: FileStatus::Uploading,
@@ -634,7 +643,7 @@ async fn attachment_reader_rejects_an_oversized_object_before_loading_it() {
         .unwrap()
         .unwrap();
     std::fs::write(
-        files.root.path().join(record.object_key),
+        files.root.path().join(record.local_location().unwrap().1),
         vec![0_u8; PNG.len() + 1],
     )
     .unwrap();
@@ -838,8 +847,10 @@ async fn recovery_rejects_records_for_unconfigured_storage() {
         file_id: "file-unknown-storage".to_string(),
         owner_user_id: "user-1".to_string(),
         project_id: None,
-        storage_id: "archive".to_string(),
-        object_key: "files/file-unknown-storage/content.png".to_string(),
+        location: talos_store::file::FileLocation::Local {
+            storage_id: "archive".to_string(),
+            object_key: "files/file-unknown-storage/content.png".to_string(),
+        },
         original_filename: "content.png".to_string(),
         mime_type: None,
         size_bytes: None,
@@ -871,8 +882,10 @@ async fn recovery_removes_more_than_one_bounded_batch() {
                 file_id: file_id.clone(),
                 owner_user_id: "user-1".to_string(),
                 project_id: None,
-                storage_id: "local".to_string(),
-                object_key: format!("files/{file_id}/content.png"),
+                location: talos_store::file::FileLocation::Local {
+                    storage_id: "local".to_string(),
+                    object_key: format!("files/{file_id}/content.png"),
+                },
                 original_filename: "content.png".to_string(),
                 mime_type: None,
                 size_bytes: None,

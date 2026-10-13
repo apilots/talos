@@ -11,6 +11,7 @@ import {
   storeWebAuthToken,
 } from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
+import { DesktopConnectionControl } from "@/features/computers";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
 import { accountTypeFromWire } from "@/shared/types/account";
@@ -124,8 +125,8 @@ export function AuthPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[#f6f6f3] p-6 text-ink">
-      <Panel className="w-full max-w-[360px] rounded-[14px] border-[#dedbd2] bg-[#fffffc] p-6 shadow-[0_16px_44px_rgba(27,24,19,0.08)] backdrop-blur-none">
+    <div className="flex h-screen items-center justify-center bg-background p-6 text-ink">
+      <Panel className="w-full max-w-[360px] rounded-[14px] border-border bg-card p-6 shadow-panel backdrop-blur-none">
         <div className="text-center">
           <img
             alt="Talos"
@@ -144,7 +145,7 @@ export function AuthPage() {
 
         <form className="mt-7 grid gap-3" onSubmit={handleLogin}>
           <Button
-            className="h-10 w-full rounded-[10px] border border-[#dedbd2] bg-white text-[13px] font-medium text-ink shadow-[0_1px_0_rgba(27,24,19,0.04)] hover:border-[#c9c4b8] hover:bg-[#f8f8f5] disabled:bg-[#f4f4f0]"
+            className="h-10 w-full rounded-[10px] border border-border bg-card text-[13px] font-medium text-ink shadow-[0_1px_0_rgba(27,24,19,0.04)] hover:border-muted/40 hover:bg-surface disabled:bg-surface"
             disabled={isCompleting || isLoadingConfig}
             type="submit"
             variant="secondary"
@@ -162,12 +163,13 @@ export function AuthPage() {
             type="button"
           >
             <span>Need an account?</span>{" "}
-            <span className="text-[#806132] transition hover:text-[#5f451f]">
+            <span className="text-ink transition hover:text-ink">
               Create one in Talos Cloud
             </span>
           </button>
         ) : null}
 
+        <DesktopConnectionControl />
         {error ? <p className="mt-4 text-center text-[13px] leading-5 text-danger">{error}</p> : null}
       </Panel>
     </div>

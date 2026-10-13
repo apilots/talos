@@ -1,3 +1,4 @@
+import { useEnvironmentKey } from "@/features/computers";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Lock } from "lucide-react";
@@ -15,10 +16,11 @@ interface SkillPluginsManagementViewProps {
 }
 
 export function SkillPluginsManagementView({ query, refreshVersion }: SkillPluginsManagementViewProps) {
+  const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("plugins");
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const availableSkillsQuery = useQuery({
-    queryKey: ["talos", "skills", "available", refreshVersion],
+    queryKey: ["talos", environmentKey, "skills", "available", refreshVersion],
     queryFn: () => listSkills(true),
   });
   const availableSkills = useMemo(

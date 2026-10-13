@@ -45,6 +45,7 @@ impl SessionStore for MockSessionStore {
         Ok(Some(SessionRecord {
             id: session_id.to_string(),
             agent_id: "default".to_string(),
+            execution_node_id: "embedded".to_string(),
             tree_identity: SessionTreeIdentity::Primary,
             title: DEFAULT_SESSION_TITLE.to_string(),
             user_id: "mock-user".to_string(),
@@ -92,7 +93,7 @@ impl SessionStore for MockSessionStore {
         Ok(false)
     }
 
-    async fn has_nonterminal_turns(&self) -> TalosResult<bool> {
+    async fn has_nonterminal_turns(&self, _node_id: Option<&str>) -> TalosResult<bool> {
         Ok(false)
     }
 

@@ -1,3 +1,5 @@
+import type { ProjectStatus } from "@talos/sdk-core";
+export type { ProjectStatus, ProjectStatusState, ProjectUnavailableReason } from "@talos/sdk-core";
 import type {
   ContextCompactionMetrics,
   ContextCompactionOutcome,
@@ -14,6 +16,7 @@ export type ReasoningLevel = "none" | "light" | "medium" | "high" | "extra_high"
 export type SessionUiStatus = "running" | "done" | "error";
 
 export interface ProjectView {
+  nodeId?: string;
   id: string;
   name: string;
   directory?: string | null;
@@ -22,22 +25,6 @@ export interface ProjectView {
   updatedAt: number;
   origin?: "default" | "server";
   sessionCount?: number;
-}
-
-export type ProjectStatusState = "available" | "missing" | "not_directory" | "permission_denied";
-export type ProjectUnavailableReason = "path_not_found" | "not_directory" | "permission_denied";
-
-export interface ProjectStatus {
-  state: ProjectStatusState;
-  reason?: ProjectUnavailableReason | null;
-}
-
-export interface MemoryItemView {
-  id: string;
-  title: string;
-  detail: string;
-  tags: string[];
-  updatedAt: number;
 }
 
 export type ChatToolStatus =

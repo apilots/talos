@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { connectCdp, waitForPage, waitForExpression, waitForEvaluate } from "./desktop-cdp.mjs";
 import { evaluate } from "./desktop-smoke-evaluate.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -11,7 +12,8 @@ const repoRoot = path.resolve(desktopDir, "../..");
 const artifactDir = path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
 const smokeHome = path.join(artifactDir, "home");
 const talosHome = path.join(smokeHome, ".talos");
-const talosConfig = path.join(repoRoot, "conf/talos-dev.yaml");
+const talosConfigTemplate = path.join(repoRoot, "conf/talos-dev.yaml");
+const talosConfig = path.join(talosHome, "conf/talos.yaml");
 const modeSmokeFiles = [1, 2, 3].map((index) =>
   path.join(talosHome, "workspace-talos", "anonymous", `desktop-mode-smoke-${index}.txt`)
 );
@@ -37,6 +39,7 @@ const childEnv = {
   HOME: smokeHome,
   TALOS_HOME: talosHome,
   TALOS_CONFIG: talosConfig,
+  ...(!appExecutable ? { TALOS_RESOURCE_DIR: repoRoot } : {}),
   TALOS_LLM_ANTHROPIC_API_KEY: process.env.TALOS_LLM_ANTHROPIC_API_KEY ?? "desktop-smoke-dummy",
 };
 if (!appExecutable || explicitAppServerBin) {
@@ -50,7 +53,12 @@ function configureSmokeHome() {
   mkdirSync(confRoot, { recursive: true });
   mkdirSync(workspaceRoot, { recursive: true });
   mkdirSync(skillRoot, { recursive: true });
-  copyFileSync(talosConfig, path.join(confRoot, "talos.yaml"));
+  const config = readFileSync(talosConfigTemplate, "utf8").replace(/(^desktop:\r?\n[ \t]+connection_mode:)[^\n]+/m, "$1 local");
+  writeFileSync(talosConfig, config);
+  if (existsSync(path.join(repoRoot, ".env"))) {
+    copyFileSync(path.join(repoRoot, ".env"), path.join(talosHome, ".env"));
+    chmodSync(path.join(talosHome, ".env"), 0o600);
+  }
   modeSmokeFiles.forEach((file, index) => {
     writeFileSync(file, `DESKTOP_MODE_CONTENT_${index + 1}\n`);
   });
@@ -133,6 +141,15 @@ try {
   await evaluate(cdp, "location.hash = '#/'; undefined");
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
   await captureScreenshot(cdp, path.join(artifactDir, "home.png"));
+  await cdp.call("Page.reload");
+  await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
+  assert(await evaluate(cdp, 'document.activeElement!==document.querySelector(`button[aria-label="Collapse sidebar"]`)'), "Refreshing the sidebar automatically focused Collapse.");
+  await captureScreenshot(cdp, path.join(artifactDir, "sidebar-default.png"));
+  await installSmokeInvoke(cdp);
+  await evaluate(cdp, 'document.querySelector(`button[aria-label="Collapse sidebar"]`).focus()');
+  assert(await evaluate(cdp, '(()=>{const style=getComputedStyle(document.querySelector(`button[aria-label="Collapse sidebar"]`));return style.outlineStyle==="none" || style.outlineColor==="rgba(0, 0, 0, 0)";})()'), "Sidebar retained native accent outline.");
+  await captureScreenshot(cdp, path.join(artifactDir, "sidebar-focus.png"));
+  await evaluate(cdp, "document.activeElement.blur()");
 
   const interaction = process.env.TALOS_DESKTOP_SMOKE_INTERACTION === "1"
     ? await runInteractionSmoke(cdp, artifactDir)
@@ -232,6 +249,7 @@ try {
     electron.kill("SIGKILL");
   }
   cdp?.close?.();
+  rmSync(path.join(talosHome, ".env"), { force: true });
 }
 
 async function runInteractionSmoke(cdp, outputDir) {
@@ -660,9 +678,9 @@ async function waitForPendingUserAction(cdp, sessionId, timeoutMs) {
       afterEventId: null,
       replayLimit: null
     }).then((response) => response.replay.events
-      .map((entry) => entry.event.payload)
+      .map((entry) => entry.event.data.payload)
       .reverse()
-      .find((payload) => payload.type === 'waitingForInput' && payload.data.type === 'userAction')
+      .find((payload) => payload.type === 'waitingForInput' && payload.data?.type === 'userAction')
       ?.data.action ?? null)`,
     timeoutMs,
   );
@@ -718,111 +736,13 @@ function isPortFree(port) {
   });
 }
 
-async function waitForPage(port, timeoutMs) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-      const pages = await response.json();
-      const page = pages.find((candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl);
-      if (page) {
-        return page;
-      }
-    } catch {
-      // Electron may not have opened the debugging endpoint yet.
-    }
-    await sleep(200);
-  }
-  throw new Error(`Timed out waiting for Electron debugging page on port ${port}.`);
-}
-
-function connectCdp(url) {
-  const socket = new WebSocket(url);
-  let nextId = 1;
-  const pending = new Map();
-
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    if (!message.id) {
-      return;
-    }
-    const request = pending.get(message.id);
-    if (!request) {
-      return;
-    }
-    pending.delete(message.id);
-    if (message.error) {
-      request.reject(new Error(message.error.message));
-      return;
-    }
-    request.resolve(message.result);
-  });
-
-  return new Promise((resolve, reject) => {
-    socket.addEventListener("open", () => {
-      resolve({
-        call(method, params = {}) {
-          const id = nextId++;
-          socket.send(JSON.stringify({ id, method, params }));
-          return new Promise((callResolve, callReject) => {
-            const timeout = setTimeout(() => {
-              if (pending.delete(id)) {
-                callReject(new Error(`CDP request timed out: ${method}`));
-              }
-            }, 30_000);
-            pending.set(id, {
-              resolve(value) {
-                clearTimeout(timeout);
-                callResolve(value);
-              },
-              reject(error) {
-                clearTimeout(timeout);
-                callReject(error);
-              },
-            });
-          });
-        },
-        close() {
-          socket.close();
-        },
-      });
-    }, { once: true });
-    socket.addEventListener("error", () => reject(new Error("Failed to connect to Electron CDP.")), { once: true });
-  });
-}
-
-async function waitForExpression(cdp, expression, timeoutMs) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    if (await evaluate(cdp, expression)) {
-      return;
-    }
-    await sleep(200);
-  }
-  throw new Error(`Timed out waiting for expression: ${expression}`);
-}
-
-async function waitForEvaluate(cdp, expression, timeoutMs) {
-  const startedAt = Date.now();
-  let lastError;
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      return await evaluate(cdp, expression);
-    } catch (error) {
-      lastError = error;
-      await sleep(300);
-    }
-  }
-  throw new Error(`Timed out evaluating expression: ${expression}\n${errorMessage(lastError)}`);
-}
-
 async function captureScreenshot(cdp, outputPath) {
   const result = await cdp.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   writeFileSync(outputPath, Buffer.from(result.data, "base64"));
 }
 
 async function clickAnchorByHash(cdp, hash) {
-  const clicked = await evaluate(
+  await waitForExpression(
     cdp,
     `(() => {
       const target = ${JSON.stringify(hash)};
@@ -834,15 +754,15 @@ async function clickAnchorByHash(cdp, hash) {
       anchor.click();
       return true;
     })()`,
+    30_000,
   );
-  assert(clicked, `Anchor not found for hash: ${hash}`);
 }
 
 async function clickAccountMenuSettings(cdp) {
   const opened = await evaluate(
     cdp,
     `(() => {
-      const button = document.querySelector("button[aria-expanded]");
+      const button = document.querySelector("button[aria-label=Anonymous]");
       if (!button) return false;
       button.click();
       return true;

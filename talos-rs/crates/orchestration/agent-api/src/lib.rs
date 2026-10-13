@@ -18,8 +18,9 @@ pub use event::{
     AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
     AgentMessageStarted, AgentPendingInput, AgentRunMetrics, AgentStopReason,
     AgentToolCallArgumentsDelta, AgentTurnCompleted, AgentTurnFailed, AgentTurnStarted,
-    RecoverTimelineResponse, SessionActiveTurnResponse, TimelineActiveTurn, TimelineCursorStatus,
-    TimelineEvent, TimelineEventPayload, TimelineReplay, TimelineSystemNotice,
+    RecoverTimelineResponse, SessionActiveTurnChangedNotification, SessionActiveTurnResponse,
+    TimelineActiveTurn, TimelineCursorStatus, TimelineEvent, TimelineEventPayload, TimelineReplay,
+    TimelineSystemNotice,
 };
 pub use history::{SessionHistoryResponse, SessionHistoryTurn};
 pub use lifecycle::ActiveTurnState;

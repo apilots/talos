@@ -1,7 +1,9 @@
 mod access;
 mod auth;
 mod auth_session;
+mod computers;
 mod errors;
+mod sync;
 
 #[cfg(test)]
 #[path = "error_contract_tests.rs"]
@@ -10,6 +12,7 @@ mod events;
 mod files;
 mod fs;
 mod lifecycle;
+mod mcp_oauth;
 mod memory_files;
 mod message_queue;
 mod messages;
@@ -62,7 +65,7 @@ use self::messages::{
 };
 use self::misc::{
     get_config_handler, get_llm_handler, health_handler, list_models_handler, put_config_handler,
-    put_llm_handler, shutdown_signal,
+    put_llm_handler, reload_config_handler, shutdown_signal,
 };
 use self::plugin::{
     add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
@@ -191,10 +194,13 @@ impl HttpServer {
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
             .route("/v1/config/:path", get(get_config_handler))
             .route("/v1/config", put(put_config_handler))
+            .route("/v1/config/reload", post(reload_config_handler))
             .route(
                 "/v1/fs/directory",
                 get(read_directory_handler).post(create_directory_handler),
             )
+            .merge(computers::routes())
+            .merge(sync::routes())
             .route("/v1/sessions", get(list_sessions_handler))
             .route(
                 "/v1/projects",
@@ -241,6 +247,7 @@ impl HttpServer {
                 post(remove_plugin_source_handler),
             )
             .route("/v1/plugin/search", post(search_plugins_handler))
+            .route("/v1/mcp/oauth/callback", get(mcp_oauth::callback_handler))
             .route("/v1/mcp/servers", get(list_mcp_servers_handler))
             .route("/v1/mcp/servers/import", post(import_mcp_server_handler))
             .route(

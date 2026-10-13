@@ -10,14 +10,14 @@ Install the latest release:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh
+  https://github.com/apilots/talos/releases/latest/download/install.sh | sh
 ```
 
 Install a specific version:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL \
-  https://github.com/apilots/talos-releases/releases/latest/download/install.sh \
+  https://github.com/apilots/talos/releases/latest/download/install.sh \
   | sh -s -- --version 0.1.7
 ```
 
@@ -42,6 +42,8 @@ deploy/install/tests/install_test.sh
 
 `release_assets_test.sh` additionally verifies and installs from the fully assembled four-platform
 release asset directory. The release workflow runs it after generating the final checksum manifest.
+The installer checks Talos releases first and falls back to archived `talos-releases` assets
+for versions that predate the migration.
 
 Run native and available Docker acceptance paths with:
 

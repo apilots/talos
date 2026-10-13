@@ -9,6 +9,7 @@ pub(crate) struct CreateSessionParams {
     pub source: SessionSource,
     pub user_id: String,
     pub target_agent: String,
+    pub execution_node_id: String,
     pub model_selection: Option<ModelSelection>,
     pub conf: Option<SessionConf>,
     pub workspace_id: String,

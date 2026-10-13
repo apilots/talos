@@ -11,6 +11,7 @@ async fn submit_start_turn_records_completed_turn_progress() {
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("hello"),
             model_selection: None,
@@ -62,6 +63,7 @@ async fn cancelled_turn_does_not_advance_session_progress() {
         &service,
         test_session(),
         StartTurnRequest {
+            node_id: None,
             session_id: "s1".to_string(),
             input: test_user_input("hello"),
             model_selection: None,

@@ -7,6 +7,7 @@ async fn concurrent_idempotent_submission_does_not_start_a_second_execution() {
         test_service(agent_execution.clone()).await;
     create_test_session_record(store.clone()).await;
     let request = StartTurnRequest {
+        node_id: None,
         session_id: "s1".to_string(),
         input: test_user_input("hello"),
         model_selection: None,
