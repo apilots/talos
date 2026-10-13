@@ -16,8 +16,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
-          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
         run: |
+          AUTHOR_ASSOCIATION="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.author_association')"
           case "${AUTHOR_ASSOCIATION}" in
             OWNER|MEMBER|COLLABORATOR)
               echo "Trusted pull request author: ${AUTHOR_ASSOCIATION}."
