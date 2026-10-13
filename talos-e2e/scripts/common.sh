@@ -600,12 +600,11 @@ build_app_server_binaries() {
 
 api_data_json() {
   local json="$1"
-  JSON_INPUT="$json" python3 - <<'PY'
+  printf '%s' "$json" | python3 -c '
 import json
-import os
 import sys
 
-raw = os.environ.get("JSON_INPUT", "")
+raw = sys.stdin.read()
 try:
     data = json.loads(raw)
 except Exception as exc:
@@ -617,19 +616,18 @@ if not (isinstance(data, dict) and data.get("status") == "success" and "data" in
     sys.exit(1)
 
 print(json.dumps(data["data"], ensure_ascii=False, separators=(",", ":")))
-PY
+'
 }
 
 json_get() {
   local json="$1"
   local key="$2"
-  JSON_INPUT="$json" python3 - "$key" <<'PY'
+  printf '%s' "$json" | python3 -c '
 import json
-import os
 import sys
 
 key = sys.argv[1]
-raw = os.environ.get("JSON_INPUT", "")
+raw = sys.stdin.read()
 if not raw:
     print("")
     sys.exit(0)
@@ -653,7 +651,7 @@ elif isinstance(node, (dict,list)):
     print(json.dumps(node))
 else:
     print(node)
-PY
+' "$key"
 }
 
 api_json_get() {

@@ -92,7 +92,7 @@ def public(cluster, path, user='alice', method='GET', body=None):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                        urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=cluster.cert)))
     try:
-        response = opener.open(request, timeout=15)
+        response = opener.open(request, timeout=30)
     except urllib.error.HTTPError as error:
         response = error
     with response:

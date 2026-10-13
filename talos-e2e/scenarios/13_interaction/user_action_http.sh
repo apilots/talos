@@ -159,16 +159,19 @@ assert_terminal_turn() {
   local case_name="$1"
   local turn_id="$2"
   local expected_status="$3"
-  local active_json history_json
+  local active_json history_json history_file
   active_json="$(get_active_turn_json)"
   history_json="$(get_session_history_json)"
-  ACTIVE_JSON="${active_json}" HISTORY_JSON="${history_json}" TURN_ID="${turn_id}" EXPECTED_STATUS="${expected_status}" python3 - <<'PY'
+  history_file="$(scenario_report_path "${case_name}_history.json")"
+  printf '%s' "${history_json}" > "${history_file}"
+  ACTIVE_JSON="${active_json}" HISTORY_JSON_FILE="${history_file}" TURN_ID="${turn_id}" EXPECTED_STATUS="${expected_status}" python3 - <<'PY'
 import json
 import os
+from pathlib import Path
 
 active = json.loads(os.environ["ACTIVE_JSON"])["activeTurn"]
 assert active is None, active
-history = json.loads(os.environ["HISTORY_JSON"])
+history = json.loads(Path(os.environ["HISTORY_JSON_FILE"]).read_text())
 turns = [
     turn for turn in history["data"]
     if turn["identity"]["turnId"] == os.environ["TURN_ID"]

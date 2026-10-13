@@ -284,7 +284,9 @@ class Cluster:
                     chunk = os.read(process.stdout.fileno(), 65536)
                     if not chunk:
                         active = self.query('SELECT state FROM agent_active_turns WHERE session_id = ?', (session,))
-                        raise AssertionError(f'SSE ended without terminal event; curl_exit={process.wait(timeout=5)}, active_turn={active}')
+                        exit_code = process.wait(timeout=5)
+                        stderr = process.stderr.read().decode(errors='replace')[-4096:]
+                        raise AssertionError(f'SSE ended without terminal event; curl_exit={exit_code}, curl_stderr={stderr!r}, active_turn={active}')
                     pending += chunk
                     while b'\n\n' in pending:
                         frame, pending = pending.split(b'\n\n', 1)
@@ -308,6 +310,12 @@ class Cluster:
             if process.poll() is None:
                 process.terminate()
             process.communicate(timeout=5)
+
+    def wait_worker_settlement(self, name):
+        markers = self.nodes[name]['home'] / 'data/worker/session-heads'
+        wait_for(lambda: bool(list(markers.glob('*.json'))) and all(
+            (lambda marker: marker['active'] is None and marker['cleanup_confirmed'])(json.loads(path.read_text()))
+            for path in markers.glob('*.json')), 'Worker terminal cursor committed before restart', 40)
 
     def verify_file(self, name, filename, marker):
         matches = list(self.nodes[name]['home'].rglob(filename))

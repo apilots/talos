@@ -82,6 +82,7 @@ def plugins(cluster):
     cluster.events('alice', session, data(ack)['turnId'],90)
     passed('plugin_mutations_are_per_node_and_do_not_block_other_computers')
 
+    cluster.wait_worker_settlement('alice-a')
     cluster.stop(a['process'])
     wait_for(lambda: not cluster.info('alice-a').get('available'), 'Worker disconnect')
     cluster.start_worker('alice-a')

@@ -93,10 +93,7 @@ def oauth(cluster):
     # Stop only after the Worker has received the terminal cursor acknowledgement.
     # A terminal SSE fact precedes final RPC cleanup/commit, so restarting here
     # without observing handoff readiness can interrupt that legitimate settlement.
-    markers = a['home'] / 'data/worker/session-heads'
-    wait_for(lambda: bool(list(markers.glob('*.json'))) and all(
-        (lambda marker: marker['active'] is None and marker['cleanup_confirmed'])(json.loads(path.read_text()))
-        for path in markers.glob('*.json')), 'Worker terminal cursor committed before restart', 40)
+    cluster.wait_worker_settlement('alice-a')
 
     cluster.stop(a['process']);cluster.start_worker('alice-a')
     wait_for(lambda:cluster.info('alice-a').get('available'),'OAuth Worker UUID restart')
