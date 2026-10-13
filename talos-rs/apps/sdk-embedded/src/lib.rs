@@ -66,7 +66,11 @@ impl EmbeddedServerClient {
         let auth_enabled = runtime.config.gateway.auth;
         Self::from_runtime_with_actor(
             runtime,
-            Actor::regular("local"),
+            if auth_enabled {
+                Actor::regular("local")
+            } else {
+                Actor::auth_disabled()
+            },
             auth_enabled,
             /*actor_overridden*/ false,
         )

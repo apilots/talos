@@ -218,6 +218,7 @@ run_linux_docker_tui_install() {
   target_dir="${TALOS_E2E_TMP_ROOT}/tui-install-linux-target-${docker_arch}"
   container_report_dir="${SCENARIO_REPORT_DIR}/container"
   mkdir -p "${target_dir}" "${container_report_dir}"
+  mkdir -p "${REPO_ROOT}/talos-rs/target"
 
   docker build -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
   docker run --rm \

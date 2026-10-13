@@ -10,6 +10,7 @@ RUN apt-get update \
         libssl-dev \
         perl \
         pkg-config \
+        protobuf-compiler \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 
