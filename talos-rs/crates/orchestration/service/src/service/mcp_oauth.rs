@@ -29,11 +29,14 @@ impl TalosService {
         actor: &Actor,
         mut request: McpAuthenticationStartRequest,
     ) -> TalosResult<McpAuthenticationStartResponse> {
-        let node_id = request
+        let requested_node_id = request
             .node_id
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
-        let environment = self.worker_environment(actor, Some(&node_id)).await?;
+        let node_id = self
+            .connect_selected_computer(actor, &requested_node_id)
+            .await?;
+        let environment = self.access.worker_environment(actor, &node_id).await?;
         if self.mode() == talos_config::DeploymentMode::Local && node_id == "embedded" {
             return environment
                 .start_mcp_authentication(
@@ -83,7 +86,7 @@ impl TalosService {
         if state.is_empty() || response.expires_at <= now() || response.expires_at > now() + 600 {
             return Err(invalid());
         }
-        let current = self.worker_environment(actor, Some(&node_id)).await?;
+        let current = self.access.worker_environment(actor, &node_id).await?;
         if !Arc::ptr_eq(&current, &environment) {
             return Err(TalosError::new(
                 ErrorCode::ServiceUnavailable,
@@ -147,8 +150,11 @@ impl TalosService {
         })?;
         let result = async {
             let original = route.environment.upgrade().ok_or_else(unavailable)?;
+            // Admission already resolved this route. Recheck ownership and the current
+            // connection without reopening account sync with a browser callback.
             let environment = self
-                .worker_environment(&route.actor, Some(&route.node_id))
+                .access
+                .worker_environment(&route.actor, &route.node_id)
                 .await?;
             if !Arc::ptr_eq(&original, &environment) {
                 return Err(unavailable());

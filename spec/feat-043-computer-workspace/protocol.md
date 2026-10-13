@@ -375,6 +375,9 @@ Use the existing ten-minute attempt deadline and pending-attempt capacity as the
 no PKCE/token and is not persisted. State is not rewritten or accepted as a user identity. For shared embedded,
 the route retains the authorized initiating Actor; callbacks cannot acquire administrator rights themselves.
 
+Resolve the selected Computer alias to its execution node once at authorization start and retain that
+node in the route. The callback rechecks owner access and the same live Worker connection through the
+existing execution access path; it does not initiate account synchronization or reconnect another host.
 The callback requires no browser bearer header: the recorded route supplies the trusted Actor/target, and
 the original Worker SDK verifies state and issuer. Only one callback per attempt is processed concurrently;
 the Worker remains the authority for one-time state consumption, token exchange and durable credential commit.
