@@ -123,7 +123,9 @@ class Cluster:
 
     def start_process(self, name, argv, env=None):
         with (REPORT / f'{name}.log').open('ab') as output:
-            process = subprocess.Popen(argv, env=env, stdout=output, stderr=subprocess.STDOUT)
+            # Absolute executables and CLOEXEC descriptors allow posix_spawn, avoiding gRPC fork hooks.
+            process = subprocess.Popen(argv, executable=shutil.which(str(argv[0])), close_fds=False,
+                                       env=env, stdout=output, stderr=subprocess.STDOUT)
         self.processes.append(process)
         return process
 
@@ -271,6 +273,7 @@ class Cluster:
         if after:
             url += '&after_event_id=' + urllib.parse.quote(after)
         process = subprocess.Popen(['curl', '-fsSN', '--max-time', str(timeout), '-H', f'Authorization: Bearer {token}', url],
+                                   executable=shutil.which('curl'), close_fds=False,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         events, pending = [], b''
         started = time.monotonic()

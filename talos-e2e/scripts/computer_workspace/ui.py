@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import selectors
+import shutil
 import subprocess
 import sys
 import time
@@ -19,6 +20,7 @@ class Driver:
         self.pending = b''
         self.log = (REPORT / 'ui-driver.log').open('ab')
         self.process = subprocess.Popen(['node', str(ROOT / 'talos-app/desktop/scripts/computer-ui-driver.mjs')],
+                                        executable=shutil.which('node'), close_fds=False,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log)
         cluster.processes.append(self.process)
         self.selector = selectors.DefaultSelector()

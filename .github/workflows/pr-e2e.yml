@@ -79,8 +79,7 @@ jobs:
       - name: Install macOS system dependencies
         if: runner.os == 'macOS'
         run: |
-          brew install caddy curl protobuf
-          echo "$(brew --prefix curl)/bin" >> "$GITHUB_PATH"
+          brew install caddy protobuf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
