@@ -30,7 +30,8 @@ export function AppLayout() {
     const display = () => {
       dialog.close();
       modal = !viewport.matches;
-      if (viewport.matches) dialog.show();
+      // A persistent non-modal sidebar must not run dialog.show()'s autofocus steps.
+      if (viewport.matches) dialog.open = true;
       else dialog.showModal();
     };
     display();

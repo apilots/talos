@@ -110,6 +110,10 @@ def run(cluster):
             driver.call(name, 'select', nodeId=local_id)
         passed('real_web_device_login_selects_owned_outbound_computers')
 
+        driver.call('a', 'reload')
+        driver.call('a', 'wait', expression='Boolean(document.querySelector(`button[aria-label="Collapse sidebar"]`))')
+        require(driver.call('a', 'evaluate', expression='document.activeElement!==document.querySelector(`button[aria-label="Collapse sidebar"]`)'), 'Refresh automatically focused Sidebar Collapse')
+        driver.call('a', 'screenshot', path=str(REPORT / 'sidebar-default.png'))
         driver.call('a', 'evaluate', expression='document.querySelector(`button[aria-label="Collapse sidebar"]`).focus()')
         require(driver.call('a', 'evaluate', expression='(()=>{const style=getComputedStyle(document.querySelector(`button[aria-label="Collapse sidebar"]`));return style.outlineStyle==="none" || style.outlineColor==="rgba(0, 0, 0, 0)";})()'), 'Sidebar button retained native accent outline')
         driver.call('a', 'screenshot', path=str(REPORT / 'sidebar-focus.png'))
