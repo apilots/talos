@@ -44,6 +44,9 @@ chore(release): prepare v<version>
 
 ## 稳定阶段只修 bug
 
+每次推送 `release-*` 分支都会通过 `release-source.yml` 运行完整源码门禁。正式标签复用同一门禁和已验证的 Cargo 锁文件。分支预检不创建标签、发布产物或镜像，也不部署服务；发布脚本应在候选预检通过后运行。
+源码门禁还会构建真实的开发配置 Server/TUI 包并校验内容。Linux 包必须在产品二进制旁包含 sandbox launcher；原生安装验收会先探测安装后的 launcher，再检查产品运行。
+
 release 分支只接受 bug 修复，以及修复所需的回归测试、发布文档或打包纠错。
 准备提交之后统一使用 `fix` 提交；不增加特性、不做无关重构，也不将持续开发中的
 main 整体合入。需要共享修复时 cherry-pick 对应提交。
@@ -85,6 +88,11 @@ scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.
 
 所有 release job 使用 GitHub-hosted runner。没有跳过准出的输入，也不能用本地验证代替。
 要重跑已有 tag 的 release workflow 时执行：
+
+每个产品归档和 Desktop 安装包都携带 Talos `LICENSE` 与 `NOTICE`；Server 和 Worker
+镜像将三份许可文件安装到 `/usr/share/licenses/talos`。其中 `THIRD_PARTY_NOTICES`
+列出第三方依赖的许可类别和固定版本源码位置，包括 MPL 组件的源码。Release job 在上传前
+检查各平台制品内容，GitHub Release 也并列提供这些文件及校验和、产品制品。
 
 ```bash
 gh workflow run release.yml --repo apilots/talos \

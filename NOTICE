@@ -1,0 +1,47 @@
+Talos includes code and mechanisms adapted from OpenAI Codex, licensed under
+the Apache License, Version 2.0, at commit:
+
+  a26bc337cf61cbca9cd9ac25b25c88c32186eb20
+
+## Linux sandbox adaptation
+
+Source repository: https://github.com/openai/codex
+Source paths:
+
+  codex-rs/linux-sandbox/src/bwrap.rs
+  codex-rs/linux-sandbox/src/launcher.rs
+  codex-rs/linux-sandbox/src/landlock.rs
+  codex-rs/linux-sandbox/src/linux_run_main.rs
+
+Target crate: `talos-rs/crates/action/linux-sandbox`
+
+Adapted mechanisms are limited to the outer helper -> bubblewrap -> inner
+helper execution sequence, no_new_privs, and restricted-network seccomp rules.
+Codex DTOs, Landlock, bundled bubblewrap, proxy routing, glob expansion, and
+synthetic/protected-create mount machinery are not included.
+
+## macOS sandbox adaptation
+
+Source repository: https://github.com/openai/codex
+Source paths:
+
+  codex-rs/sandboxing/src/seatbelt.rs
+  codex-rs/sandboxing/src/seatbelt_base_policy.sbpl
+  codex-rs/sandboxing/src/seatbelt_network_policy.sbpl
+
+Target crate: `talos-rs/crates/action/macos-sandbox`
+
+The source material is licensed under Apache License 2.0. Talos rewrites the
+provider against its own sandbox SPI and does not import Codex protocol,
+network proxy, exec-server, or filesystem policy objects.
+
+## Tools sandbox path-resolution adaptation
+
+Source repository: https://github.com/openai/codex
+Source path: `codex-rs/exec-server/src/local_file_system.rs`
+Target crate: `talos-rs/crates/action/tools-sandbox`
+
+The source material is licensed under Apache License 2.0. Talos adapts only
+the nearest-existing-ancestor path resolution algorithm and adds fail-closed
+broken-symlink handling. Codex PathUri, remote filesystem, fs helper protocol,
+copy implementation, and executor DTOs are not included.

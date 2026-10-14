@@ -23,6 +23,7 @@ ARG REVISION=unknown
 ARG DEBIAN_FRONTEND=noninteractive
 LABEL org.opencontainers.image.title="Talos Worker" \
       org.opencontainers.image.description="User-owned Talos execution Worker" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/apilots/talos" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
@@ -36,7 +37,11 @@ RUN groupadd --gid 10001 talos \
 COPY --from=rust-builder /artifacts/talos-worker /opt/talos/bin/talos-worker
 COPY --from=rust-builder /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
 COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
+COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 RUN /opt/talos/bin/talos-worker --version \
+    && test -s /usr/share/licenses/talos/LICENSE \
+    && test -s /usr/share/licenses/talos/NOTICE \
+    && test -s /usr/share/licenses/talos/THIRD_PARTY_NOTICES \
     && /opt/talos/bin/talos-linux-sandbox-launcher --probe-seccomp
 ENV HOME=/home/talos \
     SHELL=/bin/bash \

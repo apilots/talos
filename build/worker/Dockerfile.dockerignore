@@ -1,5 +1,8 @@
 **
 !talos/
+!talos/LICENSE
+!talos/NOTICE
+!talos/THIRD_PARTY_NOTICES
 !talos/conf/
 !talos/conf/**
 !talos/talos-rs/

@@ -2,6 +2,8 @@ name: Build release
 
 on:
   push:
+    branches:
+      - "release-*"
     tags:
       - "v*"
   workflow_dispatch:
@@ -25,6 +27,7 @@ concurrency:
 
 jobs:
   prepare:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
     name: Prepare release metadata
     runs-on: ubuntu-latest
     outputs:
@@ -174,34 +177,16 @@ jobs:
   quality:
     name: Source release gate
     needs: [prepare, validate-source]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate-source.outputs.source_sha }}
-          fetch-depth: 0
-          fetch-tags: true
+    uses: ./.github/workflows/release-source.yml
+    with:
+      source_ref: ${{ needs.validate-source.outputs.source_sha }}
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: talos-rs
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-nextest
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9.14.4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: talos-app/pnpm-lock.yaml
-      - run: pnpm --dir talos-app install --frozen-lockfile
-      - name: Run Talos release checks
-        run: bash scripts/check-release.sh
+  candidate-quality:
+    name: Validate unpublished candidate
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release-') }}
+    uses: ./.github/workflows/release-source.yml
+    with:
+      source_ref: ${{ github.sha }}
 
   build:
     name: Build ${{ matrix.name }}
@@ -262,6 +247,21 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Use validated Cargo dependency resolution
+        uses: actions/download-artifact@v4
+        with:
+          name: release-cargo-lockfile
+          path: talos-rs
+
+      - name: Install Protocol Buffer compiler
+        run: |
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            brew install protobuf
+          else
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -294,6 +294,12 @@ jobs:
           TUI_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: ./build.sh "${{ matrix.build_target }}"
+
+      - name: Verify packaged license and product contents
+        env:
+          PROFILE: release
+          PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
+        run: bash build/scripts/verify-release-artifacts.sh "${{ matrix.product_subdir }}"
 
       - name: Verify native TUI installation
         if: ${{ matrix.build_target == 'tui' }}
@@ -360,6 +366,12 @@ jobs:
           path: talos
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Use validated Cargo dependency resolution
+        uses: actions/download-artifact@v4
+        with:
+          name: release-cargo-lockfile
+          path: talos/talos-rs
 
       - name: Set Docker metadata
         id: docker_metadata
@@ -589,6 +601,7 @@ jobs:
 
           mkdir -p release-assets
           install -m 755 deploy/install/install.sh release-assets/install.sh
+          cp LICENSE NOTICE THIRD_PARTY_NOTICES release-assets/
           find downloaded -type f -print0 | while IFS= read -r -d '' file; do
             base="$(basename "${file}")"
             group="$(basename "$(dirname "${file}")")"

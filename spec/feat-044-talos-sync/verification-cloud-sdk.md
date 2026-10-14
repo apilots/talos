@@ -12,13 +12,12 @@ re-export; no direct types dependency, old package alias, path or patch remains.
 The original origin-only API URL and `with_access_token` calls are preserved.
 
 Rust quality/native-install CI, Server/Worker images and SDK-only sandbox/install
-containers no longer checkout, copy or mount the private Cloud repository.
-Real authentication E2E still starts the Cloud service from its source fixture;
-its package is `talos-cloud-server`, with the existing `cloud-server` binary.
-The independent Sync server also consumes the public Cloud SDK. Its product
-image and the Talos 19-group runner require no private SDK bundle or named
-context. Real authentication E2E alone retains the Cloud service source fixture.
-The Cloud service repository was not modified.
+containers use the published Cloud SDK and do not require Cloud source in their
+build contexts. The independent Sync server also consumes the public Cloud SDK;
+its product image and the Talos 19-group runner require no private SDK bundle or
+named context. Isolated authentication E2E launches a separately supplied fixture
+executable using `TALOS_CLOUD_SERVER_BIN` (or `cloud-server` on `PATH`); it does
+not require a Cloud source checkout.
 
 ## Observed checks
 

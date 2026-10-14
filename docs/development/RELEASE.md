@@ -49,6 +49,14 @@ do not backport them to an existing release branch as product bug fixes.
 
 ## Stabilize
 
+Each push to `release-*` runs the complete source gate before publication, using
+`release-source.yml`. Tag builds reuse that same gate and its validated Cargo
+lockfile. Branch checks do not create tags, publish packages or images, or deploy
+services. Wait for this candidate check before running the publication script.
+The source gate also builds real development Server and TUI packages and checks
+their contents. Linux packages include the sandbox launcher beside their binaries;
+native installation checks probe the installed launcher before runtime acceptance.
+
 The release branch accepts only bug fixes, including necessary regression tests
 and corrections to release documentation or packaging. Use `fix` subjects after
 the preparation commit; no features, unrelated refactors, or merges from advancing
@@ -96,6 +104,13 @@ is pushed, or when a maintainer manually retries an existing tag:
 
 All release jobs use GitHub-hosted runners. There is no skip-gate input or local
 validation substitute. To retry the workflow for an existing tag:
+
+Every product archive and Desktop package carries the Talos `LICENSE`,
+`NOTICE`, and `THIRD_PARTY_NOTICES`; Server and Worker images install them under
+`/usr/share/licenses/talos`. The release job verifies package contents before
+upload. The third-party notice identifies dependency license families and
+versioned source locations, including MPL-covered source. The GitHub Release
+also includes these files alongside checksums and product artifacts.
 
 ```bash
 gh workflow run release.yml --repo apilots/talos \

@@ -115,6 +115,16 @@ run_installed_tui_acceptance() {
   fi
   echo "CASE tui_install_version PASS platform=${platform} arch=${architecture} output=${version_output}"
 
+  if [[ "${platform}" == "linux" ]]; then
+    local sandbox_launcher="${install_root}/current/bin/talos-linux-sandbox-launcher"
+    [[ -x "${sandbox_launcher}" ]] || {
+      echo "Installed Linux sandbox launcher is missing: ${sandbox_launcher}" >&2
+      exit 1
+    }
+    "${sandbox_launcher}" --probe-seccomp
+    echo "CASE tui_install_sandbox_runtime PASS platform=${platform} arch=${architecture}"
+  fi
+
   [[ ! -e "${talos_home}" ]] || {
     echo "Talos home must be empty before first-run validation: ${talos_home}" >&2
     exit 1

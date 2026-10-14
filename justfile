@@ -66,6 +66,9 @@ test *args:
       echo "cargo-nextest is required. Run: just install-tools" >&2; \
       exit 127; \
     fi
+    @if [ "$(uname -s)" = "Linux" ]; then \
+      cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher; \
+    fi
     RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --no-fail-fast "$@"
 
 # Run fast Clippy checks for selected packages without linting path dependencies.

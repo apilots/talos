@@ -43,6 +43,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.title="Talos Server" \
       org.opencontainers.image.description="Talos HTTP API and WebUI server" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/apilots/talos" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
@@ -71,9 +72,13 @@ COPY --from=rust-builder /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/
 COPY --from=web-builder /workspace/talos/talos-app/web/dist/ /opt/talos/webui/
 COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
 COPY talos/conf/migrations /opt/talos/conf/migrations
+COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 
 RUN chmod 755 /opt/talos/bin/talos-server /opt/talos/bin/talos-worker /opt/talos/bin/talos-linux-sandbox-launcher \
   && chown -R talos:talos /home/talos \
+  && test -s /usr/share/licenses/talos/LICENSE \
+  && test -s /usr/share/licenses/talos/NOTICE \
+  && test -s /usr/share/licenses/talos/THIRD_PARTY_NOTICES \
   && /opt/talos/bin/talos-linux-sandbox-launcher --probe-seccomp \
   && bwrap --version \
   && /opt/talos/bin/talos-server --version \

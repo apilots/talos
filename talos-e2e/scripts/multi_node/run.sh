@@ -16,6 +16,5 @@ if [[ "$1" != lease_expiry ]] && ! has_real_llm_key; then
 fi
 build_server_binary
 build_worker_binary
-MULTI_NODE_CLOUD_ROOT="${TALOS_CLOUD_REPO:-${REPO_ROOT}/../talos-cloud}"
-(cd "${MULTI_NODE_CLOUD_ROOT}/cloud-rs" && cargo build -q -p talos-cloud-server)
+export TALOS_CLOUD_SERVER_BIN="$(resolve_cloud_server_binary)"
 python3 "${MULTI_NODE_SCRIPT_DIR}/scenarios.py" "$1"

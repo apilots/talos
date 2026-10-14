@@ -449,7 +449,26 @@ async fn sandbox_approval_allow_once_replays_the_same_bash_invocation_once() {
     let workspace = tempfile::tempdir().expect("temp dir should create");
     let workspace_path = std::fs::canonicalize(workspace.path()).expect("workspace should resolve");
     let marker = workspace_path.join("approval-marker");
-    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
+    let mut paths = talos_tools_sandbox::SandboxRuntimePaths::default();
+    if cfg!(target_os = "linux") {
+        let executable = std::env::current_exe().expect("test executable must resolve");
+        let artifact_dir = executable.parent().expect("test artifact directory");
+        let runtime_dir = if artifact_dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+            artifact_dir.parent().expect("Cargo runtime directory")
+        } else {
+            artifact_dir
+        };
+        let helper = runtime_dir.join("talos-linux-sandbox-launcher");
+        assert!(
+            helper.is_file(),
+            "Run this scenario through just test to build the Linux helper"
+        );
+        paths.linux_helper_executable = Some(helper);
+    }
+    let registry = ToolRegistry::new_with_policy_and_sandbox(
+        ToolPolicy::allow_list(vec!["Bash"]),
+        ToolSandbox::with_runtime_paths(paths),
+    );
     register_core_local_tools(&registry);
     let invocation = registry
         .build_function_invocation(

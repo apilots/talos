@@ -1,0 +1,64 @@
+name: Release source checks
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Exact source commit to validate.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  source-checks:
+    name: Source release gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+      - name: Prepare Linux source-check prerequisites
+        run: |
+          echo "TMPDIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap protobuf-compiler ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.14.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: talos-app/pnpm-lock.yaml
+      - run: pnpm --dir talos-app install --frozen-lockfile
+      - name: Validate formal candidate version and history
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("talos-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          bash scripts/check-release-version.sh "${version}"
+
+      - name: Run Talos release checks
+        run: bash scripts/check-release.sh
+
+      - name: Preserve validated Cargo dependency resolution
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-cargo-lockfile
+          path: talos-rs/Cargo.lock
+          if-no-files-found: error
+          retention-days: 1

@@ -139,17 +139,27 @@ impl RegisteredWorker {
     pub async fn shutdown(mut self) -> TalosResult<()> {
         self.shutdown.cancel();
         self.rpc.adapter().clear_registration();
-        let (execution, transport) = match &self.owned_worker {
-            Some(worker) => (worker.shutdown().await, self.rpc.shutdown().await),
-            None => (self.rpc.adapter().drain_disconnected().await, Ok(())),
+        let execution = match &self.owned_worker {
+            Some(worker) => worker.shutdown().await,
+            None => self.rpc.adapter().drain_disconnected().await,
         };
+        // Register may still be publishing Direct clients back to this listener.
+        // Keep transport alive until its bounded response and Unregister finish.
         let registration = if let Some(runner) = self.runner.take() {
-            runner.await.map_err(|error| {
-                TalosError::internal_with_source(
-                    "Worker registration task failed; technical details were withheld.",
-                    error,
-                )
-            })?
+            runner
+                .await
+                .map_err(|error| {
+                    TalosError::internal_with_source(
+                        "Worker registration task failed; technical details were withheld.",
+                        error,
+                    )
+                })
+                .and_then(|result| result)
+        } else {
+            Ok(())
+        };
+        let transport = if self.owned_worker.is_some() {
+            self.rpc.shutdown().await
         } else {
             Ok(())
         };

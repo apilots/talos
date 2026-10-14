@@ -70,14 +70,13 @@ skills cases need real model credentials. The public app-server smoke case reuse
 the existing client to exercise model listing, Session creation, configuration and
 Workspace/Memory API reads without executing a model. Scenarios `11_auth`,
 `17_multi_node`, and `18_computer_workspace` still
-build the private Cloud service source; run them locally with the adjacent
-`talos-cloud` checkout until that fixture has a public, reproducible distribution.
+use the configured Cloud fixture executable for isolated account setup.
 The larger `19_computer_sync` topology also remains local acceptance. These
 exclusions are explicit and do not claim that the corresponding scenarios passed
 in GitHub CI.
 
 This PR subset keeps representative gated behavior while preventing fork code
-from receiving secrets. Provider-backed and private-service acceptance is
+from receiving secrets. Provider-backed and Cloud-fixture acceptance is
 maintainer-owned; it does not run automatically for each outside contribution.
 
 ## Environment requirements
@@ -87,7 +86,7 @@ maintainer-owned; it does not run automatically for each outside contribution.
 | Base server, CLI, and TUI | Rust toolchain and repository test tools |
 | Web and Desktop | Node.js, pnpm dependencies, and platform UI prerequisites |
 | Real model or MCP flows | Network access and the provider credentials required by the scenario preflight; use the maintainer workflow or local acceptance |
-| Cloud auth | Adjacent private `talos-cloud` source, explicit test credentials, and isolated resources |
+| Cloud auth | Cloud fixture executable (`TALOS_CLOUD_SERVER_BIN` or `cloud-server` on `PATH`), explicit test credentials, and isolated resources |
 | S3 files | curl with SigV4 support; pinned Versity Gateway v1.8.0 (downloaded and checksum-verified by group 12) |
 | Linux sandbox supplements | Docker on a supported host |
 | Release installation | Native target environment; Docker supplements Linux only |
@@ -95,9 +94,10 @@ maintainer-owned; it does not run automatically for each outside contribution.
 Each scenario owns its preflight and reports missing variables or tools. Read
 the selected script before running a credentialed or external-service group.
 
-`just e2e-group 17_multi_node` starts a real Cloud Auth server, one Talos Server,
-and three Talos Workers in isolated homes. It requires the adjacent `talos-cloud`
-checkout (or `TALOS_CLOUD_REPO`), `protoc`, and Python `grpcio`, `protobuf` and
+`just e2e-group 17_multi_node` starts a real Cloud Auth fixture, one Talos Server,
+and three Talos Workers in isolated homes. Set `TALOS_CLOUD_SERVER_BIN` to the
+fixture executable or make `cloud-server` available on `PATH`; no Cloud source
+checkout is required. It also needs `protoc`, Python `grpcio`, `protobuf` and
 `PyYAML`. Execution scenarios also require a real provider key in `.env`. The attachment
 scenario uses `deepseek-v4-flash-vision-exp` by default; `TALOS_E2E_IMAGE_MODEL`
 can select another configured, accessible vision model.
@@ -115,8 +115,8 @@ execution acceptance has resumed after provider funding. See the
 [scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
 
 Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
-Mac with Docker, the adjacent `talos-sync` and `talos-cloud` sources, and the same
-protobuf/Python/Node prerequisites. The group builds current Worker and Sync
+Mac with Docker, the adjacent `talos-sync` source, a Cloud fixture executable,
+and the same protobuf/Python/Node prerequisites. The group builds current Worker and Sync
 images, starts isolated real services, and checks owner isolation, hardware
 registration, realtime history, same-Computer continuation, offline outbox,
 and restart recovery. Only execution/recovery cases need funded model access;

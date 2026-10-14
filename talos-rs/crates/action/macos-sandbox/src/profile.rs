@@ -7,6 +7,7 @@ const RUNTIME_POLICY: &str = include_str!("seatbelt_runtime_policy.sbpl");
 const NETWORK_POLICY: &str = include_str!("seatbelt_network_policy.sbpl");
 pub(crate) fn build_seatbelt_profile(
     request: &SandboxExecutionRequest,
+    host_tmp: Option<&std::path::Path>,
 ) -> (String, Vec<(String, PathBuf)>) {
     let mut definitions = Vec::new();
     let mut sections = vec![BASE_POLICY.to_string(), RUNTIME_POLICY.to_string()];
@@ -28,10 +29,9 @@ pub(crate) fn build_seatbelt_profile(
         &mut definitions,
     ));
 
-    if let Some(host_tmp) = std::env::var_os("TMPDIR") {
-        let host_tmp = PathBuf::from(host_tmp);
-        if let Ok(canonical) = std::fs::canonicalize(&host_tmp) {
-            if let Some(policy) = xcrun_cache_policy(&host_tmp, &canonical) {
+    if let Some(host_tmp) = host_tmp {
+        if let Ok(canonical) = std::fs::canonicalize(host_tmp) {
+            if let Some(policy) = xcrun_cache_policy(host_tmp, &canonical) {
                 sections.push(policy);
             }
         }
