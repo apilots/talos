@@ -33,13 +33,13 @@ CDLA-Permissive-2.0
 The following packages declare CDLA-Permissive-2.0:
 
   webpki-root-certs 1.0.9
-  webpki-roots 1.0.7
+  webpki-roots 1.0.9
 
 Their source and license notices are available in the versioned crates.io
 packages:
 
   https://crates.io/crates/webpki-root-certs/1.0.9
-  https://crates.io/crates/webpki-roots/1.0.7
+  https://crates.io/crates/webpki-roots/1.0.9
 
 The Community Data License Agreement - Permissive, Version 2.0 is available
 at:
