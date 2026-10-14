@@ -1,7 +1,8 @@
-# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
 ARG RUST_IMAGE=rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 ARG RUNTIME_IMAGE=ubuntu:24.04
+ARG PRODUCT_STAGE=source
 
 FROM ${RUST_IMAGE} AS rust-builder
 WORKDIR /workspace
@@ -16,6 +17,13 @@ RUN --mount=type=cache,id=talos-worker-target-${TARGETPLATFORM},target=/workspac
     -p talos-worker-bin -p talos-linux-sandbox --release \
     && mkdir -p /artifacts \
     && cp talos/talos-rs/target/release/talos-worker talos/talos-rs/target/release/talos-linux-sandbox-launcher /artifacts/
+
+FROM rust-builder AS source
+
+FROM scratch AS packaged
+COPY talos/.release-product/bin/talos-worker talos/.release-product/bin/talos-linux-sandbox-launcher /artifacts/
+
+FROM ${PRODUCT_STAGE} AS product
 
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG VERSION=dev
@@ -34,8 +42,8 @@ RUN groupadd --gid 10001 talos \
     && useradd --uid 10001 --gid talos --home-dir /home/talos --create-home --shell /bin/bash talos \
     && chmod 0755 /home/talos \
     && install -d -o talos -g talos /opt/talos/bin /opt/talos/conf /home/talos/.talos
-COPY --from=rust-builder /artifacts/talos-worker /opt/talos/bin/talos-worker
-COPY --from=rust-builder /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
+COPY --from=product /artifacts/talos-worker /opt/talos/bin/talos-worker
+COPY --from=product /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
 COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
 COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 RUN /opt/talos/bin/talos-worker --version \

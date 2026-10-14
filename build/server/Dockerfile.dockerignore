@@ -4,6 +4,8 @@
 !talos/LICENSE
 !talos/NOTICE
 !talos/THIRD_PARTY_NOTICES
+!talos/.release-product/
+!talos/.release-product/**
 !talos/build/
 !talos/build/server/
 !talos/build/server/Dockerfile

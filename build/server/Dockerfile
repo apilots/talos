@@ -1,8 +1,9 @@
-# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 
 ARG NODE_IMAGE=node:24-bookworm
 ARG RUST_IMAGE=rust:bookworm@sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6
 ARG RUNTIME_IMAGE=ubuntu:24.04
+ARG PRODUCT_STAGE=source
 
 FROM ${NODE_IMAGE} AS web-builder
 WORKDIR /workspace/talos
@@ -35,6 +36,15 @@ RUN --mount=type=cache,id=talos-worker-target-${TARGETPLATFORM},target=/workspac
     && cp talos/talos-rs/target/release/talos-server talos/talos-rs/target/release/talos-worker \
       talos/talos-rs/target/release/talos-linux-sandbox-launcher /artifacts/
 
+FROM rust-builder AS source
+COPY --from=web-builder /workspace/talos/talos-app/web/dist/ /artifacts/webui/
+
+FROM scratch AS packaged
+COPY talos/.release-product/bin/ /artifacts/
+COPY talos/.release-product/webui/ /artifacts/webui/
+
+FROM ${PRODUCT_STAGE} AS product
+
 FROM ${RUNTIME_IMAGE} AS runtime
 
 ARG VERSION=dev
@@ -66,10 +76,10 @@ RUN groupadd --gid 10001 talos \
   && chmod 0755 /home/talos \
   && install -d -o talos -g talos /opt/talos/bin /opt/talos/conf /opt/talos/webui /home/talos/.talos
 
-COPY --from=rust-builder /artifacts/talos-server /opt/talos/bin/talos-server
-COPY --from=rust-builder /artifacts/talos-worker /opt/talos/bin/talos-worker
-COPY --from=rust-builder /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
-COPY --from=web-builder /workspace/talos/talos-app/web/dist/ /opt/talos/webui/
+COPY --from=product /artifacts/talos-server /opt/talos/bin/talos-server
+COPY --from=product /artifacts/talos-worker /opt/talos/bin/talos-worker
+COPY --from=product /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
+COPY --from=product /artifacts/webui/ /opt/talos/webui/
 COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
 COPY talos/conf/migrations /opt/talos/conf/migrations
 COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/

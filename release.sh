@@ -4,14 +4,15 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./release.sh <version|vversion> --notes <release-notes.md> [--yes] [--dry-run] [--watch]
+  ./release.sh <version|vversion> [--notes <release-notes.md>] [--yes] [--dry-run] [--watch]
 
 Examples:
-  ./release.sh 0.1.3 --notes /tmp/talos-v0.1.3.md
-  ./release.sh v0.1.3 --notes CHANGELOG.md --watch
+  ./release.sh 0.1.10 --dry-run --yes
+  ./release.sh v0.1.10 --notes output/release-notes/v0.1.10.md --watch
 
 This script creates the annotated source tag with canonical release notes.
-The tag workflow validates, builds, and publishes the GitHub Release and artifacts.
+Notes default to the successful candidate's standard generator output.
+The tag workflow reuses that source gate, then builds and verifies formal artifacts.
 EOF
 }
 
@@ -80,6 +81,9 @@ require_tag_annotation() {
   contents="$(git for-each-ref --format='%(contents)' "refs/tags/${TAG}")"
   [[ "${contents%%$'\n'*}" == "# Talos ${TAG}" ]] \
     || die "tag annotation must start with: # Talos ${TAG}"
+  git cat-file tag "${TAG}" | sed '1,/^$/d' > "${CANDIDATE_DIR}/tag-notes.md"
+  cmp "${NOTES_FILE}" "${CANDIDATE_DIR}/tag-notes.md" \
+    || die "tag annotation must equal the candidate's canonical Notes"
 }
 
 resolve_tag_action() {
@@ -104,8 +108,34 @@ resolve_tag_action() {
 }
 
 require_release_absent() {
-  if gh release view "${TAG}" >/dev/null 2>&1; then
+  local query_error="${CANDIDATE_DIR}/release-query-error"
+  if gh api "repos/${REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>"${query_error}"; then
     die "GitHub Release already exists: ${TAG}"
+  fi
+  if ! grep -Fq 'HTTP 404' "${query_error}"; then
+    cat "${query_error}" >&2
+    die "could not verify release absence"
+  fi
+}
+
+require_validated_candidate() {
+  CANDIDATE_RUN="$(python3 .github/scripts/release_candidate.py find \
+    --repository "${REPOSITORY}" --sha "${HEAD_SHA}" \
+    --outputs "${CANDIDATE_DIR}/candidate.outputs")"
+  local artifact_name
+  artifact_name="$(sed -n 's/^artifact_name=//p' "${CANDIDATE_DIR}/candidate.outputs")"
+  gh run download "${CANDIDATE_RUN}" --repo "${REPOSITORY}" \
+    --name "${artifact_name}" --dir "${CANDIDATE_DIR}"
+  python3 .github/scripts/release_candidate.py verify \
+    --repository "${REPOSITORY}" --sha "${HEAD_SHA}" \
+    --run-id "${CANDIDATE_RUN}" --directory "${CANDIDATE_DIR}"
+  if [[ -z "${NOTES_FILE}" ]]; then
+    mkdir -p output/release-notes
+    NOTES_FILE="${PWD}/output/release-notes/${TAG}.md"
+    cp "${CANDIDATE_DIR}/release-body.md" "${NOTES_FILE}"
+  else
+    cmp "${NOTES_FILE}" "${CANDIDATE_DIR}/release-body.md" \
+      || die "--notes must equal the candidate's standard generator output"
   fi
 }
 
@@ -179,11 +209,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "${NOTES_FILE}" ]] || die "--notes is required"
-[[ -f "${NOTES_FILE}" ]] || die "release notes file not found: ${NOTES_FILE}"
-[[ -s "${NOTES_FILE}" ]] || die "release notes file is empty: ${NOTES_FILE}"
-[[ "$(head -n 1 "${NOTES_FILE}")" == "# Talos ${TAG}" ]] \
-  || die "release notes must start with the heading: # Talos ${TAG}"
+if [[ -n "${NOTES_FILE}" ]]; then
+  [[ -f "${NOTES_FILE}" ]] || die "release notes file not found: ${NOTES_FILE}"
+fi
 
 require_command git
 require_command gh
@@ -194,10 +222,14 @@ require_release_branch
 require_synced_release_branch
 gh auth status >/dev/null
 bash scripts/check-release-version.sh "${VERSION}"
-resolve_tag_action
-require_release_absent
-
 HEAD_SHA="$(git rev-parse HEAD)"
+REPOSITORY="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
+mkdir -p output
+CANDIDATE_DIR="$(mktemp -d "${PWD}/output/release-candidate.XXXXXX")"
+trap 'rm -rf "${CANDIDATE_DIR}"' EXIT
+require_release_absent
+require_validated_candidate
+resolve_tag_action
 
 cat <<EOF
 Release summary:
@@ -205,6 +237,7 @@ Release summary:
   tag:        ${TAG}
   branch:     ${EXPECTED_BRANCH}
   commit:     ${HEAD_SHA}
+  candidate:  ${CANDIDATE_RUN}
   notes file: ${NOTES_FILE}
   tag action: ${TAG_ACTION}
   dry run:    ${DRY_RUN}

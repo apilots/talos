@@ -40,6 +40,11 @@ jobs:
           fi
           echo "base=${base}" >> "${GITHUB_OUTPUT}"
           echo "head=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+          if git diff --quiet "$base" "$HEAD_SHA" -- build/server build/worker .github/workflows/release.yml; then
+            echo "docker_checks=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "docker_checks=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Test repository policy scripts
         run: |
@@ -55,6 +60,25 @@ jobs:
           scripts/check-commit-message.sh
           --range "${{ steps.range.outputs.base }}"
           "${{ steps.range.outputs.head }}"
+
+      - name: Install workflow linter
+        uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint
+
+      - name: Validate release workflow syntax
+        run: actionlint .github/workflows/release.yml .github/workflows/release-source.yml
+
+      - name: Validate Docker configurations without building images
+        if: ${{ steps.range.outputs.docker_checks == 'true' }}
+        run: |
+          set -euo pipefail
+          for product in server worker; do
+            for stage in source packaged; do
+              docker buildx build --check --build-arg "PRODUCT_STAGE=${stage}" \
+                --file "build/${product}/Dockerfile" ..
+            done
+          done
 
       - name: Check changed files
         run: >-

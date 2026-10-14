@@ -49,13 +49,19 @@ do not backport them to an existing release branch as product bug fixes.
 
 ## Stabilize
 
-Each push to `release-*` runs the complete source gate before publication, using
-`release-source.yml`. Tag builds reuse that same gate and its validated Cargo
-lockfile. Branch checks do not create tags, publish packages or images, or deploy
-services. Wait for this candidate check before running the publication script.
-The source gate also builds real development Server and TUI packages and checks
-their contents. Linux packages include the sandbox launcher beside their binaries;
-native installation checks probe the installed launcher before runtime acceptance.
+Each push to `release-*` runs the full source gate once in `release-source.yml`.
+Its visible stages cover contracts, Rust formatting/check/tests, frontend quality
+and installer contracts. It does not build development product packages. Candidate
+runs are isolated per branch; superseded candidates cancel, while publication runs
+remain serialized. Release runner labels and Rust/Node/pnpm versions are fixed in
+`.github/release-toolchain.env`; update them through reviewed PRs.
+
+A successful candidate preserves its exact source SHA, run/attempt, preceding
+published tag, Cargo.lock, toolchain fingerprint and standard generated Notes for
+14 days. The tag workflow verifies and reuses that source gate and graph; it does
+not rerun the source suite or resolve a new dependency graph. Missing, expired or
+mismatched evidence fails explicitly. Rerun the candidate gate at the same source
+when evidence is unavailable, then review its new validated graph before tagging.
 
 The release branch accepts only bug fixes, including necessary regression tests
 and corrections to release documentation or packaging. Use `fix` subjects after
@@ -65,45 +71,69 @@ commit need not be HEAD: the final tag points to the fully corrected release tip
 The shared validator rejects non-fix commits after preparation. Commit classification
 is a guardrail; review must still ensure that a fix does not introduce a feature.
 
-Generate and edit English Notes from the preceding published tag to the final
-release tip. The source repository owns the only canonical Notes; the artifact
-repository copies them unchanged. The generator groups by commit type, excludes
-merge, release preparation, and next-development version commits, keeps legacy untyped subjects under Other
-Changes, rejects unknown typed subjects, and omits empty categories.
+The candidate generates English Notes with the existing
+`scripts/generate-release-notes.sh`, from the preceding published tag to the exact
+candidate SHA. Keep its commit-type sections and standard content. The same bytes
+become the local reviewed file, annotated tag and public Release body. Generic
+upgrade/rollback instructions belong in deployment documentation.
 
 ```bash
-scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.9.md
-./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --dry-run --yes
-./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --yes
+./release.sh 0.1.10 --dry-run --yes
+# Review output/release-notes/v0.1.10.md, then publish the same candidate.
+./release.sh 0.1.10 --yes
 ```
 
-The branch must be clean and synchronized with its matching remote. The script
-creates and pushes an annotated tag whose message is the canonical Release Notes.
-Pushing the tag starts Talos's release workflow. It publishes the GitHub Release
-only after source validation, quality checks, product builds, native TUI installation
-checks, and image publication succeed. If a workflow run fails, rerun `release.yml`
-for the same immutable tag after fixing the workflow or runner issue; never move a
-published tag or rebuild it from changed code.
+The branch must be clean, synchronized and backed by a successful candidate gate.
+`--notes <file>` is optional and must equal that candidate's generated Notes.
+The script verifies release absence and candidate provenance before pushing the
+annotated tag with verbatim text. It performs no product build or local package
+inspection. It never corrects tags or adds a publication recovery path.
+
+Before the first publication from a repository, or after moving the publishing
+repository, inspect **Manage Actions access** on existing GHCR packages and grant
+the publishing repository **Write**. Registry login and package metadata reads do
+not prove this permission; GitHub provides no equivalent Actions ACL read API.
+Keep the workflow's normal GITHUB_TOKEN and avoid fake uploads or personal-token
+workarounds. Check release immutability settings and finalize Notes before publish:
+immutable release tags/assets are locked, even when only their annotation changes.
 
 ## One release gate
 
 The `release.yml` workflow in `apilots/talos` runs this sequence when a `v*` tag
 is pushed, or when a maintainer manually retries an existing tag:
 
-1. Resolve the immutable tag to a source SHA; validate formal versions,
-   preparation/fix history, and nonempty canonical Notes stored in the annotated tag.
-2. Run `bash scripts/check-release.sh` from that source: commit and Notes contract
-   tests, Rust format/check/tests, frontend pipeline, and installer contract tests.
-3. Build the existing Desktop, WebUI, and four-platform TUI products. Run native
-   installation E2E on each TUI product before uploading it, reusing its built bundle
-   through `TUI_INSTALL_PRODUCT_DIR`.
-4. Build and publish Server and Worker images for `linux/amd64` and `linux/arm64`;
-   prepare checksums and the release manifest, then validate the final installer assets.
-5. Create the Talos GitHub Release only after every required job succeeds, using the
-   tag's canonical Notes unchanged. Optional R2 mirroring remains available.
+1. Resolve the immutable tag to a SHA and validate version/history and annotation.
+2. Verify the successful release-branch candidate for that exact SHA, run/attempt,
+   Notes, lock and toolchain. Import its source evidence without repeating tests.
+3. Build each of the eight formal product targets once using the validated lock.
+   Verify the build preserved that graph. Check the actual packages before upload;
+   each TUI's native acceptance checks and installs that same built bundle through
+   `TUI_INSTALL_PRODUCT_DIR`. No second development package is made for verification.
+4. Assemble Server/Worker runtime images from the validated Linux Server packages
+   for each architecture, reusing their binaries, launcher and WebUI. The Docker
+   `PRODUCT_STAGE=packaged` input selects this normal release path; the default
+   `source` stage remains available to local source-image builds. Runtime dependency,
+   version, launcher and license probes remain in the images before upload.
+5. Publish the multi-architecture manifests after all product and image gates pass;
+   validate final installer assets and create the GitHub Release with exact tag Notes.
+   Preserve Cargo.lock and source-validation.json as checksummed public assets;
+   manifest.validation records the candidate run and lock hash. Optional R2 remains.
 
-All release jobs use GitHub-hosted runners. There is no skip-gate input or local
-validation substitute. To retry the workflow for an existing tag:
+All release jobs use GitHub-hosted runners with bounded durations. There is no
+skip-gate input, unvalidated-result fallback or automatic tag repair. To retry an
+incomplete publication at its unchanged tag, dispatch a fresh workflow run:
+
+```bash
+gh workflow run release.yml --repo apilots/talos \
+  -f tag=v0.1.10 -f publish_latest=true
+```
+
+A completed GitHub Release is rejected before builds; this is not a way to rebuild
+an existing version. Local release automation edits require scoped contract and
+workflow/configuration checks, not full local product rebuilds. When changing
+packaging behavior, choose relevant checks for that behavior; CI retains the final
+package and native installation gates. Docker configuration can be checked with
+`docker buildx build --check` without building an image.
 
 Every product archive and Desktop package carries the Talos `LICENSE`,
 `NOTICE`, and `THIRD_PARTY_NOTICES`; Server and Worker images install them under
@@ -112,15 +142,11 @@ upload. The third-party notice identifies dependency license families and
 versioned source locations, including MPL-covered source. The GitHub Release
 also includes these files alongside checksums and product artifacts.
 
-```bash
-gh workflow run release.yml --repo apilots/talos \
-  -f tag=v0.1.9 -f publish_latest=true
-```
-
 Publish consecutive versions serially, using `publish_latest=false` for older
 versions. The workflow serializes release runs and prevents older versions from
 moving latest backward relative to the current GitHub latest release. Local bug
-fixes need only affected scenario checks; the full release suite runs once as the gate.
+fixes need only affected scenario checks; each exact-source candidate runs the
+source suite once and formal publication reuses its validated result.
 Keep local verification output in ignored `output/release-<version>/`; record
 unavailable external-account scenarios as unverified. Never infer their success
 from unit tests or artifact builds.
@@ -132,7 +158,9 @@ or `shasum -a 256 -c` on macOS. Verify the release Notes match the annotated tag
 the manifest source SHA matches the immutable tag, and both `linux/amd64` and
 `linux/arm64` image platforms are present. Verify latest references for the newest release.
 
-After successful publication, merge the release branch into `main`. Preserve main's
+After successful publication, archive the exact tag Notes in
+`docs/releases/<tag>.md` without rewriting them, then merge the release branch
+into `main`. Preserve main's
 next development version when resolving version conflicts; never reset main to the
 released version or copy the entire release tree over ongoing development. Update
 Docker defaults to the newly published image. If main has not advanced yet, start

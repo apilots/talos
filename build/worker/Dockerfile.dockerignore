@@ -3,6 +3,8 @@
 !talos/LICENSE
 !talos/NOTICE
 !talos/THIRD_PARTY_NOTICES
+!talos/.release-product/
+!talos/.release-product/**
 !talos/conf/
 !talos/conf/**
 !talos/talos-rs/

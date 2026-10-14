@@ -11,19 +11,27 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   source-checks:
     name: Source release gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Load release toolchain versions
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
@@ -40,10 +48,10 @@ jobs:
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
       - uses: pnpm/action-setup@v4
         with:
-          version: 9.14.4
-      - uses: actions/setup-node@v4
+          version: ${{ env.RELEASE_PNPM_VERSION }}
+      - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: talos-app/pnpm-lock.yaml
       - run: pnpm --dir talos-app install --frozen-lockfile
@@ -52,13 +60,40 @@ jobs:
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("talos-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
           bash scripts/check-release-version.sh "${version}"
 
-      - name: Run Talos release checks
-        run: bash scripts/check-release.sh
+      - name: Validate commit, Notes and version contracts
+        run: bash scripts/check-release.sh contracts
+      - name: Check Rust formatting
+        run: bash scripts/check-release.sh rust-format
+      - name: Check Rust workspace
+        run: bash scripts/check-release.sh rust-check
+      - name: Test Rust behavior
+        run: bash scripts/check-release.sh rust-tests
+      - name: Check, test and build frontend
+        run: bash scripts/check-release.sh frontend
+      - name: Test installer contracts
+        run: bash scripts/check-release.sh installer
+
+      - name: Record validated source and dependency graph
+        env:
+          SOURCE_SHA: ${{ inputs.source_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("talos-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          previous_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"
+          mkdir -p release-candidate
+          scripts/generate-release-notes.sh "$version" --from "$previous_tag" \
+            --to "$SOURCE_SHA" --output release-candidate/release-body.md
+          python3 .github/scripts/release_candidate.py record \
+            --repository "$GITHUB_REPOSITORY" --sha "$SOURCE_SHA" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --version "$version" --previous-tag "$previous_tag" \
+            --directory release-candidate
 
       - name: Preserve validated Cargo dependency resolution
         uses: actions/upload-artifact@v4
         with:
-          name: release-cargo-lockfile
-          path: talos-rs/Cargo.lock
+          name: release-candidate-${{ github.run_attempt }}
+          path: release-candidate/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
