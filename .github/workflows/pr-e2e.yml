@@ -1,8 +1,8 @@
 name: Talos PR E2E
 
 on:
-  pull_request: {}
-  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
@@ -12,74 +12,97 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  change-scope:
+    name: Check product change scope
+    runs-on: ubuntu-latest
+    outputs:
+      run_workflow: ${{ steps.scope.outputs.run_workflow }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether E2E checks apply
+        id: scope
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/pr_change_scope.py pr-e2e
+
+  contract-tests:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
+    name: Cloud adapter and Desktop enrollment tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out Talos
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Protocol Buffer compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+
+      - name: Install just and nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+
+      - name: Test public Cloud SDK adapter and Desktop enrollment boundaries
+        run: just test -p talos-auth -p talos-base
+
   scenarios:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
     name: E2E ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 360
+    timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 3
       matrix:
         include:
-          - name: core
+          - name: health-and-model-catalog
             runner: ubuntu-24.04
             targets: |
               case:01_health_and_models
-              case:02_session_lifecycle
-              case:03_messages_http_sse
-              group:05_cli
-              group:06_tools
-              group:07_memory
-              group:08_tui
-          - name: app-and-integration
+          - name: app-server
             runner: ubuntu-24.04
             targets: |
               group:09_app_server
-              group:10_talos_app
-              group:11_auth
-              group:12_files
-          - name: interaction
+          - name: app-and-files
             runner: ubuntu-24.04
             targets: |
-              group:13_interaction
+              group:10_talos_app
+              group:12_files
           - name: sandbox
             runner: ubuntu-24.04
             targets: |
               group:14_sandbox
-          - name: multi-node
-            runner: ubuntu-24.04
-            targets: |
-              group:17_multi_node
-          - name: computer-workspace
-            runner: macos-26
-            targets: |
-              group:18_computer_workspace
-
-    env:
-      TALOS_CLOUD_REPO: ${{ github.workspace }}/talos-cloud
-      TALOS_LLM_DEEPSEEK_API_KEY: ${{ secrets.TALOS_LLM_DEEPSEEK_API_KEY }}
-      TALOS_WEB_SEARCH_FIRECRAWL_API_KEY: ${{ secrets.TALOS_WEB_SEARCH_FIRECRAWL_API_KEY }}
-      TALOS_WEB_SEARCH_TAVILY_API_KEY: ${{ secrets.TALOS_WEB_SEARCH_TAVILY_API_KEY }}
 
     steps:
       - name: Check out Talos
         uses: actions/checkout@v6
 
       - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bubblewrap build-essential curl libssl-dev pkg-config \
             protobuf-compiler ripgrep sqlite3 tmux xvfb
-          # The disposable Ubuntu runner must permit bubblewrap user namespaces.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
-
-      - name: Install macOS system dependencies
-        if: runner.os == 'macOS'
-        run: |
-          brew install caddy protobuf
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -88,7 +111,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
-          cache-on-failure: true
 
       - name: Install just and nextest
         uses: taiki-e/install-action@v2
@@ -118,62 +140,34 @@ jobs:
       - name: Install application dependencies
         run: pnpm --dir talos-app install --frozen-lockfile
 
-      - name: Check out Talos Cloud for owned integration scenarios
-        if: contains(matrix.targets, 'group:11_auth') || contains(matrix.targets, 'group:17_multi_node') || contains(matrix.targets, 'group:18_computer_workspace')
-        uses: actions/checkout@v6
-        with:
-          repository: apilots/talos-cloud
-          ref: main
-          path: talos-cloud
-          token: ${{ secrets.TALOS_SOURCE_READ_TOKEN }}
-
       - name: Install Chrome for Linux MCP E2E
         id: chrome
         if: runner.os == 'Linux'
         uses: browser-actions/setup-chrome@v1
 
-      - name: Run existing E2E scenarios (group 19 is local-only)
+      - name: Run secretless PR scenarios
         shell: bash
         env:
           E2E_TARGETS: ${{ matrix.targets }}
-          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ runner.os == 'Linux' && steps.chrome.outputs.chrome-path || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }}
-          TALOS_E2E_CHROME_BIN: ${{ runner.os == 'Linux' && steps.chrome.outputs.chrome-path || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' }}
+          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ steps.chrome.outputs.chrome-path }}
+          TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
-          if [[ -z "${TALOS_LLM_DEEPSEEK_API_KEY}" ]]; then
-            echo "TALOS_LLM_DEEPSEEK_API_KEY Actions secret is required for the existing real-provider E2E scenarios." >&2
-            exit 1
-          fi
-          if grep -q '^group:06_tools$' <<<"${E2E_TARGETS}" \
-            && { [[ -z "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}" ]] || [[ -z "${TALOS_WEB_SEARCH_TAVILY_API_KEY}" ]]; }; then
-            echo "Firecrawl and Tavily Actions secrets are required for group 06." >&2
-            exit 1
-          fi
           scenario_result=0
           while IFS= read -r target; do
             [[ -n "${target}" ]] || continue
             kind="${target%%:*}"
             value="${target#*:}"
             if [[ "${kind}" == "group" ]]; then
-              if [[ "${value}" == "14_sandbox" ]]; then
-                docker info >/dev/null
-              fi
-              if [[ "${RUNNER_OS}" == "Linux" ]]; then
-                xvfb-run -a ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
-              else
-                ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
-              fi
+              if [[ "${value}" == "14_sandbox" ]]; then docker info >/dev/null; fi
+              xvfb-run -a ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
             else
-              if [[ "${RUNNER_OS}" == "Linux" ]]; then
-                xvfb-run -a ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
-              else
-                ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
-              fi
+              xvfb-run -a ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
             fi
           done <<<"${E2E_TARGETS}"
           exit "${scenario_result}"
 
-      - name: Show redacted failed-scenario diagnostics
+      - name: Show failed-scenario diagnostics
         if: failure()
         shell: bash
         run: |
@@ -201,23 +195,31 @@ jobs:
                   log = section.split("```text\n", 1)[-1].rsplit("```", 1)[0]
                   print(f"Failed scenario: {name}")
                   print(redact("\n".join(log.splitlines()[-80:])))
-          for artifact in sorted(Path(".tmp/desktop-smoke").glob("*/desktop-smoke-error.log")):
-              print(f"Desktop startup diagnostics: {artifact}")
-              print(redact("\n".join(artifact.read_text(errors="replace").splitlines()[-80:])))
           PY
 
   gate:
     if: ${{ always() }}
     name: talos-pr-e2e
     runs-on: ubuntu-latest
-    needs: scenarios
+    needs: [change-scope, contract-tests, scenarios]
     steps:
-      - name: Require every existing E2E shard
+      - name: Require public PR contract tests and scenarios
         env:
-          RESULT: ${{ needs.scenarios.result }}
+          SCOPE_RESULT: ${{ needs.change-scope.result }}
+          RUN_WORKFLOW: ${{ needs.change-scope.outputs.run_workflow }}
+          CONTRACT_RESULT: ${{ needs.contract-tests.result }}
+          SCENARIO_RESULT: ${{ needs.scenarios.result }}
         run: |
-          if [[ "${RESULT}" != "success" ]]; then
-            echo "Existing E2E scenarios did not all pass: ${RESULT}" >&2
+          if [[ "${SCOPE_RESULT}" != "success" ]]; then
+            echo "Could not determine E2E change scope." >&2
             exit 1
           fi
-          echo "All pre-existing E2E groups passed. Group 19 remains a local acceptance group."
+          if [[ "${RUN_WORKFLOW}" != "true" ]]; then
+            echo "No E2E product inputs changed; E2E acceptance is not applicable."
+            exit 0
+          fi
+          if [[ "${CONTRACT_RESULT}" != "success" || "${SCENARIO_RESULT}" != "success" ]]; then
+            echo "Public PR validation failed: contract=${CONTRACT_RESULT}, scenarios=${SCENARIO_RESULT}." >&2
+            exit 1
+          fi
+          echo "All secretless PR contract tests and E2E scenarios passed."

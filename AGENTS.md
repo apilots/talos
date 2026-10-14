@@ -11,6 +11,13 @@ Apply rules to the changed behavior. Check directory instructions when entering 
 - Preserve the unified `TalosError` / `ApiError` contract, typed sources, and one handling-owner report. Branch on codes and typed parameters, never public English messages; never expose diagnostic `Display` text to users or models.
 - Fail explicitly at the responsible boundary. Do not conceal broken state with fallback paths or test-only production branches. Avoid compatibility code for unreleased behavior and flags that will never be disabled after release.
 
+## Agent-first contribution contract
+
+- AI coding agents are the default code implementers. Humans provide product intent, design direction, decisions, and review; they are not expected to write implementation code.
+- Agents own repository inspection, scoped planning, implementation, relevant documentation, verification, and an evidence-based handoff. Follow the task's authorization boundary; never merge, publish, deploy, or use external credentials without authorization.
+- Ask a human when product intent, public behavior, security boundaries, or acceptance criteria require a decision. Resolve routine implementation choices from repository conventions.
+- Use the structured request and pull request fields in [CONTRIBUTING.md](CONTRIBUTING.md). Report exact checks and results; label unavailable or skipped checks with the reason.
+
 ## Read when relevant
 
 These are task-triggered references, not a startup reading list. Read the linked section before changing that behavior; add other references only when the task crosses their boundary. A typo or prose edit does not require reading implementation contracts merely because the document mentions them.
