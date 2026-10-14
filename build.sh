@@ -77,10 +77,11 @@ cargo_build() {
 }
 
 rust_target_dir() {
+  local target_dir="${CARGO_TARGET_DIR:-${RUST_DIR}/target}"
   if [[ "${PROFILE}" == "release" ]]; then
-    echo "${RUST_DIR}/target/release"
+    echo "${target_dir}/release"
   else
-    echo "${RUST_DIR}/target/debug"
+    echo "${target_dir}/debug"
   fi
 }
 
@@ -139,6 +140,16 @@ copy_rust_binary_as() {
   mkdir -p "$(dirname "${output_path}")"
   cp "$(rust_target_dir)/${binary_name}" "${output_path}"
   chmod 755 "${output_path}"
+}
+
+copy_linux_sandbox_runtime() {
+  local binary_dir="$1"
+  if [[ "$(package_platform)" == "linux" ]]; then
+    cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" \
+      -p talos-linux-sandbox --bin talos-linux-sandbox-launcher
+    copy_rust_binary_as "talos-linux-sandbox-launcher" \
+      "${binary_dir}/talos-linux-sandbox-launcher"
+  fi
 }
 
 copy_conf_resource() {
@@ -203,6 +214,7 @@ build_server() {
   cargo_build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-worker-bin --bin talos-worker
   copy_rust_binary_as "talos-server" "${PRODUCT_DIR}/server/talos-server"
   copy_rust_binary_as "talos-worker" "${PRODUCT_DIR}/server/talos-worker"
+  copy_linux_sandbox_runtime "${PRODUCT_DIR}/server"
   copy_conf_resource "${PRODUCT_DIR}/server"
   copy_license_resources "${PRODUCT_DIR}/server"
 }
@@ -228,6 +240,7 @@ build_server_webui() {
   fi
   copy_rust_binary_as "talos-server" "${staging_dir}/bin/talos-server"
   copy_rust_binary_as "talos-worker" "${staging_dir}/bin/talos-worker"
+  copy_linux_sandbox_runtime "${staging_dir}/bin"
   copy_conf_resource "${staging_dir}"
   copy_license_resources "${staging_dir}"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${staging_dir}/webui/"
@@ -295,6 +308,7 @@ build_tui() {
   rm -rf "${PRODUCT_DIR}/tui"
   mkdir -p "${PRODUCT_DIR}/tui"
   copy_rust_binary_as "talos" "${PRODUCT_DIR}/tui/bin/talos"
+  copy_linux_sandbox_runtime "${PRODUCT_DIR}/tui/bin"
   copy_conf_resource "${PRODUCT_DIR}/tui"
   copy_license_resources "${PRODUCT_DIR}/tui"
   create_tui_tarball "${PRODUCT_DIR}/tui" "${version}"

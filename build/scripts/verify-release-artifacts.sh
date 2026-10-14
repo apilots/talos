@@ -71,6 +71,11 @@ verify_tui() {
     echo "Missing TUI binary in ${archive_path}" >&2
     exit 1
   fi
+  if [[ "$(basename "${archive_path}")" == *linux* ]] \
+    && ! tar -tzf "${archive_path}" | grep -E '^bin/talos-linux-sandbox-launcher$' >/dev/null; then
+    echo "Missing Linux sandbox launcher in ${archive_path}" >&2
+    exit 1
+  fi
   if ! tar -tzf "${archive_path}" | grep -E '^conf/talos.yaml$' >/dev/null; then
     echo "Missing TUI config template in ${archive_path}" >&2
     exit 1

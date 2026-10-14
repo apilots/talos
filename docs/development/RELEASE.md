@@ -53,6 +53,9 @@ Each push to `release-*` runs the complete source gate before publication, using
 `release-source.yml`. Tag builds reuse that same gate and its validated Cargo
 lockfile. Branch checks do not create tags, publish packages or images, or deploy
 services. Wait for this candidate check before running the publication script.
+The source gate also builds real development Server and TUI packages and checks
+their contents. Linux packages include the sandbox launcher beside their binaries;
+native installation checks probe the installed launcher before runtime acceptance.
 
 The release branch accepts only bug fixes, including necessary regression tests
 and corrections to release documentation or packaging. Use `fix` subjects after

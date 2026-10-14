@@ -45,6 +45,7 @@ chore(release): prepare v<version>
 ## 稳定阶段只修 bug
 
 每次推送 `release-*` 分支都会通过 `release-source.yml` 运行完整源码门禁。正式标签复用同一门禁和已验证的 Cargo 锁文件。分支预检不创建标签、发布产物或镜像，也不部署服务；发布脚本应在候选预检通过后运行。
+源码门禁还会构建真实的开发配置 Server/TUI 包并校验内容。Linux 包必须在产品二进制旁包含 sandbox launcher；原生安装验收会先探测安装后的 launcher，再检查产品运行。
 
 release 分支只接受 bug 修复，以及修复所需的回归测试、发布文档或打包纠错。
 准备提交之后统一使用 `fix` 提交；不增加特性、不做无关重构，也不将持续开发中的
