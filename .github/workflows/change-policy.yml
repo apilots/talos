@@ -62,9 +62,20 @@ jobs:
           "${{ steps.range.outputs.head }}"
 
       - name: Install workflow linter
-        uses: taiki-e/install-action@v2
-        with:
-          tool: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          tool_dir="${RUNNER_TEMP}/actionlint"
+          mkdir -p "$tool_dir"
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          checksums="actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          curl -fsSL "$base/$archive" -o "$tool_dir/$archive"
+          curl -fsSL "$base/$checksums" -o "$tool_dir/$checksums"
+          (cd "$tool_dir" && sha256sum --check --ignore-missing "$checksums")
+          tar -xzf "$tool_dir/$archive" -C "$tool_dir" actionlint
+          echo "$tool_dir" >> "$GITHUB_PATH"
 
       - name: Validate release workflow syntax
         run: actionlint .github/workflows/release.yml .github/workflows/release-source.yml
