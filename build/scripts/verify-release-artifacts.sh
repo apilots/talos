@@ -15,9 +15,20 @@ require_file() {
   fi
 }
 
+verify_archive_licenses() {
+  local archive_path="$1"
+  for name in LICENSE NOTICE THIRD_PARTY_NOTICES; do
+    if ! tar -tzf "${archive_path}" | grep -E "^(\\./)?${name}$" >/dev/null; then
+      echo "Missing ${name} in ${archive_path}" >&2
+      exit 1
+    fi
+  done
+}
+
 verify_server_config_template() {
   local archive_path
   archive_path="$(find "${PRODUCT_DIR}/server" -maxdepth 1 -name "Talos-Server-*.tar.gz" | head -n 1)"
+  verify_archive_licenses "${archive_path}"
   if ! tar -tzf "${archive_path}" | grep -E '^(\./)?bin/talos-server$' >/dev/null; then
     echo "Missing server binary in ${archive_path}" >&2
     exit 1
@@ -55,6 +66,7 @@ verify_tui_checksums() {
 verify_tui() {
   local archive_path
   archive_path="$(find "${PRODUCT_DIR}/tui" -maxdepth 1 -name "Talos-TUI-*.tar.gz" | head -n 1)"
+  verify_archive_licenses "${archive_path}"
   if ! tar -tzf "${archive_path}" | grep -E '^bin/talos$' >/dev/null; then
     echo "Missing TUI binary in ${archive_path}" >&2
     exit 1
@@ -96,6 +108,12 @@ verify_macos_app_server() {
     echo "Missing packaged macOS config template: ${config_template}" >&2
     exit 1
   fi
+  for license_file in LICENSE NOTICE THIRD_PARTY_NOTICES; do
+    if [[ ! -f "${mount_dir}/Talos.app/Contents/Resources/licenses/${license_file}" ]]; then
+      echo "Missing packaged ${license_file} in macOS app." >&2
+      exit 1
+    fi
+  done
   local sqlite_migrations="${mount_dir}/Talos.app/Contents/Resources/conf/migrations/sqlite"
   if ! find "${sqlite_migrations}" -maxdepth 1 -name '*.sql' -print -quit | grep -q .; then
     echo "Missing packaged macOS SQLite migrations: ${sqlite_migrations}" >&2
@@ -134,6 +152,12 @@ verify_linux_app_server() {
     echo "Missing packaged Linux app-server binary: ${app_server}" >&2
     exit 1
   fi
+  for license_file in LICENSE NOTICE THIRD_PARTY_NOTICES; do
+    if [[ ! -f "${extract_dir}/squashfs-root/resources/licenses/${license_file}" ]]; then
+      echo "Missing packaged ${license_file} in Linux AppImage." >&2
+      exit 1
+    fi
+  done
   if [[ ! -x "${launcher}" ]]; then
     echo "Missing packaged Linux sandbox launcher: ${launcher}" >&2
     exit 1
@@ -144,11 +168,28 @@ verify_linux_app_server() {
 }
 
 case "${VERIFY_TARGET}" in
+  server)
+    require_file "${PRODUCT_DIR}/server/Talos-Server-*.tar.gz"
+    verify_server_config_template
+    ;;
   tui)
     require_file "${PRODUCT_DIR}/tui/Talos-TUI-*.tar.gz"
     require_file "${PRODUCT_DIR}/tui/SHA256SUMS"
     verify_tui
     verify_tui_checksums
+    ;;
+  desktop-mac)
+    require_file "${PRODUCT_DIR}/desktop-mac/Talos-*.dmg"
+    verify_macos_app_server
+    ;;
+  desktop-linux)
+    require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.AppImage"
+    require_file "${PRODUCT_DIR}/desktop-linux/SHA256SUMS"
+    (
+      cd "${PRODUCT_DIR}/desktop-linux"
+      shasum -a 256 -c SHA256SUMS
+    )
+    verify_linux_app_server
     ;;
   all)
     require_file "${PRODUCT_DIR}/server/Talos-Server-*.tar.gz"

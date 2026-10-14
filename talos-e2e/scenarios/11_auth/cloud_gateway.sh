@@ -11,8 +11,7 @@ require_command curl
 require_command python3
 build_binaries
 
-CLOUD_REPO="${TALOS_CLOUD_REPO:-$(cd "${REPO_ROOT}/.." && pwd)/talos-cloud}"
-CLOUD_RS_DIR="${CLOUD_REPO}/cloud-rs"
+CLOUD_SERVER_BIN="$(resolve_cloud_server_binary)"
 CLOUD_BIND_HOST="${TALOS_AUTH_E2E_CLOUD_HOST:-127.0.0.1}"
 CLOUD_BIND_PORT="${TALOS_AUTH_E2E_CLOUD_PORT:-18881}"
 CLOUD_BIND_ADDR="${CLOUD_BIND_HOST}:${CLOUD_BIND_PORT}"
@@ -93,8 +92,6 @@ wait_for_cloud() {
 }
 
 start_cloud_server() {
-  [[ -d "${CLOUD_RS_DIR}" ]] || fail_case "missing talos-cloud repo: ${CLOUD_RS_DIR}"
-  (cd "${CLOUD_RS_DIR}" && cargo build -q -p talos-cloud-server)
 cat >"${CLOUD_CONFIG_PATH}" <<EOF
 server:
   bind_addr: "${CLOUD_BIND_ADDR}"
@@ -106,7 +103,7 @@ database:
   url: "sqlite://${CLOUD_DB_PATH}?mode=rwc"
 EOF
   TALOS_CLOUD_CONFIG_PATH="${CLOUD_CONFIG_PATH}" \
-    "${CLOUD_RS_DIR}/target/debug/cloud-server" >"${CLOUD_SERVER_LOG}" 2>&1 &
+    "${CLOUD_SERVER_BIN}" >"${CLOUD_SERVER_LOG}" 2>&1 &
   CLOUD_SERVER_PID="$!"
   wait_for_cloud
 }

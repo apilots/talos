@@ -36,6 +36,18 @@ module.exports = {
       to: "conf",
       filter: ["**/*"],
     },
+    {
+      from: path.join(repoRoot, "LICENSE"),
+      to: "licenses/LICENSE",
+    },
+    {
+      from: path.join(repoRoot, "NOTICE"),
+      to: "licenses/NOTICE",
+    },
+    {
+      from: path.join(repoRoot, "THIRD_PARTY_NOTICES"),
+      to: "licenses/THIRD_PARTY_NOTICES",
+    },
   ],
   asar: true,
   mac: {

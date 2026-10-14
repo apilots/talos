@@ -18,8 +18,9 @@ controlled RPC tests do not replace these scenarios.
 | `07_environment` | Two real Workers: same document/date/Memory ID isolation, stale-version rejection, index replacement, Skills operations, real Harness document context, owner/offline rejection and restart preservation |
 | `11_product_ui` | Two isolated real Chrome clients and one central Server: device login, owned Computer selection, real Worker file effects and live final replies, same-Computer continuation, running-task switch, rename/disable/rejoin, owned Project continuation/title/reload, narrow Sidebar/Escape/focus, model settings, drafts, 22-node pagination, offline history, themes/language and logout/account isolation |
 
-Prerequisites: the adjacent `talos-cloud` checkout (or `TALOS_CLOUD_REPO`), Rust,
-Node.js, installed pnpm workspace dependencies, OpenSSL, protoc, Python grpcio,
+Prerequisites: `TALOS_CLOUD_SERVER_BIN` pointing to the Cloud fixture executable
+(or `cloud-server` on `PATH`), Rust, Node.js, installed pnpm workspace dependencies,
+OpenSSL, protoc, Python grpcio,
 protobuf and PyYAML. Registration additionally needs Caddy 2.9+ on PATH (or
 `TALOS_E2E_CADDY_BIN`); execution needs lsof and a funded provider configured in
 `.env`. Product UI requires installed Google Chrome (or `TALOS_E2E_CHROME_BIN`) and

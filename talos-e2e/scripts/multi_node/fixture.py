@@ -164,12 +164,12 @@ class Cluster:
 
     def start_control_plane(self):
         """Start real Auth and Server without requiring execution Workers or models."""
-        cloud_root = Path(os.environ.get('TALOS_CLOUD_REPO', ROOT.parent / 'talos-cloud'))
+        cloud_server = Path(os.environ['TALOS_CLOUD_SERVER_BIN'])
         cloud_config = self.root / 'cloud.yaml'
         cloud_config.write_text(yaml.safe_dump({
             'server': {'bind_addr': f'127.0.0.1:{self.cloud_port}', 'api_base_url': self.cloud_url, 'cloud_base_url': self.cloud_url},
             'database': {'type': 'sqlite', 'url': f'sqlite://{self.root}/cloud.db?mode=rwc'}}))
-        self.start_process('cloud', [str(cloud_root / 'cloud-rs/target/debug/cloud-server')],
+        self.start_process('cloud', [str(cloud_server)],
                            dict(os.environ, TALOS_CLOUD_CONFIG_PATH=str(cloud_config)))
         wait_for(lambda: http(self.cloud_url + '/v1/auth/config'), 'Cloud startup')
         # Cloud gives the first account admin privileges; owner-isolation cases

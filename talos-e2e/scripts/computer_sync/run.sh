@@ -15,7 +15,7 @@ if [[ "${1}" == nat ]]; then
   docker build -f "${SCRIPT_DIR}/firewall.Dockerfile" -t talos-e2e-firewall:local "${SCRIPT_DIR}"
 fi
 (cd "${TALOS_RS_DIR}" && cargo build -q -p talos-server -p talos-worker-bin -p app-server)
-(cd "${TALOS_CLOUD_REPO:-${REPO_ROOT}/../talos-cloud}/cloud-rs" && cargo build -q -p talos-cloud-server)
+export TALOS_CLOUD_SERVER_BIN="$(resolve_cloud_server_binary)"
 # Build the candidate once per runner invocation, then verify its exact image IDs.
 # Rebuilding every case adds registry requests without testing different source.
 image_marker="${E2E_TMP_ROOT}/computer-sync-images-${TALOS_E2E_RUN_ID:?}.ids"

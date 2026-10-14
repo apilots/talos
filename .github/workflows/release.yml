@@ -295,6 +295,12 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: ./build.sh "${{ matrix.build_target }}"
 
+      - name: Verify packaged license and product contents
+        env:
+          PROFILE: release
+          PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
+        run: bash build/scripts/verify-release-artifacts.sh "${{ matrix.product_subdir }}"
+
       - name: Verify native TUI installation
         if: ${{ matrix.build_target == 'tui' }}
         env:
@@ -589,6 +595,7 @@ jobs:
 
           mkdir -p release-assets
           install -m 755 deploy/install/install.sh release-assets/install.sh
+          cp LICENSE NOTICE THIRD_PARTY_NOTICES release-assets/
           find downloaded -type f -print0 | while IFS= read -r -d '' file; do
             base="$(basename "${file}")"
             group="$(basename "$(dirname "${file}")")"

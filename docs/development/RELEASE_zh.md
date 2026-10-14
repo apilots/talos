@@ -86,6 +86,11 @@ scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.
 所有 release job 使用 GitHub-hosted runner。没有跳过准出的输入，也不能用本地验证代替。
 要重跑已有 tag 的 release workflow 时执行：
 
+每个产品归档和 Desktop 安装包都携带 Talos `LICENSE` 与 `NOTICE`；Server 和 Worker
+镜像将三份许可文件安装到 `/usr/share/licenses/talos`。其中 `THIRD_PARTY_NOTICES`
+列出第三方依赖的许可类别和固定版本源码位置，包括 MPL 组件的源码。Release job 在上传前
+检查各平台制品内容，GitHub Release 也并列提供这些文件及校验和、产品制品。
+
 ```bash
 gh workflow run release.yml --repo apilots/talos \
   -f tag=v0.1.9 -f publish_latest=true

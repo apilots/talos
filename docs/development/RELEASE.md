@@ -97,6 +97,13 @@ is pushed, or when a maintainer manually retries an existing tag:
 All release jobs use GitHub-hosted runners. There is no skip-gate input or local
 validation substitute. To retry the workflow for an existing tag:
 
+Every product archive and Desktop package carries the Talos `LICENSE`,
+`NOTICE`, and `THIRD_PARTY_NOTICES`; Server and Worker images install them under
+`/usr/share/licenses/talos`. The release job verifies package contents before
+upload. The third-party notice identifies dependency license families and
+versioned source locations, including MPL-covered source. The GitHub Release
+also includes these files alongside checksums and product artifacts.
+
 ```bash
 gh workflow run release.yml --repo apilots/talos \
   -f tag=v0.1.9 -f publish_latest=true

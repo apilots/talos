@@ -131,4 +131,5 @@ just e2e-case 01_health_and_models
 
 ## 许可证
 
-Talos 使用 MIT License。
+Talos 使用 [Apache License 2.0](LICENSE)。Talos 代码归属声明见 [NOTICE](NOTICE)，
+依赖许可和源码信息见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)。

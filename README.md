@@ -160,4 +160,6 @@ active and archived specifications.
 
 ## License
 
-Talos is licensed under the MIT License.
+Talos is licensed under the [Apache License, Version 2.0](LICENSE). Talos
+attributions are in [NOTICE](NOTICE), and dependency notices are in
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).

@@ -1,0 +1,58 @@
+Third-party components distributed with Talos
+=============================================
+
+Talos binaries and containers include or may include the following Rust
+dependencies. Talos does not modify these components. Their licenses remain
+separate from the Apache License 2.0 that applies to Talos's own code.
+
+Mozilla Public License 2.0
+--------------------------
+
+The following packages declare MPL-2.0 in the Cargo dependency graph:
+
+  bitmaps 2.1.0 (MPL-2.0+)
+  im 15.1.0 (MPL-2.0+)
+  option-ext 0.2.0 (MPL-2.0)
+  sized-chunks 0.6.5 (MPL-2.0+)
+
+Their unmodified source is available from the versioned crates.io package
+pages below. The crate archives contain the corresponding source files and
+license notices:
+
+  https://crates.io/crates/bitmaps/2.1.0
+  https://crates.io/crates/im/15.1.0
+  https://crates.io/crates/option-ext/0.2.0
+  https://crates.io/crates/sized-chunks/0.6.5
+
+The Mozilla Public License 2.0 is available at:
+  https://www.mozilla.org/en-US/MPL/2.0/
+
+CDLA-Permissive-2.0
+-------------------
+
+The following packages declare CDLA-Permissive-2.0:
+
+  webpki-root-certs 1.0.9
+  webpki-roots 1.0.7
+
+Their source and license notices are available in the versioned crates.io
+packages:
+
+  https://crates.io/crates/webpki-root-certs/1.0.9
+  https://crates.io/crates/webpki-roots/1.0.7
+
+The Community Data License Agreement - Permissive, Version 2.0 is available
+at:
+  https://cdla.dev/permissive-2-0/
+
+Additional dependencies
+-----------------------
+
+Other Rust dependencies and their declared SPDX license expressions are
+recorded in talos-rs/Cargo.lock and the package manifests in the Talos source
+release. Each dependency retains its own license and notices in its source
+package. In particular, packages with a choice of licenses may be used under
+any license offered by that package; this notice does not relicense them.
+
+The dependency versions above were present in the Cargo.lock used to prepare
+this release. Consult that lockfile for the complete resolved dependency set.

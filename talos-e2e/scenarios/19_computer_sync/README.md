@@ -48,14 +48,15 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   Worker's Session while the origin management service is stopped, and source
   FileService operations use the existing G relay after restoration.
 
-Requires a real macOS host, Docker, the adjacent `talos-sync` and `talos-cloud`
-sources, Node/pnpm, Python grpcio/protobuf/PyYAML, and existing DEV configuration.
+Requires a real macOS host, Docker, the adjacent `talos-sync` source, a Cloud
+fixture executable (`TALOS_CLOUD_SERVER_BIN` or `cloud-server` on `PATH`),
+Node/pnpm, Python grpcio/protobuf/PyYAML, and existing DEV configuration.
 Execution cases use the configured funded DeepSeek provider in `.env`; no model
 key is baked into an image. Each runner invocation builds the current candidate images once, verifies their
 exact image IDs before every case, and reuses release caches without accepting
 stale images from a prior invocation. NAT additionally builds the current Server
 image and a small test-only iptables helper; NET_ADMIN applies solely to these
-isolated fixture network namespaces, never to the host or unrelated containers. `TALOS_SYNC_REPO`, `TALOS_CLOUD_REPO`,
+isolated fixture network namespaces, never to the host or unrelated containers. `TALOS_SYNC_REPO`,
 `TALOS_WORKER_E2E_IMAGE` and `TALOS_SYNC_E2E_IMAGE` select inputs.
 
 Accounts are registered and authenticated through the real Cloud service; database

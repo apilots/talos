@@ -74,7 +74,7 @@ members = [
 version = "0.1.9-SNAPSHOT"
 edition = "2021"
 authors = ["Liu Xi"]
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/xiliu/talos"
 description = "Talos - AI Agent Framework"
 

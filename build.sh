@@ -33,7 +33,7 @@ Environment:
   SERVER_IMAGE_TAGS="tag1 tag2"  Docker image tags. Defaults to the workspace version.
   SERVER_IMAGE_PLATFORMS=linux/amd64,linux/arm64  Optional buildx platforms.
   SERVER_IMAGE_PUSH=1  Push image instead of loading it into the local Docker daemon.
-  DOCKER_BUILD_CONTEXT=path  Context containing talos/ and talos-cloud/. Defaults to the parent of this repo.
+  DOCKER_BUILD_CONTEXT=path  Build context containing the talos/ repository. Defaults to its parent.
 EOF
 }
 
@@ -149,6 +149,13 @@ copy_conf_resource() {
   cp -R "${CONF_DIR}/migrations" "${output_dir}/conf/migrations"
 }
 
+copy_license_resources() {
+  local output_dir="$1"
+  cp "${REPO_ROOT}/LICENSE" "${output_dir}/LICENSE"
+  cp "${REPO_ROOT}/NOTICE" "${output_dir}/NOTICE"
+  cp "${REPO_ROOT}/THIRD_PARTY_NOTICES" "${output_dir}/THIRD_PARTY_NOTICES"
+}
+
 cleanup_desktop_package_dir() {
   local package_dir="$1"
   find "${package_dir}" -mindepth 1 -maxdepth 1 -type d \
@@ -187,7 +194,7 @@ create_tui_tarball() {
   local version="$2"
   local archive_path
   archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
-  tar -czf "${archive_path}" -C "${package_dir}" bin conf
+  tar -czf "${archive_path}" -C "${package_dir}" bin conf LICENSE NOTICE THIRD_PARTY_NOTICES
 }
 
 build_server() {
@@ -197,6 +204,7 @@ build_server() {
   copy_rust_binary_as "talos-server" "${PRODUCT_DIR}/server/talos-server"
   copy_rust_binary_as "talos-worker" "${PRODUCT_DIR}/server/talos-worker"
   copy_conf_resource "${PRODUCT_DIR}/server"
+  copy_license_resources "${PRODUCT_DIR}/server"
 }
 
 build_server_webui() {
@@ -221,6 +229,7 @@ build_server_webui() {
   copy_rust_binary_as "talos-server" "${staging_dir}/bin/talos-server"
   copy_rust_binary_as "talos-worker" "${staging_dir}/bin/talos-worker"
   copy_conf_resource "${staging_dir}"
+  copy_license_resources "${staging_dir}"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${staging_dir}/webui/"
   tar -czf "${archive_path}" -C "${staging_dir}" .
   rm -rf "${PRODUCT_DIR}/.staging"
@@ -238,8 +247,8 @@ build_server_image() {
   local revision
   revision="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
-  if [[ ! -d "${context_dir}/talos" || ! -d "${context_dir}/talos-cloud" ]]; then
-    echo "Docker build context must contain talos/ and talos-cloud/: ${context_dir}" >&2
+  if [[ ! -d "${context_dir}/talos" ]]; then
+    echo "Docker build context must contain the talos/ repository: ${context_dir}" >&2
     exit 1
   fi
   if [[ "${push}" != "1" && "${platforms}" == *,* ]]; then
@@ -287,6 +296,7 @@ build_tui() {
   mkdir -p "${PRODUCT_DIR}/tui"
   copy_rust_binary_as "talos" "${PRODUCT_DIR}/tui/bin/talos"
   copy_conf_resource "${PRODUCT_DIR}/tui"
+  copy_license_resources "${PRODUCT_DIR}/tui"
   create_tui_tarball "${PRODUCT_DIR}/tui" "${version}"
   write_sha256sums "${PRODUCT_DIR}/tui"
 }

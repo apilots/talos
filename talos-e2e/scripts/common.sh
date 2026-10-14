@@ -485,6 +485,25 @@ require_command() {
   fi
 }
 
+resolve_cloud_server_binary() {
+  local requested="${TALOS_CLOUD_SERVER_BIN:-cloud-server}"
+  local resolved
+  if [[ "${requested}" == */* ]]; then
+    [[ -x "${requested}" ]] || {
+      echo "Cloud auth fixture binary is not executable: ${requested}" >&2
+      return 1
+    }
+    resolved="$(cd "$(dirname "${requested}")" && pwd)/$(basename "${requested}")"
+  else
+    resolved="$(command -v "${requested}" || true)"
+    [[ -n "${resolved}" ]] || {
+      echo "Cloud auth fixture binary '${requested}' was not found. Set TALOS_CLOUD_SERVER_BIN to its executable path." >&2
+      return 1
+    }
+  fi
+  printf '%s\n' "${resolved}"
+}
+
 has_real_llm_key() {
   [[ -n "${TALOS_LLM_ANTHROPIC_API_KEY:-}" \
     || -n "${TALOS_LLM_BAILIAN_API_KEY:-}" \

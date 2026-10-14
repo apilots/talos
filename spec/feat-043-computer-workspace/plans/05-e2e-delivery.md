@@ -45,7 +45,7 @@ Status: Complete（043原版本验收）。依赖：阶段1–4。044阶段1管�
 - pnpm --dir talos-app check:repo；just fmt-check；git diff --check；实际变更范围 quality gates。
 - 公网测试仅在已有部署和测试授权范围内；未部署时记录 Not Verified，不用修改真实用户数据来验收。
 
-前提：相邻 talos-cloud 或 TALOS_CLOUD_REPO、protoc、Python grpcio/protobuf/PyYAML、真实模型凭据、Electron/UI 环境。
+前提：Cloud fixture 可执行文件（通过 TALOS_CLOUD_SERVER_BIN 指定）、protoc、Python grpcio/protobuf/PyYAML、真实模型凭据、Electron/UI 环境。
 实际结果（2026-10-11）：
 
 - 18 的 11 个场景均实际通过：01–10 完整 group 回归通过，新增 11 单独完成产品/安装验收。最后加强断言的安装版 11 共 15 项 PASS，93.88 秒；报告 `talos-e2e/reports/e2e_report_20261011_170445.md`。不把早于新增 11 的 group 命令声称为一次运行了 11 场景。
