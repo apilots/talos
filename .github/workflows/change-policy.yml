@@ -40,6 +40,11 @@ jobs:
           fi
           echo "base=${base}" >> "${GITHUB_OUTPUT}"
           echo "head=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+          if git diff --quiet "$base" "$HEAD_SHA" -- build/server build/worker .github/workflows/release.yml; then
+            echo "docker_checks=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "docker_checks=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Test repository policy scripts
         run: |
@@ -55,6 +60,36 @@ jobs:
           scripts/check-commit-message.sh
           --range "${{ steps.range.outputs.base }}"
           "${{ steps.range.outputs.head }}"
+
+      - name: Install workflow linter
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          tool_dir="${RUNNER_TEMP}/actionlint"
+          mkdir -p "$tool_dir"
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          checksums="actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          curl -fsSL "$base/$archive" -o "$tool_dir/$archive"
+          curl -fsSL "$base/$checksums" -o "$tool_dir/$checksums"
+          (cd "$tool_dir" && sha256sum --check --ignore-missing "$checksums")
+          tar -xzf "$tool_dir/$archive" -C "$tool_dir" actionlint
+          echo "$tool_dir" >> "$GITHUB_PATH"
+
+      - name: Validate release workflow syntax
+        run: actionlint .github/workflows/release.yml .github/workflows/release-source.yml
+
+      - name: Validate Docker configurations without building images
+        if: ${{ steps.range.outputs.docker_checks == 'true' }}
+        run: |
+          set -euo pipefail
+          for product in server worker; do
+            for stage in source packaged; do
+              docker buildx build --check --build-arg "PRODUCT_STAGE=${stage}" \
+                --file "build/${product}/Dockerfile" ..
+            done
+          done
 
       - name: Check changed files
         run: >-

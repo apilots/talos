@@ -20,16 +20,22 @@ on:
 
 permissions:
   contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
 
 concurrency:
-  group: talos-release
-  cancel-in-progress: false
+  group: talos-release-${{ startsWith(github.ref, 'refs/heads/release-') && github.ref || 'publication' }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/heads/release-') }}
 
 jobs:
   prepare:
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
     name: Prepare release metadata
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       tag: ${{ steps.metadata.outputs.tag }}
       version: ${{ steps.metadata.outputs.version }}
@@ -125,7 +131,8 @@ jobs:
     name: Validate source release version
     needs:
       - prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
@@ -152,7 +159,11 @@ jobs:
             exit 1
           fi
 
-          git for-each-ref --format='%(contents)' "refs/tags/${RELEASE_TAG}" > release-body.md
+          [[ "$(git cat-file -t "${RELEASE_TAG}")" == "tag" ]] || {
+            echo "Release tag must be annotated." >&2
+            exit 1
+          }
+          git cat-file tag "${RELEASE_TAG}" | sed '1,/^$/d' > release-body.md
           [[ -s release-body.md ]] || {
             echo "Annotated tag ${RELEASE_TAG} must contain the canonical release notes." >&2
             exit 1
@@ -172,14 +183,64 @@ jobs:
           name: canonical-release-notes
           path: release-body.md
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
 
   quality:
-    name: Source release gate
+    name: Verify validated source candidate
     needs: [prepare, validate-source]
-    uses: ./.github/workflows/release-source.yml
-    with:
-      source_ref: ${{ needs.validate-source.outputs.source_sha }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      candidate_run: ${{ steps.candidate.outputs.run_id }}
+      lock_sha256: ${{ steps.provenance.outputs.lock_sha256 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.validate-source.outputs.source_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Resolve successful exact-source candidate
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
+        run: >-
+          python3 .github/scripts/release_candidate.py find
+          --repository "$GITHUB_REPOSITORY" --sha "$SOURCE_SHA"
+          --outputs "$GITHUB_OUTPUT"
+      - name: Download candidate dependency graph
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.candidate.outputs.artifact_id }}
+          run-id: ${{ steps.candidate.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: release-candidate
+          merge-multiple: true
+      - name: Verify source, run and dependency provenance
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
+          CANDIDATE_RUN: ${{ steps.candidate.outputs.run_id }}
+        run: >-
+          python3 .github/scripts/release_candidate.py verify
+          --repository "$GITHUB_REPOSITORY" --sha "$SOURCE_SHA"
+          --run-id "$CANDIDATE_RUN" --directory release-candidate
+          --outputs "$GITHUB_OUTPUT"
+      - name: Download tag Notes
+        uses: actions/download-artifact@v4
+        with:
+          name: canonical-release-notes
+          path: tagged-notes
+      - name: Verify the tag uses the candidate's canonical Notes
+        run: cmp release-candidate/release-body.md tagged-notes/release-body.md
+      - name: Preserve validated dependency graph for builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-source-provenance
+          path: release-candidate/
+          if-no-files-found: error
+          retention-days: 14
 
   candidate-quality:
     name: Validate unpublished candidate
@@ -195,6 +256,9 @@ jobs:
       - validate-source
       - quality
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      VALIDATED_LOCK_SHA256: ${{ needs.quality.outputs.lock_sha256 }}
     strategy:
       fail-fast: false
       matrix:
@@ -206,12 +270,12 @@ jobs:
             product_subdir: desktop-mac
           - name: Linux Desktop
             artifact_name: talos-desktop-linux-amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             build_target: desktop-linux
             product_subdir: desktop-linux
           - name: Server WebUI linux-amd64
             artifact_name: talos-server-webui-linux-amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             build_target: server-webui
             product_subdir: server
           - name: Server WebUI linux-arm64
@@ -250,8 +314,11 @@ jobs:
       - name: Use validated Cargo dependency resolution
         uses: actions/download-artifact@v4
         with:
-          name: release-cargo-lockfile
-          path: talos-rs
+          name: release-source-provenance
+          path: .release-source
+
+      - name: Restore the validated Cargo lockfile
+        run: cp .release-source/Cargo.lock talos-rs/Cargo.lock
 
       - name: Install Protocol Buffer compiler
         run: |
@@ -262,8 +329,12 @@ jobs:
             sudo apt-get install -y protobuf-compiler
           fi
 
+      - name: Load release toolchain versions
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
 
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
@@ -273,17 +344,20 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9.14.4
+          version: ${{ env.RELEASE_PNPM_VERSION }}
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: talos-app/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         run: pnpm --dir talos-app install --frozen-lockfile
+
+      - name: Fetch the validated Rust dependency graph
+        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
 
       - name: Build product
         env:
@@ -293,9 +367,15 @@ jobs:
           SERVER_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
           TUI_PACKAGE_VERSION: ${{ needs.prepare.outputs.version }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CARGO_NET_OFFLINE: "true"
         run: ./build.sh "${{ matrix.build_target }}"
 
+      - name: Verify the build preserved the validated dependency graph
+        run: |
+          test "$(shasum -a 256 talos-rs/Cargo.lock | cut -d ' ' -f 1)" = "$VALIDATED_LOCK_SHA256"
+
       - name: Verify packaged license and product contents
+        if: ${{ matrix.build_target != 'tui' }}
         env:
           PROFILE: release
           PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
@@ -308,7 +388,7 @@ jobs:
         run: talos-e2e/run_e2e.sh --case 15_tui_install/01_native_install
 
       - name: Upload native installation report
-        if: ${{ always() && matrix.build_target == 'tui' }}
+        if: ${{ !cancelled() && matrix.build_target == 'tui' }}
         uses: actions/upload-artifact@v4
         with:
           name: native-install-report-${{ matrix.artifact_name }}
@@ -332,7 +412,9 @@ jobs:
       - prepare
       - validate-source
       - quality
+      - build
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -343,7 +425,7 @@ jobs:
           - product: server
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - product: server
             platform: linux/arm64
             arch: arm64
@@ -351,7 +433,7 @@ jobs:
           - product: worker
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - product: worker
             platform: linux/arm64
             arch: arm64
@@ -367,11 +449,20 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Use validated Cargo dependency resolution
+      - name: Download the validated Server package
         uses: actions/download-artifact@v4
         with:
-          name: release-cargo-lockfile
-          path: talos/talos-rs
+          name: talos-server-webui-linux-${{ matrix.arch }}
+          path: server-package
+
+      - name: Prepare the existing product for the runtime image
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p talos/.release-product
+          tar -xzf "server-package/Talos-Server-${RELEASE_VERSION}-linux-${PACKAGE_ARCH}.tar.gz" \
+            -C talos/.release-product
 
       - name: Set Docker metadata
         id: docker_metadata
@@ -410,6 +501,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.prepare.outputs.version }}
             REVISION=${{ steps.docker_metadata.outputs.revision }}
+            PRODUCT_STAGE=packaged
 
       - name: Export image digest
         env:
@@ -431,7 +523,7 @@ jobs:
           name: talos-${{ matrix.product }}-image-digests-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 14
 
   docker-manifest:
     name: Publish ${{ matrix.product }} image manifest
@@ -439,7 +531,8 @@ jobs:
       - prepare
       - docker-image
       - build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
       packages: write
@@ -558,9 +651,11 @@ jobs:
     needs:
       - prepare
       - validate-source
+      - quality
       - build
       - docker-manifest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     env:
@@ -589,6 +684,12 @@ jobs:
           name: canonical-release-notes
           path: .
 
+      - name: Download validated source provenance
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-provenance
+          path: source-provenance
+
       - name: Prepare release assets
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -596,12 +697,16 @@ jobs:
           SOURCE_REPO: apilots/talos
           SOURCE_REF: ${{ needs.prepare.outputs.source_ref }}
           SOURCE_SHA: ${{ needs.validate-source.outputs.source_sha }}
+          CANDIDATE_RUN: ${{ needs.quality.outputs.candidate_run }}
+          LOCK_SHA256: ${{ needs.quality.outputs.lock_sha256 }}
         run: |
           set -euo pipefail
 
           mkdir -p release-assets
           install -m 755 deploy/install/install.sh release-assets/install.sh
           cp LICENSE NOTICE THIRD_PARTY_NOTICES release-assets/
+          cp source-provenance/Cargo.lock release-assets/Cargo.lock
+          cp source-provenance/candidate.json release-assets/source-validation.json
           find downloaded -type f -print0 | while IFS= read -r -d '' file; do
             base="$(basename "${file}")"
             group="$(basename "$(dirname "${file}")")"
@@ -673,6 +778,8 @@ jobs:
             --arg source_repo "${SOURCE_REPO}" \
             --arg source_ref "${SOURCE_REF}" \
             --arg source_sha "${SOURCE_SHA}" \
+            --arg candidate_run "${CANDIDATE_RUN}" \
+            --arg lock_sha256 "${LOCK_SHA256}" \
             --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg r2_base_url "${R2_PUBLIC_BASE_URL}" \
             --slurpfile assets "${assets_json}" \
@@ -685,6 +792,10 @@ jobs:
                 repository: $source_repo,
                 ref: $source_ref,
                 sha: $source_sha
+              },
+              validation: {
+                candidate_run_id: ($candidate_run | tonumber),
+                cargo_lock_sha256: $lock_sha256
               },
               generated_at: $generated_at,
               r2_base_url: $r2_base_url,

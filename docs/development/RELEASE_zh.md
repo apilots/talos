@@ -44,8 +44,9 @@ chore(release): prepare v<version>
 
 ## 稳定阶段只修 bug
 
-每次推送 `release-*` 分支都会通过 `release-source.yml` 运行完整源码门禁。正式标签复用同一门禁和已验证的 Cargo 锁文件。分支预检不创建标签、发布产物或镜像，也不部署服务；发布脚本应在候选预检通过后运行。
-源码门禁还会构建真实的开发配置 Server/TUI 包并校验内容。Linux 包必须在产品二进制旁包含 sandbox launcher；原生安装验收会先探测安装后的 launcher，再检查产品运行。
+每次推送 `release-*` 分支，通过 `release-source.yml` 分阶段执行一次源码门禁：契约、Rust 格式/检查/测试、前端质量和安装器契约。源码门禁不生成开发版产品包。候选按分支隔离，更新后取消旧候选；正式发布仍串行执行。发布 runner 使用固定系统标签，Rust/Node/pnpm 版本统一放在 `.github/release-toolchain.env`，升级通过独立 PR 审核。
+
+成功候选保留精确 SHA、run/attempt、前一已发布 tag、Cargo.lock、工具链指纹和标准生成的 Notes，保留期 14 天。标签流程验证并复用该源码门禁和依赖图，不重复执行源码套件或重新解析依赖。缺失、过期或不匹配时明确失败；先对同一源码重跑候选门禁，审阅新的依赖图，再创建标签。
 
 release 分支只接受 bug 修复，以及修复所需的回归测试、发布文档或打包纠错。
 准备提交之后统一使用 `fix` 提交；不增加特性、不做无关重构，也不将持续开发中的
@@ -55,53 +56,44 @@ main 整体合入。需要共享修复时 cherry-pick 对应提交。
 共享校验器拒绝准备提交之后的非 fix 提交；提交分类只是守卫，review 仍须判断内容
 是否偷偷引入新特性。
 
-从上一个正式 tag 到最终 release 提交生成英文 Notes，并人工编辑。annotated tag 中的
-Notes 是唯一发布正文。生成器按提交类型归类，排除 merge、正式版本准备和下一开发版本提交，
-历史无类型提交保留在 Other Changes，未知类型报错，空分类不输出。
+候选阶段通过现有 `scripts/generate-release-notes.sh`，从前一已发布 tag 到精确候选 SHA 生成英文 Notes。保持脚本的提交分类和标准内容；本地审阅文件、tag 注释和公开 Release 正文使用相同字节。通用升级/回滚说明放在部署文档。
 
 ```bash
-scripts/generate-release-notes.sh v0.1.9 --from v0.1.8 --output /tmp/talos-v0.1.9.md
-./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --dry-run --yes
-./release.sh 0.1.9 --notes /tmp/talos-v0.1.9.md --yes
+./release.sh 0.1.10 --dry-run --yes
+# 审阅 output/release-notes/v0.1.10.md，再发布同一候选。
+./release.sh 0.1.10 --yes
 ```
 
-工作区必须干净，分支必须与同名远端同步。脚本创建并推送 annotated tag，tag 正文就是
-唯一的 Release Notes。推送 tag 后由 Talos 的 release workflow 执行准出；只有源码校验、
-质量检查、产品构建、TUI 原生安装验收和镜像发布都成功后，才创建 GitHub Release。
-若 workflow 失败，修复工作流或 runner 问题后可对同一个不可变 tag 重跑 `release.yml`；
-不得移动已发布的 tag，也不能用修改后的代码重出同名版本。
+工作区必须干净、分支与远端同步，候选源码门禁成功。可选的 `--notes <file>` 必须与候选生成内容一致。脚本在创建标签前验证 Release 尚不存在及候选来源，使用 verbatim 注释；不构建产品或本地检查包，不自动修正标签或加入补救分支。
+
+首次从一个仓库发布，或迁移发布仓库时，检查已有 GHCR 包的 **Manage Actions access**，确认发布仓库具备 **Write**。登录成功及读取包信息都不能证明此权限；GitHub 没有对应 Actions ACL 的只读 API。使用正常 GITHUB_TOKEN，不假上传、不用个人 Token 补救。发布前确认 immutable release 设置并审阅最终 Notes；正式发布后关联标签和制品锁定，标签注释同样不能修改。
 
 ## 统一准出与发包
 
 `apilots/talos` 中的 `release.yml` 在推送 `v*` tag 时执行以下流程，也支持维护者手动重跑：
 
-1. 将不可变 tag 解析为精确源码 SHA，校验正式版本、准备与修复历史，以及 annotated tag
-   中非空的唯一 Notes。
-2. 从该源码运行 `bash scripts/check-release.sh`：提交与 Notes 契约、Rust 格式/检查/测试、
-   前端流水线、安装器契约测试。
-3. 从验证后的 SHA 构建原有 Desktop、WebUI 和四平台 TUI 产品。TUI 上传前都必须通过原生
-   安装 E2E，并通过 `TUI_INSTALL_PRODUCT_DIR` 复用刚构建的包。
-4. 构建并发布 `linux/amd64` 与 `linux/arm64` 的 Server、Worker 镜像，生成 checksums 和
-   release manifest，再验证最终安装器制品。
-5. 所有必需 job 成功后才创建 Talos GitHub Release，正文原样取自 tag Notes；可选 R2
-   镜像上传继续保留。
+1. 将不可变 tag 解析为精确 SHA，校验正式版本、提交历史及注释。
+2. 核验该 SHA 的成功候选、run/attempt、Notes、锁文件和工具链，导入已验证结果，不重复跑源码套件。
+3. 使用已验证锁文件，各构建一次八个正式产品目标，核验构建未改变依赖图。上传前校验实际包；TUI 原生验收通过 `TUI_INSTALL_PRODUCT_DIR` 检查并安装同一份包，不为检查另打开发包。
+4. 各架构的 Server/Worker 镜像复用已验证 Linux Server 包内的程序、launcher 和 WebUI，`PRODUCT_STAGE=packaged` 选择正常发布输入；本地源码镜像仍默认使用 `source` 阶段。镜像上传前保留运行时依赖、版本、launcher 和许可探测。
+5. 所有产品及镜像门禁成功后发布多架构清单，验证最终安装器制品，创建 GitHub Release，正文使用精确 tag Notes。将 Cargo.lock 和 source-validation.json 作为带校验和的公开资产保存，manifest.validation 记录候选 run 和锁文件摘要；保留可选 R2 上传。
 
-所有 release job 使用 GitHub-hosted runner。没有跳过准出的输入，也不能用本地验证代替。
-要重跑已有 tag 的 release workflow 时执行：
+所有 job 使用 GitHub-hosted runner 并设置超时；不提供跳过门禁、未验证结果回退或自动修标签。未完成发布可在同一源码标签上新建一次工作流运行：
+
+```bash
+gh workflow run release.yml --repo apilots/talos \
+  -f tag=v0.1.10 -f publish_latest=true
+```
+
+已存在正式 Release 时，在构建前拒绝执行，不能借此重出旧版。发布自动化修改只需针对性的契约和工作流/配置检查，不要求本地重建整套产品；打包行为变更选择对应验证，CI 保留正式包内容和原生安装门禁。Docker 配置可以用 `docker buildx build --check` 检查，不生成镜像。
 
 每个产品归档和 Desktop 安装包都携带 Talos `LICENSE` 与 `NOTICE`；Server 和 Worker
 镜像将三份许可文件安装到 `/usr/share/licenses/talos`。其中 `THIRD_PARTY_NOTICES`
 列出第三方依赖的许可类别和固定版本源码位置，包括 MPL 组件的源码。Release job 在上传前
 检查各平台制品内容，GitHub Release 也并列提供这些文件及校验和、产品制品。
 
-```bash
-gh workflow run release.yml --repo apilots/talos \
-  -f tag=v0.1.9 -f publish_latest=true
-```
-
 连续发布时先完成旧版，旧版使用 `publish_latest=false`，最新版使用 true。工作流串行执行，
-并以当前 GitHub latest 版本为基准，阻止旧版倒退 latest。日常小修仅验证受影响场景，发布准出统一
-运行完整检查。本地验证输出保存在忽略目录 `output/release-<version>/`；未运行的
+并以当前 GitHub latest 版本为基准，阻止旧版倒退 latest。日常小修仅验证受影响场景；精确候选执行一次完整源码检查，正式发布复用已验证结果。本地验证输出保存在忽略目录 `output/release-<version>/`；未运行的
 真实账号场景必须记录为未验证，不能由单测或构建成功推断其通过。
 
 ## 发布后收尾
@@ -110,7 +102,7 @@ gh workflow run release.yml --repo apilots/talos \
 `shasum -a 256 -c checksums.txt`。验证 Release Notes 与 annotated tag 一致、manifest
 源码 SHA 对应不可变 tag、镜像包含 `linux/amd64` 与 `linux/arm64`，最新版本还要验证 latest 引用。
 
-发布成功后将 release 分支合回 main。发生版本冲突时保留 main 已进入的下一开发
+发布成功后将精确 tag Notes 原样归档到 `docs/releases/<tag>.md`，再将 release 分支合回 main。发生版本冲突时保留 main 已进入的下一开发
 版本，不能将 main 降回正式版本，也不能用 release 整棵文件树覆盖正在进行的开发。
 Docker 默认值更新为新发布镜像。如果 main 尚未切下一版本，再用独立提交进入开发周期。
 已发布 tag 始终不变。协议和数据升级还需执行
