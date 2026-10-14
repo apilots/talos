@@ -1,65 +1,28 @@
 #!/usr/bin/env python3
-"""Decide whether a pull request needs a resource-heavy quality workflow."""
+"""Select product CI jobs from the repository's top-level ownership folders."""
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import subprocess
 import sys
 
 
 DOCUMENT_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
-DOCUMENT_PATHS = (
-    "docs/**",
-    "specs/**",
-    ".github/ISSUE_TEMPLATE/**",
-    ".github/PULL_REQUEST_TEMPLATE.md",
-    "AGENTS.md",
-    "CONTRIBUTING*.md",
-)
 SCOPES = {
-    "pr-e2e": (
-        "talos-rs/**",
-        "talos-app/**",
-        "talos-e2e/**",
-        "conf/**",
-        "deploy/**",
-        "build/**",
-        "build.sh",
-        "justfile",
-        "Cargo.toml",
-        "pnpm-workspace.yaml",
-        "pnpm-lock.yaml",
-    ),
-    "rust": (
-        "talos-rs/**",
-        "scripts/check_error_contract*.py",
-        "justfile",
-    ),
-    "frontend": (
-        "talos-app/**",
-    ),
+    "rust": ("talos-rs/",),
+    "frontend": ("talos-app/",),
+    "pr-e2e": ("conf/", "talos-app/", "talos-e2e/", "talos-rs/"),
     "tui-install": (
-        "build.sh",
-        "build/scripts/verify-release-artifacts.sh",
-        "conf/**",
-        "deploy/install/**",
-        "talos-e2e/lib/**",
-        "talos-e2e/run_e2e.sh",
-        "talos-e2e/scripts/tui_install.sh",
-        "talos-e2e/scenarios/15_tui_install/**",
-        "talos-e2e/tests/tui_install_target_test.sh",
-        "talos-rs/Cargo.toml",
+        "conf/",
+        "talos-rs/",
+        "talos-e2e/scenarios/15_tui_install/",
     ),
 }
 
 
-def is_document_only_path(path: str) -> bool:
-    normalized = path.removeprefix("./")
-    if any(fnmatch.fnmatchcase(normalized, pattern) for pattern in DOCUMENT_PATHS):
-        return True
-    return normalized.lower().endswith(DOCUMENT_SUFFIXES)
+def is_document(path: str) -> bool:
+    return path.lower().endswith(DOCUMENT_SUFFIXES)
 
 
 def changed_paths() -> list[str]:
@@ -75,9 +38,9 @@ def changed_paths() -> list[str]:
 
 
 def scope_matches(scope: str, path: str) -> bool:
-    if is_document_only_path(path):
+    if is_document(path):
         return False
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in SCOPES[scope])
+    return any(path.startswith(directory) for directory in SCOPES[scope])
 
 
 def should_run(scope: str, paths: list[str]) -> bool:
@@ -103,9 +66,9 @@ def main() -> int:
             stream.write(f"run_workflow={'true' if relevant else 'false'}\n")
 
     if relevant:
-        print(f"{scope}: relevant product or workflow inputs changed")
+        print(f"{scope}: matching product directory changed")
     else:
-        print(f"{scope}: no relevant product inputs changed; skip resource-heavy jobs")
+        print(f"{scope}: no matching product directory changed; skip product jobs")
         if paths:
             print("Changed files:")
             for path in paths:
