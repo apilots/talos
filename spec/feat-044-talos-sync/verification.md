@@ -106,3 +106,11 @@ Linux Docker installation and the required aggregate gate. This proves the
 45-minute job budget permits the existing tests and cleanup to finish; it does
 not claim a tagged product release. The closure PR is rebased onto the public CI
 policy, with its temporary external-PR workaround removed.
+
+The new public CI exposed one fixture-classification error: the complete
+`09_app_server` group executes real models and cannot run without provider keys.
+It remains in the existing maintainer workflow; public PRs run the extracted
+existing client smoke case instead. With an empty test environment file, that
+case passed real app-server model listing, Session creation, configuration and
+Workspace/Memory reads. The full group retains its model-dependent assertions,
+and the smoke case is not duplicated in the protocol scenario.

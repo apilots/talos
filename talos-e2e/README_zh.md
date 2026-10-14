@@ -61,12 +61,15 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 当前没有 Group `04`；应以场景目录为准，不要假设 Group 编号连续。
 
 GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secrets 的
-`01_health_and_models`、`09_app_server`、`10_talos_app`、`12_files` 和
+`01_health_and_models`、`09_app_server/smoke_e2e`、`10_talos_app`、`12_files` 和
 `14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
 适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
 Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
 
-维护者可从 `main` 手动运行 provider 集成工作流 `trusted-e2e.yml`。`11_auth`、
+维护者可从 `main` 手动运行provider集成工作流 `trusted-e2e.yml`，包含需要真实模型
+凭据的完整 `09_app_server` 执行、MCP、Memory和Skills场景。公开app-server smoke
+复用原客户端，实际验证模型列表、Session创建、配置及Workspace/Memory API读取，
+不执行模型。`11_auth`、
 `17_multi_node` 和 `18_computer_workspace` 仍需构建私有 Cloud 服务源码；在该 fixture
 可通过公开、可复现方式获得之前，须在相邻 `talos-cloud` checkout 上本地运行。
 `19_computer_sync` 的大型拓扑也继续本地验收。上述排除项均明确记录，不得声称已在
