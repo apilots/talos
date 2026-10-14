@@ -48,11 +48,14 @@ at:
 Additional dependencies
 -----------------------
 
-Other Rust dependencies and their declared SPDX license expressions are
-recorded in talos-rs/Cargo.lock and the package manifests in the Talos source
-release. Each dependency retains its own license and notices in its source
-package. In particular, packages with a choice of licenses may be used under
-any license offered by that package; this notice does not relicense them.
+Other Rust dependencies declare their licenses in their package manifests.
+The Talos source release contains workspace manifests; Cargo.lock is generated
+during the build and is not tracked in the source archive. Each dependency
+retains its own license and notices in its source package. In particular,
+packages with a choice of licenses may be used under any license offered by
+that package; this notice does not relicense them.
 
-The dependency versions above were present in the Cargo.lock used to prepare
-this release. Consult that lockfile for the complete resolved dependency set.
+The dependency versions above were present in the generated Cargo.lock used
+to prepare this candidate. Inspect the lockfile and Cargo metadata from the
+actual product build for its complete resolved dependency set; versions may
+differ when dependencies are resolved again.
