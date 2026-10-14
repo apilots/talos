@@ -25,7 +25,11 @@ Status: Complete。依赖：阶段 1–3。
 成功标准：本地 Desktop 默认本机并产生本机效果；切远端后产生远端效果；第二个 Desktop/Web 看见并执行第一台节点；
 本机标签不跟随选中/在线变化；Desktop与Server保留自己的业务DB并按044同步账号事实；纯本地功能保持；用户菜单与固定会话归属无回归。当前管理runtime与同步边界见[044设计](../../feat-044-talos-sync/design.md)；043原阶段验收保留其实际日期与范围。
 
-拟执行检查：
+## 原043实施与验收（2026-10-11）
+
+下方检查、实施切片及Review修复全部保留043原验收基线；其中cloud客户端直接调用云产品HTTP API、云Desktop无第二个管理runtime的描述已由044替代，不作为当前实施指导。当前契约以上方步骤及[044设计](../../feat-044-talos-sync/design.md)为准，不改写历史测试结果。
+
+原阶段检查：
 
 - pnpm --dir talos-app --filter talos-web test；lint；typecheck；build（分别执行）。
 - pnpm --dir talos-app --filter talos-desktop check
@@ -36,7 +40,7 @@ Status: Complete。依赖：阶段 1–3。
 边界核查：UI 不直连 Harness、不持节点密钥、不维护租约；Desktop 不开第二个云业务控制面。
 交付与消融的最终结果见阶段 5 和 [验收记录](../verification.md)。
 
-## 实施切片
+## 原043实施切片
 
 | 切片 | 目标、依赖与验收 | 状态 |
 | --- | --- | --- |
@@ -44,7 +48,7 @@ Status: Complete。依赖：阶段 1–3。
 | 4.2 Computer 组件 | 独立 Rail/Item/Overflow/Page；默认本机、轻量标签、完整搜索/分页和管理，保留现有账号菜单。依赖 4.1；验证键盘/主题/i18n 与实际截图 | Complete |
 | 4.3 产品接线 | Project/Session/env/new Turn 目标绑定、草稿/缓存隔离、固定会话恢复和离线状态。依赖 4.1–2；真实 Electron/Web 操作 + 前端 checks，再对照 Spec | Complete |
 
-当前：4.1–3 已完成。云模式直接访问同一个产品控制面，本地模式复用原 stdio API。
+043当时状态：4.1–3已完成；当时云模式直接访问同一个产品控制面，本地模式复用原stdio API。
 
 4.1 实际结果：37 项客户端测试、全工作区 typecheck、Web lint 通过；新增 stdio 目标保留场景后，Web 全量 384 项通过。云 product API 使用 host endpoint 与实际 Actor，stdio 目标参数保持；凭据只由宿主持有。
 

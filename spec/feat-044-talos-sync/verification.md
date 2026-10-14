@@ -99,3 +99,10 @@ checks and all 24 local links in the edited 043 documents passed. Installer and
 release contract checks passed, including the historical release archive fallback.
 These are scoped maintenance checks, not a repeated eight-case sync acceptance
 or a production deployment.
+
+The scoped native installer correction subsequently passed hosted acceptance:
+run `38499832576` completed all four Linux/macOS amd64/arm64 installations,
+Linux Docker installation and the required aggregate gate. This proves the
+45-minute job budget permits the existing tests and cleanup to finish; it does
+not claim a tagged product release. The closure PR is rebased onto the public CI
+policy, with its temporary external-PR workaround removed.
