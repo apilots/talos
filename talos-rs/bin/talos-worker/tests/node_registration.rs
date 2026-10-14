@@ -204,13 +204,17 @@ async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_si
         "node exited: {}",
         std::fs::read_to_string(&log_path).unwrap()
     );
-    assert!(store
-        .get(&node_id)
-        .await
-        .unwrap()
-        .unwrap()
-        .lease_token_hash
-        .is_none());
+    assert!(
+        store
+            .get(&node_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .lease_token_hash
+            .is_none(),
+        "Worker did not unregister: {}",
+        std::fs::read_to_string(&log_path).unwrap()
+    );
     assert!(coordinator.ensure_agent("default").await.is_err());
 
     stop_restarted.cancel();
