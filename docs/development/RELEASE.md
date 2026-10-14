@@ -49,6 +49,11 @@ do not backport them to an existing release branch as product bug fixes.
 
 ## Stabilize
 
+Each push to `release-*` runs the complete source gate before publication, using
+`release-source.yml`. Tag builds reuse that same gate and its validated Cargo
+lockfile. Branch checks do not create tags, publish packages or images, or deploy
+services. Wait for this candidate check before running the publication script.
+
 The release branch accepts only bug fixes, including necessary regression tests
 and corrections to release documentation or packaging. Use `fix` subjects after
 the preparation commit; no features, unrelated refactors, or merges from advancing
