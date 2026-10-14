@@ -14,7 +14,8 @@ cp "${validator}" "${temp_dir}/scripts/check-release-version.sh"
 git -C "${temp_dir}" config core.hooksPath /dev/null
 git -C "${temp_dir}" add scripts/check-release-version.sh
 git -C "${temp_dir}" -c core.hooksPath=/dev/null commit -q --allow-empty -m "chore: initialize"
-cd "${temp_dir}"
+cd -P "${temp_dir}"
+temp_dir="${PWD}"
 python3 - <<'PY'
 from pathlib import Path
 
@@ -66,8 +67,11 @@ cat > "${publication_root}/notes.md" <<'EOF'
 
 - Preserve Markdown headings and # inline text exactly.
 EOF
-PATH="${publication_root}/bin:${PATH}" bash "${repo_root}/release.sh" 1.2.3 \
-  --notes "${publication_root}/notes.md" --yes > "${publication_root}/publisher.log" 2>&1
+if ! PATH="${publication_root}/bin:${PATH}" bash "${repo_root}/release.sh" 1.2.3 \
+  --notes "${publication_root}/notes.md" --yes > "${publication_root}/publisher.log" 2>&1; then
+  cat "${publication_root}/publisher.log" >&2
+  exit 1
+fi
 python3 - "${publication_root}" <<'PY_TAG'
 import subprocess
 import sys
@@ -90,7 +94,10 @@ if PATH="${publication_root}/bin:${PATH}" bash "${repo_root}/release.sh" 1.2.3 \
   echo 'Invalid annotation should fail before remote publication' >&2
   exit 1
 fi
-grep -Fq 'tag annotation must start with: # Talos v1.2.3' "${publication_root}/rejected.log"
+if ! grep -Fq 'tag annotation must start with: # Talos v1.2.3' "${publication_root}/rejected.log"; then
+  cat "${publication_root}/rejected.log" >&2
+  exit 1
+fi
 [[ "$(git --git-dir="${publication_root}/origin.git" rev-parse v1.2.3)" == "${remote_tag}" ]]
 
 expect_rejection() {

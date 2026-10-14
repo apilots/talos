@@ -191,6 +191,9 @@ require_command python3
 require_repo_root
 require_clean_worktree
 require_release_branch
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+  require_tag_annotation
+fi
 require_synced_release_branch
 gh auth status >/dev/null
 bash scripts/check-release-version.sh "${VERSION}"
