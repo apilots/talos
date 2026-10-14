@@ -202,7 +202,7 @@ EOF
 confirm_release
 
 if [[ "${TAG_ACTION}" == "create" ]]; then
-  run git tag -a "${TAG}" -F "${NOTES_FILE}"
+  run git tag -a --cleanup=verbatim "${TAG}" -F "${NOTES_FILE}"
 fi
 if [[ "${TAG_ACTION}" != "reuse" ]]; then
   run git push origin "${TAG}"
