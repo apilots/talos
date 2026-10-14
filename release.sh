@@ -73,6 +73,15 @@ require_synced_release_branch() {
     || die "${EXPECTED_BRANCH} is not synced with origin/${EXPECTED_BRANCH}"
 }
 
+require_tag_annotation() {
+  [[ "$(git cat-file -t "${TAG}")" == "tag" ]] \
+    || die "${TAG} must be an annotated tag"
+  local contents
+  contents="$(git for-each-ref --format='%(contents)' "refs/tags/${TAG}")"
+  [[ "${contents%%$'\n'*}" == "# Talos ${TAG}" ]] \
+    || die "tag annotation must start with: # Talos ${TAG}"
+}
+
 resolve_tag_action() {
   TAG_ACTION="create"
   if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
@@ -84,6 +93,8 @@ resolve_tag_action() {
   head_sha="$(git rev-parse HEAD)"
   [[ "${tag_sha}" == "${head_sha}" ]] \
     || die "existing tag ${TAG} points to ${tag_sha}, expected ${head_sha}"
+
+  require_tag_annotation
 
   if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
     TAG_ACTION="reuse"
@@ -203,6 +214,9 @@ confirm_release
 
 if [[ "${TAG_ACTION}" == "create" ]]; then
   run git tag -a --cleanup=verbatim "${TAG}" -F "${NOTES_FILE}"
+  if [[ "${DRY_RUN}" != "1" ]]; then
+    require_tag_annotation
+  fi
 fi
 if [[ "${TAG_ACTION}" != "reuse" ]]; then
   run git push origin "${TAG}"

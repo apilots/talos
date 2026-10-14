@@ -82,6 +82,17 @@ for git_args in ([], [f"--git-dir={root / 'origin.git'}"]):
     assert target == subprocess.check_output(["git", "rev-parse", "HEAD"])
 PY_TAG
 
+# Reject an invalid existing annotation before a push or remote-tag reuse.
+remote_tag="$(git --git-dir="${publication_root}/origin.git" rev-parse v1.2.3)"
+git tag -a --cleanup=verbatim -f v1.2.3 -m 'Invalid notes header' HEAD >/dev/null
+if PATH="${publication_root}/bin:${PATH}" bash "${repo_root}/release.sh" 1.2.3 \
+  --notes "${publication_root}/notes.md" --yes > "${publication_root}/rejected.log" 2>&1; then
+  echo 'Invalid annotation should fail before remote publication' >&2
+  exit 1
+fi
+grep -Fq 'tag annotation must start with: # Talos v1.2.3' "${publication_root}/rejected.log"
+[[ "$(git --git-dir="${publication_root}/origin.git" rev-parse v1.2.3)" == "${remote_tag}" ]]
+
 expect_rejection() {
   local reason="$1"
   if bash "${validator}" 1.2.3 >validation.log 2>&1; then
