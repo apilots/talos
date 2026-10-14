@@ -1,6 +1,6 @@
 {
   "name": "talos-ts-sdk",
-  "version": "0.1.9-SNAPSHOT",
+  "version": "0.1.9",
   "license": "Apache-2.0",
   "private": true,
   "scripts": {
