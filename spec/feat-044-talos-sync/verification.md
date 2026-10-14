@@ -87,3 +87,15 @@ Docker networks. It does not claim multiple physical machines, Kubernetes,
 production PG or a production deployment. Public SDK publication does not imply
 a service release. The independent Sync project owns its service checks; both
 projects build against the public Cloud SDK without private SDK credentials.
+
+## Post-merge maintenance (2026-10-14)
+
+The 043 records now explicitly identify the superseded cloud Desktop assembly;
+the current UI plan uses each management host's original DB and Worker identity.
+`talos-tools-sandbox` declares its own Tokio `fs`, `io-util` and `process` features,
+without relying on a consumer to enable them. Standalone package check, 41/41
+nextest tests (zero skipped), all-target strict Clippy, formatting, repository
+checks and all 24 local links in the edited 043 documents passed. Installer and
+release contract checks passed, including the historical release archive fallback.
+These are scoped maintenance checks, not a repeated eight-case sync acceptance
+or a production deployment.

@@ -15,7 +15,7 @@ talos-types.workspace = true
 tempfile = "3"
 thiserror.workspace = true
 tracing.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "process"] }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

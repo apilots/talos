@@ -52,6 +52,8 @@ Status: Complete。依赖：已获用户实施授权（2026-10-11）。
 
 阶段 1.3 实际结果（2026-10-11）：
 
+以下为043历史切片；云宿主裁剪管理runtime、无本地业务DB及outbound完全无listener的组装已由[044统一Worker RPC阶段](../../feat-044-talos-sync/plans/01-worker-rpc.md)替代。当前Desktop保留完整管理runtime、原业务DB与同一Worker的loopback RPC listener；不将旧切片测试计为新架构验收。
+
 - Desktop main 注入设备名并启动原 app-server；默认 cloud，显式 local 保存后重启同一宿主。没有新增二进制/执行进程。
 - cloud 宿主只组装 AccountService、登录缓存和 TalosWorker 注册；不创建本地业务数据库。普通 stdio/Server 与纯本地功能保留。
 - 登录与重启恢复后创建/复用 UUID；凭据以 Unix 0600、原子替换和 fsync 写到 conf 下，配置先记录 UUID；pending 标记防止未知结果重复创建。

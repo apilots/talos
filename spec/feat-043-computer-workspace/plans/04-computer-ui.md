@@ -6,14 +6,14 @@ Status: Complete。依赖：阶段 1–3。
 
 步骤：
 
-1. 客户端 SDK composition 显式选择 cloud/local：云模式使用云产品 API，纯本地复用 stdio。
+1. Desktop客户端SDK经stdio连接本机完整管理runtime；云登录启用注册与同步，远端Worker访问内聚在管理端agent-client，不把Desktop变成云控制面的薄客户端。Web使用所连接管理端的原产品API。
    复用已有登录/账户机制；Cloud Auth 与控制面 Actor 对齐，Desktop main 保存节点身份/凭据，renderer 不持有 NodeAuth。
 2. 使用阶段 1.3 已实现的 desktop/workerIdentity、connection 与 workerEnroll 宿主接口，完成界面接线；复用既有 binary resolver、打包和进程管理。
-   在 app-server 内区分云 Worker 宿主组装和纯本地业务组装，同一 home 只运行一个 Worker，不增加 Desktop worker 二进制。
-   消费已有 runtime-state 的结构化 ApiError；登录初始化、断网和 Worker 接入失败各有明确状态，注册失败不重置登录，不用本地 DB 冒充云历史。
+   app-server始终保留完整管理runtime与业务DB，同一 home 只运行一个Worker及其RPC host，不增加Desktop worker二进制。
+   消费已有runtime-state的结构化ApiError；登录初始化、断网和Worker接入失败各有明确状态，注册失败不重置登录；原Store通过044同步物化账号历史，不伪造云端已确认状态。
 3. features/computers 复用 app store；独立 ComputerRail、ComputerOverflowMenu、ComputerItem 与 ComputersPage。
    三列布局保留既有 Sidebar、用户按钮/菜单；快捷三项、完整浮层服务端搜索/分页、管理入口按确认稿。
-4. 本机根据控制面 + UUID 匹配，设备名称旁轻量标签，窄栏 tooltip；不同 Desktop 标识不同，Web 不猜本机。
+4. 本机根据当前管理宿主的Worker身份匹配，设备名称旁轻量标签，窄栏 tooltip；Desktop与Web都标识其所连接管理宿主的内嵌Worker，不按浏览器所在机器推断。
    首次优先本机，接入中显示进度；最近选择/Session 链接优先；失败/离线不自动改选其他 Computer。
 5. 节点详情与个人改名、启停/凭据恢复走同一 Service；启停指注册可用性，不杀 Desktop 进程。
 6. 项目/会话/环境页和新任务同步携带目标；运行任务不迁移、不因切换中断；草稿与云历史区分客户端/服务端 owner。
@@ -23,7 +23,7 @@ Status: Complete。依赖：阶段 1–3。
 7. 键盘焦点、浅色/深色、i18n、长列表、离线历史和明确错误完成实际 Web/Electron 验收。
 
 成功标准：本地 Desktop 默认本机并产生本机效果；切远端后产生远端效果；第二个 Desktop/Web 看见并执行第一台节点；
-本机标签不跟随选中/在线变化；云模式业务不进本地 DB；纯本地功能保持；用户菜单与固定会话归属无回归。
+本机标签不跟随选中/在线变化；Desktop与Server保留自己的业务DB并按044同步账号事实；纯本地功能保持；用户菜单与固定会话归属无回归。当前管理runtime与同步边界见[044设计](../../feat-044-talos-sync/design.md)；043原阶段验收保留其实际日期与范围。
 
 拟执行检查：
 
