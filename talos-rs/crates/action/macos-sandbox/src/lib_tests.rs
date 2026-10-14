@@ -88,7 +88,7 @@ fn profile_uses_parameters_and_keeps_restricted_network_closed() {
         NetworkIsolationSpec::Restricted,
     );
 
-    let (policy, definitions) = super::profile::build_seatbelt_profile(&request);
+    let (policy, definitions) = super::profile::build_seatbelt_profile(&request, Some(root.path()));
     assert!(policy.starts_with("; Adapted from OpenAI Codex"));
     assert!(policy.contains("(deny default)"));
     assert!(!policy.contains("(allow network-outbound)\n(allow network-inbound)"));
@@ -99,6 +99,8 @@ fn profile_uses_parameters_and_keeps_restricted_network_closed() {
         .iter()
         .any(|(name, path)| name == "DENIED_ROOT_0" && path == absolute(&denied).as_path()));
     assert!(policy.contains("/xcrun_db(-[^/]+)?$"));
+    let (without_host_tmp, _) = super::profile::build_seatbelt_profile(&request, None);
+    assert!(!without_host_tmp.contains("/xcrun_db(-[^/]+)?$"));
     assert!(policy.contains("(subpath \"/Library/Developer/CommandLineTools\")"));
     assert!(policy.contains("(subpath \"/opt/homebrew/opt\")"));
     assert!(policy.contains("(subpath \"/opt/homebrew/Cellar\")"));

@@ -103,7 +103,8 @@ impl SandboxProvider for MacosSandboxProvider {
                 reason: "Seatbelt provider received a non-macOS request".to_string(),
             });
         }
-        let (policy, definitions) = build_seatbelt_profile(&request);
+        let host_tmp = std::env::var_os("TMPDIR").map(PathBuf::from);
+        let (policy, definitions) = build_seatbelt_profile(&request, host_tmp.as_deref());
         let original = request.into_command();
         let mut args = vec!["-p".to_string(), policy];
         args.extend(
