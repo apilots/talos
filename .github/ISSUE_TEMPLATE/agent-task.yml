@@ -1,0 +1,55 @@
+name: Agent task
+description: Provide a decision-ready task for an AI coding agent
+title: ""
+labels: []
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the human-owned decisions and the outcome. The agent owns repository inspection, implementation, and evidence.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should users or maintainers be able to observe when this is complete?
+      placeholder: Describe the behavior or result, not the implementation steps.
+    validations:
+      required: true
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Accepted product and design decisions
+      description: Record decisions already made. If none exist, say so and let the agent identify choices that need human input.
+      placeholder: Include API, UX, ownership, or compatibility decisions that are already settled; otherwise enter None.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and non-goals
+      description: What must stay compatible, out of scope, or protected?
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions the agent can verify.
+      placeholder: Use one checkable condition per line.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Required verification or evidence
+      description: Name required scenarios, environments, or artifacts. The agent should report unavailable checks explicitly.
+    validations:
+      required: false
+  - type: textarea
+    id: approvals
+    attributes:
+      label: Human decision or approval boundaries
+      description: Identify any product decision, external write, deployment, merge, or publication that must wait for a human.
+    validations:
+      required: false

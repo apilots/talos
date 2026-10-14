@@ -27,7 +27,28 @@ permissions:
   contents: read
 
 jobs:
+  change-scope:
+    name: Check installer change scope
+    runs-on: ubuntu-latest
+    outputs:
+      run_workflow: ${{ steps.scope.outputs.run_workflow }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether installer checks apply
+        id: scope
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/pr_change_scope.py tui-install
+
   installer-tests:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
     name: Installer shell tests
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -47,6 +68,8 @@ jobs:
           talos-e2e/tests/tui_install_target_test.sh
 
   native-install-e2e:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
     name: Install ${{ matrix.platform }}-${{ matrix.arch }}
     strategy:
       fail-fast: false
@@ -118,6 +141,8 @@ jobs:
           retention-days: 7
 
   linux-docker-install-e2e:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
     name: Linux Docker installer E2E
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -144,17 +169,28 @@ jobs:
     name: talos-tui-install-gate
     runs-on: ubuntu-latest
     needs:
+      - change-scope
       - installer-tests
       - native-install-e2e
       - linux-docker-install-e2e
     steps:
       - name: Require every installer check
         env:
+          SCOPE_RESULT: ${{ needs.change-scope.result }}
+          RUN_INSTALLER: ${{ needs.change-scope.outputs.run_workflow }}
           INSTALLER_TESTS: ${{ needs.installer-tests.result }}
           NATIVE_INSTALL: ${{ needs.native-install-e2e.result }}
           DOCKER_INSTALL: ${{ needs.linux-docker-install-e2e.result }}
         run: |
           set -euo pipefail
+          if [[ "${SCOPE_RESULT}" != "success" ]]; then
+            echo "Could not determine installer change scope." >&2
+            exit 1
+          fi
+          if [[ "${RUN_INSTALLER}" != "true" ]]; then
+            echo "No installer inputs changed; installer acceptance is not applicable."
+            exit 0
+          fi
           for result in "${INSTALLER_TESTS}" "${NATIVE_INSTALL}" "${DOCKER_INSTALL}"; do
             if [[ "${result}" != "success" ]]; then
               echo "Installer acceptance did not pass: ${result}" >&2

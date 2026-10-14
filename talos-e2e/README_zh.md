@@ -60,13 +60,20 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 当前 case 清单以 `scenarios/` 为事实来源。
 当前没有 Group `04`；应以场景目录为准，不要假设 Group 编号连续。
 
-GitHub PR 门禁运行所有现存 E2E 场景：`01`-`03`、`05`-`15`、`17` 和 `18`。
-其中 `13_interaction` 在 Linux Xvfb 中运行，`14_sandbox` 和 `15_tui_install`
-要求 runner 上 Docker 可用；15 由独立的 TUI 安装门禁覆盖四个平台原生安装和 Linux Docker。
-`17_multi_node` 在单个 Linux runner 内启动控制面与三个 Worker，`18_computer_workspace`
-在 macOS runner 上执行真实 Desktop/Web 登录和 Computer 流程。当前没有 Group `16`。
-`19_computer_sync` 需要本地多服务拓扑，继续作为本地验收组；
-这不替代上述各组在 PR 门禁中的产品行为验证。
+GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secrets 的
+`01_health_and_models`、`09_app_server`、`10_talos_app`、`12_files` 和
+`14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
+适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
+Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
+
+维护者可从 `main` 手动运行 provider 集成工作流 `trusted-e2e.yml`。`11_auth`、
+`17_multi_node` 和 `18_computer_workspace` 仍需构建私有 Cloud 服务源码；在该 fixture
+可通过公开、可复现方式获得之前，须在相邻 `talos-cloud` checkout 上本地运行。
+`19_computer_sync` 的大型拓扑也继续本地验收。上述排除项均明确记录，不得声称已在
+GitHub CI 通过。
+
+PR 子集保留有代表性的门禁，同时避免 Fork 代码接触 Secrets。真实 Provider 和私有
+服务验收由维护者负责，不会随每个外部贡献自动运行。
 
 ## 环境要求
 
@@ -75,7 +82,7 @@ GitHub PR 门禁运行所有现存 E2E 场景：`01`-`03`、`05`-`15`、`17` 和
 | 基础 Server、CLI 和 TUI | Rust toolchain 和仓库测试工具 |
 | Web 和 Desktop | Node.js、pnpm 依赖和平台 UI 前置条件 |
 | 真实模型或 MCP 链路 | 网络访问以及场景 preflight 要求的 Provider credential |
-| Cloud auth 和 S3 | 显式 Cloud 测试 credential 和隔离资源 |
+| Cloud auth 和 S3 | Cloud auth 需相邻私有 `talos-cloud` 源码、显式测试 credential 和隔离资源；S3 使用本地 fixture |
 | Linux Sandbox 补充验证 | 受支持主机上的 Docker |
 | Release 安装 | 原生目标环境；Docker 只补充验证 Linux |
 
@@ -85,8 +92,8 @@ Group 前先阅读所选脚本。
 Computer 注册与主动执行验收组：`18_computer_workspace`。仅注册运行
 `just e2e-case 18_computer_workspace/01_registration`，需要 Caddy（可用
 `TALOS_E2E_CADDY_BIN` 指定）、Node.js 和 pnpm 依赖，不需要模型 key。
-完整执行组还需要可用且有额度的执行/inner/vision Provider；PR 门禁使用仓库 Actions
-secrets 中的真实凭据，缺少必需凭据时会失败而不是跳过。覆盖范围与证据见
+完整执行组还需要可用且有额度的执行/inner/vision Provider；该组不在公开 PR 门禁中运行。
+覆盖范围与证据见
 [场景说明](scenarios/18_computer_workspace/README.md)。
 
 ## 证据和临时数据

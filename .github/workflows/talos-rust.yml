@@ -20,7 +20,28 @@ permissions:
   contents: read
 
 jobs:
+  change-scope:
+    name: Check Rust change scope
+    runs-on: ubuntu-latest
+    outputs:
+      run_workflow: ${{ steps.scope.outputs.run_workflow }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether Rust checks apply
+        id: scope
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/pr_change_scope.py rust
+
   rust-quality:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
     name: rust-format-and-check
     runs-on: ubuntu-latest
     timeout-minutes: 20

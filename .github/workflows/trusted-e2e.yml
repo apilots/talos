@@ -1,0 +1,191 @@
+name: Talos Maintainer E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: talos-maintainer-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-ref:
+    name: Require trusted main ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject non-main refs
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "${REF}" != "refs/heads/main" ]]; then
+            echo "Maintainer E2E must run from refs/heads/main, not ${REF}." >&2
+            exit 1
+          fi
+
+  scenarios:
+    name: E2E ${{ matrix.name }}
+    if: github.ref == 'refs/heads/main'
+    needs: validate-ref
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - name: chat-and-cli
+            runner: ubuntu-24.04
+            targets: |
+              case:01_health_and_models
+              case:02_session_lifecycle
+              case:03_messages_http_sse
+              group:05_cli
+          - name: tools-and-memory
+            runner: ubuntu-24.04
+            targets: |
+              group:06_tools
+              group:07_memory
+          - name: tui-and-interaction
+            runner: ubuntu-24.04
+            targets: |
+              group:08_tui
+              group:13_interaction
+
+    env:
+      TALOS_LLM_DEEPSEEK_API_KEY: ${{ secrets.TALOS_LLM_DEEPSEEK_API_KEY }}
+      TALOS_WEB_SEARCH_FIRECRAWL_API_KEY: ${{ secrets.TALOS_WEB_SEARCH_FIRECRAWL_API_KEY }}
+      TALOS_WEB_SEARCH_TAVILY_API_KEY: ${{ secrets.TALOS_WEB_SEARCH_TAVILY_API_KEY }}
+
+    steps:
+      - name: Check out Talos
+        uses: actions/checkout@v6
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bubblewrap build-essential curl libssl-dev pkg-config \
+            protobuf-compiler ripgrep sqlite3 tmux xvfb
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+          cache-on-failure: true
+
+      - name: Install just and nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python scenario dependencies
+        run: python -m pip install --disable-pip-version-check grpcio protobuf pyyaml
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.14.4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: talos-app/pnpm-lock.yaml
+
+      - name: Install application dependencies
+        run: pnpm --dir talos-app install --frozen-lockfile
+
+      - name: Install Chrome for Linux MCP E2E
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run maintainer-only provider scenarios
+        shell: bash
+        env:
+          E2E_TARGETS: ${{ matrix.targets }}
+          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ steps.chrome.outputs.chrome-path }}
+          TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TALOS_LLM_DEEPSEEK_API_KEY}" ]]; then
+            echo "TALOS_LLM_DEEPSEEK_API_KEY Actions secret is required." >&2
+            exit 1
+          fi
+          if grep -q '^group:06_tools$' <<<"${E2E_TARGETS}" \
+            && { [[ -z "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}" ]] || [[ -z "${TALOS_WEB_SEARCH_TAVILY_API_KEY}" ]]; }; then
+            echo "Firecrawl and Tavily Actions secrets are required for group 06." >&2
+            exit 1
+          fi
+
+          scenario_result=0
+          while IFS= read -r target; do
+            [[ -n "${target}" ]] || continue
+            kind="${target%%:*}"
+            value="${target#*:}"
+            if [[ "${kind}" == "group" ]]; then
+              xvfb-run -a ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
+            else
+              xvfb-run -a ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
+            fi
+          done <<<"${E2E_TARGETS}"
+          exit "${scenario_result}"
+
+      - name: Show redacted failed-scenario diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          secrets = [value for key, value in os.environ.items()
+                     if re.search(r"KEY|TOKEN|PASSWORD|SECRET", key) and len(value) >= 8]
+          def redact(text):
+              for secret in sorted(secrets, key=len, reverse=True):
+                  text = text.replace(secret, "<redacted>")
+              text = re.sub(r"(?i)(bearer\s+)\S+", r"\1<redacted>", text)
+              text = re.sub(r"eyJ[\w-]+\.[\w-]+\.[\w-]+", "<redacted>", text)
+              text = re.sub(r"(?i)([\"']?(?:\w*(?:token|password|secret|api_?key|credentials?)\w*)"
+                            r"[\"']?\s*[:=]\s*)([\"'])(.*?)\2", r"\1\2<redacted>\2", text)
+              return text
+
+          for report in sorted(Path("talos-e2e/reports").glob("e2e_report_*.md")):
+              for section in report.read_text(errors="replace").split("### 场景 ")[1:]:
+                  if "- 状态: FAIL\n" not in section:
+                      continue
+                  name = section.splitlines()[0]
+                  log = section.split("```text\n", 1)[-1].rsplit("```", 1)[0]
+                  print(f"Failed scenario: {name}")
+                  print(redact("\n".join(log.splitlines()[-80:])))
+          PY
+
+  gate:
+    if: ${{ always() }}
+    name: talos-maintainer-e2e
+    runs-on: ubuntu-latest
+    needs: [validate-ref, scenarios]
+    steps:
+      - name: Require every provider scenario
+        env:
+          REF_RESULT: ${{ needs.validate-ref.result }}
+          SCENARIO_RESULT: ${{ needs.scenarios.result }}
+        run: |
+          if [[ "${REF_RESULT}" != "success" || "${SCENARIO_RESULT}" != "success" ]]; then
+            echo "Maintainer E2E validation failed: ref=${REF_RESULT}, scenarios=${SCENARIO_RESULT}." >&2
+            exit 1
+          fi
+          echo "All maintainer E2E scenarios passed."

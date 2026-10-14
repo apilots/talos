@@ -57,12 +57,24 @@ Inspect `scenarios/` for the current case list; it is the source of truth.
 There is no current group `04`; use the scenario directory rather than assuming
 that group numbers are contiguous.
 
-The GitHub PR quality gate runs all existing E2E cases and groups except
-`19_computer_sync`. That group needs a Mac host plus multiple Docker services and
-is a local topology acceptance. It must be run and reported locally; its exclusion
-does not waive gated coverage for agent or product behavior.
-Group `15_tui_install` is covered by the separate TUI install gate, including four
-native platform runners and the Linux Docker install case.
+The approval-gated GitHub PR quality gate runs the secretless scenarios
+`01_health_and_models`, `09_app_server`, `10_talos_app`, `12_files`, and
+`14_sandbox`, along with the `talos-auth` and `talos-base` package tests for the
+public Cloud SDK adapter and Desktop enrollment boundaries. `15_tui_install` has
+its own four-platform native and Linux Docker gate. The PR workflow does not
+receive repository secrets and does not check out private repositories.
+
+Maintainers can manually run the provider-backed `trusted-e2e.yml` workflow from
+`main`. Scenarios `11_auth`, `17_multi_node`, and `18_computer_workspace` still
+build the private Cloud service source; run them locally with the adjacent
+`talos-cloud` checkout until that fixture has a public, reproducible distribution.
+The larger `19_computer_sync` topology also remains local acceptance. These
+exclusions are explicit and do not claim that the corresponding scenarios passed
+in GitHub CI.
+
+This PR subset keeps representative gated behavior while preventing fork code
+from receiving secrets. Provider-backed and private-service acceptance is
+maintainer-owned; it does not run automatically for each outside contribution.
 
 ## Environment requirements
 
@@ -70,8 +82,8 @@ native platform runners and the Linux Docker install case.
 | --- | --- |
 | Base server, CLI, and TUI | Rust toolchain and repository test tools |
 | Web and Desktop | Node.js, pnpm dependencies, and platform UI prerequisites |
-| Real model or MCP flows | Network access and the provider credentials required by the scenario preflight |
-| Cloud auth | Explicit cloud test credentials and isolated resources |
+| Real model or MCP flows | Network access and the provider credentials required by the scenario preflight; use the maintainer workflow or local acceptance |
+| Cloud auth | Adjacent private `talos-cloud` source, explicit test credentials, and isolated resources |
 | S3 files | curl with SigV4 support; pinned Versity Gateway v1.8.0 (downloaded and checksum-verified by group 12) |
 | Linux sandbox supplements | Docker on a supported host |
 | Release installation | Native target environment; Docker supplements Linux only |
