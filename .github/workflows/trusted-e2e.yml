@@ -42,6 +42,7 @@ jobs:
               case:02_session_lifecycle
               case:03_messages_http_sse
               group:05_cli
+              group:09_app_server
           - name: tools-and-memory
             runner: ubuntu-24.04
             targets: |

@@ -25,7 +25,9 @@ DEV YAML 用于本地无鉴权回归；联网场景保留真实登录，避免�
 安装版本地命令：`TALOS_DESKTOP_SMOKE_APP=/tmp/talos-computer-delivery-installed/Talos.app/Contents/MacOS/Talos node talos-app/desktop/scripts/desktop-smoke.mjs`。
 实际截图在 [场景目录](../../talos-e2e/reports/18_computer_workspace/11_product_ui)，本地 smoke 记录在 `.tmp/desktop-smoke/20261011_085624`。
 
-## 实现与 Spec 对照
+## 原阶段实现与 Spec 对照
+
+本节描述2026-10-11的043验收基线，不代表当前架构。044已替换“云Desktop无本地业务DB”的组装：Desktop app-server与talos-server均保留完整管理runtime、自己的业务DB和单个内嵌Worker，本机与远端使用同一RPC SDK；注册与命令中转由G负责，各管理端通过H同步账号数据。本机标识来自当前管理宿主的Worker身份。当前契约与验收见[044设计](../feat-044-talos-sync/design.md)和[044验收](../feat-044-talos-sync/verification.md)。
 
 - Desktop 云模式只有一个已打包 app-server 内的 Worker；业务 HTTP/SSE 接唯一控制面，没有第二份本地业务 DB。
 - 注册身份仍为控制面签发的持久 UUID；改名、重启、启停与显式凭据恢复不改变节点身份。

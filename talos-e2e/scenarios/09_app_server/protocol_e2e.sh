@@ -25,7 +25,6 @@ run_client_scenario() {
   fi
 }
 
-run_client_scenario "smoke"
 run_client_scenario "malformed"
 run_client_scenario "replay"
 run_client_scenario "multi-subscriber"

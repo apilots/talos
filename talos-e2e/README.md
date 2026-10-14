@@ -58,14 +58,18 @@ There is no current group `04`; use the scenario directory rather than assuming
 that group numbers are contiguous.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server`, `10_talos_app`, `12_files`, and
+`01_health_and_models`, `09_app_server/smoke_e2e`, `10_talos_app`, `12_files`, and
 `14_sandbox`, along with the `talos-auth` and `talos-base` package tests for the
 public Cloud SDK adapter and Desktop enrollment boundaries. `15_tui_install` has
 its own four-platform native and Linux Docker gate. The PR workflow does not
 receive repository secrets and does not check out private repositories.
 
 Maintainers can manually run the provider-backed `trusted-e2e.yml` workflow from
-`main`. Scenarios `11_auth`, `17_multi_node`, and `18_computer_workspace` still
+`main`, including the full `09_app_server` group whose execution, MCP, memory and
+skills cases need real model credentials. The public app-server smoke case reuses
+the existing client to exercise model listing, Session creation, configuration and
+Workspace/Memory API reads without executing a model. Scenarios `11_auth`,
+`17_multi_node`, and `18_computer_workspace` still
 build the private Cloud service source; run them locally with the adjacent
 `talos-cloud` checkout until that fixture has a public, reproducible distribution.
 The larger `19_computer_sync` topology also remains local acceptance. These

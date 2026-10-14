@@ -80,7 +80,7 @@ jobs:
           - name: app-server
             runner: ubuntu-24.04
             targets: |
-              group:09_app_server
+              case:09_app_server/smoke_e2e
           - name: app-and-files
             runner: ubuntu-24.04
             targets: |

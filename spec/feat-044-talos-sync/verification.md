@@ -87,3 +87,30 @@ Docker networks. It does not claim multiple physical machines, Kubernetes,
 production PG or a production deployment. Public SDK publication does not imply
 a service release. The independent Sync project owns its service checks; both
 projects build against the public Cloud SDK without private SDK credentials.
+
+## Post-merge maintenance (2026-10-14)
+
+The 043 records now explicitly identify the superseded cloud Desktop assembly;
+the current UI plan uses each management host's original DB and Worker identity.
+`talos-tools-sandbox` declares its own Tokio `fs`, `io-util` and `process` features,
+without relying on a consumer to enable them. Standalone package check, 41/41
+nextest tests (zero skipped), all-target strict Clippy, formatting, repository
+checks and all 24 local links in the edited 043 documents passed. Installer and
+release contract checks passed, including the historical release archive fallback.
+These are scoped maintenance checks, not a repeated eight-case sync acceptance
+or a production deployment.
+
+The scoped native installer correction subsequently passed hosted acceptance:
+run `38499832576` completed all four Linux/macOS amd64/arm64 installations,
+Linux Docker installation and the required aggregate gate. This proves the
+45-minute job budget permits the existing tests and cleanup to finish; it does
+not claim a tagged product release. The closure PR is rebased onto the public CI
+policy, with its temporary external-PR workaround removed.
+
+The new public CI exposed one fixture-classification error: the complete
+`09_app_server` group executes real models and cannot run without provider keys.
+It remains in the existing maintainer workflow; public PRs run the extracted
+existing client smoke case instead. With an empty test environment file, that
+case passed real app-server model listing, Session creation, configuration and
+Workspace/Memory reads. The full group retains its model-dependent assertions,
+and the smoke case is not duplicated in the protocol scenario.
