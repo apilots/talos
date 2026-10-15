@@ -12,8 +12,6 @@ on:
       - main
     paths:
       - "talos-rs/**"
-      - "contracts/talos-sync/**"
-      - "scripts/sync-metrics-contract.py"
       - "scripts/check_error_contract*.py"
       - "justfile"
       - ".github/workflows/talos-rust.yml"
@@ -77,7 +75,6 @@ jobs:
       - name: Check Rust workspace
         run: just check
 
-      - name: Verify Sync metrics contract and client boundaries
+      - name: Verify Sync SDK and client boundaries
         run: |
-          python3 scripts/sync-metrics-contract.py --check
           just test -p talos-sync -p talos-app-protocol -p talos-sdk

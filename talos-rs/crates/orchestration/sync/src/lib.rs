@@ -2,7 +2,6 @@
 
 mod facade;
 mod metrics;
-mod metrics_wire;
 pub use metrics::read_account_metrics;
 mod projection;
 mod runner;

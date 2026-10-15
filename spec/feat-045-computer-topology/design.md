@@ -1,6 +1,6 @@
 # Computer topology and account Sync observations
 
-Status: implemented; verified locally on 2026-10-14. Authorized after Sync local readiness. See [verification](verification.md) for evidence and unrun hosted/optional checks.
+Status: implemented. Actual self-test and review evidence belongs in PR #28 and ignored root output; this document owns the reusable contract and verification strategy.
 
 ## Ownership and boundaries
 
@@ -8,7 +8,7 @@ Preserve the existing Computer rail, resource sidebar and management route. Mana
 
 The existing management Sync port owns authenticated account metrics retrieval. Verify the caller through the original AuthService and send its current Bearer token only to the configured Sync origin using HTTPS, the configured trust CA and no redirects. Account scope is derived by Sync and checked against the verified actor again on receipt. No account selector, anonymous dashboard request or browser-held Sync credential is introduced. Metrics reads do not enable synchronization or register a Worker.
 
-Retain a mechanically generated, version 1 account-wire snapshot from the Sync server's canonical Rust DTO and schema, with source digests and a reproducible check. Product builds require no sibling source checkout. Convert upstream millisecond timestamps explicitly into Talos's canonical Unix seconds and expose one typed product model through HTTP, JSON-RPC, Rust/embedded and TypeScript Browser/Desktop SDKs. Errors retain the existing structured contract and safe reporting owner.
+Use the published `talos-sync-sdk` Metrics client and its canonical types for version 1 account observations. The SDK owns HTTPS transport, trust, deadline/body bounds and account/version validation; no direct HTTP adapter, copied DTO snapshot or sibling source checkout is needed. Talos retains its original verified login and product authorization owners. Convert upstream millisecond timestamps explicitly into Talos's canonical Unix seconds and expose one typed product model through HTTP, JSON-RPC, Rust/embedded and TypeScript Browser/Desktop SDKs. Errors retain the existing structured contract and safe reporting owner.
 
 ## Interface
 
@@ -20,4 +20,4 @@ Reuse paginated server-owned Computer search. Topology and list display the same
 
 ## Verification and compatibility
 
-Cover authenticated retrieval, wrong-account replies, upstream errors, trust/redirect boundaries and timestamp conversion. Verify HTTP/RPC and SDK capability parity through generated protocol artifacts and focused tests. UI checks cover topology/list switching, inspection vs execution selection, presence-only Sync edges, pagination/search, failure visibility, both locales and responsive layout. Exercise real isolated Sync plus Talos where supported and report local topology acceptance separately from hosted CI. No release, production configuration or deployment change is authorized.
+Cover authenticated retrieval, wrong-account replies, upstream errors, trust/redirect boundaries and timestamp conversion. Verify HTTP/RPC and SDK capability parity through generated protocol artifacts and focused tests. UI checks cover topology/list switching, inspection vs execution selection, presence-only Sync edges, pagination/search, failure visibility, both locales and responsive layout. Exercise real isolated Sync plus Talos where supported and report local topology acceptance separately from hosted CI. SDK integration and merging the reviewed PR are authorized; product release, production configuration and deployment remain independent.

@@ -4,11 +4,6 @@ from pr_change_scope import is_document, scope_matches, should_run
 
 
 class PullRequestChangeScopeTests(unittest.TestCase):
-    def test_sync_contract_changes_run_the_rust_guard(self):
-        for path in ["contracts/talos-sync/metrics-v1/dto.rs", "contracts/talos-sync/metrics-v1/schema.json", "scripts/sync-metrics-contract.py"]:
-            self.assertTrue(scope_matches("rust", path))
-        self.assertFalse(scope_matches("rust", "contracts/talos-sync/metrics-v1/README.md"))
-
     def test_document_files_do_not_trigger_product_jobs(self):
         for path in (
             "docs/development/DEVELOPMENT.md",
