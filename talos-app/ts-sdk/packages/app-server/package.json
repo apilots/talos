@@ -1,6 +1,6 @@
 {
   "name": "@talos/sdk-app-server",
-  "version": "0.1.10-SNAPSHOT",
+  "version": "0.1.10",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
