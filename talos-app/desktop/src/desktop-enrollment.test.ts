@@ -3,13 +3,18 @@ import { AppProtocol } from "@talos/sdk-core";
 import { DesktopAppServerController } from "./app-server-controller";
 import { FakeBridge } from "./app-server-controller.test-support";
 
-function hostBridge(mode: "cloud" | "local", savedLogin: boolean): FakeBridge {
+function hostBridge(mode: "cloud" | "local", savedLogin: boolean, authEnabled = true): FakeBridge {
   const bridge = new FakeBridge();
+  const connect = bridge.connect.bind(bridge);
+  vi.spyOn(bridge, "connect").mockImplementation(async () => {
+    const response = await connect();
+    return { ...response, server_info: { ...response.server_info, auth_enabled: authEnabled } };
+  });
   vi.spyOn(bridge, "invoke").mockImplementation(<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> => {
     bridge.requests.push({ method, params });
     const responses: Partial<Record<AppProtocol.ClientMethod, unknown>> = {
       "desktop/connection/read": { connectionMode: mode, controlPlaneEndpoint: "https://agent.talos.love" },
-      "desktop/connection/set": params,
+      "desktop/connection/set": { ...(params as AppProtocol.DesktopConnectionSetParams), controlPlaneEndpoint: "https://agent.talos.love" },
       "auth/session/read": { session: savedLogin ? { access_token: "USER_ACCESS_TOKEN" } : null },
       "auth/login/status": { status: "authenticated", access_token: "USER_ACCESS_TOKEN" },
       "desktop/workerEnroll": { nodeId: "stable-uuid", controlPlaneEndpoint: "https://agent.talos.love" },
@@ -40,9 +45,43 @@ describe("Desktop host enrollment", () => {
     }
   });
 
-  it("persists explicit local mode and replaces the cloud host without reacting to stale exits", async () => {
+  it.each([false, true])("persists cloud mode for authenticated Desktop with stored local mode (saved login: %s)", async (savedLogin) => {
+    const bridge = hostBridge("local", savedLogin);
+    const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => bridge });
+    try {
+      await controller.connect();
+      expect(bridge.requests).toEqual([
+        { method: "desktop/connection/read", params: null },
+        { method: "desktop/connection/set", params: { connectionMode: "cloud" } },
+        { method: "auth/session/read", params: {} },
+        ...(savedLogin ? [{ method: "desktop/workerEnroll", params: { nodeId: null } }] : []),
+      ]);
+      if (!savedLogin) {
+        await controller.invoke("auth/login/status", { login_id: "login-1" });
+        expect(bridge.requests.at(-1)).toEqual({ method: "desktop/workerEnroll", params: { nodeId: null } });
+      }
+    } finally { await controller.close(); }
+  });
+
+  it("reports a failed cloud configuration write before becoming ready or enrolling", async () => {
+    const bridge = hostBridge("local", true);
+    const invoke = bridge.invoke.bind(bridge);
+    vi.spyOn(bridge, "invoke").mockImplementation(<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> => {
+      if (method === "desktop/connection/set") return Promise.reject(new Error("Configuration write failed"));
+      return invoke<T>(method, params);
+    });
+    const states = vi.fn();
+    const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => bridge, onRuntimeState: states });
+    try {
+      await expect(controller.connect()).rejects.toThrow("Configuration write failed");
+      expect(states.mock.calls).toEqual([[{ kind: "starting", message: null }]]);
+      expect(bridge.requests.map((request) => request.method)).toEqual(["desktop/connection/read"]);
+    } finally { await controller.close(); }
+  });
+
+  it("preserves explicit auth-disabled development local mode without reacting to stale exits", async () => {
     const cloud = hostBridge("cloud", false);
-    const local = hostBridge("local", true);
+    const local = hostBridge("local", true, false);
     const factory = vi.fn().mockReturnValueOnce(cloud).mockReturnValue(local);
     const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: factory });
     try {

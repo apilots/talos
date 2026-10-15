@@ -88,7 +88,11 @@ aligned on the same business capabilities.
 
 The production Desktop UI requires account sign-in and exposes no local/cloud
 mode switch on the login or Computer pages. Anonymous access is reserved for
-explicit development configurations with authentication disabled. This does not
+explicit development configurations with authentication disabled. When the
+app-server requires authentication, the Desktop host persists cloud mode through
+the existing configuration API before restoring a login or enrolling its Worker.
+An existing local setting therefore cannot suppress production registration;
+auth-disabled development may retain explicit local mode. This does not
 change authenticated local execution, cached history or the independent Sync
 preference.
 
