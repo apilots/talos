@@ -92,6 +92,18 @@ Nginx also needs the existing public certificate at its documented example paths
 Caddy may retain its existing public certificate automation. Match the installed
 proxy version and certificate management before applying a site fragment.
 
+The Caddy example uses the current `tls_trust_pool file` directive. On an
+existing Caddy 2.6 installation, use its supported equivalent inside the same
+HTTP transport block:
+
+```caddyfile
+tls_trusted_ca_certs /opt/talos-server/tls/ca.crt
+```
+
+Keep `versions 2` and `tls_server_name talos-agent.internal` in either case.
+Validate with the installed binary before reloading; upgrading a shared proxy
+is a separate operation.
+
 Worker/Desktop clients trust the public edge certificate using system roots;
 leave client `trusted_ca_file` null for the public endpoint. The hub's
 `trusted_node_ca_file` is for dialing direct Workers, not for authenticating the
