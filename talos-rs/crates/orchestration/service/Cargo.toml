@@ -46,6 +46,7 @@ url = "2"
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 opendal = { workspace = true, features = ["services-fs", "services-memory"] }
 sqlx = { workspace = true }

@@ -36,10 +36,17 @@ fn project_record(project_id: &str, user_id: &str) -> ProjectRecord {
 struct RecordingSessionStore {
     records: Mutex<Vec<SessionRecord>>,
     failing_updates: AtomicUsize,
+    history_cursor: Mutex<Option<talos_types::SessionHistoryCursor>>,
 }
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
+    async fn get_history_cursor(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<Option<talos_types::SessionHistoryCursor>> {
+        Ok(self.history_cursor.lock().unwrap().clone())
+    }
     async fn set_generated_title(
         &self,
         identity: &talos_agent_api::AgentTurnRef,
@@ -969,3 +976,6 @@ async fn existing_control_plane_workspace_is_not_an_implicit_working_directory()
     assert_eq!(context.session.workspace, workspace);
     assert_eq!(context.working_directory, None);
 }
+
+#[path = "execution_boundary_tests.rs"]
+mod execution_boundary_tests;

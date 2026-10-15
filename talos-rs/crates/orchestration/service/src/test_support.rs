@@ -214,6 +214,18 @@ struct EnvironmentCoordinator {
 }
 #[async_trait]
 impl AgentCoordinator for EnvironmentCoordinator {
+    async fn read_session_execution_state(
+        &self,
+        context: AgentSessionContext,
+    ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
+        self.delegate.read_session_execution_state(context).await
+    }
+    async fn commit_session_execution_state(
+        &self,
+        params: agent_protocol::CommitSessionExecutionStateParams,
+    ) -> TalosResult<()> {
+        self.delegate.commit_session_execution_state(params).await
+    }
     async fn worker_environment(
         &self,
         _node_id: &str,
