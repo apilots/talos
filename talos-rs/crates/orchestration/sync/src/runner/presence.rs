@@ -2,16 +2,30 @@
 use crate::{facade::sync_error, TalosSync};
 use std::{
     collections::BTreeSet,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use talos_error::{TalosError, TalosResult};
 use talos_sync_sdk::{SyncClient, SyncPresence};
 
-pub(super) async fn publish(
+/// Polled alongside the document session, cancelled with its owning connection.
+/// At most one publication is in flight; SDK deadlines bound its room lifetime.
+pub(super) async fn run(
     sync: &TalosSync,
-    computers: &[String],
+    computers: tokio::sync::watch::Receiver<Vec<String>>,
     client: &SyncClient,
-) -> TalosResult<()> {
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(10));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let current = computers.borrow().clone();
+        if let Err(error) = publish(sync, &current, client).await {
+            talos_logging::report_error(&error);
+        }
+    }
+}
+
+async fn publish(sync: &TalosSync, computers: &[String], client: &SyncClient) -> TalosResult<()> {
     let observed_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| {
@@ -20,7 +34,7 @@ pub(super) async fn publish(
         .as_millis() as i64;
     let computers: BTreeSet<_> = computers.iter().collect();
     for computer_id in computers {
-        // Do not reserve an extra room for telemetry while document work runs.
+        // Release the ephemeral room after each publication; never retain it between ticks.
         let channel = client
             .open_presence(computer_id.clone())
             .await

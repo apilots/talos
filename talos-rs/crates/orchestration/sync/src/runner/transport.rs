@@ -41,7 +41,11 @@ pub(super) async fn connected<A: SyncDataAdapter>(
             "Synchronization hub identity does not match the installed binding.",
         ))
     } else {
+        // One connection owns both futures. Dropping the select cancels presence
+        // guards before shutdown; optional I/O never blocks document/session work.
+        let presence = super::presence::run(sync, channels.presence_computers.clone(), &client);
         tokio::select! {
+            _ = presence => Ok(()),
             _ = stop.cancelled() => Ok(()),
             result = session(sync, adapter, &params.binding, &client, channels) => result,
         }
@@ -137,8 +141,6 @@ async fn session<A: SyncDataAdapter>(
             .map(|(_, error)| error.clone());
     });
     let mut interval = tokio::time::interval(Duration::from_secs(1));
-    let mut presence = tokio::time::interval(Duration::from_secs(10));
-    presence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         if !sync.enabled(&binding.scope.account_id).await? {
             return Ok(());
@@ -159,13 +161,6 @@ async fn session<A: SyncDataAdapter>(
                 let Some(command) = command else { return Ok(()) };
                 operations::execute(sync, adapter, binding, client, channels, command).await;
             }
-            _ = presence.tick() => {
-                let computers = channels.presence_computers.borrow().clone();
-                if let Err(error) = super::presence::publish(sync, &computers, client).await {
-                    // Optional observations must not terminate durable document sync.
-                    talos_logging::report_error(&error);
-                }
-            },
             _ = interval.tick() => upload_pending(sync, adapter, binding, client, channels).await?,
             wakeup = channels.wake.recv() => {
                 if wakeup.is_none() { return Ok(()) }
