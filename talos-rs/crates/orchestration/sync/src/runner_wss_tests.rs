@@ -24,8 +24,41 @@ impl SyncDataAdapter for EmptyAdapter {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PresenceRejection {
+    None,
+    Join,
+    Update,
+    SilentJoin,
+    SilentUpdate,
+}
+
 #[tokio::test]
 async fn permanent_upload_rejection_preserves_outbox_without_starving_later_resources() {
+    upload_rejection_scenario(PresenceRejection::None).await;
+}
+
+#[tokio::test]
+async fn unsupported_presence_does_not_disconnect_or_starve_document_sync() {
+    upload_rejection_scenario(PresenceRejection::Join).await;
+}
+
+#[tokio::test]
+async fn rejected_presence_update_does_not_disconnect_or_starve_document_sync() {
+    upload_rejection_scenario(PresenceRejection::Update).await;
+}
+
+#[tokio::test]
+async fn silent_presence_join_keeps_document_sync_and_commands_responsive() {
+    upload_rejection_scenario(PresenceRejection::SilentJoin).await;
+}
+
+#[tokio::test]
+async fn silent_presence_update_keeps_document_sync_and_commands_responsive() {
+    upload_rejection_scenario(PresenceRejection::SilentUpdate).await;
+}
+
+async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     use futures_util::{SinkExt, StreamExt};
@@ -51,6 +84,12 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
     );
     let uploads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = uploads.clone();
+    let presences = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_presence = presences.clone();
+    let presence_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_attempts = presence_attempts.clone();
+    let silent_presence = Arc::new(tokio::sync::Notify::new());
+    let blocked_presence = silent_presence.clone();
     let peer = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = tokio_rustls::TlsAcceptor::from(Arc::new(tls))
@@ -95,17 +134,38 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                 Message::Binary(bytes) => {
                     let response = match loro_protocol::decode(&bytes).unwrap() {
                         ProtocolMessage::JoinRequest { crdt, room_id, .. } => {
-                            ProtocolMessage::JoinResponseOk {
-                                crdt,
-                                room_id,
-                                permission: Permission::Write,
-                                version: vec![],
-                                extra: Some(
-                                    serde_json::to_vec(&talos_sync_types::DocumentJoinAccepted {
-                                        history_generation: 0,
-                                    })
-                                    .unwrap(),
-                                ),
+                            let presence = crdt == loro_protocol::CrdtType::LoroEphemeralStore;
+                            if presence {
+                                observed_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                            if presence && presence_rejection == PresenceRejection::SilentJoin {
+                                blocked_presence.notify_one();
+                                continue;
+                            }
+                            if presence && presence_rejection == PresenceRejection::Join {
+                                ProtocolMessage::JoinError {
+                                    crdt,
+                                    room_id,
+                                    code: loro_protocol::JoinErrorCode::AppError,
+                                    message: "Ephemeral presence is unsupported.".into(),
+                                    receiver_version: None,
+                                    app_code: None,
+                                }
+                            } else {
+                                ProtocolMessage::JoinResponseOk {
+                                    crdt,
+                                    room_id,
+                                    permission: Permission::Write,
+                                    version: vec![],
+                                    extra: Some(
+                                        serde_json::to_vec(
+                                            &talos_sync_types::DocumentJoinAccepted {
+                                                history_generation: 0,
+                                            },
+                                        )
+                                        .unwrap(),
+                                    ),
+                                }
                             }
                         }
                         ProtocolMessage::DocUpdate {
@@ -114,7 +174,22 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                             batch_id,
                             updates,
                         } => {
-                            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            if crdt == loro_protocol::CrdtType::Loro {
+                                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            } else if crdt == loro_protocol::CrdtType::LoroEphemeralStore {
+                                for update in &updates {
+                                    observed_presence
+                                        .lock()
+                                        .unwrap()
+                                        .extend(talos_sync_sdk::decode_presence(update).unwrap());
+                                }
+                            }
+                            if crdt == loro_protocol::CrdtType::LoroEphemeralStore
+                                && presence_rejection == PresenceRejection::SilentUpdate
+                            {
+                                blocked_presence.notify_one();
+                                continue;
+                            }
                             // Payload size alone determines the controlled remote refusal.
                             let too_large = updates.iter().map(Vec::len).sum::<usize>() > 4096;
                             if too_large {
@@ -142,7 +217,11 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                                 crdt,
                                 room_id,
                                 ref_id: batch_id,
-                                status: if too_large {
+                                status: if crdt == loro_protocol::CrdtType::LoroEphemeralStore
+                                    && presence_rejection == PresenceRejection::Update
+                                {
+                                    UpdateStatusCode::AppError
+                                } else if too_large {
                                     UpdateStatusCode::PayloadTooLarge
                                 } else {
                                     UpdateStatusCode::Ok
@@ -168,74 +247,6 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
     )
     .await;
     let binding = fixture.binding.clone();
-    let failed = SyncResourceKey::Computer {
-        computer_id: uuid::Uuid::new_v4().to_string(),
-    };
-    // Nine rejected resources exceed one upload page; later healthy resources must still publish.
-    let mut transaction = fixture.storage.begin_transaction().await.unwrap();
-    let local_failure = SyncResourceKey::Computer {
-        computer_id: uuid::Uuid::new_v4().to_string(),
-    };
-    let mut original = node("Invalid local binding");
-    original.node_id = local_failure.id().into();
-    let mut invalid = original.clone();
-    invalid.owner_user_id = None;
-    // Both captures fit the account scope, but forming one document must reject
-    // the immutable owner change. Other resources must still be published.
-    fixture
-        .sync
-        .capture(
-            &mut *transaction,
-            SyncCaptureParams {
-                binding: binding.clone(),
-                resource: local_failure.clone(),
-                changes: vec![
-                    SyncChange::Metadata {
-                        before: None,
-                        after: Box::new(SyncResourceSnapshot::Computer(original.clone())),
-                    },
-                    SyncChange::Metadata {
-                        before: Some(Box::new(SyncResourceSnapshot::Computer(original))),
-                        after: Box::new(SyncResourceSnapshot::Computer(invalid)),
-                    },
-                ],
-                created_at: 1,
-            },
-        )
-        .await
-        .unwrap();
-    for index in 0..10 {
-        let resource = if index == 0 {
-            failed.clone()
-        } else {
-            SyncResourceKey::Computer {
-                computer_id: uuid::Uuid::new_v4().to_string(),
-            }
-        };
-        let mut info = node(&if index < 9 {
-            "x".repeat(12000)
-        } else {
-            "Healthy".into()
-        });
-        info.node_id = resource.id().into();
-        fixture
-            .sync
-            .capture(
-                &mut *transaction,
-                SyncCaptureParams {
-                    binding: binding.clone(),
-                    resource,
-                    changes: vec![SyncChange::Metadata {
-                        before: None,
-                        after: Box::new(SyncResourceSnapshot::Computer(info)),
-                    }],
-                    created_at: 1,
-                },
-            )
-            .await
-            .unwrap();
-    }
-    transaction.commit().await.unwrap();
     let sync = Arc::new(fixture.sync);
     let handle = sync
         .clone()
@@ -256,6 +267,81 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
             },
         )
         .unwrap();
+    if matches!(
+        presence_rejection,
+        PresenceRejection::SilentJoin | PresenceRejection::SilentUpdate
+    ) {
+        // Capture only after the hub has withheld a real presence response.
+        // Document progress must not depend on the SDK's 15-second deadline.
+        tokio::time::timeout(Duration::from_secs(5), silent_presence.notified())
+            .await
+            .unwrap();
+    }
+    let failed = SyncResourceKey::Computer {
+        computer_id: uuid::Uuid::new_v4().to_string(),
+    };
+    // Nine rejected resources exceed one upload page; later healthy resources must still publish.
+    let mut transaction = fixture.storage.begin_transaction().await.unwrap();
+    let local_failure = SyncResourceKey::Computer {
+        computer_id: uuid::Uuid::new_v4().to_string(),
+    };
+    let mut original = node("Invalid local binding");
+    original.node_id = local_failure.id().into();
+    let mut invalid = original.clone();
+    invalid.owner_user_id = None;
+    // Both captures fit the account scope, but forming one document must reject
+    // the immutable owner change. Other resources must still be published.
+    sync.capture(
+        &mut *transaction,
+        SyncCaptureParams {
+            binding: binding.clone(),
+            resource: local_failure.clone(),
+            changes: vec![
+                SyncChange::Metadata {
+                    before: None,
+                    after: Box::new(SyncResourceSnapshot::Computer(original.clone())),
+                },
+                SyncChange::Metadata {
+                    before: Some(Box::new(SyncResourceSnapshot::Computer(original))),
+                    after: Box::new(SyncResourceSnapshot::Computer(invalid)),
+                },
+            ],
+            created_at: 1,
+        },
+    )
+    .await
+    .unwrap();
+    for index in 0..10 {
+        let resource = if index == 0 {
+            failed.clone()
+        } else {
+            SyncResourceKey::Computer {
+                computer_id: uuid::Uuid::new_v4().to_string(),
+            }
+        };
+        let mut info = node(&if index < 9 {
+            "x".repeat(12000)
+        } else {
+            "Healthy".into()
+        });
+        info.node_id = resource.id().into();
+        sync.capture(
+            &mut *transaction,
+            SyncCaptureParams {
+                binding: binding.clone(),
+                resource,
+                changes: vec![SyncChange::Metadata {
+                    before: None,
+                    after: Box::new(SyncResourceSnapshot::Computer(info)),
+                }],
+                created_at: 1,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    transaction.commit().await.unwrap();
+    handle.notify_committed();
     let mut status = handle.subscribe();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -282,6 +368,26 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
         10,
         "Permanent rejections must not automatically retry unchanged facts"
     );
+
+    {
+        let observations = presences.lock().unwrap();
+        assert_eq!(
+            observations.is_empty(),
+            matches!(
+                presence_rejection,
+                PresenceRejection::Join | PresenceRejection::SilentJoin
+            )
+        );
+        assert!(observations.iter().all(|presence| {
+            presence.peer_id == sync.peer_id()
+                && binding
+                    .computers
+                    .iter()
+                    .any(|alias| alias.computer_id == presence.computer_id)
+                && presence.valid_until - presence.observed_at == 30_000
+        }));
+    }
+    assert!(presence_attempts.load(std::sync::atomic::Ordering::SeqCst) > 0);
     assert_eq!(
         handle.flush(failed).await.unwrap_err().error_code(),
         ErrorCode::UploadTooLarge
@@ -291,6 +397,9 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
         ErrorCode::Conflict
     );
     assert_eq!(handle.status().connection, SyncConnectionState::Connected);
-    handle.shutdown().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
+        .await
+        .unwrap()
+        .unwrap();
     peer.await.unwrap();
 }

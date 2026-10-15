@@ -3,6 +3,10 @@ use super::*;
 
 #[async_trait]
 impl GatewayClient for AppServerClient {
+    async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse> {
+        self.request_typed("sync/metrics", Option::<()>::None).await
+    }
+
     async fn list_computers(
         &mut self,
         request: talos_types::ComputerListRequest,

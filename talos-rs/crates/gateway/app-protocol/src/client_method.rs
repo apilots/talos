@@ -19,6 +19,8 @@ pub enum ClientMethod {
     DesktopWorkerEnroll,
     #[serde(rename = "sync/status")]
     SyncStatus,
+    #[serde(rename = "sync/metrics")]
+    SyncMetrics,
     #[serde(rename = "sync/enable")]
     SyncEnable,
     #[serde(rename = "sync/disable")]
@@ -203,6 +205,7 @@ impl ClientMethod {
             Self::DesktopConnectionSet => "desktop/connection/set",
             Self::DesktopWorkerIdentity => "desktop/workerIdentity",
             Self::DesktopWorkerEnroll => "desktop/workerEnroll",
+            Self::SyncMetrics => "sync/metrics",
             Self::SyncStatus => "sync/status",
             Self::SyncEnable => "sync/enable",
             Self::SyncDisable => "sync/disable",
@@ -311,6 +314,7 @@ impl FromStr for ClientMethod {
             "desktop/connection/set" => Ok(Self::DesktopConnectionSet),
             "desktop/workerIdentity" => Ok(Self::DesktopWorkerIdentity),
             "desktop/workerEnroll" => Ok(Self::DesktopWorkerEnroll),
+            "sync/metrics" => Ok(Self::SyncMetrics),
             "sync/status" => Ok(Self::SyncStatus),
             "sync/enable" => Ok(Self::SyncEnable),
             "sync/disable" => Ok(Self::SyncDisable),

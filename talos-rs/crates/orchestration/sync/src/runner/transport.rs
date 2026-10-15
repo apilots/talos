@@ -41,7 +41,11 @@ pub(super) async fn connected<A: SyncDataAdapter>(
             "Synchronization hub identity does not match the installed binding.",
         ))
     } else {
+        // One connection owns both futures. Dropping the select cancels presence
+        // guards before shutdown; optional I/O never blocks document/session work.
+        let presence = super::presence::run(sync, channels.presence_computers.clone(), &client);
         tokio::select! {
+            _ = presence => Ok(()),
             _ = stop.cancelled() => Ok(()),
             result = session(sync, adapter, &params.binding, &client, channels) => result,
         }

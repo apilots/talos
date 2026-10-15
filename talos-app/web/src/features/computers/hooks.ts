@@ -25,6 +25,15 @@ export function useSyncStatus() {
     enabled: auth === "authenticated" || auth === "open", refetchInterval: 5_000, retry: false });
 }
 
+export function useAccountSyncMetrics() {
+  const scope = useProductScope();
+  const auth = useAppStore((state) => state.connection.authStatus);
+  const enabled = auth === "authenticated";
+  const query = useQuery({ queryKey: ["talos", scope, "sync-metrics"],
+    queryFn: () => getTalosClient().sync.metrics(), enabled, refetchInterval: 5_000, retry: false });
+  return { ...query, data: enabled && !query.error ? query.data : undefined, enabled };
+}
+
 export function useComputerList(query = "") {
   const scope = useProductScope();
   return useInfiniteQuery({

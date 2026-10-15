@@ -218,6 +218,12 @@ impl AppServerApplication for TalosApplicationAdapter {
             | ClientRequestParams::DesktopWorkerEnroll(_) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest))
             }
+            ClientRequestParams::SyncMetrics(_) => to_value(
+                self.app
+                    .sync_metrics(actor)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::SyncStatus(_) => to_value(
                 self.app
                     .sync_status(actor)

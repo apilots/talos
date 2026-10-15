@@ -1,4 +1,5 @@
 export type {
+  SyncMetricsResponse, SyncPeerMetrics, SyncMetadataCounts,
   SyncEnableRequest, SyncStatusResponse, SyncConnectionState,
   ComputerListRequest,
   ComputerListResponse,

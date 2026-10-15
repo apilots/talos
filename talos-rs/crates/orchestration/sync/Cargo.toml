@@ -21,6 +21,7 @@ uuid.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 url = "2"
+tracing.workspace = true
 
 [dev-dependencies]
 futures-util = "0.3"

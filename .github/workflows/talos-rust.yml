@@ -54,10 +54,10 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Install just
+      - name: Install just and scoped test runner
         uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-nextest
 
       - name: Install Protocol Buffer compiler
         run: |
@@ -74,3 +74,7 @@ jobs:
 
       - name: Check Rust workspace
         run: just check
+
+      - name: Verify Sync SDK and client boundaries
+        run: |
+          just test -p talos-sync -p talos-app-protocol -p talos-sdk

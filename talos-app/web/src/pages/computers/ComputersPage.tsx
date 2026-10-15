@@ -1,64 +1,293 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
-import { ComputerDetails, ComputerItem, useComputerList, useComputers } from "@/features/computers";
-import { getTalosClient } from "@/shared/api/client";
-import { Button } from "@/shared/ui/Button";
-import { getDesktopBridge } from "@/shared/api/desktop-client";
-import { SyncControl } from "@/features/computers";
+import { GitBranch, List, Plus, Search } from "lucide-react";
+import {
+  ComputerGraph,
+  ComputerTopologyList,
+  ComputerInspector,
+  ComputerServiceDetails,
+  SyncControl,
+  useAccountSyncMetrics,
+  useComputerList,
+  useComputers,
+  observationsDelayed,
+  type ComputerService,
+  type FlowLayer,
+} from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
-import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import {
+  apiErrorMessage,
+  userVisibleErrorMessage,
+} from "@/shared/i18n/apiErrorMessage";
+import { Button } from "@/shared/ui/Button";
+import "./computers.css";
 
 export function ComputersPage() {
-  const { t } = useTranslation(["computers", "common"]);
+  const { t, i18n } = useTranslation(["computers", "common"]);
   const computers = useComputers();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
-  const [name, setName] = useState("");
-  const [showHelp, setShowHelp] = useState(false);
+  const [view, setView] = useState<"topology" | "list">("topology");
+  const [layer, setLayer] = useState<FlowLayer>("all");
+  const [help, setHelp] = useState(false);
+  const [inspection, setInspection] = useState<{
+    scope: string;
+    nodeId?: string;
+    service?: ComputerService;
+  }>();
   const list = useComputerList(search.trim());
+  const metrics = useAccountSyncMetrics();
   const connection = useAppStore((state) => state.connection);
-  const node = computers.selected;
-  useEffect(() => { setName(node?.displayName ?? ""); }, [node?.nodeId, node?.displayName]);
-  const mutation = useMutation({ mutationFn: async (action: "rename" | "status" | "recover") => {
-    const client = getTalosClient();
-    if (action === "recover") {
-      const bridge = getDesktopBridge();
-      if (bridge) await createElectronAppServerClient(bridge).desktop.enrollWorker({ nodeId: computers.localId ?? node?.nodeId ?? null });
-    } else if (node) {
-      if (action === "rename") await client.computers.rename({ nodeId: node.nodeId, displayName: name.trim() });
-      else await client.computers.setStatus({ nodeId: node.nodeId, status: node.status === "enabled" ? "disabled" : "enabled" });
-    }
-  }, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["talos", computers.scope] }); } });
-  const personal = node?.mode === "remote" && node.ownerUserId === connection.userId;
-  const canRecover = connection.desktopConnectionMode === "cloud" && personal && node.endpoint === null && (!computers.localId || node.nodeId === computers.localId);
-  return <div className="h-full overflow-auto px-6 py-8 lg:px-12">
-    <div className="mx-auto max-w-4xl">
-      <div className="mb-6 flex items-center justify-between"><h1 className="text-2xl font-semibold">{t("computers:title")}</h1><button className="rounded-lg border border-border px-3 py-2 text-sm" onClick={() => setShowHelp(!showHelp)}>{t("computers:add")}</button></div>
-      {showHelp ? <p className="mb-6 rounded-xl border border-border bg-card p-4 text-sm text-muted">{t("computers:addHelp")}</p> : null}
-      <SyncControl />
-      {computers.runtime?.error ? <p role="alert" className="mb-4 text-sm text-danger">{apiErrorMessage(computers.runtime.error)}</p> : null}
-      {connection.desktopConnectionMode === "cloud" && !computers.localId ? <p className="mb-4 text-sm text-muted">{t("computers:recoverHelp")}</p> : null}
-      <div className="grid gap-8 md:grid-cols-[minmax(240px,1fr)_1fr]">
-        <section><input aria-label={t("computers:search")} placeholder={t("computers:search")} value={search} onChange={(event) => setSearch(event.target.value)} className="mb-3 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" />
-          {list.data?.pages.flatMap((page) => page.data).map((item) => <ComputerItem key={item.nodeId} node={item} selected={item.nodeId === node?.nodeId} local={item.nodeId === computers.localId} onSelect={() => computers.select(item.nodeId)} />)}
-          {list.hasNextPage ? <button disabled={list.isFetchingNextPage} className="p-3 text-sm text-brand" onClick={() => void list.fetchNextPage()}>{t("common:showMore")}</button> : null}
-          {list.error ? <p role="alert" className="py-3 text-sm text-danger">{userVisibleErrorMessage(list.error, t("computers:loadError"))}</p> : null}
+  const controlPlane =
+    connection.controlPlaneEndpoint || window.location.origin;
+  const nodes = list.data?.pages.flatMap((page) => page.data) ?? [];
+  const current =
+    inspection?.scope === computers.scope ? inspection : undefined;
+  const inspectedId = current?.service
+    ? undefined
+    : (current?.nodeId ??
+      nodes.find((node) => node.nodeId === computers.localId)?.nodeId ??
+      nodes[0]?.nodeId);
+  const service =
+    current?.service ?? (!inspectedId ? "controlPlane" : undefined);
+  const open = (id: string) => {
+    computers.select(id);
+    navigate("/");
+  };
+  const inspect = (id: string) =>
+    setInspection({ scope: computers.scope, nodeId: id });
+  const inspectService = (value: ComputerService) =>
+    setInspection({ scope: computers.scope, service: value });
+  const loaded = t("computers:loadedComputers", {
+    loaded: nodes.length,
+    total: list.data?.pages[0]?.total ?? 0,
+    count: list.data?.pages[0]?.total ?? 0,
+  });
+  return (
+    <div className="cmp-page">
+      <div className="cmp-breadcrumb">
+        Talos <span>/</span> {t("computers:title")}
+      </div>
+      <header className="cmp-page-heading">
+        <div>
+          <h1>
+            {t("computers:title")}
+            <span>.</span>
+          </h1>
+          <p>{t("computers:managementSubtitle")}</p>
+        </div>
+        <Button
+          onClick={() => setHelp(!help)}
+          aria-expanded={help}
+          aria-controls="computer-connect-help"
+        >
+          <Plus size={16} aria-hidden="true" />
+          {t("computers:add")}
+        </Button>
+      </header>
+      {help ? (
+        <p id="computer-connect-help" className="cmp-notice">
+          {t("computers:addHelp")}
+        </p>
+      ) : null}
+      <section className="cmp-overview" aria-label={t("computers:title")}>
+        <span>
+          <strong>
+            {list.data?.pages[0]?.total.toLocaleString(i18n.language) ?? "—"}
+          </strong>{" "}
+          {t("computers:title")}
+        </span>
+        <span>
+          <i className="cmp-dot is-online" />
+          <strong>
+            {list.data && !list.error
+              ? nodes.filter((node) => node.available).length
+              : "—"}
+          </strong>
+          {t("computers:onlineInView")}
+        </span>
+        <span className="cmp-sync-text">
+          <strong>
+            {metrics.data?.peers.length.toLocaleString(i18n.language) ?? "—"}
+          </strong>
+          {t("computers:peerCount", { count: metrics.data?.peers.length ?? 0 })}
+        </span>
+        <small>{loaded}</small>
+      </section>
+      <div className="cmp-controls">
+        <SyncControl />
+      </div>
+      {computers.runtime?.error ? (
+        <p role="alert" className="cmp-notice text-danger">
+          {apiErrorMessage(computers.runtime.error)}
+        </p>
+      ) : null}
+      {metrics.error ? (
+        <p role="alert" className="cmp-notice text-danger">
+          <span className="block">{t("computers:metricsUnavailable")}</span>
+          <span className="mt-1 block text-xs">
+            {userVisibleErrorMessage(
+              metrics.error,
+              t("computers:metricsUnavailable"),
+            )}
+          </span>
+        </p>
+      ) : !metrics.enabled ? (
+        <p className="cmp-notice">{t("computers:metricsSignIn")}</p>
+      ) : metrics.isPending ? (
+        <p role="status" className="cmp-notice">
+          {t("computers:metricsLoading")}
+        </p>
+      ) : metrics.data && observationsDelayed(metrics.data) ? (
+        <p role="status" className="cmp-notice">
+          {t("computers:metricsIncomplete")}
+        </p>
+      ) : null}
+      <div className="cmp-tools">
+        <label className="cmp-search">
+          <Search size={16} aria-hidden="true" />
+          <input
+            aria-label={t("computers:search")}
+            placeholder={t("computers:search")}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <div className="cmp-segments" aria-label={t("computers:viewMode")}>
+          <button
+            type="button"
+            aria-pressed={view === "topology"}
+            onClick={() => setView("topology")}
+          >
+            <GitBranch size={14} aria-hidden="true" />
+            {t("computers:topologyView")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "list"}
+            onClick={() => setView("list")}
+          >
+            <List size={14} aria-hidden="true" />
+            {t("computers:listView")}
+          </button>
+        </div>
+      </div>
+      <div className="cmp-content">
+        <section className="cmp-panel">
+          <div className="cmp-panel-heading">
+            <div>
+              <h2>
+                {t(
+                  view === "topology"
+                    ? "computers:topologyTitle"
+                    : "computers:title",
+                )}
+              </h2>
+              <small>{loaded}</small>
+            </div>
+            {view === "topology" ? (
+              <div
+                className="cmp-flow-buttons"
+                aria-label={t("computers:flowFilter")}
+              >
+                {(["all", "execution", "sync"] as const).map((value) => (
+                  <button
+                    type="button"
+                    key={value}
+                    aria-pressed={layer === value}
+                    onClick={() => setLayer(value)}
+                  >
+                    {value !== "all" ? (
+                      <i
+                        className={`cmp-flow-key ${value === "sync" ? "is-sync" : ""}`}
+                      />
+                    ) : null}
+                    {t(
+                      value === "all"
+                        ? "computers:allFlows"
+                        : value === "execution"
+                          ? "computers:executionFlow"
+                          : "computers:syncFlow",
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          {view === "topology" ? (
+            <p className="cmp-mobile-hint">{t("computers:graphScroll")}</p>
+          ) : null}
+          {list.error ? (
+            <p role="alert" className="cmp-notice text-danger">
+              {userVisibleErrorMessage(
+                list.error,
+                t("computers:directoryError"),
+              )}
+            </p>
+          ) : list.isPending ? (
+            <p role="status" className="cmp-empty">
+              {t("common:loading")}
+            </p>
+          ) : view === "topology" ? (
+            <ComputerGraph
+              nodes={nodes}
+              metrics={metrics.data}
+              selectedId={inspectedId}
+              selectedService={service}
+              layer={layer}
+              controlPlane={controlPlane}
+              onInspect={inspect}
+              onService={inspectService}
+            />
+          ) : (
+            <ComputerTopologyList
+              nodes={nodes}
+              metrics={metrics.data}
+              selectedId={inspectedId}
+              onInspect={inspect}
+            />
+          )}
+          {list.hasNextPage ? (
+            <button
+              type="button"
+              className="cmp-load-more"
+              disabled={list.isFetchingNextPage}
+              onClick={() => void list.fetchNextPage()}
+            >
+              {t("common:showMore")} · {loaded}
+            </button>
+          ) : null}
+          <footer className="cmp-canvas-footer">
+            <span>{t("computers:inspectHint")}</span>
+            <details>
+              <summary>{t("computers:flowHelp")}</summary>
+              <p>{t("computers:flowHelpText")}</p>
+            </details>
+          </footer>
         </section>
-        {node ? <section className="rounded-2xl border border-border bg-card p-5">
-          <h2 className="mb-4 truncate text-lg font-semibold">{node.displayName}</h2>
-          <p className="mb-2 text-xs text-muted">{t(node.status === "disabled" ? (node.nodeId === computers.localId && node.available ? "computers:remoteDisabled" : "computers:disabled") : node.available ? "computers:connected" : "computers:offline")}</p>
-          <ComputerDetails node={node} controlPlane={connection.controlPlaneEndpoint || window.location.origin} />
-          {!node.available ? <p className="mt-4 text-sm text-muted">{t("computers:offlineHelp")}</p> : null}
-          {personal ? <div className="mt-6 space-y-3"><label className="block text-xs text-muted">{t("computers:rename")}<input aria-label={t("computers:rename")} value={name} maxLength={255} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background p-2 text-sm text-ink" /></label><div className="flex flex-wrap gap-2"><Button disabled={!name.trim() || name.trim() === node.displayName || mutation.isPending} onClick={() => mutation.mutate("rename")}>{t("common:save")}</Button><button className="rounded-lg border border-border px-3 py-2 text-sm" disabled={mutation.isPending} onClick={() => mutation.mutate("status")}>{t(node.status === "enabled" ? "computers:disable" : "computers:enable")}</button></div></div> : null}
-          {canRecover ? <button className="mt-4 block text-sm text-brand" disabled={mutation.isPending} onClick={() => mutation.mutate("recover")}>{t("computers:recover")}</button> : null}
-          {mutation.error ? <p role="alert" className="mt-3 text-sm text-danger">{userVisibleErrorMessage(mutation.error, t("computers:loadError"))}</p> : null}
-          <button className="mt-6 text-sm text-brand" onClick={() => navigate("/")}>{t("computers:open")}</button>
-        </section> : null}
+        <aside
+          className="cmp-panel cmp-inspector"
+          aria-label={t("computers:manage")}
+        >
+          {service ? (
+            <ComputerServiceDetails
+              service={service}
+              metrics={metrics.data}
+              controlPlane={controlPlane}
+            />
+          ) : inspectedId ? (
+            <ComputerInspector
+              key={`${computers.scope}:${inspectedId}`}
+              nodeId={inspectedId}
+              localId={computers.localId}
+              controlPlane={controlPlane}
+              metrics={metrics.data}
+              onOpen={open}
+            />
+          ) : null}
+        </aside>
       </div>
     </div>
-  </div>;
+  );
 }

@@ -12,6 +12,8 @@ use talos_types::{AgentUserContent, AgentUserInput, StartTurnRequest};
 
 #[path = "application_sync_login_tests.rs"]
 mod login;
+#[path = "application_sync_metrics_tests.rs"]
+mod metrics;
 
 struct HubProcess(std::process::Child);
 impl HubProcess {
@@ -378,6 +380,13 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
         .unwrap();
     assert_eq!(response["error"]["code"], "permissionDenied");
     // A newly signed-in host enrolls its existing Worker, persists its UUID, and resumes with an explicit opt-out.
+    let mut late_config = config(&directory.path().join("desktop-late-enrollment"), &api);
+    late_config.cloud.agent_base_url = endpoint.clone();
+    late_config.cloud.agent_trusted_ca_file = Some(cert.clone());
+    late_config.sync.hub_endpoint = format!("wss://{hub_address}/v1/sync");
+    late_config.sync.trusted_ca_file = Some(cert.clone());
+    std::fs::write(late_config.source_path(), persisted_config(&late_config)).unwrap();
+    metrics::verify_late_enrollment(late_config, &migration, &actor, &scope).await;
     let mut fresh_config = config(&directory.path().join("desktop-login"), &api);
     fresh_config.cloud.agent_base_url = endpoint.clone();
     fresh_config.cloud.agent_trusted_ca_file = Some(cert.clone());
@@ -464,6 +473,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
             .all(|handle| handle.status().connection == SyncConnectionState::Connected)
     })
     .await;
+    metrics::verify(&a, &b, &actor, gateway_http_port).await;
     let local_llm = a
         .service
         .get_config(

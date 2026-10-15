@@ -5,6 +5,8 @@ use super::{
 };
 use axum::{
     extract::State,
+    http::header::CACHE_CONTROL,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Extension, Json, Router,
 };
@@ -15,6 +17,7 @@ use talos_types::{SyncEnableRequest, SyncStatusResponse};
 pub(super) fn routes() -> Router<Arc<HttpApiState>> {
     Router::new()
         .route("/v1/sync/status", get(status))
+        .route("/v1/sync/metrics", get(metrics))
         .route("/v1/sync/enable", post(enable))
         .route("/v1/sync/disable", post(disable))
 }
@@ -51,4 +54,17 @@ async fn disable(
         .await
         .map(api_success)
         .map_err(ApiError::from_talos_error)
+}
+
+async fn metrics(
+    State(state): State<Arc<HttpApiState>>,
+    Extension(actor): Extension<RequestIdentity>,
+) -> Response {
+    let result = state
+        .app
+        .sync_metrics(&shared_actor(&actor))
+        .await
+        .map(api_success)
+        .map_err(ApiError::from_talos_error);
+    ([(CACHE_CONTROL, "no-store")], result).into_response()
 }
