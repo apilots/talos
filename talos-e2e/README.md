@@ -59,8 +59,10 @@ that group numbers are contiguous.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
 `01_health_and_models`, `09_app_server/smoke_e2e`, `10_talos_app`, `12_files`, and
-`14_sandbox`, along with the `talos-auth` and `talos-base` package tests for the
-public Cloud SDK adapter and Desktop enrollment boundaries. `15_tui_install` has
+`14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
+`talos-agent` and `talos-service` package tests. These cover public Cloud SDK
+adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
+Worker reservation barriers, and the imported-history/Shared-confirmation race. `15_tui_install` has
 its own four-platform native and Linux Docker gate. The PR workflow does not
 receive repository secrets and does not check out private repositories.
 
@@ -71,7 +73,13 @@ the existing client to exercise model listing, Session creation, configuration a
 Workspace/Memory API reads without executing a model. Scenarios `11_auth`,
 `17_multi_node`, and `18_computer_workspace` still
 use the configured Cloud fixture executable for isolated account setup.
-The larger `19_computer_sync` topology also remains local acceptance. These
+The larger `19_computer_sync` topology also remains local acceptance.
+Cross-manager continuation acceptance must send a real model/tool task to its
+pinned Worker, continue the same Session from the receiving manager once its
+terminal history is visible, and verify the exact file effect only on that Worker.
+Do not manually change execution markers or require a pre-test Shared wait to
+hide the admission race. A local Linux container plus a physical Mac exercises
+cross-OS execution; report it separately from acceptance on two physical machines. These
 exclusions are explicit and do not claim that the corresponding scenarios passed
 in GitHub CI.
 
