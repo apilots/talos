@@ -186,9 +186,10 @@ impl SessionService {
             .cloned()
     }
 
-    /// Read the same Worker boundary used by every transport. Recover history
-    /// only when a Shared history_cursor is absent locally; no network wait for an already
-    /// confirmed local history_cursor. Worker reservation still performs the atomic check.
+    /// Read the same Worker boundary used by every transport. The current
+    /// coordinator can reuse confirmed Local history without Sync. A different
+    /// coordinator also needs Shared confirmation when terminal facts arrived
+    /// first. Worker reservation still performs the final atomic check.
     pub(crate) async fn prepare_execution(
         &self,
         record: &SessionRecord,
@@ -197,17 +198,61 @@ impl SessionService {
             return Ok(record.clone());
         };
         let session = self.build_agent_session_context(record).await?;
-        let Some(state) = self
+        let Some(mut state) = self
             .coordinator
-            .read_session_execution_state(session)
+            .read_session_execution_state(session.clone())
             .await?
         else {
             return Ok(record.clone());
         };
+        let peer = self.sync.read().expect("Session sync lock").peer_id.clone();
+        let awaiting_shared = |state: &agent_protocol::SessionExecutionState| {
+            peer.is_some()
+                && state.coordinator_id.is_some()
+                && state.coordinator_id != peer
+                && !state.handoff_ready
+                && match &state.active_turn {
+                    Some(active) => {
+                        history_cursor.completed_turn_id.as_deref() == Some(active.turn_id.as_str())
+                            && history_cursor.history_generation
+                                == state.history_cursor.history_generation
+                    }
+                    None => state.history_cursor == history_cursor,
+                }
+        };
+        if awaiting_shared(&state) {
+            // Imported terminal facts can arrive before Worker cleanup, Local
+            // commit and the source's durable ACK / Shared commit. Bound this wait; only the Worker can confirm
+            // handoff. Same-coordinator Local execution never waits.
+            state = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let current = self
+                        .coordinator
+                        .read_session_execution_state(session.clone())
+                        .await?
+                        .ok_or_else(|| {
+                            TalosError::new(
+                                ErrorCode::Conflict,
+                                "Worker execution state changed during handoff.",
+                            )
+                        })?;
+                    if !awaiting_shared(&current) {
+                        return Ok::<_, TalosError>(current);
+                    }
+                }
+            })
+            .await
+            .map_err(|_| {
+                TalosError::new(
+                    ErrorCode::ServiceUnavailable,
+                    "Worker history is awaiting synchronization confirmation.",
+                )
+            })??;
+        }
         if state.history_cursor == history_cursor {
             return Ok(record.clone());
         }
-        let peer = self.sync.read().expect("Session sync lock").peer_id.clone();
         // Store reset is durable before its Worker commit. The same coordinator
         // may finish that exact next-generation empty reset after a lost reply.
         // The existing Worker commit checks cleanup, identity and generation.

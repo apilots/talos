@@ -59,8 +59,8 @@ jobs:
         with:
           tool: just,cargo-nextest
 
-      - name: Test public Cloud SDK adapter and Desktop enrollment boundaries
-        run: just test -p talos-auth -p talos-base
+      - name: Test Cloud, Desktop, SQLite and cross-coordinator boundaries
+        run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service
 
   scenarios:
     needs: change-scope
