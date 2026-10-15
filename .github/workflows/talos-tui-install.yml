@@ -10,18 +10,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - ".github/workflows/talos-tui-install.yml"
-      - "build.sh"
-      - "build/scripts/verify-release-artifacts.sh"
-      - "conf/**"
-      - "deploy/install/**"
-      - "talos-e2e/lib/**"
-      - "talos-e2e/run_e2e.sh"
-      - "talos-e2e/scripts/tui_install.sh"
-      - "talos-e2e/scenarios/15_tui_install/**"
-      - "talos-e2e/tests/tui_install_target_test.sh"
-      - "talos-rs/Cargo.toml"
 
 permissions:
   contents: read
@@ -44,6 +32,8 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         run: python3 .github/scripts/pr_change_scope.py tui-install
 
   installer-tests:
@@ -93,8 +83,16 @@ jobs:
       - name: Checkout Talos
         uses: actions/checkout@v6
 
+      - name: Load shared toolchain versions
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+
+      - name: Resolve CI dependency graph
+        run: cargo generate-lockfile --manifest-path talos-rs/Cargo.toml
 
       - name: Install Protocol Buffer compiler
         run: |
@@ -109,6 +107,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-release
 
       - name: Fetch native build dependencies
         shell: bash

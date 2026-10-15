@@ -58,7 +58,11 @@ jobs:
           python3 -m py_compile .github/scripts/pr_change_scope.py
           scripts/check-commit-message-tests.sh
           scripts/generate-release-notes-tests.sh
+          bash scripts/check-release-version-tests.sh
           bash -n .githooks/* scripts/*.sh
+
+      - name: Validate actual version metadata
+        run: bash scripts/check-release-version.sh --metadata
 
       - name: Check commit subjects
         run: >-
@@ -82,8 +86,8 @@ jobs:
           tar -xzf "$tool_dir/$archive" -C "$tool_dir" actionlint
           echo "$tool_dir" >> "$GITHUB_PATH"
 
-      - name: Validate release workflow syntax
-        run: actionlint .github/workflows/release.yml .github/workflows/release-source.yml
+      - name: Validate workflow syntax
+        run: actionlint .github/workflows/*.yml
 
       - name: Validate Docker configurations without building images
         if: ${{ steps.range.outputs.docker_checks == 'true' }}

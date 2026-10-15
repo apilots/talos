@@ -10,11 +10,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "talos-rs/**"
-      - "scripts/check_error_contract*.py"
-      - "justfile"
-      - ".github/workflows/talos-rust.yml"
 
 permissions:
   contents: read
@@ -37,6 +32,8 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         run: python3 .github/scripts/pr_change_scope.py rust
 
   rust-quality:
@@ -49,10 +46,23 @@ jobs:
       - name: Checkout Talos
         uses: actions/checkout@v6
 
+      - name: Load shared toolchain versions
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
           components: rustfmt
+
+      - name: Resolve CI dependency graph
+        run: cargo generate-lockfile --manifest-path talos-rs/Cargo.toml
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
 
       - name: Install just and scoped test runner
         uses: taiki-e/install-action@v2

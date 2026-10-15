@@ -45,7 +45,7 @@ single case during development and the owning group before handoff.
 | --- | --- |
 | `01`-`03` | Server health, models, Session lifecycle, HTTP, and SSE |
 | `05`-`08` | CLI, tools, memory, and embedded TUI |
-| `09`-`10` | App Server protocol, Skills, MCP, Web, Desktop, and SDK regression |
+| `09` | App Server protocol, Skills, MCP, and Memory integration |
 | `11`-`13` | Cloud auth, files, and durable user interaction |
 | `14` | Unified sandbox and permission enforcement |
 | `15` | Release bundle installation and installed TUI startup |
@@ -54,11 +54,12 @@ single case during development and the owning group before handoff.
 | `19` | Multi-control-plane sync: two native Mac Desktop runtimes, native and Docker Workers, Docker WSS hub, real auth and model tasks |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
-There is no current group `04`; use the scenario directory rather than assuming
-that group numbers are contiguous.
+Groups `04` and `10` are not assigned; use the scenario directory rather than assuming
+that group numbers are contiguous. Frontend unit tests belong to the frontend
+quality workflow and are not repeated as an E2E scenario.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server/smoke_e2e`, `10_talos_app`, `12_files`, and
+`01_health_and_models`, `09_app_server/smoke_e2e`, `12_files`, and
 `14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
 `talos-agent` and `talos-service` package tests. These cover public Cloud SDK
 adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,

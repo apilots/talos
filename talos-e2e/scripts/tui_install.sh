@@ -225,6 +225,7 @@ run_linux_docker_tui_install() {
   local source_cargo_lock
   local created_source_lock=false
   local docker_status
+  local rust_version
 
   require_command docker
   docker info >/dev/null
@@ -247,7 +248,14 @@ run_linux_docker_tui_install() {
   trap cleanup_source_lock_mountpoint EXIT
   mkdir -p "${REPO_ROOT}/talos-rs/target"
 
-  docker build -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
+  rust_version="$(awk -F= '$1 == "RELEASE_RUST_VERSION" { print $2 }' \
+    "${REPO_ROOT}/.github/release-toolchain.env")"
+  [[ "${rust_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "The shared toolchain must specify RELEASE_RUST_VERSION." >&2
+    return 1
+  }
+  docker build --build-arg "RUST_VERSION=${rust_version}" \
+    -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
   if docker run --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \

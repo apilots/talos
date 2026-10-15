@@ -43,7 +43,7 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 | --- | --- |
 | `01`-`03` | Server health、models、Session lifecycle、HTTP 和 SSE |
 | `05`-`08` | CLI、Tools、Memory 和 embedded TUI |
-| `09`-`10` | App Server 协议、Skills、MCP、Web、Desktop 和 SDK regression |
+| `09` | App Server 协议、Skills、MCP 和 Memory 集成 |
 | `11`-`13` | Cloud auth、Files 和持久化用户交互 |
 | `14` | 统一 Sandbox 和权限执行 |
 | `15` | Release bundle 安装和已安装 TUI 启动 |
@@ -59,10 +59,11 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 [多节点验收说明](scenarios/17_multi_node/README.md)。已知缺陷也必须报告 FAIL，不能跳过。
 
 当前 case 清单以 `scenarios/` 为事实来源。
-当前没有 Group `04`；应以场景目录为准，不要假设 Group 编号连续。
+当前 Group `04` 和 `10` 未分配；应以场景目录为准，不要假设 Group 编号连续。前端单元测试由前端质量工作流负责，
+不再作为 E2E 场景重复执行。
 
 GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secrets 的
-`01_health_and_models`、`09_app_server/smoke_e2e`、`10_talos_app`、`12_files` 和
+`01_health_and_models`、`09_app_server/smoke_e2e`、`12_files` 和
 `14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
 适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
 Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。

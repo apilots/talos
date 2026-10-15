@@ -86,7 +86,10 @@ upgrade/rollback instructions belong in deployment documentation.
 The branch must be clean, synchronized and backed by a successful candidate gate.
 `--notes <file>` is optional and must equal that candidate's generated Notes.
 The script verifies release absence and candidate provenance before pushing the
-annotated tag with verbatim text. It performs no product build or local package
+annotated tag with verbatim text. Tag pre-push checks validate the annotation,
+source commit and version without repeating branch source checks; the publisher
+and tag workflow still require the successful exact-source candidate. It performs
+no product build or local package
 inspection. It never corrects tags or adds a publication recovery path.
 
 Before the first publication from a repository, or after moving the publishing

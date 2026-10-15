@@ -72,13 +72,22 @@ jobs:
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
 
+      - name: Load shared toolchain versions
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+
+      - name: Resolve CI dependency graph
+        run: cargo generate-lockfile --manifest-path talos-rs/Cargo.toml
 
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
           cache-on-failure: true
 
       - name: Install just and nextest
@@ -97,12 +106,12 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9.14.4
+          version: ${{ env.RELEASE_PNPM_VERSION }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: talos-app/pnpm-lock.yaml
 

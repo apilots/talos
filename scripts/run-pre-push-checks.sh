@@ -11,6 +11,27 @@ checked_ref=false
 
 while read -r local_ref local_sha remote_ref remote_sha; do
     [[ -n "${local_ref}" && "${local_sha}" != "${zero_sha}" ]] || continue
+    if [[ "${remote_ref}" == refs/tags/* ]]; then
+        source_sha="$(git rev-parse "${local_sha}^{commit}")"
+        tag="${remote_ref#refs/tags/}"
+        if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            [[ "$(git cat-file -t "${local_sha}")" == tag ]] || {
+                echo "Release tags must be annotated." >&2; exit 1;
+            }
+            title="$(git cat-file tag "${local_sha}" | sed '1,/^$/d' | sed -n '1p')"
+            [[ "${title}" == "# Talos ${tag}" ]] || {
+                echo "Release tag Notes must start with # Talos ${tag}." >&2; exit 1;
+            }
+            version="$(git show "${source_sha}:talos-rs/Cargo.toml" | awk '
+                /^\[workspace.package\]/ { active=1; next } /^\[/ { active=0 }
+                active && /^version = / { gsub(/"/, "", $3); print $3; exit }')"
+            [[ "v${version}" == "${tag}" ]] || {
+                echo "Release tag and source version differ." >&2; exit 1;
+            }
+        fi
+        echo "Tag ${tag}: metadata checked; publisher and release CI require exact-source candidate evidence."
+        continue
+    fi
     checked_ref=true
     base="${remote_sha}"
     if [[ "${base}" == "${zero_sha}" ]]; then
@@ -22,9 +43,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 
     python3 scripts/check_changed_files.py --base "${base}" --head "${local_sha}"
     scripts/check-commit-message.sh --range "${base}" "${local_sha}"
+    for scope in frontend rust; do
+        result="$(python3 .github/scripts/pr_change_scope.py "${scope}" \
+            --base "${base}" --head "${local_sha}" --product-only --print-result)"
+        if [[ "${result}" == true ]]; then
+            if [[ "${scope}" == frontend ]]; then frontend_changed=true; else rust_changed=true; fi
+        fi
+    done
     while IFS= read -r -d '' path; do
-        [[ "${path}" == talos-app/* ]] && frontend_changed=true
-        [[ "${path}" == talos-rs/* || "${path}" == justfile ]] && rust_changed=true
         if [[ "${path}" == *.sh ]] && git cat-file -e "${local_sha}:${path}" 2>/dev/null; then
             git show "${local_sha}:${path}" | bash -n
         fi
