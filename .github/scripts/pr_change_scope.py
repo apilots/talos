@@ -23,6 +23,7 @@ SCOPES = {
         "talos-e2e/scripts/common.sh", "talos-e2e/scripts/tui_install.sh",
         "talos-e2e/run_e2e.sh", "talos-e2e/scenarios/15_tui_install/",
         "talos-e2e/tests/tui_install_target_test.sh",
+        "talos-e2e/docker/tui-install-ubuntu-24.04.Dockerfile",
     ),
 }
 CI_INPUTS = {

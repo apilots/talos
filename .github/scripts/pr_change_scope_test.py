@@ -25,6 +25,7 @@ class ChangeScopeTests(unittest.TestCase):
             'talos-app/web/src/app.tsx': {'frontend', 'pr-e2e'},
             'conf/talos-prod.yaml': {'pr-e2e', 'tui-install'},
             'deploy/install/install.sh': {'tui-install'},
+            'talos-e2e/docker/tui-install-ubuntu-24.04.Dockerfile': {'pr-e2e', 'tui-install'},
             'build.sh': {'pr-e2e', 'tui-install'},
             'justfile': {'rust', 'pr-e2e'},
             'scripts/check_error_contract.py': {'rust', 'frontend'},
@@ -170,6 +171,28 @@ class GitScopeTests(unittest.TestCase):
         tag = self.git('rev-parse', 'v0.1.12')
         self.assertEqual(self.hook(f'refs/tags/v0.1.12 {tag} refs/tags/v0.1.12 {"0" * 40}\n'), '')
         self.assertEqual(self.hook(f'refs/heads/main {head} refs/heads/main {self.base}\n'), '')
+
+    def test_docker_install_uses_shared_toolchain(self):
+        self.write('.github/release-toolchain.env', (ROOT / '.github/release-toolchain.env').read_text())
+        binary = self.write('bin/docker', '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_CALLS"\n'
+                            'if [ "$1" = info ] && [ "$2" = --format ]; then echo x86_64; fi\n')
+        binary.chmod(0o755)
+        calls = self.root / 'docker-calls.log'
+        env = dict(os.environ, PATH=f'{binary.parent}:{os.environ["PATH"]}', DOCKER_CALLS=str(calls))
+        script = f'''set -euo pipefail
+REPO_ROOT="{self.root}"
+TALOS_E2E_DIR="{self.root}/talos-e2e"
+TALOS_E2E_TMP_ROOT="{self.root}/tmp"
+SCENARIO_REPORT_DIR="{self.root}/reports"
+require_command() {{ command -v "$1" >/dev/null; }}
+source "{ROOT}/talos-e2e/scripts/tui_install.sh"
+run_linux_docker_tui_install
+'''
+        result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        version = next(line.split('=', 1)[1] for line in (ROOT / '.github/release-toolchain.env').read_text().splitlines()
+                       if line.startswith('RELEASE_RUST_VERSION='))
+        self.assertIn(f'build --build-arg RUST_VERSION={version}', calls.read_text())
 
     def test_product_change_in_mixed_ref_push_keeps_source_checks(self):
         self.prepare_hook()
