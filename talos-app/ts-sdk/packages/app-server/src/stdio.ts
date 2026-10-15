@@ -446,7 +446,7 @@ export class StdioAppServerClient extends AppServerClient {
       client_info: {
         name: this.options.clientName ?? "talos-ts-app-server-sdk",
         title: null,
-        version: this.options.clientVersion ?? "0.1.10",
+        version: this.options.clientVersion ?? "0.1.11-SNAPSHOT",
         kind: this.options.clientKind ?? "sdk",
       },
       capabilities: {
