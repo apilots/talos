@@ -119,6 +119,7 @@ const messageQueueMessageParams = (params: unknown) =>
   messageQueueSessionParams(params) && hasString(params, "messageId");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
+  "sync/metrics": (params) => params == null,
   "sync/status": (params) => params == null,
   "sync/disable": (params) => params == null,
   "sync/enable": (params) => isRecord(params) && (params.claimLocalHistory === undefined || typeof params.claimLocalHistory === "boolean"),

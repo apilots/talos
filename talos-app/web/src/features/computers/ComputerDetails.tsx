@@ -3,14 +3,14 @@ import { useTranslation } from "react-i18next";
 
 /** Read-only Computer metadata. Management actions remain owned by the page. */
 export function ComputerDetails({ node, controlPlane }: { node: AppProtocol.NodeInfo; controlPlane: string }) {
-  const { t } = useTranslation("computers");
+  const { t, i18n } = useTranslation("computers");
   const info = node.systemInfo;
-  const timestamp = (value: number | null) => value ? new Date(value * 1_000).toLocaleString() : undefined;
+  const timestamp = (value: number | null) => value ? new Date(value * 1_000).toLocaleString(i18n.language) : undefined;
   const rows: [string, string | number | undefined | null][] = [
     ["system", info ? (info.osVersion ?? (info.os === "macOs" ? "macOS" : "Linux")) : undefined],
     ["architecture", info?.architecture], ["hostname", info?.hostname], ["processor", info?.cpuModel],
     ["cpuCount", info?.logicalCpuCount || undefined],
-    ["memory", info?.memoryBytes ? `${(info.memoryBytes / 1024 ** 3).toLocaleString(undefined, { maximumFractionDigits: 1 })} GiB` : undefined],
+    ["memory", info?.memoryBytes ? `${(info.memoryBytes / 1024 ** 3).toLocaleString(i18n.language, { maximumFractionDigits: 1 })} GiB` : undefined],
     ["board", info?.boardModel], ["graphics", info?.graphics.join(", ") || undefined],
     ["workerVersion", info?.workerVersion], ["heartbeat", timestamp(node.lastHeartbeatAt)],
     ["created", timestamp(node.createdAt)], ["updated", timestamp(node.updatedAt)],

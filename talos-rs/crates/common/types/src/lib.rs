@@ -68,4 +68,6 @@ mod session_execution;
 pub use session_execution::SessionHistoryCursor;
 
 mod sync;
+mod sync_metrics;
 pub use sync::{SyncConnectionState, SyncEnableRequest, SyncStatusResponse};
+pub use sync_metrics::{SyncMetadataCounts, SyncMetricsResponse, SyncPeerMetrics};

@@ -2,7 +2,7 @@ import { decodeFileContent } from "./file-content";
 import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
-  SyncEnableRequest, SyncStatusResponse,
+  SyncMetricsResponse, SyncEnableRequest, SyncStatusResponse,
   ComputerListRequest,
   ComputerListResponse,
   NodeInfo,
@@ -190,6 +190,7 @@ export class TalosClient {
   }
 
   sync = {
+    metrics: (): Promise<SyncMetricsResponse> => this.http.request(this.url("/v1/sync/metrics")),
     status: (): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/status")),
     enable: (request: SyncEnableRequest = { claimLocalHistory: false }): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/enable"), { method: "POST", body: JSON.stringify(request) }),
     disable: (): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/disable"), { method: "POST" }),

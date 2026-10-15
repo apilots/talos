@@ -46,6 +46,8 @@ pub enum ClientRequestParams {
     DesktopWorkerEnroll(talos_types::DesktopWorkerEnrollParams),
     #[serde(rename = "sync/status")]
     SyncStatus(Option<()>),
+    #[serde(rename = "sync/metrics")]
+    SyncMetrics(Option<()>),
     #[serde(rename = "sync/enable")]
     SyncEnable(talos_types::SyncEnableRequest),
     #[serde(rename = "sync/disable")]
@@ -246,6 +248,7 @@ impl ClientRequest {
         let params_value = params.unwrap_or_else(|| match method_kind {
             ClientMethod::DesktopConnectionRead
             | ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::SyncMetrics
             | ClientMethod::SyncStatus
             | ClientMethod::SyncDisable => serde_json::Value::Null,
             _ => serde_json::Value::Object(Default::default()),
@@ -264,6 +267,7 @@ impl ClientRequest {
             ClientMethod::DesktopWorkerEnroll => {
                 ClientRequestParams::DesktopWorkerEnroll(decode(params_value)?)
             }
+            ClientMethod::SyncMetrics => ClientRequestParams::SyncMetrics(decode(params_value)?),
             ClientMethod::SyncStatus => ClientRequestParams::SyncStatus(decode(params_value)?),
             ClientMethod::SyncEnable => ClientRequestParams::SyncEnable(decode(params_value)?),
             ClientMethod::SyncDisable => ClientRequestParams::SyncDisable(decode(params_value)?),

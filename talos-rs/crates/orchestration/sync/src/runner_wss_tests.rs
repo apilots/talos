@@ -51,6 +51,8 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
     );
     let uploads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = uploads.clone();
+    let presences = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_presence = presences.clone();
     let peer = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = tokio_rustls::TlsAcceptor::from(Arc::new(tls))
@@ -114,7 +116,16 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                             batch_id,
                             updates,
                         } => {
-                            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            if crdt == loro_protocol::CrdtType::Loro {
+                                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            } else if crdt == loro_protocol::CrdtType::LoroEphemeralStore {
+                                for update in &updates {
+                                    observed_presence
+                                        .lock()
+                                        .unwrap()
+                                        .extend(talos_sync_sdk::decode_presence(update).unwrap());
+                                }
+                            }
                             // Payload size alone determines the controlled remote refusal.
                             let too_large = updates.iter().map(Vec::len).sum::<usize>() > 4096;
                             if too_large {
@@ -282,6 +293,19 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
         10,
         "Permanent rejections must not automatically retry unchanged facts"
     );
+
+    {
+        let observations = presences.lock().unwrap();
+        assert!(!observations.is_empty());
+        assert!(observations.iter().all(|presence| {
+            presence.peer_id == sync.peer_id()
+                && binding
+                    .computers
+                    .iter()
+                    .any(|alias| alias.computer_id == presence.computer_id)
+                && presence.valid_until - presence.observed_at == 30_000
+        }));
+    }
     assert_eq!(
         handle.flush(failed).await.unwrap_err().error_code(),
         ErrorCode::UploadTooLarge

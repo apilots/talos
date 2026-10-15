@@ -3,6 +3,10 @@ use super::*;
 
 #[async_trait]
 impl GatewayClient for EmbeddedServerClient {
+    async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse> {
+        self.runtime.service.sync_metrics(&self.actor).await
+    }
+
     async fn list_computers(
         &mut self,
         request: talos_types::ComputerListRequest,

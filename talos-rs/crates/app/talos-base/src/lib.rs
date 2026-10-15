@@ -35,6 +35,7 @@ mod application_sync;
 mod application_sync_computers;
 mod application_sync_files;
 mod application_sync_management;
+mod application_sync_metrics;
 #[cfg(all(test, feature = "e2e"))]
 #[path = "application_sync_tests.rs"]
 mod application_sync_tests;

@@ -94,6 +94,9 @@ impl MessageQueueChangeStream {
 
 #[async_trait]
 pub trait GatewayClient: Send {
+    /// Reads current-account Sync observations without enabling sync or exposing credentials.
+    async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse>;
+
     /// Lists caller-owned Computers and the shared embedded Computer, including offline metadata.
     async fn list_computers(
         &mut self,

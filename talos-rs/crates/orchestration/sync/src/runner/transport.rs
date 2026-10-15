@@ -137,6 +137,8 @@ async fn session<A: SyncDataAdapter>(
             .map(|(_, error)| error.clone());
     });
     let mut interval = tokio::time::interval(Duration::from_secs(1));
+    let mut presence = tokio::time::interval(Duration::from_secs(10));
+    presence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         if !sync.enabled(&binding.scope.account_id).await? {
             return Ok(());
@@ -157,6 +159,7 @@ async fn session<A: SyncDataAdapter>(
                 let Some(command) = command else { return Ok(()) };
                 operations::execute(sync, adapter, binding, client, channels, command).await;
             }
+            _ = presence.tick() => super::presence::publish(sync, binding, client).await?,
             _ = interval.tick() => upload_pending(sync, adapter, binding, client, channels).await?,
             wakeup = channels.wake.recv() => {
                 if wakeup.is_none() { return Ok(()) }

@@ -10,7 +10,7 @@ import sys
 
 DOCUMENT_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
 SCOPES = {
-    "rust": ("talos-rs/",),
+    "rust": ("talos-rs/", "contracts/talos-sync/", "scripts/sync-metrics-contract.py"),
     "frontend": ("talos-app/",),
     "pr-e2e": ("conf/", "talos-app/", "talos-e2e/", "talos-rs/"),
     "tui-install": (

@@ -390,6 +390,7 @@ export class AppServerClient {
   }
 
   sync = {
+    metrics: (): Promise<AppProtocol.SyncMetricsResponse> => this.transport.request("sync/metrics", null),
     status: (): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/status", null),
     enable: (request: AppProtocol.SyncEnableRequest = { claimLocalHistory: false }): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/enable", request),
     disable: (): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/disable", null),

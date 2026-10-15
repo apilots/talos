@@ -12,6 +12,8 @@ use talos_types::{AgentUserContent, AgentUserInput, StartTurnRequest};
 
 #[path = "application_sync_login_tests.rs"]
 mod login;
+#[path = "application_sync_metrics_tests.rs"]
+mod metrics;
 
 struct HubProcess(std::process::Child);
 impl HubProcess {
@@ -464,6 +466,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
             .all(|handle| handle.status().connection == SyncConnectionState::Connected)
     })
     .await;
+    metrics::verify(&a, &b, &actor, gateway_http_port).await;
     let local_llm = a
         .service
         .get_config(

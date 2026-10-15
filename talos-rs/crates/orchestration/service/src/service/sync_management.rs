@@ -8,6 +8,10 @@ use talos_types::{SyncEnableRequest, SyncStatusResponse};
 /// Installed by the management host. Pure Worker processes do not implement this port.
 /// Credentials are verified by the original AuthService, never by sync metadata.
 pub trait ManagementSync: Send + Sync {
+    fn metrics<'a>(
+        &'a self,
+        actor: &'a Actor,
+    ) -> AgentFuture<'a, TalosResult<talos_types::SyncMetricsResponse>>;
     fn status<'a>(&'a self, actor: &'a Actor) -> AgentFuture<'a, TalosResult<SyncStatusResponse>>;
     fn enable<'a>(
         &'a self,
@@ -99,6 +103,12 @@ impl super::TalosService {
             }
         }
         Ok(info)
+    }
+    pub async fn sync_metrics(
+        &self,
+        actor: &Actor,
+    ) -> TalosResult<talos_types::SyncMetricsResponse> {
+        self.sync_host()?.metrics(actor).await
     }
     pub async fn sync_status(&self, actor: &Actor) -> TalosResult<SyncStatusResponse> {
         self.sync_host()?.status(actor).await

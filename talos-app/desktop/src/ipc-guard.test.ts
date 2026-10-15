@@ -4,6 +4,10 @@ import type { AppProtocol } from "@talos/sdk-core";
 import { assertDesktopRendererInvoke, isDesktopRendererMethod } from "./ipc-guard";
 
 describe("desktop IPC guard", () => {
+  it("allows account metrics without letting the renderer select another account", () => {
+    expect(() => assertDesktopRendererInvoke("sync/metrics", null)).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("sync/metrics", { accountId: "other" })).toThrow();
+  });
   it("allows Computer metadata operations while keeping credentials in the trusted host", () => {
     expect(() => assertDesktopRendererInvoke("computer/list", { query: "laptop", limit: 50 })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("computer/read", { nodeId: "node-1" })).not.toThrow();

@@ -1831,6 +1831,24 @@
           "properties": {
             "method": {
               "enum": [
+                "sync/metrics"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "sync/enable"
               ],
               "type": "string"
@@ -9266,6 +9284,143 @@
       },
       "type": "object"
     },
+    "SyncMetadataCounts": {
+      "properties": {
+        "computers": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "projects": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sessions": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "computers",
+        "files",
+        "projects",
+        "sessions"
+      ],
+      "type": "object"
+    },
+    "SyncMetricsResponse": {
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "controlPlanePeerId": {
+          "description": "Current host's peer only when this management host is a Control Plane.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpoint": {
+          "description": "Safe origin of the configured synchronization service; no credentials or query.",
+          "type": "string"
+        },
+        "lastFlushedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "metadata": {
+          "$ref": "#/definitions/SyncMetadataCounts"
+        },
+        "observedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "peers": {
+          "items": {
+            "$ref": "#/definitions/SyncPeerMetrics"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "complete",
+        "endpoint",
+        "metadata",
+        "observedAt",
+        "peers"
+      ],
+      "type": "object"
+    },
+    "SyncPeerMetrics": {
+      "properties": {
+        "commitP95Ms": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "computerIds": {
+          "description": "Match only against the caller's authorized Computer directory.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "connections": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "documentRooms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "inboundBytesPerSecond": {
+          "format": "double",
+          "type": "number"
+        },
+        "lastActivityAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "outboundBytesPerSecond": {
+          "format": "double",
+          "type": "number"
+        },
+        "peerId": {
+          "type": "string"
+        },
+        "updatesPerSecond": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "computerIds",
+        "connections",
+        "documentRooms",
+        "inboundBytesPerSecond",
+        "outboundBytesPerSecond",
+        "peerId",
+        "updatesPerSecond"
+      ],
+      "type": "object"
+    },
     "SyncStatusResponse": {
       "properties": {
         "canClaimLocalHistory": {
@@ -10773,6 +10928,9 @@
     "subscribe_timeline_response": {
       "$ref": "#/definitions/SubscribeTimelineResponse"
     },
+    "sync_metrics_response": {
+      "$ref": "#/definitions/SyncMetricsResponse"
+    },
     "sync_status_response": {
       "$ref": "#/definitions/SyncStatusResponse"
     },
@@ -10838,6 +10996,7 @@
     "submit_turn_input_response",
     "subscribe_timeline_request",
     "subscribe_timeline_response",
+    "sync_metrics_response",
     "sync_status_response",
     "timeline_event",
     "timeline_recovery_response",

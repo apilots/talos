@@ -75,6 +75,15 @@ The larger `19_computer_sync` topology also remains local acceptance. These
 exclusions are explicit and do not claim that the corresponding scenarios passed
 in GitHub CI.
 
+Computer topology adds representative hosted coverage through the Rust quality
+gate (`talos-sync` HTTPS/auth/retention-independent client checks and the
+protocol/SDK tests) and frontend component/SDK/IPC checks. The committed Metrics v1
+snapshot is checked without a sibling checkout. Real multi-management-host
+presence, HTTP/RPC account isolation and same-Worker continuation are also checked
+locally by the `talos-base` feature `e2e` scenario with an explicit `TALOS_SYNC_BIN`;
+that larger cross-project topology is not claimed as hosted CI acceptance. See
+[Computer topology](../spec/feat-045-computer-topology/design.md).
+
 This PR subset keeps representative gated behavior while preventing fork code
 from receiving secrets. Provider-backed and Cloud-fixture acceptance is
 maintainer-owned; it does not run automatically for each outside contribution.

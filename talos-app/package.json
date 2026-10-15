@@ -18,7 +18,7 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "check": "pnpm --filter talos-web check",
-    "check:repo": "node ./scripts/check-repo.mjs && node --test ./scripts/error-presentation-rule.test.mjs && python3 ../scripts/check_error_contract.py",
+    "check:repo": "node ./scripts/check-repo.mjs && node --test ./scripts/error-presentation-rule.test.mjs && python3 ../scripts/check_error_contract.py && python3 ../scripts/sync-metrics-contract.py --check",
     "ci:frontend-app": "pnpm lint && pnpm test && pnpm typecheck && pnpm build && pnpm check:repo"
   }
 }

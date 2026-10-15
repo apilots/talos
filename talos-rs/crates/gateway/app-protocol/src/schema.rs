@@ -20,6 +20,7 @@ pub struct AppProtocolSchemaRoot {
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
     pub error: AppServerErrorBody,
+    pub sync_metrics_response: talos_types::SyncMetricsResponse,
     pub sync_status_response: talos_types::SyncStatusResponse,
     pub computer_list_response: talos_types::ComputerListResponse,
     pub desktop_connection_response: talos_types::DesktopConnectionResponse,
@@ -175,6 +176,9 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::UpdateNodeRequest>());
     output.push_str(&export::<talos_types::RotateCredentialRequest>());
     output.push_str(&export::<talos_types::SyncConnectionState>());
+    output.push_str(&export::<talos_types::SyncMetricsResponse>());
+    output.push_str(&export::<talos_types::SyncPeerMetrics>());
+    output.push_str(&export::<talos_types::SyncMetadataCounts>());
     output.push_str(&export::<talos_types::SyncStatusResponse>());
     output.push_str(&export::<talos_types::SyncEnableRequest>());
     output.push_str(&export::<talos_types::ComputerListRequest>());

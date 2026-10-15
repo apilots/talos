@@ -15,6 +15,7 @@ use crate::{
 
 mod control;
 mod operations;
+mod presence;
 mod transport;
 
 use control::ControlCommand;

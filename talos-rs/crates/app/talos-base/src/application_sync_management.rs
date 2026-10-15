@@ -376,6 +376,12 @@ impl ApplicationSyncHost {
 }
 
 impl ManagementSync for ApplicationSyncHost {
+    fn metrics<'a>(
+        &'a self,
+        actor: &'a Actor,
+    ) -> AgentFuture<'a, TalosResult<talos_types::SyncMetricsResponse>> {
+        Box::pin(self.read_metrics(actor))
+    }
     fn status<'a>(&'a self, actor: &'a Actor) -> AgentFuture<'a, TalosResult<SyncStatusResponse>> {
         Box::pin(async move {
             let _guard = self.lifecycle.lock().await;

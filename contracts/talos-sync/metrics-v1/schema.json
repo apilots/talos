@@ -1,0 +1,343 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MetricsContract",
+  "type": "object",
+  "required": [
+    "account",
+    "public"
+  ],
+  "properties": {
+    "account": {
+      "$ref": "#/definitions/AccountMetrics"
+    },
+    "public": {
+      "$ref": "#/definitions/PublicMetrics"
+    }
+  },
+  "definitions": {
+    "AccountMetrics": {
+      "type": "object",
+      "required": [
+        "accountId",
+        "apiVersion",
+        "complete",
+        "metadata",
+        "observedAt",
+        "peers"
+      ],
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "apiVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "lastFlushedAt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "metadata": {
+          "$ref": "#/definitions/MetadataCounts"
+        },
+        "observedAt": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "peers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PeerMetrics"
+          }
+        }
+      }
+    },
+    "ConnectionDistribution": {
+      "type": "object",
+      "required": [
+        "accounts",
+        "minimumPeers",
+        "peers"
+      ],
+      "properties": {
+        "accounts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "maximumPeers": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "minimumPeers": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "peers": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "HistoryPoint": {
+      "type": "object",
+      "required": [
+        "inboundBytesPerSecond",
+        "outboundBytesPerSecond",
+        "timestamp",
+        "updatesPerSecond"
+      ],
+      "properties": {
+        "commitP95Ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "inboundBytesPerSecond": {
+          "type": "number",
+          "format": "double"
+        },
+        "outboundBytesPerSecond": {
+          "type": "number",
+          "format": "double"
+        },
+        "timestamp": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "updatesPerSecond": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "MetadataCounts": {
+      "type": "object",
+      "required": [
+        "computers",
+        "files",
+        "projects",
+        "sessions"
+      ],
+      "properties": {
+        "computers": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "files": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "projects": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "sessions": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "PeerMetrics": {
+      "type": "object",
+      "required": [
+        "computerIds",
+        "connections",
+        "documentRooms",
+        "inboundBytesPerSecond",
+        "outboundBytesPerSecond",
+        "peerId",
+        "updatesPerSecond"
+      ],
+      "properties": {
+        "commitP95Ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "computerIds": {
+          "description": "Unexpired, self-published presence; join only to the authorized Computer directory.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "connections": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "documentRooms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "inboundBytesPerSecond": {
+          "type": "number",
+          "format": "double"
+        },
+        "lastActivityAt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "outboundBytesPerSecond": {
+          "type": "number",
+          "format": "double"
+        },
+        "peerId": {
+          "type": "string"
+        },
+        "updatesPerSecond": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "PublicMetrics": {
+      "type": "object",
+      "required": [
+        "activePeers",
+        "apiVersion",
+        "bucketSeconds",
+        "complete",
+        "connections",
+        "distribution",
+        "documentRooms",
+        "history",
+        "inboundBytesPerSecond",
+        "metadata",
+        "observedAt",
+        "onlineAccounts",
+        "onlinePeers",
+        "outboundBytesPerSecond",
+        "rangeSeconds",
+        "stopping",
+        "updatesPerSecond"
+      ],
+      "properties": {
+        "activePeers": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "apiVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "bucketSeconds": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "commitP95Ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "connections": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "distribution": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConnectionDistribution"
+          }
+        },
+        "documentRooms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "failureRate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HistoryPoint"
+          }
+        },
+        "inboundBytesPerSecond": {
+          "type": "number",
+          "format": "double"
+        },
+        "lastFlushedAt": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "metadata": {
+          "$ref": "#/definitions/MetadataCounts"
+        },
+        "observedAt": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "onlineAccounts": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "onlinePeers": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "outboundBytesPerSecond": {
+          "type": "number",
+          "format": "double"
+        },
+        "rangeSeconds": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "stopping": {
+          "type": "boolean"
+        },
+        "updatesPerSecond": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    }
+  }
+}

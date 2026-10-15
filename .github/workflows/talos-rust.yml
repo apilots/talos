@@ -12,6 +12,8 @@ on:
       - main
     paths:
       - "talos-rs/**"
+      - "contracts/talos-sync/**"
+      - "scripts/sync-metrics-contract.py"
       - "scripts/check_error_contract*.py"
       - "justfile"
       - ".github/workflows/talos-rust.yml"
@@ -54,10 +56,10 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Install just
+      - name: Install just and scoped test runner
         uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-nextest
 
       - name: Install Protocol Buffer compiler
         run: |
@@ -74,3 +76,8 @@ jobs:
 
       - name: Check Rust workspace
         run: just check
+
+      - name: Verify Sync metrics contract and client boundaries
+        run: |
+          python3 scripts/sync-metrics-contract.py --check
+          just test -p talos-sync -p talos-app-protocol -p talos-sdk
