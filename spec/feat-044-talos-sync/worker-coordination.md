@@ -144,7 +144,7 @@ UNSPECIFIED拒绝；提交者必须是该状态的当前调用者，不能为别
 清理完成与共享事实确认均属于公共Worker RPC host的Session gate，不能只依靠先返回的Provider settlement。
 handoffReady 只在实际清理确认且共享事实已提交后成立；输入等待与 cleanupPending 不能被视为空闲。
 本机离线执行允许当前协调者在 Local 可见性下继续同 Worker；另一协调者不能越过未共享 历史游标。恢复网络后 flush 再开放 Shared。
-另一管理端已收到完全相同的终态历史、但 Worker 仍由原协调者持有 Local 标记时，准入最多等待 30 秒，定期读取原 Worker 的 Shared 确认；超时返回 ServiceUnavailable。等待本身不提交 Shared、不改 owner、不跳过 durable ACK；原协调者的 Local 离线执行和旧游标冲突保持原规则。
+另一管理端已收到完全相同的终态历史、但 Worker 仍在清理该终态 Turn 或由原协调者持有相同的 Local 标记时，准入最多等待 30 秒，定期读取原 Worker 的 Shared 确认；超时返回 ServiceUnavailable。等待本身不提交 Shared、不改 owner、不跳过 durable ACK；原协调者的 Local 离线执行和旧游标冲突保持原规则。
 Local是当前协调者已持久化的事实，不限定Worker的物理位置；同一协调者经agent通道继续远端任务也不要求sync在线。
 coordinatorId在active或尚未Shared时保留当前调用者，避免idle期间被别的调用者越过未共享事实；Shared确认后不再形成Session永久owner。
 Worker不解析Loro、不建业务DB或执行账本。RPC host在Worker自己的`$TALOS_HOME/data/worker/session-heads/`保存每Session最小恢复标记：immutable binding、历史游标、最后coordinatorId、active identity?、Local/Shared及cleanupConfirmed。文件名只来自校验后的Session ID/安全编码；私有文件原子替换/fsync，在准入consume前标记未确认、终态确认后更新；失败不开始模型或开放handoff。

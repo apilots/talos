@@ -206,15 +206,23 @@ impl SessionService {
             return Ok(record.clone());
         };
         let peer = self.sync.read().expect("Session sync lock").peer_id.clone();
-        if state.history_cursor == history_cursor
-            && peer.is_some()
-            && state.coordinator_id.is_some()
-            && state.coordinator_id != peer
-            && state.active_turn.is_none()
-            && !state.handoff_ready
-        {
-            // Imported terminal facts can arrive before the source's durable ACK
-            // and Shared commit. Bound this wait; only the Worker can confirm
+        let awaiting_shared = |state: &agent_protocol::SessionExecutionState| {
+            peer.is_some()
+                && state.coordinator_id.is_some()
+                && state.coordinator_id != peer
+                && !state.handoff_ready
+                && match &state.active_turn {
+                    Some(active) => {
+                        history_cursor.completed_turn_id.as_deref() == Some(active.turn_id.as_str())
+                            && history_cursor.history_generation
+                                == state.history_cursor.history_generation
+                    }
+                    None => state.history_cursor == history_cursor,
+                }
+        };
+        if awaiting_shared(&state) {
+            // Imported terminal facts can arrive before Worker cleanup, Local
+            // commit and the source's durable ACK / Shared commit. Bound this wait; only the Worker can confirm
             // handoff. Same-coordinator Local execution never waits.
             state = tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 loop {
@@ -229,11 +237,7 @@ impl SessionService {
                                 "Worker execution state changed during handoff.",
                             )
                         })?;
-                    if current.handoff_ready
-                        || current.active_turn.is_some()
-                        || current.coordinator_id == peer
-                        || current.history_cursor != history_cursor
-                    {
+                    if !awaiting_shared(&current) {
                         return Ok::<_, TalosError>(current);
                     }
                 }

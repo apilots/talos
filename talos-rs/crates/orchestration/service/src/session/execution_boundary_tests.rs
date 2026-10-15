@@ -80,6 +80,37 @@ async fn imported_terminal_history_waits_for_worker_shared_confirmation() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn imported_terminal_history_waits_through_worker_cleanup_and_local_commit() {
+    let (service, record, coordinator, _home) = fixture().await;
+    let terminal_cursor = coordinator.state.lock().unwrap().history_cursor.clone();
+    {
+        let mut state = coordinator.state.lock().unwrap();
+        state.history_cursor = SessionHistoryCursor::default();
+        state.active_turn = Some(AgentTurnRef::new(&record.id, "finished-turn"));
+    }
+    let mut prepare = std::pin::pin!(service.prepare_execution(&record));
+    assert!(
+        std::future::poll_fn(|context| Poll::Ready(prepare.as_mut().poll(context)))
+            .await
+            .is_pending()
+    );
+    {
+        let mut state = coordinator.state.lock().unwrap();
+        state.active_turn = None;
+        state.history_cursor = terminal_cursor;
+    }
+    tokio::time::advance(Duration::from_millis(100)).await;
+    assert!(
+        std::future::poll_fn(|context| Poll::Ready(prepare.as_mut().poll(context)))
+            .await
+            .is_pending(),
+        "Local commit alone must not complete the cross-coordinator handoff"
+    );
+    coordinator.state.lock().unwrap().handoff_ready = true;
+    assert_eq!(prepare.await.unwrap().id, record.id);
+}
+
+#[tokio::test(start_paused = true)]
 async fn unconfirmed_shared_history_times_out_without_opening_worker_boundary() {
     let (service, record, coordinator, _home) = fixture().await;
     let error = service.prepare_execution(&record).await.unwrap_err();
