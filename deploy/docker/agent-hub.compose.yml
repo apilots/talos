@@ -1,0 +1,38 @@
+# Apply only during an explicitly authorized deployment window; never --build.
+services:
+  talos-server:
+    image: ${TALOS_HUB_IMAGE:?Set the verified release image and digest in .hub.env}
+    container_name: talos-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TALOS_HOME: /home/talos/.talos
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9443:9443"
+    volumes:
+      - talos-data:/home/talos/.talos
+      - type: bind
+        source: ${TALOS_HUB_TLS_DIR:?Set the absolute server TLS directory}
+        target: /run/talos-tls
+        read_only: true
+        bind:
+          create_host_path: false
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      # HTTP liveness only. Register + both Connect streams are acceptance gates.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+volumes:
+  talos-data:
+    external: true
+    name: ${TALOS_HUB_DATA_VOLUME:?Set the existing verified Talos home volume}

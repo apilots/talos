@@ -1,0 +1,57 @@
+# Complete v0.1.9 registration hub profile. Install inside the existing Talos home.
+# Keep the live home/config writable: account enrollment uses atomic replacement.
+timezone: Asia/Shanghai
+mode: cloud
+workspaces:
+  default_workspace_id: default
+  definitions:
+    - workspace_id: default
+      root_prefix: workspace-talos
+gateway:
+  host: 0.0.0.0
+  port: 8080
+  auth: true
+agent_node:
+  control_plane:
+    bind_address: 0.0.0.0:9443
+    tls_certificate_file: /run/talos-tls/server.crt
+    tls_private_key_file: /run/talos-tls/server.key
+    trusted_node_ca_file: null
+  runner: null
+  worker_rpc:
+    bind_address: 127.0.0.1:0
+    tls: null
+desktop:
+  connection_mode: cloud
+cloud:
+  api_base_url: https://api.talos.love
+  agent_base_url: https://agent.talos.love
+  agent_trusted_ca_file: null
+  web_base_url: https://cloud.talos.love
+sync:
+  hub_endpoint: wss://sync.talos.love/v1/sync
+  trusted_ca_file: null
+agent:
+  name: talos
+  inner_model:
+    provider: deepseek
+    id: deepseek-v4-flash
+  kernel:
+    mcp:
+      servers: []
+llm:
+  provider: deepseek
+  model: deepseek-v4-flash
+  deepseek:
+    api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
+    base_url: https://api.deepseek.com
+    protocol: chat
+    models:
+      - id: deepseek-v4-flash
+        name: DeepSeek V4 Flash
+        context_window: 1000000
+        reasoning: true
+        input: [text]
+storage:
+  database_type: sqlite
+  max_connections: 5

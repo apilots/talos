@@ -39,6 +39,8 @@ docker compose up -d
 curl http://127.0.0.1:8080/health
 ```
 
+注册与 RPC 中心 `agent.talos.love` 的专用生产配置、Compose、TLS 入口、升级回滚及验收见 [Computer Hub 上线手册](AGENT_HUB.md)。普通 Compose 示例不会自动开启注册 listener。
+
 ## 终端安装
 
 Release bundle installer 位于 [`install/`](install/README.md)，它将产品资源与
