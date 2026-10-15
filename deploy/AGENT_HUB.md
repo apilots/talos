@@ -104,6 +104,11 @@ Keep `versions 2` and `tls_server_name talos-agent.internal` in either case.
 Validate with the installed binary before reloading; upgrading a shared proxy
 is a separate operation.
 
+If `/opt/talos-server` is root-only, give Caddy a readable copy of the **public**
+CA certificate at `/etc/caddy/talos-agent-ca.crt` and use that path in its trust
+directive. Keep the service directory permissions and private keys restricted;
+test CA readability as the proxy's service user, not only as root.
+
 Worker/Desktop clients trust the public edge certificate using system roots;
 leave client `trusted_ca_file` null for the public endpoint. The hub's
 `trusted_node_ca_file` is for dialing direct Workers, not for authenticating the
