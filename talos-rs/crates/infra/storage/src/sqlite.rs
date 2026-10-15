@@ -135,17 +135,21 @@ pub struct SqliteWriteTransaction {
 impl SqliteWriteTransaction {
     /// Acquire one pooled connection and begin an immediate SQLite transaction.
     pub async fn begin(pool: &Pool<Sqlite>) -> TalosResult<Self> {
-        let mut connection = pool
+        let connection = pool
             .acquire()
             .await
             .map_err(|error| crate::database_error("acquire a database connection", error))?;
+        // SQLx's SQLite worker can finish BEGIN after this future is cancelled.
+        // Own cleanup before the await so an unconfirmed transaction is closed,
+        // never returned to the pool with its writer lock still held.
+        let mut transaction = Self {
+            connection: Some(connection),
+        };
         sqlx::query("BEGIN IMMEDIATE")
-            .execute(&mut *connection)
+            .execute(&mut *transaction)
             .await
             .map_err(|error| crate::database_error("begin the database transaction", error))?;
-        Ok(Self {
-            connection: Some(connection),
-        })
+        Ok(transaction)
     }
 
     /// Commit the transaction and return its clean connection to the pool.

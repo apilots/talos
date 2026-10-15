@@ -206,3 +206,80 @@ async fn concurrent_writers_wait_for_the_active_transaction() {
         vec!["first".to_string(), "second".to_string()]
     );
 }
+
+#[tokio::test]
+async fn cancelled_begin_does_not_return_an_open_transaction_or_retain_the_writer() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cancelled-begin.db");
+    let storage = SqliteStorage::new_with_max_connections(path.to_str().unwrap(), 1)
+        .await
+        .unwrap();
+    storage
+        .execute("CREATE TABLE writes (id INTEGER PRIMARY KEY)", &[])
+        .await
+        .unwrap();
+    let writer = SqliteWriteTransaction::begin(storage.pool()).await.unwrap();
+
+    // Signal from SQLite's VM, rather than sleeping and guessing whether BEGIN
+    // reached the worker thread. The first writer keeps this BEGIN pending.
+    let started = Arc::new(tokio::sync::Notify::new());
+    let progress = started.clone();
+    let options = SqliteConnectOptions::from_str(&SqliteStorage::normalize_connection_string(
+        path.to_str().unwrap(),
+    ))
+    .unwrap()
+    .busy_timeout(Duration::from_secs(5));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .after_connect(move |connection, _| {
+            let progress = progress.clone();
+            Box::pin(async move {
+                connection
+                    .lock_handle()
+                    .await?
+                    .set_progress_handler(1, move || {
+                        progress.notify_one();
+                        true
+                    });
+                Ok(())
+            })
+        })
+        .connect_with(options)
+        .await
+        .unwrap();
+    let pending_pool = pool.clone();
+    let pending = tokio::spawn(async move { SqliteWriteTransaction::begin(&pending_pool).await });
+    tokio::time::timeout(Duration::from_secs(5), started.notified())
+        .await
+        .unwrap();
+    pending.abort();
+    assert!(matches!(pending.await, Err(error) if error.is_cancelled()));
+    writer.commit().await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut next = SqliteWriteTransaction::begin(&pool).await.unwrap();
+        sqlx::query("INSERT INTO writes VALUES (1)")
+            .execute(&mut *next)
+            .await
+            .unwrap();
+        next.commit().await.unwrap();
+        storage
+            .execute("INSERT INTO writes VALUES (2)", &[])
+            .await
+            .unwrap();
+    })
+    .await
+    .expect("cancelled BEGIN must release its connection and database writer");
+    assert_eq!(
+        storage
+            .query("SELECT id FROM writes ORDER BY id", &[])
+            .await
+            .unwrap()
+            .iter()
+            .filter_map(|row| row.get_i64("id"))
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    pool.close().await;
+}
