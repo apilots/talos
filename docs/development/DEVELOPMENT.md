@@ -77,12 +77,15 @@ Local iteration --> pre-commit --> pre-push --> PR / main CI --> source Release
 | --- | --- |
 | Local | Scoped `just test -p <package>` and frontend scenarios, plus applicable quality gates |
 | pre-commit | Changed-file policy, selected frontend ESLint, shell syntax, Rust formatting |
-| pre-push | Changed areas trigger frontend pipeline or Rust format/check and error-contract guards |
-| PR/main CI | Path-filtered workflows; Rust quality checks do not run the full behavioral suite |
+| pre-push | Product changes trigger frontend or Rust checks; tags validate metadata and require publisher/CI candidate provenance |
+| PR/main CI | Shared content-aware scopes include build/workflow inputs; version-only changes run metadata/policy checks |
 | Release | Public workflow runs source checks before builds and native installation before publication |
 
 See [hook scripts](../../scripts/run-pre-push-checks.sh) and
 [Rust workflow](../../.github/workflows/talos-rust.yml) for exact commands.
+Shared Rust/Node/pnpm versions come from `.github/release-toolchain.env`. Rust
+caches are isolated by platform, architecture, profile, toolchain and the resolved
+Cargo graph. Cache hits never replace compilation or behavioral checks.
 CI success does not substitute for unrun scoped tests, snapshots or real-path
 acceptance. Error changes require source/disclosure, transport/replay coverage
 and generation per [Error contract](../architecture/ERROR_MODEL.md).

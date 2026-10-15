@@ -13,9 +13,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "talos-app/**"
-      - ".github/workflows/talos-frontend-app.yml"
 
 jobs:
   change-scope:
@@ -35,6 +32,8 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         run: python3 .github/scripts/pr_change_scope.py frontend
 
   frontend-app-quality:
@@ -52,15 +51,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Load shared toolchain versions
+        working-directory: .
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9.14.4
+          version: ${{ env.RELEASE_PNPM_VERSION }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: talos-app/pnpm-lock.yaml
 

@@ -342,11 +342,13 @@ jobs:
           workspaces: talos-rs
 
       - name: Install pnpm
+        if: ${{ matrix.build_target != 'tui' }}
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.RELEASE_PNPM_VERSION }}
 
       - name: Install Node.js
+        if: ${{ matrix.build_target != 'tui' }}
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
@@ -354,6 +356,7 @@ jobs:
           cache-dependency-path: talos-app/pnpm-lock.yaml
 
       - name: Install frontend dependencies
+        if: ${{ matrix.build_target != 'tui' }}
         run: pnpm --dir talos-app install --frozen-lockfile
 
       - name: Fetch the validated Rust dependency graph

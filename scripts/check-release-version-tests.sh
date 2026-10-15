@@ -62,4 +62,21 @@ git reset --soft HEAD~2
 git -c core.hooksPath=/dev/null commit -q -m "chore(release): prepare v1.2.3"
 expect_rejection "version preparation commit must contain only"
 
+# Main closeout validates consistent snapshot metadata without release-only history.
+git reset --hard -q
+python3 - <<'PY_METADATA'
+from pathlib import Path
+for root in [Path("talos-app"), Path("talos-rs")]:
+    for path in root.rglob("*"):
+        if path.is_file():
+            path.write_text(path.read_text().replace("1.2.3", "1.2.4-SNAPSHOT"))
+PY_METADATA
+bash "${validator}" --metadata
+printf '{"version":"1.2.5-SNAPSHOT"}\n' > talos-app/package.json
+if bash "${validator}" --metadata >metadata.log 2>&1; then
+  echo "Expected mismatched snapshot metadata to fail" >&2
+  exit 1
+fi
+grep -Fq "expected '1.2.4-SNAPSHOT'" metadata.log
+
 echo "Release version lifecycle tests passed."

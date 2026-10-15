@@ -58,6 +58,10 @@ $TALOS_HOME/logs/talos.log
 Provider secret 保存在 `.env` 中，配置引用对应的 `TALOS_LLM_*_API_KEY` 环境变量。
 仓库默认配置位于 `conf/`，由 Runtime 复制或升级，不直接编辑用户 home 中的文件。
 
+CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`。Rust 缓存按
+平台、架构、构建模式、工具链及解析后的依赖图隔离，缓存命中不替代编译或行为检查。
+标签 pre-push 只核对元数据，发布脚本和发布 CI 仍要求精确源码候选证据。
+
 ## 端到端测试
 
 ```bash
