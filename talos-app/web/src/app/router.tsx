@@ -2,7 +2,6 @@ import { type ReactNode, lazy, Suspense } from "react";
 import { Navigate, createBrowserRouter, createHashRouter, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-import { DesktopConnectionControl } from "@/features/computers";
 import { AppLayout } from "@/app/layouts/AppLayout";
 import { useConnectionSettings } from "@/features/connection";
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
@@ -38,7 +37,6 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (connection.authError) {
     return <div role="alert" className="m-8 rounded-xl border border-danger/30 p-6 text-danger">
       {apiErrorMessage(connection.authError)}
-      <DesktopConnectionControl />
       <button className="ml-4 underline" onClick={() => window.location.reload()}>{t("retryNow")}</button>
     </div>;
   }

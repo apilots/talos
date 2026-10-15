@@ -106,7 +106,26 @@ describe("AuthPage", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("keeps Desktop login required without a local-mode shortcut", () => {
+    vi.stubGlobal("talos", { invoke: vi.fn() });
+    renderAuthPage("/auth/login");
+
+    expect(screen.getByRole("button", { name: /continue with talos cloud/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /use local mode/i })).toBeNull();
+    expect(useAppStore.getState().connection.authStatus).toBe("unauthenticated");
+    expect(startCloudLoginMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves explicitly configured open development access", async () => {
+    useAppStore.getState().setConnection({ authStatus: "open" });
+    renderAuthPage("/auth/login");
+
+    await waitFor(() => expect(screen.getByText("Talos Home")).toBeTruthy());
+    expect(startCloudLoginMock).not.toHaveBeenCalled();
   });
 
   it("does not start device login when the login page mounts", async () => {

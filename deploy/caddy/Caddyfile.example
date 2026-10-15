@@ -1,9 +1,18 @@
-api.example.com {
-	encode zstd gzip
-	reverse_proxy 127.0.0.1:8787
-}
+# Agent virtual host only; merge with the existing proxy configuration.
+# Do not replace other Cloud/Sync virtual hosts. See ../AGENT_HUB.md.
+agent.talos.love {
+	@grpc path /talos.agent.v1.*
+	handle @grpc {
+		reverse_proxy https://127.0.0.1:9443 {
+			flush_interval -1
+			transport http {
+				versions 2
+				tls_server_name talos-agent.internal
+				tls_trust_pool file /opt/talos-server/tls/ca.crt
+			}
+		}
+	}
 
-agent.example.com {
 	@sse path /v1/sessions/*/events
 
 	handle @sse {

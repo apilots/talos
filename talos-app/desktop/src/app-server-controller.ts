@@ -69,6 +69,11 @@ export class DesktopAppServerController {
     const response = await this.ensureBridge().connect();
     if (this.options.desktopHost) {
       this.connection = await this.ensureBridge().invoke<AppProtocol.DesktopConnectionResponse>("desktop/connection/read", null);
+      if (response.server_info.auth_enabled && this.connection.connectionMode === "local") {
+        this.connection = await this.ensureBridge().invoke<AppProtocol.DesktopConnectionResponse>(
+          "desktop/connection/set", { connectionMode: "cloud" },
+        );
+      }
       if (this.connection.connectionMode === "cloud") {
         const session = await this.ensureBridge().invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
         this.initializeResponse = response;

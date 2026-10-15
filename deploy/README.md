@@ -44,6 +44,10 @@ Before using the example, select an image version matching your SDK/UI and data
 format. The Compose sample's pinned release is not a promise that every current
 source-tree capability exists in that image.
 
+For the production registration/RPC hub at `agent.talos.love`, use the separate
+[Computer hub runbook](AGENT_HUB.md), production profile and Compose file. The
+general example above does not enable the registration listener.
+
 ## Deployment mode and configuration access
 
 `mode: local` is the default when omitted. `conf/talos-prod.yaml` explicitly uses

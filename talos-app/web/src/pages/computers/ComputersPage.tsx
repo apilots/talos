@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
-import { ComputerDetails, DesktopConnectionControl, ComputerItem, useComputerList, useComputers } from "@/features/computers";
+import { ComputerDetails, ComputerItem, useComputerList, useComputers } from "@/features/computers";
 import { getTalosClient } from "@/shared/api/client";
 import { Button } from "@/shared/ui/Button";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
@@ -40,7 +40,6 @@ export function ComputersPage() {
       <div className="mb-6 flex items-center justify-between"><h1 className="text-2xl font-semibold">{t("computers:title")}</h1><button className="rounded-lg border border-border px-3 py-2 text-sm" onClick={() => setShowHelp(!showHelp)}>{t("computers:add")}</button></div>
       {showHelp ? <p className="mb-6 rounded-xl border border-border bg-card p-4 text-sm text-muted">{t("computers:addHelp")}</p> : null}
       <SyncControl />
-      <DesktopConnectionControl />
       {computers.runtime?.error ? <p role="alert" className="mb-4 text-sm text-danger">{apiErrorMessage(computers.runtime.error)}</p> : null}
       {connection.desktopConnectionMode === "cloud" && !computers.localId ? <p className="mb-4 text-sm text-muted">{t("computers:recoverHelp")}</p> : null}
       <div className="grid gap-8 md:grid-cols-[minmax(240px,1fr)_1fr]">

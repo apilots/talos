@@ -39,7 +39,8 @@ For unfamiliar ownership, consult the relevant entry in [Rust modules](docs/refe
 
 ## Validation and completion
 
-- Keep transient test/review logs, screenshots, reports, and scratch files in the repository-root ignored `output/` or `.tmp/` directories. Specs retain designs, plans, and concise verification conclusions, not process artifacts.
+- Keep actual self-test, review and acceptance records in the repository-root ignored `output/` directory, including result tables, verification-only Markdown, logs, screenshots and issue observations. Use `.tmp/` for disposable scratch files. Do not commit these records under specs or deployment documentation, including concise copies of the same results.
+- Tracked specs and documentation own designs, contracts, reusable verification procedures and deployment/acceptance checklists. Summarize actual commands, results, limitations and blockers in PR evidence; link to PRs rather than ignored local reports when a durable reference is needed. Keep task plans and progress in the ignored task-owned `IMPLEMENTATION_PLAN.md` as required by the development guide.
 - Use [scoped validation commands](docs/development/DEVELOPMENT.md#scoped-validation) from the repository root. Rust tests run through `just test -p <package>` (cargo-nextest), not bare `cargo test`. The repository check is `pnpm --dir talos-app check:repo`.
 - Choose checks for the affected behavior. Fix failures caused by the change and continue through authorized implementation and verification; a first implementation or successful compile alone is not completion. Broaden or repeat checks only for changed behavior, failures, or unresolved risk.
 - Review the requested diff for missing behavior and unnecessary code, fixtures, conversions, or workarounds. Remove obsolete paths introduced or replaced by the change; leave no TODO without an associated issue or plan. Preserve unrelated user work.

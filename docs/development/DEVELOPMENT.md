@@ -104,9 +104,12 @@ For complex or staged work, maintain a task-owned `IMPLEMENTATION_PLAN.md`
 Reuse the current task's plan; when the root plan belongs to another task, keep
 this plan alongside the current task's spec. Simple edits need no new plan.
 Specs describe architecture, objects, APIs, state schemas, errors, and safety
-constraints, not execution checklists. Keep specs aligned with implementation.
-Preserve lasting decisions and verification in tracked specs or PR evidence
-before retiring a local plan; historical verification is not a new test result.
+constraints. Tracked documentation may include reusable verification procedures
+and acceptance checklists, but actual self-test/acceptance records, result tables,
+logs and screenshots belong only in ignored root `output/`, not verification-only
+spec or deployment Markdown. Keep implementation decisions in their owning
+contracts and summarize actual verification, limitations and blockers in PR
+evidence before retiring a local plan. Historical verification is not a new result.
 
 At stage boundaries, check scope, non-goals, reusable infrastructure, and the
 smallest viable change. Complete that stage's checks and cleanup before starting
