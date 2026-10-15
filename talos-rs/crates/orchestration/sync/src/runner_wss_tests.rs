@@ -24,8 +24,29 @@ impl SyncDataAdapter for EmptyAdapter {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PresenceRejection {
+    None,
+    Join,
+    Update,
+}
+
 #[tokio::test]
 async fn permanent_upload_rejection_preserves_outbox_without_starving_later_resources() {
+    upload_rejection_scenario(PresenceRejection::None).await;
+}
+
+#[tokio::test]
+async fn unsupported_presence_does_not_disconnect_or_starve_document_sync() {
+    upload_rejection_scenario(PresenceRejection::Join).await;
+}
+
+#[tokio::test]
+async fn rejected_presence_update_does_not_disconnect_or_starve_document_sync() {
+    upload_rejection_scenario(PresenceRejection::Update).await;
+}
+
+async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     use futures_util::{SinkExt, StreamExt};
@@ -53,6 +74,8 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
     let observed = uploads.clone();
     let presences = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed_presence = presences.clone();
+    let presence_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_attempts = presence_attempts.clone();
     let peer = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = tokio_rustls::TlsAcceptor::from(Arc::new(tls))
@@ -97,17 +120,34 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                 Message::Binary(bytes) => {
                     let response = match loro_protocol::decode(&bytes).unwrap() {
                         ProtocolMessage::JoinRequest { crdt, room_id, .. } => {
-                            ProtocolMessage::JoinResponseOk {
-                                crdt,
-                                room_id,
-                                permission: Permission::Write,
-                                version: vec![],
-                                extra: Some(
-                                    serde_json::to_vec(&talos_sync_types::DocumentJoinAccepted {
-                                        history_generation: 0,
-                                    })
-                                    .unwrap(),
-                                ),
+                            let presence = crdt == loro_protocol::CrdtType::LoroEphemeralStore;
+                            if presence {
+                                observed_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            }
+                            if presence && presence_rejection == PresenceRejection::Join {
+                                ProtocolMessage::JoinError {
+                                    crdt,
+                                    room_id,
+                                    code: loro_protocol::JoinErrorCode::AppError,
+                                    message: "Ephemeral presence is unsupported.".into(),
+                                    receiver_version: None,
+                                    app_code: None,
+                                }
+                            } else {
+                                ProtocolMessage::JoinResponseOk {
+                                    crdt,
+                                    room_id,
+                                    permission: Permission::Write,
+                                    version: vec![],
+                                    extra: Some(
+                                        serde_json::to_vec(
+                                            &talos_sync_types::DocumentJoinAccepted {
+                                                history_generation: 0,
+                                            },
+                                        )
+                                        .unwrap(),
+                                    ),
+                                }
                             }
                         }
                         ProtocolMessage::DocUpdate {
@@ -153,7 +193,11 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                                 crdt,
                                 room_id,
                                 ref_id: batch_id,
-                                status: if too_large {
+                                status: if crdt == loro_protocol::CrdtType::LoroEphemeralStore
+                                    && presence_rejection == PresenceRejection::Update
+                                {
+                                    UpdateStatusCode::AppError
+                                } else if too_large {
                                     UpdateStatusCode::PayloadTooLarge
                                 } else {
                                     UpdateStatusCode::Ok
@@ -296,7 +340,10 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
 
     {
         let observations = presences.lock().unwrap();
-        assert!(!observations.is_empty());
+        assert_eq!(
+            observations.is_empty(),
+            presence_rejection == PresenceRejection::Join
+        );
         assert!(observations.iter().all(|presence| {
             presence.peer_id == sync.peer_id()
                 && binding
@@ -306,6 +353,7 @@ async fn permanent_upload_rejection_preserves_outbox_without_starving_later_reso
                 && presence.valid_until - presence.observed_at == 30_000
         }));
     }
+    assert!(presence_attempts.load(std::sync::atomic::Ordering::SeqCst) > 0);
     assert_eq!(
         handle.flush(failed).await.unwrap_err().error_code(),
         ErrorCode::UploadTooLarge

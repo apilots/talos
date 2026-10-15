@@ -190,13 +190,15 @@ impl ApplicationSyncHost {
         if !self.sync.enabled(&actor.user_id).await? {
             return Ok(());
         }
-        if self
+        let installed = self
             .sync_stores
             .handles
             .lock()
             .await
-            .contains_key(&actor.user_id)
-        {
+            .get(&actor.user_id)
+            .cloned();
+        if let Some(handle) = installed {
+            self.refresh_presence_computers(actor, &handle).await?;
             return Ok(());
         }
         let mut binding = self.sync.account_binding(actor).await?;
@@ -263,16 +265,18 @@ impl ApplicationSyncHost {
             );
         }
         let binding = binding.expect("account binding");
-        self.start_account_sync(
-            actor,
-            SyncBindParams {
-                scope: binding.scope,
-                source_user_id: binding.source_user_id,
-                computers: binding.computers,
-            },
-            credentials,
-        )
-        .await?;
+        let handle = self
+            .start_account_sync(
+                actor,
+                SyncBindParams {
+                    scope: binding.scope,
+                    source_user_id: binding.source_user_id,
+                    computers: binding.computers,
+                },
+                credentials,
+            )
+            .await?;
+        self.refresh_presence_computers(actor, &handle).await?;
         Ok(())
     }
 

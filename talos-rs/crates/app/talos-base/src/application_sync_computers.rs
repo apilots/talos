@@ -7,6 +7,33 @@ use talos_service::Actor;
 use talos_types::NodeInfo;
 
 impl ApplicationSyncHost {
+    /// Presence follows current verified enrollment, not immutable capture aliases.
+    pub(crate) async fn refresh_presence_computers(
+        &self,
+        actor: &RequestIdentity,
+        handle: &talos_sync::SyncHandle,
+    ) -> TalosResult<()> {
+        let computers = self
+            .local_computer(
+                &Actor::regular(&actor.user_id)
+                    .with_access_token(actor.access_token.clone().expect("verified token")),
+            )
+            .await?
+            .map_or_else(Vec::new, |computer_id| {
+                vec![talos_sync::ComputerAlias {
+                    source_node_id: "embedded".into(),
+                    computer_id,
+                }]
+            });
+        self.verify_computer_aliases(actor, &computers).await?;
+        handle.set_presence_computers(
+            computers
+                .into_iter()
+                .map(|alias| alias.computer_id)
+                .collect(),
+        )
+    }
+
     pub(crate) async fn local_computer_for_client(
         &self,
         actor: &Actor,

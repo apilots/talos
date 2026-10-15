@@ -159,7 +159,13 @@ async fn session<A: SyncDataAdapter>(
                 let Some(command) = command else { return Ok(()) };
                 operations::execute(sync, adapter, binding, client, channels, command).await;
             }
-            _ = presence.tick() => super::presence::publish(sync, binding, client).await?,
+            _ = presence.tick() => {
+                let computers = channels.presence_computers.borrow().clone();
+                if let Err(error) = super::presence::publish(sync, &computers, client).await {
+                    // Optional observations must not terminate durable document sync.
+                    talos_logging::report_error(&error);
+                }
+            },
             _ = interval.tick() => upload_pending(sync, adapter, binding, client, channels).await?,
             wakeup = channels.wake.recv() => {
                 if wakeup.is_none() { return Ok(()) }

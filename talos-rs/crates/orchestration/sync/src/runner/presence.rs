@@ -1,5 +1,5 @@
 //! Advertise only this management host's verified Computer aliases, without durable state.
-use crate::{facade::sync_error, SyncBinding, TalosSync};
+use crate::{facade::sync_error, TalosSync};
 use std::{
     collections::BTreeSet,
     time::{SystemTime, UNIX_EPOCH},
@@ -9,7 +9,7 @@ use talos_sync_sdk::{SyncClient, SyncPresence};
 
 pub(super) async fn publish(
     sync: &TalosSync,
-    binding: &SyncBinding,
+    computers: &[String],
     client: &SyncClient,
 ) -> TalosResult<()> {
     let observed_at = SystemTime::now()
@@ -18,11 +18,7 @@ pub(super) async fn publish(
             TalosError::internal_with_source("Read synchronization presence time.", error)
         })?
         .as_millis() as i64;
-    let computers: BTreeSet<_> = binding
-        .computers
-        .iter()
-        .map(|alias| &alias.computer_id)
-        .collect();
+    let computers: BTreeSet<_> = computers.iter().collect();
     for computer_id in computers {
         // Do not reserve an extra room for telemetry while document work runs.
         let channel = client

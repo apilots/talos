@@ -3,6 +3,96 @@ use super::*;
 use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
 use talos_error::ErrorCode;
 
+pub(super) async fn verify_late_enrollment(
+    config: Config,
+    migration: &Path,
+    actor: &talos_service::Actor,
+    scope: &talos_sync::SyncScope,
+) {
+    let runtime = build_application_runtime_with_migration_dir(config, migration)
+        .await
+        .unwrap();
+    let identity = RequestIdentity {
+        user_id: ACCOUNT.into(),
+        username: None,
+        role: talos_auth::UserRole::User,
+        auth_disabled: false,
+        access_token: Some(TOKEN.into()),
+    };
+    // Reproduce a previous sign-in that discovered Sync before Worker enrollment.
+    let handle = runtime
+        .start_account_sync(
+            &identity,
+            talos_sync::SyncBindParams {
+                scope: scope.clone(),
+                source_user_id: ACCOUNT.into(),
+                computers: vec![],
+            },
+            Arc::new(|| {
+                Box::pin(async {
+                    Ok(talos_sync_sdk::VerifiedCredential {
+                        account_id: ACCOUNT.into(),
+                        access_token: TOKEN.into(),
+                    })
+                })
+            }),
+        )
+        .await
+        .unwrap();
+    wait_for("pre-enrollment document sync", async || {
+        handle.status().connection == talos_sync::SyncConnectionState::Connected
+    })
+    .await;
+    assert!(runtime
+        .sync
+        .account_binding(&identity)
+        .await
+        .unwrap()
+        .unwrap()
+        .computers
+        .is_empty());
+    let status = runtime.service.sync_status(actor).await.unwrap();
+    let local = status
+        .local_computer_id
+        .expect("later enrollment must succeed");
+    assert!(Arc::ptr_eq(
+        &handle,
+        runtime
+            .sync_stores
+            .handles
+            .lock()
+            .await
+            .get(ACCOUNT)
+            .unwrap()
+    ));
+    wait_for("late enrolled Computer presence", async || {
+        runtime
+            .service
+            .sync_metrics(actor)
+            .await
+            .is_ok_and(|metrics| {
+                metrics.peers.iter().any(|peer| {
+                    peer.peer_id == runtime.sync.peer_id() && peer.computer_ids.contains(&local)
+                })
+            })
+    })
+    .await;
+    // Observation refresh must not rewrite capture identity or restart execution.
+    assert!(runtime
+        .sync
+        .account_binding(&identity)
+        .await
+        .unwrap()
+        .unwrap()
+        .computers
+        .is_empty());
+    assert_eq!(
+        handle.status().connection,
+        talos_sync::SyncConnectionState::Connected
+    );
+    close(runtime).await;
+}
+
 pub(super) async fn verify(
     a: &TalosApplicationRuntime,
     b: &TalosApplicationRuntime,

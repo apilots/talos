@@ -21,6 +21,7 @@ mod transport;
 use control::ControlCommand;
 
 struct RunnerChannels {
+    presence_computers: watch::Receiver<Vec<String>>,
     upload_cursor: i64,
     upload_cut: i64,
     failed_uploads: HashMap<crate::SyncResourceKey, (Option<i64>, talos_error::ApiError)>,
@@ -61,6 +62,7 @@ pub trait SyncDataAdapter: Send + Sync {
 
 /// Owns only synchronization transport. Dropping it never shuts down a Worker.
 pub struct SyncHandle {
+    presence_computers: watch::Sender<Vec<String>>,
     sync: Arc<TalosSync>,
     binding: crate::SyncBinding,
     stop: CancellationToken,
@@ -72,6 +74,21 @@ pub struct SyncHandle {
 }
 
 impl SyncHandle {
+    /// Refresh only ephemeral observations after the host verifies local ownership.
+    /// This never changes durable capture aliases or grants execution authority.
+    pub fn set_presence_computers(&self, computers: Vec<String>) -> TalosResult<()> {
+        if computers
+            .iter()
+            .any(|id| uuid::Uuid::parse_str(id).is_err())
+        {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Invalid Computer presence identity.",
+            ));
+        }
+        self.presence_computers.send_replace(computers);
+        Ok(())
+    }
     /// Coalesce committed batches into one bounded wakeup, without network waits.
     pub fn notify_committed(&self) {
         let _ = self.wake.try_send(());
@@ -152,7 +169,16 @@ impl TalosSync {
             last_acknowledged_at: None,
             last_error: None,
         });
+        let (presence_computers, observed_computers) = watch::channel(
+            params
+                .binding
+                .computers
+                .iter()
+                .map(|alias| alias.computer_id.clone())
+                .collect(),
+        );
         let channels = RunnerChannels {
+            presence_computers: observed_computers,
             upload_cursor: 0,
             upload_cut: 0,
             failed_uploads: HashMap::new(),
@@ -165,6 +191,7 @@ impl TalosSync {
         let binding = params.binding.clone();
         let task = tokio::spawn(run(self, adapter, params, stop.clone(), channels));
         Ok(SyncHandle {
+            presence_computers,
             sync,
             binding,
             stop,
