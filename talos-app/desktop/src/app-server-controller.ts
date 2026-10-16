@@ -185,8 +185,16 @@ export class DesktopAppServerController {
     const bridge = this.createBridge();
     bridge.onNotification((notification) => {
       if (this.bridge !== bridge) return;
-      if (notification.method === "session/activeTurnChanged") { this.options.onActiveTurnChanged?.(notification.params as AppProtocol.SessionActiveTurnChangedNotification); return; }
-      if (notification.method === "messageQueue/changed") { this.options.onMessageQueueChanged?.(notification.params as AppProtocol.MessageQueueChangedNotification); return; }
+      if (notification.method === "session/activeTurnChanged") {
+        const change = notification.params as AppProtocol.SessionActiveTurnChangedNotification;
+        if (this.subscriptions.has(change.sessionId)) this.options.onActiveTurnChanged?.(change);
+        return;
+      }
+      if (notification.method === "messageQueue/changed") {
+        const change = notification.params as AppProtocol.MessageQueueChangedNotification;
+        if (this.subscriptions.has(change.sessionId)) this.options.onMessageQueueChanged?.(change);
+        return;
+      }
       if (notification.method === "desktop/worker/ready") { this.emitRuntimeState("ready", null); return; }
       if (notification.method !== "desktop/worker/failed") return;
       try {
@@ -223,7 +231,10 @@ export class DesktopAppServerController {
   }
 
   private handleSubscriptionTerminated(notification: AppProtocol.SubscriptionTerminatedNotification): void {
-    if (this.subscriptions.get(notification.sessionId)?.subscriptionId === null) this.subscriptions.delete(notification.sessionId);
+    const subscription = this.subscriptions.get(notification.sessionId);
+    if (!subscription) return;
+    if (subscription.subscriptionId === null) this.subscriptions.delete(notification.sessionId);
+    else if (!this.sessionsBySubscriptionId.has(notification.subscriptionId)) return;
     this.forgetSubscription(notification.subscriptionId);
     this.options.onSubscriptionTerminated?.(notification);
   }
@@ -241,6 +252,7 @@ export class DesktopAppServerController {
         message,
       });
     }
+    this.sessionsBySubscriptionId.clear();
   }
 
   private handleServerRequest(request: AppProtocol.JsonRpcRequest): Promise<unknown> | unknown {

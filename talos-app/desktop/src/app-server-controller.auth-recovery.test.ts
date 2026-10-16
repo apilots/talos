@@ -115,17 +115,23 @@ describe("authenticated Desktop restart recovery", () => {
     const initial = authenticatedBridge();
     const replacement = authenticatedBridge("bob");
     const events = vi.fn();
-    const controller = new DesktopAppServerController({ restartDelayMs: 10, onEvent: events,
+    const activeTurns = vi.fn();
+    const queues = vi.fn();
+    const controller = new DesktopAppServerController({ restartDelayMs: 10, onEvent: events, onActiveTurnChanged: activeTurns, onMessageQueueChanged: queues,
       bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValue(replacement.bridge) });
     try {
       await controller.connect();
       await controller.invoke("event/subscribe", subscribe("private"), credentials("current-token"));
       await controller.invoke(method, {}, credentials("current-token"));
       initial.bridge.emitEvent(event("private", "late-logout-event"));
+      initial.bridge.emitNotification({ jsonrpc: "2.0", method: "session/activeTurnChanged", params: { sessionId: "private", state: { activeTurn: null, latestEventId: null } } });
+      initial.bridge.emitNotification({ jsonrpc: "2.0", method: "messageQueue/changed", params: { sessionId: "private", revision: 2 } });
       initial.bridge.emitExit();
       await vi.advanceTimersByTimeAsync(10);
       expect(replacement.requests.mock.calls.some(([request]) => request === "event/subscribe")).toBe(false);
       expect(events).not.toHaveBeenCalled();
+      expect(activeTurns).not.toHaveBeenCalled();
+      expect(queues).not.toHaveBeenCalled();
     } finally { await controller.close(); vi.useRealTimers(); }
   });
 
