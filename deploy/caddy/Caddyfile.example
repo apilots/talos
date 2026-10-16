@@ -1,5 +1,5 @@
-# Agent virtual host only; merge with the existing proxy configuration.
-# Do not replace other Cloud/Sync virtual hosts. See ../AGENT_HUB.md.
+# Talos Server virtual host only; merge with the existing proxy configuration.
+# Do not replace other Cloud/Sync virtual hosts. See ../TALOS_SERVER.md.
 agent.talos.love {
 	@grpc path /talos.agent.v1.*
 	handle @grpc {

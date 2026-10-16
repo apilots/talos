@@ -46,9 +46,9 @@ jobs:
             echo "docker_checks=true" >> "$GITHUB_OUTPUT"
           fi
           if git diff --quiet "$base" "$HEAD_SHA" -- deploy/docker deploy/caddy deploy/nginx deploy/tests .github/workflows/change-policy.yml; then
-            echo "hub_checks=false" >> "$GITHUB_OUTPUT"
+            echo "server_checks=false" >> "$GITHUB_OUTPUT"
           else
-            echo "hub_checks=true" >> "$GITHUB_OUTPUT"
+            echo "server_checks=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Test repository policy scripts
@@ -106,6 +106,6 @@ jobs:
           --base "${{ steps.range.outputs.base }}"
           --head "${{ steps.range.outputs.head }}"
 
-      - name: Verify published Computer hub startup and HTTPS proxy
-        if: ${{ steps.range.outputs.hub_checks == 'true' }}
-        run: bash deploy/tests/agent_hub_smoke.sh
+      - name: Verify published Talos Server startup and HTTPS proxy
+        if: ${{ steps.range.outputs.server_checks == 'true' }}
+        run: bash deploy/tests/talos_server_smoke.sh

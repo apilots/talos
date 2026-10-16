@@ -1,7 +1,7 @@
 # Apply only during an explicitly authorized deployment window; never --build.
 services:
   talos-server:
-    image: ${TALOS_HUB_IMAGE:?Set the verified release image and digest in .hub.env}
+    image: ${TALOS_SERVER_IMAGE:-ghcr.io/apilots/talos-server}:${TALOS_SERVER_VERSION:?Set the published release version in .env}
     container_name: talos-server
     restart: unless-stopped
     env_file:
@@ -14,7 +14,7 @@ services:
     volumes:
       - talos-data:/home/talos/.talos
       - type: bind
-        source: ${TALOS_HUB_TLS_DIR:?Set the absolute server TLS directory}
+        source: ${TALOS_SERVER_TLS_DIR:?Set the absolute server TLS directory}
         target: /run/talos-tls
         read_only: true
         bind:
@@ -35,4 +35,4 @@ services:
 volumes:
   talos-data:
     external: true
-    name: ${TALOS_HUB_DATA_VOLUME:?Set the existing verified Talos home volume}
+    name: ${TALOS_SERVER_DATA_VOLUME:?Set the existing verified Talos home volume}
