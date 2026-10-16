@@ -33,7 +33,14 @@ chore(release): prepare v<version>
 
 版本位置包括 Rust workspace、TUI 展示、七个 Web/Desktop/SDK package、App Server SDK
 默认客户端版本及 Docker 示例与 Compose 镜像默认值。精确清单、版本和准备提交历史
-统一由 `scripts/check-release-version.sh` 校验。Cargo.lock 保持忽略，由 manifest 生成。
+统一由 `scripts/check-release-version.sh` 校验，包括已提交的 `talos-rs/Cargo.lock`
+内本地 workspace 包版本。修改 workspace 版本后，运行
+`cargo metadata --offline --format-version 1 --manifest-path talos-rs/Cargo.toml > /dev/null`
+更新相应锁文件条目，审阅 registry 版本、来源及校验和均未改变；锁文件纳入独立版本提交。
+只有本地包版本变化时跳过 PR/main 重型任务，真实依赖图变化仍触发对应检查。
+
+依赖修改必须一起提交并审阅锁文件。CI 使用 `cargo fetch --locked` 获取已提交依赖图，
+不重新生成依赖图。
 
 分支建立后，`main` 可以立即用独立的 `chore(release): start v<next-version> development`
 提交进入下一版本 `-SNAPSHOT` 开发，不必等待 release 发布。Docker 默认值继续指向
@@ -46,7 +53,7 @@ chore(release): prepare v<version>
 
 每次推送 `release-*` 分支，通过 `release-source.yml` 分阶段执行一次源码门禁：契约、Rust 格式/检查/测试、前端质量和安装器契约。源码门禁不生成开发版产品包。候选按分支隔离，更新后取消旧候选；正式发布仍串行执行。发布 runner 使用固定系统标签，Rust/Node/pnpm 版本统一放在 `.github/release-toolchain.env`，升级通过独立 PR 审核。
 
-成功候选保留精确 SHA、run/attempt、前一已发布 tag、Cargo.lock、工具链指纹和标准生成的 Notes，保留期 14 天。标签流程验证并复用该源码门禁和依赖图，不重复执行源码套件或重新解析依赖。缺失、过期或不匹配时明确失败；先对同一源码重跑候选门禁，审阅新的依赖图，再创建标签。
+成功候选保留精确 SHA、run/attempt、前一已发布 tag、Cargo.lock、工具链指纹和标准生成的 Notes，保留期 14 天。标签流程验证并复用该源码门禁和依赖图，不重复执行源码套件或重新解析依赖。缺失、过期或不匹配时明确失败；先对同一源码重跑候选门禁，审阅证据，再创建标签。候选锁文件必须与已提交源码完全一致，源码检查若改动锁文件则拒绝记录；正式构建和制品校验继续复用同一份已验证依赖图。
 
 release 分支只接受 bug 修复，以及修复所需的回归测试、发布文档或打包纠错。
 准备提交之后统一使用 `fix` 提交；不增加特性、不做无关重构，也不将持续开发中的

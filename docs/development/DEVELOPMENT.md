@@ -7,6 +7,9 @@ Rust commands in `talos-rs` and exposes shared E2E and generation workflows.
 
 ## Setup
 
+Repository policy and release scripts require Python 3.11 or newer for standard
+library TOML parsing. Keep that interpreter on `PATH` when running Git hooks.
+
 ```bash
 just install-tools
 just setup-git-hooks
@@ -166,8 +169,11 @@ just gen-app-protocol
 Generated files are changed only by their owning generator and are committed
 with the source definition. Configuration type changes require the configuration
 schema generator; experimental API changes include their experimental schemas.
-Dependency changes update `Cargo.lock` and applicable Bazel, Buck, Nix, or other
-lockfiles. New compile-time resources (`include_str!`, `include_bytes!`, migrations,
+Dependency changes update and commit `talos-rs/Cargo.lock` and applicable Bazel,
+Buck, Nix, or other lockfiles. CI uses the committed Cargo graph with `--locked`;
+update dependencies explicitly during development, never by regenerating the graph
+in CI. Version preparation updates local workspace lock versions as described in
+[Release workflow](RELEASE.md). New compile-time resources (`include_str!`, `include_bytes!`, migrations,
 schemas, fixtures) require corresponding build declarations.
 
 ## Build storage

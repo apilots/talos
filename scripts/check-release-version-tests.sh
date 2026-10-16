@@ -3,6 +3,9 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 validator="${repo_root}/scripts/check-release-version.sh"
+# Keep the selected interpreter when the fixture leaves the project directory.
+python_bin="$(python3 -c 'import sys; print(sys.executable)')"
+export PATH="$(dirname "${python_bin}"):${PATH}"
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "${temp_dir}"' EXIT
 
@@ -16,6 +19,7 @@ from pathlib import Path
 
 files = {
     "talos-rs/Cargo.toml": '[workspace.package]\nversion = "1.2.3"\n',
+    "talos-rs/Cargo.lock": 'version = 4\n[[package]]\nname = "talos-test"\nversion = "1.2.3"\n[[package]]\nname = "external"\nversion = "2.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n',
     "talos-rs/apps/tui/src/utils.rs": 'pub const APP_VERSION: &str = "v1.2.3";\n',
     "talos-app/ts-sdk/packages/app-server/src/stdio.ts": 'version: this.options.clientVersion ?? "1.2.3"\n',
     "deploy/docker/talos-worker/.env.example": 'TALOS_WORKER_VERSION=v1.2.3\n',
@@ -59,6 +63,10 @@ done
 printf '{"version":"1.2.4-SNAPSHOT"}\n' > talos-app/package.json
 expect_rejection "expected '1.2.3'"
 git restore talos-app/package.json
+sed 's/version = "1.2.3"/version = "1.2.4"/' talos-rs/Cargo.lock > bad-lock
+mv bad-lock talos-rs/Cargo.lock
+expect_rejection "Cargo.lock talos-test version is '1.2.4', expected '1.2.3'"
+git restore talos-rs/Cargo.lock
 git reset --soft HEAD~2
 git -c core.hooksPath=/dev/null commit -q -m "chore(release): prepare v1.2.3"
 expect_rejection "version preparation commit must contain only"

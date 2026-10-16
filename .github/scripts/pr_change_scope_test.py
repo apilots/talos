@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 from pr_change_scope import (
@@ -12,6 +13,14 @@ from pr_change_scope import (
 
 
 class ChangeScopeTests(unittest.TestCase):
+    def test_ci_fetches_committed_graph_without_regeneration(self):
+        for workflow in ['talos-rust', 'pr-e2e', 'talos-tui-install', 'trusted-e2e', 'release-source']:
+            content = (ROOT / f'.github/workflows/{workflow}.yml').read_text()
+            self.assertNotIn('cargo generate-lockfile', content)
+            self.assertIn('cargo fetch --locked --manifest-path talos-rs/Cargo.toml', content)
+        installer = (ROOT / '.github/workflows/talos-tui-install.yml').read_text()
+        self.assertEqual(installer.count('cargo fetch --locked'), 1)
+
     def test_documents_and_unrelated_files(self):
         for scope in SCOPES:
             for path in ['docs/guide.md', 'talos-rs/README.md', 'spec/design.rst']:
@@ -47,15 +56,56 @@ class ChangeScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertNotEqual(before, after)
                 self.assertTrue(version_change_only(path, before, after))
-                mixed = json.dumps({**json.loads(after), 'private': not bool(json.loads(after).get('private'))}) if path.endswith('/package.json') else after + '\n# product change\n'
+                if path == 'talos-rs/Cargo.lock':
+                    registry = next(p for p in tomllib.loads(after)['package'] if 'source' in p)
+                    mixed = after.replace(f'checksum = "{registry["checksum"]}"', 'checksum = "changed"', 1)
+                else:
+                    mixed = json.dumps({**json.loads(after), 'private': not bool(json.loads(after).get('private'))}) if path.endswith('/package.json') else after + '\n# product change\n'
                 self.assertFalse(version_change_only(path, before, mixed))
         cargo = '[dependencies]\nexample = "0.1.11"\n[workspace.package]\nversion = "0.1.11"\n'
         self.assertFalse(version_change_only('talos-rs/Cargo.toml', cargo, cargo.replace('example = "0.1.11"', 'example = "0.1.12"')))
         package = '{"version":"0.1.11","dependencies":{"x":"1"}}'
         self.assertFalse(version_change_only('talos-app/package.json', package, package.replace('"x":"1"', '"x":"2"')))
 
+    def test_lock_keeps_registry_identity_checksums_and_edges(self):
+        before = '''version = 4
+[[package]]
+name = "app"
+version = "0.1.11"
+dependencies = ["helper 0.1.11", "external 0.1.11"]
+[[package]]
+name = "helper"
+version = "0.1.11"
+[[package]]
+name = "external"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "original"
+'''
+        path = 'talos-rs/Cargo.lock'
+        after = with_version(path, before)
+        self.assertTrue(version_change_only(path, before, after))
+        for changed in [after.replace('external 0.1.11', 'external 0.1.12'),
+                        after.replace('checksum = "original"', 'checksum = "changed"'),
+                        after.replace('name = "helper"', 'name = "replacement"'),
+                        after.replace('version = "0.1.11"', 'version = "0.1.12"'),
+                        after.replace('registry+', 'git+')]:
+            self.assertFalse(version_change_only(path, before, changed))
+
 
 def with_version(path, content, version='0.1.12-SNAPSHOT'):
+    if path == 'talos-rs/Cargo.lock':
+        import re
+        local = [p for p in tomllib.loads(content)['package'] if 'source' not in p]
+        blocks = content.split('[[package]]')
+        for i in range(1, len(blocks)):
+            if 'source' not in tomllib.loads(blocks[i]):
+                blocks[i] = re.sub(r'(?m)^version = "[^"]+"', f'version = "{version}"', blocks[i])
+        result = '[[package]]'.join(blocks)
+        for package in local:
+            result = result.replace(f'"{package["name"]} {package["version"]}"',
+                                    f'"{package["name"]} {version}"')
+        return result
     if path.endswith('/package.json'):
         data = json.loads(content)
         data['version'] = version
@@ -128,6 +178,18 @@ class GitScopeTests(unittest.TestCase):
             self.assertEqual(self.classify(event, head, 'rust'), 'run_workflow=true')
             self.assertEqual(self.classify(event, head), 'run_workflow=true')
         self.assertEqual(self.classify('push', head, 'frontend'), 'run_workflow=false')
+
+    def test_dependency_lock_changes_run_affected_jobs(self):
+        self.versions()
+        path = self.root / 'talos-rs/Cargo.lock'
+        lock = path.read_text()
+        registry = next(p for p in tomllib.loads(lock)['package'] if 'source' in p)
+        path.write_text(lock.replace(f'checksum = "{registry["checksum"]}"', 'checksum = "changed"', 1))
+        head = self.commit()
+        for event in ['pull_request', 'push']:
+            for scope in ['rust', 'pr-e2e', 'tui-install']:
+                self.assertEqual(self.classify(event, head, scope), 'run_workflow=true')
+            self.assertEqual(self.classify(event, head, 'frontend'), 'run_workflow=false')
 
     def test_installer_changes_run_in_pr_and_main(self):
         self.write('deploy/install/install.sh', '#!/bin/sh\nexit 0\n')

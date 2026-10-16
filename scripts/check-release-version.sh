@@ -17,6 +17,7 @@ talos-app/ts-sdk/packages/browser/package.json
 talos-app/ts-sdk/packages/core/package.json
 talos-app/web/package.json
 talos-rs/Cargo.toml
+talos-rs/Cargo.lock
 talos-rs/apps/tui/src/utils.rs
 EOF
 }
@@ -64,6 +65,20 @@ PY
 
 require_version_matches() {
   assert_file_contains "talos-rs/Cargo.toml" "version = \"${VERSION}\""
+  EXPECTED_VERSION="${VERSION}" python3 - <<'PY'
+import os
+from pathlib import Path
+import tomllib
+
+lock = tomllib.loads(Path("talos-rs/Cargo.lock").read_text())
+local = [p for p in lock.get("package", []) if "source" not in p]
+if not local:
+    raise SystemExit("Cargo.lock must include workspace packages")
+for package in local:
+    if package["version"] != os.environ["EXPECTED_VERSION"]:
+        raise SystemExit(f'Cargo.lock {package["name"]} version is {package["version"]!r}, '
+                         f'expected {os.environ["EXPECTED_VERSION"]!r}')
+PY
   assert_file_contains "talos-rs/apps/tui/src/utils.rs" "APP_VERSION: &str = \"${TAG}\""
   assert_package_version "talos-app/package.json" "${VERSION}"
   assert_package_version "talos-app/web/package.json" "${VERSION}"

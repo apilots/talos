@@ -55,8 +55,8 @@ jobs:
           toolchain: ${{ env.RELEASE_RUST_VERSION }}
           components: rustfmt
 
-      - name: Resolve CI dependency graph
-        run: cargo generate-lockfile --manifest-path talos-rs/Cargo.toml
+      - name: Fetch locked CI dependencies
+        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
 
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2

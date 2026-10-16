@@ -73,6 +73,15 @@ class ReleaseCandidateTests(unittest.TestCase):
                              (root / "talos-rs/Cargo.lock").read_bytes())
             self.assertEqual(evidence["notes_sha256"], hashlib.sha256(
                 (directory / "release-body.md").read_bytes()).hexdigest())
+            (root / "talos-rs/Cargo.lock").write_text('version = 3\n')
+            result = subprocess.run([
+                sys.executable, str(repo / ".github/scripts/release_candidate.py"),
+                "record", "--repository", "apilots/talos", "--sha", sha,
+                "--run-id", "42", "--run-attempt", "1", "--version", "0.2.0",
+                "--previous-tag", "v0.1.9", "--directory", str(directory)],
+                cwd=root, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Validated Cargo.lock differs from committed source", result.stderr)
 
     def test_requires_live_current_attempt_evidence(self):
         good = dict(id=7, name="release-candidate-1", expired=False)

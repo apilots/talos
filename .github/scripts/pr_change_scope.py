@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +70,18 @@ def version_files() -> set[str]:
 
 
 def normalize_version(path: str, content: str) -> str | dict | None:
+    if path == "talos-rs/Cargo.lock":
+        data = tomllib.loads(content)
+        local = [p for p in data.get("package", []) if "source" not in p]
+        if not local or any(not re.fullmatch(VERSION, p["version"]) for p in local):
+            return None
+        references = {f'{p["name"]} {p["version"]}': f'{p["name"]} <version>' for p in local}
+        for package in data["package"]:
+            if "source" not in package:
+                package["version"] = "<version>"
+            if "dependencies" in package:
+                package["dependencies"] = [references.get(dep, dep) for dep in package["dependencies"]]
+        return data
     if path.endswith("/package.json"):
         data = json.loads(content)
         version = data.get("version")
