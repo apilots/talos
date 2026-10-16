@@ -2,6 +2,9 @@
 
 [English](README.md)
 
+当前 TUI release 支持 Linux AMD64/ARM64 和 macOS Apple Silicon（ARM64）。
+macOS Intel 构建与原生安装 CI 已停用。历史 Intel 产物仍可通过指定已有版本安装。
+
 Installer 根据当前 macOS 或 Linux CPU target 选择 TUI release bundle，校验 release
 checksum，安装不可变产品资源并启用稳定 launcher。
 

@@ -103,6 +103,15 @@ gh workflow run release.yml --repo apilots/talos \
 并以当前 GitHub latest 版本为基准，阻止旧版倒退 latest。日常小修仅验证受影响场景；精确候选执行一次完整源码检查，正式发布复用已验证结果。本地验证输出保存在忽略目录 `output/release-<version>/`；未运行的
 真实账号场景必须记录为未验证，不能由单测或构建成功推断其通过。
 
+## 支持的发布平台
+
+Desktop 发布 macOS Apple Silicon 和 Linux AMD64；Server WebUI 发布 Linux
+AMD64/ARM64；TUI 发布 Linux AMD64/ARM64 和 macOS Apple Silicon。
+macOS Intel 构建与原生安装 CI 已停用。
+
+最终组装产物使用与工作流相同提交的校验工具，保持支持平台策略与构建矩阵一致。
+产品源码、公开安装脚本、Notes 与依赖溯源仍取自不可变的 release tag。
+
 ## 发布后收尾
 
 下载公开资产，Linux 使用 `sha256sum --check checksums.txt`，macOS 使用
