@@ -7,6 +7,7 @@ use talos_config::Config;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 pub async fn run() -> TalosResult<()> {
+    talos_upgrade::prepare_before_config_load().inspect_err(talos_logging::report_error)?;
     let config = Config::load().inspect_err(talos_logging::report_error)?;
     let _log_guard = init_logging(&config).inspect_err(talos_logging::report_error)?;
     run_with_config(config)
@@ -15,6 +16,12 @@ pub async fn run() -> TalosResult<()> {
 }
 
 async fn run_with_config(config: Config) -> TalosResult<()> {
+    if config.agent_node.control_plane.is_some() {
+        return Err(TalosError::new(
+            ErrorCode::InvalidRequest,
+            "Standalone Workers do not serve a control-plane listener",
+        ));
+    }
     config.agent_node.validate(&config.gateway)?;
     config.agent_node.runner.as_ref().ok_or_else(|| {
         TalosError::new(

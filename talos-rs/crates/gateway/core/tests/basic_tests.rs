@@ -13,7 +13,7 @@ use talos_agent_api::{
     AgentEventPayload, AgentInterruptOutcome, AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
 };
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserRole, UserService};
-use talos_config::{DeploymentMode, InMemoryLlmConfigStore, ProviderModelConfig};
+use talos_config::{InMemoryLlmConfigStore, ProviderModelConfig};
 use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
@@ -210,12 +210,7 @@ impl UserService for TestAuthService {
 }
 
 async fn test_gateway() -> ServiceGateway {
-    test_gateway_for_mode(DeploymentMode::Local).await
-}
-
-async fn test_gateway_for_mode(mode: DeploymentMode) -> ServiceGateway {
-    let mut config = test_config();
-    config.mode = mode;
+    let config = test_config();
     let (storage, store) = test_session_storage().await;
     let handler = Arc::new(RecordingHandler);
     test_gateway_with_coordinator(config, storage, store, handler).await
@@ -360,11 +355,11 @@ async fn gateway_start_turn_rejects_invalid_request() {
 }
 
 #[tokio::test]
-async fn gateway_cloud_config_allows_authorized_worker_owner() {
-    let gateway = test_gateway_for_mode(DeploymentMode::Cloud).await;
+async fn gateway_config_allows_authorized_worker_owner() {
+    let gateway = test_gateway().await;
 
     // RecordingHandler grants access to the target Worker environment.
-    // Deployment mode must not override that Computer's owner authorization.
+    // Configuration access follows the target Computer authorization.
     let config = gateway
         .get_config(
             &Actor::regular("user-1"),
@@ -392,8 +387,8 @@ async fn gateway_cloud_config_allows_authorized_worker_owner() {
 }
 
 #[tokio::test]
-async fn gateway_cloud_config_allows_admin_and_auth_disabled() {
-    let gateway = test_gateway_for_mode(DeploymentMode::Cloud).await;
+async fn gateway_config_allows_authorized_admin_and_auth_disabled() {
+    let gateway = test_gateway().await;
 
     gateway
         .get_config(
@@ -419,8 +414,8 @@ async fn gateway_cloud_config_allows_admin_and_auth_disabled() {
 }
 
 #[tokio::test]
-async fn gateway_local_config_allows_regular_auth() {
-    let gateway = test_gateway_for_mode(DeploymentMode::Local).await;
+async fn gateway_config_allows_regular_owner() {
+    let gateway = test_gateway().await;
 
     gateway
         .get_config(

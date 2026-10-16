@@ -21,7 +21,7 @@ topic owns its detailed contract.
 
 ## Reference
 
-- [Deployment](../deploy/README.md): local/cloud configuration access, safety, and upgrade boundaries
+- [Deployment](../deploy/README.md): Computer ownership, transport, and upgrade boundaries
 - [Project structure](reference/PROJECT_STRUCTURE.md): current repository layout
 - [Rust workspace modules](reference/RUST_MODULES.md): current Rust workspace inventory
 

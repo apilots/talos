@@ -36,10 +36,6 @@ pub use client_method::ClientMethod;
 pub enum ClientRequestParams {
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
-    #[serde(rename = "desktop/connection/read")]
-    DesktopConnectionRead(Option<()>),
-    #[serde(rename = "desktop/connection/set")]
-    DesktopConnectionSet(talos_types::DesktopConnectionSetParams),
     #[serde(rename = "desktop/workerIdentity")]
     DesktopWorkerIdentity(Option<()>),
     #[serde(rename = "desktop/workerEnroll")]
@@ -246,8 +242,7 @@ impl ClientRequest {
     ) -> Result<Self, AppServerErrorBody> {
         let method_kind = ClientMethod::from_str(method)?;
         let params_value = params.unwrap_or_else(|| match method_kind {
-            ClientMethod::DesktopConnectionRead
-            | ClientMethod::DesktopWorkerIdentity
+            ClientMethod::DesktopWorkerIdentity
             | ClientMethod::SyncMetrics
             | ClientMethod::SyncStatus
             | ClientMethod::SyncDisable => serde_json::Value::Null,
@@ -255,12 +250,6 @@ impl ClientRequest {
         });
         let params = match method_kind {
             ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
-            ClientMethod::DesktopConnectionRead => {
-                ClientRequestParams::DesktopConnectionRead(decode(params_value)?)
-            }
-            ClientMethod::DesktopConnectionSet => {
-                ClientRequestParams::DesktopConnectionSet(decode(params_value)?)
-            }
             ClientMethod::DesktopWorkerIdentity => {
                 ClientRequestParams::DesktopWorkerIdentity(decode(params_value)?)
             }

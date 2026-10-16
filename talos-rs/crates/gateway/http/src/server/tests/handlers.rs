@@ -102,7 +102,6 @@ async fn test_health() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["mode"], "local");
     assert_eq!(payload["auth_enabled"], true);
     assert_eq!(payload["cloud_auth_url"], "http://127.0.0.1:3000");
 }
@@ -215,9 +214,8 @@ async fn test_get_and_put_web_search_config_handlers() {
 }
 
 #[tokio::test]
-async fn test_config_handler_allows_authorized_regular_worker_user_in_cloud_mode() {
-    let mut config = test_config();
-    config.mode = talos_config::DeploymentMode::Cloud;
+async fn test_config_handler_allows_authorized_regular_worker_user() {
+    let config = test_config();
     let state = test_state_with_config(config, false).await;
     let response = put_config_handler(
         State(state),
@@ -226,7 +224,7 @@ async fn test_config_handler_allows_authorized_regular_worker_user_in_cloud_mode
         Json(talos_types::ConfigValue::WebSearch(Box::default())),
     )
     .await
-    .expect("authorized Worker users can configure their environment in cloud mode");
+    .expect("authorized Worker users can configure their environment");
     assert_eq!(
         expect_success(response.0),
         talos_types::ConfigResponse::WebSearch {

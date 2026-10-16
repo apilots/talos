@@ -42,8 +42,8 @@ a shared DB does not share live Registry/Connect handles across replicas.
 
 ## Deployment files
 
-- [Production config](docker/talos-server/talos.yaml.example): complete minimal profile
-  for this release, authenticated cloud mode, TLS control-plane listener on9443,
+- [Production config](docker/talos-server/talos.yaml.example): complete deployment profile
+  for this release, authentication, TLS control-plane listener on9443,
   private embedded Worker loopback listener, and the existing Cloud/Sync URLs.
 - [Production Compose](docker/talos-server/compose.production.yml): loopback8080/9443, external
   existing home volume, read-only TLS directory and current one-GiB resource cap.
@@ -55,8 +55,9 @@ a shared DB does not share live Registry/Connect handles across replicas.
   virtual host. Merge only that virtual host into the existing proxy; do not
   replace the whole proxy configuration or the API/Sync sites.
 
-The minimal profile omits desktop-only MCP/browser commands. It retains the
-ordinary Server runtime and private embedded Worker. Review the default DeepSeek
+The profile lists current shared runtime settings and leaves MCP servers and
+personal plugin roots empty. It retains the ordinary Server runtime and private
+embedded Worker. Review the default DeepSeek
 model/provider and any existing instance-specific resources before rollout;
 private remote Workers retain their own model/search configuration and keys.
 Do not copy a macOS PATH or browser executable into the Linux service.
@@ -217,7 +218,7 @@ to bypass a failed login, registration or history assertion.
 
 | Gate | Required observation |
 | --- | --- |
-| Version/startup | Configured published Server version, successful migrations; health reports cloud mode and auth enabled |
+| Version/startup | Configured published Server version, successful migrations; health reports auth enabled |
 | Public transport | Valid certificate, HTTP2 ALPN, real SDK Register and both Connect streams through the public origin; HTTP health alone is insufficient |
 | Desktop enrollment | Actual device login approval/polling, owned UUID/credential saved by the host; restart reuses identity without manual Computer creation |
 | Pure Worker | Owner-created UUID/credential; outbound registration without a published port; lease/Connect reaches available |

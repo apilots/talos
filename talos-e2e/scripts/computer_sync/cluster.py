@@ -73,7 +73,6 @@ class SyncCluster(Cluster):
             path = home / 'conf/talos.yaml'
             document = yaml.safe_load(path.read_text())
             document['cloud'].update(agent_base_url=f'https://127.0.0.1:{self.rpc_port}', agent_trusted_ca_file=str(self.cert))
-            document['desktop'] = {'connection_mode': 'cloud'}
             document['sync'] = self.sync_config()
             path.write_text(yaml.safe_dump(document, sort_keys=False))
             host = Desktop(self, home, name)

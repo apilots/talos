@@ -49,41 +49,44 @@ For Talos Server at `agent.talos.love`, including Computer registration and RPC,
 [Talos Server deployment guide](TALOS_SERVER.md), production profile and Compose file. The
 general example above does not enable the registration listener.
 
-## Deployment mode and configuration access
+## Computer identity, transport and configuration access
 
-`mode: local` is the default when omitted. `conf/talos-prod.yaml` explicitly uses
-local mode with authentication; `conf/talos-cloud.yaml` uses cloud mode with
-authentication. The current server Dockerfile packages the Cloud profile as
-`/opt/talos/conf/talos.yaml`. Retained user configuration may differ: verify the
-running instance's `/health` response, including `mode` and `auth_enabled`.
+One central Talos Server issues immutable node UUIDs and registration credentials.
+Every registered Computer belongs to a user, including embedded and standalone
+Workers. Administrator directory access does not grant product execution access
+to another user's Computer. The first administrator to sign in claims the Server's
+embedded Worker; later logins preserve that personal owner, independently of
+subsequent administrator role changes. It uses direct RPC
+on the existing Server TLS endpoint, and private loopback for its own local calls.
 
-```text
-Deployment profile --> server-owned mode --------+
-                                                |
-Request --> authentication --> trusted Actor ---+--> Gateway config guard
-                                                        |
-                         +------------------------------+------------------+
-                         |                                                 |
-                 open / local / admin                           cloud regular user
-                         |                                                 |
-                 configuration access                              PermissionDenied
+Worker connection policy uses `agent_node.runner.transport` (`outbound` by
+default, or `direct`) and the Server's node `endpoint`. An outbound Worker opens
+an authenticated bidirectional Connect stream; it does not need a public listener.
+A direct Worker needs a reachable TLS endpoint. Transport does not describe the
+Computer's origin or change its owner. There is no deployment or Desktop
+connection mode setting.
 
-Health mode + auth state --> Web settings visibility [UX, not enforcement]
-```
+Configuration, models and MCP operations authorize the selected Computer owner.
+Authentication remains controlled by `gateway.auth`; Sync preferences remain
+independent of registration and local execution.
 
-| Authentication / deployment / role | Instance configuration management |
-| --- | --- |
-| Authentication disabled | Allowed; not a safe default for an exposed shared server |
-| Local, authenticated user | Allowed without requiring administrator role |
-| Cloud, authenticated administrator | Allowed |
-| Cloud, authenticated regular user | Denied |
+Managed `$TALOS_HOME/conf/talos.yaml` is normalized against the bundled template
+before loading, with a backup before changes. Obsolete mode keys are removed;
+node identity and credentials are preserved. Obsolete Desktop recovery flags are
+removed without migrating their value. Explicit
+`TALOS_CONFIG` files are operator-owned and skip normalization: remove obsolete
+keys when updating those files, keeping the existing runner and credential files.
+Direct registration and its TLS/authentication settings are validated together;
+an upgrade that cannot preserve a saved Worker identity stops without rewriting
+the configuration and requires an explicit repair.
 
-This gate covers configuration get/update/delete/reload, including LLM and web
-search settings. It does not deny ordinary model listing or search execution.
-Local mode does not bypass authentication when authentication is enabled.
-Mode describes instance ownership, not Cloud Computer provisioning, execution
-location or an Agent Provider choice. Choose local for a user-owned instance;
-choose cloud for shared administration, then review credentials and role mapping.
+Worker enrollment recovery is internal state at `$TALOS_HOME/.worker-state.json`;
+`.worker-state.lock` serializes its updates under the existing configuration lock.
+Both files are removed after the identity and protected credential are durable,
+or after an existing saved identity successfully registers following interrupted
+cleanup. Unknown CreateNode outcomes retain the recovery barrier and use the
+existing owned-UUID recovery flow; known identities automatically register on
+restart without provisioning another Computer or rotating their credentials.
 
 ## Data upgrades and rollback
 

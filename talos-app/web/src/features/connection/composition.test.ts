@@ -7,9 +7,9 @@ import { useAppStore } from "@/shared/store/app-store";
 
 const desktopWindow = window as Window & { talos?: DesktopRendererBridge };
 const success = (data: unknown) => ({ status: "success", data });
-function installHost(mode: "cloud" | "local") {
+function installHost() {
   const invoke = vi.fn(async (method: string) => {
-    if (method === "desktop/connection/read") return success({ connectionMode: mode, controlPlaneEndpoint: "https://agent.example" });
+    if (method === "desktop/workerIdentity") return success({ nodeId: "computer-a", controlPlaneEndpoint: "https://agent.example" });
     if (method === "model/list") return success({ models: [], defaultModelSelection: null });
     if (method === "user/current") return success({ user: { user_id: "alice", username: "Alice", role: "user", type: "Free" } });
     throw new Error("Unexpected host business request");
@@ -30,12 +30,11 @@ describe("Desktop product composition", () => {
   });
   afterEach(() => { delete desktopWindow.talos; vi.restoreAllMocks(); });
 
-  it("keeps cloud-mode Desktop business calls on its own management host with the verified actor", async () => {
-    const invoke = installHost("cloud");
+  it("keeps authenticated Desktop business calls on its own management host with the verified actor", async () => {
+    const invoke = installHost();
     const fetcher = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Public G offline"));
     const health = await getGatewayHealth();
-    useAppStore.getState().setConnection({ desktopConnectionMode: health.desktopConnection!.connectionMode,
-      controlPlaneEndpoint: health.desktopConnection!.controlPlaneEndpoint, authToken: "actor", authStatus: "authenticated", userId: "alice" });
+    useAppStore.getState().setConnection({ controlPlaneEndpoint: health.desktopWorker!.controlPlaneEndpoint!, authToken: "actor", authStatus: "authenticated", userId: "alice" });
     await expect(getCurrentUserWithToken("actor")).resolves.toMatchObject({ user_id: "alice" });
     await getTalosClient().models.list({ nodeId: "computer-a" });
     expect(invoke).toHaveBeenCalledWith("user/current", {}, { actorCredentials: { credential: { type: "existing_session_token", token: "actor" } } });
@@ -43,11 +42,11 @@ describe("Desktop product composition", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("keeps pure local execution on stdio without requiring a cloud connection mode", async () => {
-    const invoke = installHost("local");
+  it("keeps anonymous execution on its local stdio Worker", async () => {
+    const invoke = installHost();
     const fetcher = vi.spyOn(globalThis, "fetch");
-    const health = await getGatewayHealth();
-    useAppStore.getState().setConnection({ desktopConnectionMode: health.desktopConnection!.connectionMode, authStatus: "open" });
+    await getGatewayHealth();
+    useAppStore.getState().setConnection({ authStatus: "open" });
     await getTalosClient().models.list({ nodeId: "embedded" });
     expect(invoke).toHaveBeenCalledWith("model/list", { nodeId: "embedded" }, expect.anything());
     expect(fetcher).not.toHaveBeenCalled();

@@ -146,6 +146,13 @@ Keep provider secrets in `.env`; configuration references the corresponding
 `TALOS_LLM_*_API_KEY` variables. Repository defaults live under `conf/` and are
 copied or upgraded by the runtime rather than edited in a user's home directly.
 
+`talos.yaml`, `talos-dev.yaml`, and `talos-prod.yaml` share the same configuration
+schema. The startup entrypoint selects Server or Worker capabilities. Both Docker
+images package `talos-prod.yaml` as `conf/talos.yaml`; deployment examples supply
+their listener, TLS and registration settings using that same schema. Keep every
+writable field in maintained templates: managed upgrades remove keys absent from
+the selected template. Derived paths and private registration state stay outside YAML.
+
 ## End-to-end tests
 
 ```bash

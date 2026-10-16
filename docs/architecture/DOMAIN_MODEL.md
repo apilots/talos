@@ -48,7 +48,6 @@ when their trusted User and Workspace identities match.
 | AgentSession | Provider-owned live execution/management handle | A second persisted Session record |
 | Turn | One logical interaction identified by AgentTurnRef | Exactly one model call or invocation |
 | AgentContext | Service-resolved input for one logical Turn | A serialized duplicate of Session state |
-| DeploymentMode | Instance configuration-access boundary: local or cloud | Execution location, sandbox mode or Agent Provider |
 
 ## Workspace and working directory
 
@@ -92,5 +91,5 @@ target does not itself create a new memory scope.
 
 - [Workspace resolution](../../talos-rs/crates/infra/config/src/workspace.rs)
 - [Session context construction](../../talos-rs/crates/orchestration/service/src/session/service.rs)
-- [Execution context types](../../talos-rs/crates/orchestration/agent/src/context.rs)
+- [Execution context types](../../talos-rs/crates/orchestration/agent-protocol/src/context.rs)
 - [Provider lifecycle contract](../../talos-rs/crates/orchestration/agent/src/provider.rs)

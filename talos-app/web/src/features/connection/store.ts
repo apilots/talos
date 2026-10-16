@@ -1,4 +1,3 @@
-import type { DeploymentMode } from "@/shared/types/ui";
 import type { AccountType } from "./account-type";
 import type { AuthStatus } from "@/shared/types/account";
 
@@ -6,7 +5,6 @@ type UserRole = "user" | "admin";
 
 export interface ConnectionState {
   workerRuntimeState?: import("@talos/sdk-app-server/desktop").TalosRuntimeState;
-  desktopConnectionMode?: import("@talos/sdk-core").AppProtocol.DesktopConnectionMode;
   controlPlaneEndpoint?: string;
   authError?: import("@talos/sdk-core").AppProtocol.ApiError;
   authToken: string;
@@ -15,7 +13,6 @@ export interface ConnectionState {
   accountType: AccountType;
   authUsername: string;
   userId: string;
-  deploymentMode: DeploymentMode;
 }
 
 export interface ConnectionSlice {
@@ -36,16 +33,12 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
       accountType: "Free",
       authUsername: "Anonymous",
       userId: "anonymous",
-      deploymentMode: "local",
     },
     setConnection: (patch) =>
       set((state) => {
         const nextConnection = {
           ...state.connection,
           ...patch,
-          deploymentMode: normalizeDeploymentMode(
-            patch.deploymentMode ?? state.connection.deploymentMode,
-          ),
         };
         const changed = Object.keys(patch).some((key) => {
           const typedKey = key as keyof ConnectionState;
@@ -63,8 +56,4 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
         };
       }),
   };
-}
-
-function normalizeDeploymentMode(value: DeploymentMode): DeploymentMode {
-  return value === "cloud" ? "cloud" : "local";
 }

@@ -563,9 +563,7 @@ async fn resolve_request_actor(
 
     if matches!(
         method,
-        ClientMethod::DesktopConnectionRead
-            | ClientMethod::DesktopConnectionSet
-            | ClientMethod::DesktopWorkerIdentity
+        ClientMethod::DesktopWorkerIdentity
             | ClientMethod::DesktopWorkerEnroll
             | ClientMethod::AuthLoginStart
             | ClientMethod::AuthLoginStatus

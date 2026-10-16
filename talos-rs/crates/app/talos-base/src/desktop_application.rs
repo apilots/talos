@@ -1,4 +1,4 @@
-//! Desktop host policy over the same management runtime in local and cloud modes.
+//! Desktop identity and enrollment over the existing management runtime.
 use async_trait::async_trait;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -9,10 +9,7 @@ use talos_auth::AuthService;
 use talos_config::{Config, YamlConfigStore};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{AccountService, Actor, TimelineSubscription};
-use talos_types::{
-    DesktopConnectionResponse, DesktopWorkerIdentityResponse, StartTurnRequest,
-    SubscribeTimelineRequest,
-};
+use talos_types::{DesktopWorkerIdentityResponse, StartTurnRequest, SubscribeTimelineRequest};
 use tokio::sync::Mutex;
 
 pub(crate) struct DesktopApplication {
@@ -61,18 +58,6 @@ impl DesktopApplication {
         request: ClientRequest,
     ) -> TalosResult<serde_json::Value> {
         match request.params {
-            ClientRequestParams::DesktopConnectionRead(_) => value(DesktopConnectionResponse {
-                connection_mode: self.store.load_desktop()?.connection_mode,
-                control_plane_endpoint: self.config.cloud.agent_base_url.clone(),
-            }),
-            ClientRequestParams::DesktopConnectionSet(params) => {
-                self.stop_registration().await?;
-                self.store.save_desktop_connection(params.connection_mode)?;
-                value(DesktopConnectionResponse {
-                    connection_mode: params.connection_mode,
-                    control_plane_endpoint: self.config.cloud.agent_base_url.clone(),
-                })
-            }
             ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity()?),
             ClientRequestParams::DesktopWorkerEnroll(params) => {
                 if actor.access_token.is_some()
@@ -104,7 +89,7 @@ impl DesktopApplication {
                     .as_ref()
                     .map_or_else(|| "embedded".into(), |runner| runner.node_id.clone()),
             ),
-            control_plane_endpoint: runner.map(|runner| runner.control_plane_endpoint),
+            control_plane_endpoint: Some(self.config.cloud.agent_base_url.clone()),
         })
     }
 }
@@ -124,9 +109,7 @@ impl AppServerApplication for DesktopApplication {
     ) -> ApplicationResult<ApplicationResponse> {
         let host_method = matches!(
             request.params,
-            ClientRequestParams::DesktopConnectionRead(_)
-                | ClientRequestParams::DesktopConnectionSet(_)
-                | ClientRequestParams::DesktopWorkerIdentity(_)
+            ClientRequestParams::DesktopWorkerIdentity(_)
                 | ClientRequestParams::DesktopWorkerEnroll(_)
         );
         if !host_method {

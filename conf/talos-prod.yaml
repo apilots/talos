@@ -1,5 +1,4 @@
 timezone: "Asia/Shanghai"
-mode: local
 
 workspaces:
   default_workspace_id: "default"
@@ -23,7 +22,7 @@ automation:
     batch_size: 50
     max_batches: 10
 
-# Production profile for packaged Talos clients.
+# Shared production profile; the startup entrypoint selects host capabilities.
 gateway:
   port: 8080
   host: "0.0.0.0"
@@ -32,14 +31,10 @@ gateway:
 agent_node:
   control_plane: null
   runner: null
-  # The embedded Worker uses authenticated loopback RPC, independently of cloud enrollment.
+  # The embedded Worker uses authenticated loopback RPC, independently of Server registration.
   worker_rpc:
     bind_address: 127.0.0.1:0
     tls: null
-
-# Desktop product connection source; Server deployment mode is independent.
-desktop:
-  connection_mode: cloud
 
 cloud:
   api_base_url: "https://api.talos.love"
@@ -70,6 +65,8 @@ agent:
         user_permission_mode: "full_access"
         default_mode: "use_default"
         network: "use_default"
+        platform:
+          linux_helper_executable: null
       web_search:
         provider: "firecrawl"
         firecrawl:
@@ -84,6 +81,21 @@ agent:
           api_key: ${TALOS_WEB_SEARCH_TAVILY_API_KEY}
           base_url: "https://api.tavily.com"
           timeout_ms: 15000
+      dynamic:
+        on_timeout: error_to_model
+        response_timeout_ms: 300000
+      enable_dynamic_tools: false
+      enable_mcp_tools: true
+      file:
+        default_list_limit: 200
+        default_read_limit: 200
+        default_search_limit: 200
+      local_exec:
+        default_timeout_ms: 60000
+        max_output_bytes: 65536
+      mcp_runtime:
+        enable_resource_tools: true
+        enable_tools: true
     skills:
       max_skill_md_bytes: 65536
       max_available_summary_bytes: 8192
@@ -162,9 +174,20 @@ agent:
       retrieved_memories_keep: 4
       retrieved_memory_max_chars: 2000
       compacted_retrieved_memory_max_chars: 800
+      model: null
+  agents: []
+  command_idempotency_ttl_hours: 24
+  identity: null
+  message_queue:
+    max_messages_per_session: 10
+  timeline_replay_batch_size: 1024
 channels:
   whatsapp:
     enabled: false
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    token: null
   telegram:
     enabled: false
     token: ${TALOS_TELEGRAM_BOT_TOKEN}
@@ -203,10 +226,19 @@ channels:
         mode: "webhook"
         webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
         groups: []
+    webhook_secret: null
   discord:
     enabled: false
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    token: null
   feishu:
     enabled: false
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    token: null
 
 llm:
   provider: "deepseek"
@@ -480,11 +512,13 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
+    api_key: null
 
 logging:
   level: "info"
   format: "text"
   stdout: true
+  timezone: null
 
 storage:
   database_type: "sqlite"
@@ -532,6 +566,7 @@ storage:
 
 # Account data sharing is independent of Worker RPC and registration.
 sync:
-  # Omitted enabled follows verified login; false keeps sharing disabled.
+  # null follows the account preference; false disables Sync on this host.
   hub_endpoint: wss://sync.talos.love/v1/sync
   trusted_ca_file: null
+  enabled: null

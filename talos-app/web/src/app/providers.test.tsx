@@ -31,7 +31,7 @@ function ActorSettings() {
 afterEach(() => { cleanup(); client.clear(); pending.length = 0; });
 
 it("clears old actor settings without cancelling the new actor's first requests", async () => {
-  useAppStore.getState().setConnection({ desktopConnectionMode: "cloud", controlPlaneEndpoint: "https://agent.talos.love", userId: "alice" });
+  useAppStore.getState().setConnection({ controlPlaneEndpoint: "https://agent.talos.love", userId: "alice" });
   const oldKeys = settingsKeys(connectionScope(useAppStore.getState().connection));
   render(<AppProviders />);
   await screen.findByText("alice:alice:alice");

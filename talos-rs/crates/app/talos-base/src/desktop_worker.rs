@@ -1,4 +1,4 @@
-//! Enrollment and lifecycle of the app-server's one embedded cloud Worker.
+//! Personal Worker identity provisioning and registration for management hosts.
 use crate::desktop_application::DesktopApplication;
 use agent_client::{AgentNodeClient, AgentTlsTrust};
 use agent_protocol::{CreateNodeRequest, NodeMode, RotateCredentialRequest};
@@ -52,6 +52,7 @@ impl WorkerEnrollment<'_> {
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
         // Serialize host enrollment and shutdown; ConfigStore's barrier also prevents a second process creating a duplicate.
         let mut active = self.worker.lock().await;
+        let previous_runner = self.store.load_agent_node()?.runner;
         if recover_node_id.is_some() {
             if let Some(worker) = active.take() {
                 worker.shutdown().await?;
@@ -63,14 +64,30 @@ impl WorkerEnrollment<'_> {
         let config = match result {
             Ok(config) => config,
             Err(error) => {
-                if let Some(worker) = active.take() {
-                    if let Err(cleanup) = worker.shutdown().await {
-                        talos_logging::report_error(&cleanup);
+                // A rejected competing central claim cannot stop its current owner's Worker.
+                if self.config.agent_node.control_plane.is_none() {
+                    if let Some(worker) = active.take() {
+                        if let Err(cleanup) = worker.shutdown().await {
+                            talos_logging::report_error(&cleanup);
+                        }
                     }
                 }
                 return Err(error);
             }
         };
+        if previous_runner
+            .as_ref()
+            .map(AgentNodeRunnerConfig::transport)
+            != config
+                .agent_node
+                .runner
+                .as_ref()
+                .map(AgentNodeRunnerConfig::transport)
+        {
+            if let Some(worker) = active.take() {
+                worker.shutdown().await?;
+            }
+        }
         if active
             .as_ref()
             .is_some_and(talos_worker::RegisteredWorker::is_finished)
@@ -187,7 +204,10 @@ impl WorkerEnrollment<'_> {
             ));
         }
         let endpoint = config.cloud.agent_base_url.clone();
-        let existing = self.store.load_agent_node()?.runner;
+        let mut existing = self.store.load_agent_node()?.runner;
+        let central = config.agent_node.control_plane.is_some();
+        let direct_endpoint = central.then(|| endpoint.clone());
+        let mut transport_changed = false;
         if existing
             .as_ref()
             .is_some_and(|runner| runner.control_plane_endpoint != endpoint)
@@ -215,9 +235,10 @@ impl WorkerEnrollment<'_> {
         let expires_at = CloudSessionCache::now_ms() / 1000 + CREDENTIAL_LIFETIME_SECONDS;
         let node_id = recover_node_id
             .as_ref()
-            .or(existing.as_ref().map(|runner| &runner.node_id));
-        let (node, credential) = if let Some(node_id) = node_id {
-            let node = client.get_node(token, node_id).await?;
+            .or(existing.as_ref().map(|runner| &runner.node_id))
+            .cloned();
+        let (node, credential) = if let Some(node_id) = node_id.as_ref() {
+            let mut node = client.get_node(token, node_id).await?;
             if node.status == agent_protocol::NodeStatus::Disabled {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,
@@ -226,11 +247,15 @@ impl WorkerEnrollment<'_> {
             }
             if node.mode != NodeMode::Remote
                 || node.owner_user_id.as_deref() != Some(&actor.user_id)
-                || node.endpoint.is_some()
+                || (!central
+                    && node.endpoint.is_some()
+                        != existing
+                            .as_ref()
+                            .is_some_and(|runner| runner.transport() == AgentNodeTransport::Direct))
             {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,
-                    "Saved computer is not an outbound Worker owned by this account",
+                    "Saved computer ownership or transport does not match this Worker",
                 ));
             }
             if existing
@@ -242,11 +267,30 @@ impl WorkerEnrollment<'_> {
                     "Recovery must use the saved computer UUID",
                 ));
             }
-            if recover_node_id.is_none() && self.store.load_desktop()?.enrollment_pending {
-                return Err(TalosError::new(ErrorCode::Conflict, "Worker identity save was not confirmed. Recover the saved computer credential."));
+            // A saved UUID always retries registration with its existing credential.
+            // Successful lease observation clears any interrupted-save marker;
+            // rejected/missing credentials still require recovery of this UUID.
+            if central {
+                if node.endpoint != direct_endpoint {
+                    node = client
+                        .update_node(
+                            token,
+                            talos_types::UpdateNodeRequest {
+                                node_id: node.node_id.clone(),
+                                display_name: node.display_name.clone(),
+                                endpoint: direct_endpoint.clone(),
+                                status: node.status,
+                            },
+                        )
+                        .await?;
+                }
+                if let Some(saved) = existing.as_mut() {
+                    transport_changed = saved.transport() != AgentNodeTransport::Direct;
+                    saved.transport = Some(AgentNodeTransport::Direct);
+                }
             }
             let credential = if recover_node_id.is_some() {
-                if !self.store.load_desktop()?.enrollment_pending {
+                if !self.store.node_enrollment_pending()? {
                     self.store.begin_node_enrollment(Some(node_id))?;
                 }
                 Some(
@@ -280,7 +324,7 @@ impl WorkerEnrollment<'_> {
                     token,
                     CreateNodeRequest {
                         display_name: self.device_name.to_owned(),
-                        endpoint: None,
+                        endpoint: direct_endpoint.clone(),
                         owner_user_id: None,
                         credential_expires_at: expires_at,
                     },
@@ -305,7 +349,7 @@ impl WorkerEnrollment<'_> {
             };
             if created.node.owner_user_id.as_deref() != Some(&actor.user_id)
                 || created.node.mode != NodeMode::Remote
-                || created.node.endpoint.is_some()
+                || created.node.endpoint != direct_endpoint
             {
                 return Err(TalosError::internal(
                     "Control plane returned an invalid Worker ownership or transport",
@@ -314,7 +358,11 @@ impl WorkerEnrollment<'_> {
             (created.node, Some(created.credential))
         };
         let runner = existing.unwrap_or_else(|| AgentNodeRunnerConfig {
-            transport: Some(AgentNodeTransport::Outbound),
+            transport: Some(if central {
+                AgentNodeTransport::Direct
+            } else {
+                AgentNodeTransport::Outbound
+            }),
             node_id: node.node_id.clone(),
             control_plane_endpoint: endpoint,
             credential_file: config
@@ -330,6 +378,16 @@ impl WorkerEnrollment<'_> {
                 ));
             }
             self.store.save_node_identity(&runner, &credential.token)?;
+        } else if transport_changed {
+            // Preserve the Server-issued UUID and protected credential when retiring
+            // an old self-outbound registration in favor of the central direct ingress.
+            let token = std::fs::read_to_string(&runner.credential_file).map_err(|error| {
+                TalosError::internal_with_source(
+                    "Read existing Worker credential; technical details were withheld.",
+                    error,
+                )
+            })?;
+            self.store.save_node_identity(&runner, token.trim())?;
         }
         config.agent_node.runner = Some(runner);
         Ok(config)

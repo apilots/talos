@@ -60,22 +60,22 @@ Desktop 继续启动已打包的 app-server，由它组装现有 TalosWorker lib
 ### Desktop 宿主入口（阶段 1.3）
 
 Electron main 给现有 app-server 传入宿主设备名，仍只启动一个已打包的进程。
-`desktop.connection_mode`不再选择“完整runtime/无DB宿主”分支；044阶段1.2已移除裁剪runtime路径，普通stdio/Server保留完整组装；阶段4继续统一产品连接设置/共享状态。
+Desktop/TUI 登录后使用统一个人 Worker 注册流程；不再提供连接模式或部署模式配置。普通 stdio/Server 保留完整管理组装，direct/outbound 与 endpoint 继续只决定传输。
 cloud 宿主复用 AccountService/CloudSessionCache，登录完成和重启恢复后调用受信任的 `desktop/workerEnroll`；
 app-server保存身份，以同一Worker+Runner注册，同时保留本地Project/Session/Timeline数据库。共享启停不换DB或销毁管理宿主；导入走原Store事务，不迁移Computer。
 
 配置沿用 `TALOS_HOME/conf/talos.yaml`，显式外部 config 路径不能用于 Desktop 自动注册。
 `cloud.agent_trusted_ca_file` 是首次创建节点时可选的私有 CA，随后写入 runner.trusted_ca_file；缺省使用系统根。
-创建前设置宿主配置的 `desktop.enrollment_pending`，明确拒绝的创建可清除；未知结果保留标记，要求选已有 UUID 恢复。
-保存顺序为 UUID/地址与 pending 标记 -> conf 下原子写凭据（Unix 0600、文件/目录 fsync）-> 清除 pending。
+创建前将恢复标记原子写入 `$TALOS_HOME/.worker-state.json`，通过 `.worker-state.lock` 和现有配置锁串行更新。明确拒绝的创建可清除标记；未知结果保留标记，要求选已有 UUID 恢复。身份和凭据落盘完成后删除两个内部文件；已有身份重启自动注册，成功注册也会清理中断遗留的文件。旧配置字段由配置升级直接移除，不迁移其值。
+保存顺序为内部 pending 标记 -> 配置中的 UUID/地址 -> conf 下原子写凭据（Unix 0600、文件/目录 fsync）-> 删除内部状态文件。
 每次保存都有配置锁并保留其他 YAML 节点；并发创建检查原身份，避免重复创建。
 注册凭据首次有效期为 365 天，过期由当前 owner 显式恢复；租约仍使用原有 90 秒/心跳/续期规则。
 重启先读取已保存 UUID，向控制面确认归属，不覆盖用户改名；账户/控制面不匹配明确拒绝。
 
 登录成功与 Worker 注册失败独立：保留登录结果和缓存，注册错误通过现有 Desktop runtime-state 的 ApiError 返回。
-退出或模式切换先让 stdio EOF 触发宿主 drain/注销，再退出进程；注销失败仍由既有租约过期规则收敛。
+退出先让 stdio EOF 触发宿主 drain/注销，再退出进程；注销失败仍由既有租约过期规则收敛。
 首次 Register 已发出时在既有 RPC 超时范围内等响应，退出再注销；不丢弃已签发租约，不新增持久化状态。
-Register 只建立身份与租约；同一 RegisteredWorker 的主动 Connect 确认后才安装远程 Harness 并发布执行能力。
+Register 建立身份与租约；direct 使用可达 TLS RPC 发布执行能力，outbound 则在同一 RegisteredWorker 的主动 Connect 确认后安装远程 Harness 并发布执行能力。
 
 ## 4. 注册、身份与可用性
 
@@ -140,10 +140,10 @@ Web 手工连接允许一次性受控展示凭据，禁止加入通用查询缓�
 | Target | Select / execute | Environment management |
 | --- | --- | --- |
 | 个人云注册 Computer，包含 Desktop 内嵌 Worker | 当前 owner；管理员跨用户管理目录不混入自己的任务选择器 | owner 管理完整 Worker 环境；Pod 限制由节点本地能力与沙箱执行 |
-| 共享 Server embedded Computer | 按既有业务访问权限可见/选择；普通用户自己的 Project/Session 可读、可继续操作，列表仍按 Actor 过滤 | 用户 Workspace/文档沿用既有权限；共享实例配置、插件/MCP 管理保持管理员权限 |
+| Server 内嵌 Worker | 首位管理员自动认领并绑定个人 owner，签发 UUID；本机调用 loopback，对外使用中心 TLS 入口的 direct RPC | 其他管理员不隐式获得该 Computer 的执行或环境权限 |
 | 显式本地模式 embedded Computer | 现有可信本地 Actor，包括 auth_disabled 的本地连接 | 现有本地权限；此规则不能放宽公网节点注册/管理的认证 |
 
-配置/插件/MCP 权限按目标计算，不能直接复用控制面的 local/cloud/admin 总门禁限制个人节点。
+配置/插件/MCP 权限按目标计算，不能直接复用控制面的管理员目录权限限制个人节点。
 Computer 可见/业务执行权限与实例环境管理权限分别校验。computer/list/read 必须能返回普通用户有权访问的 embedded，
 旧会话链接可以恢复其节点上下文；不因无管理权限隐藏自己的历史，也不因此允许修改共享实例配置。
 无需新增历史入口或 grants 表；使用相同选择器与既有 Actor/业务资源权限，停用时仍可读取有权访问的历史。

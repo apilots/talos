@@ -19,6 +19,11 @@ retain its issued UUID; configure `agent_node.runner` with that same UUID,
 `control_plane_endpoint`, `credential_file`, and `transport: outbound`. Production
 uses `https://agent.talos.love`; local TLS tests also configure `trusted_ca_file`.
 Credential files must be private and readable by the container's chosen UID.
+Managed default configuration is upgraded from the bundled template before load,
+with a backup. Existing UUIDs, credentials and recovery state are retained.
+Explicit `TALOS_CONFIG` files remain operator-owned and are not normalized.
+Server and Worker images share `conf/talos-prod.yaml` as the packaged template;
+the Worker entrypoint starts only execution and registration capabilities.
 
 ```bash
 docker run --name talos-worker \

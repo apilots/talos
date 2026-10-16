@@ -167,6 +167,18 @@ pub(crate) fn upgrade_default_config_from_template(
         &mut normalize_report,
     );
 
+    // An invalid registration must be repaired explicitly. Defaulting it to
+    // null loses the saved UUID and could make the host enroll a new Computer.
+    let runner_path = ["agent_node", "runner"];
+    if get_path(&original, &runner_path).is_some_and(|runner| !runner.is_null())
+        && get_path(&normalized, &runner_path).is_none_or(YamlValue::is_null)
+    {
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            "Configuration upgrade cannot preserve the Worker identity. Repair agent_node settings before upgrading.",
+        ));
+    }
+
     validate_config_value(&normalized).map_err(|err| {
         err.context(format!(
             "validate normalized config {}",
@@ -224,6 +236,22 @@ fn read_yaml_file(path: &Path) -> TalosResult<YamlValue> {
 
 fn build_validation_template(template: &YamlValue, original: &YamlValue) -> YamlValue {
     let mut validation_template = template.clone();
+    // Direct runners depend on their TLS listener (or the central ingress),
+    // and a central ingress depends on gateway authentication. Validate these
+    // together so a valid identity is not rejected against empty defaults.
+    if let Some(nodes) = get_path(original, &["agent_node"]) {
+        let mut candidate = template.clone();
+        let nodes_path = vec!["agent_node".to_string()];
+        let auth_path = vec!["gateway".to_string(), "auth".to_string()];
+        if set_path(&mut candidate, &nodes_path, nodes.clone()).is_ok() {
+            if let Some(auth) = get_path(original, &["gateway", "auth"]) {
+                let _ = set_path(&mut candidate, &auth_path, auth.clone());
+            }
+            if validate_config_value(&candidate).is_ok() {
+                validation_template = candidate;
+            }
+        }
+    }
     let backends_path = ["storage", "files", "backends"];
     let default_path = ["storage", "files", "default"];
     if let Some(original_backends) = get_path(original, &backends_path) {
@@ -235,7 +263,7 @@ fn build_validation_template(template: &YamlValue, original: &YamlValue) -> Yaml
             .iter()
             .map(|segment| (*segment).to_string())
             .collect::<Vec<_>>();
-        let mut candidate = template.clone();
+        let mut candidate = validation_template.clone();
         if set_path(&mut candidate, &backends_path, original_backends.clone()).is_ok() {
             if let Some(original_default) = get_path(original, &["storage", "files", "default"]) {
                 let mut candidate_with_default = candidate.clone();

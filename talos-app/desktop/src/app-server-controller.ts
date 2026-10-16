@@ -54,7 +54,6 @@ export class DesktopAppServerController {
   private initializeResponse?: AppProtocol.InitializeResponse;
   private reconnecting?: Promise<void>;
   private closed = false;
-  private connection?: AppProtocol.DesktopConnectionResponse;
   private readonly subscriptions = new Map<string, SubscriptionReplayState>();
   private readonly sessionsBySubscriptionId = new Map<string, string>();
 
@@ -67,20 +66,12 @@ export class DesktopAppServerController {
     this.closed = false;
     this.emitRuntimeState("starting", null);
     const response = await this.ensureBridge().connect();
-    if (this.options.desktopHost) {
-      this.connection = await this.ensureBridge().invoke<AppProtocol.DesktopConnectionResponse>("desktop/connection/read", null);
-      if (response.server_info.auth_enabled && this.connection.connectionMode === "local") {
-        this.connection = await this.ensureBridge().invoke<AppProtocol.DesktopConnectionResponse>(
-          "desktop/connection/set", { connectionMode: "cloud" },
-        );
-      }
-      if (this.connection.connectionMode === "cloud") {
-        const session = await this.ensureBridge().invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
-        this.initializeResponse = response;
-        this.emitRuntimeState("ready", null);
-        if (session.session) { await this.enrollWorker(); }
-        return response;
-      }
+    if (this.options.desktopHost && response.server_info.auth_enabled) {
+      const session = await this.ensureBridge().invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
+      this.initializeResponse = response;
+      this.emitRuntimeState("ready", null);
+      if (session.session) { await this.enrollWorker(); }
+      return response;
     }
     this.initializeResponse = response;
     this.emitRuntimeState("ready", null);
@@ -100,17 +91,13 @@ export class DesktopAppServerController {
       ? this.resolveUnsubscribeParams(params as AppProtocol.EventUnsubscribeRequest)
       : params;
     const result = await this.ensureBridge().invoke<T>(method, effectiveParams, options);
-    if (this.connection?.connectionMode === "cloud" && (
+    if (this.options.desktopHost && this.initializeResponse?.server_info.auth_enabled && (
       (method === "auth/login/status" && (result as AppProtocol.CloudLoginStatusResponse).status === "authenticated") ||
       (method === "auth/session/read" && (result as AppProtocol.AuthSessionReadResponse).session !== null)
     )) {
       await this.enrollWorker();
     }
     if (method === "desktop/workerEnroll") this.emitRuntimeState("ready", null);
-    if (method === "desktop/connection/set") {
-      await this.close();
-      await this.connect();
-    }
     if (method === "event/subscribe") {
       this.recordSubscription(params as AppProtocol.SubscribeTimelineRequest, result as AppProtocol.SubscribeTimelineResponse);
     }

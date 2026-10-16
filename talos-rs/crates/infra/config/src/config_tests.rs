@@ -637,27 +637,12 @@ models:
 #[test]
 fn test_product_configs_include_configured_provider_models() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let config_paths = [
-        (repo_root.join("conf/talos.yaml"), DeploymentMode::Local),
-        (
-            repo_root.join("conf/talos-cloud.yaml"),
-            DeploymentMode::Cloud,
-        ),
-        (repo_root.join("conf/talos-dev.yaml"), DeploymentMode::Local),
-        (
-            repo_root.join("conf/talos-prod.yaml"),
-            DeploymentMode::Local,
-        ),
-    ];
-    for (config_path, expected_mode) in config_paths {
-        let content =
-            std::fs::read_to_string(config_path).expect("product config should be readable");
+    let config_paths = ["talos.yaml", "talos-dev.yaml", "talos-prod.yaml"];
+    for name in config_paths {
+        let content = std::fs::read_to_string(repo_root.join("conf").join(name))
+            .expect("product config should be readable");
         let config: Config =
             serde_yaml::from_str(&content).expect("product config should deserialize");
-        assert_eq!(config.mode, expected_mode);
-        if expected_mode == DeploymentMode::Cloud {
-            assert!(config.gateway.auth);
-        }
         assert_eq!(
             config
                 .llm

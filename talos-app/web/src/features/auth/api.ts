@@ -7,15 +7,13 @@ import { getTalosClient } from "@/shared/api/client";
 import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 import { getDesktopBridge, isDesktopRuntime } from "@/shared/api/desktop-client";
 import { clearWebAuthToken } from "./web-auth-session";
-import type { DeploymentMode } from "@/shared/types/ui";
 
 export interface HealthResponse {
-  desktopConnection?: AppProtocol.DesktopConnectionResponse;
+  desktopWorker?: AppProtocol.DesktopWorkerIdentityResponse;
   status: string;
   service: string;
   timestamp: string;
   auth_enabled: boolean;
-  mode: DeploymentMode;
   cloud_auth_url?: string | null;
 }
 
@@ -61,14 +59,13 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
       throw new Error("Desktop runtime bridge is not available.");
     }
     const serverInfo = await getDesktopServerInfo(bridge);
-    const desktopConnection = await createElectronAppServerClient(bridge).desktop.connection();
+    const desktopWorker = await createElectronAppServerClient(bridge).desktop.workerIdentity();
     return {
-      desktopConnection,
+      desktopWorker,
       status: "ok",
       service: serverInfo.name,
       timestamp: new Date().toISOString(),
       auth_enabled: serverInfo.auth_enabled,
-      mode: "local",
       cloud_auth_url: serverInfo.cloud_auth_url,
     };
   }

@@ -184,8 +184,6 @@ export class AppServerClient {
 
   /** Host settings and safe identity; enrollment returns no node credential. */
   readonly desktop = {
-    connection: () => this.transport.request<AppProtocol.DesktopConnectionResponse>("desktop/connection/read", null),
-    setConnection: (params: AppProtocol.DesktopConnectionSetParams) => this.transport.request<AppProtocol.DesktopConnectionResponse>("desktop/connection/set", params),
     workerIdentity: () => this.transport.request<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerIdentity", null),
     enrollWorker: (params: AppProtocol.DesktopWorkerEnrollParams) => this.transport.request<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerEnroll", params),
   };

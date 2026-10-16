@@ -138,7 +138,8 @@ impl AgentNodeConfig {
                 || !runner.control_plane_endpoint.starts_with("https://")
                 || runner.credential_file.as_os_str().is_empty()
                 || (runner.transport() == AgentNodeTransport::Direct
-                    && self.worker_rpc.tls.is_none())
+                    && self.worker_rpc.tls.is_none()
+                    && self.control_plane.is_none())
                 || runner
                     .trusted_ca_file
                     .as_ref()

@@ -23,7 +23,6 @@ pub struct AppProtocolSchemaRoot {
     pub sync_metrics_response: talos_types::SyncMetricsResponse,
     pub sync_status_response: talos_types::SyncStatusResponse,
     pub computer_list_response: talos_types::ComputerListResponse,
-    pub desktop_connection_response: talos_types::DesktopConnectionResponse,
     pub desktop_worker_identity_response: talos_types::DesktopWorkerIdentityResponse,
     pub node_info: talos_types::NodeInfo,
     pub created_node: talos_types::CreatedNode,
@@ -102,9 +101,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
     output.push_str(&export::<crate::requests::FileUploadParams>());
-    output.push_str(&export::<talos_types::DesktopConnectionMode>());
-    output.push_str(&export::<talos_types::DesktopConnectionResponse>());
-    output.push_str(&export::<talos_types::DesktopConnectionSetParams>());
     output.push_str(&export::<talos_types::DesktopWorkerIdentityResponse>());
     output.push_str(&export::<talos_types::DesktopWorkerEnrollParams>());
     output.push_str(&export::<talos_types::ProfileReadRequest>());

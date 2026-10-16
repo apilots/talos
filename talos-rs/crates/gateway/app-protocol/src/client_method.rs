@@ -9,10 +9,6 @@ use crate::errors::AppServerErrorBody;
 pub enum ClientMethod {
     #[serde(rename = "initialize")]
     Initialize,
-    #[serde(rename = "desktop/connection/read")]
-    DesktopConnectionRead,
-    #[serde(rename = "desktop/connection/set")]
-    DesktopConnectionSet,
     #[serde(rename = "desktop/workerIdentity")]
     DesktopWorkerIdentity,
     #[serde(rename = "desktop/workerEnroll")]
@@ -201,8 +197,6 @@ impl ClientMethod {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Initialize => "initialize",
-            Self::DesktopConnectionRead => "desktop/connection/read",
-            Self::DesktopConnectionSet => "desktop/connection/set",
             Self::DesktopWorkerIdentity => "desktop/workerIdentity",
             Self::DesktopWorkerEnroll => "desktop/workerEnroll",
             Self::SyncMetrics => "sync/metrics",
@@ -310,8 +304,6 @@ impl FromStr for ClientMethod {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "initialize" => Ok(Self::Initialize),
-            "desktop/connection/read" => Ok(Self::DesktopConnectionRead),
-            "desktop/connection/set" => Ok(Self::DesktopConnectionSet),
             "desktop/workerIdentity" => Ok(Self::DesktopWorkerIdentity),
             "desktop/workerEnroll" => Ok(Self::DesktopWorkerEnroll),
             "sync/metrics" => Ok(Self::SyncMetrics),

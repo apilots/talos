@@ -26,7 +26,7 @@ not a substitute for parity tests.
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
 | Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer   |  | Rust AppServer   |
-| HTTP + SSE       |  | cloud/local mode |  | Client           |  | Client           |
+| HTTP + SSE       |  | personal Worker  |  | Client           |  | Client           |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          +---------------------+-----------+---------+---------------------+
@@ -77,24 +77,14 @@ embedded SDK, and their product transports can all reach it.
 | `@talos/sdk-app-server` | JSON-RPC transport plus Electron main-process and typed preload IPC adapters |
 
 Web uses `TalosClient` over HTTP/SSE to its selected management service. Desktop
-uses `AppServerClient` through typed preload IPC and JSON-RPC stdio in both local
-and cloud modes. Its bundled app-server retains the original Service, Store and
-Coordinator, plus one `TalosWorker`; cloud mode enables registration and account
-synchronization without replacing that management runtime. Remote dispatch stays
-inside the Rust `agent-client` SDK. Typed preload also exposes the existing login
-lifecycle and safe host identity; node credentials never reach the renderer.
-Shared generated types and parity tests keep the browser and Desktop facades
-aligned on the same business capabilities.
-
-The production Desktop UI requires account sign-in and exposes no local/cloud
-mode switch on the login or Computer pages. Anonymous access is reserved for
-explicit development configurations with authentication disabled. When the
-app-server requires authentication, the Desktop host persists cloud mode through
-the existing configuration API before restoring a login or enrolling its Worker.
-An existing local setting therefore cannot suppress production registration;
-auth-disabled development may retain explicit local mode. This does not
-change authenticated local execution, cached history or the independent Sync
-preference.
+uses `AppServerClient` through typed preload IPC and JSON-RPC stdio. Its bundled
+app-server retains Service, Store, Coordinator and one `TalosWorker`. Verified
+login enrolls or restores this same Worker's personal UUID through the central
+Server. Registration does not replace the management runtime or its data.
+Remote dispatch stays inside `agent-client`; credentials never reach the renderer.
+The production UI requires sign-in. Anonymous development keeps local execution
+without registering a fictitious cloud node. Sync opt-out remains independent.
+Shared generated types and parity tests keep the browser and Desktop facades aligned.
 
 ## Rust SDK and embedded SDK
 
@@ -186,13 +176,13 @@ the existing presenter. Branch on codes/typed parameters, never English sentence
 Show failed Turns even without assistant text. Public error disclosure, report
 ownership and protocol 0.4 migration are defined by [Error contract](ERROR_MODEL.md).
 
-Web reads `deploymentMode` from its connected management service. Desktop keeps
-its complete local management runtime; its explicit `connectionMode` controls
-cloud registration, independently of synchronization opt-out and server
-deployment policy. Settings
-navigation and direct routes mirror the [configuration authorization
-matrix](../../deploy/README.md#deployment-mode-and-configuration-access); Gateway
-still enforces access independently of client visibility.
+Desktop and Web settings follow ownership of the selected Computer. The central
+Server's embedded Worker is claimed by its first administrator as a personal
+Computer, using direct RPC; it is not a shared Computer. A competing claim must
+preserve the current owner's registration and runtime status. Registration
+uses the same UUID/credential contract for embedded and standalone Workers;
+`direct`/`outbound` selects transport independently of ownership. See
+[deployment and authorization](../../deploy/README.md#computer-identity-transport-and-configuration-access).
 
 - SDKs own the complete product API, typed domain objects, structured errors,
   stream contracts, and transport-neutral lifecycle semantics.

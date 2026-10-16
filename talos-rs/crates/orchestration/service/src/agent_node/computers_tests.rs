@@ -94,11 +94,11 @@ async fn computer_directory_scopes_search_and_pagination_without_exposing_privat
         .list_computers(&admin, ComputerListRequest::default())
         .await
         .unwrap();
-    assert_eq!(administrator.total, 2);
+    assert_eq!(administrator.total, 1);
     assert!(administrator
         .data
         .iter()
-        .all(|node| node.node_id == "embedded" || node.owner_user_id.as_deref() == Some("admin")));
+        .all(|node| node.owner_user_id.as_deref() == Some("admin")));
     let local = Actor::auth_disabled();
     let local_page = service
         .list_computers(&local, ComputerListRequest::default())

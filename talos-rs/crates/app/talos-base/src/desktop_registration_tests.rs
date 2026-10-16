@@ -199,6 +199,24 @@ impl DesktopFixture {
 #[tokio::test]
 async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentials() {
     let fixture = DesktopFixture::new().await;
+    // A role or proximity alone never makes an authenticated user the Computer owner.
+    for actor in [
+        Actor::regular("user-1"),
+        Actor::regular("administrator").with_role(UserRole::Admin),
+    ] {
+        let error = fixture
+            .runtime
+            .service
+            .workspace_info(
+                &actor,
+                talos_types::WorkspaceInfoRequest {
+                    node_id: Some("embedded".into()),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.error_code(), ErrorCode::PermissionDenied);
+    }
     let host = Arc::new(fixture.host("Original laptop"));
     assert!(host
         .enroll_worker(None)
@@ -335,7 +353,7 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
     }});
     let frames = format!(
         "{initialize}\n{}\n{}\n",
-        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "desktop/connection/read"}),
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "desktop/workerIdentity"}),
         serde_json::json!({"jsonrpc": "2.0", "id": 3, "method": "desktop/workerIdentity", "params": null})
     );
     client.write_all(frames.as_bytes()).await.unwrap();
@@ -553,6 +571,10 @@ async fn desktop_pending_first_enrollment_requires_explicit_owned_uuid() {
         .unwrap();
     let store = YamlConfigStore::new(fixture.config.source_path());
     store.begin_node_enrollment(None).unwrap();
+    assert!(fixture.home.path().join(".worker-state.json").exists());
+    assert!(fixture.home.path().join(".worker-state.lock").exists());
+    // Reopen host persistence after the unconfirmed CreateNode response.
+    let store = YamlConfigStore::new(fixture.config.source_path());
     let host = fixture.host("Renamed host");
     assert!(host
         .enroll_worker(None)
@@ -568,7 +590,9 @@ async fn desktop_pending_first_enrollment_requires_explicit_owned_uuid() {
         identity.node_id.as_deref(),
         Some(created.node.node_id.as_str())
     );
-    assert!(!store.load_desktop().unwrap().enrollment_pending);
+    assert!(!store.node_enrollment_pending().unwrap());
+    assert!(!fixture.home.path().join(".worker-state.json").exists());
+    assert!(!fixture.home.path().join(".worker-state.lock").exists());
     fixture.registered(&created.node.node_id).await;
     host.stop_registration().await.unwrap();
     assert_eq!(

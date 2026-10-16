@@ -1,3 +1,4 @@
+import { getDesktopBridge } from "@/shared/api/desktop-client";
 import type { ConnectionState } from "@/features/connection/store";
 
 export function defaultProductEndpoint() {
@@ -9,7 +10,7 @@ export function normalizeEndpoint(endpoint: string) {
 }
 /** Actor and control-plane identity, excluding rotating credentials. */
 export function connectionScope(connection: ConnectionState) {
-  const endpoint = connection.desktopConnectionMode ? "desktop-host"
+  const endpoint = getDesktopBridge() ? "desktop-host"
     : normalizeEndpoint(connection.controlPlaneEndpoint || defaultProductEndpoint());
   return JSON.stringify([endpoint, connection.userId]);
 }

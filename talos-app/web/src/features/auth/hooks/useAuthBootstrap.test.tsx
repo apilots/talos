@@ -55,7 +55,6 @@ describe("useAuthBootstrap", () => {
         accountType: "Free",
         authUsername: "Anonymous",
         userId: "anonymous",
-        deploymentMode: "local",
       },
     }));
   });
@@ -71,7 +70,7 @@ describe("useAuthBootstrap", () => {
       created_at: 0,
       updated_at: 0,
     };
-    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true, mode: "cloud" });
+    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
     readDesktopCloudSessionMock.mockResolvedValue({
       access_token: "cached-token",
       cloud_api_base_url: "http://127.0.0.1:8787",
@@ -93,7 +92,6 @@ describe("useAuthBootstrap", () => {
     expect(getCurrentUserMock).not.toHaveBeenCalled();
     expect(useAppStore.getState().connection.authStatus).toBe("authenticated");
     expect(useAppStore.getState().connection.accountType).toBe("Max");
-    expect(useAppStore.getState().connection.deploymentMode).toBe("cloud");
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 

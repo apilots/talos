@@ -40,8 +40,22 @@ impl Drop for NodeProcess {
     }
 }
 
+enum Configuration {
+    Explicit,
+    Managed,
+}
+
 #[tokio::test]
 async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_signal() {
+    verify_node_lifecycle(Configuration::Explicit).await;
+}
+
+#[tokio::test]
+async fn standalone_node_upgrades_managed_config_and_preserves_direct_identity() {
+    verify_node_lifecycle(Configuration::Managed).await;
+}
+
+async fn verify_node_lifecycle(configuration: Configuration) {
     let directory = tempfile::tempdir().unwrap();
     let home = directory.path().join("node-home");
     let conf = home.join("conf");
@@ -133,19 +147,40 @@ async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_si
 
     let log_path = directory.path().join("node.log");
     let log = std::fs::File::create(&log_path).unwrap();
-    let mut node = NodeProcess(
-        Command::new(env!("CARGO_BIN_EXE_talos-worker"))
-            .env("TALOS_HOME", &home)
-            .env("TALOS_CONFIG", &config_path)
-            .stdout(Stdio::null())
-            .stderr(log)
-            .spawn()
-            .unwrap(),
-    );
+    let mut command = Command::new(env!("CARGO_BIN_EXE_talos-worker"));
+    command.env("TALOS_HOME", &home);
+    match configuration {
+        Configuration::Explicit => {
+            command.env("TALOS_CONFIG", &config_path);
+        }
+        Configuration::Managed => {
+            let resource = directory.path().join("resources");
+            std::fs::create_dir_all(resource.join("conf")).unwrap();
+            let template = std::fs::read_to_string(&config_path).unwrap();
+            std::fs::write(resource.join("conf/talos.yaml"), &template).unwrap();
+            let old = format!("mode: cloud\n{template}\ndesktop:\n  connection_mode: local\n  enrollment_pending: true\n");
+            std::fs::write(&config_path, old).unwrap();
+            // Simulate termination after durable identity/credential persistence
+            // but before cleanup. Startup must register the same identity unaided.
+            std::fs::write(
+                home.join(".worker-state.json"),
+                r#"{"enrollment_pending":true}"#,
+            )
+            .unwrap();
+            std::fs::write(home.join(".worker-state.lock"), "").unwrap();
+            command
+                .env_remove("TALOS_CONFIG")
+                .env("TALOS_RESOURCE_DIR", resource);
+        }
+    }
+    let saved_credential = std::fs::read(&credential_path).unwrap();
+    let mut node = NodeProcess(command.stdout(Stdio::null()).stderr(log).spawn().unwrap());
     let first_hash = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if let Some(hash) = store.get(&node_id).await.unwrap().unwrap().lease_token_hash {
-                break hash;
+                if coordinator.ensure_agent("default").await.is_ok() {
+                    break hash;
+                }
             }
             assert!(
                 node.0.try_wait().unwrap().is_none(),
@@ -157,6 +192,24 @@ async fn standalone_node_reregisters_after_control_restart_and_unregisters_on_si
     })
     .await
     .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while home.join(".worker-state.json").exists() || home.join(".worker-state.lock").exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read(&credential_path).unwrap(), saved_credential);
+    if matches!(configuration, Configuration::Managed) {
+        let upgraded = std::fs::read_to_string(&config_path).unwrap();
+        assert!(upgraded.contains(&node_id));
+        assert!(upgraded.contains("transport: direct"));
+        assert!(std::fs::read_dir(&conf).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("talos.yaml.bak.")));
+    }
     coordinator.ensure_agent("default").await.unwrap();
     stop_control.cancel();
     control_task.await.unwrap().unwrap();

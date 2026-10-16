@@ -212,9 +212,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(talos_error_to_api_error)?;
                 to_value(snapshot)
             }
-            ClientRequestParams::DesktopConnectionRead(_)
-            | ClientRequestParams::DesktopConnectionSet(_)
-            | ClientRequestParams::DesktopWorkerIdentity(_)
+            ClientRequestParams::DesktopWorkerIdentity(_)
             | ClientRequestParams::DesktopWorkerEnroll(_) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest))
             }
