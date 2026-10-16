@@ -55,6 +55,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: talos-app/pnpm-lock.yaml
       - run: pnpm --dir talos-app install --frozen-lockfile
+      - name: Fetch locked CI dependencies
+        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
       - name: Validate formal candidate version and history
         run: |
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("talos-rs/Cargo.toml", "rb"))["workspace"]["package"]["version"])')"

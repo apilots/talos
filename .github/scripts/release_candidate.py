@@ -98,6 +98,9 @@ def main() -> None:
             parser.error("record requires directory, run-id, run-attempt, version and previous-tag")
         if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != args.sha:
             raise ValueError("Source checkout does not match candidate")
+        source_lock = subprocess.check_output(["git", "show", f"{args.sha}:talos-rs/Cargo.lock"])
+        if Path("talos-rs/Cargo.lock").read_bytes() != source_lock:
+            raise ValueError("Validated Cargo.lock differs from committed source")
         args.directory.mkdir(parents=True, exist_ok=True)
         lock = args.directory / "Cargo.lock"
         lock.write_bytes(Path("talos-rs/Cargo.lock").read_bytes())

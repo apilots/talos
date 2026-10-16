@@ -91,9 +91,6 @@ jobs:
         with:
           toolchain: ${{ env.RELEASE_RUST_VERSION }}
 
-      - name: Resolve CI dependency graph
-        run: cargo generate-lockfile --manifest-path talos-rs/Cargo.toml
-
       - name: Install Protocol Buffer compiler
         run: |
           if [ "${{ matrix.platform }}" = "macos" ]; then
@@ -114,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if cargo fetch --manifest-path talos-rs/Cargo.toml; then
+            if cargo fetch --locked --manifest-path talos-rs/Cargo.toml; then
               exit 0
             fi
             if [ "$attempt" = 3 ]; then exit 1; fi

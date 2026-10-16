@@ -8,6 +8,7 @@ target/
 
 # Cargo
 Cargo.lock
+!/talos-rs/Cargo.lock
 
 # IDE
 .idea/

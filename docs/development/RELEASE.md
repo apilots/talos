@@ -36,8 +36,16 @@ publication to change the version.
 Version locations are the Rust workspace, TUI display, seven Web/Desktop/SDK
 package manifests, App Server SDK default client metadata, and Docker example
 and Compose image defaults. `scripts/check-release-version.sh` owns the exact
-file list and validates both values and preparation history. Cargo.lock remains
-ignored and generated from the workspace manifest.
+file list and validates both values and preparation history, including the local
+workspace package versions in the committed `talos-rs/Cargo.lock`. After changing
+workspace versions, run `cargo metadata --offline --format-version 1
+--manifest-path talos-rs/Cargo.toml > /dev/null` to update those lock entries;
+review that registry versions, sources and checksums remain unchanged. Include
+the lockfile in the standalone version commit. Version-only lock changes skip
+heavy PR/main jobs; dependency graph changes still trigger the affected checks.
+
+Commit and review the lockfile with every dependency change. CI fetches the
+committed graph with `cargo fetch --locked`; it never regenerates the graph.
 
 After branching, `main` may immediately advance to the next `-SNAPSHOT` version
 in a separate `chore(release): start v<next-version> development` commit. Keep
@@ -61,7 +69,10 @@ published tag, Cargo.lock, toolchain fingerprint and standard generated Notes fo
 14 days. The tag workflow verifies and reuses that source gate and graph; it does
 not rerun the source suite or resolve a new dependency graph. Missing, expired or
 mismatched evidence fails explicitly. Rerun the candidate gate at the same source
-when evidence is unavailable, then review its new validated graph before tagging.
+when evidence is unavailable, then review its evidence before tagging. The
+candidate must retain the exact committed lockfile; recording fails if source
+checks changed it. Formal product builds and artifact checksum checks continue
+to use that same validated graph.
 
 The release branch accepts only bug fixes, including necessary regression tests
 and corrections to release documentation or packaging. Use `fix` subjects after
