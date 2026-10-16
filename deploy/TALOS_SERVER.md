@@ -1,9 +1,19 @@
-# Computer registration hub production runbook
+# Talos Server production deployment
 
 Scope: the Talos service under `/opt/talos-server` on `talos-host`. Apply this
 runbook only in a separately authorized deployment window. Preparing files,
 validating Compose and local acceptance do not authorize production changes.
 Do not change Cloud, Sync, sibling service directories or global proxy settings.
+
+## Deployment products
+
+- `talos-server` is the cloud Docker service for Web/API, Computer registration,
+  leases and authenticated execution/resource relay.
+- `talos-worker` is the independent execution process and Docker image. It uses
+  its owned Computer credential to register with Talos Server; see the
+  [Worker deployment guide](../build/worker/README.md).
+- Desktop and TUI are user-side clients. Desktop may start an embedded Worker;
+  that does not introduce another cloud service or deployment product.
 
 ## Ownership and release
 
@@ -14,31 +24,33 @@ Do not change Cloud, Sync, sibling service directories or global proxy settings.
 | `sync.talos.love/v1/sync` | Existing independent WSS account-data synchronization |
 
 Desktop and Server keep their own management databases. The current coordinator
-owns its Turn/Timeline; the hub forwards calls and callbacks. Pure Workers have
+owns its Turn/Timeline; Talos Server forwards calls and callbacks. Pure Workers have
 no management Session DB or Sync client. Desktop login automatically enrolls its
 embedded Worker; standalone Workers receive an owned UUID and credential through
 the authenticated Computer API. Registration never accepts a self-selected owner.
 
-Use the published Server **0.1.9** manifest, not `latest` or a development build:
+Use a published Server version, such as **0.1.10**, not `latest` or a development build:
 
 ```text
-ghcr.io/apilots/talos-server@sha256:5b5199794b9fabc06e3ba819c4e940e82ceff31a16e521d9ca6ff144c9c1f349
+TALOS_SERVER_IMAGE=ghcr.io/apilots/talos-server
+TALOS_SERVER_VERSION=v0.1.10
 ```
 
-This amd64/arm64 digest is recorded in the release's `manifest.json`. No build or
-new package is required. Keep HTTP and all gRPC services on the same instance;
+The published version tag provides amd64/arm64 images. No build or new package
+is required. Keep HTTP and all gRPC services on the same instance;
 a shared DB does not share live Registry/Connect handles across replicas.
 
 ## Deployment files
 
-- [Production config](docker/talos-agent.yaml.example): complete minimal profile
+- [Production config](docker/talos-server.yaml.example): complete minimal profile
   for this release, authenticated cloud mode, TLS control-plane listener on9443,
   private embedded Worker loopback listener, and the existing Cloud/Sync URLs.
-- [Production Compose](docker/agent-hub.compose.yml): loopback8080/9443, external
+- [Production Compose](docker/talos-server.compose.yml): loopback8080/9443, external
   existing home volume, read-only TLS directory and current one-GiB resource cap.
   That cap is inherited from the observed deployment, not a measured capacity claim.
-- [Non-secret environment](docker/.hub.env.example): exact image, existing volume
-  name and absolute TLS directory. Existing provider secrets remain in `.env`.
+- [Deployment environment](docker/.env.example): copy to `.env` beside
+  the Compose file. Comments separate the image version, existing volume name and
+  absolute TLS directory from provider secrets. This is the only deployment env file.
 - [Caddy](caddy/Caddyfile.example) or [Nginx](nginx/talos.conf.example): agent-only
   virtual host. Merge only that virtual host into the existing proxy; do not
   replace the whole proxy configuration or the API/Sync sites.
@@ -66,6 +78,15 @@ Keep its directory and file writable by UID/GID10001: account enrollment updates
 YAML with atomic replacement. A read-only or single-file bind mount of the live
 config prevents that lifecycle. TLS files are a separate read-only bind mount;
 `create_host_path: false` prevents an accidental empty certificate directory.
+
+The operator-owned `/opt/talos-server/.env` supplies Compose interpolation and
+container environment values. Talos writes secrets to `$TALOS_HOME/.env` inside
+the persistent home, a separate file; it does not rewrite the deployment file or
+its comments. Do not bind mount the deployment file over the runtime file.
+Injected process environment takes precedence over runtime-file values: choose
+one source for each provider key when managing secrets through the product UI.
+Both Compose profiles use `TALOS_SERVER_IMAGE` and `TALOS_SERVER_VERSION` from
+this deployment file. Change the version field to select another published release.
 
 Use the sample only as a new/reviewed configuration. Existing databases require
 the coordinated backup/upgrade procedure in [deployment guidance](README.md#data-upgrades-and-rollback).
@@ -110,7 +131,7 @@ directive. Keep the service directory permissions and private keys restricted;
 test CA readability as the proxy's service user, not only as root.
 
 Worker/Desktop clients trust the public edge certificate using system roots;
-leave client `trusted_ca_file` null for the public endpoint. The hub's
+leave client `trusted_ca_file` null for the public endpoint. The Server's
 `trusted_node_ca_file` is for dialing direct Workers, not for authenticating the
 reverse proxy. Outbound-only nodes need no public listener or private CA rollout.
 The RPC listener reads its certificate at startup; certificate replacement needs
@@ -125,28 +146,51 @@ See [Cloudflare gRPC requirements](https://developers.cloudflare.com/network/grp
 [Caddy upstream TLS](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 and [Nginx gRPC](https://nginx.org/en/docs/http/ngx_http_grpc_module.html).
 
-## Read-only preparation and later rollout
+## Configuration-only redeployment
+
+For deployment-file changes using the same published Server version, preserve
+its named volume, runtime YAML, product-writable `.env` and TLS identity. No
+package build, new release or business-data backup/restore is needed for this
+configuration-only procedure.
+
+From `/opt/talos-server`, validate and recreate only this service:
+
+```bash
+docker compose config --quiet
+docker compose pull talos-server
+docker compose up -d --no-deps --no-build --pull never talos-server
+docker compose ps
+```
+
+Check the configured image/version, unchanged volume/TLS mounts, preserved
+provider settings and healthy authenticated startup. Verify only affected
+HTTPS/gRPC paths. Run the full acceptance checklist for a first production
+rollout or relevant product changes, rather than repeating unrelated business
+flows for deployment-file naming changes.
+
+## Version or data upgrades
 
 1. Record the current container/image digest, Compose/env hashes, volume and health
    using only `/opt/talos-server` and its own container. Do not print secret values.
-2. Prepare the new Compose, `.hub.env`, reviewed `conf/talos.yaml`, TLS identity and
+2. Prepare the new Compose, `.env`, reviewed `conf/talos.yaml`, TLS identity and
    agent proxy fragment offline. Validate with the installed proxy version.
-3. In a local disposable directory containing a placeholder `.env`, run:
+3. In a local disposable directory, copy `.env.example` to `.env` and
+   the Server Compose file beside it, then run:
 
    ```bash
-   docker compose --project-name talos-server --env-file .hub.env \
-     -f agent-hub.compose.yml config --quiet
+   docker compose --project-name talos-server \
+     -f talos-server.compose.yml config --quiet
    ```
 
-   This only validates configuration. `.hub.env` comes from the non-secret sample;
-   production `.env` must remain private. Do not paste resolved production config
-   into reports because Compose can expand its provider secrets.
+   This only validates configuration. Use placeholder secrets for local checks;
+   production `.env` must remain private with mode 0600. Do not paste resolved
+   production config into reports because Compose can expand its provider secrets.
 4. **Stop here without deployment authorization.** Later, stop writers for this
    Talos service, take a consistent access-controlled backup of its entire home,
    and verify that the backup restores in isolation with the original image.
    A live filesystem copy of SQLite/WAL is not a verified consistent backup.
 5. During that later window, install only the reviewed files for this service,
-   preserve the external volume, and start the pinned image with the same Compose
+   preserve the external volume, and start the selected version with the same Compose
    project/service identity. Do not create a second writer on the existing volume.
    Confirm migrations/startup and then update only the agent proxy fragment.
 6. Run the acceptance checklist below before declaring launch complete. Do not
@@ -168,16 +212,16 @@ to bypass a failed login, registration or history assertion.
 
 | Gate | Required observation |
 | --- | --- |
-| Version/startup | Exact0.1.9 image, successful migrations; health reports cloud mode and auth enabled |
+| Version/startup | Configured published Server version, successful migrations; health reports cloud mode and auth enabled |
 | Public transport | Valid certificate, HTTP2 ALPN, real SDK Register and both Connect streams through the public origin; HTTP health alone is insufficient |
 | Desktop enrollment | Actual device login approval/polling, owned UUID/credential saved by the host; restart reuses identity without manual Computer creation |
 | Pure Worker | Owner-created UUID/credential; outbound registration without a published port; lease/Connect reaches available |
 | Lease/revocation | Several lease/renewal cycles, reconnect, disable and credential rotation; old credentials/streams rejected |
-| Account boundary | Another authorized account cannot view/execute/rotate the first account's private Computer; unowned hub embedded execution rejected |
+| Account boundary | Another authorized account cannot view/execute/rotate the first account's private Computer; unowned Server embedded execution rejected |
 | Real execution | B dispatches to A on another physical machine/network; actual tool file stays on A; live progress, final result and callbacks return to B |
 | Sync integration | Existing H shares complete facts; another management host continues the same Computer/Session after durable history is available |
 | Independent faults | Sync disabled does not break current execution or registration; G offline makes remote routing unavailable while local execution remains usable |
-| Restart/recovery | Hub restart preserves UUID/directory and reconnects; offline target remains explicit, no implicit reassignment or active-Turn takeover |
+| Restart/recovery | Server restart preserves UUID/directory and reconnects; offline target remains explicit, no implicit reassignment or active-Turn takeover |
 | Operations | Backup restore observed; disk/DB errors, authentication failures, connection/reconnect failures and certificate expiry have owned alerts |
 
 Record image/source, topology, timestamps, actual assertions and limitations in

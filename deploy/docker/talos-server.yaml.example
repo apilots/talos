@@ -1,4 +1,4 @@
-# Complete v0.1.9 registration hub profile. Install inside the existing Talos home.
+# Talos Server production profile. Install inside the existing Talos home.
 # Keep the live home/config writable: account enrollment uses atomic replacement.
 timezone: Asia/Shanghai
 mode: cloud

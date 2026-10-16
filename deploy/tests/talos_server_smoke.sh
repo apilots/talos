@@ -3,10 +3,9 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mkdir -p "$root/output"
-fixture="$(mktemp -d "$root/output/agent-hub-smoke.XXXXXX")"
-server="talos-hub-smoke-$$"
-proxy="talos-hub-proxy-$$"
-image="ghcr.io/apilots/talos-server@sha256:5b5199794b9fabc06e3ba819c4e940e82ceff31a16e521d9ca6ff144c9c1f349"
+fixture="$(mktemp -d "$root/output/talos-server-smoke.XXXXXX")"
+server="talos-server-smoke-$$"
+proxy="talos-server-proxy-$$"
 cleanup() {
   docker logs "$server" > "$fixture/server.log" 2>&1 || true
   docker logs "$proxy" > "$fixture/proxy.log" 2>&1 || true
@@ -14,11 +13,10 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$fixture/home/conf" "$fixture/tls"
-cp "$root/deploy/docker/talos-agent.yaml.example" "$fixture/home/conf/talos.yaml"
-cp "$root/deploy/docker/agent-hub.compose.yml" "$fixture/"
-cp "$root/deploy/docker/.hub.env.example" "$fixture/.hub.env"
-printf 'TALOS_LLM_DEEPSEEK_API_KEY=unused-startup-probe\n' > "$fixture/.env"
-docker compose --env-file "$fixture/.hub.env" -f "$fixture/agent-hub.compose.yml" config --quiet
+cp "$root/deploy/docker/talos-server.yaml.example" "$fixture/home/conf/talos.yaml"
+cp "$root/deploy/docker/talos-server.compose.yml" "$fixture/"
+cp "$root/deploy/docker/.env.example" "$fixture/.env"
+image="$(cd "$fixture" && docker compose -f talos-server.compose.yml config --images)"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=Talos-test-CA \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -keyout "$fixture/ca.key" -out "$fixture/tls/ca.crt" >/dev/null 2>&1
@@ -61,7 +59,7 @@ for _ in {1..40}; do
   fi
   sleep 1
 done
-[[ "$ready" == 1 ]] || { echo 'Hub HTTPS startup failed' >&2; exit 1; }
+[[ "$ready" == 1 ]] || { echo 'Talos Server HTTPS startup failed' >&2; exit 1; }
 python3 - "$fixture" <<'PY'
 import json,sys
 from pathlib import Path
@@ -82,4 +80,4 @@ assert headers.startswith('http/2 200'),headers
 assert 'content-type: application/grpc' in headers,headers
 assert 'grpc-status: 0' in headers,headers
 PY
-printf 'PASS: published hub starts with production profile; verified HTTPS + gRPC proxy route. Evidence: %s\n' "$fixture"
+printf 'PASS: published Talos Server starts with production profile; verified HTTPS + gRPC proxy route. Evidence: %s\n' "$fixture"
