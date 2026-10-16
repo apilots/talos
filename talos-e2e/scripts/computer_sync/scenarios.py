@@ -11,6 +11,29 @@ from cluster import REPORT, ROOT, Desktop, data, http, require, wait_for
 from turn_helpers import submit, settled
 
 
+def topology(cluster):
+    desktops = {desktop['node'] for desktop in cluster.desktops.values()}
+
+    def observed():
+        metrics = data(http(cluster.url + '/v1/sync/metrics', token=cluster.users['alice']['access_token']))
+        peers = metrics['peers']
+        mapped = {computer for peer in peers for computer in peer['computerIds']}
+        if desktops <= mapped and any(peer['peerId'] == metrics['controlPlanePeerId'] for peer in peers):
+            return metrics
+        return False
+
+    metrics = wait_for(observed, 'Control Plane peer and Desktop Computer sync mappings')
+    mapped = {computer for peer in metrics['peers'] for computer in peer['computerIds']}
+    require(not mapped.intersection(node['node_id'] for node in cluster.nodes.values()),
+            'Standalone Worker incorrectly advertised a Sync mapping')
+    for name in cluster.desktops:
+        status = cluster.desktop(name, 'sync/status')
+        require(status['connection'] == 'connected' and status['lastError'] is None,
+                name + ' synchronization is not healthy')
+    (REPORT / 'sync-topology-metrics.json').write_text(json.dumps(metrics, indent=2))
+    print('CASE sync_topology_control_plane_and_desktop_mappings PASS', flush=True)
+
+
 def directory(cluster):
     expected = {d['node'] for d in cluster.desktops.values()} | {cluster.nodes[n]['node_id'] for n in ('Mac-Worker', 'Docker-Worker')}
     for name in cluster.desktops:
@@ -38,6 +61,7 @@ def directory(cluster):
     require(http(cluster.url + '/v1/computers/embedded', token=cluster.users['alice']['access_token']).get('error', {}).get('code') == 'permissionDenied',
             'An ordinary account read the center private embedded Computer')
     print('CASE sync_directory_hardware_and_account_ownership PASS', flush=True)
+    topology(cluster)
 
 
 

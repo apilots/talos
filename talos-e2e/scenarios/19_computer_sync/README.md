@@ -8,7 +8,10 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
 
 - `01_directory_registration`: real device login, own Computer identities,
   account-scoped directories, Linux/macOS hardware registration and identical
-  metadata materialization, pure Workers without management databases.
+  metadata materialization, pure Workers without management databases. Real
+  account Metrics must observe the exact Control Plane peer and both Desktop
+  Computer mappings used by topology sync edges; standalone Workers must have
+  no Sync mappings and Desktop synchronization must remain healthy.
 - `02_execution_history`: funded real model/tool tasks on Desktop embedded,
   native Mac and Docker Linux Workers; another Desktop continues each Session on
   its immutable Computer, realtime progress, identical complete history and files
