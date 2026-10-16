@@ -2,7 +2,11 @@
 
 [Chinese](README_zh.md)
 
-The installer selects the TUI release bundle for the current macOS or Linux CPU target,
+Current TUI releases support Linux AMD64/ARM64 and macOS Apple Silicon (ARM64).
+macOS Intel builds and native CI installation are disabled. The installer can
+select older Intel bundles by explicit version when those assets exist.
+
+The installer selects the TUI release bundle for the current supported CPU target,
 verifies its release checksum, installs immutable product resources, and activates a stable
 launcher.
 
@@ -40,7 +44,7 @@ Run the offline installer tests with:
 deploy/install/tests/install_test.sh
 ```
 
-`release_assets_test.sh` additionally verifies and installs from the fully assembled four-platform
+`release_assets_test.sh` additionally verifies and installs from the fully assembled three-platform
 release asset directory. The release workflow runs it after generating the final checksum manifest.
 The installer checks Talos releases first and falls back to archived `talos-releases` assets
 for versions that predate the migration.

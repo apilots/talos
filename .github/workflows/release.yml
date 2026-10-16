@@ -256,7 +256,7 @@ jobs:
       - validate-source
       - quality
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes || 45 }}
+    timeout-minutes: 45
     env:
       VALIDATED_LOCK_SHA256: ${{ needs.quality.outputs.lock_sha256 }}
     strategy:
@@ -291,12 +291,6 @@ jobs:
           - name: TUI linux-arm64
             artifact_name: talos-tui-linux-arm64
             runner: ubuntu-24.04-arm
-            build_target: tui
-            product_subdir: tui
-          - name: TUI macOS AMD64
-            artifact_name: talos-tui-macos-amd64
-            runner: macos-26-intel
-            timeout_minutes: 90
             build_target: tui
             product_subdir: tui
           - name: TUI macOS ARM64
@@ -810,10 +804,19 @@ jobs:
               }
             }' > release-assets/manifest.json
 
+      - name: Check out release validation tooling
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: deploy/install/tests/release_assets_test.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Test final TUI release assets
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: deploy/install/tests/release_assets_test.sh release-assets "${RELEASE_VERSION}"
+        run: .release-tools/deploy/install/tests/release_assets_test.sh release-assets "${RELEASE_VERSION}"
 
 
       - name: Upload release assets to R2
