@@ -81,6 +81,8 @@ uses `AppServerClient` through typed preload IPC and JSON-RPC stdio. Its bundled
 app-server retains Service, Store, Coordinator and one `TalosWorker`. Verified
 login enrolls or restores this same Worker's personal UUID through the central
 Server. Registration does not replace the management runtime or its data.
+Rust stdio and embedded clients initialize the existing host registration lifecycle
+after verified login or cached-session restoration, including when Sync is disabled.
 Remote dispatch stays inside `agent-client`; credentials never reach the renderer.
 The production UI requires sign-in. Anonymous development keeps local execution
 without registering a fictitious cloud node. Sync opt-out remains independent.

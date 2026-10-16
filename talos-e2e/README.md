@@ -74,6 +74,9 @@ the existing client to exercise model listing, Session creation, configuration a
 Workspace/Memory API reads without executing a model. Scenarios `11_auth`,
 `17_multi_node`, and `18_computer_workspace` still
 use the configured Cloud fixture executable for isolated account setup.
+`11_auth/cloud_gateway` uses real device approval and personal Computer registration
+before restoring App-server/CLI sessions. It checks the owned model catalog and
+offline Auth rejection; no provider completion is required.
 The larger `19_computer_sync` topology also remains local acceptance.
 Cross-manager continuation acceptance must send a real model/tool task to its
 pinned Worker, continue the same Session from the receiving manager once its
