@@ -63,7 +63,7 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 不再作为 E2E 场景重复执行。
 
 GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secrets 的
-`01_health_and_models`、`09_app_server/smoke_e2e`、`12_files` 和
+`01_health_and_models`、`09_app_server/smoke_e2e`、`09_app_server/desktop_recovery`、`12_files` 和
 `14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
 适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
 Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
@@ -74,6 +74,11 @@ Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓�
 不执行模型。`11_auth`、`17_multi_node` 和 `18_computer_workspace` 使用配置好的 Cloud fixture
 可执行文件启动本地隔离服务；`19_computer_sync` 的大型拓扑也继续本地验收。上述排除项
 均明确记录，不得声称已在 GitHub CI 通过。
+
+`09_app_server/desktop_recovery` 使用真实 controller、SDK、Server 和 app-server 进程，
+以受控的本地 Auth/模型 HTTP fixture 验证认证要求、SIGTERM 后自动恢复、已交付事件与
+持久历史一致、Computer/Session 不变、后续回合和原取消句柄，不需要私有源码或付费凭据。
+打包 Desktop 与 Server/Web 接续仍需使用真实 Auth、Sync 进行本地产品验收。
 
 PR 子集保留有代表性的门禁，同时避免 Fork 代码接触 Secrets。真实 Provider 和
 Cloud fixture 验收由维护者负责，不会随每个外部贡献自动运行。

@@ -59,7 +59,7 @@ that group numbers are contiguous. Frontend unit tests belong to the frontend
 quality workflow and are not repeated as an E2E scenario.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server/smoke_e2e`, `12_files`, and
+`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `12_files`, and
 `14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
 `talos-agent` and `talos-service` package tests. These cover public Cloud SDK
 adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
@@ -77,6 +77,13 @@ use the configured Cloud fixture executable for isolated account setup.
 `11_auth/cloud_gateway` uses real device approval and personal Computer registration
 before restoring App-server/CLI sessions. It checks the owned model catalog and
 offline Auth rejection; no provider completion is required.
+`09_app_server/desktop_recovery` uses the real controller, SDK, Server and
+app-server processes with controlled loopback Auth/model HTTP fixtures. It checks
+actual credential enforcement, SIGTERM replacement, exact delivered/history event
+parity, unchanged Computer/Session, a subsequent controlled turn and the original
+unsubscribe handle. It needs no private source or provider credentials. Native
+packaged Desktop plus Server/Web continuation remains a local acceptance using
+real Auth and Sync; controlled fixtures do not replace that product verification.
 The larger `19_computer_sync` topology also remains local acceptance.
 Cross-manager continuation acceptance must send a real model/tool task to its
 pinned Worker, continue the same Session from the receiving manager once its

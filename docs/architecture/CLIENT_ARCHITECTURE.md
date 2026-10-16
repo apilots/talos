@@ -193,6 +193,19 @@ uses the same UUID/credential contract for embedded and standalone Workers;
 - Clients own presentation, interaction, optimistic state, and reconnect UX.
 - The server owns search, matching, parsing, permission, and durable lifecycle rules.
 
+Desktop's app-server controller owns backend restart and subscription replay.
+Replay retains the verified account ID and last delivered cursor, never a token.
+After replacement it reads the current session from the existing auth owner and
+uses that account's current credential through normal request validation. Missing,
+rejected or different-account credentials terminate recovery explicitly; there is
+no anonymous fallback. Logout, a new login, unsubscribe and controller shutdown
+retire subscription contexts; retired backend events are ignored. Original
+renderer unsubscribe handles continue to resolve after backend replacement.
+Subscriptions accept initial replay events before the subscribe response resumes;
+only delivered events advance their cursor, never an unconsumed high-water mark.
+Authenticated Desktop startup restores the existing host lifecycle through
+`sync/status`, using the current login credential for enrollment and owner binding.
+
 ## Parity requirements
 
 - API changes review Rust SDK, TypeScript SDK, embedded SDK, HTTP, JSON-RPC, Web,

@@ -13,9 +13,9 @@ function hostBridge(savedLogin: boolean, authEnabled = true): FakeBridge {
   vi.spyOn(bridge, "invoke").mockImplementation(<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> => {
     bridge.requests.push({ method, params });
     const responses: Partial<Record<AppProtocol.ClientMethod, unknown>> = {
-      "auth/session/read": { session: savedLogin ? { access_token: "USER_ACCESS_TOKEN" } : null },
-      "auth/login/status": { status: "authenticated", access_token: "USER_ACCESS_TOKEN" },
-      "desktop/workerEnroll": { nodeId: "stable-uuid", controlPlaneEndpoint: "https://agent.talos.love" },
+      "auth/session/read": { session: savedLogin ? { access_token: "USER_ACCESS_TOKEN", user: { user_id: "owner" } } : null },
+      "auth/login/status": { status: "authenticated", access_token: "USER_ACCESS_TOKEN", user: { user_id: "owner" } },
+      "sync/status": { localComputerId: "stable-uuid" },
     };
     return Promise.resolve(responses[method] as T);
   });
@@ -32,10 +32,12 @@ describe("Desktop host enrollment", () => {
       await controller.connect();
       expect(initial.requests.map((request) => request.method)).toEqual(["auth/session/read"]);
       await controller.invoke("auth/login/status", { login_id: "login-1" });
-      expect(initial.requests.at(-1)).toEqual({ method: "desktop/workerEnroll", params: { nodeId: null } });
+      expect(initial.requests.at(-1)).toEqual({ method: "sync/status", params: null });
+      expect(initial.invoke).toHaveBeenLastCalledWith("sync/status", null, { actorCredentials: { credential: { type: "existing_session_token", token: "USER_ACCESS_TOKEN" } } });
       initial.emitExit();
       await vi.advanceTimersByTimeAsync(300);
-      expect(restored.requests.map((request) => request.method)).toEqual(["auth/session/read", "desktop/workerEnroll"]);
+      expect(restored.requests.map((request) => request.method)).toEqual(["auth/session/read", "sync/status"]);
+      expect(restored.invoke).toHaveBeenLastCalledWith("sync/status", null, { actorCredentials: { credential: { type: "existing_session_token", token: "USER_ACCESS_TOKEN" } } });
       expect(restored.requests.some((request) => request.method === "computer/create")).toBe(false);
     } finally {
       await controller.close();
@@ -57,7 +59,7 @@ describe("Desktop host enrollment", () => {
     const factory = vi.fn().mockReturnValue(bridge);
     const invoke = bridge.invoke.bind(bridge);
     vi.spyOn(bridge, "invoke").mockImplementation(<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> => {
-      if (method === "desktop/workerEnroll") {
+      if (method === "sync/status") {
         return Promise.reject(new Error("Enrollment unavailable"));
       }
       return invoke<T>(method, params);
