@@ -93,7 +93,15 @@ checksum = "original"
             self.assertFalse(version_change_only(path, before, changed))
 
 
-def with_version(path, content, version='0.1.12-SNAPSHOT'):
+def next_fixture_version():
+    current = tomllib.loads((ROOT / 'talos-rs/Cargo.toml').read_text())['workspace']['package']['version']
+    major, minor, patch = map(int, current.split('-', 1)[0].split('.'))
+    return f'{major}.{minor}.{patch + 1}-SNAPSHOT'
+
+
+def with_version(path, content, version=None):
+    if version is None:
+        version = next_fixture_version()
     if path == 'talos-rs/Cargo.lock':
         import re
         local = [p for p in tomllib.loads(content)['package'] if 'source' not in p]
@@ -140,12 +148,12 @@ class GitScopeTests(unittest.TestCase):
         file.write_text(text)
         return file
 
-    def commit(self, subject='chore(release): start v0.1.12 development'):
+    def commit(self, subject='chore(release): update version fixture'):
         self.git('add', '.')
         self.git('commit', '-qm', subject)
         return self.git('rev-parse', 'HEAD')
 
-    def versions(self, version='0.1.12-SNAPSHOT'):
+    def versions(self, version=None):
         for path in version_files():
             file = self.root / path
             file.write_text(with_version(path, file.read_text(), version))
@@ -227,11 +235,12 @@ class GitScopeTests(unittest.TestCase):
 
     def test_tag_and_metadata_pushes_do_not_repeat_source_checks(self):
         self.prepare_hook()
-        self.versions('0.1.12')
-        head = self.commit('chore(release): prepare v0.1.12')
-        self.git('tag', '-a', 'v0.1.12', '--cleanup=verbatim', '-m', '# Talos v0.1.12\n\n## Fixes\n\n- Product fix')
-        tag = self.git('rev-parse', 'v0.1.12')
-        self.assertEqual(self.hook(f'refs/tags/v0.1.12 {tag} refs/tags/v0.1.12 {"0" * 40}\n'), '')
+        version = next_fixture_version().removesuffix('-SNAPSHOT')
+        self.versions(version)
+        head = self.commit(f'chore(release): prepare v{version}')
+        self.git('tag', '-a', f'v{version}', '--cleanup=verbatim', '-m', f'# Talos v{version}\n\n## Fixes\n\n- Product fix')
+        tag = self.git('rev-parse', f'v{version}')
+        self.assertEqual(self.hook(f'refs/tags/v{version} {tag} refs/tags/v{version} {"0" * 40}\n'), '')
         self.assertEqual(self.hook(f'refs/heads/main {head} refs/heads/main {self.base}\n'), '')
 
     def test_docker_install_uses_shared_toolchain(self):
