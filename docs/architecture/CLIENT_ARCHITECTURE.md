@@ -205,6 +205,10 @@ Subscriptions accept initial replay events before the subscribe response resumes
 only delivered events advance their cursor, never an unconsumed high-water mark.
 Authenticated Desktop startup restores the existing host lifecycle through
 `sync/status`, using the current login credential for enrollment and owner binding.
+Sign-out retires subscriptions immediately and waits only for the backend
+handshake, never pending replay. Recovery completion and auth callbacks affect
+only their current bridge/account generation; a retired recovery cannot clear
+its replacement or rebind the previous account.
 
 ## Parity requirements
 

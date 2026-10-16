@@ -180,4 +180,112 @@ describe("authenticated Desktop restart recovery", () => {
       expect(replacement.requests.mock.calls.some(([method]) => method === "event/subscribe")).toBe(false);
     } finally { release(); await controller.close(); vi.useRealTimers(); }
   });
+
+  it("clears logout immediately while replay is blocked instead of delivering old-account events", async () => {
+    vi.useFakeTimers();
+    const initial = authenticatedBridge();
+    const replacement = authenticatedBridge();
+    const replay = deferred<void>();
+    const entered = deferred<void>();
+    const invoke = replacement.requests.getMockImplementation()!;
+    replacement.requests.mockImplementation(async <T>(method: AppProtocol.ClientMethod, params: unknown, options?: { actorCredentials?: AppProtocol.ActorCredentials | null }): Promise<T> => {
+      if (method === "event/subscribe") { entered.resolve(); await replay.promise; }
+      return invoke(method, params, options) as Promise<T>;
+    });
+    const events = vi.fn();
+    const terminated = vi.fn();
+    const controller = new DesktopAppServerController({ restartDelayMs: 10, onEvent: events, onSubscriptionTerminated: terminated,
+      bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValue(replacement.bridge) });
+    let logout: Promise<unknown> | undefined;
+    try {
+      await controller.connect();
+      await controller.invoke("event/subscribe", subscribe("private"), credentials("current-token"));
+      initial.bridge.emitExit();
+      await vi.advanceTimersByTimeAsync(10);
+      await entered.promise;
+      logout = controller.invoke("auth/session/clear", {});
+      await vi.advanceTimersByTimeAsync(0);
+      replacement.bridge.emitEvent(event("private", "after-logout-request"));
+      expect(events).not.toHaveBeenCalled();
+      expect(terminated).toHaveBeenCalledOnce();
+      expect(replacement.requests.mock.calls.some(([method]) => method === "auth/session/clear")).toBe(true);
+      replay.resolve();
+      await logout;
+      replacement.bridge.emitEvent(event("private", "after-logout-response"));
+      expect(events).not.toHaveBeenCalled();
+    } finally { replay.resolve(); await logout; await controller.close(); vi.useRealTimers(); }
+  });
+
+  it("keeps a second replacement recovery alive when the first replacement exits during connect", async () => {
+    vi.useFakeTimers();
+    const initial = authenticatedBridge();
+    const replacement = authenticatedBridge();
+    const third = authenticatedBridge();
+    const secondReady = deferred<AppProtocol.InitializeResponse>();
+    const thirdReady = deferred<AppProtocol.InitializeResponse>();
+    const thirdResponse = await third.bridge.connect();
+    vi.spyOn(replacement.bridge, "connect").mockReturnValue(secondReady.promise);
+    vi.spyOn(third.bridge, "connect").mockReturnValue(thirdReady.promise);
+    const terminated = vi.fn();
+    const events = vi.fn();
+    const states = vi.fn();
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const controller = new DesktopAppServerController({ restartDelayMs: 10, onEvent: events, onRuntimeState: states, onSubscriptionTerminated: terminated,
+      bridgeFactory: vi.fn().mockReturnValueOnce(initial.bridge).mockReturnValueOnce(replacement.bridge).mockReturnValue(third.bridge) });
+    let request: Promise<unknown> | undefined;
+    try {
+      await controller.connect();
+      await controller.invoke("event/subscribe", subscribe("private"), credentials("current-token"));
+      initial.bridge.emitEvent(event("private", "event-before-exits"));
+      initial.bridge.emitExit();
+      await vi.advanceTimersByTimeAsync(10);
+      replacement.bridge.emitExit();
+      secondReady.reject(new Error("Replacement exited during initialization."));
+      await vi.advanceTimersByTimeAsync(10);
+      let settled = false;
+      request = controller.invoke("user/current", {}, credentials("current-token")).then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      thirdReady.resolve(thirdResponse);
+      await vi.advanceTimersByTimeAsync(0);
+      await request;
+      expect(terminated).not.toHaveBeenCalled();
+      expect(states.mock.calls.some(([state]) => state.kind === "error")).toBe(false);
+      expect(third.requests.mock.calls).toContainEqual(["event/subscribe", { ...subscribe("private"), sinceEventId: "event-before-exits" }, credentials("current-token")]);
+      third.bridge.emitEvent(event("private", "event-after-exits"));
+      expect(events.mock.calls.map(([value]) => value.eventId)).toEqual(["event-before-exits", "event-after-exits"]);
+    } finally { secondReady.reject(new Error("Stopped.")); thirdReady.resolve(thirdResponse); await request; await controller.close(); report.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it("does not let a delayed session read rebind the previous account after another login", async () => {
+    const initial = authenticatedBridge();
+    const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => initial.bridge });
+    await controller.connect();
+    const snapshot = await initial.bridge.invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
+    const read = deferred<AppProtocol.AuthSessionReadResponse>();
+    const entered = deferred<void>();
+    const invoke = initial.requests.getMockImplementation()!;
+    initial.requests.mockImplementation(async <T>(method: AppProtocol.ClientMethod, params: unknown, options?: { actorCredentials?: AppProtocol.ActorCredentials | null }): Promise<T> => {
+      if (method === "auth/session/read") { entered.resolve(); return read.promise as Promise<T>; }
+      if (method === "auth/login/status") return { status: "authenticated", access_token: "bob-token", user: { user_id: "bob" } } as T;
+      return invoke(method, params, options) as Promise<T>;
+    });
+    const stale = controller.invoke("auth/session/read", {});
+    try {
+      await entered.promise;
+      await controller.invoke("auth/login/status", { login_id: "bob-login" });
+      read.resolve(snapshot);
+      await stale;
+      const bindings = initial.requests.mock.calls.filter(([method]) => method === "sync/status");
+      expect(bindings.map(([, , options]) => options?.actorCredentials?.credential.token)).toEqual(["current-token", "bob-token"]);
+    } finally { read.resolve(snapshot); await stale; await controller.close(); }
+  });
+
 });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}

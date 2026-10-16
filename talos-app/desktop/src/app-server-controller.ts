@@ -68,6 +68,7 @@ export class DesktopAppServerController {
     this.closed = false;
     this.emitRuntimeState("starting", null);
     const bridge = this.ensureBridge();
+    const epoch = this.subscriptionEpoch;
     const response = await bridge.connect();
     if (this.closed || this.bridge !== bridge) return response;
     if (this.options.desktopHost && response.server_info.auth_enabled) {
@@ -75,7 +76,7 @@ export class DesktopAppServerController {
       if (this.closed || this.bridge !== bridge) return response;
       this.initializeResponse = response;
       this.emitRuntimeState("ready", null);
-      if (session.session) { await this.enrollWorker(session.session.access_token); }
+      if (session.session && epoch === this.subscriptionEpoch) { await this.enrollWorker(bridge, session.session.access_token, epoch); }
       return response;
     }
     this.initializeResponse = response;
@@ -88,15 +89,13 @@ export class DesktopAppServerController {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T> {
-    if (this.reconnecting) {
-      await this.reconnecting;
-    }
-
-    if (method === "auth/logout" || method === "auth/session/clear") {
-      this.clearSubscriptions();
-    }
+    const clearingAuth = method === "auth/logout" || method === "auth/session/clear";
+    if (clearingAuth) this.clearSubscriptions();
+    while (!clearingAuth && this.reconnecting) await this.reconnecting;
     const bridge = this.ensureBridge();
     const epoch = this.subscriptionEpoch;
+    // Sign-out waits only for the handshake, never for an in-flight replay.
+    if (clearingAuth) await bridge.connect();
     const userId = method === "event/subscribe" && this.initializeResponse?.server_info.auth_enabled
       ? (await bridge.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, options)).user.user_id
       : null;
@@ -118,21 +117,22 @@ export class DesktopAppServerController {
       }
       throw error;
     }
-    if (method === "auth/logout" || method === "auth/session/clear") this.clearSubscriptions();
-    if (method === "auth/login/status") {
+    const current = !this.closed && this.bridge === bridge && epoch === this.subscriptionEpoch;
+    if (clearingAuth && current) this.clearSubscriptions();
+    if (method === "auth/login/status" && current) {
       const login = result as AppProtocol.CloudLoginStatusResponse;
       if (login.status === "authenticated") this.clearSubscriptions();
     }
-    if (method === "auth/session/read") {
+    if (method === "auth/session/read" && current) {
       this.retainAccountSubscriptions((result as AppProtocol.AuthSessionReadResponse).session?.user.user_id ?? null);
     }
-    if (this.options.desktopHost && this.initializeResponse?.server_info.auth_enabled) {
+    if (current && this.options.desktopHost && this.initializeResponse?.server_info.auth_enabled) {
       const login = method === "auth/login/status" ? result as AppProtocol.CloudLoginStatusResponse : null;
       const session = method === "auth/session/read" ? (result as AppProtocol.AuthSessionReadResponse).session : null;
       const token = login?.status === "authenticated" ? login.access_token : session?.access_token;
-      if (token) await this.enrollWorker(token);
+      if (token) await this.enrollWorker(bridge, token, this.subscriptionEpoch);
     }
-    if (method === "desktop/workerEnroll") this.emitRuntimeState("ready", null);
+    if (method === "desktop/workerEnroll" && current) this.emitRuntimeState("ready", null);
     if (subscription && this.subscriptions.get(subscription.sessionId) === subscription) {
       for (const [subscriptionId, sessionId] of this.sessionsBySubscriptionId) {
         if (sessionId === subscription.sessionId) this.sessionsBySubscriptionId.delete(subscriptionId);
@@ -157,13 +157,15 @@ export class DesktopAppServerController {
   }
 
   /** Enrollment is independent of successful login; report its failure without rewriting auth. */
-  private async enrollWorker(token: string): Promise<void> {
+  private async enrollWorker(bridge: AppServerBridge, token: string, epoch: number): Promise<void> {
     try {
-      await this.ensureBridge().invoke("sync/status", null, {
+      await bridge.invoke("sync/status", null, {
         actorCredentials: { credential: { type: "existing_session_token", token } },
       });
+      if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
       this.emitRuntimeState("ready", null);
     } catch (error) {
+      if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
       if (!(error instanceof TalosApiError)) { console.error("Desktop Worker enrollment failed", error); }
       this.options.onRuntimeState?.({
         kind: "error",
@@ -271,9 +273,10 @@ export class DesktopAppServerController {
 
     const message = `app-server exited: code=${status.code ?? "null"} signal=${status.signal ?? "null"}`;
     this.emitRuntimeState("restarting", message);
-    this.reconnecting = this.restartAndReplay().finally(() => {
-      this.reconnecting = undefined;
+    const recovery = this.restartAndReplay().finally(() => {
+      if (this.reconnecting === recovery) this.reconnecting = undefined;
     });
+    this.reconnecting = recovery;
     // Reconnect reports and terminates subscriptions even without an awaiting request.
     void this.reconnecting.catch(() => undefined);
   }
@@ -281,21 +284,22 @@ export class DesktopAppServerController {
   private async restartAndReplay(): Promise<void> {
     await delay(this.options.restartDelayMs ?? 300);
     if (this.closed) return;
+    const bridge = this.ensureBridge();
+    const epoch = this.subscriptionEpoch;
     try {
       await this.connect();
-      if (this.closed) return;
-      await this.replaySubscriptions();
+      if (this.closed || this.bridge !== bridge) return;
+      await this.replaySubscriptions(bridge);
     } catch (error) {
-      if (this.closed) return;
+      if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
       this.handleError(error);
       throw error;
     }
   }
 
-  private async replaySubscriptions(): Promise<void> {
+  private async replaySubscriptions(bridge: AppServerBridge): Promise<void> {
     const subscriptions = [...this.subscriptions.values()];
     if (!subscriptions.length) return;
-    const bridge = this.ensureBridge();
     const session = this.initializeResponse?.server_info.auth_enabled
       ? (await bridge.invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {})).session
       : null;
