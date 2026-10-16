@@ -35,16 +35,14 @@ not read-modify-write of the full UpdateNodeRequest. Domain owners and generated
 ## Desktop host API
 
 These named methods use the existing stdio App Server protocol and its SDK. They are not Agent business PB definitions.
-The connectionMode DTO/read/set entries document the 043 bootstrap surface. Feature 044 updates their SDK/UI configuration
+Worker identity and enrollment remain the Desktop host bootstrap surface. Feature 044 updates SDK/UI configuration
 semantics with the unified management runtime; they must not select a no-database host or destroy local services on login.
 The trusted host performs enrollment through AgentNodeClient's existing management gRPC service with Actor Bearer auth.
 Configuration remains snake_case; host DTOs and their generated schema/TypeScript use camelCase.
 
 | Method | Params | Response / caller expectations |
 | --- | --- | --- |
-| desktop/connection/read | null / omitted | DesktopConnectionResponse { connectionMode: cloud or local, controlPlaneEndpoint: string } |
-| desktop/connection/set | DesktopConnectionSetParams { connectionMode } | DesktopConnectionResponse; main restarts the existing host after a durable save |
-| desktop/workerIdentity | null / omitted | DesktopWorkerIdentityResponse { nodeId: string or null, controlPlaneEndpoint: string or null }; local returns embedded/null; not enrolled returns null/null |
+| desktop/workerIdentity | null / omitted | DesktopWorkerIdentityResponse { nodeId: string or null, controlPlaneEndpoint: string or null }; nodeId is the saved UUID or embedded; controlPlaneEndpoint is the configured Server address |
 | desktop/workerEnroll | DesktopWorkerEnrollParams { nodeId?: string or null } | DesktopWorkerIdentityResponse; null creates/reuses, an explicit existing UUID recovers by rotating its credential |
 
 These bootstrap methods require the local host connection; enrollment additionally verifies its cached Cloud Auth login,
@@ -315,7 +313,7 @@ Secrets stay on the Worker and use existing redacted responses. Failure does not
 
 Extend the existing OAuth owner and attempt lifecycle, without introducing a second OAuth manager or Store.
 The existing McpAuthenticationStartRequest/Response and ReadMcpAuthentication contracts remain authoritative.
-StartMcpAuthentication's internal RPC envelope adds a typed callback target: Loopback for explicit local mode,
+StartMcpAuthentication's internal RPC envelope adds a typed callback target: Loopback for anonymous local execution,
 or ControlPlaneRelay with the configured control-plane HTTPS callback URI. This is adapter input, not a
 user-supplied redirect URI in the public business request. The Worker verifies the relay origin/path against
 its configured control plane, and uses that exact URI for authorization and token exchange.

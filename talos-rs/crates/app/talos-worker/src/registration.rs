@@ -5,7 +5,7 @@ use agent_client::{
 };
 use agent_protocol::{NodeAuth, Registration};
 use std::sync::Arc;
-use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport, Config};
+use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport, Config, YamlConfigStore};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio_util::sync::CancellationToken;
 
@@ -72,6 +72,7 @@ impl RegisteredWorker {
         )
         .await?;
         worker.use_remote_resource_rpc(resources.clone());
+        let observer = lease_observer(adapter, Some(resources), &config, credential.clone());
         let node = AgentNodeRunner::new(
             client,
             runner.node_id.clone(),
@@ -79,7 +80,7 @@ impl RegisteredWorker {
             worker.deployments(),
         )
         .with_system_info(worker.system_info().clone())
-        .with_lease_observer(lease_observer(adapter, Some(resources)));
+        .with_lease_observer(observer);
         Ok(Self::spawn(None, rpc, node, runner.transport(), on_failure))
     }
 
@@ -231,6 +232,12 @@ pub(crate) async fn prepare_registered_worker(
     .with_registration_revocation_hook(Arc::new(move || {
         authorization_owner.cancel_remote_mcp_authorizations()
     }));
+    let observer = lease_observer(
+        adapter.clone(),
+        Some(resources),
+        &config,
+        credential.clone(),
+    );
     let node = AgentNodeRunner::new(
         node_client,
         runner.node_id.clone(),
@@ -238,7 +245,7 @@ pub(crate) async fn prepare_registered_worker(
         worker.deployments(),
     )
     .with_system_info(worker.system_info().clone())
-    .with_lease_observer(lease_observer(adapter.clone(), Some(resources)));
+    .with_lease_observer(observer);
     Ok((worker, adapter, node))
 }
 
@@ -270,7 +277,13 @@ fn registration_trust(runner: &AgentNodeRunnerConfig) -> TalosResult<AgentTlsTru
 fn lease_observer(
     adapter: AgentHarnessRpcAdapter,
     resources: Option<AgentSessionDataClient>,
+    config: &Config,
+    credential: String,
 ) -> agent_client::AgentNodeLeaseObserver {
+    // Only the managed home can provision identities or own this recovery state.
+    let paths = config.talos_paths();
+    let store = (config.source_path() == paths.config_file)
+        .then(|| YamlConfigStore::with_env_path(config.source_path(), paths.env_file));
     Arc::new(move |update| {
         let Some(update) = update else {
             adapter.clear_registration();
@@ -287,6 +300,10 @@ fn lease_observer(
                 owner_user_id: update.owner_user_id,
             },
             update.deadline,
-        )
+        )?;
+        if let Some(store) = &store {
+            store.complete_node_enrollment(&update.auth.node_id, &credential)?;
+        }
+        Ok(())
     })
 }

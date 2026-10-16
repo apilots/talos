@@ -7,11 +7,11 @@ from fixture import Cluster, require
 from scenarios import routing, reliability, collaboration, parity
 from workspace import WorkspaceCluster, workspace
 from environment import EnvironmentCluster, environment
-from configuration import ConfigurationCluster, configuration
+from configuration import configuration
 from plugins import plugins
 from oauth import OAuthCluster, oauth
 
-cluster_type = {'workspace': WorkspaceCluster, 'environment': EnvironmentCluster, 'configuration': ConfigurationCluster, 'plugins': ConfigurationCluster, 'oauth': OAuthCluster}.get(sys.argv[1], Cluster)
+cluster_type = {'workspace': WorkspaceCluster, 'environment': EnvironmentCluster, 'configuration': EnvironmentCluster, 'plugins': EnvironmentCluster, 'oauth': OAuthCluster}.get(sys.argv[1], Cluster)
 cluster = cluster_type(worker_transport='outbound')
 try:
     cluster.start()

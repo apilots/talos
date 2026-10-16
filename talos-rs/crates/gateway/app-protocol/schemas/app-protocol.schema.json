@@ -1741,42 +1741,6 @@
           "properties": {
             "method": {
               "enum": [
-                "desktop/connection/read"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "type": "null"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "desktop/connection/set"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/DesktopConnectionSetParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
                 "desktop/workerIdentity"
               ],
               "type": "string"
@@ -4065,40 +4029,6 @@
       "required": [
         "credential",
         "node"
-      ],
-      "type": "object"
-    },
-    "DesktopConnectionMode": {
-      "description": "Product connection source, independent of the server deployment mode.",
-      "enum": [
-        "cloud",
-        "local"
-      ],
-      "type": "string"
-    },
-    "DesktopConnectionResponse": {
-      "properties": {
-        "connectionMode": {
-          "$ref": "#/definitions/DesktopConnectionMode"
-        },
-        "controlPlaneEndpoint": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "connectionMode",
-        "controlPlaneEndpoint"
-      ],
-      "type": "object"
-    },
-    "DesktopConnectionSetParams": {
-      "properties": {
-        "connectionMode": {
-          "$ref": "#/definitions/DesktopConnectionMode"
-        }
-      },
-      "required": [
-        "connectionMode"
       ],
       "type": "object"
     },
@@ -10805,9 +10735,6 @@
     "created_node": {
       "$ref": "#/definitions/CreatedNode"
     },
-    "desktop_connection_response": {
-      "$ref": "#/definitions/DesktopConnectionResponse"
-    },
     "desktop_worker_identity_response": {
       "$ref": "#/definitions/DesktopWorkerIdentityResponse"
     },
@@ -10955,7 +10882,6 @@
     "collaboration_tool_result",
     "computer_list_response",
     "created_node",
-    "desktop_connection_response",
     "desktop_worker_identity_response",
     "error",
     "event_unsubscribe_response",

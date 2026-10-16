@@ -65,7 +65,7 @@ import json,sys
 from pathlib import Path
 fixture=Path(sys.argv[1])
 health=json.loads((fixture/'health.json').read_text())
-assert health['auth_enabled'] is True and health['mode']=='cloud',health
+assert health['auth_enabled'] is True,health
 (fixture/'request.bin').write_bytes(bytes(5))
 PY
 curl --http2 -fsS --max-time 10 --noproxy '*' --resolve "talos-agent.internal:$port:127.0.0.1" --cacert "$fixture/tls/ca.crt" \

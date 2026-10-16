@@ -44,7 +44,7 @@ RUN groupadd --gid 10001 talos \
     && install -d -o talos -g talos /opt/talos/bin /opt/talos/conf /home/talos/.talos
 COPY --from=product /artifacts/talos-worker /opt/talos/bin/talos-worker
 COPY --from=product /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
-COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
+COPY talos/conf/talos-prod.yaml /opt/talos/conf/talos.yaml
 COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 RUN /opt/talos/bin/talos-worker --version \
     && test -s /usr/share/licenses/talos/LICENSE \

@@ -41,6 +41,7 @@ pub struct NodeRpcServer {
     subagent_control: NodeSubagentControlRpc,
     tool_images: NodeToolImageRpc,
     remote_publisher: RemoteNodePublisher,
+    worker_adapter: Option<agent_client::AgentHarnessRpcAdapter>,
 }
 
 impl NodeRpcServer {
@@ -107,7 +108,15 @@ impl NodeRpcServer {
             subagent_control,
             tool_images,
             remote_publisher,
+            worker_adapter: None,
         })
+    }
+
+    /// Publish the same embedded Worker on the central TLS ingress. Its personal
+    /// node lease still authorizes every direct request; no extra Worker is built.
+    pub fn with_worker_adapter(mut self, adapter: agent_client::AgentHarnessRpcAdapter) -> Self {
+        self.worker_adapter = Some(adapter);
+        self
     }
 
     pub fn with_coordinator_id(mut self, coordinator_id: String) -> TalosResult<Self> {
@@ -166,6 +175,15 @@ impl NodeRpcServer {
             .add_service(session_data)
             .add_service(subagent_control)
             .add_service(tool_images)
+            .add_optional_service(
+                self.worker_adapter
+                    .clone()
+                    .map(pb::worker_environment_rpc_server::WorkerEnvironmentRpcServer::new),
+            )
+            .add_optional_service(
+                self.worker_adapter
+                    .map(pb::agent_harness_rpc_server::AgentHarnessRpcServer::new),
+            )
             .serve_with_shutdown(self.bind_address, shutdown.cancelled_owned())
             .await
             .map_err(|error| {

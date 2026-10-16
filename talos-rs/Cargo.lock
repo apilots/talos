@@ -7177,6 +7177,7 @@ dependencies = [
  "talos-tools",
  "talos-tools-sandbox",
  "talos-types",
+ "talos-upgrade",
  "tempfile",
  "tokio",
  "tokio-stream",

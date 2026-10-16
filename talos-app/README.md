@@ -71,7 +71,7 @@ from Rust with `just gen-app-protocol`; do not edit them manually.
 - User-visible timeline changes require rendering and interaction coverage.
 - Session subscriptions include product notices beyond a Turn's terminal fact.
 - Keep ApiError structured until rendering; use the shared error presenter.
-- Server deploymentMode governs settings visibility; Gateway enforces authorization.
+- Selected Computer ownership governs settings visibility; Services and Workers enforce authorization.
 
 See [Client architecture](../docs/architecture/CLIENT_ARCHITECTURE.md) for the
 cross-client transport and ownership model.

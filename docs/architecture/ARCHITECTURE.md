@@ -138,7 +138,7 @@ not define different Session, Turn, Timeline, Tool, or Agent semantics.
 | `AgentSession` | Provider-owned in-memory handle for Turn execution and Session management; it is not durable product state |
 | Agent Kernel | Built-in Kernel Agent subsystem (`talos-agent-kernel`) for one bounded Turn reasoning and tool loop |
 
-For User, Workspace, Project, deployment mode and binding relationships, see the
+For User, Workspace, Project, Computer ownership and binding relationships, see the
 [Domain model](DOMAIN_MODEL.md). An Agent does not own the User's Workspace.
 Timeline carries both Agent execution facts and independent product notices.
 

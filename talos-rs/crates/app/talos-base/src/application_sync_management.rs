@@ -99,6 +99,41 @@ impl ApplicationSyncHost {
             .map_or_else(|| "embedded".into(), |runner| runner.node_id))
     }
 
+    /// The central Server's first administrator claims its Worker. Later logins
+    /// must preserve that personal owner and must not interrupt its registration.
+    async fn can_enroll_local_worker(&self, actor: &RequestIdentity) -> TalosResult<bool> {
+        if self.config.agent_node.control_plane.is_none() {
+            return Ok(true);
+        }
+        let store = YamlConfigStore::new(self.config.source_path());
+        let Some(runner) = store.load_agent_node()?.runner else {
+            return Ok(actor.role == talos_auth::UserRole::Admin);
+        };
+        let node = match self
+            .service
+            .nodes
+            .get_node(
+                &Actor::regular(&actor.user_id).with_role(actor.role),
+                talos_types::GetNodeRequest {
+                    node_id: runner.node_id,
+                },
+            )
+            .await
+        {
+            Ok(node) => node,
+            // Directory reads hide another user's Computer from regular users.
+            // That expected denial must not mark this host's registration failed.
+            Err(error)
+                if actor.role != talos_auth::UserRole::Admin
+                    && error.is_code(ErrorCode::ResourceNotFound) =>
+            {
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(node.owner_user_id.as_deref() == Some(actor.user_id.as_str()))
+    }
+
     async fn attach_signed_in(
         &self,
         actor: &RequestIdentity,
@@ -109,7 +144,7 @@ impl ApplicationSyncHost {
             .read()
             .expect("local computer owner lock")
             .clone();
-        if self.trusted_local_host
+        if self.config.agent_node.control_plane.is_none()
             && previous
                 .as_ref()
                 .is_some_and(|owner| owner != &actor.user_id)
@@ -133,12 +168,7 @@ impl ApplicationSyncHost {
             .await
             .as_ref()
             .is_none_or(talos_worker::RegisteredWorker::is_finished);
-        if (self.trusted_local_host
-            || (self.config.agent_node.control_plane.is_some()
-                && actor.role == talos_auth::UserRole::Admin))
-            && store.load_desktop()?.connection_mode == talos_config::DesktopConnectionMode::Cloud
-            && (!owner_matches || finished)
-        {
+        if (!owner_matches || finished) && self.can_enroll_local_worker(actor).await? {
             let name = std::env::var("TALOS_DESKTOP_HOSTNAME")
                 .unwrap_or_else(|_| self.config.agent.name.clone());
             let enrollment = super::desktop_worker::WorkerEnrollment {
@@ -160,14 +190,22 @@ impl ApplicationSyncHost {
                         Some(actor.user_id.clone());
                 }
                 Err(error) => {
-                    talos_logging::report_error(&error);
-                    self.worker_failures
-                        .send_replace(Some(error.to_api_error()));
+                    // Another administrator may have claimed during the initial check.
+                    // Only the current owner can report this host's enrollment failure.
+                    if self.can_enroll_local_worker(actor).await? {
+                        talos_logging::report_error(&error);
+                        self.worker_failures
+                            .send_replace(Some(error.to_api_error()));
+                    }
                 }
             }
         }
         let credentials = self.credentials(actor);
-        if let Some(runner) = store.load_agent_node()?.runner {
+        let owns_local = self.config.agent_node.control_plane.is_none()
+            && self
+                .owns_local_computer(&Actor::regular(&actor.user_id))
+                .await?;
+        if let Some(runner) = store.load_agent_node()?.runner.filter(|_| owns_local) {
             match self.connect_computer(actor, &runner.node_id).await {
                 Err(error) => {
                     self.worker_failures

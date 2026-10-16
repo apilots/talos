@@ -43,6 +43,9 @@ mod desktop_application;
 mod desktop_worker;
 mod dream_memory_maintenance;
 mod memory_progress;
+#[cfg(test)]
+#[path = "application_sync_server_tests.rs"]
+mod server_registration_tests;
 mod startup;
 mod tool_images;
 
@@ -571,7 +574,11 @@ async fn start_server_after_startup(
                     runtime.config.storage.files.limits.max_upload_bytes,
                 ),
             )
-            .and_then(|server| server.with_coordinator_id(runtime.sync.peer_id().into()))
+            .and_then(|server| {
+                server
+                    .with_worker_adapter(runtime.worker_rpc.adapter())
+                    .with_coordinator_id(runtime.sync.peer_id().into())
+            })
         })
         .transpose()?;
 

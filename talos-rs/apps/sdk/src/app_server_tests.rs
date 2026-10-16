@@ -157,35 +157,56 @@ async fn rejected_cached_credentials_preserve_the_original_request_error() {
 }
 
 #[tokio::test]
-async fn cloud_login_status_uses_returned_token_without_session_cache() {
-    let mut client = test_app_server_client(false);
-    let response = authenticated_login_response("web-token");
-
-    client
-        .apply_cloud_login_credentials(&response)
-        .await
-        .expect("returned token should be accepted");
-
-    assert_eq!(
-        client.actor_credentials,
-        Some(existing_session_credentials("web-token".to_string()))
-    );
-}
-
-#[tokio::test]
-async fn cloud_login_status_uses_returned_token_with_session_cache_enabled() {
-    let mut client = test_app_server_client(true);
-    let response = authenticated_login_response("local-token");
-
-    client
-        .apply_cloud_login_credentials(&response)
-        .await
-        .expect("returned token should avoid local cache read during login");
-
-    assert_eq!(
-        client.actor_credentials,
-        Some(existing_session_credentials("local-token".to_string()))
-    );
+async fn cloud_login_initializes_owned_host_with_the_returned_token() {
+    for use_cache in [false, true] {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut client = test_app_server_client(use_cache);
+        client.stdin = child.stdin.take();
+        let pending = client.pending_responses.clone();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        let response = authenticated_login_response("issued-login-token");
+        let respond = async move {
+            let request: talos_app_protocol::jsonrpc::JsonRpcRequest =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(request.method, "sync/status");
+            assert_eq!(
+                request.actor_credentials,
+                Some(existing_session_credentials("issued-login-token".into()))
+            );
+            let talos_app_protocol::jsonrpc::RequestId::Number(id) = request.id else {
+                panic!("numeric SDK request ID");
+            };
+            let status = talos_types::SyncStatusResponse {
+                configured_enabled: Some(false),
+                connection: talos_types::SyncConnectionState::Disabled,
+                pending_changes: 0,
+                last_acknowledged_at: None,
+                last_error: None,
+                local_computer_id: Some("owned-computer".into()),
+                can_claim_local_history: true,
+            };
+            pending
+                .lock()
+                .await
+                .remove(&id)
+                .unwrap()
+                .send(Ok(serde_json::to_value(status).unwrap()))
+                .unwrap();
+        };
+        let (result, ()) = tokio::join!(client.apply_cloud_login_credentials(&response), respond);
+        result.unwrap();
+        assert_eq!(
+            client.actor_credentials,
+            Some(existing_session_credentials("issued-login-token".into()))
+        );
+        drop(client.stdin.take());
+        child.wait().await.unwrap();
+    }
 }
 
 #[tokio::test]

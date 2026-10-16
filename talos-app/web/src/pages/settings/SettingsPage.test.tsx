@@ -29,7 +29,6 @@ vi.mock("@/features/settings", async () => {
 function buildSettingsState(
   authStatus: "authenticated" | "open" = "authenticated",
   authRole: "user" | "admin" = "user",
-  deploymentMode: "local" | "cloud" = "local",
 ) {
   return {
     connection: {
@@ -39,7 +38,6 @@ function buildSettingsState(
       accountType: "Pro",
       authUsername: authRole,
       userId: `${authRole}-1`,
-      deploymentMode,
     },
     setConnection: vi.fn(),
     uiTheme: "light",
@@ -58,11 +56,10 @@ function renderSettings(
   initialEntry: string,
   authStatus: "authenticated" | "open" = "authenticated",
   authRole: "user" | "admin" = "user",
-  deploymentMode: "local" | "cloud" = "local",
   ownsComputer = true,
 ) {
   managementPermission.mockReturnValue(ownsComputer);
-  useSettingsPageMock.mockReturnValue(buildSettingsState(authStatus, authRole, deploymentMode));
+  useSettingsPageMock.mockReturnValue(buildSettingsState(authStatus, authRole));
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -79,7 +76,7 @@ describe("SettingsPage", () => {
   });
 
   it("renders the routed section content", () => {
-    renderSettings("/settings/models", "authenticated", "admin", "cloud");
+    renderSettings("/settings/models", "authenticated", "admin");
 
     expect(screen.getByText("Models content")).toBeTruthy();
     expect(screen.getByText("Personalization")).toBeTruthy();
@@ -127,34 +124,34 @@ describe("SettingsPage", () => {
   });
 
   it("renders the web search settings section", () => {
-    renderSettings("/settings/web-search", "authenticated", "admin", "cloud");
+    renderSettings("/settings/web-search", "authenticated", "admin");
 
     expect(screen.getByText("Web Search content")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Web Search" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("shows config management when Cloud authentication is disabled", () => {
-    renderSettings("/settings/models", "open", "user", "cloud");
+    renderSettings("/settings/models", "open", "user");
 
     expect(screen.getByText("Models content")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Models" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("redirects users who do not own the selected Computer away from config management sections", () => {
-    renderSettings("/settings/web-search", "authenticated", "user", "cloud", false);
+    renderSettings("/settings/web-search", "authenticated", "user", false);
 
     expect(screen.getByText("Profile content")).toBeTruthy();
     expect(screen.queryByText("Web Search content")).toBeNull();
   });
 
   it("allows a regular owner to configure Models and Web Search in Cloud mode", () => {
-    renderSettings("/settings/models", "authenticated", "user", "cloud");
+    renderSettings("/settings/models", "authenticated", "user");
     expect(screen.getByText("Models content")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Web Search" })).toBeTruthy();
   });
 
   it("renders the general settings section", () => {
-    renderSettings("/settings/general", "authenticated", "user", "cloud");
+    renderSettings("/settings/general", "authenticated", "user");
 
     expect(screen.getByRole("link", { name: "Models" })).toBeTruthy();
     expect(screen.getByText("General content")).toBeTruthy();

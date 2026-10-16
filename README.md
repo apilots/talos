@@ -79,8 +79,8 @@ Perception/Cognition/Action describe capabilities rather than a second pipeline.
   refresh reconnects/replays instead of re-submitting the original input.
 - Recovery requires a supported checkpoint/continuation. Arbitrary-position
   resume and exactly-once external tool effects are not guaranteed.
-- `local`/`cloud` deployment mode controls instance configuration access, not
-  Agent execution location. See [Deployment](deploy/README.md).
+- Computer owners authorize execution and environment configuration. Direct/outbound
+  transport is independent of ownership. See [Deployment](deploy/README.md).
 - `TurnCompleted` does not mean task acceptance passed. Generic completion gates
   and evidence-driven learning remain [evolution topics](docs/architecture/ARCHITECTURE.md#evolution-model).
 

@@ -27,7 +27,7 @@
          v                     v                     v                     v
 +------------------+  +------------------+  +------------------+  +------------------+
 | Browser adapter  |  | HTTP/SSE or IPC  |  | EmbeddedServer  |  | Rust AppServer   |
-| HTTP + SSE       |  | cloud/local mode |  | Client          |  | Client           |
+| HTTP + SSE       |  | personal Worker  |  | Client          |  | Client           |
 +--------+---------+  +--------+---------+  +--------+---------+  +--------+---------+
          |                     |                     |                     |
          +---------------------+----------+----------+---------------------+

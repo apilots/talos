@@ -9,18 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yaml
 from fixture import data, http, require, wait_for
 from scenarios import passed
-from environment import EnvironmentCluster, memory_document
+from environment import memory_document
 
-
-class ConfigurationCluster(EnvironmentCluster):
-    def config(self, home, node_config):
-        env = super().config(home, node_config)
-        if 'control_plane' in node_config:
-            path = Path(env['TALOS_CONFIG'])
-            config = yaml.safe_load(path.read_text())
-            config['mode'] = 'cloud'
-            path.write_text(yaml.safe_dump(config, sort_keys=False))
-        return env
 
 def configuration(cluster):
     token = cluster.users['alice']['access_token']

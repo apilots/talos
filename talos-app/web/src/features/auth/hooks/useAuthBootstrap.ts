@@ -40,10 +40,8 @@ export function useAuthBootstrap() {
           return;
         }
         setConnection({
-          deploymentMode: health.mode,
-          ...(health.desktopConnection ? {
-            desktopConnectionMode: health.desktopConnection.connectionMode,
-            controlPlaneEndpoint: health.desktopConnection.controlPlaneEndpoint,
+          ...(health.desktopWorker ? {
+            controlPlaneEndpoint: health.desktopWorker.controlPlaneEndpoint ?? undefined,
           } : {}),
         });
         if (!health.auth_enabled) {

@@ -38,7 +38,7 @@ impl AgentNodeService {
                 user_id: actor.user_id.clone(),
                 // G has no shared personal Computer. The private Worker is shown only
                 // after the host has mapped its registered UUID for this owner.
-                include_embedded: excluded.is_some() || actor.role == talos_auth::UserRole::Admin,
+                include_embedded: excluded.is_some(),
             }
         };
         let query = request

@@ -162,6 +162,7 @@ impl GatewayClient for EmbeddedServerClient {
             .await?;
         if let CloudLoginStatusResponse::Authenticated { access_token, .. } = &response {
             self.actor = authenticated_actor_from_access_token(&self.runtime, access_token).await?;
+            self.runtime.service.sync_status(&self.actor).await?;
         }
         Ok(response)
     }

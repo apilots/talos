@@ -1,7 +1,13 @@
 use super::{parse_yaml_root, YamlConfigStore};
-use crate::{AgentNodeConfig, AgentNodeRunnerConfig, DesktopConfig, DesktopConnectionMode};
+use crate::{AgentNodeConfig, AgentNodeRunnerConfig};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::{FilePermissions, FileSystem, WriteOptions};
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkerState {
+    enrollment_pending: bool,
+}
 
 impl YamlConfigStore {
     pub fn load_sync(&self) -> TalosResult<crate::SyncConfig> {
@@ -15,12 +21,13 @@ impl YamlConfigStore {
         let mut sync: crate::SyncConfig = decode_section(&root, "sync")?;
         sync.enabled = Some(enabled);
         set_section(&mut root, "sync", &sync)?;
-        self.write_desktop_root(&root)
+        self.write_host_root(&root)
     }
 
-    pub fn load_desktop(&self) -> TalosResult<DesktopConfig> {
-        let root = parse_yaml_root(&self.read_config_text()?)?;
-        decode_section(&root, "desktop")
+    /// Read private recovery state; never infer it from a lock file's existence.
+    pub fn node_enrollment_pending(&self) -> TalosResult<bool> {
+        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
+        Ok(self.load_worker_state()?.enrollment_pending)
     }
 
     pub fn load_agent_node(&self) -> TalosResult<AgentNodeConfig> {
@@ -28,22 +35,11 @@ impl YamlConfigStore {
         decode_section(&root, "agent_node")
     }
 
-    /// Change only Desktop connection policy; preserve worker identity and other sections.
-    pub fn save_desktop_connection(&self, mode: DesktopConnectionMode) -> TalosResult<()> {
-        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
-        let mut root = parse_yaml_root(&self.read_config_text()?)?;
-        let mut desktop: DesktopConfig = decode_section(&root, "desktop")?;
-        desktop.connection_mode = mode;
-        set_section(&mut root, "desktop", &desktop)?;
-        self.write_desktop_root(&root)
-    }
-
     /// Persist the uncertain-outcome barrier before a non-idempotent CreateNode call.
     /// Recovery must select an existing UUID and rotate its credential, never guess by hostname.
     pub fn begin_node_enrollment(&self, expected_node_id: Option<&str>) -> TalosResult<()> {
         let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
-        let mut root = parse_yaml_root(&self.read_config_text()?)?;
-        let mut desktop: DesktopConfig = decode_section(&root, "desktop")?;
+        let root = parse_yaml_root(&self.read_config_text()?)?;
         let nodes: AgentNodeConfig = decode_section(&root, "agent_node")?;
         if nodes.runner.as_ref().map(|runner| runner.node_id.as_str()) != expected_node_id {
             return Err(TalosError::new(
@@ -51,19 +47,18 @@ impl YamlConfigStore {
                 "Worker identity changed during enrollment",
             ));
         }
-        if desktop.enrollment_pending {
+        if self.load_worker_state()?.enrollment_pending {
             return Err(TalosError::new(ErrorCode::Conflict,
                 "Worker enrollment was not confirmed. Select the existing computer to recover its credential."));
         }
-        desktop.enrollment_pending = true;
-        set_section(&mut root, "desktop", &desktop)?;
-        self.write_desktop_root(&root)
+        let _worker_lock = talos_fs::std_fs().with_file_lock(&self.worker_lock_path())?;
+        self.save_worker_pending()
     }
 
     /// Clear a definitely rejected CreateNode attempt. Never use this for an uncertain network result.
     pub fn cancel_node_creation(&self) -> TalosResult<()> {
         let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
-        let mut root = parse_yaml_root(&self.read_config_text()?)?;
+        let root = parse_yaml_root(&self.read_config_text()?)?;
         let nodes: AgentNodeConfig = decode_section(&root, "agent_node")?;
         if nodes.runner.is_some() {
             return Err(TalosError::new(
@@ -71,10 +66,8 @@ impl YamlConfigStore {
                 "Worker identity already exists",
             ));
         }
-        let mut desktop: DesktopConfig = decode_section(&root, "desktop")?;
-        desktop.enrollment_pending = false;
-        set_section(&mut root, "desktop", &desktop)?;
-        self.write_desktop_root(&root)
+        let _worker_lock = talos_fs::std_fs().with_file_lock(&self.worker_lock_path())?;
+        self.clear_worker_state()
     }
 
     /// Commit UUID first, then the protected credential, then clear the barrier.
@@ -126,25 +119,83 @@ impl YamlConfigStore {
             ));
         }
         nodes.runner = Some(runner.clone());
-        let mut desktop: DesktopConfig = decode_section(&root, "desktop")?;
-        desktop.enrollment_pending = true;
+        let _worker_lock = talos_fs::std_fs().with_file_lock(&self.worker_lock_path())?;
+        self.save_worker_pending()?;
         set_section(&mut root, "agent_node", &nodes)?;
-        set_section(&mut root, "desktop", &desktop)?;
-        self.write_desktop_root(&root)?;
+        self.write_host_root(&root)?;
         talos_fs::std_fs().write_file_with(
             &runner.credential_file,
             token,
             WriteOptions::default().with_permissions(FilePermissions::unix(0o600)),
         )?;
-        desktop.enrollment_pending = false;
-        set_section(&mut root, "desktop", &desktop)?;
-        self.write_desktop_root(&root)
+        self.clear_worker_state()
     }
 
-    fn write_desktop_root(&self, root: &serde_yaml::Value) -> TalosResult<()> {
+    /// A successful lease proves that a saved credential works after an interrupted
+    /// save/cleanup. Never clear recovery state for a different UUID or credential.
+    pub fn complete_node_enrollment(&self, node_id: &str, credential: &str) -> TalosResult<()> {
+        // Ordinary registration needs no config write access when no recovery
+        // files exist. A concurrent new enrollment must keep its own marker.
+        if !self.worker_state_path().try_exists().map_err(|error| {
+            TalosError::internal_with_source("Inspect Worker recovery state", error)
+        })? && !self
+            .worker_lock_path()
+            .try_exists()
+            .map_err(|error| TalosError::internal_with_source("Inspect Worker state lock", error))?
+        {
+            return Ok(());
+        }
+        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
+        self.load_worker_state()?;
+        let Some(runner) = self
+            .load_agent_node()?
+            .runner
+            .filter(|runner| runner.node_id == node_id)
+        else {
+            return Ok(());
+        };
+        let saved = std::fs::read_to_string(&runner.credential_file).map_err(|error| {
+            TalosError::internal_with_source("Read saved Worker credential", error)
+        })?;
+        if saved.trim() != credential.trim() {
+            return Ok(());
+        }
+        let _worker_lock = talos_fs::std_fs().with_file_lock(&self.worker_lock_path())?;
+        self.clear_worker_state()
+    }
+
+    fn worker_state_path(&self) -> std::path::PathBuf {
+        self.env_path.with_file_name(".worker-state.json")
+    }
+
+    fn worker_lock_path(&self) -> std::path::PathBuf {
+        self.env_path.with_file_name(".worker-state.lock")
+    }
+
+    fn load_worker_state(&self) -> TalosResult<WorkerState> {
+        talos_fs::read_json_or_default(&self.worker_state_path())
+    }
+
+    fn save_worker_pending(&self) -> TalosResult<()> {
+        talos_fs::write_json_pretty(
+            &self.worker_state_path(),
+            &WorkerState {
+                enrollment_pending: true,
+            },
+        )
+    }
+
+    fn clear_worker_state(&self) -> TalosResult<()> {
+        // Every root Worker lock acquisition is nested under the stable config
+        // lock. No waiter can retain the old inode while these files are removed.
+        talos_fs::std_fs().remove_file(&self.worker_state_path())?;
+        talos_fs::std_fs().remove_file(&self.worker_lock_path())
+    }
+
+    fn write_host_root(&self, root: &serde_yaml::Value) -> TalosResult<()> {
         let text = serde_yaml::to_string(root).map_err(|error| {
             TalosError::internal_with_source(
-                "Serialize Desktop settings; technical details were withheld.",
+                "Serialize host settings; technical details were withheld.",
                 error,
             )
         })?;
@@ -161,7 +212,7 @@ fn decode_section<T: serde::de::DeserializeOwned + Default>(
         .map(|value| {
             serde_yaml::from_value(value.clone()).map_err(|error| {
                 TalosError::internal_with_source(
-                    "Read Desktop configuration; technical details were withheld.",
+                    "Read host configuration; technical details were withheld.",
                     error,
                 )
             })
@@ -177,7 +228,7 @@ fn set_section<T: serde::Serialize>(
 ) -> TalosResult<()> {
     let value = serde_yaml::to_value(value).map_err(|error| {
         TalosError::internal_with_source(
-            "Serialize Desktop configuration; technical details were withheld.",
+            "Serialize host configuration; technical details were withheld.",
             error,
         )
     })?;
@@ -185,5 +236,5 @@ fn set_section<T: serde::Serialize>(
 }
 
 #[cfg(test)]
-#[path = "desktop_tests.rs"]
+#[path = "host_tests.rs"]
 mod tests;

@@ -40,18 +40,6 @@ pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 
-/// Selects the instance deployment boundary used for configuration access.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-#[ts(rename_all = "lowercase")]
-pub enum DeploymentMode {
-    /// A user-owned Talos instance.
-    #[default]
-    Local,
-    /// A shared Talos Cloud instance.
-    Cloud,
-}
-
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentProviderConfig, MessageQueueConfig, PlannerMode,
 };
@@ -63,7 +51,6 @@ pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
-pub use domains::desktop::{DesktopConfig, DesktopConnectionMode};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
@@ -126,10 +113,6 @@ pub struct Config {
     #[serde(skip)]
     runtime_paths: Option<TalosPaths>,
 
-    /// Controls access to instance-level configuration.
-    #[serde(default)]
-    pub mode: DeploymentMode,
-
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]
     pub timezone: String,
@@ -153,10 +136,6 @@ pub struct Config {
     /// Distributed Agent node control and runner configuration.
     #[serde(default)]
     pub agent_node: AgentNodeConfig,
-
-    /// Desktop product connection settings; ignored by Server and CLI hosts.
-    #[serde(default)]
-    pub desktop: DesktopConfig,
 
     /// Gateway 配置
     #[serde(default)]
@@ -215,14 +194,12 @@ impl Default for Config {
         let mut config = Self {
             source_path: None,
             runtime_paths: None,
-            mode: DeploymentMode::default(),
             timezone: default_timezone(),
             automation: AutomationConfig::default(),
             memory: MemoryConfig::default(),
             workspaces: WorkspaceConfig::default(),
             agent: AgentConfig::default(),
             agent_node: AgentNodeConfig::default(),
-            desktop: DesktopConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
             sync: SyncConfig::default(),

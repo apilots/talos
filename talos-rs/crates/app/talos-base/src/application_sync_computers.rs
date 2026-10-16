@@ -38,12 +38,10 @@ impl ApplicationSyncHost {
         &self,
         actor: &Actor,
     ) -> TalosResult<Option<String>> {
-        Ok(self.local_computer(actor).await?.or_else(|| {
-            (self.trusted_local_host
-                || actor.auth_disabled
-                || actor.role == talos_auth::UserRole::Admin)
-                .then(|| "embedded".into())
-        }))
+        Ok(self
+            .local_computer(actor)
+            .await?
+            .or_else(|| actor.auth_disabled.then(|| "embedded".into())))
     }
     pub(crate) async fn gateway_client(&self) -> TalosResult<AgentNodeClient> {
         gateway_client(&self.config).await

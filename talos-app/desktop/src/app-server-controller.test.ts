@@ -17,6 +17,7 @@ describe("DesktopAppServerController", () => {
     const onRuntimeState = vi.fn();
     const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onActiveTurnChanged, onMessageQueueChanged, onRuntimeState });
     await controller.connect();
+    await controller.invoke("event/subscribe", { sessionId: "shared", turnId: null, sinceEventId: null, replayLimit: null, closeWhenIdle: false, closeOnTerminal: false });
     const active = { sessionId: "shared", state: { activeTurn: null, latestEventId: null } };
     bridge.emitNotification({ jsonrpc: "2.0", method: "session/activeTurnChanged", params: active });
     bridge.emitNotification({ jsonrpc: "2.0", method: "messageQueue/changed", params: { sessionId: "shared", revision: 2 } });

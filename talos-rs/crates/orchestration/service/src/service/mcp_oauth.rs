@@ -37,7 +37,7 @@ impl TalosService {
             .connect_selected_computer(actor, &requested_node_id)
             .await?;
         let environment = self.access.worker_environment(actor, &node_id).await?;
-        if self.mode() == talos_config::DeploymentMode::Local && node_id == "embedded" {
+        if actor.auth_disabled && node_id == "embedded" {
             return environment
                 .start_mcp_authentication(
                     actor.worker_environment_context(),

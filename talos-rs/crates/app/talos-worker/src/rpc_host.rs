@@ -111,7 +111,8 @@ impl WorkerRpcHost {
         self.address
     }
 
-    pub(crate) fn adapter(&self) -> AgentHarnessRpcAdapter {
+    /// Reuses this authenticated Worker on a host's existing TLS ingress.
+    pub fn adapter(&self) -> AgentHarnessRpcAdapter {
         self.adapter.clone()
     }
 

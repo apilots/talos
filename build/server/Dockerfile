@@ -80,7 +80,7 @@ COPY --from=product /artifacts/talos-server /opt/talos/bin/talos-server
 COPY --from=product /artifacts/talos-worker /opt/talos/bin/talos-worker
 COPY --from=product /artifacts/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
 COPY --from=product /artifacts/webui/ /opt/talos/webui/
-COPY talos/conf/talos-cloud.yaml /opt/talos/conf/talos.yaml
+COPY talos/conf/talos-prod.yaml /opt/talos/conf/talos.yaml
 COPY talos/conf/migrations /opt/talos/conf/migrations
 COPY talos/LICENSE talos/NOTICE talos/THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 

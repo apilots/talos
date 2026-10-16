@@ -47,7 +47,7 @@ talos/
 | Active and archived change designs | `spec/REGISTRY.md` |
 | E2E scenario discovery | `talos-e2e/run_e2e.sh` and `talos-e2e/scenarios/` |
 | Deployment topology | `deploy/` assets and README |
-| Instance configuration authorization | Config DeploymentMode and shared Gateway configuration guard |
+| Computer environment authorization | Verified Computer owner, Service admission and Worker credentials |
 | Public errors and product notices | `docs/architecture/ERROR_MODEL.md` and generated protocol types |
 
 Local `IMPLEMENTATION_PLAN.md` files are ignored working notes, not durable

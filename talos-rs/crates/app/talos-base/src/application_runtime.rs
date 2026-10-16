@@ -331,8 +331,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         worker_registration: worker_registration.clone(),
         worker_failures: worker_failures.clone(),
         trusted_local_host: std::env::var_os("TALOS_DESKTOP_HOSTNAME").is_some()
-            || (config.mode == talos_config::DeploymentMode::Local
-                && config.agent_node.control_plane.is_none()
+            || (config.agent_node.control_plane.is_none()
                 && matches!(
                     config.gateway.host.as_str(),
                     "127.0.0.1" | "::1" | "localhost"

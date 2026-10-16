@@ -10,7 +10,7 @@ import time
 import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'multi_node'))
 from fixture import ROOT, REPORT, data, free_port, http, require, wait_for
-from configuration import ConfigurationCluster
+from environment import EnvironmentCluster
 from registration import start_ingress, public
 
 
@@ -276,7 +276,7 @@ def run(cluster):
 
 
 if __name__ == '__main__':
-    cluster = ConfigurationCluster(worker_transport='outbound')
+    cluster = EnvironmentCluster(worker_transport='outbound')
     try:
         run(cluster)
     finally:

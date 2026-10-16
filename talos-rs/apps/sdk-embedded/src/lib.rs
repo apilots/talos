@@ -88,6 +88,9 @@ impl EmbeddedServerClient {
         } else {
             actor
         };
+        if !actor.auth_disabled && actor.access_token.is_some() {
+            runtime.service.sync_status(&actor).await?;
+        }
         Ok(Self {
             runtime,
             actor,

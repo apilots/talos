@@ -13,11 +13,11 @@ from urllib.parse import urlparse,parse_qs,urlencode
 import yaml
 from fixture import ROOT,free_port,data,http,require,wait_for
 from scenarios import passed
-from configuration import ConfigurationCluster
+from environment import EnvironmentCluster
 from registration import start_ingress
 
 
-class OAuthCluster(ConfigurationCluster):
+class OAuthCluster(EnvironmentCluster):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.ingress=f'https://127.0.0.1:{free_port()}'

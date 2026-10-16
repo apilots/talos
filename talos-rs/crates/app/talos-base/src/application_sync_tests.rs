@@ -301,7 +301,6 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
             .await
             .unwrap();
         let mut peer = config(&directory.path().join(name), &api);
-        peer.mode = talos_config::DeploymentMode::Cloud;
         let credential_file = peer.talos_paths().conf_dir.join("worker.credential");
         talos_fs::write_bytes_with(
             &credential_file,

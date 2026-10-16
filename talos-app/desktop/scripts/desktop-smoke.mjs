@@ -53,7 +53,7 @@ function configureSmokeHome() {
   mkdirSync(confRoot, { recursive: true });
   mkdirSync(workspaceRoot, { recursive: true });
   mkdirSync(skillRoot, { recursive: true });
-  const config = readFileSync(talosConfigTemplate, "utf8").replace(/(^desktop:\r?\n[ \t]+connection_mode:)[^\n]+/m, "$1 local");
+  const config = readFileSync(talosConfigTemplate, "utf8");
   writeFileSync(talosConfig, config);
   if (existsSync(path.join(repoRoot, ".env"))) {
     copyFileSync(path.join(repoRoot, ".env"), path.join(talosHome, ".env"));

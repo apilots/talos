@@ -17,6 +17,189 @@ fn default_yaml() -> YamlValue {
     template_yaml()
 }
 
+#[test]
+fn upgrade_removes_retired_config_without_changing_worker_identity() {
+    for (transport, central) in [("outbound", false), ("direct", false), ("direct", true)] {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = TalosPaths::from_home(dir.path().join(".talos"));
+        let template_path = write_template(dir.path());
+        let mut old = template_yaml();
+        set_path_for_test(&mut old, &["gateway", "auth"], YamlValue::Bool(true));
+        set_path_for_test(&mut old, &["mode"], YamlValue::String("cloud".into()));
+        set_path_for_test(
+            &mut old,
+            &["desktop"],
+            serde_yaml::from_str("connection_mode: local\nenrollment_pending: true\n").unwrap(),
+        );
+        let mut runner: YamlValue = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: https://agent.example\ncredential_file: /private/node.credential\ntransport: outbound\ntrusted_ca_file: /private/ca.crt\n").unwrap();
+        let credential = paths.conf_dir.join("node.credential");
+        set_path_for_test(
+            &mut runner,
+            &["credential_file"],
+            serde_yaml::to_value(&credential).unwrap(),
+        );
+        set_path_for_test(&mut old, &["agent_node", "runner"], runner.clone());
+        if transport == "direct" {
+            set_path_for_test(
+                &mut runner,
+                &["transport"],
+                YamlValue::String("direct".into()),
+            );
+            set_path_for_test(&mut old, &["agent_node", "runner"], runner.clone());
+            let tls: YamlValue = serde_yaml::from_str(
+                "certificate_file: /private/worker.crt\nprivate_key_file: /private/worker.key\n",
+            )
+            .unwrap();
+            set_path_for_test(&mut old, &["agent_node", "worker_rpc", "tls"], tls);
+        }
+        if central {
+            let control: YamlValue = serde_yaml::from_str("bind_address: 127.0.0.1:18800\ntls_certificate_file: /private/server.crt\ntls_private_key_file: /private/server.key\ntrusted_node_ca_file: /private/ca.crt\n").unwrap();
+            set_path_for_test(&mut old, &["agent_node", "control_plane"], control);
+            set_path_for_test(
+                &mut old,
+                &["agent_node", "worker_rpc", "tls"],
+                YamlValue::Null,
+            );
+        }
+        let expected_nodes = get_path_for_test(&old, &["agent_node"]).unwrap().clone();
+        // The old document differs from the new strict schema only in retired modes.
+        let mut current = old.clone();
+        remove_path_for_test(&mut current, &["mode"]);
+        remove_path_for_test(&mut current, &["desktop"]);
+        validate_config_value(&current).unwrap();
+        write_existing(&paths, &old);
+        std::fs::write(&credential, "existing-registration-credential").unwrap();
+
+        let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
+        let mut removed = report.removed_paths.clone();
+        removed.sort();
+        assert_eq!(removed, vec!["desktop", "mode"]);
+        assert_eq!(
+            read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
+            old
+        );
+        let normalized = read_yaml_file(&paths.config_file).unwrap();
+        assert_eq!(
+            get_path_for_test(&normalized, &["agent_node"]),
+            Some(&expected_nodes)
+        );
+        assert_eq!(normalized, current);
+        assert!(!paths.talos_home.join(".worker-state.json").exists());
+        assert!(!paths.talos_home.join(".worker-state.lock").exists());
+        assert_eq!(
+            std::fs::read_to_string(credential).unwrap(),
+            "existing-registration-credential"
+        );
+        assert!(
+            !upgrade_default_config_from_template(&paths, &template_path)
+                .unwrap()
+                .changed
+        );
+    }
+}
+
+#[test]
+fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    for profile in ["talos.yaml", "talos-prod.yaml", "talos-dev.yaml"] {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = TalosPaths::from_home(dir.path().join("home"));
+        let template_path = repo_root.join("conf").join(profile);
+        let mut saved = read_yaml_file(&template_path).unwrap();
+        for (path, value) in [
+            (vec!["sync", "enabled"], "false"),
+            (vec!["agent", "identity"], "PERSONA.md"),
+            (
+                vec!["agent", "message_queue", "max_messages_per_session"],
+                "23",
+            ),
+            (vec!["agent", "timeline_replay_batch_size"], "128"),
+            (vec!["agent", "command_idempotency_ttl_hours"], "72"),
+            (
+                vec!["agent", "agents"],
+                "[{id: researcher, name: Researcher, enabled: true}]",
+            ),
+            (
+                vec!["agent", "kernel", "compaction", "model"],
+                "deepseek-v4-flash",
+            ),
+            (
+                vec![
+                    "agent",
+                    "kernel",
+                    "tools",
+                    "local_exec",
+                    "default_timeout_ms",
+                ],
+                "90000",
+            ),
+            (
+                vec!["agent", "kernel", "tools", "enable_dynamic_tools"],
+                "true",
+            ),
+            (
+                vec!["agent", "kernel", "tools", "dynamic", "response_timeout_ms"],
+                "45000",
+            ),
+            (
+                vec!["agent", "kernel", "tools", "mcp_runtime", "enable_tools"],
+                "false",
+            ),
+            (vec!["logging", "timezone"], "UTC"),
+            (vec!["llm", "ollama", "api_key"], "fixture-provider-key"),
+            (
+                vec!["channels", "discord", "token"],
+                "fixture-channel-token",
+            ),
+            (vec!["channels", "discord", "allow_from"], "[fixture-user]"),
+        ] {
+            set_path_for_test(&mut saved, &path, serde_yaml::from_str(value).unwrap());
+        }
+        // A newly introduced nullable setting triggers normalization of a saved home.
+        remove_path_for_test(&mut saved, &["sync", "trusted_ca_file"]);
+        let expected: Config = serde_yaml::from_value(saved.clone()).unwrap();
+        expected.validate_runtime().unwrap();
+        write_existing(&paths, &saved);
+
+        let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
+        assert!(report.changed, "{profile}");
+        assert_eq!(
+            read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
+            saved
+        );
+        let actual: Config =
+            serde_yaml::from_value(read_yaml_file(&paths.config_file).unwrap()).unwrap();
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap(),
+            "{profile}"
+        );
+        assert!(
+            !upgrade_default_config_from_template(&paths, &template_path)
+                .unwrap()
+                .changed
+        );
+    }
+}
+
+#[test]
+fn upgrade_refuses_to_erase_worker_identity_when_tls_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = TalosPaths::from_home(dir.path().join(".talos"));
+    let template_path = write_template(dir.path());
+    let mut old = template_yaml();
+    set_path_for_test(&mut old, &["mode"], YamlValue::String("local".into()));
+    let runner = serde_yaml::from_str("node_id: a03f484f-dfb3-4bf8-8796-35c6ce239d31\ncontrol_plane_endpoint: https://agent.example\ncredential_file: /private/node.credential\ntransport: direct\n").unwrap();
+    set_path_for_test(&mut old, &["agent_node", "runner"], runner);
+    write_existing(&paths, &old);
+    let original = std::fs::read(&paths.config_file).unwrap();
+
+    // A damaged listener must require repair, never silently reset enrollment.
+    let error = upgrade_default_config_from_template(&paths, &template_path).unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+    assert_eq!(std::fs::read(&paths.config_file).unwrap(), original);
+}
+
 fn template_yaml() -> YamlValue {
     let mut value = serde_yaml::to_value(Config::default()).expect("default config should encode");
     remove_path_for_test(&mut value, &["logging", "file"]);

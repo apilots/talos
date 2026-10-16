@@ -135,7 +135,6 @@ def configure_desktop(cluster, name):
     import yaml
     config = yaml.safe_load(path.read_text())
     config['cloud'].update(agent_base_url=cluster.ingress, agent_trusted_ca_file=str(cluster.cert))
-    config['desktop'] = {'connection_mode': 'cloud'}
     path.write_text(yaml.safe_dump(config, sort_keys=False))
     return home
 
@@ -165,8 +164,8 @@ def run(cluster):
     first = Desktop(cluster, home, 'desktop-a')
     second = None
     try:
-        require(first.call('desktop/workerIdentity') == {'nodeId': 'embedded', 'controlPlaneEndpoint': None},
-                'Fresh Desktop must expose only its unregistered embedded Worker')
+        require(first.call('desktop/workerIdentity') == {'nodeId': 'embedded', 'controlPlaneEndpoint': cluster.ingress},
+                'Fresh Desktop must expose its unregistered identity and configured Server')
         first.login('alice')
         identity = first.call('desktop/workerIdentity')
         node_id = identity['nodeId']

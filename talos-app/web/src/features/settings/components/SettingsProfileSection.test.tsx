@@ -58,7 +58,6 @@ describe("SettingsProfileSection", () => {
           accountType: "Free",
           authUsername: "Anonymous",
           userId: "anonymous",
-          deploymentMode: "local",
         }}
       />,
     );
@@ -83,7 +82,6 @@ describe("SettingsProfileSection", () => {
           accountType: "Free",
           authUsername: "Anonymous",
           userId: "anonymous",
-          deploymentMode: "local",
         }}
       />,
     );

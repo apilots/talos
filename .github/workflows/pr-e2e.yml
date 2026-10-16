@@ -90,6 +90,7 @@ jobs:
             runner: ubuntu-24.04
             targets: |
               case:09_app_server/smoke_e2e
+              case:09_app_server/desktop_recovery
           - name: files
             runner: ubuntu-24.04
             targets: |

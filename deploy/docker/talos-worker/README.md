@@ -32,6 +32,12 @@ For a private registration endpoint, set `control_plane_endpoint` and
 `trusted_ca_file` in the runtime YAML to that endpoint and its trusted CA. The
 public `https://agent.talos.love` endpoint uses system trust.
 
+The example lists the shared configuration fields. Its required `gateway` section
+does not start HTTP in `talos-worker`; management, channel and Sync sections are
+not consumed by this process. Execution tools, model settings and workspace paths
+apply to this Worker. For direct transport, configure reachable Worker RPC TLS
+and the Computer endpoint together; outbound requires no inbound listener.
+
 ## Validate and start on the chosen Worker host
 
 ~~~bash

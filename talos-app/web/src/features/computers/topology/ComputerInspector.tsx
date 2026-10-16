@@ -78,7 +78,6 @@ export function ComputerInspector({
     node.mode === "remote" && node.ownerUserId === connection.userId;
   const canRecover =
     Boolean(getDesktopBridge()) &&
-    connection.desktopConnectionMode === "cloud" &&
     personal &&
     node.endpoint === null &&
     (!localId || node.nodeId === localId);

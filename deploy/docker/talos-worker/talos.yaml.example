@@ -1,11 +1,37 @@
-# Standalone execution Worker: no Server control-plane or Sync service.
+# Standalone outbound Worker: retain the Server-issued UUID and protected credential.
+# No management HTTP, control-plane listener, channel server or Sync client is started.
+# Management-only sections below satisfy the shared configuration schema.
 timezone: Asia/Shanghai
-mode: local
+
 workspaces:
   default_workspace_id: default
   definitions:
     - workspace_id: default
       root_prefix: workspace-talos
+
+memory:
+  file_list_default_limit: 20
+  file_list_max_limit: 90
+  memory_dirname: memory
+
+automation:
+  dream_memory_maintenance:
+    batch_size: 50
+    cron: 0 30 3 * * *
+    max_batches: 10
+  profile_usage_retention:
+    batch_size: 1000
+    cron: 0 15 3 * * 1
+    max_batches: 10
+    retention_days: 366
+
+# Shared loader requires these fields; talos-worker does not bind this HTTP address.
+gateway:
+  host: 127.0.0.1
+  port: 8080
+  auth: true
+
+# Outbound needs no inbound port. For direct, configure reachable Worker TLS and the node endpoint together.
 agent_node:
   control_plane: null
   runner:
@@ -17,27 +43,246 @@ agent_node:
   worker_rpc:
     bind_address: 127.0.0.1:0
     tls: null
+
+cloud:
+  agent_base_url: https://agent.talos.love
+  agent_trusted_ca_file: null
+  api_base_url: https://api.talos.love
+  auth:
+    introspection_cache_ttl_seconds: 300
+  web_base_url: https://cloud.talos.love
+
+# Pure Workers do not run Sync.
+sync:
+  enabled: false
+  hub_endpoint: wss://sync.talos.love/v1/sync
+  trusted_ca_file: null
+
+fs:
+  directory_picker:
+    enabled: true
+    root: home
+    show_hidden: true
+
+# Worker execution settings. No desktop browser command or personal plugin root is included.
 agent:
-  name: talos-worker
+  agents: []
+  command_idempotency_ttl_hours: 24
+  identity: null
   inner_model:
     provider: deepseek
     id: deepseek-v4-flash
   kernel:
+    compaction:
+      compacted_recent_messages_keep: 2
+      compacted_recent_messages_max_chars: 1200
+      compacted_retrieved_memory_max_chars: 800
+      compacted_summary_max_chars: 800
+      compacted_tool_exchange_max_chars: 300
+      compacted_tool_output_max_chars: 600
+      hard_ratio_percent: 95
+      model: null
+      recent_messages_keep: 24
+      recent_messages_max_chars: 4000
+      recent_summaries_keep: 2
+      retrieved_memories_keep: 4
+      retrieved_memory_max_chars: 2000
+      source_recent_messages_limit: 48
+      source_recent_tool_exchanges_limit: 12
+      source_recent_tool_results_limit: 12
+      summary_max_chars: 1200
+      tool_exchange_keep_last: 2
+      tool_exchange_max_chars: 600
+      tool_output_keep_last: 2
+      tool_output_max_chars: 2000
+      trigger_ratio_percent: 85
+    context_compaction_max_bytes: 262144
     mcp:
       servers: []
+    output:
+      max_tokens: 32000
+      upper_limit: 64000
+    planner_mode: built_in
+    plugins:
+      roots: []
+      sources:
+        - display_name: Apilots Skills
+          kind: git
+          reference: main
+          source_type: official
+          sparse_paths:
+            - skills
+          url: https://github.com/apilots/skills
+    prompt:
+      bootstrap:
+        auto_create_missing_files: true
+        enabled: true
+        include_agents: true
+        include_heartbeat: true
+        include_identity: true
+        include_soul: true
+        include_user: true
+        max_chars_per_file: 8000
+        warning_mode: once
+      window:
+        compaction_buffer_tokens: 4096
+        reserved_output_tokens:
+          kind: use_model_default
+    skills:
+      max_available_summary_bytes: 8192
+      max_skill_md_bytes: 65536
+    tool_parallelism: 3
+    tool_result_max_bytes: 65536
+    tools:
+      dynamic:
+        on_timeout: error_to_model
+        response_timeout_ms: 300000
+      enable_collaboration_tools: true
+      enable_dynamic_tools: false
+      enable_mcp_tools: true
+      file:
+        default_list_limit: 200
+        default_read_limit: 200
+        default_search_limit: 200
+      local_exec:
+        default_timeout_ms: 60000
+        max_output_bytes: 65536
+      mcp_runtime:
+        enable_resource_tools: true
+        enable_tools: true
+      sandbox_policy:
+        default_mode: use_default
+        network: use_default
+        platform:
+          linux_helper_executable: null
+        user_permission_mode: full_access
+      web_search:
+        brave:
+          api_key: ${TALOS_WEB_SEARCH_BRAVE_API_KEY}
+          base_url: https://api.search.brave.com/res/v1/web/search
+          timeout_ms: 15000
+        firecrawl:
+          api_key: ${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}
+          base_url: https://api.firecrawl.dev
+          timeout_ms: 15000
+        provider: firecrawl
+        tavily:
+          api_key: ${TALOS_WEB_SEARCH_TAVILY_API_KEY}
+          base_url: https://api.tavily.com
+          timeout_ms: 15000
+  message_queue:
+    max_messages_per_session: 10
+  name: talos-worker
+  timeline_replay_batch_size: 1024
+
+channels:
+  discord:
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    enabled: false
+    token: null
+  feishu:
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    enabled: false
+    token: null
+  telegram:
+    accounts: []
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    enabled: false
+    group_allow_from: []
+    group_policy: mention
+    mode: polling
+    token: null
+    webhook_secret: null
+    webhook_url: null
+  whatsapp:
+    allow_from: []
+    dm_policy: open
+    dm_scope: per_channel_peer_topic
+    enabled: false
+    token: null
+
+# Configure provider keys in $TALOS_HOME/.env. Only the selected provider needs a key.
 llm:
-  provider: deepseek
-  model: deepseek-v4-flash
+  anthropic:
+    api_key: null
+    base_url: null
+    models: []
+    protocol: null
+  bailian:
+    api_key: null
+    base_url: null
+    models: []
+    protocol: null
   deepseek:
     api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
     base_url: https://api.deepseek.com
-    protocol: chat
     models:
       - id: deepseek-v4-flash
         name: DeepSeek V4 Flash
         context_window: 1000000
         reasoning: true
-        input: [text]
+        input:
+          - text
+    protocol: chat
+  model: deepseek-v4-flash
+  ollama:
+    api_key: null
+    base_url: null
+    models: []
+    protocol: null
+  openai:
+    api_key: null
+    base_url: null
+    models: []
+    protocol: null
+  openrouter:
+    api_key: null
+    base_url: null
+    models: []
+    protocol: null
+  provider: deepseek
+
+logging:
+  format: text
+  level: info
+  stdout: true
+  timezone: null
+
+# File roots are relative to $TALOS_HOME/data; database/log paths are derived from TALOS_HOME.
 storage:
   database_type: sqlite
+  files:
+    allowed_mime_types:
+      - application/msword
+      - application/pdf
+      - application/vnd.ms-excel
+      - application/vnd.openxmlformats-officedocument.presentationml.presentation
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      - image/jpeg
+      - image/png
+      - image/webp
+      - text/csv
+    backends:
+      local:
+        root: files
+        type: fs
+    default: local
+    limits:
+      max_filename_bytes: 255
+      max_files_per_turn: 5
+      max_metadata_bytes: 8192
+      max_metadata_entries: 32
+      max_metadata_key_bytes: 64
+      max_metadata_value_bytes: 2048
+      max_tag_bytes: 64
+      max_tags: 20
+      max_turn_file_bytes: 20971520
+      max_upload_bytes: 52428800
   max_connections: 5

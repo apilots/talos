@@ -24,6 +24,11 @@ docker compose up -d
 `compose.production.yml` uses an existing external home volume, loopback8080/9443,
 and read-only TLS files for authenticated Computer registration and RPC relay.
 It requires the reviewed runtime configuration and certificates before startup.
+`talos.yaml.example` lists shared runtime settings and the central TLS listener.
+Both Server and Worker images package the shared `conf/talos-prod.yaml` as
+their default `conf/talos.yaml`;
+the production example additionally enables the central listener and TLS.
+Preserve any saved Worker identity when applying settings to an existing home.
 Use the [Talos Server production guide](../../TALOS_SERVER.md) for preparation,
 proxy routing and acceptance.
 

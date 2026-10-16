@@ -38,6 +38,13 @@ fn node_network_configuration_requires_authenticated_tls() {
     config.runner.as_mut().unwrap().trusted_ca_file = None;
     assert!(config.validate(&gateway).is_ok());
 
+    // A central Server serves direct RPC on its existing authenticated TLS ingress.
+    config.worker_rpc.tls = None;
+    assert!(config.validate(&gateway).is_ok());
+    let control = config.control_plane.take();
+    assert!(config.validate(&gateway).is_err());
+    config.control_plane = control;
+
     let registration_only: AgentNodeRunnerConfig = serde_yaml::from_str(
         "node_id: laptop-1\ncontrol_plane_endpoint: https://localhost:18800\ncredential_file: /tmp/node.credential\ntrusted_ca_file: ca.crt\n",
     )

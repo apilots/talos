@@ -118,7 +118,6 @@ def recovery(cluster):
     cold_path = cold_home / 'conf/talos.yaml'
     document = yaml.safe_load(cold_path.read_text())
     document['cloud'].update(agent_base_url=f'https://127.0.0.1:{cluster.rpc_port}', agent_trusted_ca_file=str(cluster.cert))
-    document['desktop'] = {'connection_mode': 'cloud'}
     document['sync'] = cluster.sync_config()
     cold_path.write_text(yaml.safe_dump(document, sort_keys=False))
     cold = Desktop(cluster, cold_home, 'Desktop-Cold')

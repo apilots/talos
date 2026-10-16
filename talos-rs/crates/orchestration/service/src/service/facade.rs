@@ -57,7 +57,6 @@ mod project_fs;
 #[derive(Clone)]
 pub struct TalosService {
     sync_management: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementSync>>>>,
-    mode: talos_config::DeploymentMode,
     oauth_relay_origin: String,
     oauth_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], Arc<mcp_oauth::McpRelayRoute>>>>,
@@ -174,7 +173,6 @@ impl TalosService {
         Self {
             sync_management: Default::default(),
             active_commands: Default::default(),
-            mode: base_config.mode,
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
             oauth_routes: Arc::default(),
             oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
@@ -204,11 +202,6 @@ impl TalosService {
             files,
             execution_gate,
         }
-    }
-
-    /// Returns the deployment mode captured when the service starts.
-    pub fn mode(&self) -> talos_config::DeploymentMode {
-        self.mode
     }
 
     /// Installs the control-plane model used by the existing reflection policy.

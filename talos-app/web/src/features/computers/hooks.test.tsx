@@ -72,10 +72,9 @@ it("does not inject a shared Server's private Worker into another account's Comp
   expect(computers.read).not.toHaveBeenCalled();
 });
 
-it("allows the owner of an embedded Computer to configure it in Cloud mode", async () => {
+it("allows the owner of an embedded Computer to configure it regardless of host deployment", async () => {
   const connection = {
     ...useAppStore.getState().connection,
-    deploymentMode: "cloud" as const,
   };
   useAppStore.setState({ connection });
   useAppStore
@@ -97,10 +96,9 @@ it("allows the owner of an embedded Computer to configure it in Cloud mode", asy
   });
   await waitFor(() => expect(result.current).toBe(true));
 });
-it("does not grant a deployment mode access to the center private Computer", async () => {
+it("does not grant access to the center private Computer", async () => {
   const connection = {
     ...useAppStore.getState().connection,
-    deploymentMode: "local" as const,
   };
   useAppStore.setState({ connection });
   useAppStore
