@@ -255,6 +255,18 @@ run_linux_docker_tui_install
         version = next(line.split('=', 1)[1] for line in (ROOT / '.github/release-toolchain.env').read_text().splitlines()
                        if line.startswith('RELEASE_RUST_VERSION='))
         self.assertIn(f'build --build-arg RUST_VERSION={version}', calls.read_text())
+        self.assertIn(f'-v {self.root}:/workspace/talos:ro', calls.read_text())
+        self.assertNotIn('/workspace/talos/talos-rs/Cargo.lock', calls.read_text())
+        self.assertEqual((self.root / 'talos-rs/Cargo.lock').read_bytes(),
+                         (ROOT / 'talos-rs/Cargo.lock').read_bytes())
+        self.assertFalse((self.root / 'tmp/tui-install-linux-target-x86_64/Cargo.lock').exists())
+        (self.root / 'talos-rs/Cargo.lock').unlink()
+        calls.unlink()
+        missing = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn('committed talos-rs/Cargo.lock is required', missing.stderr)
+        self.assertNotIn('build', calls.read_text())
+        self.assertFalse((self.root / 'talos-rs/Cargo.lock').exists())
 
     def test_product_change_in_mixed_ref_push_keeps_source_checks(self):
         self.prepare_hook()

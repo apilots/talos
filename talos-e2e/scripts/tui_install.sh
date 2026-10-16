@@ -221,10 +221,6 @@ run_linux_docker_tui_install() {
   local container_report_dir
   local docker_arch
   local target_dir
-  local cargo_lock_file
-  local source_cargo_lock
-  local created_source_lock=false
-  local docker_status
   local rust_version
 
   require_command docker
@@ -232,20 +228,11 @@ run_linux_docker_tui_install() {
   docker_arch="$(docker info --format '{{.Architecture}}')"
   target_dir="${TALOS_E2E_TMP_ROOT}/tui-install-linux-target-${docker_arch}"
   container_report_dir="${SCENARIO_REPORT_DIR}/container"
-  cargo_lock_file="${target_dir}/Cargo.lock"
-  source_cargo_lock="${REPO_ROOT}/talos-rs/Cargo.lock"
-  mkdir -p "${target_dir}" "${container_report_dir}"
-  : >"${cargo_lock_file}"
-  if [[ ! -e "${source_cargo_lock}" ]]; then
-    : >"${source_cargo_lock}"
-    created_source_lock=true
-  fi
-  cleanup_source_lock_mountpoint() {
-    if [[ "${created_source_lock}" == true ]]; then
-      rm -f "${source_cargo_lock}"
-    fi
+  [[ -s "${REPO_ROOT}/talos-rs/Cargo.lock" ]] || {
+    echo "The committed talos-rs/Cargo.lock is required for Docker installation acceptance." >&2
+    return 1
   }
-  trap cleanup_source_lock_mountpoint EXIT
+  mkdir -p "${target_dir}" "${container_report_dir}"
   mkdir -p "${REPO_ROOT}/talos-rs/target"
 
   rust_version="$(awk -F= '$1 == "RELEASE_RUST_VERSION" { print $2 }' \
@@ -256,21 +243,12 @@ run_linux_docker_tui_install() {
   }
   docker build --build-arg "RUST_VERSION=${rust_version}" \
     -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
-  if docker run --rm \
+  docker run --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \
-    -v "${cargo_lock_file}:/workspace/talos/talos-rs/Cargo.lock" \
     -v "${container_report_dir}:/tmp/talos-e2e-report" \
     -e TALOS_E2E_TMP_ROOT=/tmp/talos-e2e \
     -e TALOS_SCENARIO_REPORT_DIR=/tmp/talos-e2e-report \
     "${TUI_INSTALL_DOCKER_IMAGE}" \
-    bash -lc "/workspace/talos/talos-e2e/scenarios/15_tui_install/01_native_install.sh"; then
-    docker_status=0
-  else
-    docker_status=$?
-  fi
-
-  cleanup_source_lock_mountpoint
-  trap - EXIT
-  return "${docker_status}"
+    bash -lc "/workspace/talos/talos-e2e/scenarios/15_tui_install/01_native_install.sh"
 }
