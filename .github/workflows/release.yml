@@ -256,7 +256,7 @@ jobs:
       - validate-source
       - quality
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout_minutes || 45 }}
     env:
       VALIDATED_LOCK_SHA256: ${{ needs.quality.outputs.lock_sha256 }}
     strategy:
@@ -296,6 +296,7 @@ jobs:
           - name: TUI macOS AMD64
             artifact_name: talos-tui-macos-amd64
             runner: macos-26-intel
+            timeout_minutes: 90
             build_target: tui
             product_subdir: tui
           - name: TUI macOS ARM64
