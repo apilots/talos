@@ -4,15 +4,18 @@ import { ArrowLeftRight, Layers, Laptop, Server } from "lucide-react";
 import type { AppProtocol } from "@talos/sdk-core";
 import {
   computerPeers,
+  computerSyncState,
+  controlPlaneSyncState,
   computerPlatform,
-  controlPlanePeer,
   type ComputerService,
   type FlowLayer,
 } from "./observations";
+import { syncStateLabel } from "./sync-state";
 
 export interface ComputerGraphProps {
   nodes: AppProtocol.NodeInfo[];
   metrics?: AppProtocol.SyncMetricsResponse;
+  syncStatus?: AppProtocol.SyncStatusResponse;
   selectedId?: string;
   selectedService?: ComputerService;
   controlPlane: string;
@@ -24,6 +27,7 @@ export interface ComputerGraphProps {
 export function ComputerGraph({
   nodes,
   metrics,
+  syncStatus,
   selectedId,
   selectedService,
   controlPlane,
@@ -34,7 +38,7 @@ export function ComputerGraph({
   const { t } = useTranslation("computers");
   const marker = useId().replaceAll(":", "");
   const height = Math.max(510, nodes.length * 126 + 80);
-  const planePeer = controlPlanePeer(metrics);
+  const planeState = controlPlaneSyncState(metrics, syncStatus);
   return (
     <div
       className="cmp-canvas-scroll"
@@ -77,12 +81,7 @@ export function ComputerGraph({
           {nodes.map((node, index) => {
             const y = 125 + index * 126;
             const peers = computerPeers(metrics, node.nodeId);
-            const active = peers.some(
-              (peer) =>
-                peer.lastActivityAt !== null &&
-                metrics &&
-                metrics.observedAt - peer.lastActivityAt < 60,
-            );
+            const state = computerSyncState(metrics, node.nodeId, syncStatus);
             return (
               <g key={node.nodeId}>
                 {layer !== "sync" ? (
@@ -97,30 +96,34 @@ export function ComputerGraph({
                     <title>{`${node.displayName} · ${t("executionFlow")}`}</title>
                   </path>
                 ) : null}
-                {layer !== "execution" && peers.length > 0 ? (
+                {layer !== "execution" && (peers.length > 0 || syncStatus?.localComputerId === node.nodeId) ? (
                   <path
                     data-flow="sync"
                     data-computer-id={node.nodeId}
                     d={`M286,365 C405,365 405,${y + 20} 468,${y + 20}`}
-                    className={`cmp-sync-wire ${active ? "is-active" : ""}`}
+                    data-sync-state={state}
+                    className={`cmp-sync-wire is-${state}`}
                     markerStart={`url(#${marker}-sync)`}
                     markerEnd={`url(#${marker}-sync)`}
                   >
-                    <title>{`${node.displayName} · ${t("syncFlow")}`}</title>
+                    <title>{`${node.displayName} · ${t(syncStateLabel[state])}`}</title>
                   </path>
                 ) : null}
               </g>
             );
           })}
-          {layer !== "execution" && planePeer ? (
+          {layer !== "execution" && metrics?.controlPlanePeerId ? (
             <path
               data-flow="sync"
               data-service="controlPlane"
               d="M160,184 L160,304"
-              className="cmp-sync-wire"
+              data-sync-state={planeState}
+              className={`cmp-sync-wire is-${planeState}`}
               markerStart={`url(#${marker}-sync)`}
               markerEnd={`url(#${marker}-sync)`}
-            />
+            >
+              <title>{t(syncStateLabel[planeState])}</title>
+            </path>
           ) : null}
         </svg>
         <button
@@ -143,10 +146,10 @@ export function ComputerGraph({
           </footer>
         </button>
         <div className="cmp-service-relation">
-          {planePeer ? (
+          {metrics?.controlPlanePeerId ? (
             <>
               <ArrowLeftRight size={15} />
-              <span>{t("accountFacts")}</span>
+              <span data-sync-state={planeState}>{t(syncStateLabel[planeState])}</span>
             </>
           ) : (
             <span>{t("controlPlaneSyncUnknown")}</span>
@@ -173,6 +176,7 @@ export function ComputerGraph({
         </button>
         {nodes.map((node, index) => {
           const peers = computerPeers(metrics, node.nodeId);
+          const state = computerSyncState(metrics, node.nodeId, syncStatus);
           const Icon = node.systemInfo?.os === "macOs" ? Laptop : Server;
           return (
             <button
@@ -204,14 +208,8 @@ export function ComputerGraph({
                         : "offline",
                   )}
                 </span>
-                <span className={peers.length ? "cmp-sync-text" : ""}>
-                  {t(
-                    !metrics
-                      ? "syncUnknown"
-                      : peers.length
-                        ? "syncObserved"
-                        : "syncNotObserved",
-                  )}
+                <span data-sync-state={state} className={`cmp-sync-status is-${state}`}>
+                  {t(syncStateLabel[state])}
                 </span>
               </footer>
             </button>

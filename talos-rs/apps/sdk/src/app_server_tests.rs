@@ -182,6 +182,7 @@ async fn cloud_login_initializes_owned_host_with_the_returned_token() {
                 panic!("numeric SDK request ID");
             };
             let status = talos_types::SyncStatusResponse {
+                peer_id: None,
                 configured_enabled: Some(false),
                 connection: talos_types::SyncConnectionState::Disabled,
                 pending_changes: 0,

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SyncControl } from "./SyncControl";
+import { topologyMetrics } from "@/shared/test/computer-topology.fixture";
 import { useAppStore } from "@/shared/store/app-store";
 import { setTalosClientFactory, resetTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
 
@@ -12,9 +13,9 @@ vi.mock("react-i18next", async (importOriginal) => ({ ...await importOriginal<ty
 const off = { connection: "disabled", configuredEnabled: false, pendingChanges: 2,
   lastAcknowledgedAt: null, lastError: null, localComputerId: "mine", canClaimLocalHistory: true };
 const sync = { status: vi.fn(), enable: vi.fn(), disable: vi.fn() };
-function show() {
+function show(metrics?: typeof topologyMetrics) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><MemoryRouter><SyncControl /></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter><SyncControl metrics={metrics} /></MemoryRouter></QueryClientProvider>);
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -42,4 +43,19 @@ it("offers a sharing-off switch when H is disconnected without adding an executi
   expect(toggle).toHaveAttribute("aria-checked", "true");
   fireEvent.click(toggle);
   await waitFor(() => expect(sync.disable).toHaveBeenCalledOnce());
+});
+
+it("shows a conflict instead of reporting connected data as up to date", async () => {
+  sync.status.mockResolvedValue({ ...off, connection: "connected", configuredEnabled: true,
+    lastError: { code: "conflict", message: "Conflict", localization: null } });
+  show();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("syncConflict"));
+  expect(screen.getByRole("status")).toHaveTextContent("syncPending");
+  expect(screen.getByRole("alert")).toBeVisible();
+});
+
+it("uses document observations for the same active label as topology", async () => {
+  sync.status.mockResolvedValue({ ...off, connection: "connected", peerId: "peer-a", configuredEnabled: true, pendingChanges: 0 });
+  show(topologyMetrics);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("syncActive"));
 });

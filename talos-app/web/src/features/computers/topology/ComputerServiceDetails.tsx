@@ -7,10 +7,12 @@ export function ComputerServiceDetails({
   service,
   metrics,
   controlPlane,
+  syncStatus,
 }: {
   service: ComputerService;
   metrics?: AppProtocol.SyncMetricsResponse;
   controlPlane: string;
+  syncStatus?: AppProtocol.SyncStatusResponse;
 }) {
   const { t, i18n } = useTranslation("computers");
   const peer = controlPlanePeer(metrics);
@@ -45,11 +47,15 @@ export function ComputerServiceDetails({
         <p className="cmp-footnote">{t("syncUnknown")}</p>
       )}
       {service === "controlPlane" ? (
-        peer ? (
-          <SyncPeerDetails peers={[peer]} />
-        ) : (
-          <p className="cmp-footnote">{t("controlPlaneSyncUnknown")}</p>
-        )
+        <SyncPeerDetails
+          peers={peer ? [peer] : []}
+          metrics={metrics}
+          syncStatus={
+            metrics?.controlPlanePeerId && metrics.controlPlanePeerId === syncStatus?.peerId
+              ? syncStatus
+              : undefined
+          }
+        />
       ) : (
         <>
           <h3 className="mb-3 mt-6 text-sm font-medium">

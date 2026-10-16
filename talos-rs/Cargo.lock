@@ -6960,9 +6960,9 @@ dependencies = [
 
 [[package]]
 name = "talos-sync-sdk"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d36163d1e2bac80b24acbc1e1119bc4140e1978617ae92bb55f2a8f0d4d94ef"
+checksum = "6788b16499ba23823216be7d85359c7b92361ad2c97142b8750c8c8a20b53b71"
 dependencies = [
  "futures-util",
  "loro",
@@ -6982,9 +6982,9 @@ dependencies = [
 
 [[package]]
 name = "talos-sync-types"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "492506b668da46005f4c8590745c20c01c61acb0f6364d88fc861d3192216aa0"
+checksum = "f617ee83127d919806b838ec3bd9683a5b3426f7b5dce6525ae393f75a8b621e"
 dependencies = [
  "base64 0.22.1",
  "serde",

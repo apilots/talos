@@ -244,7 +244,7 @@
 .cmp-arrow-sync {
   fill: #9383be;
 }
-.cmp-sync-wire.is-active {
+.cmp-sync-wire.is-syncing {
   animation: cmp-flow 2s linear infinite;
 }
 .cmp-service,
@@ -598,7 +598,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cmp-sync-wire.is-active {
+  .cmp-sync-wire.is-syncing {
     animation: none;
   }
 }
@@ -615,3 +615,14 @@
     display: block;
   }
 }
+
+/* Synchronization state never changes execution availability. */
+.cmp-sync-wire.is-unknown,
+.cmp-sync-wire.is-disabled { opacity: 0.3; }
+.cmp-sync-wire.is-disconnected { stroke: rgb(var(--color-muted)); opacity: 0.6; }
+.cmp-sync-wire.is-conflict,
+.cmp-sync-wire.is-error { stroke: rgb(var(--color-danger)); }
+.cmp-sync-status.is-conflict,
+.cmp-sync-status.is-error { color: rgb(var(--color-danger)); }
+.cmp-sync-status.is-idle,
+.cmp-sync-status.is-syncing { color: #9383be; }

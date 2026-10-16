@@ -47,6 +47,9 @@ pub struct SyncPeerMetrics {
     pub document_rooms: u64,
     #[ts(type = "number | null")]
     pub last_activity_at: Option<i64>,
+    /// Sync service receipt of the last solicited heartbeat pong.
+    #[ts(type = "number | null")]
+    pub last_heartbeat_at: Option<i64>,
     pub inbound_bytes_per_second: f64,
     pub outbound_bytes_per_second: f64,
     pub updates_per_second: f64,

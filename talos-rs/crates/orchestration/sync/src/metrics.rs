@@ -42,6 +42,7 @@ fn project(account: AccountMetrics, endpoint: String) -> SyncMetricsResponse {
                 connections: peer.connections,
                 document_rooms: peer.document_rooms,
                 last_activity_at: peer.last_activity_at.map(|value| value / 1000),
+                last_heartbeat_at: peer.last_heartbeat_at.map(|value| value / 1000),
                 inbound_bytes_per_second: peer.inbound_bytes_per_second,
                 outbound_bytes_per_second: peer.outbound_bytes_per_second,
                 updates_per_second: peer.updates_per_second,

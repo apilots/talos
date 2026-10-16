@@ -107,13 +107,22 @@ pub(super) async fn verify(
                 metrics
                     .peers
                     .iter()
-                    .any(|peer| peer.computer_ids.contains(id))
+                    .any(|peer| peer.computer_ids.contains(id) && peer.last_heartbeat_at.is_some())
             })
         })
     })
     .await;
     let bindings = a.sync.saved_bindings().await.unwrap().len();
     let observations = a.service.sync_metrics(actor).await.unwrap();
+    assert_eq!(
+        a.service
+            .sync_status(actor)
+            .await
+            .unwrap()
+            .peer_id
+            .as_deref(),
+        Some(a.sync.peer_id())
+    );
     assert!(observations.observed_at < 10_000_000_000);
     assert_eq!(observations.control_plane_peer_id, None);
     assert!(observations

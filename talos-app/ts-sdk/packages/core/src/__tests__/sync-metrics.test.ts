@@ -12,7 +12,9 @@ it("exposes account metrics through both SDK transports without account selector
     lastFlushedAt: null,
     complete: false,
     metadata: { computers: 0, projects: 0, sessions: 0, files: 0 },
-    peers: [],
+    peers: [{ peerId: "peer-a", computerIds: ["computer-a"], connections: 1,
+      documentRooms: 0, lastActivityAt: null, lastHeartbeatAt: 1_700_000_000,
+      inboundBytesPerSecond: 0, outboundBytesPerSecond: 0, updatesPerSecond: 0, commitP95Ms: null }],
   };
   const request = vi.fn().mockResolvedValue(metrics);
   const browser = new TalosClient(
