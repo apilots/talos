@@ -1,4 +1,4 @@
-//! Product synchronization controls. Transport identities remain private to the host.
+//! Product synchronization controls and authenticated host observations.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -29,6 +29,8 @@ pub struct SyncStatusResponse {
     /// Null follows verified login; false persists an explicit opt-out.
     pub configured_enabled: Option<bool>,
     pub connection: SyncConnectionState,
+    /// Current management peer; scopes local pending/error observations in topology.
+    pub peer_id: Option<String>,
     #[ts(type = "number")]
     pub pending_changes: u64,
     #[ts(type = "number | null")]

@@ -400,6 +400,7 @@ impl ApplicationSyncHost {
         Ok(SyncStatusResponse {
             configured_enabled,
             connection,
+            peer_id: (!actor.auth_disabled).then(|| self.sync.peer_id().to_owned()),
             pending_changes,
             last_acknowledged_at: status
                 .as_ref()

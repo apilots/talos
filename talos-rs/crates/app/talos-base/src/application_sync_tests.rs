@@ -191,7 +191,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
     });
     let hub_address = port();
     let hub_config = directory.path().join("sync.yaml");
-    std::fs::write(&hub_config, serde_json::to_vec_pretty(&json!({"listener":{"bind_address":hub_address.to_string(),"certificate_file":cert,"private_key_file":key},"storage":{"backend":"sqlite","path":directory.path().join("hub.db"),"max_connections":1,"busy_timeout_ms":5000},"auth":{"issuer_url":api,"timeout_ms":5000,"revalidate_interval_ms":1000}})).unwrap()).unwrap();
+    std::fs::write(&hub_config, serde_json::to_vec_pretty(&json!({"listener":{"bind_address":hub_address.to_string(),"certificate_file":cert,"private_key_file":key},"storage":{"backend":"sqlite","path":directory.path().join("hub.db"),"max_connections":1,"busy_timeout_ms":5000},"auth":{"issuer_url":api,"timeout_ms":5000,"revalidate_interval_ms":1000},"limits":{"heartbeat_interval_ms":300}})).unwrap()).unwrap();
     let binary = std::env::var_os("TALOS_SYNC_BIN")
         .map(PathBuf::from)
         .unwrap_or_else(|| {

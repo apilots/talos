@@ -224,7 +224,11 @@ export type SyncPeerMetrics = { peerId: string,
 /**
  * Match only against the caller's authorized Computer directory.
  */
-computerIds: Array<string>, connections: number, documentRooms: number, lastActivityAt: number | null, inboundBytesPerSecond: number, outboundBytesPerSecond: number, updatesPerSecond: number, commitP95Ms: number | null, };
+computerIds: Array<string>, connections: number, documentRooms: number, lastActivityAt: number | null,
+/**
+ * Sync service receipt of the last solicited heartbeat pong.
+ */
+lastHeartbeatAt: number | null, inboundBytesPerSecond: number, outboundBytesPerSecond: number, updatesPerSecond: number, commitP95Ms: number | null, };
 
 export type SyncMetadataCounts = { computers: number, projects: number, sessions: number, files: number, };
 
@@ -232,7 +236,11 @@ export type SyncStatusResponse = {
 /**
  * Null follows verified login; false persists an explicit opt-out.
  */
-configuredEnabled: boolean | null, connection: SyncConnectionState, pendingChanges: number, lastAcknowledgedAt: number | null, lastError: ApiError | null,
+configuredEnabled: boolean | null, connection: SyncConnectionState,
+/**
+ * Current management peer; scopes local pending/error observations in topology.
+ */
+peerId: string | null, pendingChanges: number, lastAcknowledgedAt: number | null, lastError: ApiError | null,
 /**
  * This management host's accessible Computer UUID, or embedded before enrollment.
  * Null means the signed-in account does not own this shared host's private Worker.

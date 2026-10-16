@@ -20,11 +20,13 @@ export const topologyNodes: AppProtocol.NodeInfo[] = [
   systemInfo: null,
 }));
 
+const observedAt = Math.floor(Date.now() / 1000);
+
 export const topologyMetrics: AppProtocol.SyncMetricsResponse = {
   endpoint: "https://sync.example",
   controlPlanePeerId: null,
-  observedAt: 1_700_000_000,
-  lastFlushedAt: 1_699_999_999,
+  observedAt,
+  lastFlushedAt: observedAt - 1,
   complete: true,
   metadata: { computers: 2, projects: 1, sessions: 3, files: 0 },
   peers: [
@@ -33,7 +35,8 @@ export const topologyMetrics: AppProtocol.SyncMetricsResponse = {
       computerIds: ["manager-a"],
       connections: 1,
       documentRooms: 2,
-      lastActivityAt: 1_699_999_995,
+      lastActivityAt: observedAt - 5,
+      lastHeartbeatAt: observedAt - 2,
       inboundBytesPerSecond: 20,
       outboundBytesPerSecond: 10,
       updatesPerSecond: 1,

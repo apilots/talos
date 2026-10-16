@@ -1,17 +1,27 @@
 import { useTranslation } from "react-i18next";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { syncObservationState, syncStateLabel } from "./sync-state";
 import type { AppProtocol } from "@talos/sdk-core";
 
 export function SyncPeerDetails({
   peers,
+  metrics,
+  syncStatus,
 }: {
   peers: AppProtocol.SyncPeerMetrics[];
+  metrics?: AppProtocol.SyncMetricsResponse;
+  syncStatus?: AppProtocol.SyncStatusResponse;
 }) {
   const { t, i18n } = useTranslation("computers");
   const number = (value: number) =>
     value.toLocaleString(i18n.language, { maximumFractionDigits: 1 });
+  const state = syncObservationState(metrics, peers, syncStatus);
   return (
     <section className="cmp-peer-details" aria-label={t("syncTitle")}>
       <h3>{t("syncTitle")}</h3>
+      <p data-sync-state={state} className={`cmp-sync-status is-${state}`}>{t(syncStateLabel[state])}</p>
+      {syncStatus?.pendingChanges ? <p>{t("syncPending", { count: syncStatus.pendingChanges })}</p> : null}
+      {syncStatus?.lastError ? <p role="alert" className="text-danger">{apiErrorMessage(syncStatus.lastError)}</p> : null}
       {peers.length === 0 ? (
         <p className="cmp-muted">{t("noPeerDetails")}</p>
       ) : (
@@ -50,6 +60,11 @@ export function SyncPeerDetails({
               <div>
                 <dt>{t("activeRooms")}</dt>
                 <dd>{peer.documentRooms}</dd>
+              </div>
+              <div>
+                <dt>{t("lastSyncHeartbeat")}</dt>
+                <dd>{peer.lastHeartbeatAt === null ? t("noHeartbeat") :
+                  new Date(peer.lastHeartbeatAt * 1000).toLocaleTimeString(i18n.language)}</dd>
               </div>
               <div>
                 <dt>{t("lastActivity")}</dt>

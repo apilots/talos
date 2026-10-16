@@ -18,6 +18,7 @@ interface Props {
   localId?: string;
   controlPlane: string;
   metrics?: AppProtocol.SyncMetricsResponse;
+  syncStatus?: AppProtocol.SyncStatusResponse;
   onOpen: (id: string) => void;
 }
 
@@ -27,6 +28,7 @@ export function ComputerInspector({
   localId,
   controlPlane,
   metrics,
+  syncStatus,
   onOpen,
 }: Props) {
   const { t } = useTranslation(["computers", "common"]);
@@ -74,6 +76,7 @@ export function ComputerInspector({
         {t("common:loading")}
       </p>
     );
+  const peers = computerPeers(metrics, node.nodeId);
   const personal =
     node.mode === "remote" && node.ownerUserId === connection.userId;
   const canRecover =
@@ -102,12 +105,16 @@ export function ComputerInspector({
       {!node.available ? (
         <p className="cmp-footnote">{t("computers:offlineHelp")}</p>
       ) : null}
-      {metrics ? (
-        <SyncPeerDetails peers={computerPeers(metrics, node.nodeId)} />
-      ) : null}
-      {!metrics ? (
-        <p className="cmp-footnote">{t("computers:syncUnknown")}</p>
-      ) : null}
+      <SyncPeerDetails
+        peers={peers}
+        metrics={metrics}
+        syncStatus={
+          syncStatus?.localComputerId === node.nodeId ||
+          peers.some((peer) => peer.peerId === syncStatus?.peerId)
+            ? syncStatus
+            : undefined
+        }
+      />
       <ComputerDetails node={node} controlPlane={controlPlane} />
       {personal ? (
         <div className="mt-5 space-y-3">

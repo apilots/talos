@@ -5,7 +5,7 @@ export { useEnvironmentKey, useComputers, useComputerList, useComputer, useSelec
 export { SyncControl } from "./SyncControl";
 export { ComputerDetails } from "./ComputerDetails";
 
-export { useAccountSyncMetrics } from "./hooks";
+export { useAccountSyncMetrics, useSyncStatus } from "./hooks";
 export { ComputerGraph } from "./topology/ComputerGraph";
 export { ComputerTopologyList } from "./topology/ComputerTopologyList";
 export { ComputerInspector } from "./topology/ComputerInspector";

@@ -9,6 +9,7 @@ import {
   ComputerServiceDetails,
   SyncControl,
   useAccountSyncMetrics,
+  useSyncStatus,
   useComputerList,
   useComputers,
   observationsDelayed,
@@ -38,6 +39,8 @@ export function ComputersPage() {
   }>();
   const list = useComputerList(search.trim());
   const metrics = useAccountSyncMetrics();
+  const status = useSyncStatus();
+  const syncStatus = status.error ? undefined : status.data;
   const connection = useAppStore((state) => state.connection);
   const controlPlane =
     connection.controlPlaneEndpoint || window.location.origin;
@@ -116,7 +119,7 @@ export function ComputersPage() {
         <small>{loaded}</small>
       </section>
       <div className="cmp-controls">
-        <SyncControl />
+        <SyncControl metrics={metrics.data} />
       </div>
       {computers.runtime?.error ? (
         <p role="alert" className="cmp-notice text-danger">
@@ -233,6 +236,7 @@ export function ComputersPage() {
             <ComputerGraph
               nodes={nodes}
               metrics={metrics.data}
+              syncStatus={syncStatus}
               selectedId={inspectedId}
               selectedService={service}
               layer={layer}
@@ -244,6 +248,7 @@ export function ComputersPage() {
             <ComputerTopologyList
               nodes={nodes}
               metrics={metrics.data}
+              syncStatus={syncStatus}
               selectedId={inspectedId}
               onInspect={inspect}
             />
@@ -274,6 +279,7 @@ export function ComputersPage() {
             <ComputerServiceDetails
               service={service}
               metrics={metrics.data}
+              syncStatus={syncStatus}
               controlPlane={controlPlane}
             />
           ) : inspectedId ? (
@@ -283,6 +289,7 @@ export function ComputersPage() {
               localId={computers.localId}
               controlPlane={controlPlane}
               metrics={metrics.data}
+              syncStatus={syncStatus}
               onOpen={open}
             />
           ) : null}
