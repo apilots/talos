@@ -11,7 +11,8 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   metadata materialization, pure Workers without management databases. Real
   account Metrics must observe the exact Control Plane peer and both Desktop
   Computer mappings used by topology sync edges; standalone Workers must have
-  no Sync mappings and Desktop synchronization must remain healthy.
+  no Sync mappings and Desktop synchronization must remain healthy. Require a
+  complete observation flushed within 15 seconds, matching the UI freshness rule.
 - `02_execution_history`: funded real model/tool tasks on Desktop embedded,
   native Mac and Docker Linux Workers; another Desktop continues each Session on
   its immutable Computer, realtime progress, identical complete history and files
