@@ -165,6 +165,16 @@ Keep local verification output in ignored `output/release-<version>/`; record
 unavailable external-account scenarios as unverified. Never infer their success
 from unit tests or artifact builds.
 
+## Supported release targets
+
+Publish Desktop for macOS Apple Silicon and Linux AMD64, Server WebUI for Linux
+AMD64/ARM64, and TUI for Linux AMD64/ARM64 and macOS Apple Silicon. macOS Intel
+builds and native installation CI are disabled.
+
+Final assembled-asset validation uses the tooling from the exact workflow commit
+so its supported-target policy matches the build matrix. Product source, installer,
+Notes and dependency provenance still come from the immutable release tag.
+
 ## Finish
 
 Download public assets and check `checksums.txt` using `sha256sum --check` on Linux

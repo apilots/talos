@@ -47,7 +47,7 @@ expected_checksum() {
   exit 1
 }
 
-for target in linux-amd64 linux-arm64 macos-amd64 macos-arm64; do
+for target in linux-amd64 linux-arm64 macos-arm64; do
   asset_name="Talos-TUI-${VERSION}-${target}.tar.gz"
   asset_path="${ASSETS_DIR}/${asset_name}"
   [[ -f "${asset_path}" ]] || {
