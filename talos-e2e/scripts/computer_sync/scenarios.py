@@ -18,7 +18,7 @@ def topology(cluster):
         metrics = data(http(cluster.url + '/v1/sync/metrics', token=cluster.users['alice']['access_token']))
         peers = metrics['peers']
         mapped = {computer for peer in peers for computer in peer['computerIds']}
-        if desktops <= mapped and any(peer['peerId'] == metrics['controlPlanePeerId'] for peer in peers):
+        if metrics['complete'] and desktops <= mapped and any(peer['peerId'] == metrics['controlPlanePeerId'] for peer in peers):
             return metrics
         return False
 
