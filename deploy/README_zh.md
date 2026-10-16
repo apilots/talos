@@ -33,7 +33,7 @@ TLS、持久化、资源限制和 secret 管理。
 在 `.env` 中设置 Provider key 后，启动 Docker Compose 示例：
 
 ```bash
-cd deploy/docker
+cd deploy/docker/talos-server
 cp .env.example .env
 docker compose up -d
 curl http://127.0.0.1:8080/health
@@ -47,3 +47,5 @@ Release bundle installer 位于 [`install/`](install/README.md)，它将产品�
 用户拥有的配置和 Runtime 状态分开安装。
 
 部署变更必须验证真实启动或安装路径，不能只做静态配置检查。
+
+Docker 示例按产品分目录维护：[talos-server](docker/talos-server/README.md) 与 [talos-worker](docker/talos-worker/README.md)。Worker 独立部署，不随 Server 部署流程启动。

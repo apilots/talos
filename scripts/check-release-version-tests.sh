@@ -18,8 +18,9 @@ files = {
     "talos-rs/Cargo.toml": '[workspace.package]\nversion = "1.2.3"\n',
     "talos-rs/apps/tui/src/utils.rs": 'pub const APP_VERSION: &str = "v1.2.3";\n',
     "talos-app/ts-sdk/packages/app-server/src/stdio.ts": 'version: this.options.clientVersion ?? "1.2.3"\n',
-    "deploy/docker/.env.example": 'TALOS_SERVER_VERSION=v1.2.3\n',
-    "deploy/docker/docker-compose.yml": 'image: ghcr.io/apilots/talos-server:${TALOS_SERVER_VERSION:-v1.2.3}\n',
+    "deploy/docker/talos-worker/.env.example": 'TALOS_WORKER_VERSION=v1.2.3\n',
+    "deploy/docker/talos-server/.env.example": 'TALOS_SERVER_VERSION=v1.2.3\n',
+    "deploy/docker/talos-server/docker-compose.yml": 'image: ghcr.io/apilots/talos-server:${TALOS_SERVER_VERSION:-v1.2.3}\n',
 }
 for package in ("", "web/", "desktop/", "ts-sdk/", "ts-sdk/packages/core/",
                 "ts-sdk/packages/browser/", "ts-sdk/packages/app-server/"):

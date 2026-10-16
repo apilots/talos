@@ -106,6 +106,10 @@ jobs:
           --base "${{ steps.range.outputs.base }}"
           --head "${{ steps.range.outputs.head }}"
 
+      - name: Validate Server and Worker Compose examples without starting containers
+        if: ${{ steps.range.outputs.server_checks == 'true' }}
+        run: bash deploy/tests/compose_examples_check.sh
+
       - name: Verify published Talos Server startup and HTTPS proxy
         if: ${{ steps.range.outputs.server_checks == 'true' }}
         run: bash deploy/tests/talos_server_smoke.sh
