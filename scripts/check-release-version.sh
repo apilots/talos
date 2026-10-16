@@ -5,8 +5,9 @@ set -euo pipefail
 die() { echo "check-release-version: $*" >&2; exit 1; }
 version_files() {
   cat <<'EOF'
-deploy/docker/.env.example
-deploy/docker/docker-compose.yml
+deploy/docker/talos-server/.env.example
+deploy/docker/talos-worker/.env.example
+deploy/docker/talos-server/docker-compose.yml
 talos-app/desktop/package.json
 talos-app/package.json
 talos-app/ts-sdk/package.json
@@ -75,11 +76,12 @@ require_version_matches() {
     "version: this.options.clientVersion ?? \"${VERSION}\""
   local docker_tag="${TAG}"
   if [[ "${metadata_only}" == true && "${VERSION}" == *-SNAPSHOT ]]; then
-    docker_tag="$(sed -n 's/^TALOS_SERVER_VERSION=\(v[0-9]*\.[0-9]*\.[0-9]*\)$/\1/p' deploy/docker/.env.example)"
+    docker_tag="$(sed -n 's/^TALOS_SERVER_VERSION=\(v[0-9]*\.[0-9]*\.[0-9]*\)$/\1/p' deploy/docker/talos-server/.env.example)"
     [[ "${docker_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "Docker default must be a formal version"
   fi
-  assert_file_contains "deploy/docker/.env.example" "TALOS_SERVER_VERSION=${docker_tag}"
-  assert_file_contains "deploy/docker/docker-compose.yml" "TALOS_SERVER_VERSION:-${docker_tag}"
+  assert_file_contains "deploy/docker/talos-server/.env.example" "TALOS_SERVER_VERSION=${docker_tag}"
+  assert_file_contains "deploy/docker/talos-server/docker-compose.yml" "TALOS_SERVER_VERSION:-${docker_tag}"
+  assert_file_contains "deploy/docker/talos-worker/.env.example" "TALOS_WORKER_VERSION=${docker_tag}"
 }
 
 require_version_commit() {

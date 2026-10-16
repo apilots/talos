@@ -42,13 +42,13 @@ a shared DB does not share live Registry/Connect handles across replicas.
 
 ## Deployment files
 
-- [Production config](docker/talos-server.yaml.example): complete minimal profile
+- [Production config](docker/talos-server/talos.yaml.example): complete minimal profile
   for this release, authenticated cloud mode, TLS control-plane listener on9443,
   private embedded Worker loopback listener, and the existing Cloud/Sync URLs.
-- [Production Compose](docker/talos-server.compose.yml): loopback8080/9443, external
+- [Production Compose](docker/talos-server/compose.production.yml): loopback8080/9443, external
   existing home volume, read-only TLS directory and current one-GiB resource cap.
   That cap is inherited from the observed deployment, not a measured capacity claim.
-- [Deployment environment](docker/.env.example): copy to `.env` beside
+- [Deployment environment](docker/talos-server/.env.example): copy to `.env` beside
   the Compose file. Comments separate the image version, existing volume name and
   absolute TLS directory from provider secrets. This is the only deployment env file.
 - [Caddy](caddy/Caddyfile.example) or [Nginx](nginx/talos.conf.example): agent-only
@@ -83,8 +83,10 @@ The operator-owned `/opt/talos-server/.env` supplies Compose interpolation and
 container environment values. Talos writes secrets to `$TALOS_HOME/.env` inside
 the persistent home, a separate file; it does not rewrite the deployment file or
 its comments. Do not bind mount the deployment file over the runtime file.
-Injected process environment takes precedence over runtime-file values: choose
-one source for each provider key when managing secrets through the product UI.
+Injected process environment takes precedence over runtime-file values, even
+for an empty string. Omit deployment entries for product-managed keys; uncomment
+only non-empty values when the operator deliberately owns that key. Saving a
+key through the product UI writes the runtime file, not this deployment file.
 Both Compose profiles use `TALOS_SERVER_IMAGE` and `TALOS_SERVER_VERSION` from
 this deployment file. Change the version field to select another published release.
 
@@ -153,13 +155,16 @@ its named volume, runtime YAML, product-writable `.env` and TLS identity. No
 package build, new release or business-data backup/restore is needed for this
 configuration-only procedure.
 
-From `/opt/talos-server`, validate and recreate only this service:
+Install `deploy/docker/talos-server/compose.production.yml` as
+`/opt/talos-server/docker-compose.yml`; the repository basic Compose example
+is a different profile. Keep the production `.env` beside the installed file.
+From `/opt/talos-server`, explicitly select that installed production file:
 
 ```bash
-docker compose config --quiet
-docker compose pull talos-server
-docker compose up -d --no-deps --no-build --pull never talos-server
-docker compose ps
+docker compose -f /opt/talos-server/docker-compose.yml config --quiet
+docker compose -f /opt/talos-server/docker-compose.yml pull talos-server
+docker compose -f /opt/talos-server/docker-compose.yml up -d --no-deps --no-build --pull never talos-server
+docker compose -f /opt/talos-server/docker-compose.yml ps
 ```
 
 Check the configured image/version, unchanged volume/TLS mounts, preserved
@@ -174,12 +179,12 @@ flows for deployment-file naming changes.
    using only `/opt/talos-server` and its own container. Do not print secret values.
 2. Prepare the new Compose, `.env`, reviewed `conf/talos.yaml`, TLS identity and
    agent proxy fragment offline. Validate with the installed proxy version.
-3. In a local disposable directory, copy `.env.example` to `.env` and
-   the Server Compose file beside it, then run:
+3. In a local disposable directory, copy `docker/talos-server/.env.example` to `.env` and
+   `docker/talos-server/compose.production.yml` beside it, then run:
 
    ```bash
    docker compose --project-name talos-server \
-     -f talos-server.compose.yml config --quiet
+     -f compose.production.yml config --quiet
    ```
 
    This only validates configuration. Use placeholder secrets for local checks;

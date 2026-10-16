@@ -1,0 +1,43 @@
+# Standalone execution Worker: no Server control-plane or Sync service.
+timezone: Asia/Shanghai
+mode: local
+workspaces:
+  default_workspace_id: default
+  definitions:
+    - workspace_id: default
+      root_prefix: workspace-talos
+agent_node:
+  control_plane: null
+  runner:
+    node_id: ${TALOS_WORKER_NODE_ID}
+    control_plane_endpoint: https://agent.talos.love
+    credential_file: /home/talos/.talos/conf/node.credential
+    transport: outbound
+    trusted_ca_file: null
+  worker_rpc:
+    bind_address: 127.0.0.1:0
+    tls: null
+agent:
+  name: talos-worker
+  inner_model:
+    provider: deepseek
+    id: deepseek-v4-flash
+  kernel:
+    mcp:
+      servers: []
+llm:
+  provider: deepseek
+  model: deepseek-v4-flash
+  deepseek:
+    api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
+    base_url: https://api.deepseek.com
+    protocol: chat
+    models:
+      - id: deepseek-v4-flash
+        name: DeepSeek V4 Flash
+        context_window: 1000000
+        reasoning: true
+        input: [text]
+storage:
+  database_type: sqlite
+  max_connections: 5

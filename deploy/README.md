@@ -24,7 +24,8 @@ proxies must disable response buffering and compression for
 Deploy standalone Workers with the dedicated `ghcr.io/apilots/talos-worker`
 image, which uses outbound Connect and does not inherit the Server HTTP
 healthcheck. Supply its persistent home, node UUID/credential and TLS trust as
-described in the [Worker image guide](../build/worker/README.md). Talos releases
+described in the [Worker Compose example](docker/talos-worker/README.md) and
+[Worker image guide](../build/worker/README.md). Talos releases
 publish Server and Worker images for both `linux/amd64` and `linux/arm64`.
 
 The examples under `caddy/`, `nginx/`, and `docker/` are the maintained starting
@@ -34,7 +35,7 @@ before production use.
 Start the Docker Compose example after setting a provider key in its `.env`:
 
 ```bash
-cd deploy/docker
+cd deploy/docker/talos-server
 cp .env.example .env
 docker compose up -d
 curl http://127.0.0.1:8080/health

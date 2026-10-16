@@ -37,8 +37,9 @@ VERSION_PATTERNS = {
     "talos-rs/Cargo.toml": rf'(?m)(^\[workspace\.package\]\n(?:(?!\[)[^\n]*\n)*?version = ")({VERSION})(")',
     "talos-rs/apps/tui/src/utils.rs": rf'(APP_VERSION: &str = "v)({VERSION})(")',
     "talos-app/ts-sdk/packages/app-server/src/stdio.ts": rf'(version: this\.options\.clientVersion \?\? ")({VERSION})(")',
-    "deploy/docker/.env.example": rf'(?m)(^TALOS_SERVER_VERSION=v)({VERSION})($)',
-    "deploy/docker/docker-compose.yml": rf'(TALOS_SERVER_VERSION:-v)({VERSION})(\}})',
+    "deploy/docker/talos-worker/.env.example": rf'(?m)(^TALOS_WORKER_VERSION=v)({VERSION})($)',
+    "deploy/docker/talos-server/.env.example": rf'(?m)(^TALOS_SERVER_VERSION=v)({VERSION})($)',
+    "deploy/docker/talos-server/docker-compose.yml": rf'(TALOS_SERVER_VERSION:-v)({VERSION})(\}})',
 }
 
 

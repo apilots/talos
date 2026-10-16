@@ -13,10 +13,10 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$fixture/home/conf" "$fixture/tls"
-cp "$root/deploy/docker/talos-server.yaml.example" "$fixture/home/conf/talos.yaml"
-cp "$root/deploy/docker/talos-server.compose.yml" "$fixture/"
-cp "$root/deploy/docker/.env.example" "$fixture/.env"
-image="$(cd "$fixture" && docker compose -f talos-server.compose.yml config --images)"
+cp "$root/deploy/docker/talos-server/talos.yaml.example" "$fixture/home/conf/talos.yaml"
+cp "$root/deploy/docker/talos-server/compose.production.yml" "$fixture/"
+cp "$root/deploy/docker/talos-server/.env.example" "$fixture/.env"
+image="$(cd "$fixture" && docker compose -f compose.production.yml config --images)"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=Talos-test-CA \
   -addext 'basicConstraints=critical,CA:TRUE' \
   -keyout "$fixture/ca.key" -out "$fixture/tls/ca.crt" >/dev/null 2>&1
