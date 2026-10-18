@@ -15,6 +15,7 @@ import { syncStateLabel } from "./sync-state";
 export interface ComputerGraphProps {
   nodes: AppProtocol.NodeInfo[];
   metrics?: AppProtocol.SyncMetricsResponse;
+  syncEndpoint?: string;
   syncStatus?: AppProtocol.SyncStatusResponse;
   selectedId?: string;
   selectedService?: ComputerService;
@@ -27,6 +28,7 @@ export interface ComputerGraphProps {
 export function ComputerGraph({
   nodes,
   metrics,
+  syncEndpoint,
   syncStatus,
   selectedId,
   selectedService,
@@ -167,11 +169,11 @@ export function ComputerGraph({
           </span>
           <span>
             <strong>Talos Sync</strong>
-            <small>{metrics?.endpoint ?? t("unknown")}</small>
+            <small>{syncEndpoint ?? metrics?.endpoint ?? t("unknown")}</small>
           </span>
           <footer>
             {t("syncFacts")}
-            <span>{t("fixedService")}</span>
+            <span>{t(!metrics && syncEndpoint ? "lastKnownEndpointShort" : "fixedService")}</span>
           </footer>
         </button>
         {nodes.map((node, index) => {

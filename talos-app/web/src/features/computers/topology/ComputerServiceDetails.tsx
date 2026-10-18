@@ -6,11 +6,13 @@ import { SyncPeerDetails } from "./SyncPeerDetails";
 export function ComputerServiceDetails({
   service,
   metrics,
+  syncEndpoint,
   controlPlane,
   syncStatus,
 }: {
   service: ComputerService;
   metrics?: AppProtocol.SyncMetricsResponse;
+  syncEndpoint?: string;
   controlPlane: string;
   syncStatus?: AppProtocol.SyncStatusResponse;
 }) {
@@ -30,7 +32,7 @@ export function ComputerServiceDetails({
           <dt>{t("endpoint")}</dt>
           <dd>
             {service === "sync"
-              ? (metrics?.endpoint ?? t("unknown"))
+              ? (syncEndpoint ?? metrics?.endpoint ?? t("unknown"))
               : controlPlane}
           </dd>
         </div>
@@ -44,7 +46,7 @@ export function ComputerServiceDetails({
           })}
         </p>
       ) : (
-        <p className="cmp-footnote">{t("syncUnknown")}</p>
+        <p className="cmp-footnote">{t(service === "sync" && syncEndpoint ? "lastKnownEndpoint" : "syncUnknown")}</p>
       )}
       {service === "controlPlane" ? (
         <SyncPeerDetails

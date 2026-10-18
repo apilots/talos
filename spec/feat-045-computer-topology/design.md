@@ -29,3 +29,27 @@ One presentation enum owns unknown, online idle, recent document activity, disco
 The existing local `sync/status` response exposes the current authenticated management `peerId` solely to scope existing connection/pending/error observations. Apply these observations only to that peer or the explicitly identified local Computer, including when telemetry fails; never attribute a local conflict to another Computer or report remote convergence. Typed conflict/idempotency-conflict errors override optimistic connected labels; other errors remain visible with their existing safe error presentation. Pending changes never count as confirmed transfers. Explicit disabled/connecting/disconnected states retain their meanings. Absent remote presence or unavailable/stale snapshots mean unknown, not disconnected; pure Workers still have no fabricated direct Sync edge. Live observations older than fifteen seconds relative to the client clock become unknown. Retain five-second queries; no SSE, new synchronization frame, persistent connection registry or remote error replication.
 
 Verify graph/list/details/control consistency, idle-to-active-to-idle transitions, Control Plane motion, heartbeat versus activity, local conflict and pending scope, disconnect and recovery, unknown observations, both languages and reduced motion. Keep metrics transport and execution availability unchanged.
+
+## Connection, activity and availability vocabulary
+
+Keep the existing `SyncTopologyState` enum; do not introduce an `offline` Sync state.
+
+| Presentation state | Evidence and meaning |
+| --- | --- |
+| `disconnected` — Sync disconnected | This management host explicitly reports a failed Sync transport connection. It is not a claim that the Sync service or a remote Computer is globally offline. |
+| `connecting` — Connecting Sync | This host is attempting an initial connection or retry. A prior transport failure may remain visible during retry. |
+| `unknown` — Sync unknown | No usable observation exists for this peer: missing mapping, unavailable telemetry, a failed status read, or a snapshot older than 15 seconds. Absence of evidence does not prove disconnection. |
+| `idle` — Online, idle | Fresh observations contain a live peer connection and no document activity within 60 seconds. Heartbeat may continue; this does not prove convergence. |
+| `syncing` — Recent sync activity | A fresh live peer observation contains document activity within 60 seconds. This indicates recent transfer activity, not completion of all pending work. |
+| `pending` — Waiting to sync | This host reports queued changes. Pending work is not a confirmed transfer or acknowledgement. |
+| `conflict` — Sync conflict | This host reports typed Conflict or IdempotencyConflict; retain pending work and the specific failure reason. CRDT merging does not automatically resolve invalid business facts. |
+| `error` — Sync error | This host is connected but reports another synchronization failure. Connection liveness does not imply successful publication. |
+| `disabled` — Sync is off | Sharing is explicitly disabled; this is not a transport outage. Local execution/capture remains independent. |
+
+Local presentation precedence remains: disabled, typed conflict, connecting/disconnected, connected error, pending, then fresh activity/idle observations. If a connected host has no usable observation, show unknown rather than inventing activity. Pending counts may accompany a disconnected/connecting label.
+
+Computer **offline** belongs to the existing directory/execution availability model. It describes an unavailable execution path; it does not establish physical power state or Sync transport state. Keep the execution and Sync labels separate in the same view. Local conflict, pending, disabled and connection evidence remains scoped to its exact host; never project it onto remote peers.
+
+On a failed metrics refetch, retain only the last verified endpoint from the existing account/management-host query cache. The graph and service details may show that address while live observations, peer counts and resource statistics remain unavailable. No previous-account/host endpoint is shown after a scope change or logout; a successful read replaces it. No address has been verified before the first successful observation, so that address remains unknown.
+
+The account Sync control owns one error notice for this page. A known Sync transport ServiceUnavailable/Timeout condition uses the contextual locale message; connection state remains a separate enum label. Other operation failures and conflicts preserve their specific structured error presentation. Telemetry and inspector views do not repeat the same failure. English source messages are not compared or parsed. This presentation rule does not alter the canonical ApiError, retry policy or synchronization protocol.

@@ -31,7 +31,10 @@ export function useAccountSyncMetrics() {
   const enabled = auth === "authenticated";
   const query = useQuery({ queryKey: ["talos", scope, "sync-metrics"],
     queryFn: () => getTalosClient().sync.metrics(), enabled, refetchInterval: 5_000, retry: false });
-  return { ...query, data: enabled && !query.error ? query.data : undefined, enabled };
+  // Query data is already keyed by account and management host. Retain identity
+  // only: a failed observation must never keep stale peers or counts live.
+  return { ...query, data: enabled && !query.error ? query.data : undefined,
+    endpoint: enabled ? query.data?.endpoint : undefined, enabled };
 }
 
 export function useComputerList(query = "") {

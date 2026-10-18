@@ -119,24 +119,14 @@ export function ComputersPage() {
         <small>{loaded}</small>
       </section>
       <div className="cmp-controls">
-        <SyncControl metrics={metrics.data} />
+        <SyncControl metrics={metrics.data} metricsError={metrics.error} />
       </div>
       {computers.runtime?.error ? (
         <p role="alert" className="cmp-notice text-danger">
           {apiErrorMessage(computers.runtime.error)}
         </p>
       ) : null}
-      {metrics.error ? (
-        <p role="alert" className="cmp-notice text-danger">
-          <span className="block">{t("computers:metricsUnavailable")}</span>
-          <span className="mt-1 block text-xs">
-            {userVisibleErrorMessage(
-              metrics.error,
-              t("computers:metricsUnavailable"),
-            )}
-          </span>
-        </p>
-      ) : !metrics.enabled ? (
+      {!metrics.enabled ? (
         <p className="cmp-notice">{t("computers:metricsSignIn")}</p>
       ) : metrics.isPending ? (
         <p role="status" className="cmp-notice">
@@ -236,6 +226,7 @@ export function ComputersPage() {
             <ComputerGraph
               nodes={nodes}
               metrics={metrics.data}
+              syncEndpoint={metrics.endpoint}
               syncStatus={syncStatus}
               selectedId={inspectedId}
               selectedService={service}
@@ -279,6 +270,7 @@ export function ComputersPage() {
             <ComputerServiceDetails
               service={service}
               metrics={metrics.data}
+              syncEndpoint={metrics.endpoint}
               syncStatus={syncStatus}
               controlPlane={controlPlane}
             />
