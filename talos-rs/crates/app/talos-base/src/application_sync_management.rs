@@ -91,6 +91,12 @@ impl ApplicationSyncHost {
     }
 
     pub(crate) fn local_computer_id(&self) -> TalosResult<String> {
+        if YamlConfigStore::new(self.config.source_path())
+            .removed_registration_owner()?
+            .is_some()
+        {
+            return Ok("embedded".into());
+        }
         Ok(self
             .config
             .reload()?
@@ -102,6 +108,12 @@ impl ApplicationSyncHost {
     /// The central Server's first administrator claims its Worker. Later logins
     /// must preserve that personal owner and must not interrupt its registration.
     async fn can_enroll_local_worker(&self, actor: &RequestIdentity) -> TalosResult<bool> {
+        if YamlConfigStore::new(self.config.source_path())
+            .removed_registration_owner()?
+            .is_some()
+        {
+            return Ok(false);
+        }
         if self.config.agent_node.control_plane.is_none() {
             return Ok(true);
         }
@@ -129,9 +141,58 @@ impl ApplicationSyncHost {
             {
                 return Ok(false);
             }
+            Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
+                store.mark_registration_removed(
+                    &store
+                        .load_agent_node()?
+                        .runner
+                        .expect("saved runner")
+                        .node_id,
+                    &actor.user_id,
+                )?;
+                *self.local_owner.write().expect("local computer owner lock") =
+                    Some(actor.user_id.clone());
+                return Ok(false);
+            }
             Err(error) => return Err(error),
         };
         Ok(node.owner_user_id.as_deref() == Some(actor.user_id.as_str()))
+    }
+
+    pub(crate) async fn retire_removed_local_registration(
+        &self,
+        actor: &RequestIdentity,
+    ) -> TalosResult<()> {
+        let store = YamlConfigStore::new(self.config.source_path());
+        if store.removed_registration_owner()?.as_deref() == Some(&actor.user_id) {
+            if let Some(runner) = store.load_agent_node()?.runner {
+                let has_alias = self
+                    .sync
+                    .account_binding(actor)
+                    .await?
+                    .is_some_and(|binding| {
+                        binding
+                            .computers
+                            .iter()
+                            .any(|alias| alias.computer_id == runner.node_id)
+                    });
+                if has_alias {
+                    self.stop_account_sync(&actor.user_id).await?;
+                }
+                self.sync_stores
+                    .nodes
+                    .reconcile_deleted_registration(&runner.node_id, &actor.user_id)
+                    .await?;
+                self.sync_stores
+                    .sessions
+                    .retire_local_registration(&actor.user_id, &runner.node_id)
+                    .await?;
+                if let Some(binding) = self.sync.account_binding(actor).await? {
+                    self.install_capture(binding)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn attach_signed_in(
@@ -139,6 +200,7 @@ impl ApplicationSyncHost {
         actor: &RequestIdentity,
     ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
         let store = YamlConfigStore::new(self.config.source_path());
+        self.retire_removed_local_registration(actor).await?;
         let previous = self
             .local_owner
             .read()
@@ -172,6 +234,7 @@ impl ApplicationSyncHost {
             let name = std::env::var("TALOS_DESKTOP_HOSTNAME")
                 .unwrap_or_else(|_| self.config.agent.name.clone());
             let enrollment = super::desktop_worker::WorkerEnrollment {
+                sync_host: self,
                 config: &self.config,
                 store: &store,
                 account: &self.service.account,
@@ -228,6 +291,47 @@ impl ApplicationSyncHost {
         if !self.sync.enabled(&actor.user_id).await? {
             return Ok(());
         }
+        if let Some(binding) = self.sync.account_binding(actor).await? {
+            if !binding
+                .computers
+                .iter()
+                .any(|alias| alias.source_node_id == "embedded")
+            {
+                if let Some(local) = self
+                    .local_computer(
+                        &Actor::regular(&actor.user_id)
+                            .with_access_token(actor.access_token.clone().expect("verified token")),
+                    )
+                    .await?
+                    .filter(|id| id != "embedded")
+                {
+                    self.verify_computer_aliases(
+                        actor,
+                        &[ComputerAlias {
+                            source_node_id: "embedded".into(),
+                            computer_id: local.clone(),
+                        }],
+                    )
+                    .await?;
+                    self.stop_account_sync(&actor.user_id).await?;
+                    let mut computers = binding.computers;
+                    computers.push(ComputerAlias {
+                        source_node_id: "embedded".into(),
+                        computer_id: local,
+                    });
+                    self.sync
+                        .bind_account(
+                            actor,
+                            SyncBindParams {
+                                scope: binding.scope,
+                                source_user_id: binding.source_user_id,
+                                computers,
+                            },
+                        )
+                        .await?;
+                }
+            }
+        }
         let installed = self
             .sync_stores
             .handles
@@ -282,6 +386,7 @@ impl ApplicationSyncHost {
                         .with_access_token(actor.access_token.clone().expect("verified token")),
                 )
                 .await?
+                .filter(|local| local != "embedded")
                 .map_or_else(Vec::new, |local| {
                     vec![ComputerAlias {
                         source_node_id: "embedded".into(),
@@ -318,11 +423,16 @@ impl ApplicationSyncHost {
         Ok(())
     }
 
-    pub(crate) async fn stop_account(&self, account_id: &str) -> TalosResult<()> {
+    async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
         self.service.remove_sync_handle(account_id);
         if let Some(handle) = self.sync_stores.handles.lock().await.remove(account_id) {
             handle.shutdown().await?;
         }
+        Ok(())
+    }
+
+    pub(crate) async fn stop_account(&self, account_id: &str) -> TalosResult<()> {
+        self.stop_account_sync(account_id).await?;
         self.sync_stores
             .credentials
             .write()

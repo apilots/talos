@@ -63,3 +63,15 @@ describe("apiErrorMessage", () => {
     }
   });
 });
+
+it.each([
+  [AppProtocol.ErrorCode.ActiveTurnRunning, "computerDeletionActive", "此 Computer 还有未结束的任务，请先完成或停止任务，再移除注册。", "Finish or stop this Computer's active tasks before removing its registration."],
+  [AppProtocol.ErrorCode.ResourceExpired, "computerRegistrationRemoved", "此 Computer 的注册已移除，请通过「连接 Computer」主动重新注册。", "This Computer registration was removed. Use Connect a computer to enroll again."],
+  [AppProtocol.ErrorCode.ServiceUnavailable, "computerDeletionUnverified", "暂时无法确认此 Computer 的任务状态，请恢复连接或等待访问租约到期后重试。", "Unable to verify this Computer's tasks. Reconnect it or wait for its access lease to expire, then retry."],
+] as const)("localizes %s guidance in both languages without parsing English", async (code, type, chinese, english) => {
+  const error = new TalosApiError({ code, message: "Backend wording may change.", localization: { type } });
+  await i18n.changeLanguage("zh-CN");
+  expect(apiErrorMessage(error)).toBe(chinese);
+  await i18n.changeLanguage("en");
+  expect(apiErrorMessage(error)).toBe(english);
+});

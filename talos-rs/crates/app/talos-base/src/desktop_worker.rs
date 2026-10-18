@@ -12,6 +12,7 @@ const CREDENTIAL_LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
 
 /// Borrow the existing host resources; enrollment never creates another Worker.
 pub(crate) struct WorkerEnrollment<'a> {
+    pub sync_host: &'a crate::application_sync::ApplicationSyncHost,
     pub config: &'a talos_config::Config,
     pub store: &'a talos_config::YamlConfigStore,
     pub account: &'a talos_service::AccountService,
@@ -29,6 +30,7 @@ impl DesktopApplication {
         recover_node_id: Option<String>,
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
         WorkerEnrollment {
+            sync_host: &self.sync_host,
             config: &self.config,
             store: &self.store,
             account: &self.account,
@@ -58,9 +60,26 @@ impl WorkerEnrollment<'_> {
                 worker.shutdown().await?;
             }
         }
-        let result = self
+        let intentional = recover_node_id.is_none() && signed_in.is_none();
+        if intentional && self.store.removed_registration_owner()?.is_some() {
+            if let Some(worker) = active.take() {
+                worker.shutdown().await?;
+            }
+        }
+        let mut result = self
             .prepare_worker_identity(recover_node_id, signed_in)
             .await;
+        if intentional
+            && result
+                .as_ref()
+                .is_err_and(|error| error.is_code(ErrorCode::ResourceExpired))
+            && self.store.removed_registration_owner()?.is_some()
+        {
+            if let Some(worker) = active.take() {
+                worker.shutdown().await?;
+            }
+            result = self.prepare_worker_identity(None, None).await;
+        }
         let config = match result {
             Ok(config) => config,
             Err(error) => {
@@ -196,6 +215,23 @@ impl WorkerEnrollment<'_> {
         }
         self.account
             .record_verified_access_token_use(token, CloudSessionCache::now_ms())?;
+        if let Some(owner) = self.store.removed_registration_owner()? {
+            if signed_in.is_some() || recover_node_id.is_some() {
+                return Err(TalosError::localized(
+                    talos_error::ErrorLocalization::ComputerRegistrationRemoved,
+                ));
+            }
+            if owner != actor.user_id {
+                return Err(TalosError::new(
+                    ErrorCode::PermissionDenied,
+                    "Only the previous owner may reconnect this Computer.",
+                ));
+            }
+            self.sync_host
+                .retire_removed_local_registration(&actor)
+                .await?;
+            self.store.retire_removed_registration(&actor.user_id)?;
+        }
         let mut config = self.config.reload()?;
         if config.source_path() != config.talos_paths().config_file {
             return Err(TalosError::new(
@@ -238,7 +274,15 @@ impl WorkerEnrollment<'_> {
             .or(existing.as_ref().map(|runner| &runner.node_id))
             .cloned();
         let (node, credential) = if let Some(node_id) = node_id.as_ref() {
-            let mut node = client.get_node(token, node_id).await?;
+            let mut node = match client.get_node(token, node_id).await {
+                Ok(node) => node,
+                Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
+                    self.store
+                        .mark_registration_removed(node_id, &actor.user_id)?;
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            };
             if node.status == agent_protocol::NodeStatus::Disabled {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,

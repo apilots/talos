@@ -83,6 +83,26 @@ impl AgentEnvironmentClient {
             closed: tokio_util::sync::CancellationToken::new(),
         }
     }
+    /// Reserve idle Worker admission during a registration deletion; local host access remains independent.
+    pub async fn set_registration_admission(&self, blocked: bool) -> TalosResult<()> {
+        let request = pb::SetRegistrationAdmissionRequest {
+            auth: Some(node_pb::encode_auth(self.auth.clone())),
+            blocked,
+        };
+        let mut request = Request::new(request);
+        request.set_timeout(Duration::from_secs(10));
+        let response = self
+            .transport
+            .set_registration_admission(request)
+            .await
+            .map_err(crate::decode_rpc_status)?
+            .into_inner();
+        match response.result.ok_or_else(wire::invalid)? {
+            pb::empty_response::Result::Completed(_) => Ok(()),
+            pb::empty_response::Result::Failure(error) => Err(error_pb::decode_failure(error)?),
+        }
+    }
+
     /// Withdraw this published transport and interrupt its active relays.
     pub fn close(&self) {
         self.closed.cancel();

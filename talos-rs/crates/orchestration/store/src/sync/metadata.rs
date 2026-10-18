@@ -68,6 +68,7 @@ pub(super) async fn read(
             }))
         }
         SyncResourceKey::Project { project_id } => {
+            if adapter.binding.computers.is_empty() && !tx.query("SELECT 1 FROM projects WHERE project_id = ? AND execution_node_id = 'embedded'", &[project_id]).await?.is_empty() { return Ok(None); }
             let rows = tx.query("SELECT p.*, (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.project_id) AS session_count FROM projects p WHERE p.project_id = ? AND p.user_id IN (?, ?)", &[project_id, &adapter.binding.source_user_id, &adapter.binding.scope.account_id]).await?;
             rows.first()
                 .map(|row| {
@@ -102,6 +103,15 @@ pub(super) async fn read(
                 return Ok(None);
             };
             let record = crate::session::DatabaseSessionStore::parse_session_record(row)?;
+            if record.execution_node_id == "embedded"
+                && !adapter
+                    .binding
+                    .computers
+                    .iter()
+                    .any(|alias| alias.source_node_id == "embedded")
+            {
+                return Ok(None);
+            }
             let memory_processed_through = session::key_at(
                 adapter,
                 tx,
@@ -174,6 +184,16 @@ pub(super) async fn apply(
                     ));
                 }
                 let local = node.node_id.clone();
+                if !tx
+                    .query(
+                        "SELECT 1 FROM computer_deletions WHERE node_id = ? AND owner_user_id = ?",
+                        &[&local, &batch.scope.account_id],
+                    )
+                    .await?
+                    .is_empty()
+                {
+                    continue;
+                }
                 let mode = "remote";
                 let status = transcode::<_, NodeStatus>(&node.status)?;
                 let status = match status {
@@ -240,6 +260,9 @@ pub(super) async fn delete(
     tx: &mut dyn StorageTransaction,
     resource: &SyncResourceKey,
 ) -> TalosResult<()> {
+    if let SyncResourceKey::Computer { computer_id } = resource {
+        tx.execute("INSERT INTO computer_deletions(node_id, owner_user_id, deleted_at) VALUES (?, ?, ?) ON CONFLICT(node_id) DO NOTHING", &[computer_id, &adapter.binding.scope.account_id, &chrono::Utc::now().timestamp().to_string()]).await?;
+    }
     let (table, key, owner) = match resource {
         SyncResourceKey::Computer { .. } => ("agent_nodes", "node_id", "owner_user_id"),
         SyncResourceKey::Project { .. } => ("projects", "project_id", "user_id"),

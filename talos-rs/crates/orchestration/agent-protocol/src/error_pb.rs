@@ -11,6 +11,15 @@ pub fn encode_failure(error: &TalosError) -> pb::Failure {
 
 pub fn encode_api_error(api: ApiError) -> pb::ApiError {
     let localization = api.localization.map(|value| match value {
+        ErrorLocalization::ComputerDeletionActive => {
+            pb::api_error::Localization::ComputerDeletionActive(pb::Empty {})
+        }
+        ErrorLocalization::ComputerRegistrationRemoved => {
+            pb::api_error::Localization::ComputerRegistrationRemoved(pb::Empty {})
+        }
+        ErrorLocalization::ComputerDeletionUnverified => {
+            pb::api_error::Localization::ComputerDeletionUnverified(pb::Empty {})
+        }
         ErrorLocalization::ModelNotConfigured { provider, model } => {
             pb::api_error::Localization::ModelNotConfigured(pb::ModelNotConfigured {
                 provider,
@@ -38,6 +47,15 @@ pub fn decode_failure(failure: pb::Failure) -> TalosResult<TalosError> {
 pub fn decode_api_error(error: pb::ApiError) -> TalosResult<ApiError> {
     let code = decode_code(error.code)?;
     let localization = error.localization.map(|value| match value {
+        pb::api_error::Localization::ComputerDeletionActive(_) => {
+            ErrorLocalization::ComputerDeletionActive
+        }
+        pb::api_error::Localization::ComputerRegistrationRemoved(_) => {
+            ErrorLocalization::ComputerRegistrationRemoved
+        }
+        pb::api_error::Localization::ComputerDeletionUnverified(_) => {
+            ErrorLocalization::ComputerDeletionUnverified
+        }
         pb::api_error::Localization::ModelNotConfigured(value) => {
             ErrorLocalization::ModelNotConfigured {
                 provider: value.provider,
@@ -246,14 +264,21 @@ mod tests {
             localization: None,
         })
         .is_err());
-        let original = TalosError::localized(ErrorLocalization::ModelNotConfigured {
-            provider: "p".into(),
-            model: "m".into(),
-        });
-        assert_eq!(
-            decode_status(encode_status(&original)).to_api_error(),
-            original.to_api_error()
-        );
+        for localization in [
+            ErrorLocalization::ModelNotConfigured {
+                provider: "p".into(),
+                model: "m".into(),
+            },
+            ErrorLocalization::ComputerDeletionActive,
+            ErrorLocalization::ComputerRegistrationRemoved,
+            ErrorLocalization::ComputerDeletionUnverified,
+        ] {
+            let original = TalosError::localized(localization);
+            assert_eq!(
+                decode_status(encode_status(&original)).to_api_error(),
+                original.to_api_error()
+            );
+        }
     }
 
     #[test]

@@ -13,6 +13,7 @@ service AgentNodeControl {
 }
 // Existing Actor authentication and node ownership protect management methods.
 service AgentNodeManagement {
+  rpc DeleteComputer(GetNodeRequest) returns (DeleteComputerResponse);
   rpc CreateNode(CreateNodeRequest) returns (CreateNodeResponse);
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
   rpc GetDeployments(GetNodeRequest) returns (GetDeploymentsResponse);
@@ -91,3 +92,5 @@ message NodeSystemInfo {
   repeated NodeNetworkInterface network_interfaces = 9; repeated string graphics = 10;
   string worker_version = 11;
 }
+
+message DeleteComputerResponse { oneof result { string node_id = 1; Failure failure = 2; } }

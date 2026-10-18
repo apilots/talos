@@ -128,6 +128,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "computer/list": (params) => isRecord(params) &&
     [params.query, params.cursor].every((value) => value == null || typeof value === "string") &&
     (params.limit == null || (typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0)),
+  "computer/delete": (params) => hasString(params, "nodeId"),
   "computer/read": (params) => hasString(params, "nodeId"),
   "computer/rename": (params) => hasString(params, "nodeId") && hasString(params, "displayName"),
   "computer/setStatus": (params) => hasString(params, "nodeId") && isRecord(params) &&

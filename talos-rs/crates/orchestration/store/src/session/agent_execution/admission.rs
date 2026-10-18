@@ -47,6 +47,7 @@ pub(super) async fn commit_initial(
     let mut transaction = store
         .begin_session_transaction(&identity.session_id)
         .await?;
+    ensure_registration_retained(transaction.as_mut(), &identity.session_id).await?;
     let records = append_events(transaction.as_mut(), events).await?;
     let last_event_seq = records
         .last()
@@ -114,6 +115,7 @@ pub(super) async fn commit_maintenance(
     let mut transaction = store
         .begin_session_transaction(&identity.session_id)
         .await?;
+    ensure_registration_retained(transaction.as_mut(), &identity.session_id).await?;
     let mut records = append_events(transaction.as_mut(), vec![event]).await?;
     let record = records
         .pop()
@@ -303,6 +305,17 @@ fn validate_input_command(
         return Err(execution_conflict(
             "running input does not match its idempotency lease",
         ));
+    }
+    Ok(())
+}
+
+async fn ensure_registration_retained(
+    tx: &mut dyn talos_storage::StorageTransaction,
+    session_id: &str,
+) -> TalosResult<()> {
+    if !tx.query("SELECT 1 FROM sessions s JOIN computer_deletions d ON d.node_id = s.execution_node_id WHERE s.session_key = ?", &[session_id]).await?.is_empty() {
+        return Err(talos_error::TalosError::new(talos_error::ErrorCode::ResourceExpired,
+            "This Computer registration was removed. Select a connected Computer to start new work."));
     }
     Ok(())
 }

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { GitBranch, List, Plus, Search } from "lucide-react";
 import {
   ComputerGraph,
+  ComputerConnectHelp,
   ComputerTopologyList,
   ComputerInspector,
   ComputerServiceDetails,
@@ -89,11 +90,7 @@ export function ComputersPage() {
           {t("computers:add")}
         </Button>
       </header>
-      {help ? (
-        <p id="computer-connect-help" className="cmp-notice">
-          {t("computers:addHelp")}
-        </p>
-      ) : null}
+      {help ? <ComputerConnectHelp scope={computers.scope} /> : null}
       <section className="cmp-overview" aria-label={t("computers:title")}>
         <span>
           <strong>
@@ -283,6 +280,7 @@ export function ComputersPage() {
               metrics={metrics.data}
               syncStatus={syncStatus}
               onOpen={open}
+              onDeleted={() => inspectService("controlPlane")}
             />
           ) : null}
         </aside>

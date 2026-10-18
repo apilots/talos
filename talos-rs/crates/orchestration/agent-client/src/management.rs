@@ -7,6 +7,32 @@ use agent_protocol::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
 impl AgentNodeClient {
+    pub async fn delete_computer(
+        &self,
+        access_token: &str,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse> {
+        let response =
+            pb::agent_node_management_client::AgentNodeManagementClient::new(self.channel.clone())
+                .delete_computer(actor_request(
+                    access_token,
+                    pb::GetNodeRequest {
+                        node_id: request.node_id,
+                    },
+                )?)
+                .await
+                .map_err(crate::decode_rpc_status)?
+                .into_inner();
+        match response.result.ok_or_else(malformed)? {
+            pb::delete_computer_response::Result::NodeId(node_id) => {
+                Ok(talos_types::DeleteComputerResponse { node_id })
+            }
+            pb::delete_computer_response::Result::Failure(error) => {
+                Err(error_pb::decode_failure(error)?)
+            }
+        }
+    }
+
     /// Discover the center's current advertisements under the logged-in owner.
     /// No lease credential or second node registration is returned.
     pub async fn get_deployments(

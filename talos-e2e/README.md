@@ -59,7 +59,7 @@ that group numbers are contiguous. Frontend unit tests belong to the frontend
 quality workflow and are not repeated as an E2E scenario.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `12_files`, and
+`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `12_files`, and
 `14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
 `talos-agent` and `talos-service` package tests. These cover public Cloud SDK
 adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
@@ -77,6 +77,17 @@ use the configured Cloud fixture executable for isolated account setup.
 `11_auth/cloud_gateway` uses real device approval and personal Computer registration
 before restoring App-server/CLI sessions. It checks the owned model catalog and
 offline Auth rejection; no provider completion is required.
+`09_app_server/computer_deletion` runs real Chrome, HTTP Gateway/Service/Store and
+node gRPC with an explicitly selected secretless upstream Auth contract fixture.
+It covers owner isolation, offline inspection, disable/enable, cancel/confirm,
+English/Chinese prompts, clearing selection and rejected old credentials. Run
+`talos-e2e/scripts/computer_workspace/deletion.py` without `--contract-auth` for
+local acceptance with real disposable Cloud Auth (`TALOS_CLOUD_SERVER_BIN`). Both
+modes require Python Playwright and installed Chrome (`TALOS_E2E_CHROME_BIN`).
+This case does not exercise a multi-manager Sync deployment; that topology
+remains local group 19 acceptance, with deletion/history covered separately by
+owning-package two-peer Store/CRDT tests.
+
 `09_app_server/desktop_recovery` uses the real controller, SDK, Server and
 app-server processes with controlled loopback Auth/model HTTP fixtures. It checks
 actual credential enforcement, SIGTERM replacement, exact delivered/history event

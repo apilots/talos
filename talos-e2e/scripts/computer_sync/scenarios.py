@@ -275,6 +275,9 @@ if __name__ == '__main__':
         elif sys.argv[1] == 'owner-configuration':
             from owner_configuration import run
             run(cluster)
+        elif sys.argv[1] == 'deletion':
+            from deletion import run
+            run(cluster)
         elif sys.argv[1] == 'nat':
             from nat import run
             run(cluster)

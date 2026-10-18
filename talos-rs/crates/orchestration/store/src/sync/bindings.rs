@@ -19,14 +19,20 @@ impl StoreSyncBindings {
             existing.binding.source_user_id == adapter.binding.source_user_id
                 || existing.binding.scope.account_id == adapter.binding.scope.account_id
         }) {
-            if existing.binding != adapter.binding {
+            if existing.binding.scope != adapter.binding.scope
+                || existing.binding.source_user_id != adapter.binding.source_user_id
+                || existing.binding.peer_id != adapter.binding.peer_id
+            {
                 return Err(TalosError::new(
                     ErrorCode::Conflict,
                     "Source data is already associated with another synchronization account.",
                 ));
             }
         }
-        bindings.retain(|existing| existing.binding != adapter.binding);
+        bindings.retain(|existing| {
+            existing.binding.scope != adapter.binding.scope
+                || existing.binding.source_user_id != adapter.binding.source_user_id
+        });
         bindings.push(adapter);
         Ok(())
     }

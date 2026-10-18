@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
-import type { AppProtocol } from "@talos/sdk-core";
+import { TalosApiError, AppProtocol } from "@talos/sdk-core";
 import { getTalosClient } from "@/shared/api/client";
 import { getDesktopBridge } from "@/shared/api/desktop-client";
 import { useAppStore } from "@/shared/store/app-store";
@@ -65,6 +65,7 @@ export function useComputers() {
   const list = useComputerList();
   const nodes = list.data?.pages.flatMap((page) => page.data) ?? [];
   useEffect(() => {
+    if (selectedId === "") return;
     if (selectedId && !(selectedId === "embedded" && localId && localId !== "embedded")) return;
     if (localId) {
       select(scope, localId);
@@ -73,6 +74,13 @@ export function useComputers() {
     }
   }, [bridge, list.data, localId, nodes, scope, select, selectedId]);
   const selected = useComputer(selectedId);
+  const clear = useAppStore((state) => state.clearComputer);
+  useEffect(() => {
+    if (selectedId && selected.error instanceof TalosApiError &&
+      (selected.error.code === AppProtocol.ErrorCode.ResourceNotFound || selected.error.code === AppProtocol.ErrorCode.ResourceExpired)) {
+      clear(scope, selectedId);
+    }
+  }, [clear, scope, selected.error, selectedId]);
   const local = useComputer(localId);
   const quickNodes = [...new Map([local.data, selected.data, ...nodes]
     .filter((node): node is AppProtocol.NodeInfo => Boolean(node)).map((node) => [node.nodeId, node])).values()].slice(0, 3);

@@ -1,5 +1,11 @@
 export const computerTopologyResources = {
   en: {
+    removeRegistration: "Remove registration",
+    removeTitle: 'Remove “{{name}}”?',
+    removeDescription: "This Computer will be removed from your directory and remote execution options. Existing registration credentials will stop working. Finish or stop active tasks first.",
+    removeRetention: "Projects, sessions, history and Workspace files are kept. Talos stays installed and local use remains available. Connecting again requires an explicit new registration.",
+    removeError: "Unable to remove this Computer registration.",
+    removing: "Removing…",
     managementSubtitle:
       "Computers, execution paths and account sync in one place.",
     topologyView: "Topology",
@@ -80,6 +86,12 @@ export const computerTopologyResources = {
     noActivity: "No activity observed",
   },
   "zh-CN": {
+    removeRegistration: "移除注册",
+    removeTitle: "移除「{{name}}」的注册？",
+    removeDescription: "此 Computer 将从电脑列表和远程执行选项中移除，已有注册凭证将失效。请先完成或停止正在进行的任务。",
+    removeRetention: "项目、会话、历史记录和工作区文件均会保留，不会卸载 Talos，本机仍可使用。再次连接需要主动重新注册。",
+    removeError: "无法移除此 Computer 的注册。",
+    removing: "正在移除…",
     managementSubtitle: "设备、执行链路与多端同步，在同一处查看。",
     topologyView: "拓扑",
     listView: "列表",

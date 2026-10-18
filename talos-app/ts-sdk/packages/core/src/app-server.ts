@@ -395,6 +395,8 @@ export class AppServerClient {
   };
 
   computers = {
+    delete: (params: AppProtocol.DeleteComputerRequest): Promise<AppProtocol.DeleteComputerResponse> =>
+      this.transport.request("computer/delete", params),
     list: (params: AppProtocol.ComputerListRequest = {}): Promise<AppProtocol.ComputerListResponse> =>
       this.transport.request("computer/list", params),
     read: (params: AppProtocol.GetNodeRequest): Promise<AppProtocol.NodeInfo> =>

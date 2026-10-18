@@ -37,6 +37,7 @@ message WorkerRpcCall {
   // Only reverse resource calls carry this context on their first frame.
   CoordinatorCallContext caller = 6;
   oneof request {
+    SetRegistrationAdmissionRequest set_registration_admission = 117;
     ActiveSessionCommandRequest active_session_command = 116;
     ReadSessionExecutionStateRequest read_session_execution_state = 114;
     CommitSessionExecutionStateRequest commit_session_execution_state = 115;

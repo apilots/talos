@@ -118,6 +118,19 @@ impl agent_protocol::ActiveSessionCommands for GatewayPeerAccess {
 }
 
 impl talos_service::ComputerManagement for GatewayPeerAccess {
+    fn delete<'a>(
+        &'a self,
+        actor: &'a talos_service::Actor,
+        request: talos_types::DeleteComputerRequest,
+    ) -> AgentFuture<'a, TalosResult<talos_types::DeleteComputerResponse>> {
+        Box::pin(async move {
+            self.gateway()
+                .await?
+                .delete_computer(management_token(actor)?, request)
+                .await
+        })
+    }
+
     fn create<'a>(
         &'a self,
         actor: &'a talos_service::Actor,

@@ -71,6 +71,12 @@ pub trait Gateway: Send + Sync {
         request: talos_types::RenameComputerRequest,
     ) -> TalosResult<talos_types::NodeInfo>;
 
+    async fn delete_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse>;
+
     async fn set_computer_status(
         &self,
         actor: &Actor,

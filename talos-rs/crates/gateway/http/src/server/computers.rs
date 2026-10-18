@@ -14,7 +14,10 @@ pub(super) fn routes() -> axum::Router<Arc<HttpApiState>> {
             "/v1/computers",
             get(list_computers_handler).post(create_computer_handler),
         )
-        .route("/v1/computers/:node_id", get(read_computer_handler))
+        .route(
+            "/v1/computers/:node_id",
+            get(read_computer_handler).delete(delete_computer_handler),
+        )
         .route(
             "/v1/computers/:node_id/name",
             patch(rename_computer_handler),
@@ -120,4 +123,20 @@ pub(super) async fn rotate_computer_credential_handler(
         api_success(response),
     )
         .into_response())
+}
+
+pub(super) async fn delete_computer_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Path(node_id): Path<String>,
+) -> Result<JsonResponse<talos_types::DeleteComputerResponse>, ApiError> {
+    let response = state
+        .gateway
+        .delete_computer(
+            &shared_actor(&actor.0),
+            talos_types::DeleteComputerRequest { node_id },
+        )
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
 }

@@ -47,6 +47,16 @@ impl GatewayClient for EmbeddedServerClient {
             .await
     }
 
+    async fn delete_computer(
+        &mut self,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse> {
+        self.runtime
+            .gateway
+            .delete_computer(&self.actor, request)
+            .await
+    }
+
     async fn set_computer_status(
         &mut self,
         request: talos_types::SetComputerStatusRequest,

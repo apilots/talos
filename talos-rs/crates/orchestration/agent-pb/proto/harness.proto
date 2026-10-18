@@ -6,6 +6,7 @@ import "memory.proto";
 
 // Ordinary per-method gRPC. Each node serves its existing local Harness instances.
 service AgentHarnessRpc {
+  rpc SetRegistrationAdmission(SetRegistrationAdmissionRequest) returns (EmptyResponse);
   rpc ReadSessionExecutionState(ReadSessionExecutionStateRequest) returns (SessionExecutionStateResponse);
   rpc CommitSessionExecutionState(CommitSessionExecutionStateRequest) returns (EmptyResponse);
   rpc Start(stream StartRequest) returns (stream RunResponse);
@@ -87,3 +88,6 @@ message ReadSessionExecutionStateRequest { NodeAuth auth = 1; SessionContext par
 message SessionExecutionStateResponse { oneof result { SessionExecutionState state = 1; Failure failure = 2; } }
 message CommitSessionExecutionStateParams { SessionContext session = 1; TurnRef identity = 2; SessionHistoryCursor history_cursor = 3; SessionStateVisibility visibility = 4; }
 message CommitSessionExecutionStateRequest { NodeAuth auth = 1; CommitSessionExecutionStateParams params = 2; CoordinatorCallContext caller = 3; }
+
+// The control plane excludes renewal while preparing an owned registration deletion.
+message SetRegistrationAdmissionRequest { NodeAuth auth = 1; bool blocked = 2; }

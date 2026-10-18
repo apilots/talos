@@ -7,6 +7,9 @@ export function apiErrorMessage(error: AppProtocol.ApiError | TalosApiError): st
   const descriptor = apiError.localization;
   if (!descriptor) return apiError.message;
   switch (descriptor.type) {
+    case "computerDeletionActive":
+    case "computerRegistrationRemoved":
+    case "computerDeletionUnverified":
     case "modelNotConfigured":
     case "attachmentCountExceeded":
       return i18n.t(`errors:detail.${descriptor.type}`, {

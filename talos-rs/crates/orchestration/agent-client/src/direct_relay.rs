@@ -220,6 +220,7 @@ impl AgentEnvironmentClient {
                     unary!(value, environment, reload_config, ReloadConfig)
                 }
 
+                Call::SetRegistrationAdmission(_) => Err(invalid()),
                 Call::ReadSessionExecutionState(value) => {
                     unary!(
                         value,

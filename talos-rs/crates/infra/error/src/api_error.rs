@@ -55,6 +55,9 @@ impl schemars::JsonSchema for ApiError {
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type", rename_all = "camelCase")]
 pub enum ErrorLocalization {
+    ComputerDeletionActive,
+    ComputerRegistrationRemoved,
+    ComputerDeletionUnverified,
     ModelNotConfigured {
         provider: String,
         model: String,
@@ -70,6 +73,9 @@ pub enum ErrorLocalization {
 impl ErrorLocalization {
     pub fn code(&self) -> ErrorCode {
         match self {
+            Self::ComputerDeletionActive => ErrorCode::ActiveTurnRunning,
+            Self::ComputerRegistrationRemoved => ErrorCode::ResourceExpired,
+            Self::ComputerDeletionUnverified => ErrorCode::ServiceUnavailable,
             Self::ModelNotConfigured { .. } => ErrorCode::ProviderUnavailable,
             Self::AttachmentCountExceeded { .. } => ErrorCode::AttachmentLimitExceeded,
         }
@@ -77,6 +83,9 @@ impl ErrorLocalization {
 
     pub fn english_message(&self) -> String {
         match self {
+            Self::ComputerDeletionActive => "Finish or stop this Computer's active Turns before removing its registration.".into(),
+            Self::ComputerRegistrationRemoved => "This Computer registration was removed. Use Connect a computer to enroll again.".into(),
+            Self::ComputerDeletionUnverified => "Computer admission cannot be verified yet. Retry after its connection is restored or its lease expires.".into(),
             Self::ModelNotConfigured { provider, model } => {
                 format!("Model \"{model}\" is not configured for provider \"{provider}\".")
             }
@@ -88,6 +97,9 @@ impl ErrorLocalization {
 
     fn is_valid(&self) -> bool {
         match self {
+            Self::ComputerDeletionActive
+            | Self::ComputerRegistrationRemoved
+            | Self::ComputerDeletionUnverified => true,
             Self::ModelNotConfigured { provider, model } => [provider, model].iter().all(|value| {
                 !value.trim().is_empty() && value.chars().count() <= MAX_PARAMETER_CHARS
             }),

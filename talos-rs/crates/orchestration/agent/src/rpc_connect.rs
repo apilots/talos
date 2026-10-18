@@ -8,7 +8,7 @@ use pb::worker_rpc_result::Response as Reply;
 impl AgentHarnessRpcAdapter {
     /// Authorize connection control frames against the adapter's current node lease.
     pub fn validate_connection_auth(&self, auth: &NodeAuth) -> TalosResult<()> {
-        self.authorize(auth).map(|_| ())
+        self.authorize_transport(auth).map(|_| ())
     }
 
     /// Project the existing Harness RPC through Connect without another business model.
@@ -51,6 +51,9 @@ impl AgentHarnessRpcAdapter {
             }};
         }
         match first {
+            Call::SetRegistrationAdmission(value) => {
+                unary!(value, set_registration_admission, Empty)
+            }
             Call::ActiveSessionCommand(_)
             | Call::PeerFileRead(_)
             | Call::PeerFileUpdate(_)

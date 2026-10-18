@@ -19,6 +19,7 @@ impl ApplicationSyncHost {
                     .with_access_token(actor.access_token.clone().expect("verified token")),
             )
             .await?
+            .filter(|computer_id| computer_id != "embedded")
             .map_or_else(Vec::new, |computer_id| {
                 vec![talos_sync::ComputerAlias {
                     source_node_id: "embedded".into(),
@@ -83,6 +84,11 @@ impl ApplicationSyncHost {
         if actor.auth_disabled {
             return Ok(false);
         }
+        if let Some(owner) = talos_config::YamlConfigStore::new(self.config.source_path())
+            .removed_registration_owner()?
+        {
+            return Ok(owner == actor.user_id);
+        }
         if self
             .local_owner
             .read()
@@ -113,7 +119,7 @@ impl ApplicationSyncHost {
     }
     pub(crate) async fn local_computer(&self, actor: &Actor) -> TalosResult<Option<String>> {
         let local = self.local_computer_id()?;
-        Ok((local != "embedded" && self.owns_local_computer(actor).await?).then_some(local))
+        Ok(self.owns_local_computer(actor).await?.then_some(local))
     }
     pub(crate) async fn local_node(&self, actor: &Actor, computer_id: &str) -> TalosResult<String> {
         if computer_id == "embedded" {
@@ -188,6 +194,25 @@ impl ApplicationSyncHost {
                 ) =>
             {
                 info.available = false;
+            }
+            Err(error)
+                if own && info.node_id == local && error.is_code(ErrorCode::ResourceExpired) =>
+            {
+                talos_config::YamlConfigStore::new(self.config.source_path())
+                    .mark_registration_removed(&local, &actor.user_id)?;
+                info.node_id = "embedded".into();
+                info.mode = talos_types::NodeMode::Embedded;
+                info.owner_user_id = Some(actor.user_id.clone());
+                info.available = true;
+                info.system_info = Some(self.worker.system_info().clone());
+                return Ok(info);
+            }
+            Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
+                self.sync_stores
+                    .nodes
+                    .reconcile_deleted_registration(&info.node_id, &actor.user_id)
+                    .await?;
+                return Err(error);
             }
             Err(error) => return Err(error),
         }

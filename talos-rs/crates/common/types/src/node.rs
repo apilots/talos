@@ -211,3 +211,18 @@ pub struct SetComputerStatusRequest {
     pub node_id: String,
     pub status: NodeStatus,
 }
+
+/// Remove an owned registration, retaining history and Workspace files.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct DeleteComputerRequest {
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct DeleteComputerResponse {
+    pub node_id: String,
+}

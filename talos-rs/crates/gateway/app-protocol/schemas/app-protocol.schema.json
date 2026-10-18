@@ -1921,6 +1921,24 @@
           "properties": {
             "method": {
               "enum": [
+                "computer/delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DeleteComputerRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "computer/setStatus"
               ],
               "type": "string"
@@ -4032,6 +4050,29 @@
       ],
       "type": "object"
     },
+    "DeleteComputerRequest": {
+      "description": "Remove an owned registration, retaining history and Workspace files.",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId"
+      ],
+      "type": "object"
+    },
+    "DeleteComputerResponse": {
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId"
+      ],
+      "type": "object"
+    },
     "DesktopWorkerEnrollParams": {
       "properties": {
         "nodeId": {
@@ -4139,6 +4180,48 @@
     "ErrorLocalization": {
       "description": "Exact business explanations with real localized consumers. Extend only when a domain has a stable, parameterized message; never add arbitrary translation keys, diagnostic data, or presentation policy here.",
       "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "computerDeletionActive"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "computerRegistrationRemoved"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "computerDeletionUnverified"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "model": {
@@ -10750,6 +10833,9 @@
     "created_node": {
       "$ref": "#/definitions/CreatedNode"
     },
+    "delete_computer_response": {
+      "$ref": "#/definitions/DeleteComputerResponse"
+    },
     "desktop_worker_identity_response": {
       "$ref": "#/definitions/DesktopWorkerIdentityResponse"
     },
@@ -10897,6 +10983,7 @@
     "collaboration_tool_result",
     "computer_list_response",
     "created_node",
+    "delete_computer_response",
     "desktop_worker_identity_response",
     "error",
     "event_unsubscribe_response",

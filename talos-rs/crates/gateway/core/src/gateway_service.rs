@@ -105,6 +105,14 @@ impl Gateway for ServiceGateway {
     ) -> TalosResult<talos_types::NodeInfo> {
         ServiceGateway::rename_computer(self, actor, request).await
     }
+    async fn delete_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse> {
+        ServiceGateway::delete_computer(self, actor, request).await
+    }
+
     async fn set_computer_status(
         &self,
         actor: &Actor,

@@ -86,6 +86,16 @@ macro_rules! unary {
 }
 impl HarnessTransport {
     unary!(
+        set_registration_admission,
+        SetRegistrationAdmissionRequest,
+        EmptyResponse,
+        SetRegistrationAdmission,
+        Empty,
+        |_: &pb::SetRegistrationAdmissionRequest| Duration::from_secs(10),
+        ControlUnary
+    );
+
+    unary!(
         read_session_execution_state,
         ReadSessionExecutionStateRequest,
         SessionExecutionStateResponse,

@@ -11,6 +11,11 @@ use talos_types::{
 /// The application supplies the same authenticated Node SDK used for enrollment.
 /// This port never persists a replica lease or creates a second registry.
 pub trait ComputerManagement: Send + Sync {
+    fn delete<'a>(
+        &'a self,
+        actor: &'a Actor,
+        request: talos_types::DeleteComputerRequest,
+    ) -> AgentFuture<'a, TalosResult<talos_types::DeleteComputerResponse>>;
     fn create<'a>(
         &'a self,
         actor: &'a Actor,

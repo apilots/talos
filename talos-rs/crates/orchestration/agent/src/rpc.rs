@@ -25,6 +25,8 @@ mod connect;
 mod environment;
 #[path = "rpc_execution_state.rs"]
 mod execution_state;
+#[path = "rpc_registration.rs"]
+mod registration;
 #[path = "rpc_session_gate.rs"]
 mod session_gate;
 #[path = "rpc_streams.rs"]
@@ -109,6 +111,7 @@ pub struct AgentHarnessRpcAdapter {
     config: Arc<std::sync::RwLock<Config>>,
     harnesses: Arc<Mutex<HashMap<String, Arc<dyn AgentHarness>>>>,
     lease: Arc<Mutex<Option<Lease>>>,
+    blocked_registration: Arc<Mutex<Option<[u8; 32]>>>,
     local_auth: Arc<Mutex<Option<Lease>>>,
     active: Arc<Mutex<HashMap<TurnKey, AuthorizationOwner>>>,
     cleanup_failure: Arc<Mutex<Option<TalosError>>>,
@@ -135,6 +138,7 @@ impl AgentHarnessRpcAdapter {
             config,
             harnesses: Arc::new(Mutex::new(harnesses.into_iter().collect())),
             lease: Arc::new(Mutex::new(None)),
+            blocked_registration: Default::default(),
             local_auth: Arc::new(Mutex::new(None)),
             active: Arc::new(Mutex::new(HashMap::new())),
             cleanup_failure: Arc::new(Mutex::new(None)),
@@ -272,6 +276,12 @@ impl AgentHarnessRpcAdapter {
     }
 
     fn authorize(&self, auth: &NodeAuth) -> TalosResult<Lease> {
+        let lease = self.authorize_transport(auth)?;
+        self.authorize_admission(&lease)?;
+        Ok(lease)
+    }
+
+    fn authorize_transport(&self, auth: &NodeAuth) -> TalosResult<Lease> {
         if auth.token.is_empty() {
             return Err(unauthenticated());
         }
@@ -341,6 +351,15 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
     type SubmitInputStream = RpcStream<pb::InputResponse>;
     type CompactSessionStream = RpcStream<pb::RunResponse>;
     type FormDreamMemoryStream = RpcStream<pb::FormDreamMemoryResponse>;
+
+    async fn set_registration_admission(
+        &self,
+        request: Request<pb::SetRegistrationAdmissionRequest>,
+    ) -> Result<Response<pb::EmptyResponse>, Status> {
+        Ok(Response::new(empty_response(
+            self.registration_admission(request.into_inner()),
+        )))
+    }
 
     async fn read_session_execution_state(
         &self,

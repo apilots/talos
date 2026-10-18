@@ -75,6 +75,17 @@ impl NodeControlRpc {
             .coordinator
             .register_environment(auth.node_id.clone(), environment.clone())
             .await;
+        let admission = environment.clone();
+        self.nodes
+            .set_registration_deletion_hook(
+                &auth,
+                Arc::new(move |blocked| {
+                    let admission = admission.clone();
+                    Box::pin(async move { admission.set_registration_admission(blocked).await })
+                }),
+            )
+            .await
+            .map_err(control_status)?;
         let coordinator = self.remote_publisher.coordinator.clone();
         let revoke_node = auth.node_id.clone();
         let revoke_connection = connection.clone();

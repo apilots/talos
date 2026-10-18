@@ -1,5 +1,12 @@
 # talos-app-protocol Changelog
 
+## 0.5
+
+- Add owner-only `computer/delete` with HTTP and SDK parity. Deletion revokes remote
+  registration while retaining local files and historical resource bindings.
+- Add typed localization for active-Turn deletion refusal, removed registration,
+  and unverified admission. Update all protocol consumers together.
+
 ## 0.4
 
 - ApiError now carries specific English text and required nullable localization.

@@ -397,6 +397,14 @@
 .cmp-canvas-footer details p {
   margin-top: 10px;
 }
+.cmp-registration-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(var(--color-border));
+}
 .cmp-inspector {
   padding: 20px;
   overflow-wrap: anywhere;

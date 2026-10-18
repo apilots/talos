@@ -33,6 +33,8 @@ pub type AgentNodeRevocationHook =
 mod account_sync;
 #[path = "computers.rs"]
 mod computers;
+#[path = "deletion.rs"]
+mod deletion;
 #[path = "management.rs"]
 mod management;
 
@@ -52,6 +54,7 @@ struct CurrentRegistration {
     token_hash: [u8; 32],
     deployments: Vec<agent_protocol::Deployment>,
     revoke: Option<AgentNodeRevocationHook>,
+    prepare_deletion: Option<super::AgentNodeDeletionHook>,
 }
 
 impl AgentNodeService {
@@ -327,6 +330,7 @@ impl AgentNodeService {
                 token_hash,
                 deployments: params.deployments,
                 revoke: None,
+                prepare_deletion: None,
             },
         );
         drop(current);

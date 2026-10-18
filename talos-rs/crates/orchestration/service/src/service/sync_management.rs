@@ -145,7 +145,13 @@ impl super::TalosService {
         if let Some(host) = host {
             let mut data = Vec::new();
             for info in page.data {
-                data.push(host.computer_info(actor, info).await?);
+                match host.computer_info(actor, info).await {
+                    Ok(info) => data.push(info),
+                    Err(error) if error.is_code(talos_error::ErrorCode::ResourceExpired) => {
+                        page.total = page.total.saturating_sub(1);
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             page.data = data;
         }
@@ -167,15 +173,47 @@ impl super::TalosService {
             None => Ok(computer_id.into()),
         }
     }
+    /// Resolve only the host-local alias for retained metadata. Ownership is
+    /// checked by the resource Store; offline/removed Workers need no connection.
+    pub(crate) async fn resolve_computer_metadata_node(
+        &self,
+        actor: &Actor,
+        computer_id: &str,
+    ) -> TalosResult<String> {
+        let host = self
+            .sync_management
+            .read()
+            .expect("sync management lock")
+            .as_ref()
+            .and_then(Weak::upgrade);
+        // Directory inspection must work offline and never opens an execution connection.
+        let local = match &host {
+            Some(host) => host.local_computer(actor).await?,
+            None => None,
+        };
+        if computer_id == "embedded" && host.is_some() && local.is_none() && !actor.auth_disabled {
+            return Err(TalosError::new(
+                ErrorCode::PermissionDenied,
+                "This account does not own the management host's Computer.",
+            ));
+        }
+        Ok(if local.as_deref() == Some(computer_id) {
+            "embedded".into()
+        } else {
+            computer_id.into()
+        })
+    }
     pub async fn read_computer(
         &self,
         actor: &Actor,
         request: talos_types::GetNodeRequest,
     ) -> TalosResult<talos_types::NodeInfo> {
-        let node = self.resolve_computer_node(actor, &request.node_id).await?;
+        let node_id = self
+            .resolve_computer_metadata_node(actor, &request.node_id)
+            .await?;
         let info = self
             .nodes
-            .read_computer(actor, talos_types::GetNodeRequest { node_id: node })
+            .read_computer(actor, talos_types::GetNodeRequest { node_id })
             .await?;
         let host = self
             .sync_management

@@ -4,6 +4,75 @@ use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
 
 impl DatabaseSessionStore {
+    /// Preserve the canonical identity of historical local records before an
+    /// explicitly deleted enrollment is replaced. New unregistered local records
+    /// are excluded from Sync until an intentional enrollment supplies a new alias.
+    pub async fn retire_local_registration(
+        &self,
+        user_id: &str,
+        computer_id: &str,
+    ) -> TalosResult<()> {
+        let mut tx = self.storage.begin_transaction().await?;
+        if !tx
+            .query(
+                "SELECT 1 FROM local_computer_retirements WHERE node_id = ? AND owner_user_id = ?",
+                &[computer_id, user_id],
+            )
+            .await?
+            .is_empty()
+        {
+            tx.commit().await?;
+            return Ok(());
+        }
+        if !tx.query("SELECT 1 FROM sessions s JOIN agent_active_turns a ON a.session_id = s.session_key WHERE s.execution_node_id = 'embedded' AND s.user_id = ? LIMIT 1", &[user_id]).await?.is_empty() {
+            return Err(TalosError::localized(talos_error::ErrorLocalization::ComputerDeletionActive));
+        }
+        let mut resources = Vec::new();
+        for row in tx.query("SELECT session_key AS id FROM sessions WHERE execution_node_id = 'embedded' AND user_id = ?", &[user_id]).await? {
+            resources.push(talos_sync::SyncResourceKey::Session { session_id: row.get_string("id").expect("Session key") });
+        }
+        for row in tx.query("SELECT project_id AS id FROM projects WHERE execution_node_id = 'embedded' AND user_id = ?", &[user_id]).await? {
+            resources.push(talos_sync::SyncResourceKey::Project { project_id: row.get_string("id").expect("Project key") });
+        }
+        let adapters = self.sync.all();
+        let mut cuts = Vec::new();
+        for adapter in &adapters {
+            if adapter.binding().scope.account_id == user_id {
+                cuts.push((
+                    adapter.clone(),
+                    crate::sync::capture::prepare(adapter, &mut *tx, resources.clone()).await?,
+                ));
+            }
+        }
+        tx.execute("UPDATE sessions SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ?", &[computer_id, user_id]).await?;
+        tx.execute("UPDATE projects SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ?", &[computer_id, user_id]).await?;
+        for (adapter, cut) in &cuts {
+            crate::sync::capture::finish(adapter, &mut *tx, cut).await?;
+        }
+        for adapter in &adapters {
+            if adapter.binding().scope.account_id == user_id
+                && adapter.binding().computers.iter().any(|alias| {
+                    alias.source_node_id == "embedded" && alias.computer_id == computer_id
+                })
+            {
+                adapter
+                    .sync
+                    .retire_computer_alias(&mut *tx, adapter.binding(), computer_id)
+                    .await?;
+            }
+        }
+        tx.execute(
+            "INSERT INTO local_computer_retirements(node_id,owner_user_id) VALUES (?, ?)",
+            &[computer_id, user_id],
+        )
+        .await?;
+        tx.commit().await?;
+        for adapter in adapters {
+            adapter.committed();
+        }
+        Ok(())
+    }
+
     /// Explicit trusted-host ownership claim. Filesystem namespaces and Worker bindings never change.
     pub async fn claim_local_history(&self, user_id: &str) -> TalosResult<()> {
         let mut tx = self.storage.begin_transaction().await?;

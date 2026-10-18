@@ -56,6 +56,8 @@ pub enum ClientRequestParams {
     ComputerCreate(talos_types::CreateNodeRequest),
     #[serde(rename = "computer/rename")]
     ComputerRename(talos_types::RenameComputerRequest),
+    #[serde(rename = "computer/delete")]
+    ComputerDelete(talos_types::DeleteComputerRequest),
     #[serde(rename = "computer/setStatus")]
     ComputerSetStatus(talos_types::SetComputerStatusRequest),
     #[serde(rename = "computer/rotateCredential")]
@@ -267,6 +269,9 @@ impl ClientRequest {
             }
             ClientMethod::ComputerRename => {
                 ClientRequestParams::ComputerRename(decode(params_value)?)
+            }
+            ClientMethod::ComputerDelete => {
+                ClientRequestParams::ComputerDelete(decode(params_value)?)
             }
             ClientMethod::ComputerSetStatus => {
                 ClientRequestParams::ComputerSetStatus(decode(params_value)?)

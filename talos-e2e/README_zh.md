@@ -63,7 +63,7 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 不再作为 E2E 场景重复执行。
 
 GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secrets 的
-`01_health_and_models`、`09_app_server/smoke_e2e`、`09_app_server/desktop_recovery`、`12_files` 和
+`01_health_and_models`、`09_app_server/smoke_e2e`、`09_app_server/desktop_recovery`、`09_app_server/computer_deletion`、`12_files` 和
 `14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
 适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
 Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
@@ -74,6 +74,14 @@ Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓�
 不执行模型。`11_auth`、`17_multi_node` 和 `18_computer_workspace` 使用配置好的 Cloud fixture
 可执行文件启动本地隔离服务；`19_computer_sync` 的大型拓扑也继续本地验收。上述排除项
 均明确记录，不得声称已在 GitHub CI 通过。
+
+`09_app_server/computer_deletion` 使用真实 Chrome、HTTP Gateway/Service/Store 和
+node gRPC，显式选择无密钥的上游 Auth 契约 fixture。覆盖所有者权限、离线详情、
+停用/启用、取消/确认、中英文提示、清空选择和旧凭证拒绝。直接运行
+`talos-e2e/scripts/computer_workspace/deletion.py`（不传 `--contract-auth`）可使用
+真实隔离 Cloud Auth 验收，需要 `TALOS_CLOUD_SERVER_BIN`。两种模式均需要 Python
+Playwright 和已安装的 Chrome（`TALOS_E2E_CHROME_BIN`）。该场景不代替本地 group 19
+多管理端 Sync 拓扑验收；删除后的历史导入另有两个 peer 的 Store/CRDT 回归。
 
 `09_app_server/desktop_recovery` 使用真实 controller、SDK、Server 和 app-server 进程，
 以受控的本地 Auth/模型 HTTP fixture 验证认证要求、SIGTERM 后自动恢复、已交付事件与
