@@ -161,7 +161,7 @@ it("renders the same local conflict in the graph, list and details without attri
   </I18nextProvider>);
   expect(screen.getAllByText("同步冲突")).toHaveLength(3);
   expect(screen.getByText("2 项待同步")).toBeVisible();
-  expect(screen.getByRole("alert")).toBeVisible();
+  expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByText("最近同步心跳")).toBeVisible();
   expect(container.querySelector('[data-computer-id="worker-b"][data-flow="sync"]')).toBeNull();
   expect([...container.querySelectorAll('[data-flow="sync"]')].map((wire) => wire.getAttribute("data-sync-state")))

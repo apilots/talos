@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { syncObservationState, syncStateLabel } from "./sync-state";
 import type { AppProtocol } from "@talos/sdk-core";
 
@@ -21,7 +20,6 @@ export function SyncPeerDetails({
       <h3>{t("syncTitle")}</h3>
       <p data-sync-state={state} className={`cmp-sync-status is-${state}`}>{t(syncStateLabel[state])}</p>
       {syncStatus?.pendingChanges ? <p>{t("syncPending", { count: syncStatus.pendingChanges })}</p> : null}
-      {syncStatus?.lastError ? <p role="alert" className="text-danger">{apiErrorMessage(syncStatus.lastError)}</p> : null}
       {peers.length === 0 ? (
         <p className="cmp-muted">{t("noPeerDetails")}</p>
       ) : (

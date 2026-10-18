@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   next: vi.fn(),
   metrics: vi.fn(),
+  status: vi.fn(),
 }));
 vi.mock("@/shared/api/desktop-client", () => ({
   getDesktopBridge: () => undefined,
@@ -45,14 +46,7 @@ vi.mock("@/features/computers/hooks", async (original) => ({
     error: null,
   }),
   useAccountSyncMetrics: mocks.metrics,
-  useSyncStatus: () => ({
-    data: {
-      connection: "disabled",
-      configuredEnabled: false,
-      pendingChanges: 0,
-    },
-    isPending: false,
-  }),
+  useSyncStatus: mocks.status,
 }));
 
 beforeEach(() => {
@@ -69,8 +63,10 @@ beforeEach(() => {
     hasNextPage: true,
     fetchNextPage: mocks.next,
   });
+  mocks.status.mockReturnValue({ data: { connection: "disabled", configuredEnabled: false, pendingChanges: 0 }, isPending: false });
   mocks.metrics.mockReturnValue({
     data: topologyMetrics,
+    endpoint: topologyMetrics.endpoint,
     enabled: true,
     isPending: false,
     error: null,
@@ -147,9 +143,12 @@ it("renders the Chinese management surface and hides cached sync mappings when u
   expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(2);
 });
 
-it("keeps execution available while a localized metrics failure clears synchronization paths", async () => {
+it.each(["zh-CN", "en"])("keeps the last endpoint and one localized disconnection notice in %s without stale sync paths", async (locale) => {
+  const failure = new TalosApiError({ code: AppProtocol.ErrorCode.ServiceUnavailable, message: "The synchronization metrics service is unavailable.", localization: null });
+  mocks.status.mockReturnValue({ data: { connection: "disconnected", configuredEnabled: true, pendingChanges: 0, lastError: failure.apiError }, isPending: false });
   mocks.metrics.mockReturnValue({
     data: undefined,
+    endpoint: topologyMetrics.endpoint,
     enabled: true,
     isPending: false,
     error: new TalosApiError({
@@ -158,14 +157,19 @@ it("keeps execution available while a localized metrics failure clears synchroni
       localization: null,
     }),
   });
-  const { container } = await show("zh-CN");
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "暂时无法读取账号同步观测",
-  );
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "The synchronization metrics service is unavailable.",
-  );
+  const { container } = await show(locale);
+  const labels = computerResources[locale as keyof typeof computerResources];
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent(labels.syncUnavailable);
+  expect(screen.getByRole("status")).toHaveTextContent(labels.syncDisconnected);
+  expect(screen.queryByText("The synchronization metrics service is unavailable.")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" }));
+  expect(screen.getAllByText(topologyMetrics.endpoint)).toHaveLength(2);
+  expect(screen.getByText(labels.lastKnownEndpoint)).toBeVisible();
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+
   expect(container.querySelectorAll('[data-flow="sync"]')).toHaveLength(0);
   expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(2);
-  expect(screen.getByRole("button", { name: "进入电脑" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Studio" : "查看 Studio 的详情" }));
+  expect(screen.getByRole("button", { name: locale === "en" ? "Open computer" : "进入电脑" })).toBeEnabled();
 });

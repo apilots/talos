@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SyncControl } from "./SyncControl";
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { topologyMetrics } from "@/shared/test/computer-topology.fixture";
 import { useAppStore } from "@/shared/store/app-store";
 import { setTalosClientFactory, resetTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
@@ -13,9 +14,9 @@ vi.mock("react-i18next", async (importOriginal) => ({ ...await importOriginal<ty
 const off = { connection: "disabled", configuredEnabled: false, pendingChanges: 2,
   lastAcknowledgedAt: null, lastError: null, localComputerId: "mine", canClaimLocalHistory: true };
 const sync = { status: vi.fn(), enable: vi.fn(), disable: vi.fn() };
-function show(metrics?: typeof topologyMetrics) {
+function show(metrics?: typeof topologyMetrics, metricsError?: unknown) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><MemoryRouter><SyncControl metrics={metrics} /></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter><SyncControl metrics={metrics} metricsError={metricsError} /></MemoryRouter></QueryClientProvider>);
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -58,4 +59,22 @@ it("uses document observations for the same active label as topology", async () 
   sync.status.mockResolvedValue({ ...off, connection: "connected", peerId: "peer-a", configuredEnabled: true, pendingChanges: 0 });
   show(topologyMetrics);
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("syncActive"));
+});
+
+it.each(["disconnected", "connecting"])("shows one localized transport notice while %s despite duplicate status/metrics failures", async (connection) => {
+  const error = { code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Synchronization service is unavailable", localization: null };
+  sync.status.mockResolvedValue({ ...off, connection, configuredEnabled: true, lastError: error });
+  show(undefined, new TalosApiError(error));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("syncUnavailable"));
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.queryByText(error.message)).toBeNull();
+});
+
+it("preserves a specific conflict when telemetry fails too", async () => {
+  sync.status.mockResolvedValue({ ...off, connection: "connected", configuredEnabled: true,
+    lastError: { code: "conflict", message: "The stored Worker binding differs.", localization: null } });
+  show(undefined, new TalosApiError({ code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Metrics unavailable", localization: null }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("syncConflict"));
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent("The stored Worker binding differs.");
 });

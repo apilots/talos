@@ -122,7 +122,7 @@ it("does not grant access to the center private Computer", async () => {
 });
 
 it("removes cached private metrics immediately when authentication ends", async () => {
-  sync.metrics.mockResolvedValue({ peers: [{ peerId: "private-peer" }] });
+  sync.metrics.mockResolvedValue({ endpoint: "https://private-sync.example", peers: [{ peerId: "private-peer" }] });
   const query = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -144,6 +144,7 @@ it("removes cached private metrics immediately when authentication ends", async 
   );
   expect(result.current.data).toBeUndefined();
   expect(result.current.enabled).toBe(false);
+  expect(result.current.endpoint).toBeUndefined();
 });
 
 it("keeps a late previous-account metrics reply out of the current account view", async () => {
@@ -186,4 +187,29 @@ it("keeps a late previous-account metrics reply out of the current account view"
     finishAlice({ peers: [{ peerId: "alice-private-peer" }] }),
   );
   expect(result.current.data?.peers[0].peerId).toBe("bob-peer");
+});
+
+it("retains only the scoped endpoint after a failed refetch and replaces it on recovery", async () => {
+  sync.metrics.mockResolvedValue({ endpoint: "https://sync-a.example", peers: [{ peerId: "live-peer" }] });
+  const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { result } = renderHook(useAccountSyncMetrics, { wrapper: ({ children }: PropsWithChildren) =>
+    <QueryClientProvider client={query}>{children}</QueryClientProvider> });
+  await waitFor(() => expect(result.current.endpoint).toBe("https://sync-a.example"));
+  sync.metrics.mockRejectedValue(new Error("Connection refused"));
+  await act(async () => { await query.refetchQueries(); });
+  await waitFor(() => expect(result.current.error).toBeTruthy());
+  expect(result.current.endpoint).toBe("https://sync-a.example");
+  expect(result.current.data).toBeUndefined();
+  sync.metrics.mockResolvedValue({ endpoint: "https://sync-b.example", peers: [] });
+  await act(async () => { await query.refetchQueries(); });
+  await waitFor(() => expect(result.current.endpoint).toBe("https://sync-b.example"));
+  expect(result.current.data?.peers).toEqual([]);
+  // A different host/account starts without the previous endpoint even on failure.
+  sync.metrics.mockRejectedValue(new Error("New scope unavailable"));
+  act(() => useAppStore.setState({ connection: { ...useAppStore.getState().connection, controlPlaneEndpoint: "https://other-host.example" } }));
+  expect(result.current.endpoint).toBeUndefined();
+  await waitFor(() => expect(result.current.error).toBeTruthy());
+  expect(result.current.endpoint).toBeUndefined();
+  act(() => useAppStore.setState({ connection: { ...useAppStore.getState().connection, userId: "bob" } }));
+  expect(result.current.endpoint).toBeUndefined();
 });
