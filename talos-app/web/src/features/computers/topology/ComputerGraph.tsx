@@ -173,7 +173,7 @@ export function ComputerGraph({
           </span>
           <footer>
             {t("syncFacts")}
-            <span>{t("fixedService")}</span>
+            <span>{t(!metrics && syncEndpoint ? "lastKnownEndpointShort" : "fixedService")}</span>
           </footer>
         </button>
         {nodes.map((node, index) => {

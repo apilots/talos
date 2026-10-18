@@ -163,6 +163,7 @@ it.each(["zh-CN", "en"])("keeps the last endpoint and one localized disconnectio
   expect(screen.getByRole("alert")).toHaveTextContent(labels.syncUnavailable);
   expect(screen.getByRole("status")).toHaveTextContent(labels.syncDisconnected);
   expect(screen.queryByText("The synchronization metrics service is unavailable.")).toBeNull();
+  expect(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" })).toHaveTextContent(labels.lastKnownEndpointShort);
   fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" }));
   expect(screen.getAllByText(topologyMetrics.endpoint)).toHaveLength(2);
   expect(screen.getByText(labels.lastKnownEndpoint)).toBeVisible();

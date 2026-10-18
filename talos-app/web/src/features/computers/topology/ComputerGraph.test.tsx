@@ -46,6 +46,7 @@ it.each(["en", "zh-CN"])(
     expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(
       2,
     );
+    expect(screen.queryByText(computerResources[locale as keyof typeof computerResources].lastKnownEndpointShort)).toBeNull();
     const sync = container.querySelector(
       '[data-flow="sync"][data-computer-id="manager-a"]',
     );
