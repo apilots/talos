@@ -118,6 +118,7 @@ impl ApplicationSyncHost {
             }))
     }
     pub(crate) async fn local_computer(&self, actor: &Actor) -> TalosResult<Option<String>> {
+        self.refresh_saved_registration_removal().await?;
         let local = self.local_computer_id()?;
         Ok(self.owns_local_computer(actor).await?.then_some(local))
     }
@@ -198,8 +199,7 @@ impl ApplicationSyncHost {
             Err(error)
                 if own && info.node_id == local && error.is_code(ErrorCode::ResourceExpired) =>
             {
-                talos_config::YamlConfigStore::new(self.config.source_path())
-                    .mark_registration_removed(&local, &actor.user_id)?;
+                self.observe_registration_removal(&verified, &local).await?;
                 info.node_id = "embedded".into();
                 info.mode = talos_types::NodeMode::Embedded;
                 info.owner_user_id = Some(actor.user_id.clone());

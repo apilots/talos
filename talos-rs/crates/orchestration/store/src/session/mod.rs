@@ -1,6 +1,9 @@
 pub mod agent_execution;
+#[path = "store/local_registration.rs"]
+mod local_registration;
 mod mock_store;
 mod store;
+pub(crate) use local_registration::capture_removal_boundary;
 mod types;
 
 #[cfg(test)]

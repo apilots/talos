@@ -60,7 +60,7 @@ impl DesktopApplication {
         request: ClientRequest,
     ) -> TalosResult<serde_json::Value> {
         match request.params {
-            ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity()?),
+            ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity().await?),
             ClientRequestParams::DesktopWorkerEnroll(params) => {
                 if actor.access_token.is_some()
                     && self
@@ -83,7 +83,8 @@ impl DesktopApplication {
         }
     }
 
-    fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
+    async fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
+        self.sync_host.refresh_saved_registration_removal().await?;
         let removed = self.store.removed_registration_owner()?.is_some();
         let runner = self.store.load_agent_node()?.runner.filter(|_| !removed);
         Ok(DesktopWorkerIdentityResponse {

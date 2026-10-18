@@ -127,7 +127,7 @@ impl ApplicationSyncHost {
             .get_node(
                 &Actor::regular(&actor.user_id).with_role(actor.role),
                 talos_types::GetNodeRequest {
-                    node_id: runner.node_id,
+                    node_id: runner.node_id.clone(),
                 },
             )
             .await
@@ -142,14 +142,8 @@ impl ApplicationSyncHost {
                 return Ok(false);
             }
             Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
-                store.mark_registration_removed(
-                    &store
-                        .load_agent_node()?
-                        .runner
-                        .expect("saved runner")
-                        .node_id,
-                    &actor.user_id,
-                )?;
+                self.observe_registration_removal(actor, &runner.node_id)
+                    .await?;
                 *self.local_owner.write().expect("local computer owner lock") =
                     Some(actor.user_id.clone());
                 return Ok(false);
@@ -200,7 +194,7 @@ impl ApplicationSyncHost {
         actor: &RequestIdentity,
     ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
         let store = YamlConfigStore::new(self.config.source_path());
-        self.retire_removed_local_registration(actor).await?;
+        self.refresh_removed_registration(actor).await?;
         let previous = self
             .local_owner
             .read()

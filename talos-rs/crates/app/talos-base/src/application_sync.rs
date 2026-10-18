@@ -29,6 +29,8 @@ pub(crate) struct ApplicationSyncStores {
 }
 
 pub(crate) struct ApplicationSyncHost {
+    pub self_weak: std::sync::Weak<Self>,
+    pub registration_retirement: tokio::sync::Mutex<()>,
     pub config: talos_config::Config,
     pub sync: Arc<talos_sync::TalosSync>,
     pub sync_stores: Arc<ApplicationSyncStores>,
@@ -104,6 +106,7 @@ impl ApplicationSyncHost {
 
     pub(crate) fn install_peer_access(&self) {
         let peer = Arc::new(super::application_sync_files::GatewayPeerAccess {
+            host: self.self_weak.clone(),
             config: self.config.clone(),
             stores: self.sync_stores.clone(),
         });
@@ -250,6 +253,8 @@ impl ApplicationSyncHost {
         let account_id = verified.user_id.clone();
         let events = self.event_service.clone();
         let sessions = self.sync_stores.sessions.clone();
+        let host = self.self_weak.clone();
+        let retirement_actor = verified.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -258,12 +263,20 @@ impl ApplicationSyncHost {
                             Ok(summary) => summary,
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                if let Some(host) = host.upgrade() {
+                                    if let Err(error) = host.refresh_removed_registration(&retirement_actor).await { talos_logging::report_error(&error); }
+                                }
                                 if let Err(error) = publish_account_changes(&sessions, &events, &account_id).await {
                                     talos_logging::report_error(&error);
                                 }
                                 continue;
                             }
                         };
+                        if matches!(summary.resource, talos_sync::SyncResourceKey::Computer { .. }) {
+                            if let Some(host) = host.upgrade() {
+                                if let Err(error) = host.refresh_removed_registration(&retirement_actor).await { talos_logging::report_error(&error); }
+                            }
+                        }
                         if let talos_sync::SyncResourceKey::Session { session_id } = summary.resource {
                             if let Err(error) = events.publish_imported(&session_id).await { talos_logging::report_error(&error); }
                         }

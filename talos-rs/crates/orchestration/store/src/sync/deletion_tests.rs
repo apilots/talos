@@ -90,6 +90,28 @@ async fn local_registration_retirement_freezes_history_and_new_enrollment_uses_a
     run(&source, "old-local-history", "turn-1").await;
     source
         .sessions
+        .record_local_registration_removal("account-1", COMPUTER)
+        .await
+        .unwrap();
+    source
+        .sessions
+        .insert_session_record(&record("created-after-removal-before-reconnect"))
+        .await
+        .unwrap();
+    assert!(source
+        .sync
+        .export_pending(
+            &source.adapter.binding,
+            SyncResourceKey::Session {
+                session_id: "created-after-removal-before-reconnect".into()
+            },
+            128
+        )
+        .await
+        .unwrap()
+        .is_none());
+    source
+        .sessions
         .retire_local_registration("account-1", COMPUTER)
         .await
         .unwrap();
@@ -102,6 +124,16 @@ async fn local_registration_retirement_freezes_history_and_new_enrollment_uses_a
             .unwrap()
             .execution_node_id,
         COMPUTER
+    );
+    assert_eq!(
+        source
+            .sessions
+            .get_session_record("created-after-removal-before-reconnect")
+            .await
+            .unwrap()
+            .unwrap()
+            .execution_node_id,
+        "embedded"
     );
     let mut next = source
         .sync
@@ -217,4 +249,77 @@ async fn local_registration_retirement_freezes_history_and_new_enrollment_uses_a
         .unwrap();
     assert_eq!(new.binding.computer_id, fresh);
     tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn imported_own_deletion_snapshots_history_before_new_local_work() {
+    let source = peer(false).await;
+    let target = peer(true).await;
+    registered_computer(&source).await;
+    target
+        .sessions
+        .insert_session_record(&record("pre-import-history"))
+        .await
+        .unwrap();
+    run(&target, "pre-import-history", "turn-1").await;
+    DatabaseAgentNodeStore::new(source.storage.pool().clone())
+        .with_sync(source.adapter.clone())
+        .delete_owned(COMPUTER, "account-1", 20)
+        .await
+        .unwrap();
+    exchange(
+        &source,
+        &target,
+        SyncResourceKey::Computer {
+            computer_id: COMPUTER.into(),
+        },
+    )
+    .await;
+    target
+        .sessions
+        .insert_session_record(&record("post-import-local"))
+        .await
+        .unwrap();
+    assert!(target
+        .sync
+        .export_pending(
+            &target.adapter.binding,
+            SyncResourceKey::Session {
+                session_id: "post-import-local".into()
+            },
+            128
+        )
+        .await
+        .unwrap()
+        .is_none());
+    target
+        .sessions
+        .retire_local_registration("account-1", COMPUTER)
+        .await
+        .unwrap();
+    assert_eq!(
+        target
+            .sessions
+            .get_session_record("pre-import-history")
+            .await
+            .unwrap()
+            .unwrap()
+            .execution_node_id,
+        COMPUTER
+    );
+    assert_eq!(
+        target
+            .sessions
+            .get_session_record("post-import-local")
+            .await
+            .unwrap()
+            .unwrap()
+            .execution_node_id,
+        "embedded"
+    );
+    assert!(target
+        .sessions
+        .local_registration_retired("account-1", COMPUTER)
+        .await
+        .unwrap());
 }

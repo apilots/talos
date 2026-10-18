@@ -139,3 +139,5 @@ def run(cluster):
         'hubAndManagementRestart': True, 'freshHostHistoricalImport': True,
         'workspaceFileRetained': True}, indent=2))
     print('CASE sync_deletion_late_joiner_imports_history_without_old_computer PASS', flush=True)
+    from own_deletion import run as own_deletion
+    own_deletion(cluster)

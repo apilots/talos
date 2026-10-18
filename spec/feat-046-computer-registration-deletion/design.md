@@ -76,9 +76,12 @@ with `nodeUnavailable` status. Execution/configuration paths retain their normal
 authoritative connection and authorization checks.
 
 Desktop persists removed enrollment independently of local Worker state. Login,
-restart and automatic retry cannot recreate the old UUID. Explicit Connect retires
-the former local alias once, preserving its canonical historical references, then
-creates a new UUID and credentials. New unregistered local records remain local
+restart and automatic retry cannot recreate the old UUID. A successful own-Desktop
+SDK deletion persists removal before acknowledging success; imported Sync deletion
+also observes it without UI polling. The transaction observing removal snapshots
+existing local Project/Session IDs. Alias retirement consumes only that snapshot,
+preserving historical references while excluding subsequently created local work.
+Explicit Connect creates a new UUID and credentials. New unregistered local records remain local
 until fresh enrollment. Replacing the Sync capture alias retains the account,
 source user and peer identity.
 

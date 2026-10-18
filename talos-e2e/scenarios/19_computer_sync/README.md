@@ -99,3 +99,10 @@ NAT acceptance re-applies and verifies ingress rules after restart using current
 container addresses; real memory/reflection and child-agent callbacks return to
 the current coordinator. Live Linux SQLite evidence is read from the Linux helper,
 never opened concurrently by a Mac SQLite process.
+
+The registration-deletion case also removes Desktop A through its own SDK, checks
+private removal state and completed alias retirement before any identity/UI poll,
+and performs a real local task while unregistered. Explicit enrollment must bind
+that new work only to a fresh UUID while preserving older historical bindings.
+Deleting the fresh UUID through Desktop B must persist on A through Sync alone;
+restarting A must retain both histories without recreating either registration.

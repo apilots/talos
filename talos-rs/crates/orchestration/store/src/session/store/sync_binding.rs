@@ -13,25 +13,19 @@ impl DatabaseSessionStore {
         computer_id: &str,
     ) -> TalosResult<()> {
         let mut tx = self.storage.begin_transaction().await?;
-        if !tx
-            .query(
-                "SELECT 1 FROM local_computer_retirements WHERE node_id = ? AND owner_user_id = ?",
-                &[computer_id, user_id],
-            )
-            .await?
-            .is_empty()
-        {
+        crate::session::capture_removal_boundary(&mut *tx, user_id, computer_id).await?;
+        if !tx.query("SELECT 1 FROM local_computer_retirements WHERE node_id = ? AND owner_user_id = ? AND finalized = 1", &[computer_id, user_id]).await?.is_empty() {
             tx.commit().await?;
             return Ok(());
         }
-        if !tx.query("SELECT 1 FROM sessions s JOIN agent_active_turns a ON a.session_id = s.session_key WHERE s.execution_node_id = 'embedded' AND s.user_id = ? LIMIT 1", &[user_id]).await?.is_empty() {
+        if !tx.query("SELECT 1 FROM sessions s JOIN agent_active_turns a ON a.session_id = s.session_key JOIN local_computer_retirement_resources r ON r.resource_id = s.session_key AND r.kind = 'session' WHERE r.node_id = ? AND s.execution_node_id = 'embedded' AND s.user_id = ? LIMIT 1", &[computer_id, user_id]).await?.is_empty() {
             return Err(TalosError::localized(talos_error::ErrorLocalization::ComputerDeletionActive));
         }
         let mut resources = Vec::new();
-        for row in tx.query("SELECT session_key AS id FROM sessions WHERE execution_node_id = 'embedded' AND user_id = ?", &[user_id]).await? {
+        for row in tx.query("SELECT resource_id AS id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'session'", &[computer_id]).await? {
             resources.push(talos_sync::SyncResourceKey::Session { session_id: row.get_string("id").expect("Session key") });
         }
-        for row in tx.query("SELECT project_id AS id FROM projects WHERE execution_node_id = 'embedded' AND user_id = ?", &[user_id]).await? {
+        for row in tx.query("SELECT resource_id AS id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'project'", &[computer_id]).await? {
             resources.push(talos_sync::SyncResourceKey::Project { project_id: row.get_string("id").expect("Project key") });
         }
         let adapters = self.sync.all();
@@ -44,8 +38,8 @@ impl DatabaseSessionStore {
                 ));
             }
         }
-        tx.execute("UPDATE sessions SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ?", &[computer_id, user_id]).await?;
-        tx.execute("UPDATE projects SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ?", &[computer_id, user_id]).await?;
+        tx.execute("UPDATE sessions SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ? AND session_key IN (SELECT resource_id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'session')", &[computer_id, user_id, computer_id]).await?;
+        tx.execute("UPDATE projects SET execution_node_id = ? WHERE execution_node_id = 'embedded' AND user_id = ? AND project_id IN (SELECT resource_id FROM local_computer_retirement_resources WHERE node_id = ? AND kind = 'project')", &[computer_id, user_id, computer_id]).await?;
         for (adapter, cut) in &cuts {
             crate::sync::capture::finish(adapter, &mut *tx, cut).await?;
         }
@@ -61,11 +55,7 @@ impl DatabaseSessionStore {
                     .await?;
             }
         }
-        tx.execute(
-            "INSERT INTO local_computer_retirements(node_id,owner_user_id) VALUES (?, ?)",
-            &[computer_id, user_id],
-        )
-        .await?;
+        tx.execute("UPDATE local_computer_retirements SET finalized = 1 WHERE node_id = ? AND owner_user_id = ?", &[computer_id, user_id]).await?;
         tx.commit().await?;
         for adapter in adapters {
             adapter.committed();

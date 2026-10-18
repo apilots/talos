@@ -42,10 +42,12 @@ def run(cluster):
         browser = playwright.chromium.launch(executable_path=os.environ.get('TALOS_E2E_CHROME_BIN', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), headless=True)
         context = browser.new_context(viewport={'width': 1560, 'height': 1050}, locale='zh-CN', timezone_id='Asia/Shanghai')
         context.add_init_script('sessionStorage.setItem("talos-web-auth-token", ' + json.dumps(cluster.users['alice']['access_token']) + ');')
+        # Seed before the store mounts: a late auth-state persistence write must
+        # not overwrite a locale injected into an already running page.
+        context.add_init_script('if (!localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui", JSON.stringify({state:{locale:"zh-CN",uiTheme:"light"},version:0}));')
         page = context.new_page()
-        page.goto(url)
-        page.evaluate('localStorage.setItem("talos-web-ui", JSON.stringify({state:{locale:"zh-CN",uiTheme:"light"},version:0}))')
         page.goto(url + '/computers')
+        expect(page.locator('html')).to_have_attribute('lang', 'zh-CN')
         page.locator('.cmp-content').get_by_role('button', name=re.compile('旧测试工作站')).first.click()
         expect(page.locator('.cmp-inspector h2')).to_have_text('旧测试工作站')
         page.get_by_role('button', name='进入电脑', exact=True).click()

@@ -15,5 +15,12 @@ END;
 -- Record the one-time conversion of a host-local alias to its historical UUID.
 CREATE TABLE local_computer_retirements (
     node_id TEXT PRIMARY KEY NOT NULL,
-    owner_user_id TEXT NOT NULL
+    owner_user_id TEXT NOT NULL,
+    finalized INTEGER NOT NULL DEFAULT 0 CHECK(finalized IN (0, 1))
+);
+CREATE TABLE local_computer_retirement_resources (
+    node_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('session', 'project')),
+    resource_id TEXT NOT NULL,
+    PRIMARY KEY(node_id, kind, resource_id)
 );

@@ -783,15 +783,28 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
     let proof = fixture.home.path().join("keep-workspace.txt");
     std::fs::write(&proof, "retained").unwrap();
     fixture
+        .runtime
+        .service
         .nodes
         .delete_computer(
-            &Actor::regular("user-1"),
+            &Actor::regular("user-1").with_access_token("user-1"),
             talos_types::DeleteComputerRequest {
                 node_id: old.clone(),
             },
         )
         .await
         .unwrap();
+    assert_eq!(
+        YamlConfigStore::new(fixture.config.source_path())
+            .removed_registration_owner()
+            .unwrap()
+            .as_deref(),
+        Some("user-1")
+    );
+    assert_eq!(
+        fixture.runtime.sync_host.local_computer_id().unwrap(),
+        "embedded"
+    );
     assert!(!host.rpc.is_finished());
     let new = host.enroll_worker(None).await.unwrap().node_id.unwrap();
     assert_ne!(new, old);

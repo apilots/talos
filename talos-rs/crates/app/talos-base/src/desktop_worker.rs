@@ -277,8 +277,9 @@ impl WorkerEnrollment<'_> {
             let mut node = match client.get_node(token, node_id).await {
                 Ok(node) => node,
                 Err(error) if error.is_code(ErrorCode::ResourceExpired) => {
-                    self.store
-                        .mark_registration_removed(node_id, &actor.user_id)?;
+                    self.sync_host
+                        .observe_registration_removal(&actor, node_id)
+                        .await?;
                     return Err(error);
                 }
                 Err(error) => return Err(error),
