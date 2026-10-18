@@ -239,7 +239,7 @@ impl TalosService {
         mut request: SessionListRequest,
     ) -> ServiceResult<Vec<SessionInfo>> {
         if let Some(node) = request.node_id.take() {
-            request.node_id = Some(self.resolve_computer_node(actor, &node).await?);
+            request.node_id = Some(self.resolve_computer_metadata_node(actor, &node).await?);
         }
         let mut result = Vec::new();
         for info in self.access.list_sessions(actor, request).await? {

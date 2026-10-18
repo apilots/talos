@@ -22,6 +22,7 @@ pub struct AppProtocolSchemaRoot {
     pub error: AppServerErrorBody,
     pub sync_metrics_response: talos_types::SyncMetricsResponse,
     pub sync_status_response: talos_types::SyncStatusResponse,
+    pub delete_computer_response: talos_types::DeleteComputerResponse,
     pub computer_list_response: talos_types::ComputerListResponse,
     pub desktop_worker_identity_response: talos_types::DesktopWorkerIdentityResponse,
     pub node_info: talos_types::NodeInfo,
@@ -180,6 +181,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ComputerListRequest>());
     output.push_str(&export::<talos_types::ComputerListResponse>());
     output.push_str(&export::<talos_types::RenameComputerRequest>());
+    output.push_str(&export::<talos_types::DeleteComputerRequest>());
+    output.push_str(&export::<talos_types::DeleteComputerResponse>());
     output.push_str(&export::<talos_types::SetComputerStatusRequest>());
     output.push_str(&export::<talos_types::ProjectCreateRequest>());
     output.push_str(&export::<talos_types::ProjectCreateResponse>());

@@ -18,6 +18,8 @@ pub trait AgentNodeStore: Send + Sync {
     async fn upsert_embedded(&self, status: NodeStatus, now_at: i64) -> TalosResult<NodeRecord>;
     async fn create(&self, params: CreateNodeParams) -> TalosResult<NodeRecord>;
     async fn get(&self, node_id: &str) -> TalosResult<Option<NodeRecord>>;
+    async fn deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>>;
+    async fn delete_owned(&self, node_id: &str, owner: &str, now_at: i64) -> TalosResult<()>;
     async fn list(&self, params: ListNodesParams) -> TalosResult<NodePageRecord>;
     async fn register(&self, params: RegisterNodeParams) -> TalosResult<NodeRecord>;
     async fn renew(&self, params: RenewNodeParams) -> TalosResult<NodeRecord>;
@@ -30,7 +32,7 @@ pub trait AgentNodeStore: Send + Sync {
 }
 
 pub struct DatabaseAgentNodeStore {
-    pool: SqlitePool,
+    pub(super) pool: SqlitePool,
     sync: std::sync::Arc<crate::sync::StoreSyncBindings>,
 }
 
@@ -54,7 +56,7 @@ impl DatabaseAgentNodeStore {
         self.sync.install(adapter)
     }
 
-    async fn begin_write(
+    pub(super) async fn begin_write(
         &self,
         node_id: &str,
     ) -> TalosResult<crate::sync::capture::SqliteCaptureTransaction> {
@@ -71,6 +73,13 @@ impl DatabaseAgentNodeStore {
 
 #[async_trait]
 impl AgentNodeStore for DatabaseAgentNodeStore {
+    async fn deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>> {
+        self.read_deletion_owner(node_id).await
+    }
+    async fn delete_owned(&self, node_id: &str, owner: &str, now_at: i64) -> TalosResult<()> {
+        self.delete_registration(node_id, owner, now_at).await
+    }
+
     async fn upsert_embedded(&self, status: NodeStatus, now_at: i64) -> TalosResult<NodeRecord> {
         let mut transaction = self.begin_write("embedded").await?;
         let row = sqlx::query(&format!(

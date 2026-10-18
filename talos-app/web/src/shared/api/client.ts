@@ -12,7 +12,7 @@ type Methods<T, K extends keyof T> = Pick<T, K>;
 /** Transport-neutral API surface consumed by the Web application. */
 export type TalosWebClient = {
   sync: Methods<BrowserTalosClient["sync"], "status" | "enable" | "disable" | "metrics">;
-  computers: Methods<BrowserTalosClient["computers"], "list" | "read" | "rename" | "setStatus">;
+  computers: Methods<BrowserTalosClient["computers"], "list" | "read" | "rename" | "setStatus" | "delete">;
   auth: Methods<BrowserTalosClient["auth"], "logout">;
   user: Methods<BrowserTalosClient["user"], "current">;
   profile: Methods<BrowserTalosClient["profile"], "read">;
@@ -89,5 +89,5 @@ export function getTalosClient(nodeId?: string) {
   const state = useAppStore.getState();
   const target = nodeId ?? state.selectedComputers[connectionScope(state.connection)];
   const client = (clientFactory ?? createDefaultBrowserClient)();
-  return target ? bindComputerTarget(client, target) : client;
+  return target !== undefined ? bindComputerTarget(client, target) : client;
 }

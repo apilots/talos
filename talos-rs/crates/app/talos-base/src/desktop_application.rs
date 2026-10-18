@@ -23,6 +23,7 @@ pub(crate) struct DesktopApplication {
     pub(crate) device_name: String,
     pub(crate) worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     local: Arc<dyn AppServerApplication>,
+    pub(crate) sync_host: Arc<crate::application_sync::ApplicationSyncHost>,
 }
 
 impl DesktopApplication {
@@ -32,6 +33,7 @@ impl DesktopApplication {
         local: Arc<dyn AppServerApplication>,
     ) -> Self {
         Self {
+            sync_host: runtime.sync_host.clone(),
             store: YamlConfigStore::new(runtime.config.source_path()),
             config: runtime.config.clone(),
             account: runtime.service.account.clone(),
@@ -58,7 +60,7 @@ impl DesktopApplication {
         request: ClientRequest,
     ) -> TalosResult<serde_json::Value> {
         match request.params {
-            ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity()?),
+            ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity().await?),
             ClientRequestParams::DesktopWorkerEnroll(params) => {
                 if actor.access_token.is_some()
                     && self
@@ -81,8 +83,10 @@ impl DesktopApplication {
         }
     }
 
-    fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
-        let runner = self.store.load_agent_node()?.runner;
+    async fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
+        self.sync_host.refresh_saved_registration_removal().await?;
+        let removed = self.store.removed_registration_owner()?.is_some();
+        let runner = self.store.load_agent_node()?.runner.filter(|_| !removed);
         Ok(DesktopWorkerIdentityResponse {
             node_id: Some(
                 runner

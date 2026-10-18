@@ -12,6 +12,7 @@ export type {
   CreateNodeRequest,
   GetNodeRequest,
   RenameComputerRequest,
+  DeleteComputerRequest, DeleteComputerResponse,
   SetComputerStatusRequest,
   RotateCredentialRequest,
 

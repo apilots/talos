@@ -154,6 +154,14 @@ export function decodeApiError(value: unknown): ApiError {
     }
     const descriptor = error.localization as Record<string, unknown>;
     switch (descriptor.type) {
+      case "computerDeletionActive":
+      case "computerRegistrationRemoved":
+      case "computerDeletionUnverified": {
+        const codes = { computerDeletionActive: ErrorCode.ActiveTurnRunning, computerRegistrationRemoved: ErrorCode.ResourceExpired, computerDeletionUnverified: ErrorCode.ServiceUnavailable };
+        if (error.code !== codes[descriptor.type] || Object.keys(descriptor).length !== 1) throw new Error("Invalid Talos API response.");
+        localization = { type: descriptor.type };
+        break;
+      }
       case "modelNotConfigured": {
         const { provider, model } = descriptor;
         if (typeof provider !== "string" || typeof model !== "string" ||

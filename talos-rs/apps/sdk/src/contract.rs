@@ -122,6 +122,12 @@ pub trait GatewayClient: Send {
     ) -> TalosResult<talos_types::NodeInfo>;
 
     /// Changes registration availability; disabling revokes the active lease and execution handle.
+    /// Removes an owned registration after idle verification, retaining history and files.
+    async fn delete_computer(
+        &mut self,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse>;
+
     async fn set_computer_status(
         &mut self,
         request: talos_types::SetComputerStatusRequest,

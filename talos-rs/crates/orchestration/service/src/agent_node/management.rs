@@ -66,6 +66,18 @@ impl AgentNodeService {
     }
 
     pub async fn get_node(&self, actor: &Actor, request: GetNodeRequest) -> TalosResult<NodeInfo> {
+        if !actor.auth_disabled
+            && self
+                .store
+                .deletion_owner(&request.node_id)
+                .await?
+                .as_deref()
+                == Some(&actor.user_id)
+        {
+            return Err(TalosError::localized(
+                talos_error::ErrorLocalization::ComputerRegistrationRemoved,
+            ));
+        }
         let record = if actor.role == UserRole::Admin {
             ensure_management_actor(actor)?;
             self.store

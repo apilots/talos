@@ -69,6 +69,12 @@ pub(super) async fn read(
         }
         SyncResourceKey::Project { project_id } => {
             let rows = tx.query("SELECT p.*, (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.project_id) AS session_count FROM projects p WHERE p.project_id = ? AND p.user_id IN (?, ?)", &[project_id, &adapter.binding.source_user_id, &adapter.binding.scope.account_id]).await?;
+            if rows.first().is_some_and(|row| {
+                row.get_string("execution_node_id").as_deref() == Some("embedded")
+            }) && !capture_local_resource(adapter, tx, "project", project_id).await?
+            {
+                return Ok(None);
+            }
             rows.first()
                 .map(|row| {
                     Ok::<_, TalosError>(SyncResourceSnapshot::Project(ProjectInfo {
@@ -102,6 +108,11 @@ pub(super) async fn read(
                 return Ok(None);
             };
             let record = crate::session::DatabaseSessionStore::parse_session_record(row)?;
+            if record.execution_node_id == "embedded"
+                && !capture_local_resource(adapter, tx, "session", session_id).await?
+            {
+                return Ok(None);
+            }
             let memory_processed_through = session::key_at(
                 adapter,
                 tx,
@@ -174,6 +185,16 @@ pub(super) async fn apply(
                     ));
                 }
                 let local = node.node_id.clone();
+                if !tx
+                    .query(
+                        "SELECT 1 FROM computer_deletions WHERE node_id = ? AND owner_user_id = ?",
+                        &[&local, &batch.scope.account_id],
+                    )
+                    .await?
+                    .is_empty()
+                {
+                    continue;
+                }
                 let mode = "remote";
                 let status = transcode::<_, NodeStatus>(&node.status)?;
                 let status = match status {
@@ -240,6 +261,22 @@ pub(super) async fn delete(
     tx: &mut dyn StorageTransaction,
     resource: &SyncResourceKey,
 ) -> TalosResult<()> {
+    if let SyncResourceKey::Computer { computer_id } = resource {
+        if adapter
+            .binding
+            .computers
+            .iter()
+            .any(|alias| alias.source_node_id == "embedded" && alias.computer_id == *computer_id)
+        {
+            crate::session::capture_removal_boundary(
+                tx,
+                &adapter.binding.scope.account_id,
+                computer_id,
+            )
+            .await?;
+        }
+        tx.execute("INSERT INTO computer_deletions(node_id, owner_user_id, deleted_at) VALUES (?, ?, ?) ON CONFLICT(node_id) DO NOTHING", &[computer_id, &adapter.binding.scope.account_id, &chrono::Utc::now().timestamp().to_string()]).await?;
+    }
     let (table, key, owner) = match resource {
         SyncResourceKey::Computer { .. } => ("agent_nodes", "node_id", "owner_user_id"),
         SyncResourceKey::Project { .. } => ("projects", "project_id", "user_id"),
@@ -263,6 +300,33 @@ pub(super) async fn delete(
 pub(super) fn text(row: &talos_storage::Row, key: &str) -> TalosResult<String> {
     row.get_string(key)
         .ok_or_else(|| TalosError::internal("Missing persisted synchronization field."))
+}
+
+async fn capture_local_resource(
+    adapter: &StoreSyncAdapter,
+    tx: &mut dyn StorageTransaction,
+    kind: &str,
+    id: &str,
+) -> TalosResult<bool> {
+    let Some(alias) = adapter
+        .binding
+        .computers
+        .iter()
+        .find(|alias| alias.source_node_id == "embedded")
+    else {
+        return Ok(false);
+    };
+    if tx
+        .query(
+            "SELECT 1 FROM local_computer_retirements WHERE node_id = ? AND owner_user_id = ?",
+            &[&alias.computer_id, &adapter.binding.scope.account_id],
+        )
+        .await?
+        .is_empty()
+    {
+        return Ok(true);
+    }
+    Ok(!tx.query("SELECT 1 FROM local_computer_retirement_resources WHERE node_id = ? AND kind = ? AND resource_id = ?", &[&alias.computer_id, kind, id]).await?.is_empty())
 }
 pub(super) fn number(row: &talos_storage::Row, key: &str) -> TalosResult<i64> {
     row.get_i64(key)

@@ -126,3 +126,16 @@ describe("Computer routing through both client transports", () => {
 function noopStreamAdapter(): StreamAdapter {
   return { stream: vi.fn().mockResolvedValue(undefined) };
 }
+
+it("exposes owner deletion with the same response over HTTP and JSON-RPC", async () => {
+  const response = { nodeId: "worker/old" };
+  const request = vi.fn().mockResolvedValue(response);
+  const browser = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+  await expect(browser.computers.delete(response)).resolves.toEqual(response);
+  expect(request).toHaveBeenCalledExactlyOnceWith("http://localhost:8080/v1/computers/worker%2Fold", { method: "DELETE" });
+  const transport = new RecordingTransport();
+  vi.spyOn(transport, "request").mockResolvedValue(response);
+  const app = new AppServerClient(transport);
+  await expect(app.computers.delete(response)).resolves.toEqual(response);
+  expect(transport.request).toHaveBeenCalledWith("computer/delete", response);
+});

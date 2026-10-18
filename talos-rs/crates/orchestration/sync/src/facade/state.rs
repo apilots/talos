@@ -6,6 +6,24 @@ use super::TalosSync;
 use crate::{facade::sync_error, store, SyncBinding, SyncResourceKey, SyncVersion};
 
 impl TalosSync {
+    /// Retire only the specified local capture alias. The product transaction must
+    /// first freeze existing resources to their canonical Computer UUID. Account,
+    /// peer, source ownership and historical document bindings never change.
+    pub async fn retire_computer_alias(
+        &self,
+        tx: &mut dyn talos_storage::StorageTransaction,
+        binding: &crate::SyncBinding,
+        computer_id: &str,
+    ) -> TalosResult<crate::SyncBinding> {
+        self.require_binding(tx, binding).await?;
+        let mut next = binding.clone();
+        next.computers
+            .retain(|alias| alias.computer_id != computer_id);
+        let computers = crate::store::encode(&next.computers)?;
+        tx.execute("UPDATE sync_bindings SET computers_json = ? WHERE hub_id = ? AND account_id = ? AND source_user_id = ?", &[&computers, &binding.scope.hub_id, &binding.scope.account_id, &binding.source_user_id]).await?;
+        Ok(next)
+    }
+
     /// An account without a saved choice follows authenticated login by default.
     /// Deployment policy is enforced by the management host before starting transport.
     pub async fn enabled(&self, account_id: &str) -> TalosResult<bool> {

@@ -264,6 +264,12 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
+            ClientRequestParams::ComputerDelete(params) => to_value(
+                self.gateway
+                    .delete_computer(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::ComputerSetStatus(params) => to_value(
                 self.gateway
                     .set_computer_status(actor, params)

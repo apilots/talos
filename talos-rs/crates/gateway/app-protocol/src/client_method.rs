@@ -29,6 +29,8 @@ pub enum ClientMethod {
     ComputerCreate,
     #[serde(rename = "computer/rename")]
     ComputerRename,
+    #[serde(rename = "computer/delete")]
+    ComputerDelete,
     #[serde(rename = "computer/setStatus")]
     ComputerSetStatus,
     #[serde(rename = "computer/rotateCredential")]
@@ -207,6 +209,7 @@ impl ClientMethod {
             Self::ComputerRead => "computer/read",
             Self::ComputerCreate => "computer/create",
             Self::ComputerRename => "computer/rename",
+            Self::ComputerDelete => "computer/delete",
             Self::ComputerSetStatus => "computer/setStatus",
             Self::ComputerRotateCredential => "computer/rotateCredential",
             Self::ProfileRead => "profile/read",
@@ -314,6 +317,7 @@ impl FromStr for ClientMethod {
             "computer/read" => Ok(Self::ComputerRead),
             "computer/create" => Ok(Self::ComputerCreate),
             "computer/rename" => Ok(Self::ComputerRename),
+            "computer/delete" => Ok(Self::ComputerDelete),
             "computer/setStatus" => Ok(Self::ComputerSetStatus),
             "computer/rotateCredential" => Ok(Self::ComputerRotateCredential),
             "profile/read" => Ok(Self::ProfileRead),

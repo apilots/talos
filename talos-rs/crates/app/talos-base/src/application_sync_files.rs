@@ -8,6 +8,7 @@ use talos_types::{
 };
 
 pub(crate) struct GatewayPeerAccess {
+    pub host: std::sync::Weak<super::application_sync::ApplicationSyncHost>,
     pub config: talos_config::Config,
     pub stores: Arc<super::application_sync::ApplicationSyncStores>,
 }
@@ -118,6 +119,62 @@ impl agent_protocol::ActiveSessionCommands for GatewayPeerAccess {
 }
 
 impl talos_service::ComputerManagement for GatewayPeerAccess {
+    fn delete<'a>(
+        &'a self,
+        actor: &'a talos_service::Actor,
+        request: talos_types::DeleteComputerRequest,
+    ) -> AgentFuture<'a, TalosResult<talos_types::DeleteComputerResponse>> {
+        Box::pin(async move {
+            let host = self.host.upgrade();
+            let local_actor = match &host {
+                Some(host)
+                    if host
+                        .config
+                        .reload()?
+                        .agent_node
+                        .runner
+                        .as_ref()
+                        .is_some_and(|runner| runner.node_id == request.node_id) =>
+                {
+                    // G authenticates and authorizes the owner before its deletion
+                    // response. Local retirement must not add another Auth outage
+                    // after the central operation has committed.
+                    Some(talos_auth::RequestIdentity {
+                        user_id: actor.user_id.clone(),
+                        username: None,
+                        role: actor.role,
+                        auth_disabled: actor.auth_disabled,
+                        access_token: actor.access_token.clone(),
+                    })
+                }
+                None if self
+                    .config
+                    .reload()?
+                    .agent_node
+                    .runner
+                    .as_ref()
+                    .is_some_and(|runner| runner.node_id == request.node_id) =>
+                {
+                    return Err(TalosError::new(
+                        ErrorCode::ServiceUnavailable,
+                        "Local registration lifecycle is unavailable.",
+                    ))
+                }
+                _ => None,
+            };
+            let response = self
+                .gateway()
+                .await?
+                .delete_computer(management_token(actor)?, request)
+                .await?;
+            if let (Some(host), Some(local_actor)) = (host, local_actor) {
+                host.observe_registration_removal(&local_actor, &response.node_id)
+                    .await?;
+            }
+            Ok(response)
+        })
+    }
+
     fn create<'a>(
         &'a self,
         actor: &'a talos_service::Actor,

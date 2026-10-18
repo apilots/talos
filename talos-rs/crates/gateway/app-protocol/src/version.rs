@@ -9,7 +9,7 @@ pub struct ProtocolVersion {
 }
 
 impl ProtocolVersion {
-    pub const CURRENT: Self = Self { major: 0, minor: 4 };
+    pub const CURRENT: Self = Self { major: 0, minor: 5 };
 }
 
 impl Default for ProtocolVersion {

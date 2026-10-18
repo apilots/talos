@@ -772,3 +772,78 @@ async fn desktop_source_files_cross_outgoing_peer_stream_without_session_and_kee
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enrolls_new_uuid() {
+    let fixture = DesktopFixture::new().await;
+    fixture.login("user-1");
+    let host = fixture.host("Disposable laptop");
+    let old = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    fixture.registered(&old).await;
+    let proof = fixture.home.path().join("keep-workspace.txt");
+    std::fs::write(&proof, "retained").unwrap();
+    fixture
+        .runtime
+        .service
+        .nodes
+        .delete_computer(
+            &Actor::regular("user-1").with_access_token("user-1"),
+            talos_types::DeleteComputerRequest {
+                node_id: old.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        YamlConfigStore::new(fixture.config.source_path())
+            .removed_registration_owner()
+            .unwrap()
+            .as_deref(),
+        Some("user-1")
+    );
+    assert_eq!(
+        fixture.runtime.sync_host.local_computer_id().unwrap(),
+        "embedded"
+    );
+    assert!(!host.rpc.is_finished());
+    let new = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    assert_ne!(new, old);
+    fixture.registered(&new).await;
+    let deleted = fixture
+        .runtime
+        .sync_host
+        .sync_stores
+        .storage
+        .query(
+            "SELECT owner_user_id FROM computer_deletions WHERE node_id = ?",
+            &[&old],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        deleted
+            .first()
+            .unwrap()
+            .get_string("owner_user_id")
+            .as_deref(),
+        Some("user-1")
+    );
+    assert_eq!(std::fs::read_to_string(proof).unwrap(), "retained");
+    assert_eq!(
+        fixture
+            .nodes
+            .get_node(
+                &Actor::regular("user-1"),
+                agent_protocol::GetNodeRequest { node_id: old }
+            )
+            .await
+            .unwrap_err()
+            .error_code(),
+        ErrorCode::ResourceExpired
+    );
+    assert!(!host.rpc.is_finished());
+    host.stop_registration().await.unwrap();
+    fixture.runtime.shutdown_sync().await.unwrap();
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}

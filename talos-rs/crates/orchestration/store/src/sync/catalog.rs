@@ -16,11 +16,13 @@ pub(super) async fn scan(
         .query(
             r#"SELECT kind, id FROM (
         SELECT 'computer' AS kind, node_id AS id FROM agent_nodes WHERE owner_user_id = ? AND node_id <> 'embedded'
+        UNION ALL SELECT 'computer', node_id FROM computer_deletions WHERE owner_user_id = ?
         UNION ALL SELECT 'project', project_id FROM projects WHERE user_id = ?
         UNION ALL SELECT 'session', session_key FROM sessions WHERE user_id = ?
         UNION ALL SELECT 'file', file_id FROM files WHERE owner_user_id = ? AND status = 'ready'
     ) WHERE kind || ':' || id > ? ORDER BY kind, id LIMIT ?"#,
             &[
+                &params.binding.scope.account_id,
                 &params.binding.scope.account_id,
                 &params.binding.source_user_id,
                 &params.binding.source_user_id,

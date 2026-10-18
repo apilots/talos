@@ -209,6 +209,9 @@ message ApiError {
   ErrorCode code = 1;
   string message = 2;
   oneof localization {
+    Empty computer_deletion_active = 5;
+    Empty computer_registration_removed = 6;
+    Empty computer_deletion_unverified = 7;
     ModelNotConfigured model_not_configured = 3;
     AttachmentCountExceeded attachment_count_exceeded = 4;
   }

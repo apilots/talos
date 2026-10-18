@@ -305,7 +305,9 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         None
     };
     let worker_registration = Arc::new(tokio::sync::Mutex::new(registration));
-    let sync_host = Arc::new(super::application_sync::ApplicationSyncHost {
+    let sync_host = Arc::new_cyclic(|host| super::application_sync::ApplicationSyncHost {
+        self_weak: host.clone(),
+        registration_retirement: Default::default(),
         config: config.clone(),
         sync: sync.clone(),
         sync_stores: sync_stores.clone(),

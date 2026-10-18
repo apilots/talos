@@ -3,7 +3,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../common.sh"
-for command in cargo docker openssl protoc python3 pnpm; do require_command "${command}"; done
+for command in cargo docker git openssl protoc python3 pnpm; do require_command "${command}"; done
 [[ "$(uname -s)" == Darwin ]] || { echo 'CASE sync_native_mac_preflight FAIL requires a real macOS host' >&2; exit 1; }
 python3 -c 'import grpc, yaml; from google.protobuf import descriptor_pool'
 docker info >/dev/null
@@ -20,7 +20,30 @@ export TALOS_CLOUD_SERVER_BIN="$(resolve_cloud_server_binary)"
 # Rebuilding every case adds registry requests without testing different source.
 image_marker="${E2E_TMP_ROOT}/computer-sync-images-${TALOS_E2E_RUN_ID:?}.ids"
 if [[ ! -f "${image_marker}" ]]; then
-  (cd "${REPO_ROOT}" && just docker-worker-build "${worker_image}")
+  # The product Dockerfile expects a talos/ context directory. Build from this
+  # checkout's source even when a Git worktree has a different directory name.
+  worker_context="$(make_e2e_temp_dir computer-sync-worker-context)"
+  python3 - "${REPO_ROOT}" "${worker_context}/talos" <<'PY'
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+repo, destination = map(Path, sys.argv[1:])
+paths = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], cwd=repo)
+for raw in paths.split(b'\0'):
+    if not raw:
+        continue
+    path = Path(raw.decode())
+    if path.parts[0] not in ('talos-rs', 'conf') and str(path) not in ('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES'):
+        continue
+    source, target = repo / path, destination / path
+    if source.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+PY
+  docker build -f "${REPO_ROOT}/build/worker/Dockerfile" -t "${worker_image}" "${worker_context}"
+  rm -rf "${worker_context}"
   docker build -f "${sync_source}/build/server/Dockerfile" -t "${sync_image}" "${sync_source}"
   docker image inspect "${worker_image}" "${sync_image}" --format '{{.Id}}' > "${image_marker}"
 fi

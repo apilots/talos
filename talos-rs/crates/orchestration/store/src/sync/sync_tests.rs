@@ -604,3 +604,6 @@ async fn file_source_and_child_identity_survive_import_and_source_deletion() {
 
 #[path = "projection_tests.rs"]
 mod projection_tests;
+
+#[path = "deletion_tests.rs"]
+mod deletion_tests;

@@ -35,6 +35,13 @@ impl GatewayClient for AppServerClient {
         self.request_typed("computer/rename", request).await
     }
 
+    async fn delete_computer(
+        &mut self,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse> {
+        self.request_typed("computer/delete", request).await
+    }
+
     async fn set_computer_status(
         &mut self,
         request: talos_types::SetComputerStatusRequest,

@@ -257,6 +257,7 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
                 .unwrap();
             let store = talos_config::YamlConfigStore::new(config.source_path());
             let result = super::desktop_worker::WorkerEnrollment {
+                sync_host: &sync_host,
                 config: &sync_host.config,
                 store: &store,
                 account: &sync_host.service.account,

@@ -11,6 +11,7 @@ import { Button } from "@/shared/ui/Button";
 import { useComputer, useProductScope } from "../hooks";
 import { ComputerDetails } from "../ComputerDetails";
 import { SyncPeerDetails } from "./SyncPeerDetails";
+import { ComputerRegistrationActions } from "./ComputerRegistrationActions";
 import { computerPeers } from "./observations";
 
 interface Props {
@@ -20,6 +21,7 @@ interface Props {
   metrics?: AppProtocol.SyncMetricsResponse;
   syncStatus?: AppProtocol.SyncStatusResponse;
   onOpen: (id: string) => void;
+  onDeleted: () => void;
 }
 
 /** Inspection is page-local. Execution selection changes only through onOpen. */
@@ -30,6 +32,7 @@ export function ComputerInspector({
   metrics,
   syncStatus,
   onOpen,
+  onDeleted,
 }: Props) {
   const { t } = useTranslation(["computers", "common"]);
   const query = useComputer(nodeId);
@@ -139,17 +142,7 @@ export function ComputerInspector({
             >
               {t("common:save")}
             </Button>
-            <Button
-              variant="secondary"
-              disabled={mutation.isPending}
-              onClick={() => mutation.mutate("status")}
-            >
-              {t(
-                node.status === "enabled"
-                  ? "computers:disable"
-                  : "computers:enable",
-              )}
-            </Button>
+
           </div>
         </div>
       ) : null}
@@ -168,6 +161,7 @@ export function ComputerInspector({
           {userVisibleErrorMessage(mutation.error, t("computers:loadError"))}
         </p>
       ) : null}
+      {personal ? <ComputerRegistrationActions node={node} pending={mutation.isPending} onToggleAccess={() => mutation.mutate("status")} onDeleted={onDeleted} /> : null}
     </>
   );
 }

@@ -52,13 +52,26 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   Worker's Session while the origin management service is stopped, and source
   FileService operations use the existing G relay after restoration.
 
+- `09_registration_deletion`: a real Worker task creates a retained Project,
+  Session and Workspace file. Pause Desktop B's Sync, stop that Worker, then
+  delete its registration through Desktop A and the existing central management
+  path. Inspect each independent management database read-only to prove WSS
+  tombstone materialization before directory reads can reconcile against G.
+  Resume B's stale replica, restart the old Worker with its original credentials,
+  restart B and H, and sign in a fresh Desktop C. All managers must omit the old
+  executable identity while retaining identical history and immutable bindings;
+  old credentials/startup must fail and the Workspace proof file must remain.
+  No application database is mutated by the fixture.
+
 Requires a real macOS host, Docker, the adjacent `talos-sync` source, a Cloud
 fixture executable (`TALOS_CLOUD_SERVER_BIN` or `cloud-server` on `PATH`),
 Node/pnpm, Python grpcio/protobuf/PyYAML, and existing DEV configuration.
 Execution cases use the configured funded DeepSeek provider in `.env`; no model
 key is baked into an image. Each runner invocation builds the current candidate images once, verifies their
 exact image IDs before every case, and reuses release caches without accepting
-stale images from a prior invocation. NAT additionally builds the current Server
+stale images from a prior invocation. Worker build contexts contain Git-listed
+source from the current checkout, so a differently named worktree cannot pick up
+another checkout's code or ignored credentials. NAT additionally builds the current Server
 image and a small test-only iptables helper; NET_ADMIN applies solely to these
 isolated fixture network namespaces, never to the host or unrelated containers. `TALOS_SYNC_REPO`,
 `TALOS_WORKER_E2E_IMAGE` and `TALOS_SYNC_E2E_IMAGE` select inputs.
@@ -86,3 +99,10 @@ NAT acceptance re-applies and verifies ingress rules after restart using current
 container addresses; real memory/reflection and child-agent callbacks return to
 the current coordinator. Live Linux SQLite evidence is read from the Linux helper,
 never opened concurrently by a Mac SQLite process.
+
+The registration-deletion case also removes Desktop A through its own SDK, checks
+private removal state and completed alias retirement before any identity/UI poll,
+and performs a real local task while unregistered. Explicit enrollment must bind
+that new work only to a fresh UUID while preserving older historical bindings.
+Deleting the fresh UUID through Desktop B must persist on A through Sync alone;
+restarting A must retain both histories without recreating either registration.

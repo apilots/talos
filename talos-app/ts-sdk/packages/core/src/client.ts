@@ -11,6 +11,7 @@ import type {
   CreateNodeRequest,
   GetNodeRequest,
   RenameComputerRequest,
+  DeleteComputerRequest, DeleteComputerResponse,
   SetComputerStatusRequest,
   RotateCredentialRequest,
   DocUpdateRequest,
@@ -434,6 +435,8 @@ export class TalosClient {
   };
 
   computers = {
+    delete: (request: DeleteComputerRequest): Promise<DeleteComputerResponse> =>
+      this.http.request<DeleteComputerResponse>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}`), { method: "DELETE" }),
     list: (request: ComputerListRequest = {}): Promise<ComputerListResponse> => {
       const query = new URLSearchParams();
       if (request.query != null) query.set("query", request.query);

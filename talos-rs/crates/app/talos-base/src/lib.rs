@@ -33,6 +33,7 @@ mod application_runtime;
 mod application_storage;
 mod application_sync;
 mod application_sync_computers;
+mod application_sync_deletion;
 mod application_sync_files;
 mod application_sync_management;
 mod application_sync_metrics;

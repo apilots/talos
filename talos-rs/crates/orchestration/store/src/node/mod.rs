@@ -1,3 +1,4 @@
+mod deletion;
 mod store;
 mod types;
 

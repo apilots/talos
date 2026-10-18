@@ -272,6 +272,19 @@ impl RemoteNodePublisher {
             .lock()
             .await
             .insert(node_id.to_owned(), environment.clone());
+        let admission = environment.clone();
+        self.nodes
+            .set_registration_deletion_hook(
+                &NodeAuth {
+                    node_id: node_id.to_owned(),
+                    token: registration.lease_token.clone(),
+                },
+                Arc::new(move |blocked| {
+                    let admission = admission.clone();
+                    Box::pin(async move { admission.set_registration_admission(blocked).await })
+                }),
+            )
+            .await?;
         let published_node_id = node_id.to_owned();
         self.nodes
             .mark_registration_published(
@@ -473,6 +486,30 @@ impl NodeManagementRpc {
 
 #[tonic::async_trait]
 impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc {
+    async fn delete_computer(
+        &self,
+        request: Request<pb::GetNodeRequest>,
+    ) -> Result<Response<pb::DeleteComputerResponse>, Status> {
+        let result = async {
+            let actor = self.actor(&request).await?;
+            self.nodes
+                .delete_computer(
+                    &actor,
+                    talos_types::DeleteComputerRequest {
+                        node_id: request.into_inner().node_id,
+                    },
+                )
+                .await
+        }
+        .await;
+        Ok(Response::new(pb::DeleteComputerResponse {
+            result: Some(match result {
+                Ok(value) => pb::delete_computer_response::Result::NodeId(value.node_id),
+                Err(error) => pb::delete_computer_response::Result::Failure(failure(error)),
+            }),
+        }))
+    }
+
     async fn get_deployments(
         &self,
         request: Request<pb::GetNodeRequest>,

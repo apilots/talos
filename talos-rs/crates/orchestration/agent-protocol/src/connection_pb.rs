@@ -7,6 +7,7 @@ pub fn auth(request: &pb::worker_rpc_call::Request) -> Option<&pb::NodeAuth> {
     use pb::worker_rpc_call::Request as Call;
     macro_rules! read { ($($variant:ident),+ $(,)?) => { match request { $(Call::$variant(value) => value.auth.as_ref(),)+ } }; }
     read!(
+        SetRegistrationAdmission,
         ActiveSessionCommand,
         ReadSessionExecutionState,
         CommitSessionExecutionState,
@@ -82,6 +83,7 @@ pub fn replace_auth(request: &mut pb::worker_rpc_call::Request, auth: &pb::NodeA
     use pb::worker_rpc_call::Request as Call;
     macro_rules! replace { ($($variant:ident),+ $(,)?) => { match request { $(Call::$variant(value) => value.auth = Some(auth.clone()),)+ } }; }
     replace!(
+        SetRegistrationAdmission,
         ActiveSessionCommand,
         ReadSessionExecutionState,
         CommitSessionExecutionState,

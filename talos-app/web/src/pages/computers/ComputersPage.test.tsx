@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -141,6 +142,19 @@ it("renders the Chinese management surface and hides cached sync mappings when u
   expect(screen.getByText("登录后查看个人账号的同步拓扑。")).toBeVisible();
   expect(container.querySelectorAll('[data-flow="sync"]')).toHaveLength(0);
   expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(2);
+});
+
+it("shows registration actions only to the Computer owner", async () => {
+  await show();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect Build Worker" }));
+  expect(screen.getByRole("button", { name: "Remove registration" })).toBeVisible();
+  act(() => {
+    useAppStore.setState({
+      connection: { ...useAppStore.getState().connection, userId: "bob" },
+    });
+  });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Remove registration" })).not.toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
 });
 
 it.each(["zh-CN", "en"])("keeps the last endpoint and one localized disconnection notice in %s without stale sync paths", async (locale) => {

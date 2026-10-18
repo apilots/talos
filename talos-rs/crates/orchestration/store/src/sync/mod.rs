@@ -130,6 +130,18 @@ impl SyncDataAdapter for StoreSyncAdapter {
                 "Synchronization binding does not match this Store.",
             ));
         }
+        if let SyncResourceKey::Computer { computer_id } = &params.resource {
+            if !tx
+                .query(
+                    "SELECT 1 FROM computer_deletions WHERE node_id = ? AND owner_user_id = ?",
+                    &[computer_id, &params.binding.scope.account_id],
+                )
+                .await?
+                .is_empty()
+            {
+                return Ok(vec![SyncChange::Delete]);
+            }
+        }
         let mut changes = match metadata::read(self, tx, &params.resource).await? {
             Some(after) => vec![SyncChange::Metadata {
                 before: None,
@@ -193,6 +205,11 @@ impl SyncDataAdapter for StoreSyncAdapter {
                 }
             }
             for key in required {
+                if let SyncResourceKey::Computer { computer_id } = &key {
+                    if !tx.query("SELECT 1 FROM computer_deletions WHERE node_id = ? AND owner_user_id = ?", &[computer_id, &batch.scope.account_id]).await?.is_empty() {
+                        continue;
+                    }
+                }
                 let (table, column, id) = match &key {
                     SyncResourceKey::Computer { computer_id } => {
                         ("agent_nodes", "node_id", self.local_node(computer_id))

@@ -42,7 +42,7 @@ impl TalosService {
             ));
         }
         if let Some(node) = request.node_id.take() {
-            request.node_id = Some(self.resolve_computer_node(actor, &node).await?);
+            request.node_id = Some(self.resolve_computer_metadata_node(actor, &node).await?);
         }
         let projects = self.access.list_projects(actor).await?;
         let mut result = Vec::new();
@@ -107,7 +107,10 @@ impl TalosService {
             Err(error)
                 if matches!(
                     error.error_code(),
-                    talos_error::ErrorCode::ServiceUnavailable | talos_error::ErrorCode::Timeout
+                    talos_error::ErrorCode::ServiceUnavailable
+                        | talos_error::ErrorCode::Timeout
+                        | talos_error::ErrorCode::ResourceExpired
+                        | talos_error::ErrorCode::ResourceNotFound
                 ) =>
             {
                 ProjectStatus {

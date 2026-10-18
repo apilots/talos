@@ -237,6 +237,8 @@ impl AgentHarnessRpcAdapter {
                 },
             )
             .map_err(status_from_error)?;
+        self.authorize_admission(&lease)
+            .map_err(status_from_error)?;
         let execution = harness.start(params).await;
         let resource_guard = if execution.is_ok() {
             self.bind_resources(&auth, &session_context, first.caller.as_ref())
@@ -306,6 +308,8 @@ impl AgentHarnessRpcAdapter {
                 &context.history_cursor.clone().unwrap_or_default(),
                 super::session_gate::RunAdmission::NewTurn,
             )
+            .map_err(status_from_error)?;
+        self.authorize_admission(&lease)
             .map_err(status_from_error)?;
         let execution = harness.compact_session(context).await;
         let resource_guard = if execution.is_ok() {

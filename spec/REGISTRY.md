@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 046 |
+| `feat` | 047 |
 | `fix` | 007 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-046 | [Computer registration deletion](feat-046-computer-registration-deletion/design.md) | implemented |
 | feat-045 | [Computer topology](feat-045-computer-topology/design.md) | implemented — [review and acceptance evidence](https://github.com/apilots/talos/pull/28) |
 | feat-042 | `feat-042-distributed-agent-execution` | implemented |
 | feat-043 | `feat-043-computer-workspace` | implemented |

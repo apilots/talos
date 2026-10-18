@@ -12,3 +12,4 @@ export { ComputerInspector } from "./topology/ComputerInspector";
 export { ComputerServiceDetails } from "./topology/ComputerServiceDetails";
 export { observationsDelayed } from "./topology/observations";
 export type { ComputerService, FlowLayer } from "./topology/observations";
+export { ComputerConnectHelp } from "./ComputerConnectHelp";

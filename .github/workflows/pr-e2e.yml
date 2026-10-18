@@ -91,6 +91,10 @@ jobs:
             targets: |
               case:09_app_server/smoke_e2e
               case:09_app_server/desktop_recovery
+          - name: computer-registration
+            runner: ubuntu-24.04
+            targets: |
+              case:09_app_server/computer_deletion
           - name: files
             runner: ubuntu-24.04
             targets: |
@@ -141,7 +145,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python scenario dependencies
-        run: python -m pip install --disable-pip-version-check grpcio protobuf pyyaml
+        run: python -m pip install --disable-pip-version-check grpcio protobuf pyyaml playwright
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6

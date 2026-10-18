@@ -3,6 +3,14 @@ use talos_error::TalosResult;
 use talos_service::Actor;
 
 impl ServiceGateway {
+    pub(crate) async fn delete_computer(
+        &self,
+        actor: &Actor,
+        request: talos_types::DeleteComputerRequest,
+    ) -> TalosResult<talos_types::DeleteComputerResponse> {
+        self.service.nodes.delete_computer(actor, request).await
+    }
+
     pub(crate) async fn list_computers(
         &self,
         actor: &Actor,

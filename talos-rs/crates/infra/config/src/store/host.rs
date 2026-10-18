@@ -7,9 +7,54 @@ use talos_fs::{FilePermissions, FileSystem, WriteOptions};
 #[serde(deny_unknown_fields)]
 struct WorkerState {
     enrollment_pending: bool,
+    #[serde(default)]
+    removed_owner: Option<String>,
 }
 
 impl YamlConfigStore {
+    /// Only a verified owner-facing directory deletion response establishes this state.
+    pub fn removed_registration_owner(&self) -> TalosResult<Option<String>> {
+        Ok(self.load_worker_state()?.removed_owner)
+    }
+    pub fn mark_registration_removed(&self, node_id: &str, owner: &str) -> TalosResult<()> {
+        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
+        if self
+            .load_agent_node()?
+            .runner
+            .as_ref()
+            .is_none_or(|runner| runner.node_id != node_id)
+        {
+            return Err(TalosError::new(
+                ErrorCode::Conflict,
+                "Worker identity changed during registration removal.",
+            ));
+        }
+        let mut state = self.load_worker_state()?;
+        state.removed_owner = Some(owner.into());
+        talos_fs::write_json_pretty(&self.worker_state_path(), &state)
+    }
+    /// Explicit owner intent retires the old UUID before creating a fresh enrollment.
+    /// Keep the removal marker until the replacement credential is durably saved.
+    pub fn retire_removed_registration(&self, owner: &str) -> TalosResult<()> {
+        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
+        let state = self.load_worker_state()?;
+        if state.removed_owner.as_deref() != Some(owner) {
+            return Err(TalosError::new(
+                ErrorCode::PermissionDenied,
+                "Only the previous registration owner may reconnect this host.",
+            ));
+        }
+        let mut root = parse_yaml_root(&self.read_config_text()?)?;
+        let mut nodes: AgentNodeConfig = decode_section(&root, "agent_node")?;
+        let previous = nodes.runner.take();
+        set_section(&mut root, "agent_node", &nodes)?;
+        self.write_host_root(&root)?;
+        if let Some(previous) = previous {
+            talos_fs::std_fs().remove_file(&previous.credential_file)?;
+        }
+        Ok(())
+    }
+
     pub fn load_sync(&self) -> TalosResult<crate::SyncConfig> {
         decode_section(&parse_yaml_root(&self.read_config_text()?)?, "sync")
     }
@@ -181,6 +226,7 @@ impl YamlConfigStore {
             &self.worker_state_path(),
             &WorkerState {
                 enrollment_pending: true,
+                removed_owner: self.load_worker_state()?.removed_owner,
             },
         )
     }
