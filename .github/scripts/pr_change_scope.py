@@ -30,9 +30,16 @@ SCOPES = {
 CI_INPUTS = {
     "rust": ("scripts/check_error_contract*.py", ".github/workflows/talos-rust.yml"),
     "frontend": ("scripts/check_error_contract.py", ".github/workflows/talos-frontend-app.yml"),
-    "pr-e2e": ("build.sh", "build/*", ".github/workflows/pr-e2e.yml"),
+    "pr-e2e": ("build.sh", "build/*", ".github/workflows/pr-e2e.yml", ".github/scripts/pr_change_scope*.py"),
     "tui-install": (".github/workflows/talos-tui-install.yml",),
 }
+E2E_SCENARIOS = [
+    {"name": "health-and-model-catalog", "runner": "ubuntu-24.04", "targets": "case:01_health_and_models"},
+    {"name": "app-server", "runner": "ubuntu-24.04", "targets": "case:09_app_server/smoke_e2e\ncase:09_app_server/desktop_recovery"},
+    {"name": "computer-registration", "runner": "ubuntu-24.04", "targets": "case:09_app_server/computer_deletion"},
+    {"name": "files", "runner": "ubuntu-24.04", "targets": "group:12_files"},
+    {"name": "sandbox", "runner": "ubuntu-24.04", "targets": "group:14_sandbox"},
+]
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-SNAPSHOT)?"
 VERSION_PATTERNS = {
     "talos-rs/Cargo.toml": rf'(?m)(^\[workspace\.package\]\n(?:(?!\[)[^\n]*\n)*?version = ")({VERSION})(")',
@@ -61,6 +68,16 @@ def scope_matches(scope: str, path: str, *, product_only: bool = False) -> bool:
 
 def should_run(scope: str, paths: list[str], *, product_only: bool = False) -> bool:
     return any(scope_matches(scope, path, product_only=product_only) for path in paths)
+
+
+def e2e_plan(paths: list[str]) -> tuple[bool, dict]:
+    # This real browser scenario exercises the shared Web UI against a native
+    # service. SDK, Desktop, dependency, build and CI inputs retain full checks.
+    web_only = bool(paths) and all(
+        path.startswith(("talos-app/web/src/", "talos-app/web/public/")) for path in paths
+    )
+    scenarios = [s for s in E2E_SCENARIOS if s["name"] == "computer-registration"] if web_only else E2E_SCENARIOS
+    return not web_only, {"include": scenarios}
 
 
 def version_files() -> set[str]:
@@ -148,6 +165,10 @@ def main() -> int:
         return 0
     if output := os.environ.get("GITHUB_OUTPUT"):
         with open(output, "a", encoding="utf-8") as stream:
+            if args.scope == "pr-e2e":
+                native, matrix = e2e_plan(paths)
+                stream.write(f"run_contracts={str(relevant and native).lower()}\n")
+                stream.write(f"scenario_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
             stream.write(f"run_workflow={str(relevant).lower()}\n")
     print(f"{args.scope}: {'run affected checks' if relevant else 'no product changes; metadata/policy checks apply'}")
     return 0
