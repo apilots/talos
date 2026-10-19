@@ -100,7 +100,7 @@ export const computerTopologyResources = {
     viewMode: "展示形式",
     topologyTitle: "连接拓扑",
     moreComputers: "还有 {{count}} 台",
-    matchedComputers: "匹配 {{matched}} 台，共 {{total}} 台",
+    matchedComputers: "找到 {{matched}} 台，共 {{total}} 台",
     loadedComputers: "已加载 {{loaded}} / {{total}} 台 Computer",
     onlineInView: "台在当前视图可用",
     peerCount: "个同步端在线",

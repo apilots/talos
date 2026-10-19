@@ -122,7 +122,6 @@ export function ComputersPage() {
           </strong>
           {t("computers:peerCount", { count: metrics.data?.peers.length ?? 0 })}
         </span>
-        <small>{loaded}</small>
       </section>
       <div className="cmp-controls">
         <SyncControl metrics={metrics.data} metricsError={metrics.error} />
@@ -144,15 +143,18 @@ export function ComputersPage() {
         </p>
       ) : null}
       <div className="cmp-tools">
-        <label className="cmp-search">
-          <Search size={16} aria-hidden="true" />
-          <input
-            aria-label={t("computers:search")}
-            placeholder={t("computers:search")}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
+        <div className="cmp-search-area">
+          <label className="cmp-search">
+            <Search size={16} aria-hidden="true" />
+            <input
+              aria-label={t("computers:search")}
+              placeholder={t("computers:search")}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <span className={matches ? "cmp-search-results" : "sr-only"} role="status">{matches}</span>
+        </div>
         <div className="cmp-segments" aria-label={t("computers:viewMode")}>
           <button
             type="button"
@@ -183,8 +185,6 @@ export function ComputersPage() {
                     : "computers:title",
                 )}
               </h2>
-              {matches ? <small>{matches}</small> : null}
-              <small>{loaded}</small>
             </div>
             {view === "topology" ? (
               <div
