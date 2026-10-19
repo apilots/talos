@@ -89,6 +89,13 @@ See [hook scripts](../../scripts/run-pre-push-checks.sh) and
 Shared Rust/Node/pnpm versions come from `.github/release-toolchain.env`. Rust
 caches are isolated by platform, architecture, profile, toolchain and the resolved
 Cargo graph. Cache hits never replace compilation or behavioral checks.
+Changes limited to `talos-app/web/src/**` and `talos-app/web/public/**` run
+frontend quality and the Computer-registration browser E2E against the real native
+service. Native contract tests and the full E2E matrix still apply to SDK, Desktop,
+dependency, configuration, build, backend, scenario or E2E-selector/workflow inputs.
+Mixed changes use the full route. The fixed `talos-pr-e2e` gate requires the selected
+checks and fails on missing scope output, failure or unexpected skips.
+
 CI success does not substitute for unrun scoped tests, snapshots or real-path
 acceptance. Error changes require source/disclosure, transport/replay coverage
 and generation per [Error contract](../architecture/ERROR_MODEL.md).

@@ -3,12 +3,13 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import textwrap
 import tomllib
 import unittest
 
 from pr_change_scope import (
     ROOT, SCOPES, VERSION_PATTERNS, is_document,
-    scope_matches, should_run, version_change_only, version_files,
+    e2e_plan, scope_matches, should_run, version_change_only, version_files,
 )
 
 
@@ -41,6 +42,8 @@ class ChangeScopeTests(unittest.TestCase):
             '.github/workflows/talos-rust.yml': {'rust'},
             '.github/workflows/talos-frontend-app.yml': {'frontend'},
             '.github/workflows/pr-e2e.yml': {'pr-e2e'},
+            '.github/scripts/pr_change_scope.py': {'pr-e2e'},
+            '.github/scripts/pr_change_scope_test.py': {'pr-e2e'},
             '.github/workflows/talos-tui-install.yml': {'tui-install'},
             '.github/release-toolchain.env': set(SCOPES),
         }
@@ -48,6 +51,39 @@ class ChangeScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual({s for s in SCOPES if scope_matches(s, path)}, expected)
         self.assertFalse(scope_matches('rust', '.github/workflows/talos-rust.yml', product_only=True))
+
+    def test_web_source_changes_keep_real_browser_coverage(self):
+        paths = ['talos-app/web/src/pages/computers/ComputersPage.tsx',
+                 'talos-app/web/src/pages/computers/computers.css',
+                 'talos-app/web/src/pages/computers/ComputersPage.test.tsx',
+                 'talos-app/web/public/app-icon.svg']
+        self.assertTrue(should_run('frontend', paths))
+        self.assertTrue(should_run('pr-e2e', paths))
+        contracts, matrix = e2e_plan(paths)
+        self.assertFalse(contracts)
+        self.assertEqual([scenario['targets'] for scenario in matrix['include']],
+                         ['case:09_app_server/computer_deletion'])
+
+    def test_non_web_or_mixed_inputs_keep_native_contracts_and_full_scenarios(self):
+        inputs = ['talos-app/desktop/src/app-server-controller.ts',
+                  'talos-app/ts-sdk/packages/core/src/client.ts',
+                  'talos-app/pnpm-lock.yaml', 'talos-app/package.json',
+                  'talos-app/web/package.json', 'talos-app/web/vite.config.ts',
+                  'talos-app/web/index.html', 'talos-app/web/new-build-input',
+                  'talos-rs/crates/service/src/lib.rs', 'conf/talos.yaml',
+                  'talos-e2e/scenarios/09_app_server/computer_deletion.sh',
+                  '.github/release-toolchain.env', '.github/workflows/pr-e2e.yml',
+                  '.github/scripts/pr_change_scope.py', '.github/scripts/pr_change_scope_test.py']
+        for path in inputs:
+            for paths in ([path], ['talos-app/web/src/app.tsx', path]):
+                with self.subTest(paths=paths):
+                    self.assertTrue(should_run('pr-e2e', paths))
+                    contracts, matrix = e2e_plan(paths)
+                    self.assertTrue(contracts)
+                    self.assertEqual({s['name'] for s in matrix['include']},
+                                     {'health-and-model-catalog', 'app-server',
+                                      'computer-registration', 'files', 'sandbox'})
+        self.assertTrue(e2e_plan([])[0])
 
     def test_only_owned_version_values_are_normalized(self):
         for path in version_files():
@@ -91,6 +127,28 @@ checksum = "original"
                         after.replace('version = "0.1.11"', 'version = "0.1.12"'),
                         after.replace('registry+', 'git+')]:
             self.assertFalse(version_change_only(path, before, changed))
+
+
+class E2EGateTests(unittest.TestCase):
+    def test_gate_requires_selected_checks_and_rejects_invalid_outputs(self):
+        workflow = (ROOT / '.github/workflows/pr-e2e.yml').read_text()
+        gate = workflow.split('name: Require public PR contract tests and scenarios', 1)[1]
+        script = textwrap.dedent(gate.split('run: |\n', 1)[1])
+        defaults = dict(SCOPE_RESULT='success', RUN_WORKFLOW='true', RUN_CONTRACTS='true',
+                        CONTRACT_RESULT='success', SCENARIO_RESULT='success')
+        cases = [({}, True), ({'RUN_CONTRACTS': 'false', 'CONTRACT_RESULT': 'skipped'}, True),
+                 ({'CONTRACT_RESULT': 'skipped'}, False), ({'CONTRACT_RESULT': 'failure'}, False),
+                 ({'SCENARIO_RESULT': 'skipped'}, False), ({'SCENARIO_RESULT': 'failure'}, False),
+                 ({'RUN_CONTRACTS': 'false', 'CONTRACT_RESULT': 'failure'}, False),
+                 ({'RUN_CONTRACTS': 'false', 'SCENARIO_RESULT': 'skipped'}, False),
+                 ({'RUN_CONTRACTS': ''}, False), ({'RUN_WORKFLOW': ''}, False),
+                 ({'SCOPE_RESULT': 'failure'}, False),
+                 ({'RUN_WORKFLOW': 'false', 'CONTRACT_RESULT': 'skipped', 'SCENARIO_RESULT': 'skipped'}, True)]
+        for changes, success in cases:
+            with self.subTest(changes=changes):
+                result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
+                                        env={**os.environ, **defaults, **changes})
+                self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
 
 
 def next_fixture_version():
@@ -204,6 +262,23 @@ class GitScopeTests(unittest.TestCase):
         head = self.commit('fix(install): validate installer input')
         for event in ['pull_request', 'push']:
             self.assertEqual(self.classify(event, head), 'run_workflow=true')
+
+    def test_web_and_mixed_git_diffs_export_the_selected_matrix(self):
+        self.write('talos-app/web/src/pages/computers.css', 'body {}\n')
+        self.write('docs/ui.md', '# UI\n')
+        head = self.commit('fix(web): refine layout')
+        for event in ['pull_request', 'push']:
+            self.classify(event, head, 'pr-e2e')
+            values = dict(line.split('=', 1) for line in (self.root / 'scope.outputs').read_text().splitlines())
+            self.assertEqual(values['run_workflow'], 'true')
+            self.assertEqual(values['run_contracts'], 'false')
+            self.assertEqual(len(json.loads(values['scenario_matrix'])['include']), 1)
+        self.write('talos-app/web/vite.config.ts', 'export default {}\n')
+        head = self.commit('build(web): update build inputs')
+        self.classify('pull_request', head, 'pr-e2e')
+        values = dict(line.split('=', 1) for line in (self.root / 'scope.outputs').read_text().splitlines())
+        self.assertEqual(values['run_contracts'], 'true')
+        self.assertEqual(len(json.loads(values['scenario_matrix'])['include']), 5)
 
     def test_removed_version_file_is_not_version_only(self):
         (self.root / 'talos-app/web/package.json').unlink()

@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run_workflow: ${{ steps.scope.outputs.run_workflow }}
+      run_contracts: ${{ steps.scope.outputs.run_contracts }}
+      scenario_matrix: ${{ steps.scope.outputs.scenario_matrix }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -33,7 +35,7 @@ jobs:
 
   contract-tests:
     needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_contracts == 'true') }}
     name: Cloud adapter and Desktop enrollment tests
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -80,29 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 3
-      matrix:
-        include:
-          - name: health-and-model-catalog
-            runner: ubuntu-24.04
-            targets: |
-              case:01_health_and_models
-          - name: app-server
-            runner: ubuntu-24.04
-            targets: |
-              case:09_app_server/smoke_e2e
-              case:09_app_server/desktop_recovery
-          - name: computer-registration
-            runner: ubuntu-24.04
-            targets: |
-              case:09_app_server/computer_deletion
-          - name: files
-            runner: ubuntu-24.04
-            targets: |
-              group:12_files
-          - name: sandbox
-            runner: ubuntu-24.04
-            targets: |
-              group:14_sandbox
+      matrix: ${{ fromJSON(needs.change-scope.outputs.scenario_matrix) }}
 
     steps:
       - name: Check out Talos
@@ -229,6 +209,7 @@ jobs:
         env:
           SCOPE_RESULT: ${{ needs.change-scope.result }}
           RUN_WORKFLOW: ${{ needs.change-scope.outputs.run_workflow }}
+          RUN_CONTRACTS: ${{ needs.change-scope.outputs.run_contracts }}
           CONTRACT_RESULT: ${{ needs.contract-tests.result }}
           SCENARIO_RESULT: ${{ needs.scenarios.result }}
         run: |
@@ -236,12 +217,18 @@ jobs:
             echo "Could not determine E2E change scope." >&2
             exit 1
           fi
-          if [[ "${RUN_WORKFLOW}" != "true" ]]; then
-            echo "No E2E product inputs changed; E2E acceptance is not applicable."
-            exit 0
-          fi
-          if [[ "${CONTRACT_RESULT}" != "success" || "${SCENARIO_RESULT}" != "success" ]]; then
+          case "${RUN_WORKFLOW}" in
+            false) echo "No E2E product inputs changed; E2E acceptance is not applicable."; exit 0 ;;
+            true) ;;
+            *) echo "Invalid E2E scope output." >&2; exit 1 ;;
+          esac
+          case "${RUN_CONTRACTS}" in
+            true) expected_contract=success ;;
+            false) expected_contract=skipped ;;
+            *) echo "Invalid E2E contract scope output." >&2; exit 1 ;;
+          esac
+          if [[ "${CONTRACT_RESULT}" != "${expected_contract}" || "${SCENARIO_RESULT}" != "success" ]]; then
             echo "Public PR validation failed: contract=${CONTRACT_RESULT}, scenarios=${SCENARIO_RESULT}." >&2
             exit 1
           fi
-          echo "All secretless PR contract tests and E2E scenarios passed."
+          echo "Selected secretless PR checks passed."
