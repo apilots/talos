@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createInstance } from "i18next";
@@ -28,18 +29,14 @@ const mocks = vi.hoisted(() => ({
   next: vi.fn(),
   metrics: vi.fn(),
   status: vi.fn(),
+  computers: vi.fn(),
 }));
 vi.mock("@/shared/api/desktop-client", () => ({
   getDesktopBridge: () => undefined,
 }));
 vi.mock("@/features/computers/hooks", async (original) => ({
   ...(await original<typeof import("@/features/computers/hooks")>()),
-  useComputers: () => ({
-    scope: "fixture",
-    selectedId: "manager-a",
-    localId: "manager-a",
-    select: mocks.select,
-  }),
+  useComputers: mocks.computers,
   useComputerList: mocks.list,
   useProductScope: () => "fixture",
   useComputer: (id: string) => ({
@@ -52,6 +49,10 @@ vi.mock("@/features/computers/hooks", async (original) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.computers.mockReturnValue({
+    scope: "fixture", selectedId: "manager-a", localId: "manager-a",
+    total: 9, list: { data: { pages: [{ total: 9 }] } }, select: mocks.select,
+  });
   useAppStore.setState({
     connection: {
       ...useAppStore.getInitialState().connection,
@@ -187,4 +188,70 @@ it.each(["zh-CN", "en"])("keeps the last endpoint and one localized disconnectio
   expect(container.querySelectorAll('[data-flow="execution"]')).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Studio" : "查看 Studio 的详情" }));
   expect(screen.getByRole("button", { name: locale === "en" ? "Open computer" : "进入电脑" })).toBeEnabled();
+});
+
+
+it.each(["zh-CN", "en"])("distinguishes matched and account totals through zero results and clearing search (%s)", async (locale) => {
+  mocks.list.mockImplementation((query: string) => ({
+    data: { pages: [{ data: query === "missing" ? [] : query ? topologyNodes.slice(0, 2) : topologyNodes,
+      total: query === "missing" ? 0 : query ? 2 : 9 }] },
+    hasNextPage: false,
+    fetchNextPage: mocks.next,
+  }));
+  await show(locale);
+  const labels = computerResources[locale as keyof typeof computerResources];
+  const overview = screen.getByRole("region", { name: labels.title });
+  const search = screen.getByRole("textbox", { name: labels.search });
+  expect(within(overview).getByText("9")).toBeVisible();
+  fireEvent.change(search, { target: { value: "worker" } });
+  expect(screen.getByText(locale === "en" ? "2 matching, 9 total" : "匹配 2 台，共 9 台")).toBeVisible();
+  expect(within(overview).getByText("9")).toBeVisible();
+  fireEvent.change(search, { target: { value: "missing" } });
+  expect(screen.getByText(locale === "en" ? "0 matching, 9 total" : "匹配 0 台，共 9 台")).toBeVisible();
+  expect(screen.getByText(labels.graphEmpty)).toBeVisible();
+  expect(within(overview).getByText("9")).toBeVisible();
+  fireEvent.change(search, { target: { value: "  " } });
+  expect(screen.queryByText(/matching,|匹配/)).not.toBeInTheDocument();
+  expect(within(overview).getByText("9")).toBeVisible();
+  expect(mocks.list).toHaveBeenLastCalledWith("");
+});
+
+it("keeps filtered pagination counts distinct from the account total", async () => {
+  mocks.list.mockImplementation((query: string) => ({
+    data: { pages: [{ data: query ? topologyNodes.slice(0, 2) : topologyNodes, total: query ? 5 : 9 }] },
+    hasNextPage: true,
+    fetchNextPage: mocks.next,
+  }));
+  await show("zh-CN");
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索 Computer" }), { target: { value: "worker" } });
+  expect(screen.getByText("匹配 5 台，共 9 台")).toBeVisible();
+  expect(screen.getAllByText("已加载 2 / 5 台 Computer")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "More · 已加载 2 / 5 台 Computer" }));
+  expect(mocks.next).toHaveBeenCalledOnce();
+});
+
+it("does not present cached filtered totals as a successful search after a directory failure", async () => {
+  mocks.list.mockImplementation((query: string) => ({
+    data: { pages: [{ data: topologyNodes.slice(0, 2), total: 2 }] },
+    error: query ? new Error("Directory unavailable") : undefined,
+    hasNextPage: false,
+  }));
+  await show("zh-CN");
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索 Computer" }), { target: { value: "broken" } });
+  expect(screen.queryByText(/匹配/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/已加载/)).not.toBeInTheDocument();
+  expect(screen.getByRole("alert")).toBeVisible();
+});
+
+
+it.each(["loading", "error"])("keeps an unavailable account total unknown during %s", async (state) => {
+  mocks.computers.mockReturnValue({
+    scope: "fixture", total: 0, list: state === "loading" ? {} : { data: { pages: [{ total: 0 }] }, error: new Error("Directory unavailable") },
+    select: mocks.select,
+  });
+  await show("zh-CN");
+  const overview = screen.getByRole("region", { name: "Computer" });
+  expect(overview.querySelector("strong")).toHaveTextContent("—");
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索 Computer" }), { target: { value: "worker" } });
+  expect(screen.queryByText(/匹配/)).not.toBeInTheDocument();
 });

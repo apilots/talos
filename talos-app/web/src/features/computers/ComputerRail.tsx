@@ -12,6 +12,9 @@ import { useComputers } from "./hooks";
 export function ComputerRail() {
   const { t } = useTranslation("computers");
   const computers = useComputers();
+  const remaining = Math.max(0, computers.total - computers.quickNodes.length);
+  const more = t("moreComputers", { count: remaining });
+  const allLabel = remaining > 0 ? `${t("all")} · ${more}` : t("all");
   const navigate = useNavigate();
   const logout = useLogout();
   const connection = useAppStore((state) => state.connection);
@@ -23,7 +26,7 @@ export function ComputerRail() {
   return <aside aria-label={t("title")} className="relative z-30 flex h-screen flex-col items-center gap-2 border-r border-border bg-sidebar px-2 py-4">
     <Link to="/" title="Talos" className="mb-3 flex size-10 items-center justify-center rounded-xl text-ink hover:bg-selected"><Home size={21} /></Link>
     {computers.quickNodes.map((node) => <ComputerItem key={node.nodeId} node={node} compact selected={node.nodeId === computers.selectedId} local={node.nodeId === computers.localId} onSelect={() => select(node.nodeId)} />)}
-    <div className="relative"><button ref={trigger} type="button" aria-label={t("all")} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} className="relative flex size-10 items-center justify-center rounded-xl text-muted hover:bg-selected"><MoreHorizontal size={21} />{computers.total > 3 ? <span className="absolute -right-1 -top-1 rounded bg-selected px-1 text-[9px]">{computers.total - 3}</span> : null}</button>
+    <div className="relative"><button ref={trigger} type="button" aria-label={allLabel} title={allLabel} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} className="flex size-10 flex-col items-center justify-center rounded-xl text-muted hover:bg-selected"><MoreHorizontal size={21} />{remaining > 0 ? <span className="whitespace-nowrap text-[9px] leading-3">{more}</span> : null}</button>
       {open ? <ComputerOverflowMenu selectedId={computers.selectedId} localId={computers.localId} onSelect={select} onClose={close} /> : null}
     </div>
     <button type="button" className="mt-2 flex size-10 items-center justify-center rounded-xl text-muted lg:hidden" aria-label={t("sidebar")} aria-controls="talos-sidebar" onClick={() => setSidebarOpen(true)}><PanelLeft size={18} /></button>
