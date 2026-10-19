@@ -34,14 +34,14 @@ async function show(locale = "en") {
   return render(<I18nextProvider i18n={i18n}><MemoryRouter><ComputerRail /></MemoryRouter></I18nextProvider>);
 }
 
-it.each(["en", "zh-CN"])("explains the remaining computers visibly and accessibly (%s)", async (locale) => {
+it.each(["en", "zh-CN"])("shows a compact additional-count badge with an accessible name (%s)", async (locale) => {
   await show(locale);
   const more = locale === "en" ? "6 more" : "还有 6 台";
   const all = locale === "en" ? "All computers" : "全部 Computer";
   const trigger = screen.getByRole("button", { name: `${all} · ${more}` });
-  expect(trigger).toHaveTextContent(more);
-  expect(trigger).toHaveAttribute("title", `${all} · ${more}`);
-  expect(screen.getByText(more)).toBeVisible();
+  expect(trigger).toHaveTextContent("+6");
+  expect(trigger).not.toHaveAttribute("title");
+  expect(screen.getByText("+6")).toBeVisible();
   fireEvent.click(trigger);
   expect(trigger).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByRole("dialog")).toBeVisible();
@@ -54,5 +54,5 @@ it.each([0, 1, 3])("does not claim additional computers when all %i fit in the r
   mocks.computers.mockReturnValue({ quickNodes: quickNodes.slice(0, total), total, select: vi.fn() });
   await show("zh-CN");
   expect(screen.getByRole("button", { name: "全部 Computer" })).toBeVisible();
-  expect(screen.queryByText(/还有/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/\+\d/)).not.toBeInTheDocument();
 });

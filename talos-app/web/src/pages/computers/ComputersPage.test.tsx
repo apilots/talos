@@ -204,14 +204,18 @@ it.each(["zh-CN", "en"])("distinguishes matched and account totals through zero 
   const search = screen.getByRole("textbox", { name: labels.search });
   expect(within(overview).getByText("9")).toBeVisible();
   fireEvent.change(search, { target: { value: "worker" } });
-  expect(screen.getByText(locale === "en" ? "2 matching, 9 total" : "匹配 2 台，共 9 台")).toBeVisible();
+  expect(screen.getByText(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台")).toBeVisible();
+  const summary = screen.getByText(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台");
+  expect(summary).toHaveAttribute("role", "status");
+  expect(summary).toHaveTextContent(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台");
+  expect(within(summary.parentElement!).getByRole("textbox", { name: labels.search })).toBe(search);
   expect(within(overview).getByText("9")).toBeVisible();
   fireEvent.change(search, { target: { value: "missing" } });
-  expect(screen.getByText(locale === "en" ? "0 matching, 9 total" : "匹配 0 台，共 9 台")).toBeVisible();
+  expect(screen.getByText(locale === "en" ? "0 matching, 9 total" : "找到 0 台，共 9 台")).toBeVisible();
   expect(screen.getByText(labels.graphEmpty)).toBeVisible();
   expect(within(overview).getByText("9")).toBeVisible();
   fireEvent.change(search, { target: { value: "  " } });
-  expect(screen.queryByText(/matching,|匹配/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/matching,|找到 \d/)).not.toBeInTheDocument();
   expect(within(overview).getByText("9")).toBeVisible();
   expect(mocks.list).toHaveBeenLastCalledWith("");
 });
@@ -224,8 +228,8 @@ it("keeps filtered pagination counts distinct from the account total", async () 
   }));
   await show("zh-CN");
   fireEvent.change(screen.getByRole("textbox", { name: "搜索 Computer" }), { target: { value: "worker" } });
-  expect(screen.getByText("匹配 5 台，共 9 台")).toBeVisible();
-  expect(screen.getAllByText("已加载 2 / 5 台 Computer")).toHaveLength(2);
+  expect(screen.getByText("找到 5 台，共 9 台")).toBeVisible();
+  expect(screen.getAllByText(/已加载 2 \/ 5 台 Computer/)).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "More · 已加载 2 / 5 台 Computer" }));
   expect(mocks.next).toHaveBeenCalledOnce();
 });
@@ -238,7 +242,7 @@ it("does not present cached filtered totals as a successful search after a direc
   }));
   await show("zh-CN");
   fireEvent.change(screen.getByRole("textbox", { name: "搜索 Computer" }), { target: { value: "broken" } });
-  expect(screen.queryByText(/匹配/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/找到 \d/)).not.toBeInTheDocument();
   expect(screen.queryByText(/已加载/)).not.toBeInTheDocument();
   expect(screen.getByRole("alert")).toBeVisible();
 });
@@ -253,5 +257,5 @@ it.each(["loading", "error"])("keeps an unavailable account total unknown during
   const overview = screen.getByRole("region", { name: "Computer" });
   expect(overview.querySelector("strong")).toHaveTextContent("—");
   fireEvent.change(screen.getByRole("textbox", { name: "搜索 Computer" }), { target: { value: "worker" } });
-  expect(screen.queryByText(/匹配/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/找到 \d/)).not.toBeInTheDocument();
 });

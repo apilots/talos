@@ -61,11 +61,6 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-.cmp-overview > small {
-  margin-left: auto;
-  color: rgb(var(--color-muted));
-  font-size: 10px;
-}
 .cmp-controls {
   margin-bottom: 23px;
 }
@@ -86,9 +81,23 @@
 }
 .cmp-tools {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin: 20px 0 15px;
+}
+.cmp-search-area {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+.cmp-search-results {
+  flex-shrink: 0;
+  color: rgb(var(--color-muted));
+  font-size: 12px;
+  white-space: nowrap;
 }
 .cmp-search {
   display: flex;
@@ -154,12 +163,6 @@
 .cmp-panel-heading h2 {
   font-size: 13px;
   font-weight: 600;
-}
-.cmp-panel-heading small {
-  display: block;
-  font-size: 10px;
-  color: rgb(var(--color-muted));
-  margin-top: 5px;
 }
 .cmp-flow-buttons {
   display: flex;
@@ -581,12 +584,13 @@
     gap: 12px 18px;
     padding: 14px;
   }
-  .cmp-overview > small {
-    margin-left: 0;
-    width: 100%;
-  }
   .cmp-tools {
+    flex-wrap: wrap;
     gap: 10px;
+  }
+  .cmp-search-area {
+    flex-basis: 100%;
+    gap: 12px;
   }
   .cmp-segments button {
     padding: 6px 8px;
