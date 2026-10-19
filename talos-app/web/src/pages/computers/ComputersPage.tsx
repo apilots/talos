@@ -63,11 +63,20 @@ export function ComputersPage() {
     setInspection({ scope: computers.scope, nodeId: id });
   const inspectService = (value: ComputerService) =>
     setInspection({ scope: computers.scope, service: value });
-  const loaded = t("computers:loadedComputers", {
+  const accountTotal = computers.list.data && !computers.list.error
+    ? computers.total
+    : undefined;
+  const matchedTotal = list.data && !list.error
+    ? list.data.pages[0]?.total
+    : undefined;
+  const loaded = matchedTotal === undefined ? "—" : t("computers:loadedComputers", {
     loaded: nodes.length,
-    total: list.data?.pages[0]?.total ?? 0,
-    count: list.data?.pages[0]?.total ?? 0,
+    total: matchedTotal,
+    count: matchedTotal,
   });
+  const matches = search.trim() && matchedTotal !== undefined && accountTotal !== undefined
+    ? t("computers:matchedComputers", { matched: matchedTotal, total: accountTotal })
+    : undefined;
   return (
     <div className="cmp-page">
       <div className="cmp-breadcrumb">
@@ -94,7 +103,7 @@ export function ComputersPage() {
       <section className="cmp-overview" aria-label={t("computers:title")}>
         <span>
           <strong>
-            {list.data?.pages[0]?.total.toLocaleString(i18n.language) ?? "—"}
+            {accountTotal?.toLocaleString(i18n.language) ?? "—"}
           </strong>{" "}
           {t("computers:title")}
         </span>
@@ -174,6 +183,7 @@ export function ComputersPage() {
                     : "computers:title",
                 )}
               </h2>
+              {matches ? <small>{matches}</small> : null}
               <small>{loaded}</small>
             </div>
             {view === "topology" ? (
