@@ -153,7 +153,7 @@ export function ComputersPage() {
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          {matches ? <span className="cmp-search-results" role="status">{matches}</span> : null}
+          <span className={matches ? "cmp-search-results" : "sr-only"} role="status">{matches}</span>
         </div>
         <div className="cmp-segments" aria-label={t("computers:viewMode")}>
           <button

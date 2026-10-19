@@ -176,7 +176,7 @@ it.each(["zh-CN", "en"])("keeps the last endpoint and one localized disconnectio
   const labels = computerResources[locale as keyof typeof computerResources];
   expect(screen.getAllByRole("alert")).toHaveLength(1);
   expect(screen.getByRole("alert")).toHaveTextContent(labels.syncUnavailable);
-  expect(screen.getByRole("status")).toHaveTextContent(labels.syncDisconnected);
+  expect(within(screen.getByTestId("sync-control")).getByRole("status")).toHaveTextContent(labels.syncDisconnected);
   expect(screen.queryByText("The synchronization metrics service is unavailable.")).toBeNull();
   expect(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" })).toHaveTextContent(labels.lastKnownEndpointShort);
   fireEvent.click(screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" }));
@@ -202,10 +202,13 @@ it.each(["zh-CN", "en"])("distinguishes matched and account totals through zero 
   const labels = computerResources[locale as keyof typeof computerResources];
   const overview = screen.getByRole("region", { name: labels.title });
   const search = screen.getByRole("textbox", { name: labels.search });
+  const summary = within(search.closest(".cmp-search-area")!).getByRole("status");
+  expect(summary).toBeEmptyDOMElement();
+  expect(summary).toHaveClass("sr-only");
   expect(within(overview).getByText("9")).toBeVisible();
   fireEvent.change(search, { target: { value: "worker" } });
-  expect(screen.getByText(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台")).toBeVisible();
-  const summary = screen.getByText(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台");
+  expect(screen.getByText(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台")).toBe(summary);
+  expect(summary).toBeVisible();
   expect(summary).toHaveAttribute("role", "status");
   expect(summary).toHaveTextContent(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台");
   expect(within(summary.parentElement!).getByRole("textbox", { name: labels.search })).toBe(search);
@@ -216,8 +219,13 @@ it.each(["zh-CN", "en"])("distinguishes matched and account totals through zero 
   expect(within(overview).getByText("9")).toBeVisible();
   fireEvent.change(search, { target: { value: "  " } });
   expect(screen.queryByText(/matching,|找到 \d/)).not.toBeInTheDocument();
+  expect(summary).toBeInTheDocument();
+  expect(summary).toBeEmptyDOMElement();
+  expect(summary).toHaveClass("sr-only");
   expect(within(overview).getByText("9")).toBeVisible();
   expect(mocks.list).toHaveBeenLastCalledWith("");
+  fireEvent.change(search, { target: { value: "worker" } });
+  expect(screen.getByText(locale === "en" ? "2 matching, 9 total" : "找到 2 台，共 9 台")).toBe(summary);
 });
 
 it("keeps filtered pagination counts distinct from the account total", async () => {
