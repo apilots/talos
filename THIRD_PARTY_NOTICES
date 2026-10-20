@@ -59,3 +59,24 @@ The dependency versions above were present in the generated Cargo.lock used
 to prepare this candidate. Inspect the lockfile and Cargo metadata from the
 actual product build for its complete resolved dependency set; versions may
 differ when dependencies are resolved again.
+
+Browser Worker runtime
+----------------------
+The standard Docker Worker bundles Browser Use 0.13.11 (MIT, copyright 2024
+Gregor Zunic), Browser Harness 0.1.13, and Chromium supplied by Playwright 1.64.1.
+
+The Web and Desktop clients bundle the noVNC 1.5.0 RFB library, copyright the
+noVNC authors, under MPL-2.0. Corresponding library source is available at
+https://github.com/novnc/noVNC/tree/v1.5.0 and the license text at
+https://github.com/novnc/noVNC/blob/v1.5.0/LICENSE.txt. Talos uses the library
+inside its existing interface; the standalone noVNC application and websockify
+are not part of the Worker image.
+Their original package licenses remain in the image's Python distribution
+metadata and Chromium resources. The image's /opt/talos/browser/requirements.lock
+identifies the exact Python dependency graph and artifact hashes. Desktop uses
+its bundled Electron/Chromium; it does not install this Docker Python runtime.
+
+The Docker Worker seccomp profile derives from github.com/moby/profiles
+(Apache-2.0), upstream SHA256
+6416b47770785a41ac59073cdc77d9fe98517df2799dc83ef207e622de3053f6,
+with clone/setns/unshare allowances for Chromium user namespaces.

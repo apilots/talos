@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Browser
+Comment=Open the dedicated browser
+Exec=/usr/bin/python3 /opt/talos/browser/desktop/launcher.py
+Icon=/opt/talos/browser/desktop/browser.png
+Terminal=false
+StartupNotify=false

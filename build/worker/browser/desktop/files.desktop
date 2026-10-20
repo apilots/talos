@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Files
+Comment=Open the dedicated workspace files
+Exec=/usr/bin/python3 /opt/talos/browser/desktop/launcher.py files
+Icon=/opt/talos/browser/desktop/files.png
+Terminal=false
+StartupNotify=false

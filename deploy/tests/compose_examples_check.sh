@@ -11,6 +11,7 @@ cp "$root/deploy/docker/talos-server/docker-compose.yml" "$fixture/server/"
 cp "$root/deploy/docker/talos-server/compose.production.yml" "$fixture/server/"
 cp "$root/deploy/docker/talos-worker/.env.example" "$fixture/worker/.env"
 cp "$root/deploy/docker/talos-worker/docker-compose.yml" "$fixture/worker/"
+cp "$root/deploy/docker/talos-worker/chromium-seccomp.json" "$fixture/worker/"
 (cd "$fixture/server" && docker compose config --format json) > "$fixture/basic.json"
 (cd "$fixture/server" && docker compose -f compose.production.yml config --format json) > "$fixture/production.json"
 # This is an isolated rendering identity, never registered or started.

@@ -1,0 +1,22 @@
+# Three local application launchers; no desktop daemon or tray services.
+rounded = 16
+border_width = 1
+background_color = #ffffff 96
+border_color = #d9e1eb 100
+panel_items = L
+panel_size = 180 56
+panel_margin = 0 20
+panel_padding = 12 6 10
+panel_background_id = 1
+panel_position = bottom center horizontal
+panel_layer = top
+panel_dock = 0
+strut_policy = follow_size
+wm_menu = 0
+launcher_padding = 4 0 10
+launcher_icon_size = 32
+launcher_background_id = 0
+launcher_item_app = /opt/talos/browser/desktop/browser.desktop
+launcher_item_app = /opt/talos/browser/desktop/terminal.desktop
+launcher_item_app = /opt/talos/browser/desktop/files.desktop
+launcher_icon_asb = 100 0 0

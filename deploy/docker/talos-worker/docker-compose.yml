@@ -2,6 +2,10 @@ services:
   talos-worker:
     image: ${TALOS_WORKER_IMAGE:-ghcr.io/apilots/talos-worker}:${TALOS_WORKER_VERSION:?Set the published Worker version in .env}
     restart: unless-stopped
+    shm_size: 1gb
+    security_opt:
+      - seccomp:./chromium-seccomp.json
+      - no-new-privileges:true
     env_file:
       - .env
     environment:

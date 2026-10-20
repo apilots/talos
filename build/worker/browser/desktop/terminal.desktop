@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=Open the dedicated workspace terminal
+Exec=/usr/bin/python3 /opt/talos/browser/desktop/launcher.py terminal
+Icon=/opt/talos/browser/desktop/terminal.png
+Terminal=false
+StartupNotify=false
