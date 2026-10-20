@@ -28,6 +28,14 @@ def stop_owned(process):
         process.wait(timeout=5)
 
 
+def require_free_loopback_port(port):
+    # TIME_WAIT is safe to replace; an active listener still rejects this bind.
+    # Never use SO_REUSEPORT or borrow an existing debugging endpoint.
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind(('127.0.0.1', port))
+
+
 def main():
     if sys.platform not in ('darwin', 'linux'):
         raise RuntimeError('Native browser acceptance requires macOS or Linux private IPC')
@@ -40,8 +48,7 @@ def main():
         raise RuntimeError('Set TALOS_E2E_CHROME_BIN to installed Chrome')
     # The prepared-Chrome adapter deliberately accepts only the local 9222 endpoint.
     # Never borrow an endpoint owned by the user or another test.
-    with socket.socket() as probe:
-        probe.bind(('127.0.0.1', 9222))
+    require_free_loopback_port(9222)
     report = Path(os.environ.get('TALOS_SCENARIO_REPORT_DIR', ROOT / 'output/browser-worker'))
     report.mkdir(parents=True, exist_ok=True)
     result = report / 'native-engine-acceptance.json'
@@ -54,13 +61,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix='talos-native-browser-') as temporary:
         env.update(HOME=temporary, TALOS_ACCEPTANCE_CHROME='1',
                    TALOS_SCENARIO_REPORT_DIR=str(report))
+        # The explicit disposable user-data-dir isolates browser state. Keep
+        # Chrome's normal OS home so its platform services match a prepared user profile.
+        # Electron still uses the fixture home for its own native host state.
+        chrome_env = dict(env, HOME=str(Path.home()))
         with (report / 'prepared-chrome.log').open('w') as log:
             process = subprocess.Popen([
                 chrome, '--user-data-dir=' + str(Path(temporary) / 'chrome'),
                 '--remote-debugging-port=9222', '--remote-debugging-address=127.0.0.1',
                 '--enable-automation', '--no-first-run', '--no-default-browser-check',
                 '--new-window', 'about:blank',
-            ], env=env, stdout=log, stderr=log, start_new_session=True)
+            ], env=chrome_env, stdout=log, stderr=log, start_new_session=True)
             try:
                 deadline = time.monotonic() + 30
                 while True:

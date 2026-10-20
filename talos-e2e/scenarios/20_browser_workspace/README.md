@@ -37,7 +37,11 @@ connects to installed Chrome/Electron; no Playwright browser download is needed.
 
 Set `TALOS_E2E_CHROME_BIN` when Chrome is outside its standard installation path;
 `TALOS_E2E_CADDY_BIN` defaults to `caddy`. Port 9222 must be unused for the explicit
-prepared-Chrome case; a running user endpoint is rejected, never borrowed. Cases
+prepared-Chrome case; a running user endpoint is rejected, never borrowed.
+The fixture isolates Chrome with its own temporary `user-data-dir` while keeping
+its normal OS home; Electron receives a separate temporary home. This preserves
+platform startup behavior without reading or attaching to a user browser profile.
+Endpoint admission tolerates TCP TIME_WAIT but still rejects an active listener. Cases
 build current local binaries when a prebuilt binary is not supplied. The shared
 Web fixture uses the standard debug Server build. Native cases accept
 `TALOS_E2E_APP_SERVER_BIN`; Docker accepts `TALOS_E2E_SERVER_BIN` as well.

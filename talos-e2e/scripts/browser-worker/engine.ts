@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {mkdirSync,writeFileSync} from 'node:fs';
+import {appendFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {app,BrowserWindow,webContents} from 'electron';
@@ -8,6 +8,33 @@ import type {AppProtocol} from '@talos/sdk-core';
 import {DesktopBrowserHost} from '../../../talos-app/desktop/src/browser-host';
 const root=path.resolve(import.meta.dirname,'../../../..');
 const output=process.env.TALOS_SCENARIO_REPORT_DIR??path.join(root,'output/browser-worker');
+mkdirSync(output,{recursive:true});
+const tracePath=path.join(output,'native-engine-cdp.jsonl');
+writeFileSync(tracePath,'');
+function trace(event:Record<string,unknown>){appendFileSync(tracePath,JSON.stringify({at:Date.now(),...event})+'\n');}
+// Observe real CDP commands and replies without logging URLs, arguments or page data.
+const NativeSocket=globalThis.WebSocket;
+class ObservedChromeSocket extends NativeSocket {
+ private readonly commands=new Map<number,{method:string;started:number}>();
+ constructor(url:string|URL,protocols?:string|string[]) {
+  super(url,protocols);
+  this.addEventListener('message',event=>{
+   let message:{id?:number;method?:string;error?:unknown};try{message=JSON.parse(String(event.data));}catch{return;}
+   if(message.method&&['Page.frameStartedLoading','Page.frameStoppedLoading','Page.frameNavigated','Page.frameStartedNavigating','Page.javascriptDialogOpening','Inspector.targetCrashed'].includes(message.method))trace({phase:'pageEvent',method:message.method});
+   const pending=message.id===undefined?undefined:this.commands.get(message.id);
+   if(pending){this.commands.delete(message.id!);trace({phase:'reply',id:message.id,method:pending.method,elapsedMs:Date.now()-pending.started,rejected:Boolean(message.error)});}
+  });
+  this.addEventListener('close',()=>trace({phase:'socketClosed',pending:[...this.commands.entries()].map(([id,value])=>({id,method:value.method,elapsedMs:Date.now()-value.started}))}));
+ }
+ send(data:Parameters<WebSocket['send']>[0]):void {
+  if(typeof data==='string') {
+   let command:{id?:number;method?:string};try{command=JSON.parse(data);}catch{command={};}
+   if(typeof command.id==='number'&&typeof command.method==='string'){this.commands.set(command.id,{method:command.method,started:Date.now()});trace({phase:'send',id:command.id,method:command.method});}
+  }
+  super.send(data);
+ }
+}
+globalThis.WebSocket=ObservedChromeSocket;
 app.on('window-all-closed',()=>{});
 app.setPath('userData',path.join(root,'.tmp/browser-worker/native/profile-'+randomUUID()));
 async function run(){
@@ -16,12 +43,17 @@ await app.whenReady();
 console.log('NATIVE_READY');
 const uuidFilename='12345678-1234-1234-1234-123456789abc';
 let finishPendingReport:(()=>void)|undefined;
-const fixture=createServer((req,res)=>{if(req.url==='/uuid'){res.writeHead(200,{'content-type':'application/pdf','content-disposition':`attachment; filename="${uuidFilename}"`});res.end('%PDF-1.7 UUID download');return;}if(req.url==='/report.csv'||req.url==='/report.csv?part=2'){res.writeHead(200,{'content-type':'text/csv','content-disposition':'attachment; filename="report.csv"'});if(req.url.endsWith('?part=2')){res.write('name,value\nworker,');finishPendingReport=()=>{res.end('2\n');finishPendingReport=undefined;};}else res.end('name,value\nworker,1\n');return;}res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><title>Talos browser acceptance</title><input id="name" placeholder="Name"><button id="hello" onclick="document.querySelector('h1').textContent='Hello '+document.querySelector('#name').value">Hello</button><h1>Ready</h1><input id="upload" type="file" onchange="document.querySelector('h2').textContent=this.files[0].name"><h2></h2><a id="download" href="/report.csv">Download</a><a id="second-download" href="/report.csv?part=2">Second report</a><a id="uuid-download" href="/uuid">UUID download</a><script>window.events=[];for(const type of ["mousedown","mouseup","click","pointerdown"])document.addEventListener(type,event=>window.events.push({type,x:event.clientX,y:event.clientY,target:event.target.id}));</script>`);});
+const fixture=createServer((req,res)=>{const pathname=new URL(req.url??'/', 'http://127.0.0.1').pathname;trace({phase:'httpRequest',pathname});res.once('finish',()=>trace({phase:'httpResponseFinished',pathname,status:res.statusCode}));if(req.url==='/uuid'){res.writeHead(200,{'content-type':'application/pdf','content-disposition':`attachment; filename="${uuidFilename}"`});res.end('%PDF-1.7 UUID download');return;}if(req.url==='/report.csv'||req.url==='/report.csv?part=2'){res.writeHead(200,{'content-type':'text/csv','content-disposition':'attachment; filename="report.csv"'});if(req.url.endsWith('?part=2')){res.write('name,value\nworker,');finishPendingReport=()=>{res.end('2\n');finishPendingReport=undefined;};}else res.end('name,value\nworker,1\n');return;}res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><title>Talos browser acceptance</title><input id="name" placeholder="Name"><button id="hello" onclick="document.querySelector('h1').textContent='Hello '+document.querySelector('#name').value">Hello</button><h1>Ready</h1><input id="upload" type="file" onchange="document.querySelector('h2').textContent=this.files[0].name"><h2></h2><a id="download" href="/report.csv">Download</a><a id="second-download" href="/report.csv?part=2">Second report</a><a id="uuid-download" href="/uuid">UUID download</a><script>window.events=[];for(const type of ["mousedown","mouseup","click","pointerdown"])document.addEventListener(type,event=>window.events.push({type,x:event.clientX,y:event.clientY,target:event.target.id}));</script>`);});
 await new Promise<void>(resolve=>fixture.listen(0,'127.0.0.1',resolve));
 const address=fixture.address();assert(address&&typeof address!=='string');
 const host=new DesktopBrowserHost(),generation=randomUUID();
 let targetId:string|null=null;let selectedTarget:AppProtocol.BrowserTargetKind='managed';
-async function operation(operation:AppProtocol.BrowserHostOperation,userId='alice',target=selectedTarget) {return host.execute(randomUUID(),{generation,epoch:1,userId,target,operation});}
+async function operation(operation:AppProtocol.BrowserHostOperation,userId='alice',target=selectedTarget) {
+ const started=Date.now(),action=operation.kind==='execute'?operation.action.kind:operation.kind;
+ trace({phase:'operationStart',target,action});
+ try {const result=await host.execute(randomUUID(),{generation,epoch:1,userId,target,operation});trace({phase:'operationDone',target,action,elapsedMs:Date.now()-started});return result;}
+ catch(error){trace({phase:'operationFailed',target,action,elapsedMs:Date.now()-started});console.error(`NATIVE_OPERATION_FAILED ${target} ${action}`);throw error;}
+}
 async function action(action:AppProtocol.BrowserAction,element:AppProtocol.BrowserHostElement|null=null,upload:AppProtocol.BrowserHostUpload|null=null){const response=await operation({kind:'execute',action,targetId,element,upload});assert.equal(response.kind,'observation');if(response.kind!=='observation')throw Error('observation');targetId=response.page.targetId;return response;}
 async function downloadLifecycle(){
  const expected=new Map([['report.csv','name,value\nworker,1\n'],['report (1).csv','name,value\nworker,2\n'],[uuidFilename,'%PDF-1.7 UUID download']]);
@@ -106,7 +138,9 @@ try {
  assert.match((await action({kind:'state'})).page.text??'',/Ready/);
  await operation({kind:'show'});await operation({kind:'releaseInputs'});
  if(process.env.TALOS_ACCEPTANCE_CHROME==='1') {
+  console.log('PREPARED_CHROME_CONNECT_START');
   await operation({kind:'connect'});
+  console.log('PREPARED_CHROME_CONNECT_READY');
   const status=await operation({kind:'probe'});assert.equal(status.kind,'readiness');if(status.kind==='readiness')assert.equal(status.connected,true);
   selectedTarget='connected';targetId=null;
   await action({kind:'navigate',url:`http://127.0.0.1:${address.port}`});
