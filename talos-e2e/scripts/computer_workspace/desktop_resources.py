@@ -19,7 +19,7 @@ from http.server import ThreadingHTTPServer
 from deletion_auth_fixture import ContractAuthCluster
 from fixture import ROOT, REPORT, data, free_port, require, wait_for
 from registration import configure_desktop, start_ingress
-from resources import PreviewPage
+from resources import PreviewPage, sidebar_focus, workspace_focus_resize, observe_workspace_exit, verify_workspace_exit, settle_workspace
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -89,6 +89,7 @@ def exercise(page, token, destination, markdown):
     # The production main must initialize its native app-server and restore Auth
     # before the lazy Files route mounts. Match the existing native startup budget.
     expect(page.get_by_role('button', name='Upload', exact=True)).to_be_visible(timeout=45_000)
+    sidebar_focus(page, 'desktop')
     require(page.evaluate('typeof window.talos?.invoke') == 'function', 'Production preload bridge is missing')
     require(page.evaluate('typeof window.require') == 'undefined', 'Product renderer gained Node integration')
     identity = data(page.evaluate('async () => window.talos.workerIdentity()'))
@@ -114,6 +115,7 @@ def exercise(page, token, destination, markdown):
     expect(workspace.get_by_role('heading', name='Desktop resource acceptance', exact=True)).to_be_visible()
     expect(workspace.get_by_role('table')).to_be_visible()
     expect(workspace.locator('pre code')).to_contain_text('desktop_resource_marker = local_file')
+    settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown.png'), full_page=True)
 
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
@@ -125,6 +127,7 @@ def exercise(page, token, destination, markdown):
     expect(first_frame.get_by_role('textbox', name='Draft')).to_be_visible()
     require(first_frame.evaluate('typeof window.talos') == 'undefined', 'A webpage preview inherited the trusted host bridge')
     first_frame.get_by_role('textbox', name='Draft').fill('first Desktop draft')
+    workspace_focus_resize(page, workspace, address, first, first_frame.get_by_role('textbox', name='Draft'))
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
     address.fill(destination)
@@ -138,13 +141,16 @@ def exercise(page, token, destination, markdown):
     tabs.nth(1).click()
     expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
     require(first.evaluate('(frame) => frame.isConnected'), 'Switching resources replaced the first Desktop preview')
+    exit_panel = observe_workspace_exit(workspace)
     workspace.get_by_role('button', name='Hide workspace (3 open windows)', exact=True).click()
     expect(workspace).not_to_be_visible()
+    verify_workspace_exit(page, exit_panel, 'desktop')
     require(first.evaluate('(frame) => frame.isConnected'), 'Hiding the Desktop workspace destroyed a webpage')
     page.get_by_role('button', name='Show workspace (3 open windows)', exact=True).click()
     expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
     tabs.nth(2).click()
     expect(second_frame.get_by_role('textbox', name='Draft')).to_have_value('second Desktop draft')
+    settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-same-url-tabs.png'), full_page=True)
     workspace.get_by_role('button', name=re.compile('^Close ')).nth(2).click()
     require(not second.evaluate('(frame) => frame.isConnected'), 'Closing a Desktop resource retained its iframe')
@@ -155,6 +161,7 @@ def exercise(page, token, destination, markdown):
     expect(workspace.get_by_role('tab', name=markdown.name, exact=True)).to_be_visible()
     require(first.evaluate('(frame) => frame.isConnected'), 'Returning to Markdown destroyed the other Desktop resource')
     expect(page.get_by_role('button', name='Your computer', exact=True)).to_have_count(0)
+    settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown-retained.png'), full_page=True)
     return {'nodeId': node_id, 'nativeBrowserHost': snapshot['host'], 'nativeDisplay': snapshot['display'],
             'fileId': uploaded['fileId'], 'fileSha256': hashlib.sha256(MARKDOWN).hexdigest(),
@@ -206,7 +213,7 @@ def run(cluster):
             context.set_default_timeout(30_000)
             expect.set_options(timeout=30_000)
             # Locale/theme are ordinary persisted user settings; auth is restored by production main.
-            context.add_init_script('if (window === window.top) localStorage.setItem("talos-web-ui", JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
+            context.add_init_script('if (window === window.top && !localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui", JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
             page = context.pages[0] if context.pages else context.wait_for_event('page')
             errors, console_errors, request_failures = [], [], []
             page.on('pageerror', lambda error: errors.append(str(error)))
