@@ -212,7 +212,7 @@ class Fixture(BaseHTTPRequestHandler):
                 (REPORT/'file-tool-model-replies.json').write_text(json.dumps(tools[sequence.index('browser_upload')-1:],indent=2))
                 require(any('permission_rejection' in str(m['content']) for m in tools),'Unauthorized attachment was not rejected')
                 require(any('browser-upload.png' in str(m['content']) for m in tools),'Authorized attachment did not reach the browser')
-            delta, finish = {'role': 'assistant', 'content': 'BROWSER_WORKER_ACCEPTANCE_OK'}, 'stop' 
+            delta, finish = {'role': 'assistant', 'content': 'BROWSER_WORKER_ACCEPTANCE_OK'}, 'stop'
         if request.get('stream'):
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
