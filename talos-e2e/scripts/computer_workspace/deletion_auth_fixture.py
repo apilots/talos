@@ -35,6 +35,8 @@ class Handler(BaseHTTPRequestHandler):
         self.reply({'error': 'not_found'}, 404)
 
     def do_POST(self):
+        if self.path == '/v1/auth/logout':
+            return self.reply({'success': True})
         if self.path != '/v1/auth/introspect':
             return self.reply({'error': 'not_found'}, 404)
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))

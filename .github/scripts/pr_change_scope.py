@@ -76,8 +76,32 @@ def e2e_plan(paths: list[str]) -> tuple[bool, dict]:
     web_only = bool(paths) and all(
         path.startswith(("talos-app/web/src/", "talos-app/web/public/")) for path in paths
     )
-    scenarios = [s for s in E2E_SCENARIOS if s["name"] == "computer-registration"] if web_only else E2E_SCENARIOS
+    scenarios = [s for s in E2E_SCENARIOS if s["name"] == "computer-registration"] if web_only else list(E2E_SCENARIOS)
+    # Heavy Browser owners run the complete numbered group in its dedicated job.
+    # Lightweight resource-only edits retain the real product scenario once.
+    if web_only and not browser_e2e_applies(paths):
+        scenarios = [*scenarios, {"name": "resource-workspace", "runner": "ubuntu-24.04",
+                                  "targets": "case:20_browser_workspace/01_resource_tabs"}]
     return not web_only, {"include": scenarios}
+
+
+def browser_e2e_applies(paths: list[str]) -> bool:
+    """Keep Browser lifecycle coverage for its real owners without taxing unrelated Web edits."""
+    if not paths:
+        return True
+    web_owners = (
+        "talos-app/web/src/features/computers/", "talos-app/web/src/features/settings/",
+        "talos-app/web/src/app/", "talos-app/web/src/pages/chat/",
+        "talos-app/web/src/widgets/chat-context-bar/", "talos-app/web/src/shared/api/",
+        "talos-app/web/src/shared/store/", "talos-app/web/src/shared/ui/Button.",
+        "talos-app/web/src/shared/i18n/desktop", "talos-app/web/src/shared/i18n/computer",
+        "talos-app/web/src/shared/i18n/mcp", "talos-app/web/src/shared/i18n/apiError",
+    )
+    return any(not is_document(path) and (
+        not path.startswith(("talos-app/web/src/", "talos-app/web/public/"))
+        or path.startswith(web_owners)
+        or path == "talos-app/web/public/talos-logo.svg"
+    ) for path in paths)
 
 
 def version_files() -> set[str]:
@@ -167,6 +191,7 @@ def main() -> int:
         with open(output, "a", encoding="utf-8") as stream:
             if args.scope == "pr-e2e":
                 native, matrix = e2e_plan(paths)
+                stream.write(f"run_browser={str(relevant and browser_e2e_applies(paths)).lower()}\n")
                 stream.write(f"run_contracts={str(relevant and native).lower()}\n")
                 stream.write(f"scenario_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
             stream.write(f"run_workflow={str(relevant).lower()}\n")

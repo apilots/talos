@@ -18,6 +18,7 @@ jobs:
     outputs:
       run_workflow: ${{ steps.scope.outputs.run_workflow }}
       run_contracts: ${{ steps.scope.outputs.run_contracts }}
+      run_browser: ${{ steps.scope.outputs.run_browser }}
       scenario_matrix: ${{ steps.scope.outputs.scenario_matrix }}
     steps:
       - name: Check out repository
@@ -70,8 +71,8 @@ jobs:
         with:
           tool: just,cargo-nextest
 
-      - name: Test Cloud, Desktop, SQLite and cross-coordinator boundaries
-        run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service
+      - name: Test Cloud, Desktop, TUI, SQLite and cross-coordinator boundaries
+        run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui
 
   scenarios:
     needs: change-scope
@@ -203,15 +204,17 @@ jobs:
     if: ${{ always() }}
     name: talos-pr-e2e
     runs-on: ubuntu-latest
-    needs: [change-scope, contract-tests, scenarios]
+    needs: [change-scope, contract-tests, scenarios, browser-worker]
     steps:
       - name: Require public PR contract tests and scenarios
         env:
           SCOPE_RESULT: ${{ needs.change-scope.result }}
           RUN_WORKFLOW: ${{ needs.change-scope.outputs.run_workflow }}
           RUN_CONTRACTS: ${{ needs.change-scope.outputs.run_contracts }}
+          RUN_BROWSER: ${{ needs.change-scope.outputs.run_browser }}
           CONTRACT_RESULT: ${{ needs.contract-tests.result }}
           SCENARIO_RESULT: ${{ needs.scenarios.result }}
+          BROWSER_RESULT: ${{ needs.browser-worker.result }}
         run: |
           if [[ "${SCOPE_RESULT}" != "success" ]]; then
             echo "Could not determine E2E change scope." >&2
@@ -227,8 +230,87 @@ jobs:
             false) expected_contract=skipped ;;
             *) echo "Invalid E2E contract scope output." >&2; exit 1 ;;
           esac
-          if [[ "${CONTRACT_RESULT}" != "${expected_contract}" || "${SCENARIO_RESULT}" != "success" ]]; then
-            echo "Public PR validation failed: contract=${CONTRACT_RESULT}, scenarios=${SCENARIO_RESULT}." >&2
+          case "${RUN_BROWSER}" in
+            true) expected_browser=success ;;
+            false) expected_browser=skipped ;;
+            *) echo "Invalid Browser scope output." >&2; exit 1 ;;
+          esac
+          if [[ "${CONTRACT_RESULT}" != "${expected_contract}" || "${SCENARIO_RESULT}" != "success" || "${BROWSER_RESULT}" != "${expected_browser}" ]]; then
+            echo "Public PR validation failed: contract=${CONTRACT_RESULT}, scenarios=${SCENARIO_RESULT}, browser=${BROWSER_RESULT}." >&2
             exit 1
           fi
           echo "Selected secretless PR checks passed."
+
+  browser-worker:
+    name: Browser Worker and Desktop media
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_browser == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: talos
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: talos
+      - name: Load shared toolchains
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos/talos-rs
+          shared-key: browser-e2e-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}
+      - name: Install Linux build and Electron dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap build-essential caddy curl libsqlite3-dev libssl-dev pkg-config protobuf-compiler openssl ripgrep sqlite3 xvfb libgtk-3-0 libgbm1 libnss3 libasound2t64
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install controlled scenario dependencies
+        run: python -m pip install --disable-pip-version-check -r talos-e2e/scripts/browser-worker/requirements.txt grpcio protobuf playwright
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.RELEASE_PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: talos/talos-app/pnpm-lock.yaml
+      - name: Verify Browser fixture workload contracts
+        run: python -m unittest discover -s talos-e2e/scripts/browser-worker -p '*_test.py'
+      - name: Build the current product binaries
+        run: cargo build --locked --release --manifest-path talos-rs/Cargo.toml -p talos-server -p talos-worker-bin -p talos-linux-sandbox -p app-server
+      - name: Assemble the standard packaged Worker image
+        run: |
+          mkdir -p .release-product/bin
+          cp talos-rs/target/release/talos-worker talos-rs/target/release/talos-linux-sandbox-launcher .release-product/bin/
+          docker build --build-arg PRODUCT_STAGE=packaged -f build/worker/Dockerfile -t talos-worker:browser-e2e ..
+      - name: Install application dependencies
+        run: |
+          pnpm --dir talos-app install --frozen-lockfile
+          node talos-app/desktop/node_modules/electron/install.js
+      - name: Install isolated scenario Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+      - name: Run numbered Browser workspace group
+        env:
+          TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          TALOS_E2E_WORKER_IMAGE: talos-worker:browser-e2e
+          TALOS_E2E_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/talos-server
+          TALOS_E2E_APP_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/app-server
+        run: xvfb-run -a ./talos-e2e/run_e2e.sh --group 20_browser_workspace
+      - name: Upload browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-worker-${{ runner.arch }}
+          path: |
+            talos/talos-e2e/reports/20_browser_workspace
+            talos/talos-e2e/reports/e2e_report_*
+            talos/output/browser-worker
+          if-no-files-found: warn

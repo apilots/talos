@@ -125,3 +125,9 @@ Computer 注册与主动执行验收组：`18_computer_workspace`。仅注册运
 - 只有明确负责集成的场景才使用真实服务。
 - 复用共享 runner helper 和 fixture，不重复 setup。
 - 需要手工证据时，保留能够证明关键行为的日志或报告。
+
+## 20 浏览器与资源工作区
+
+新增标准编号组 `20_browser_workspace`，按场景分为 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop MCP、Docker Worker 五个用例。每个用例验证独立的产品边界，不把单元测试重复包装成 E2E。执行 `just e2e-group 20_browser_workspace`；轻量资源改动仅选择 `20_browser_workspace/01_resource_tabs`，浏览器宿主与后端改动在 PR gate 通过标准 runner 执行完整组，避免重复跑同一场景。
+
+前置条件、断言、隔离清理、截图归档和真实模型验收边界见[组说明](scenarios/20_browser_workspace/README.md)。公共网页与本地 Markdown 同时覆盖 Web/Desktop；远程电脑 Tab 只由 Docker Worker 能力提供。受控模型链路验证不等同于真实模型自主浏览与产品分析。

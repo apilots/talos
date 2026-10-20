@@ -9,7 +9,7 @@ import unittest
 
 from pr_change_scope import (
     ROOT, SCOPES, VERSION_PATTERNS, is_document,
-    e2e_plan, scope_matches, should_run, version_change_only, version_files,
+    browser_e2e_applies, e2e_plan, scope_matches, should_run, version_change_only, version_files,
 )
 
 
@@ -62,7 +62,26 @@ class ChangeScopeTests(unittest.TestCase):
         contracts, matrix = e2e_plan(paths)
         self.assertFalse(contracts)
         self.assertEqual([scenario['targets'] for scenario in matrix['include']],
-                         ['case:09_app_server/computer_deletion'])
+                         ['case:09_app_server/computer_deletion',
+                          'case:20_browser_workspace/01_resource_tabs'])
+
+    def test_resource_workspaces_keep_hosted_product_e2e_without_docker(self):
+        for path in ["talos-app/web/src/features/web-preview/WebPagePreview.tsx",
+                     "talos-app/web/src/features/files/components/MarkdownFilePreview.tsx"]:
+            contracts, matrix = e2e_plan([path])
+            self.assertFalse(contracts)
+            self.assertEqual(matrix["include"][1]["targets"], "case:20_browser_workspace/01_resource_tabs")
+            self.assertFalse(browser_e2e_applies([path]))
+
+    def test_heavy_browser_owners_do_not_repeat_group20_in_generic_matrix(self):
+        for path in ['talos-app/desktop/src/browser-host.ts',
+                     'talos-app/web/src/app/layouts/AppLayout.tsx',
+                     'talos-e2e/scenarios/20_browser_workspace/05_docker_worker.sh']:
+            with self.subTest(path=path):
+                self.assertTrue(browser_e2e_applies([path]))
+                _, matrix = e2e_plan([path])
+                self.assertFalse(any('20_browser_workspace' in item['targets']
+                                     for item in matrix['include']))
 
     def test_non_web_or_mixed_inputs_keep_native_contracts_and_full_scenarios(self):
         inputs = ['talos-app/desktop/src/app-server-controller.ts',
@@ -84,6 +103,22 @@ class ChangeScopeTests(unittest.TestCase):
                                      {'health-and-model-catalog', 'app-server',
                                       'computer-registration', 'files', 'sandbox'})
         self.assertTrue(e2e_plan([])[0])
+
+    def test_shared_browser_assets_are_build_inputs(self):
+        for path in ["talos-app/web/public/talos-logo.svg", "talos-app/shared/browser-home/home.html", "talos-app/desktop/resources/browser-window/chrome.js"]:
+            self.assertTrue(browser_e2e_applies([path]), path)
+
+    def test_browser_scope_retains_owners_and_skips_unrelated_web_edits(self):
+        for path in ["talos-app/web/src/pages/projects/ProjectsPage.tsx", "talos-app/web/public/icon.svg", "docs/browser.md"]:
+            self.assertFalse(browser_e2e_applies([path]))
+        for path in ["talos-app/web/src/features/computers/ComputerDesktop.tsx",
+                     "talos-app/web/src/features/settings/components/mcp/BrowserSettings.tsx",
+                     "talos-app/web/src/shared/api/client.ts", "talos-app/web/src/shared/ui/Button.tsx",
+                     "talos-app/ts-sdk/packages/core/src/client.ts", "talos-app/desktop/src/main.ts",
+                     "talos-rs/crates/action/browser/src/runtime.rs", "build/worker/Dockerfile",
+                     "conf/talos-dev.yaml", ".github/workflows/pr-e2e.yml"]:
+            self.assertTrue(browser_e2e_applies(["talos-app/web/public/icon.svg", path]), path)
+        self.assertTrue(browser_e2e_applies([]))
 
     def test_only_owned_version_values_are_normalized(self):
         for path in version_files():
@@ -133,10 +168,13 @@ class E2EGateTests(unittest.TestCase):
     def test_gate_requires_selected_checks_and_rejects_invalid_outputs(self):
         workflow = (ROOT / '.github/workflows/pr-e2e.yml').read_text()
         gate = workflow.split('name: Require public PR contract tests and scenarios', 1)[1]
-        script = textwrap.dedent(gate.split('run: |\n', 1)[1])
+        script = textwrap.dedent(gate.split('run: |\n', 1)[1].split('\n  browser-worker:', 1)[0])
         defaults = dict(SCOPE_RESULT='success', RUN_WORKFLOW='true', RUN_CONTRACTS='true',
-                        CONTRACT_RESULT='success', SCENARIO_RESULT='success')
-        cases = [({}, True), ({'RUN_CONTRACTS': 'false', 'CONTRACT_RESULT': 'skipped'}, True),
+                        CONTRACT_RESULT='success', SCENARIO_RESULT='success', RUN_BROWSER='true', BROWSER_RESULT='success')
+        cases = [({}, True), ({'RUN_BROWSER':'false','BROWSER_RESULT':'skipped'}, True),
+                 ({'RUN_BROWSER':'true','BROWSER_RESULT':'skipped'}, False),
+                 ({'RUN_BROWSER':'false','BROWSER_RESULT':'failure'}, False),
+                 ({'RUN_BROWSER':''}, False), ({'RUN_CONTRACTS': 'false', 'CONTRACT_RESULT': 'skipped'}, True),
                  ({'CONTRACT_RESULT': 'skipped'}, False), ({'CONTRACT_RESULT': 'failure'}, False),
                  ({'SCENARIO_RESULT': 'skipped'}, False), ({'SCENARIO_RESULT': 'failure'}, False),
                  ({'RUN_CONTRACTS': 'false', 'CONTRACT_RESULT': 'failure'}, False),
@@ -272,7 +310,7 @@ class GitScopeTests(unittest.TestCase):
             values = dict(line.split('=', 1) for line in (self.root / 'scope.outputs').read_text().splitlines())
             self.assertEqual(values['run_workflow'], 'true')
             self.assertEqual(values['run_contracts'], 'false')
-            self.assertEqual(len(json.loads(values['scenario_matrix'])['include']), 1)
+            self.assertEqual(len(json.loads(values['scenario_matrix'])['include']), 2)
         self.write('talos-app/web/vite.config.ts', 'export default {}\n')
         head = self.commit('build(web): update build inputs')
         self.classify('pull_request', head, 'pr-e2e')

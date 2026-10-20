@@ -52,6 +52,7 @@ single case during development and the owning group before handoff.
 | `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
 | `18` | Computer workspace: real Desktop device login, durable UUID, outbound registration and renewal |
 | `19` | Multi-control-plane sync: two native Mac Desktop runtimes, native and Docker Workers, Docker WSS hub, real auth and model tasks |
+| `20` | Browser MCP and resource workspace: shared Web/Desktop tabs and local Markdown, native browser host/MCP, Docker desktop/media/control and profile recovery |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 Groups `04` and `10` are not assigned; use the scenario directory rather than assuming
@@ -59,7 +60,7 @@ that group numbers are contiguous. Frontend unit tests belong to the frontend
 quality workflow and are not repeated as an E2E scenario.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `12_files`, and
+`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `20_browser_workspace/01_resource_tabs`, `12_files`, and
 `14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
 `talos-agent` and `talos-service` package tests. These cover public Cloud SDK
 adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
@@ -87,6 +88,20 @@ modes require Python Playwright and installed Chrome (`TALOS_E2E_CHROME_BIN`).
 This case does not exercise a multi-manager Sync deployment; that topology
 remains local group 19 acceptance, with deletion/history covered separately by
 owning-package two-peer Store/CRDT tests.
+
+`20_browser_workspace/01_resource_tabs` mounts the actual product layout in an isolated
+system Chrome instance against real Server/File APIs. Only upstream Auth is a
+contract fixture. Deterministic local previews cover independent same-URL tabs,
+retained form state across switching/collapse, keyboard selection, native modal
+and Escape focus, close/account-scope destruction, and authenticated Markdown
+rendering with non-owner metadata/content rejection. Web-only changes run this
+case alongside Computer registration without requiring a Docker Worker or model.
+Browser owner changes run the complete numbered [group 20](scenarios/20_browser_workspace/README.md)
+once through the standard runner in the dedicated Browser job; the generic matrix
+does not duplicate its resource case.
+Computer live media teardown is covered separately by the Browser Worker
+acceptance and the owning ComputerDesktop component tests; this lightweight case
+does not claim a live remote desktop connection.
 
 `09_app_server/desktop_recovery` uses the real controller, SDK, Server and
 app-server processes with controlled loopback Auth/model HTTP fixtures. It checks
