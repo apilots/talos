@@ -17,6 +17,12 @@ export function fileListQueryKey(connectionKey: string) {
   return ["talos", connectionKey, "files"] as const;
 }
 
+export function isMarkdownFile(file: Pick<FileInfo, "originalFilename" | "mimeType">) {
+  const extension = file.originalFilename.split(".").at(-1)?.toLowerCase();
+  return extension === "md" || extension === "markdown"
+    || ["text/markdown", "text/x-markdown"].includes(file.mimeType.split(";")[0].trim().toLowerCase());
+}
+
 export async function uploadFile({
   file,
   scope,

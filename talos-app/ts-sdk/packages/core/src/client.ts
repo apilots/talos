@@ -1,8 +1,8 @@
 import { decodeFileContent } from "./file-content";
-import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
+import type { DesktopStreamAdapter, FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
-  SyncMetricsResponse, SyncEnableRequest, SyncStatusResponse,
+  BrowserRequest, BrowserSnapshot, DesktopOpenRequest, DesktopViewGrant,  SyncMetricsResponse, SyncEnableRequest, SyncStatusResponse,
   ComputerListRequest,
   ComputerListResponse,
   NodeInfo,
@@ -170,6 +170,7 @@ export class TalosClient {
     private readonly http: HttpAdapter,
     private readonly streamAdapter: StreamAdapter,
     private readonly baseUrl: string,
+    private readonly desktopStream?: DesktopStreamAdapter,
   ) {}
 
   private url(path: string): string {
@@ -266,6 +267,20 @@ export class TalosClient {
         method: "POST",
         body: JSON.stringify(request),
       }),
+  };
+
+  desktop = {
+    open: (request: DesktopOpenRequest): Promise<DesktopViewGrant> =>
+      this.http.request<DesktopViewGrant>(this.url("/v1/desktop/open"), { method: "POST", body: JSON.stringify(request) }),
+    connect: (grant: DesktopViewGrant): WebSocket => {
+      if (!this.desktopStream) throw new Error("Desktop media adapter is unavailable.");
+      return this.desktopStream.connect(grant);
+    },
+  };
+
+  browser = {
+    operate: (request: BrowserRequest): Promise<BrowserSnapshot> =>
+      this.http.request<BrowserSnapshot>(this.url("/v1/browser"), { method: "POST", body: JSON.stringify(request) }),
   };
 
   mcp = {

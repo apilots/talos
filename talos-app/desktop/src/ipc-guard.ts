@@ -8,6 +8,11 @@ export type DesktopRendererMethod = Exclude<
 
 const mcpDefinitionRef = (value: unknown) => isRecord(value) && ((value.type === "plugin" && typeof value.installId === "string") || (value.type === "config" && typeof value.name === "string"));
 const mcpCredentials = (value: unknown) => isRecord(value) && isRecord(value.authentication) && (value.authentication.type === "none" || value.authentication.type === "bearer" || (value.authentication.type === "header" && typeof value.authentication.name === "string")) && (value.token === undefined || value.token === null || typeof value.token === "string") && [value.env, value.headers].every((map) => map === undefined || map === null || (isRecord(map) && Object.values(map).every((entry) => typeof entry === "string")));
+const browserParams = (params:unknown) => isRecord(params) && typeof params.nodeId === "string" && isRecord(params.operation) && ["read","selectTarget","connect","disconnect","pause","resume","openLocal","takeControl","releaseControl"].includes(String(params.operation.kind));
+const desktopOpenParams = (params:unknown) => isRecord(params) && ["nodeId","targetId","viewerId","generation"].every(key=>typeof params[key] === "string") && (
+  params.inputMode==="readOnly" ? params.controllerId===null && params.inputEpoch===null :
+  params.inputMode==="control" && typeof params.controllerId==="string" && Number.isSafeInteger(params.inputEpoch) && Number(params.inputEpoch)>=0
+);
 const emptyParams = (params: unknown) => isRecord(params);
 const sessionParams = (params: unknown) => hasString(params, "sessionId");
 const projectParams = (params: unknown) => hasString(params, "project_id");
@@ -235,6 +240,11 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "workspace/doc/list": emptyParams,
   "workspace/doc/read": (params) => hasString(params, "kind"),
   "workspace/doc/write": (params) => hasString(params, "kind") && hasString(params, "content"),
+  "desktop/streamOpen":(params)=>hasString(params,"streamId")&&hasString(params,"ticket"),
+  "desktop/streamSend":(params)=>hasString(params,"streamId")&&hasString(params,"dataBase64"),
+  "desktop/streamClose":(params)=>hasString(params,"streamId"),
+  "browser/operate": browserParams,
+  "desktop/open": desktopOpenParams,
 } satisfies Record<DesktopRendererMethod, ParamGuard>;
 
 export function assertDesktopRendererInvoke(

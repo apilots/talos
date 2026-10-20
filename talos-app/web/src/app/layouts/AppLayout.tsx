@@ -1,70 +1,73 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-
 import { ComputerRail, useComputers, useSelectedComputerId, useProductScope } from "@/features/computers";
 import { SidebarContainer } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { CollapsedSidebarBar } from "./CollapsedSidebarBar";
+import { AppNavigation, AppSessionContext, AppTopBar, WorkspaceControls } from "./AppTopBar";
+import { RightWorkspace } from "./RightWorkspace";
+import { AppSidebar } from "./AppSidebar";
+import { AppMainContent } from "./AppMainContent";
+import { AppBusinessRegion } from "./AppBusinessRegion";
+import { layoutWidths } from "./layout-sizing";
+import { SidebarComputerEntry } from "./SidebarComputerEntry";
 
+/** Five areas: app navigation, rail, project/sidebar, route content, workspace. */
 export function AppLayout() {
   const location = useLocation();
   const { t } = useTranslation("computers");
   const { selected: computer } = useComputers();
-  const computerManagement = location.pathname === "/computers";
   const computerId = useSelectedComputerId();
   const scope = useProductScope();
-  const sidebarOpen = useAppStore((state) => state.sidebarOpen);
-  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
-  const settingsRoute = location.pathname.startsWith("/settings");
-  const showMainSidebar = sidebarOpen && !settingsRoute && !computerManagement;
-  const sidebar = useRef<HTMLDialogElement>(null);
+  const sidebarOpen = useAppStore(state => state.sidebarOpen);
+  const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
+  const workspaceOpen = useAppStore(state => state.workspaceOpen);
+  const workspaceExpanded = useAppStore(state => state.workspaceExpanded);
+  const windows = useAppStore(state => state.workspaceWindows);
+  const sidebarWidth = useAppStore(state => state.sidebarWidth);
+  const workspaceWidth = useAppStore(state => state.workspaceWidth);
+  const setWorkspaceWidth = useAppStore(state => state.setWorkspaceWidth);
+  const resizing = useAppStore(state => state.resizingPane !== null);
+  const [viewport, setViewport] = useState(() => ({ wide: window.matchMedia("(min-width: 1024px)").matches, width: window.innerWidth }));
+  const { wide } = viewport;
+  const sidebarAvailable = !location.pathname.startsWith("/settings") && location.pathname !== "/computers";
+  const showSidebar = sidebarAvailable && sidebarOpen;
+  const workspaceVisible = workspaceOpen && windows.length > 0;
+  const workspaceModal = workspaceVisible && (workspaceExpanded || !wide);
+  const sidebarVisible = showSidebar && !workspaceModal;
+  const sidebarModal = sidebarVisible && !wide;
   useEffect(() => {
-    const dialog = sidebar.current;
-    if (!showMainSidebar || !dialog) return;
+    // Narrow drawers are mutually exclusive; closing the workspace must not
+    // reopen a previously covered sidebar and steal focus from its toggle.
+    if (!wide && workspaceModal && sidebarOpen) setSidebarOpen(false);
+  }, [wide, workspaceModal, sidebarOpen, setSidebarOpen]);
+  const sidebarToggle = useRef<HTMLButtonElement>(null);
+  const workspaceToggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
     const viewport = window.matchMedia("(min-width: 1024px)");
-    const focused = document.activeElement;
-    const returnFocus = focused instanceof HTMLElement && focused !== document.body && !dialog.contains(focused)
-      ? focused : document.querySelector<HTMLButtonElement>('button[aria-controls="talos-sidebar"]');
-    let modal = false;
-    const display = () => {
-      dialog.close();
-      modal = !viewport.matches;
-      // A persistent non-modal sidebar must not run dialog.show()'s autofocus steps.
-      if (viewport.matches) dialog.open = true;
-      else dialog.showModal();
-    };
-    display();
-    viewport.addEventListener("change", display);
-    return () => { viewport.removeEventListener("change", display); dialog.close(); if (modal && returnFocus?.isConnected) returnFocus.focus(); };
-  }, [showMainSidebar]);
-
-  return (
-    <div
-      className={
-        showMainSidebar
-          ? "grid h-screen overflow-hidden bg-background text-ink grid-cols-[56px_minmax(0,1fr)] lg:grid-cols-[56px_296px_minmax(0,1fr)]"
-          : "grid h-screen grid-cols-[56px_minmax(0,1fr)] overflow-hidden bg-background text-ink"
-      }
-    >
-      <ComputerRail />
-      {showMainSidebar ? (
-        <dialog id="talos-sidebar" ref={sidebar} aria-label="Sidebar" onCancel={() => setSidebarOpen(false)}
-          onClick={(event) => {
-            if (event.target !== event.currentTarget) return;
-            const bounds = event.currentTarget.getBoundingClientRect();
-            if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) setSidebarOpen(false);
-          }}
-          className="fixed inset-y-0 left-14 m-0 h-screen max-h-none w-[min(296px,calc(100vw-56px))] max-w-none min-w-0 flex-col border-0 bg-sidebar p-0 text-ink shadow-xl backdrop:bg-black/30 open:flex lg:static lg:w-auto lg:shadow-none">
-          <div className="min-h-0 flex-1 overflow-hidden"><SidebarContainer computer={computer} /></div>
-        </dialog>
-      ) : null}
-      <main className="relative flex h-screen min-w-0 flex-col overflow-hidden">
-        {!sidebarOpen && !settingsRoute && !computerManagement && !computerManagement ? <CollapsedSidebarBar onOpenSidebar={() => setSidebarOpen(true)} /> : null}
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <div key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : computerId ?? "pending"}`} className="h-full">{computerId || location.pathname === "/computers" || location.pathname.startsWith("/sessions/") ? <Outlet /> : <div className="flex h-full items-center justify-center text-sm text-muted">{t("choose")}</div>}</div>
-        </div>
-      </main>
-    </div>
-  );
+    const update = () => setViewport({ wide: viewport.matches, width: window.innerWidth });
+    update(); viewport.addEventListener("change", update);window.addEventListener("resize", update);
+    return () => { viewport.removeEventListener("change", update);window.removeEventListener("resize", update); };
+  }, []);
+  const sizes = layoutWidths(viewport.width - 56, wide && sidebarVisible, workspaceVisible && !workspaceModal, sidebarWidth, workspaceWidth);
+  useEffect(() => {
+    // Retain the admitted width so closing the sidebar does not snap the outer boundary.
+    if (workspaceVisible && !workspaceModal && workspaceWidth !== Math.round(sizes.workspace)) setWorkspaceWidth(sizes.workspace);
+  }, [workspaceVisible, workspaceModal, workspaceWidth, sizes.workspace, setWorkspaceWidth]);
+  const navigation = <AppNavigation sidebarVisible={sidebarVisible} sidebarAvailable={sidebarAvailable} sidebarToggleRef={sidebarToggle} />;
+  const context = <AppSessionContext />;
+  const sidebarExpanded = wide && sidebarVisible;
+  const mainHeader = <AppTopBar className="h-full border-b-0">{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
+  const modalHeader = <AppTopBar>{navigation}{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
+  const sidebarRegion = (wide && sidebarAvailable) || sidebarModal ? <AppSidebar modal={sidebarModal} visible={sidebarVisible} width={wide ? sizes.sidebar : Math.min(sidebarWidth, viewport.width - 56)} resizing={resizing} toggleRef={sidebarToggle} topBar={sidebarModal ? modalHeader : undefined}><SidebarContainer computer={computer} computerEntry={<SidebarComputerEntry />} /></AppSidebar> : null;
+  return <div className="flex h-screen overflow-hidden bg-background text-ink">
+    <div className="h-full w-14 shrink-0"><ComputerRail /></div>
+    <AppBusinessRegion inactive={workspaceModal} sidebarExpanded={sidebarExpanded} sidebarWidth={sizes.sidebar} sidebarMax={sizes.sidebarMax} navigation={!sidebarModal ? navigation : undefined} mainHeader={!sidebarModal ? mainHeader : null} sidebar={wide ? sidebarRegion : null}>
+      <AppMainContent key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : computerId ?? "pending"}`}>
+        {computerId || location.pathname === "/computers" || location.pathname.startsWith("/sessions/") ? <Outlet /> : <div className="flex h-full items-center justify-center text-sm text-muted">{t("choose")}</div>}
+      </AppMainContent>
+    </AppBusinessRegion>
+    {sidebarModal ? sidebarRegion : null}
+    {windows.length > 0 ? <RightWorkspace modal={workspaceModal} width={sizes.workspace} maxWidth={sizes.workspaceMax} toggleRef={workspaceToggle} /> : null}
+  </div>;
 }

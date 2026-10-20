@@ -10,6 +10,7 @@ import {
 import {
   createUiSlice,
   normalizeProjects,
+  SIDEBAR_WIDTH,
   type UiSlice,
 } from "@/shared/store/ui-slice";
 import { createPersistStorage } from "@/shared/store/persist-storage";
@@ -75,7 +76,7 @@ useAppStore.subscribe((state, previous) => {
   const oldScope = connectionScope(previous.connection);
   if (scope !== oldScope) {
     const aliases = { ...state.sessionAliasesByScope, [oldScope]: previous.sessionAliases };
-    useAppStore.setState({ sessionAliasesByScope: aliases, sessionAliases: aliases[scope] ?? {}, streams: {}, transientStatuses: {}, activeProjectId: normalizeProjects()[0].id });
+    useAppStore.setState({ sessionAliasesByScope: aliases, sessionAliases: aliases[scope] ?? {}, streams: {}, transientStatuses: {}, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false, sidebarWidth: SIDEBAR_WIDTH.initial, workspaceWidth: null, resizingPane: null, activeProjectId: normalizeProjects()[0].id });
   } else if (state.selectedComputers[scope] !== previous.selectedComputers[scope]) {
     useAppStore.setState({ activeProjectId: normalizeProjects()[0].id });
   }

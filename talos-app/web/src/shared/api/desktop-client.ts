@@ -170,6 +170,11 @@ export function createDesktopTalosClient(
       read: (request: Parameters<TalosWebClient["skills"]["read"]>[0]) =>
         client.readSkill(request),
     },
+    desktop: {
+      open: client.desktop.open,
+      connect: client.desktop.connect,
+    },
+    browser: { operate: (request) => client.browser(request) },
     mcp: {
       import: (request: Parameters<TalosWebClient["mcp"]["import"]>[0]) => client.importMcpServer(request),
       startAuthentication: (request: Parameters<TalosWebClient["mcp"]["startAuthentication"]>[0]) => client.startMcpAuthentication(request),

@@ -1,20 +1,29 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 import { BrowserWindow, ipcMain, shell } from "electron";
 
+import {desktopMediaHost} from "./desktop-media";
 import type { DesktopAppServerController } from "./app-server-controller";
 import { assertDesktopRendererInvoke } from "./ipc-guard";
 import { TALOS_IPC, type TalosRuntimeState } from "./ipc";
 
 export function registerDesktopIpcHandlers(runtime: DesktopAppServerController): void {
+  ipcMain.handle(TALOS_IPC.desktopFrameAck,(event,requestId:unknown)=>{if(typeof requestId!=="string"||event.senderFrame!==event.sender.mainFrame)throw new Error("Invalid media acknowledgement.");desktopMediaHost.acknowledge(requestId,event.sender);});
   ipcMain.handle(TALOS_IPC.workerIdentity, () => ipcResponse(() => runtime.invoke("desktop/workerIdentity", null)));
   ipcMain.handle(TALOS_IPC.connect, () => ipcResponse(() => runtime.connect()));
   ipcMain.handle(
     TALOS_IPC.invoke,
-    (_event, method: unknown, params: unknown, options: unknown) => ipcResponse(() => {
+    (event, method: unknown, params: unknown, options: unknown) => ipcResponse(async () => {
+      if(event.senderFrame!==event.sender.mainFrame || !BrowserWindow.fromWebContents(event.sender))throw new Error("Only the product renderer may invoke Desktop APIs.");
       const invokeOptions = assertDesktopRendererInvoke(method, params, options);
-      return runtime.invoke(invokeOptions.method, params, {
-        actorCredentials: invokeOptions.actorCredentials,
+      const stream=typeof params==="object" && params!==null && "streamId" in params ? String(params.streamId):null;
+      if(method==="desktop/streamOpen"&&stream)desktopMediaHost.own(stream,event.sender,()=>{
+        void runtime.invoke("desktop/streamClose",{streamId:stream},{actorCredentials:invokeOptions.actorCredentials})
+          .catch(error=>console.error("Desktop media cleanup failed",error));
       });
+      try {
+        return await runtime.invoke(invokeOptions.method, params, {actorCredentials:invokeOptions.actorCredentials});
+      } catch(error) {if(method==="desktop/streamOpen"&&stream)desktopMediaHost.release(stream,event.sender);throw error;}
+      finally {if(method==="desktop/streamClose"&&stream)desktopMediaHost.release(stream,event.sender,false);}
     }),
   );
   ipcMain.handle(TALOS_IPC.openExternal, (_event, url: unknown) => {

@@ -2,7 +2,6 @@ import type { ProjectView } from "@/shared/types/ui";
 import type { AccountType, AuthStatus } from "@/shared/types/account";
 import { SidebarAccountMenu } from "./SidebarAccountMenu";
 import { SidebarChatsSection } from "./SidebarChatsSection";
-import { SidebarCollapseButton } from "./SidebarCollapseButton";
 import { SidebarHomeEntry } from "./SidebarHomeEntry";
 import { SidebarPrimaryNav } from "./SidebarPrimaryNav";
 import { SidebarProjectSection, type SidebarProjectGroup } from "./SidebarProjectSection";
@@ -19,12 +18,12 @@ type AuthConnectionState = {
 
 interface SidebarProps {
   computer?: import("@talos/sdk-core").AppProtocol.NodeInfo;
+  computerEntry?: ReactNode;
   showAccount?: boolean;
   chats: SidebarSessionItem[];
   connection: AuthConnectionState;
   currentPath: string;
   projectGroups: SidebarProjectGroup[];
-  onCollapse: () => void;
   onCreateProjectThread: (projectId: ProjectView["id"]) => void;
   onCreateThread: () => Promise<void> | void;
   onLogout: () => Promise<void> | void;
@@ -38,12 +37,12 @@ interface SidebarProps {
 
 export function Sidebar({
   computer,
+  computerEntry,
   showAccount = true,
   chats,
   connection,
   currentPath,
   projectGroups,
-  onCollapse,
   onCreateProjectThread,
   onCreateThread,
   onLogout,
@@ -58,11 +57,8 @@ export function Sidebar({
 
   return (
     <aside className="sticky top-0 flex h-full w-full shrink-0 flex-col border-r border-border/80 bg-sidebar px-4 py-4">
-      <div className="absolute right-4 top-4 z-20">
-        <SidebarCollapseButton onCollapse={onCollapse} />
-      </div>
       <SidebarHomeEntry computer={computer} />
-      <SidebarPrimaryNav onCreateThread={onCreateThread} />
+      <SidebarPrimaryNav onCreateThread={onCreateThread} computerEntry={computerEntry} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <SidebarProjectSection
@@ -103,4 +99,4 @@ export function Sidebar({
     </aside>
   );
 }
-import { useState } from "react";
+import { useState, type ReactNode } from "react";

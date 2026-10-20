@@ -6,6 +6,8 @@ import {
   TalosClient,
   TalosApiError,
   type HttpAdapter,
+  type DesktopStreamAdapter,
+  type DesktopViewGrant,
   type HttpRequestOptions,
   parseTalosApiErrorBody,
   parseTalosJson,
@@ -179,6 +181,7 @@ export function createBrowserTalosClient(options: BrowserClientOptions) {
     new BrowserHttpAdapter(options.getToken),
     new BrowserStreamAdapter(options.getToken),
     options.baseUrl,
+    new BrowserDesktopStreamAdapter(options),
   );
 }
 
@@ -194,4 +197,15 @@ function httpFailure(payload: {
     return new TalosApiError(apiError);
   }
   return new TalosHttpError(payload);
+}
+
+/** Admission credentials are sent once in the first frame, never in a URL. */
+class BrowserDesktopStreamAdapter implements DesktopStreamAdapter {
+  constructor(private readonly options: BrowserClientOptions) {}
+  connect(grant: DesktopViewGrant): WebSocket {
+    const url = `${this.options.baseUrl.replace(/\/$/, "")}/v1/desktop/stream`.replace(/^http/, "ws");
+    const socket = new WebSocket(url);
+    socket.addEventListener("open", () => socket.send(JSON.stringify({ ticket: grant.ticket, accessToken: this.options.getToken?.() })), { once: true });
+    return socket;
+  }
 }

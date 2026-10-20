@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Home, MoreHorizontal, MonitorCog, PanelLeft } from "lucide-react";
+import { Home, MoreHorizontal, MonitorCog } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout } from "@/features/auth";
@@ -18,7 +18,6 @@ export function ComputerRail() {
   const navigate = useNavigate();
   const logout = useLogout();
   const connection = useAppStore((state) => state.connection);
-  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const close = useCallback(() => { setOpen(false); trigger.current?.focus(); }, []);
@@ -29,7 +28,6 @@ export function ComputerRail() {
     <div className="relative"><button ref={trigger} type="button" aria-label={allLabel} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)} className="relative flex size-10 items-center justify-center rounded-xl text-muted hover:bg-selected"><MoreHorizontal size={21} />{remaining > 0 ? <span aria-hidden="true" className="absolute -right-1 -top-1 rounded bg-selected px-1 text-[10px] leading-4 tabular-nums">+{remaining}</span> : null}</button>
       {open ? <ComputerOverflowMenu selectedId={computers.selectedId} localId={computers.localId} onSelect={select} onClose={close} /> : null}
     </div>
-    <button type="button" className="mt-2 flex size-10 items-center justify-center rounded-xl text-muted lg:hidden" aria-label={t("sidebar")} aria-controls="talos-sidebar" onClick={() => setSidebarOpen(true)}><PanelLeft size={18} /></button>
     <Link to="/computers" aria-label={t("manage")} title={t("manage")} className="flex size-10 items-center justify-center rounded-xl text-muted hover:bg-selected"><MonitorCog size={20} /></Link>
     <div className="mt-auto"><SidebarAccountMenu compact accountType={connection.accountType} authStatus={connection.authStatus} authUsername={connection.authUsername} onLogout={logout} /></div>
   </aside>;

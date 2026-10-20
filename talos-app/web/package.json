@@ -14,6 +14,7 @@
     "check": "pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@novnc/novnc": "1.5.0",
     "@talos/sdk-app-server": "workspace:*",
     "@talos/sdk-browser": "workspace:*",
     "@talos/sdk-core": "workspace:*",
@@ -36,6 +37,7 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.0.0",
+    "@types/novnc__novnc": "1.5.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.4.1",

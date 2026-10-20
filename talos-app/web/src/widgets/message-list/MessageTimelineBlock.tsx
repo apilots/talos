@@ -297,11 +297,13 @@ function timelineProcessLabel({
   const hasCancelledItem = items.some((item) => item.status === "cancelled");
   const state = hasActiveTimeline
     ? "processWorking"
-    : metrics?.state === "failed" || hasFailedItem
-      ? "processFailed"
-      : hasCancelledItem
-        ? "processStopped"
-        : "processWorked";
+    : metrics?.state === "completed"
+      ? "processWorked"
+      : metrics?.state === "failed" || hasFailedItem
+        ? "processFailed"
+        : hasCancelledItem
+          ? "processStopped"
+          : "processWorked";
   return displayDuration === null
     ? t(state)
     : t(`${state}Duration`, { duration: formatDuration(displayDuration) });

@@ -75,3 +75,12 @@ it.each([
   await i18n.changeLanguage("en");
   expect(apiErrorMessage(error)).toBe(english);
 });
+
+it("localizes native Browser capability rejection from typed fields", async () => {
+  const error = new TalosApiError({ code: AppProtocol.ErrorCode.InvalidRequest, message: "Wording can change.",
+    localization: { type: "browserCapabilityUnavailable", operation: "takeControl", reason: "nativeHost" } });
+  await i18n.changeLanguage("zh-CN");
+  expect(apiErrorMessage(error)).toBe("这台 Computer 不共享本机桌面。");
+  await i18n.changeLanguage("en");
+  expect(apiErrorMessage(error)).toBe("This Computer does not share its native desktop.");
+});

@@ -94,7 +94,7 @@ export interface AppServerTransport {
 }
 
 export class AppServerClient {
-  constructor(protected readonly transport: AppServerTransport) {}
+  constructor(protected readonly transport: AppServerTransport, private readonly desktopStream?: import("./adapters").DesktopStreamAdapter) {}
 
   onEvent(handler: AppServerEventHandler): () => void {
     return this.transport.onEvent(handler);
@@ -184,6 +184,11 @@ export class AppServerClient {
 
   /** Host settings and safe identity; enrollment returns no node credential. */
   readonly desktop = {
+    open: (params: AppProtocol.DesktopOpenRequest) => this.openDesktop(params),
+    connect: (grant: AppProtocol.DesktopViewGrant): WebSocket => {
+      if (!this.desktopStream) throw new Error("Desktop media adapter is unavailable.");
+      return this.desktopStream.connect(grant);
+    },
     workerIdentity: () => this.transport.request<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerIdentity", null),
     enrollWorker: (params: AppProtocol.DesktopWorkerEnrollParams) => this.transport.request<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerEnroll", params),
   };
@@ -254,6 +259,14 @@ export class AppServerClient {
   readMcpAuthentication(params: AppProtocol.McpAuthenticationReadRequest): Promise<AppProtocol.McpAuthenticationResponse> { return this.transport.request("mcp/server/auth/read", params); }
 
   updateMcpCredentials(params: AppProtocol.McpCredentialsUpdateRequest): Promise<AppProtocol.McpAuthenticationResponse> { return this.transport.request("mcp/server/credentials/update", params); }
+
+  openDesktop(params: AppProtocol.DesktopOpenRequest): Promise<AppProtocol.DesktopViewGrant> {
+    return this.transport.request("desktop/open", params);
+  }
+
+  browser(params: AppProtocol.BrowserRequest): Promise<AppProtocol.BrowserSnapshot> {
+    return this.transport.request("browser/operate", params);
+  }
 
   listMcpServers(params: AppProtocol.McpServerListRequest = {}): Promise<AppProtocol.McpServerListResponse> {
     return this.transport.request("mcp/server/list", params);

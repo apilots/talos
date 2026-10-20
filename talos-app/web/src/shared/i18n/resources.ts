@@ -5,11 +5,23 @@ import { errorResources } from "./errorResources";
 import { filesResources } from "./filesResources";
 import { mcpResources } from "./mcpResources";
 import { settingsResources } from "./settingsResources";
+import { webPreviewResources } from "./webPreviewResources";
 
 export const resources = {
   en: {
     computers: computerResources.en,
     common: {
+      navigation: {
+        back: "Back", forward: "Forward", newChat: "New chat", history: "Navigation history",
+        business: "Business area", sidebarControls: "Sidebar navigation", resizeSidebar: "Resize sidebar", sidebar: "Projects and chats", showSidebar: "Open sidebar", hideSidebar: "Collapse sidebar", settings: "Settings",
+        computers: "Computers", plugins: "Plugins", files: "Files", memory: "Memories",
+      },
+      workspace: {
+        resize: "Resize workspace", create: "New workspace tab", controls: "Workspace controls", navigation: "Application navigation", title: "Right workspace", windows: "Open windows",
+        expand: "Expand workspace", restore: "Restore workspace",
+        hide: "Hide workspace ({{count}} open windows)", show: "Show workspace ({{count}} open windows)",
+        close: "Close {{name}}",
+      },
       loading: "Loading…", save: "Save",
       cancel: "Cancel", connected: "Connected to server",
       connectedShort: "Connected", awaitingServer: "Awaiting server",
@@ -198,6 +210,7 @@ export const resources = {
       },
     },
     files: filesResources.en,
+    webPreview: webPreviewResources.en,
     settings: {
       pageLabel: "Settings",
       backToApp: "Back to app",
@@ -495,6 +508,17 @@ export const resources = {
   "zh-CN": {
     computers: computerResources["zh-CN"],
     common: {
+      navigation: {
+        back: "后退", forward: "前进", newChat: "新会话", history: "页面导航",
+        business: "业务区", sidebarControls: "侧栏导航", resizeSidebar: "调整侧栏宽度", sidebar: "项目与会话侧栏", showSidebar: "展开侧栏", hideSidebar: "收起侧栏", settings: "设置",
+        computers: "Computer", plugins: "插件", files: "文件", memory: "记忆",
+      },
+      workspace: {
+        resize: "调整工作区宽度", create: "新建工作区标签页", controls: "工作区控制", navigation: "应用导航", title: "右工作区", windows: "已打开的窗口",
+        expand: "放大工作区", restore: "还原工作区",
+        hide: "收起工作区（{{count}} 个打开的窗口）", show: "打开工作区（{{count}} 个打开的窗口）",
+        close: "关闭 {{name}}",
+      },
       loading: "加载中…",
       save: "保存",
       cancel: "取消",
@@ -684,6 +708,7 @@ export const resources = {
       },
     },
     files: filesResources.zh,
+    webPreview: webPreviewResources.zh,
     settings: {
       pageLabel: "设置",
       backToApp: "返回应用",

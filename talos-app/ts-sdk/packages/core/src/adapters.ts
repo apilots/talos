@@ -1,6 +1,6 @@
 import {
   ErrorCode,
-  type ApiError,
+  type ApiError, type BrowserCapabilityOperation, type BrowserCapabilityReason,
   type ApiResponse,
   type TimelineEvent,
   type ErrorCode as ErrorCodeType,
@@ -162,6 +162,14 @@ export function decodeApiError(value: unknown): ApiError {
         localization = { type: descriptor.type };
         break;
       }
+      case "browserCapabilityUnavailable": {
+        const { operation, reason } = descriptor;
+        if (error.code !== ErrorCode.InvalidRequest || Object.keys(descriptor).length !== 3 ||
+            typeof operation !== "string" || !["remoteDesktop", "takeControl", "releaseControl", "openLocal"].includes(operation) ||
+            typeof reason !== "string" || !["nativeHost", "notBundled", "hostPolicy", "unsupportedVersion", "clientMismatch"].includes(reason)) throw new Error("Invalid Talos API response.");
+        localization = { type: "browserCapabilityUnavailable", operation: operation as BrowserCapabilityOperation, reason: reason as BrowserCapabilityReason };
+        break;
+      }
       case "modelNotConfigured": {
         const { provider, model } = descriptor;
         if (typeof provider !== "string" || typeof model !== "string" ||
@@ -242,4 +250,9 @@ function validateSystemNotice(notice: import("./generated/app-protocol").AgentSy
   } else if (notice.content?.type !== "text" || typeof notice.content.data !== "string") {
     throw new Error("Invalid Talos notice content.");
   }
+}
+
+/** Binary desktop media lifecycle; rendering and reconnect UX remain client-owned. */
+export interface DesktopStreamAdapter {
+  connect(grant: import("./types").DesktopViewGrant): WebSocket;
 }

@@ -6,6 +6,13 @@ import { TALOS_IPC } from "./ipc";
 import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
+  onDesktopFrame:(handler)=>{
+    const listener=(_event:IpcRendererEvent,frame:AppProtocol.DesktopMediaFrame & {requestId:string})=>{
+      handler(frame);
+      void ipcRenderer.invoke(TALOS_IPC.desktopFrameAck,frame.requestId).catch(()=>{ /* A closed stream may have already withdrawn this acknowledgement. */ });
+    };
+    ipcRenderer.on(TALOS_IPC.desktopFrame,listener);return ()=>ipcRenderer.off(TALOS_IPC.desktopFrame,listener);
+  },
   workerIdentity: () => ipcRenderer.invoke(TALOS_IPC.workerIdentity) as Promise<AppProtocol.ApiResponse<AppProtocol.DesktopWorkerIdentityResponse>>,
   connect: () => ipcRenderer.invoke(TALOS_IPC.connect) as Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>,
   invoke: <T>(

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -30,15 +31,15 @@ export function FileImage({ fileId, label, size = "full" }: { fileId: string; la
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [connection, fileId]);
-  if (error) return <p className="text-xs text-muted" role="alert">{userVisibleErrorMessage(error, t("attachmentLoadFailed"))}</p>;
+  if (error) return <span className="block text-xs text-muted" role="alert">{userVisibleErrorMessage(error, t("attachmentLoadFailed"))}</span>;
   if (!source) return <span aria-label={t("imageLoading")} className="block h-24 w-36 animate-pulse rounded-lg bg-muted/10" role="status" />;
   return <>
     <button aria-label={t("imagePreview", { filename: label })} className="block max-w-full rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand/40" onClick={() => dialog.current?.showModal()} type="button">
       <img src={source} alt={label} className={size === "thumbnail" ? "max-h-28 max-w-[min(100%,12rem)] rounded-lg object-contain" : "max-h-96 max-w-full rounded-lg object-contain"} onError={() => setError(new Error())} />
     </button>
-    <dialog aria-label={t("imagePreview", { filename: label })} className="m-auto max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-visible bg-transparent p-0 backdrop:bg-black/70" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }} ref={dialog}>
+    {createPortal(<dialog aria-label={t("imagePreview", { filename: label })} className="m-auto max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-visible bg-transparent p-0 backdrop:bg-black/70" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }} ref={dialog}>
       <button aria-label={t("closeImagePreview")} className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-full bg-black/60 text-white outline-none focus-visible:ring-2 focus-visible:ring-white" onClick={() => dialog.current?.close()} type="button"><X aria-hidden="true" size={18} /></button>
       <img alt={label} className="max-h-[85vh] max-w-[calc(100vw-2rem)] rounded-lg object-contain" src={source} />
-    </dialog>
+    </dialog>, document.body)}
   </>;
 }

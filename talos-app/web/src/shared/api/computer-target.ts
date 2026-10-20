@@ -15,6 +15,8 @@ export function bindComputerTarget(client: TalosWebClient, nodeId: string): Talo
     workspaceDocs: { info: (request) => client.workspaceDocs.info({ ...target, ...request }),
       get: (kind, request) => client.workspaceDocs.get(kind, { ...target, ...request }), put: (kind, body, request) => client.workspaceDocs.put(kind, body, { ...target, ...request }) },
     skills: { list: (request) => client.skills.list({ include_disabled: false, ...target, ...request }), suggest: (request) => client.skills.suggest({ ...target, ...request }), read: (request) => client.skills.read({ ...target, ...request }) },
+    desktop: { ...client.desktop, open: (request) => client.desktop.open({ ...request, nodeId }) },
+    browser: { operate: (request) => client.browser.operate({ ...request, nodeId }) },
     mcp: { list: (request) => client.mcp.list({ ...target, ...request }), import: (request) => client.mcp.import({ ...target, ...request }),
       startAuthentication: (request) => client.mcp.startAuthentication({ ...target, ...request }), readAuthentication: (request) => client.mcp.readAuthentication({ ...target, ...request }), updateCredentials: (request) => client.mcp.updateCredentials({ ...target, ...request }) },
     plugin: { search: (request) => client.plugin.search({ ...target, ...request }), list: (request) => client.plugin.list({ ...target, ...request }), read: (request) => client.plugin.read({ ...target, ...request }),

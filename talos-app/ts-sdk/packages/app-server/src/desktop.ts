@@ -1,3 +1,5 @@
+import {createNativeDesktopStream} from "./desktop-stream";
+export {createNativeDesktopStream} from "./desktop-stream";
 import type { AppProtocol } from "@talos/sdk-core";
 
 import {
@@ -36,6 +38,7 @@ export interface TalosRuntimeState {
 }
 
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
+  onDesktopFrame?(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;
   onRuntimeState?(handler: (state: TalosRuntimeState) => void): () => void;
   connect?(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke: DesktopTalosInvoke;
@@ -85,7 +88,7 @@ class DesktopRendererTransport implements AppServerTransport {
 
 export class ElectronAppServerClient extends AppServerClient {
   constructor(bridge: DesktopRendererBridge, options: ElectronAppServerClientOptions = {}) {
-    super(new DesktopRendererTransport(bridge, options));
+    super(new DesktopRendererTransport(bridge, options), {connect: grant => createNativeDesktopStream(bridge, grant, options.getActorCredentials?.() ?? null)});
   }
 }
 

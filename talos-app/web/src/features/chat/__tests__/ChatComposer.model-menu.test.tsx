@@ -10,6 +10,26 @@ import { renderComposer } from "./ChatComposer.test-utils";
 describe("ChatComposer model menu", () => {
   afterEach(cleanup);
 
+  it("keeps a long model name accessible and selectable when the trigger is truncated", () => {
+    const name = "DeepSeek V4 Flash Vision (Experimental)";
+    const onReasoningLevelChange = vi.fn();
+    renderComposer({
+      models: [{ id: "deepseek:vision", name, provider: "deepseek" }],
+      selectedModel: "deepseek:vision",
+      reasoningLevel: "light",
+      onReasoningLevelChange,
+    });
+
+    const trigger = screen.getByRole("button", { name: `${name} · Light` });
+    expect(trigger).toHaveAttribute("title", `${name} · Light`);
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("button", { name: `Model: ${name}` })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Reasoning: Light" }));
+    fireEvent.click(screen.getByRole("button", { name: "Medium" }));
+    expect(onReasoningLevelChange).toHaveBeenCalledWith("medium");
+  });
+
   it("shows only a disabled none control when reasoning is unsupported", () => {
     renderComposer({ reasoningEnabled: false, reasoningLevel: "none" });
 

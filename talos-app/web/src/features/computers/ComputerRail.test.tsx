@@ -56,3 +56,8 @@ it.each([0, 1, 3])("does not claim additional computers when all %i fit in the r
   expect(screen.getByRole("button", { name: "全部 Computer" })).toBeVisible();
   expect(screen.queryByText(/\+\d/)).not.toBeInTheDocument();
 });
+
+it("leaves sidebar presentation to application navigation", async () => {
+ const { container } = await show();
+ expect(container.querySelector('[aria-controls="talos-sidebar"]')).toBeNull();
+});

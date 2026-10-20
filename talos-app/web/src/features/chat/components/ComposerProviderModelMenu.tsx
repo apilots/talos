@@ -32,7 +32,7 @@ export function ComposerProviderModelMenuRow({
       type="button"
     >
       <span className="font-medium text-ink">{label}</span>
-      <span className="min-w-0 text-right text-muted [overflow-wrap:anywhere] max-sm:col-start-1 max-sm:row-start-2 max-sm:text-left">{value}</span>
+      <span className="min-w-0 truncate text-right text-muted max-sm:col-start-1 max-sm:row-start-2 max-sm:text-left" title={value}>{value}</span>
       <ChevronRight className="text-muted/70 max-sm:col-start-2 max-sm:row-span-2 max-sm:row-start-1" size={15} />
     </button>
   );
@@ -44,7 +44,7 @@ export function ComposerProviderModelSelectionPage({ items, onChange, value }: {
   value: string | undefined;
 }) {
   return (
-    <div className="absolute right-0 top-0 w-[calc(50%-4px)] min-w-0 rounded-[1.1rem] border border-border/55 bg-card p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.075)]">
+    <div className="min-w-0 rounded-[1.1rem] border border-border/55 bg-card p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.075)]">
       <div className="max-h-64 overflow-y-auto py-0.5">
         {items.map((item) => (
           <button

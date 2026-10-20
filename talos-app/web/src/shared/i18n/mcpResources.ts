@@ -1,5 +1,6 @@
 export const mcpResources = {
   en: {
+    browser: {title:"Browser", builtIn:"Built-in", builtInSource:"Included with Talos"},
     backendHost: "Commands run on the Talos backend host. Working directories must be absolute paths on that host.",
     entriesHint: "One KEY=value per line. Use credentials for secret values.",
     argumentsHint: "One argument per line; spaces within a line are preserved.",
@@ -47,6 +48,7 @@ export const mcpResources = {
     serverCount_one: "{{count}} server", serverCount_other: "{{count}} servers",
   },
   zh: {
+    browser: {title:"浏览器", builtIn:"内置", builtInSource:"Talos 内置插件"},
     backendHost: "命令在 Talos 后端所在主机执行，工作目录必须使用该主机上的绝对路径。",
     entriesHint: "每行一个 KEY=value；秘密值请使用凭据设置。",
     argumentsHint: "每行一个参数，行内空格原样保留。",

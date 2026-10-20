@@ -13,7 +13,6 @@ import {
 } from "@/features/chat";
 import { useComputer, useComputers, useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
-import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
 import {
@@ -62,7 +61,6 @@ export function ChatSessionPage() {
   } = chat;
   const submitUserAction = useSubmitUserActionMutation(sessionId);
   const projects = projectsView.projects;
-  const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
@@ -96,21 +94,6 @@ export function ChatSessionPage() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {sessionQuery.error && !locationState ? <p role="alert" className="px-7 py-3 text-sm text-danger">{userVisibleErrorMessage(sessionQuery.error, "Unable to load this session.")}</p> : null}
-      {sidebarOpen ? (
-        <ChatContextBar
-          loading={!session}
-          onProjectClick={
-            sessionComposer.boundProject
-              ? () => {
-                  projectsView.setActiveProjectId(sessionComposer.boundProject!.id);
-                  navigate("/");
-                }
-              : undefined
-          }
-          projectName={sessionComposer.boundProject?.name}
-          sessionTitle={session?.title}
-        />
-      ) : null}
       <ChatSessionTimeline
         blocks={blocks}
         canRetryResponse={canRetryResponse}

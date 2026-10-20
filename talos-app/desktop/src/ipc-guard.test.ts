@@ -218,3 +218,10 @@ describe("desktop IPC guard", () => {
     expect(() => assertDesktopRendererInvoke("workspace/info", null)).toThrow();
   });
 });
+
+it("accepts read-only Desktop grants without a controller and rejects incomplete control grants",()=>{
+ const admission={nodeId:"worker",targetId:"managed",viewerId:"viewer",generation:"generation",inputMode:"readOnly",controllerId:null,inputEpoch:null};
+ expect(()=>assertDesktopRendererInvoke("desktop/open",admission)).not.toThrow();
+ expect(()=>assertDesktopRendererInvoke("desktop/open",{...admission,inputMode:"control"})).toThrow();
+ expect(()=>assertDesktopRendererInvoke("desktop/open",{...admission,inputMode:"control",controllerId:"controller",inputEpoch:2})).not.toThrow();
+});

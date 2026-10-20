@@ -112,9 +112,10 @@ export function ComposerProviderModelDropdowns({
           setSelectionMenu(undefined);
         }}
         ref={modelTriggerRef}
+        title={`${activeModelLabel} · ${activeEffortLabel}`}
         type="button"
       >
-        <span className="min-w-0 [overflow-wrap:anywhere]">{activeModelLabel}</span>
+        <span className="min-w-0 truncate">{activeModelLabel}</span>
         <span className="shrink-0 whitespace-nowrap text-muted">· {activeEffortLabel}</span>
         <ChevronDown
           className={cn("shrink-0 text-muted transition-transform", open && "rotate-180")}
@@ -123,7 +124,7 @@ export function ComposerProviderModelDropdowns({
       </button>
 
       {open ? (
-        <div className="absolute bottom-[calc(100%+8px)] right-0 z-50 grid w-[544px] max-w-[calc(100vw-4rem)] grid-cols-2 items-start gap-2">
+        <div className="absolute bottom-[calc(100%+8px)] right-0 z-50 grid w-[544px] max-w-full grid-cols-[repeat(auto-fill,minmax(min(100%,16.5rem),1fr))] items-start gap-2">
           <div className="rounded-[1.1rem] border border-border/55 bg-card p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.075)]">
             <ComposerProviderModelMenuRow
               active={selectionMenu === "provider"}
