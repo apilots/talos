@@ -91,7 +91,7 @@ try {
   const errors: Array<AppProtocol.ErrorCode | null> = [];
   const terminations: AppProtocol.SubscriptionTerminatedNotification[] = [];
   const controller = new DesktopAppServerController({
-    command: process.env.TALOS_APP_SERVER_BIN, env: { ...process.env, TALOS_DESKTOP_HOSTNAME: "recovery-desktop" }, desktopHost: true,
+    command: process.env.TALOS_APP_SERVER_BIN, env: { ...process.env, TALOS_DESKTOP_HOSTNAME: "recovery-desktop" }, desktopHost: true, clientKind: "desktop",
     restartDelayMs: 10,
     bridgeFactory: (options) => {
       const bridge = createDesktopMainAppServerBridge(options);

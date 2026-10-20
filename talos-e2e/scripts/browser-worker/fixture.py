@@ -308,7 +308,7 @@ def native_media(document,node,server_home):
     (home/'conf').mkdir();conf=home/'conf/talos.yaml';conf.write_text(json.dumps(desktop))
     (home/'auth').mkdir();(home/'auth/cloud-session.json').write_text(json.dumps({'schema_version':2,'cloud_api_base_url':desktop['cloud']['api_base_url'],'access_token':TOKEN,'token_type':'Bearer','expires_at_ms':int(time.time()*1000)+3600000,'last_used_at_ms':int(time.time()*1000),'user':USER}))
     (home/'auth/cloud-session.json').chmod(0o600)
-    env={key:os.environ[key] for key in ('PATH','TMPDIR','DISPLAY','XDG_RUNTIME_DIR') if key in os.environ}
+    env={key:os.environ[key] for key in ('PATH','TMPDIR','DISPLAY','XAUTHORITY','XDG_RUNTIME_DIR') if key in os.environ}
     env.update(HOME=str(home),TALOS_HOME=str(home),TALOS_CONFIG=str(conf),TALOS_RESOURCE_DIR=str(ROOT),TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN',str(ROOT/'talos-rs/target/debug/app-server')),TALOS_E2E_REMOTE_NODE=node,TALOS_SCENARIO_REPORT_DIR=str(REPORT))
     electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
     if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'

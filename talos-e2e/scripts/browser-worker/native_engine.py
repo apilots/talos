@@ -95,7 +95,7 @@ def main():
     electron = ROOT / 'talos-app/desktop/node_modules/electron/dist'
     electron /= 'Electron.app/Contents/MacOS/Electron' if sys.platform == 'darwin' else 'electron'
     env = {key: os.environ[key] for key in (
-        'PATH', 'TMPDIR', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT',
+        'PATH', 'TMPDIR', 'DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT',
     ) if key in os.environ}
     with tempfile.TemporaryDirectory(prefix='talos-native-browser-') as temporary:
         env.update(HOME=temporary, TALOS_ACCEPTANCE_CHROME='1',

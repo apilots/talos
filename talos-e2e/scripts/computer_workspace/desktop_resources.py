@@ -196,7 +196,7 @@ def run(cluster):
     require(electron.is_file(), 'Installed Electron runtime is required')
     debug_port = free_port()
     endpoint = f'http://127.0.0.1:{debug_port}'
-    env = {key: os.environ[key] for key in ('PATH', 'TMPDIR', 'DISPLAY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT') if key in os.environ}
+    env = {key: os.environ[key] for key in ('PATH', 'TMPDIR', 'DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT') if key in os.environ}
     env.update(HOME=str(home), TALOS_HOME=str(home), TALOS_CONFIG=str(home / 'conf/talos.yaml'),
                TALOS_RESOURCE_DIR=str(ROOT), TALOS_APP_SERVER_BIN=str(binary),
                TALOS_DESKTOP_RENDERER_URL=renderer.as_uri())

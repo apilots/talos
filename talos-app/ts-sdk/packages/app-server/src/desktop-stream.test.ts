@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import {describe,expect,it,vi} from 'vitest';
 import type {AppProtocol} from '@talos/sdk-core';
 import type {DesktopRendererBridge} from '@talos/sdk-app-server/desktop';

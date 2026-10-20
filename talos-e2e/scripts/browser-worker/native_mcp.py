@@ -20,7 +20,7 @@ config=fixture.config(home,fixture.free_port(),mock.server_port)
 config['gateway']['auth']=False;config['agent_node']={}
 config['cloud']['agent_base_url']='https://127.0.0.1:'+str(fixture.free_port())
 conf=home/'talos.json';conf.write_text(json.dumps(config))
-env={k:os.environ[k] for k in ['PATH','TMPDIR','SYSTEMROOT','DISPLAY','XDG_RUNTIME_DIR'] if k in os.environ}
+env={k:os.environ[k] for k in ['PATH','TMPDIR','SYSTEMROOT','DISPLAY','XAUTHORITY','XDG_RUNTIME_DIR'] if k in os.environ}
 env.update(HOME=str(home),TALOS_HOME=str(home),TALOS_CONFIG=str(conf),TALOS_RESOURCE_DIR=str(ROOT),TALOS_SCENARIO_REPORT_DIR=str(fixture.REPORT),TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN',str(ROOT/'talos-rs/target/debug/app-server')))
 electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
 if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'

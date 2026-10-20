@@ -55,10 +55,12 @@ jobs:
       - name: Fetch locked CI dependencies
         run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
 
-      - name: Install Protocol Buffer compiler
+      - name: Install contract test system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y protobuf-compiler ripgrep bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
 
       - name: Cache Rust build output
         uses: Swatinem/rust-cache@v2
