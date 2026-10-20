@@ -48,6 +48,7 @@ await new Promise<void>(resolve=>fixture.listen(0,'127.0.0.1',resolve));
 const address=fixture.address();assert(address&&typeof address!=='string');
 const host=new DesktopBrowserHost(),generation=randomUUID();
 let targetId:string|null=null;let selectedTarget:AppProtocol.BrowserTargetKind='managed';
+const modes:Partial<Record<AppProtocol.BrowserTargetKind,Record<string,unknown>>>={};
 async function operation(operation:AppProtocol.BrowserHostOperation,userId='alice',target=selectedTarget) {
  const started=Date.now(),action=operation.kind==='execute'?operation.action.kind:operation.kind;
  trace({phase:'operationStart',target,action});
@@ -137,6 +138,7 @@ try {
  await action({kind:'navigate',url:`http://127.0.0.1:${address.port}`});
  assert.match((await action({kind:'state'})).page.text??'',/Ready/);
  await operation({kind:'show'});await operation({kind:'releaseInputs'});
+ modes.managed={status:'passed',target:'managed',pageScreenshot:'native-browser.png',screenshotScope:'pageContent',dom:true,upload:true,downloadCollisionAndUuid:true,tabs:true};
  if(process.env.TALOS_ACCEPTANCE_CHROME==='1') {
   console.log('PREPARED_CHROME_CONNECT_START');
   await operation({kind:'connect'});
@@ -149,13 +151,19 @@ try {
   chromeState=await action({kind:'state'});const submit=chromeState.elements.find(e=>e.attributes.id==='hello');assert(submit);
   await action({kind:'click',element:'scoped-reference'},submit);
   chromeState=await action({kind:'state'});assert.match(chromeState.page.text??'',/Hello Chrome/);
-  await action({kind:'screenshot'});
+  const chromeScreenshot=await action({kind:'screenshot'});assert(chromeScreenshot.screenshot);
+  writeFileSync(path.join(output,'native-browser-connected.png'),Buffer.from(chromeScreenshot.screenshot,'base64'));
+  const chromeUpload=chromeState.elements.find(e=>e.attributes.id==='upload');assert(chromeUpload);
+  await action({kind:'upload',element:'scoped-reference',fileId:'turn-owned'},chromeUpload,{filename:'upload.csv',dataBase64:Buffer.from('a,1\n').toString('base64')});
+  assert.match((await action({kind:'state'})).page.text??'',/upload.csv/);
   await downloadLifecycle();
   await tabLifecycle();
   await operation({kind:'disconnect'});
   const remaining=await fetch('http://127.0.0.1:9222/json/version');assert.equal(remaining.ok,true);
+  modes.connected={status:'passed',target:'connected',pageScreenshot:'native-browser-connected.png',screenshotScope:'pageContent',dom:true,upload:true,downloadCollisionAndUuid:true,tabs:true,ownedChromeSurvivesDisconnect:true};
   console.log('PREPARED_CHROME_ACCEPTANCE_PASS');
  }
+ writeFileSync(path.join(output,'native-engine-modes.json'),JSON.stringify(modes,null,2));
  writeFileSync(path.join(output,'native-engine-acceptance.json'),JSON.stringify({navigate:true,dom:true,fill:true,click:true,screenshot:true,upload:true,download:true,downloadCollisionAndUuid:true,accountIsolation:true,tabs:true,staleTabAndDocumentReferences:true,debuggerDetachExplicitFailure:true,resetRecovery:true,sandbox:true,noProductRendererDebugger:true},null,2));
  console.log('NATIVE_ENGINE_ACCEPTANCE_PASS');
 }finally{await host.reset();console.log('NATIVE_HOST_RESET');fixture.closeAllConnections();await new Promise<void>(resolve=>fixture.close(()=>resolve()));console.log('NATIVE_FIXTURE_CLOSED');app.quit();}

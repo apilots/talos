@@ -22,6 +22,7 @@ pub trait BrowserHostPort: Send + Sync {
 #[derive(Default)]
 struct NativeState {
     target: Option<String>,
+    target_kind: Option<BrowserTargetKind>,
     owner: Option<(String, String, String, u64)>,
     elements: HashMap<String, BrowserHostElement>,
 }
@@ -123,6 +124,7 @@ impl BrowserBackend for NativeBrowser {
         Box::pin(async move {
             let mut state = self.state.lock().await;
             let identity = dispatch.identity()?;
+            let target = dispatch.target()?;
             *self
                 .user
                 .lock()
@@ -134,6 +136,16 @@ impl BrowserBackend for NativeBrowser {
                 identity.turn_id,
                 dispatch.epoch()?,
             );
+            if state.target_kind != Some(target)
+                || state
+                    .owner
+                    .as_ref()
+                    .is_some_and(|previous| previous.0 != owner.0 || previous.3 != owner.3)
+            {
+                state.target = None;
+                state.elements.clear();
+                state.target_kind = Some(target);
+            }
             if state.owner.as_ref() != Some(&owner) {
                 state.elements.clear();
                 state.owner = Some(owner);
@@ -168,7 +180,7 @@ impl BrowserBackend for NativeBrowser {
                     generation: self.generation.clone(),
                     epoch: dispatch.epoch()?,
                     user_id: identity.user_id,
-                    target: dispatch.target()?,
+                    target,
                     operation: BrowserHostOperation::Execute {
                         action: action.clone(),
                         target_id: state.target.clone(),
@@ -321,3 +333,7 @@ impl BrowserBackend for NativeBrowser {
 fn unavailable(message: &'static str) -> TalosError {
     TalosError::new(ErrorCode::ServiceUnavailable, message)
 }
+
+#[cfg(test)]
+#[path = "native_tests.rs"]
+mod tests;

@@ -1,6 +1,7 @@
 import importlib.util,json,os,subprocess,threading,uuid
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from native_engine import owned_chrome, stop_owned
 ROOT=Path(__file__).resolve().parents[3]
 spec=importlib.util.spec_from_file_location('browser_fixture',ROOT/'talos-e2e/scripts/browser-worker/fixture.py')
 fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
@@ -25,7 +26,15 @@ electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Content
 if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'
 result_file=fixture.REPORT/'native-mcp-acceptance.json';result_file.unlink(missing_ok=True)
 try:
- result=subprocess.run([str(electron),str(ROOT/'.tmp/browser-worker/native/mcp-dist')],env=env,timeout=150)
- if result.returncode:raise SystemExit(result.returncode)
- assert result_file.exists() and json.loads(result_file.read_text())['status']=='passed','Electron exited before completing native MCP acceptance'
+ with owned_chrome(fixture.REPORT, home, env):
+  native=subprocess.Popen([str(electron),str(ROOT/'.tmp/browser-worker/native/mcp-dist')],env=env,start_new_session=True)
+  try:
+   if native.wait(timeout=210):raise RuntimeError('Desktop MCP acceptance failed')
+  finally:stop_owned(native)
+  assert result_file.exists(),'Electron exited before completing native MCP acceptance'
+  result=json.loads(result_file.read_text())
+  assert result['status']=='passed' and result['selectedPreparedChromeAfterResume'],result
+  for mode in ('managed','connected'):
+   assert result['modes'][mode]['status']=='passed',result
+   assert (fixture.REPORT/result['modes'][mode]['pageScreenshot']).is_file(),result
 finally:page.shutdown();mock.shutdown()
