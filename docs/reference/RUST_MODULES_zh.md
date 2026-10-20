@@ -2,17 +2,17 @@
 
 [English](RUST_MODULES.md)
 
-当前 55 个 workspace member 及其职责以 [RUST_MODULES.md](RUST_MODULES.md) 和
+当前 58 个 workspace member 及其职责以 [RUST_MODULES.md](RUST_MODULES.md) 和
 `talos-rs/Cargo.toml` 为准。
 
 | 区域 | 数量 | Packages |
 | --- | ---: | --- |
 | Common | 11 | `talos-llm-provider`、Provider 实现、`talos-fs`、`talos-knowledge-format`、`talos-prompt`、`talos-types` |
-| Infrastructure | 6 | `talos-error`、`talos-config`、`talos-logging`、`talos-storage`、`talos-auth`、`talos-automation` |
+| Infrastructure | 7 | `talos-error`、`talos-config`、`talos-logging`、`talos-storage`、`talos-auth`、`talos-automation`、`talos-system-info` |
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
-| Action | 10 | `talos-mcp`、`talos-plugin`、`talos-skills`、Tools、Policy、Sandbox SPI 和平台沙箱 |
-| Orchestration | 12 | `agent-pb`、`agent-protocol`、`agent-client`、`talos-agent-api`、`talos-run-control`、`talos-agent-kernel`、`talos-agent-provider-kernel`、`talos-agent`、`talos-store`、`talos-service`、`talos-router`、`talos-coordinator` |
+| Action | 11 | `talos-browser`、`talos-mcp`、`talos-plugin`、`talos-skills`、Tools、Policy、Sandbox SPI 和平台沙箱 |
+| Orchestration | 13 | `agent-pb`、`agent-protocol`、`agent-client`、`talos-agent-api`、`talos-run-control`、`talos-agent-kernel`、`talos-agent-provider-kernel`、`talos-agent`、`talos-store`、`talos-sync`、`talos-service`、`talos-router`、`talos-coordinator` |
 | Gateway | 4 | `talos-gateway`、`talos-gateway-http`、`talos-app-protocol`、`talos-app-server` |
 | Application composition | 3 | `talos-base`、`talos-worker`、`talos-upgrade` |
 | Apps and SDKs | 4 | `talos-sdk`、`talos-sdk-embedded`、`talos-app-server-test-client`、`talos-tui` |
@@ -53,3 +53,5 @@
 - `bin/talos-worker/`：独立 Agent worker 二进制。
 
 Workspace member 变化时，应在更新 `Cargo.toml` 后，同步更新本文和英文版本。
+
+- `crates/action/browser/`：Worker 浏览器状态、私有调用/输入 fencing 与 Docker/native 后端；注入的宿主端口不依赖 gateway，JSONL 关联与媒体消费属于 app-server。
