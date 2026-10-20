@@ -816,14 +816,11 @@ pub async fn prepare_general_turn(
 
     let tool_selection_request =
         build_tool_selection_request(&session_id, input, phase, kernel_config);
-    let maintenance_usage = token_usage_from_session_history_compaction(
-        prompt_diagnostics.session_history_compaction.as_ref(),
-    );
-
     let messages =
         super::attachments::render_prompt_messages(&prompt_assembly, input, attachments)?;
 
     Ok(PreparedGeneralTurn {
+        browser_uploads: super::attachments::browser_uploads(&ctx.resolved_attachments),
         session_id: session_id.clone(),
         user_id: ctx.user_id.clone(),
         invocation_id,
@@ -837,7 +834,9 @@ pub async fn prepare_general_turn(
         attachment_tokens,
         image_input_enabled: model.input.contains(&talos_config::ModelInputKind::Image),
         messages,
-        maintenance_usage,
+        maintenance_usage: token_usage_from_session_history_compaction(
+            prompt_diagnostics.session_history_compaction.as_ref(),
+        ),
         tool_selection_request,
         prompt_diagnostics,
         prompt_warning_state,

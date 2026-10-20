@@ -7,7 +7,9 @@ use std::sync::Arc;
 use ts_rs::TS;
 
 mod api_error;
-pub use api_error::{ApiError, ErrorLocalization};
+pub use api_error::{
+    ApiError, BrowserCapabilityOperation, BrowserCapabilityReason, ErrorLocalization,
+};
 
 /// Public application error code shared by server and SDKs.
 ///

@@ -7,6 +7,7 @@ license.workspace = true
 description = "Talos Agent execution runtime for embedded and standalone hosts"
 
 [dependencies]
+talos-browser.workspace = true
 talos-system-info = { workspace = true }
 serde_json = { workspace = true }
 talos-memory = { workspace = true }

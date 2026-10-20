@@ -48,33 +48,10 @@ impl NodeControlRpc {
             .await
             .map_err(control_status)?;
         let (connection, output) = AgentExecutionConnection::accept(auth.clone(), input);
-        for deployment in deployments {
-            let client = RemoteAgentClient::from_connection(
-                connection.clone(),
-                deployment.agent_id.clone(),
-                auth.clone(),
-            )
-            .with_coordinator_id(self.remote_publisher.coordinator_id.clone())
-            .map_err(control_status)?;
-            if let Err(error) = self
-                .remote_publisher
-                .coordinator
-                .replace_remote_agent(auth.node_id.clone(), deployment.agent_id, Arc::new(client))
-                .await
-            {
-                connection.close();
-                self.remote_publisher.unpublish(&auth.node_id).await;
-                return Err(control_status(error));
-            }
-        }
         let environment = Arc::new(agent_client::AgentEnvironmentClient::from_connection(
             connection.clone(),
             auth.clone(),
         ));
-        self.remote_publisher
-            .coordinator
-            .register_environment(auth.node_id.clone(), environment.clone())
-            .await;
         let admission = environment.clone();
         self.nodes
             .set_registration_deletion_hook(
@@ -111,6 +88,31 @@ impl NodeControlRpc {
             self.nodes.withdraw_publication(&auth, &revoke).await;
             return Err(control_status(error));
         }
+        // Queue Connected before publishing a callable client. A caller may
+        // dispatch immediately when the coordinator exposes the environment;
+        // otherwise its Call can become the Worker's first handshake frame.
+        for deployment in deployments {
+            let client = RemoteAgentClient::from_connection(
+                connection.clone(),
+                deployment.agent_id.clone(),
+                auth.clone(),
+            )
+            .with_coordinator_id(self.remote_publisher.coordinator_id.clone())
+            .map_err(control_status)?;
+            if let Err(error) = self
+                .remote_publisher
+                .coordinator
+                .replace_remote_agent(auth.node_id.clone(), deployment.agent_id, Arc::new(client))
+                .await
+            {
+                self.nodes.withdraw_publication(&auth, &revoke).await;
+                return Err(control_status(error));
+            }
+        }
+        self.remote_publisher
+            .coordinator
+            .register_environment(auth.node_id.clone(), environment.clone())
+            .await;
         self.remote_publisher
             .connections
             .lock()

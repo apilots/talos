@@ -127,3 +127,8 @@ pub use talos_types::{
     McpCredentialBinding, McpCredentialValues, McpCredentialsChange, McpCredentialsUpdateRequest,
     McpDefinitionRef, McpOAuthConfig, McpServerImportRequest,
 };
+
+pub use talos_types::{
+    BrowserControlState, BrowserDisplayCapability, BrowserOperation, BrowserReadiness,
+    BrowserRequest, BrowserSnapshot, BrowserTarget, DesktopOpenRequest, DesktopViewGrant,
+};

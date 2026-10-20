@@ -60,6 +60,8 @@ message WorkerRpcCall {
     ImportMcpServerRequest import_mcp_server = 75;
     UpdateMcpCredentialsRequest update_mcp_credentials = 74;
     ReadMcpAuthenticationRequest read_mcp_authentication = 73;
+    BrowserRpcRequest browser = 118;
+    DesktopOpenRpcRequest desktop_open = 119;
     ListMcpServersRequest list_mcp_servers = 72;
     DisablePluginRequest disable_plugin = 71;
     EnablePluginRequest enable_plugin = 70;
@@ -136,6 +138,8 @@ message WorkerRpcResult {
     ImportMcpServerResponse import_mcp_server = 75;
     UpdateMcpCredentialsResponse update_mcp_credentials = 74;
     ReadMcpAuthenticationResponse read_mcp_authentication = 73;
+    BrowserRpcResponse browser = 118;
+    DesktopOpenRpcResponse desktop_open = 119;
     ListMcpServersResponse list_mcp_servers = 72;
     DisablePluginResponse disable_plugin = 71;
     EnablePluginResponse enable_plugin = 70;

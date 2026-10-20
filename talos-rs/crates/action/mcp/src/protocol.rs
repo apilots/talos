@@ -38,6 +38,16 @@ impl McpClient {
         request: McpCallToolRequest,
         cancellation: impl Future<Output = ()> + Send,
     ) -> TalosResult<McpCallToolResponse> {
+        self.call_tool_with_browser(request, cancellation, None)
+            .await
+    }
+
+    pub(super) async fn call_tool_with_browser(
+        &self,
+        request: McpCallToolRequest,
+        cancellation: impl Future<Output = ()> + Send,
+        browser_capability: Option<&str>,
+    ) -> TalosResult<McpCallToolResponse> {
         let service = &self.peer;
         let arguments = match request.arguments {
             Value::Object(map) => Some(map),
@@ -51,6 +61,15 @@ impl McpClient {
         };
         let mut params = CallToolRequestParams::new(request.tool_name);
         params.arguments = arguments;
+        if let Some(capability) = browser_capability {
+            params.meta = Some(
+                serde_json::Map::from_iter([(
+                    "talosBrowserInvocation".into(),
+                    Value::String(capability.into()),
+                )])
+                .into(),
+            );
+        }
         let response = request_response(
             service,
             ClientRequest::CallToolRequest(CallToolRequest::new(params)),

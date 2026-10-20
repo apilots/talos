@@ -1,4 +1,9 @@
 //! Projections of the existing environment DTOs; no JSON business envelopes.
+pub use crate::desktop_pb::{
+    decode_desktop_open_params, decode_desktop_open_result, encode_desktop_open_params,
+    encode_desktop_open_result,
+};
+pub use crate::environment_browser_pb::*;
 pub use crate::environment_config_pb::*;
 pub use crate::environment_docs_pb::*;
 pub use crate::environment_memory_pb::*;

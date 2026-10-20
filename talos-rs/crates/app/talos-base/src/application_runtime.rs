@@ -75,7 +75,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         Arc::new(SessionMemoryProgress::new(session_store_impl.clone()));
     let tool_image_store: Arc<dyn ToolImageStore> =
         Arc::new(super::tool_images::ToolImages(file_service.clone()));
-    let worker = TalosWorker::build(
+    let worker = TalosWorker::build_with_browser_host(
         config.clone(),
         TalosWorkerResources {
             session_history_reader: session_history_reader.clone(),
@@ -83,6 +83,11 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             attachment_reader: file_service.clone(),
             tool_image_store: tool_image_store.clone(),
             agent_control: None,
+        },
+        if std::env::var_os("TALOS_DESKTOP_HOSTNAME").is_some() {
+            talos_types::BrowserHostKind::Desktop
+        } else {
+            talos_types::BrowserHostKind::Server
         },
     )
     .await?;
@@ -227,6 +232,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             config.talos_paths().talos_home,
         ))?;
     service.set_coordinator_id(sync.peer_id().into());
+    service
+        .set_desktop_ingress(super::application_sync_computers::gateway_client(&config).await?)?;
     let sync_stores = Arc::new(super::application_sync::ApplicationSyncStores {
         storage: storage.clone(),
         sessions: session_store_impl.clone(),

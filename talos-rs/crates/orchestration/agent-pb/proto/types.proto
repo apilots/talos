@@ -209,6 +209,7 @@ message ApiError {
   ErrorCode code = 1;
   string message = 2;
   oneof localization {
+    BrowserCapabilityUnavailable browser_capability_unavailable = 8;
     Empty computer_deletion_active = 5;
     Empty computer_registration_removed = 6;
     Empty computer_deletion_unverified = 7;
@@ -421,3 +422,7 @@ message SessionHistoryCursor {
   optional string completed_turn_id = 2;
   uint64 completed_event_sequence = 3;
 }
+
+message BrowserCapabilityUnavailable { BrowserCapabilityOperation operation = 1; BrowserCapabilityReason reason = 2; }
+enum BrowserCapabilityOperation { BROWSER_CAPABILITY_OPERATION_UNSPECIFIED = 0; BROWSER_CAPABILITY_OPERATION_REMOTE_DESKTOP = 1; BROWSER_CAPABILITY_OPERATION_TAKE_CONTROL = 2; BROWSER_CAPABILITY_OPERATION_RELEASE_CONTROL = 3; BROWSER_CAPABILITY_OPERATION_OPEN_LOCAL = 4; }
+enum BrowserCapabilityReason { BROWSER_CAPABILITY_REASON_UNSPECIFIED = 0; BROWSER_CAPABILITY_REASON_NATIVE_HOST = 1; BROWSER_CAPABILITY_REASON_NOT_BUNDLED = 2; BROWSER_CAPABILITY_REASON_HOST_POLICY = 3; BROWSER_CAPABILITY_REASON_UNSUPPORTED_VERSION = 4; BROWSER_CAPABILITY_REASON_CLIENT_MISMATCH = 5; }

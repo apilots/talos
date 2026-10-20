@@ -54,6 +54,12 @@ impl PluginManager {
                 let existing = crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(
                     &install.installed_path,
                 )?;
+                if install.plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "The built-in Browser does not accept MCP credential or program edits.",
+                    ));
+                }
                 let target_matches = match (&existing.transport, &server.transport) {
                     (
                         talos_types::McpTransportDefinition::Stdio {
@@ -107,6 +113,12 @@ impl PluginManager {
         &self,
         mut server: talos_types::McpServerDefinition,
     ) -> TalosResult<(PluginInstallId, talos_types::McpServerDefinition)> {
+        if server.name == talos_types::BUILTIN_BROWSER_SERVER_NAME {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "This MCP name is reserved for the built-in Browser.",
+            ));
+        }
         let candidate = crate::installer::manual_mcp_candidate(server.clone())?;
         let path =
             crate::installer::final_install_dir(&self.state, PluginKind::McpServer, &server.name)?;

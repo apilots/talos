@@ -9,6 +9,12 @@ use crate::errors::AppServerErrorBody;
 pub enum ClientMethod {
     #[serde(rename = "initialize")]
     Initialize,
+    #[serde(rename = "desktop/streamOpen")]
+    DesktopStreamOpen,
+    #[serde(rename = "desktop/streamSend")]
+    DesktopStreamSend,
+    #[serde(rename = "desktop/streamClose")]
+    DesktopStreamClose,
     #[serde(rename = "desktop/workerIdentity")]
     DesktopWorkerIdentity,
     #[serde(rename = "desktop/workerEnroll")]
@@ -151,6 +157,10 @@ pub enum ClientMethod {
     PluginSourceRemove,
     #[serde(rename = "plugin/search")]
     PluginSearch,
+    #[serde(rename = "browser/operate")]
+    Browser,
+    #[serde(rename = "desktop/open")]
+    DesktopOpen,
     #[serde(rename = "mcp/server/list")]
     McpServerList,
     #[serde(rename = "mcp/server/credentials/update")]
@@ -199,6 +209,9 @@ impl ClientMethod {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Initialize => "initialize",
+            Self::DesktopStreamOpen => "desktop/streamOpen",
+            Self::DesktopStreamSend => "desktop/streamSend",
+            Self::DesktopStreamClose => "desktop/streamClose",
             Self::DesktopWorkerIdentity => "desktop/workerIdentity",
             Self::DesktopWorkerEnroll => "desktop/workerEnroll",
             Self::SyncMetrics => "sync/metrics",
@@ -270,6 +283,8 @@ impl ClientMethod {
             Self::PluginSourceRefresh => "plugin/source/refresh",
             Self::PluginSourceRemove => "plugin/source/remove",
             Self::PluginSearch => "plugin/search",
+            Self::DesktopOpen => "desktop/open",
+            Self::Browser => "browser/operate",
             Self::McpServerList => "mcp/server/list",
             Self::McpCredentialsUpdate => "mcp/server/credentials/update",
             Self::McpAuthenticationStart => "mcp/server/auth/start",
@@ -307,6 +322,9 @@ impl FromStr for ClientMethod {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "initialize" => Ok(Self::Initialize),
+            "desktop/streamOpen" => Ok(Self::DesktopStreamOpen),
+            "desktop/streamSend" => Ok(Self::DesktopStreamSend),
+            "desktop/streamClose" => Ok(Self::DesktopStreamClose),
             "desktop/workerIdentity" => Ok(Self::DesktopWorkerIdentity),
             "desktop/workerEnroll" => Ok(Self::DesktopWorkerEnroll),
             "sync/metrics" => Ok(Self::SyncMetrics),
@@ -378,6 +396,8 @@ impl FromStr for ClientMethod {
             "plugin/source/refresh" => Ok(Self::PluginSourceRefresh),
             "plugin/source/remove" => Ok(Self::PluginSourceRemove),
             "plugin/search" => Ok(Self::PluginSearch),
+            "desktop/open" => Ok(Self::DesktopOpen),
+            "browser/operate" => Ok(Self::Browser),
             "mcp/server/list" => Ok(Self::McpServerList),
             "mcp/server/credentials/update" => Ok(Self::McpCredentialsUpdate),
             "mcp/server/auth/start" => Ok(Self::McpAuthenticationStart),

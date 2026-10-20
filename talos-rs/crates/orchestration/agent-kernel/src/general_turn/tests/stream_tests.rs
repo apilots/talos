@@ -989,6 +989,7 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
             execution_mode: ToolExecutionMode::Sequential,
             max_parallelism: 1,
             execution_context: ToolExecutionContext {
+                browser_uploads: Vec::new(),
                 session_id: "ordered-stream".to_string(),
                 turn_id: "turn-ordered-stream".to_string(),
                 agent_id: "agent-1".to_string(),
@@ -1246,6 +1247,7 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     let registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(registry.as_ref());
     let execution_context = ToolExecutionContext {
+        browser_uploads: Vec::new(),
         session_id: "agent-a1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-a1".to_string(),

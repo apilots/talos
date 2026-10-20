@@ -209,7 +209,18 @@ pub(crate) async fn prepare_registered_worker(
     )
     .await?;
     let shared_resources = Arc::new(resources.clone());
-    let worker = TalosWorker::build(
+    let browser_resources = std::env::var_os("TALOS_RESOURCE_DIR")
+        .map(std::path::PathBuf::from)
+        .map(|path| path.join("browser"));
+    let host = if browser_resources
+        .as_ref()
+        .is_some_and(|path| path.join("runtime.json").is_file())
+    {
+        talos_types::BrowserHostKind::Docker
+    } else {
+        talos_types::BrowserHostKind::Native
+    };
+    let worker = TalosWorker::build_with_browser_host(
         config.clone(),
         TalosWorkerResources {
             session_history_reader: shared_resources.clone(),
@@ -218,10 +229,29 @@ pub(crate) async fn prepare_registered_worker(
             tool_image_store: shared_resources.clone(),
             agent_control: Some(shared_resources),
         },
+        host,
     )
     .await?;
+    if let Some(browser_resources) =
+        browser_resources.filter(|_| host == talos_types::BrowserHostKind::Docker)
+    {
+        worker
+            .browser()
+            .set_backend(talos_browser::ManagedBrowser::packaged(
+                config.talos_paths().talos_home.clone(),
+                &browser_resources,
+            )?)?;
+        let media = resources.clone();
+        worker
+            .browser()
+            .set_desktop_connector(Arc::new(move |request| {
+                let media = media.clone();
+                Box::pin(async move { media.open_desktop_media(request).await })
+            }))?;
+    }
     worker.use_remote_resource_rpc(resources.clone());
     let authorization_owner = worker.plugin_manager();
+    let browser_owner = worker.browser();
     let adapter = AgentHarnessRpcAdapter::new(
         runner.node_id.clone(),
         worker.config(),
@@ -230,7 +260,10 @@ pub(crate) async fn prepare_registered_worker(
     .with_environment(worker.environment())
     .with_resource_binder(worker.resource_binder())
     .with_registration_revocation_hook(Arc::new(move || {
-        authorization_owner.cancel_remote_mcp_authorizations()
+        authorization_owner.cancel_remote_mcp_authorizations();
+        if let Err(error) = browser_owner.registration_revoked() {
+            talos_logging::report_error(&error);
+        }
     }));
     let observer = lease_observer(
         adapter.clone(),

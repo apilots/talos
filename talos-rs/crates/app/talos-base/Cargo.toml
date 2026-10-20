@@ -10,6 +10,8 @@ license.workspace = true
 e2e = []
 
 [dependencies]
+base64.workspace = true
+talos-browser.workspace = true
 talos-sync = { workspace = true }
 talos-sync-sdk = { workspace = true }
 talos-sync-types = { workspace = true }

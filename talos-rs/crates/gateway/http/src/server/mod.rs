@@ -5,6 +5,7 @@ mod computers;
 mod errors;
 mod sync;
 
+mod desktop;
 #[cfg(test)]
 #[path = "error_contract_tests.rs"]
 mod error_contract_tests;
@@ -68,7 +69,7 @@ use self::misc::{
     put_llm_handler, reload_config_handler, shutdown_signal,
 };
 use self::plugin::{
-    add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
+    add_plugin_source_handler, browser_handler, disable_plugin_handler, enable_plugin_handler,
     import_mcp_server_handler, install_plugin_handler, list_mcp_servers_handler,
     list_plugin_sources_handler, list_plugins_handler, read_mcp_authentication_handler,
     read_plugin_handler, refresh_plugin_source_handler, remove_plugin_source_handler,
@@ -248,6 +249,9 @@ impl HttpServer {
             )
             .route("/v1/plugin/search", post(search_plugins_handler))
             .route("/v1/mcp/oauth/callback", get(mcp_oauth::callback_handler))
+            .route("/v1/browser", post(browser_handler))
+            .route("/v1/desktop/open", post(desktop::open))
+            .route("/v1/desktop/stream", get(desktop::stream))
             .route("/v1/mcp/servers", get(list_mcp_servers_handler))
             .route("/v1/mcp/servers/import", post(import_mcp_server_handler))
             .route(

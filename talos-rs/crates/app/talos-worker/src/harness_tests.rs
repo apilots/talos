@@ -21,6 +21,7 @@ async fn config_commit_is_excluded_until_the_actual_invocation_settles() {
             settlement: AgentRunSettlementReceiver::new(settlement),
         },
         gate.clone().read_owned().await,
+        None,
     );
     execution.admission.permit.consume().await.unwrap();
     let error = config.reload_config(Default::default()).await.unwrap_err();

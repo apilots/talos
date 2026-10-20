@@ -41,6 +41,8 @@ pub use sync_management::ManagementSync;
 mod active_commands;
 #[path = "config.rs"]
 mod config;
+#[path = "desktop.rs"]
+mod desktop;
 #[path = "environment.rs"]
 mod environment;
 #[path = "interrupt.rs"]
@@ -56,6 +58,9 @@ mod project_fs;
 
 #[derive(Clone)]
 pub struct TalosService {
+    desktop_ingress: Arc<std::sync::RwLock<Option<agent_client::AgentNodeClient>>>,
+    desktop_routes:
+        Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], desktop::ViewerRoute>>>,
     sync_management: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementSync>>>>,
     oauth_relay_origin: String,
     oauth_routes:
@@ -176,6 +181,8 @@ impl TalosService {
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
             oauth_routes: Arc::default(),
             oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
+            desktop_ingress: Default::default(),
+            desktop_routes: Default::default(),
             nodes,
             access: ResourceAccessService::with_services(
                 coordinator.clone(),

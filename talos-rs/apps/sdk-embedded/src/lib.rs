@@ -1,3 +1,15 @@
+//! In-process SDK adapter for the product-managed application runtime.
+//!
+//! The host composes the runtime with `talos_base::run_embedded_app_server` and
+//! keeps its logging guard alive. The bundled Browser MCP launches the host's
+//! current executable with `--browser-mcp`; before ordinary argument parsing,
+//! authentication, logging or runtime startup, the host must dispatch that
+//! argument to `talos_base::run_browser_mcp` and return when it finishes.
+//! This hidden stdio entrypoint negotiates MCP without an account or model and
+//! leaves browser execution and authorization with the existing Worker owner.
+//! `EmbeddedServerClient` only adapts an already composed runtime; it cannot
+//! install executable entrypoints on behalf of an embedding application.
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;

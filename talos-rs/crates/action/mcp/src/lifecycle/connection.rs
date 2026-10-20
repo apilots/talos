@@ -67,15 +67,54 @@ impl McpConnection {
         request: McpCallToolRequest,
         cancellation: impl Future<Output = ()> + Send,
     ) -> TalosResult<McpCallToolResponse> {
+        self.call_tool_inner(request, cancellation, None).await
+    }
+
+    pub fn is_builtin_browser(&self) -> bool {
+        self.name() == talos_types::BUILTIN_BROWSER_SERVER_NAME
+            && matches!(&self.server.descriptor.source,
+                talos_types::McpServerSource::Plugin { plugin_id, .. }
+                if plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID)
+    }
+
+    /// Private executor capability; it is never accepted as a tool argument.
+    pub async fn call_builtin_browser_tool(
+        &self,
+        request: McpCallToolRequest,
+        capability: &str,
+        cancellation: impl Future<Output = ()> + Send,
+    ) -> TalosResult<McpCallToolResponse> {
+        if !self.is_builtin_browser() {
+            return Err(TalosError::new(
+                ErrorCode::PermissionDenied,
+                "Only the bundled Browser may receive Worker invocation authority.",
+            ));
+        }
+        self.call_tool_inner(request, cancellation, Some(capability))
+            .await
+    }
+
+    async fn call_tool_inner(
+        &self,
+        request: McpCallToolRequest,
+        cancellation: impl Future<Output = ()> + Send,
+        capability: Option<&str>,
+    ) -> TalosResult<McpCallToolResponse> {
         let _call = self.admit()?;
         if request.server_name != self.name()
             || !self.tools.iter().any(|tool| tool.name == request.tool_name)
         {
             return Err(not_ready());
         }
-        self.client
-            .call_tool(request, self.cancelled(cancellation))
-            .await
+        if let Some(capability) = capability {
+            self.client
+                .call_tool_with_browser(request, self.cancelled(cancellation), Some(capability))
+                .await
+        } else {
+            self.client
+                .call_tool(request, self.cancelled(cancellation))
+                .await
+        }
     }
 
     pub async fn read_resource(

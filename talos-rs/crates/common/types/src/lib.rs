@@ -6,6 +6,7 @@ pub use talos_error::{TalosError, TalosResult};
 
 pub mod agent_input;
 pub mod auth_api;
+pub mod browser;
 pub mod config_api;
 pub mod event_api;
 pub mod file_api;
@@ -32,6 +33,7 @@ pub mod user_action;
 
 pub use agent_input::*;
 pub use auth_api::*;
+pub use browser::*;
 pub use config_api::*;
 pub use event_api::*;
 pub use file_api::*;
@@ -71,3 +73,11 @@ mod sync;
 mod sync_metrics;
 pub use sync::{SyncConnectionState, SyncEnableRequest, SyncStatusResponse};
 pub use sync_metrics::{SyncMetadataCounts, SyncMetricsResponse, SyncPeerMetrics};
+
+mod browser_action;
+pub use browser_action::*;
+mod browser_host;
+pub use browser_host::*;
+
+mod tool_file;
+pub use tool_file::{ToolInputFile, ToolOutputFile};

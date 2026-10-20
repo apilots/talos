@@ -23,6 +23,8 @@ pub use resources::{NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc
 mod connect;
 #[path = "agent_coordinator_rpc.rs"]
 mod coordinator_rpc;
+#[path = "agent_desktop_rpc.rs"]
+mod desktop;
 #[path = "agent_peer_file_rpc.rs"]
 mod peer_file_rpc;
 #[path = "agent_resource_routing.rs"]
@@ -139,6 +141,11 @@ impl NodeRpcServer {
                 shutdown.clone(),
             ));
         let management = NodeManagementRpc::new(self.nodes, self.auth_service);
+        let desktop = pb::agent_desktop_media_server::AgentDesktopMediaServer::new(
+            desktop::DesktopMediaRpc::new(management.clone(), shutdown.clone()),
+        )
+        .max_decoding_message_size(65 * 1024)
+        .max_encoding_message_size(65 * 1024);
         let peer_files = pb::agent_peer_file_rpc_server::AgentPeerFileRpcServer::new(
             peer_file_rpc::PeerFileRpc {
                 management: management.clone(),
@@ -170,6 +177,7 @@ impl NodeRpcServer {
             })?
             .add_service(control)
             .add_service(management)
+            .add_service(desktop)
             .add_service(pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(callers))
             .add_service(peer_files)
             .add_service(session_data)

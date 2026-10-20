@@ -120,3 +120,7 @@ pub fn register_subagent_tools(registry: &ToolRegistry) {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+pub use talos_types::ToolInputFile;
+
+pub use talos_types::ToolOutputFile;

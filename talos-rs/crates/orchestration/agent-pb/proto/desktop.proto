@@ -1,0 +1,32 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "auth.proto";
+import "types.proto";
+
+// Media never travels in Connect, Sync or a task queue. The Worker initiates
+// its stream at its configured trusted ingress. Consumer streams use account
+// authentication plus a single-use, 30-second reservation ticket.
+service AgentDesktopMedia {
+  rpc Reserve(DesktopReserveRequest) returns (DesktopReserveResponse);
+  rpc Worker(stream DesktopWorkerFrame) returns (stream DesktopChunk);
+  rpc Viewer(stream DesktopViewerFrame) returns (stream DesktopChunk);
+}
+enum DesktopInputMode { DESKTOP_INPUT_MODE_UNSPECIFIED = 0; DESKTOP_INPUT_MODE_READ_ONLY = 1; DESKTOP_INPUT_MODE_CONTROL = 2; }
+message DesktopBinding {
+  string stream_id = 1;
+  string target_id = 2;
+  string viewer_id = 3;
+  string generation = 4;
+  DesktopInputMode input_mode = 5;
+  optional string controller_id = 6;
+  optional uint64 input_epoch = 7;
+}
+message DesktopReserveRequest { string node_id = 1; DesktopBinding binding = 2; }
+message DesktopReservation { string nonce = 1; string ticket = 2; int64 expires_at = 3; }
+message DesktopReserveResponse { oneof result { DesktopReservation value = 1; Failure failure = 2; } }
+message DesktopWorkerHello { NodeAuth auth = 1; DesktopBinding binding = 2; string nonce = 3; }
+message DesktopViewerHello { string node_id = 1; string stream_id = 2; string ticket = 3; }
+message DesktopChunk { bytes data = 1; }
+message DesktopWorkerFrame { oneof body { DesktopWorkerHello hello = 1; DesktopChunk chunk = 2; } }
+message DesktopViewerFrame { oneof body { DesktopViewerHello hello = 1; DesktopChunk chunk = 2; } }
+message WorkerDesktopOpenParams { DesktopBinding binding = 1; string nonce = 2; }

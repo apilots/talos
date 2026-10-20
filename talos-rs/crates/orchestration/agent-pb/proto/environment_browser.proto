@@ -1,0 +1,19 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "types.proto";
+enum BrowserHostKind { BROWSER_HOST_KIND_UNSPECIFIED = 0; BROWSER_HOST_KIND_DOCKER = 1; BROWSER_HOST_KIND_DESKTOP = 2; BROWSER_HOST_KIND_NATIVE = 3; BROWSER_HOST_KIND_SERVER = 4; }
+enum BrowserTargetKind { BROWSER_TARGET_KIND_UNSPECIFIED = 0; BROWSER_TARGET_KIND_MANAGED = 1; BROWSER_TARGET_KIND_CONNECTED = 2; }
+enum BrowserDisplayUnavailableReason { BROWSER_DISPLAY_UNAVAILABLE_REASON_UNSPECIFIED = 0; BROWSER_DISPLAY_UNAVAILABLE_REASON_NATIVE_HOST = 1; BROWSER_DISPLAY_UNAVAILABLE_REASON_NOT_BUNDLED = 2; BROWSER_DISPLAY_UNAVAILABLE_REASON_HOST_POLICY = 3; BROWSER_DISPLAY_UNAVAILABLE_REASON_UNSUPPORTED_VERSION = 4; }
+enum BrowserLocalOpenCapability { BROWSER_LOCAL_OPEN_CAPABILITY_UNSPECIFIED = 0; BROWSER_LOCAL_OPEN_CAPABILITY_DESKTOP_OWNED = 1; BROWSER_LOCAL_OPEN_CAPABILITY_EXTERNAL_USER_WINDOW = 2; BROWSER_LOCAL_OPEN_CAPABILITY_UNAVAILABLE = 3; }
+enum BrowserSuspensionReason { BROWSER_SUSPENSION_REASON_UNSPECIFIED = 0; BROWSER_SUSPENSION_REASON_USER_PAUSED = 1; BROWSER_SUSPENSION_REASON_VIEWER_DISCONNECTED = 2; BROWSER_SUSPENSION_REASON_WORKER_RESTARTED = 3; BROWSER_SUSPENSION_REASON_TAKEOVER_FAILED = 4; BROWSER_SUSPENSION_REASON_PLUGIN_DISABLED = 5; }
+message BrowserReadiness { oneof value { Empty stopped = 1; Empty starting = 2; Empty ready = 3; Empty needs_connection = 4; ApiError unavailable = 5; } }
+message BrowserDisplayCapability { oneof value { string docker_desktop = 1; BrowserDisplayUnavailableReason unavailable = 2; } }
+message BrowserTarget { string target_id = 1; string display_name = 2; BrowserTargetKind kind = 3; BrowserReadiness readiness = 4; BrowserLocalOpenCapability local_open = 5; }
+message BrowserAgentOwner { string session_id = 1; string turn_id = 2; }
+message BrowserControlOwner { oneof value { Empty idle = 1; BrowserAgentOwner agent = 2; string handing_over = 3; string human = 4; BrowserSuspensionReason suspended = 5; } }
+message BrowserControlState { string generation = 1; uint64 revision = 2; uint64 epoch = 3; BrowserControlOwner owner = 4; }
+message BrowserSnapshot { bool enabled = 1; BrowserHostKind host = 2; optional string selected_target_id = 3; repeated BrowserTarget targets = 4; BrowserDisplayCapability display = 5; BrowserControlState control = 6; }
+message BrowserSelectTarget { string target_id = 1; uint64 expected_revision = 2; }
+message BrowserExpectedRevision { uint64 expected_revision = 1; }
+message BrowserReleaseControl { string controller_id = 1; uint64 expected_revision = 2; }
+message BrowserParams { oneof operation { Empty read = 1; BrowserSelectTarget select_target = 2; BrowserExpectedRevision connect = 3; BrowserExpectedRevision disconnect = 4; BrowserExpectedRevision pause = 5; BrowserExpectedRevision resume = 6; BrowserExpectedRevision take_control = 7; BrowserReleaseControl release_control = 8; Empty open_local = 9; } }

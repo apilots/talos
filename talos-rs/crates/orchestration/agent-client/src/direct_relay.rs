@@ -172,6 +172,8 @@ impl AgentEnvironmentClient {
                 Call::DisablePlugin(value) => {
                     unary!(value, environment, disable_plugin, DisablePlugin)
                 }
+                Call::DesktopOpen(value) => unary!(value, environment, desktop_open, DesktopOpen),
+                Call::Browser(value) => unary!(value, environment, browser, Browser),
                 Call::ListMcpServers(value) => {
                     unary!(value, environment, list_mcp_servers, ListMcpServers)
                 }

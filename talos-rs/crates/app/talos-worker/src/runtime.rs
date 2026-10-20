@@ -46,12 +46,22 @@ pub struct TalosWorker {
     memory_service: MemoryService,
     user_workspace_memory: Arc<UserWorkspaceMemoryService>,
     mcp: Arc<talos_mcp::TalosMcpRuntime>,
+    browser: Arc<talos_browser::BrowserRuntime>,
     mcp_credentials: McpCredentialStore,
     config_service: talos_service::ConfigService,
 }
 
 impl TalosWorker {
     pub async fn build(config: Config, resources: TalosWorkerResources) -> TalosResult<Self> {
+        Self::build_with_browser_host(config, resources, talos_types::BrowserHostKind::Native).await
+    }
+
+    /// Host capability is selected by the composition root, never model arguments.
+    pub async fn build_with_browser_host(
+        config: Config,
+        resources: TalosWorkerResources,
+        host: talos_types::BrowserHostKind,
+    ) -> TalosResult<Self> {
         let active_config = Arc::new(RwLock::new(config.clone()));
         let provider_config = active_config.clone();
         let provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
@@ -80,41 +90,59 @@ impl TalosWorker {
             }
         }
 
-        let mcp = Arc::new(talos_mcp::TalosMcpRuntime::new());
+        let manager = talos_plugin::PluginManager::with_state_store(
+            config.agent.kernel.plugins.clone(),
+            talos_plugin::PluginStateStore::new(config.talos_paths().talos_home.join("plugins")),
+        )
+        .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes);
+        let executable = std::env::current_exe().map_err(|error| {
+            TalosError::internal_with_source(
+                "Failed to locate the bundled Browser executable.",
+                error,
+            )
+        })?;
+        manager.provision_builtin_browser(&executable)?;
+        let enabled_manager = manager.clone();
+        let browser = talos_browser::BrowserRuntime::new(
+            config.talos_paths().talos_home.clone(),
+            host,
+            Arc::new(move || enabled_manager.builtin_browser_enabled()),
+        )?;
+        #[cfg(unix)]
+        let socket = Some(browser.start_ipc(&config.talos_paths().talos_home).await?);
+        #[cfg(not(unix))]
+        let socket = None;
+        let mcp = Arc::new(talos_mcp::TalosMcpRuntime::with_builtin_browser_socket(
+            socket,
+        ));
         tool_registry.register_mcp_server(Arc::new(
-            talos_tools::McpConnectionManager::from_runtime(mcp.clone()),
+            talos_tools::McpConnectionManager::from_runtime(mcp.clone())
+                .with_browser(browser.clone()),
         ));
         let mcp_credentials =
             McpCredentialStore::new(config.talos_paths().talos_home.join("mcp-credentials"));
         let mcp_for_changes = mcp.clone();
         let credentials_for_changes = mcp_credentials.clone();
         let config_for_changes = active_config.clone();
-        let plugin_manager = PluginManagerService::with_manager(
-            talos_plugin::PluginManager::with_state_store(
-                config.agent.kernel.plugins.clone(),
-                talos_plugin::PluginStateStore::new(
-                    config.talos_paths().talos_home.join("plugins"),
-                ),
-            )
-            .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes),
-        )
-        .with_mcp(
-            mcp.clone(),
-            Arc::new(move |plugins| {
-                let current = config_for_changes
-                    .read()
-                    .expect("worker config lock poisoned");
-                let prepared = prepare_mcp(
-                    &mcp_for_changes,
-                    &current.agent.kernel,
-                    plugins,
-                    &credentials_for_changes,
-                )?;
-                Ok(Box::new(move || prepared.publish()))
-            }),
-            active_config.clone(),
-            mcp_credentials.clone(),
-        );
+        let plugin_manager = PluginManagerService::with_manager(manager)
+            .with_browser(browser.clone())
+            .with_mcp(
+                mcp.clone(),
+                Arc::new(move |plugins| {
+                    let current = config_for_changes
+                        .read()
+                        .expect("worker config lock poisoned");
+                    let prepared = prepare_mcp(
+                        &mcp_for_changes,
+                        &current.agent.kernel,
+                        plugins,
+                        &credentials_for_changes,
+                    )?;
+                    Ok(Box::new(move || prepared.publish()))
+                }),
+                active_config.clone(),
+                mcp_credentials.clone(),
+            );
         let skill_roots_resolver = Arc::new(WorkerSkillRootsResolver {
             plugins: plugin_manager.clone(),
         });
@@ -170,6 +198,7 @@ impl TalosWorker {
                     execution: create_agent_harness(definition.id, provider),
                     workspace_memory: user_workspace_memory.clone(),
                     execution_gate: plugin_manager.execution_gate(),
+                    browser: browser.clone(),
                     config: active_config.clone(),
                 }) as Arc<dyn AgentHarness>,
             ));
@@ -202,6 +231,7 @@ impl TalosWorker {
             memory_service,
             user_workspace_memory,
             mcp,
+            browser,
             mcp_credentials,
             config_service,
         })
@@ -217,8 +247,13 @@ impl TalosWorker {
             .with_user_workspace_memory(self.user_workspace_memory.clone())
             .with_memory_service(self.memory_service.clone())
             .with_plugin_manager(self.plugin_manager.clone())
-            .with_config_service(self.config_service.clone()),
+            .with_config_service(self.config_service.clone())
+            .with_browser(self.browser.clone()),
         )
+    }
+
+    pub fn browser(&self) -> Arc<talos_browser::BrowserRuntime> {
+        self.browser.clone()
     }
 
     pub fn config_service(&self) -> talos_service::ConfigService {
@@ -284,7 +319,14 @@ impl TalosWorker {
                 .inspect_err(talos_logging::report_error);
             result = result.and(stopped);
         }
-        result.and(self.plugin_manager.shutdown_mcp().await)
+        let browser = self
+            .browser
+            .shutdown()
+            .await
+            .inspect_err(talos_logging::report_error);
+        result
+            .and(browser)
+            .and(self.plugin_manager.shutdown_mcp().await)
     }
 }
 

@@ -48,6 +48,24 @@ impl schemars::JsonSchema for ApiError {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowserCapabilityOperation {
+    RemoteDesktop,
+    TakeControl,
+    ReleaseControl,
+    OpenLocal,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BrowserCapabilityReason {
+    NativeHost,
+    NotBundled,
+    HostPolicy,
+    UnsupportedVersion,
+    ClientMismatch,
+}
+
 /// Exact business explanations with real localized consumers.
 /// Extend only when a domain has a stable, parameterized message; never add
 /// arbitrary translation keys, diagnostic data, or presentation policy here.
@@ -55,6 +73,10 @@ impl schemars::JsonSchema for ApiError {
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type", rename_all = "camelCase")]
 pub enum ErrorLocalization {
+    BrowserCapabilityUnavailable {
+        operation: BrowserCapabilityOperation,
+        reason: BrowserCapabilityReason,
+    },
     ComputerDeletionActive,
     ComputerRegistrationRemoved,
     ComputerDeletionUnverified,
@@ -73,6 +95,7 @@ pub enum ErrorLocalization {
 impl ErrorLocalization {
     pub fn code(&self) -> ErrorCode {
         match self {
+            Self::BrowserCapabilityUnavailable { .. } => ErrorCode::InvalidRequest,
             Self::ComputerDeletionActive => ErrorCode::ActiveTurnRunning,
             Self::ComputerRegistrationRemoved => ErrorCode::ResourceExpired,
             Self::ComputerDeletionUnverified => ErrorCode::ServiceUnavailable,
@@ -83,6 +106,11 @@ impl ErrorLocalization {
 
     pub fn english_message(&self) -> String {
         match self {
+            Self::BrowserCapabilityUnavailable { operation, reason } => {
+                let operation = match operation { BrowserCapabilityOperation::RemoteDesktop=>"Remote desktop", BrowserCapabilityOperation::TakeControl=>"Remote control", BrowserCapabilityOperation::ReleaseControl=>"Releasing remote control", BrowserCapabilityOperation::OpenLocal=>"Local browser presentation" };
+                let reason = match reason { BrowserCapabilityReason::NativeHost=>"this Computer does not share its native desktop", BrowserCapabilityReason::NotBundled=>"the required runtime is not bundled on this Computer", BrowserCapabilityReason::HostPolicy=>"the host policy does not allow it", BrowserCapabilityReason::UnsupportedVersion=>"this runtime version does not support it", BrowserCapabilityReason::ClientMismatch=>"this client is not the browser's Desktop host" };
+                format!("{operation} is unavailable: {reason}.")
+            },
             Self::ComputerDeletionActive => "Finish or stop this Computer's active Turns before removing its registration.".into(),
             Self::ComputerRegistrationRemoved => "This Computer registration was removed. Use Connect a computer to enroll again.".into(),
             Self::ComputerDeletionUnverified => "Computer admission cannot be verified yet. Retry after its connection is restored or its lease expires.".into(),
@@ -97,6 +125,7 @@ impl ErrorLocalization {
 
     fn is_valid(&self) -> bool {
         match self {
+            Self::BrowserCapabilityUnavailable { .. } => true,
             Self::ComputerDeletionActive
             | Self::ComputerRegistrationRemoved
             | Self::ComputerDeletionUnverified => true,

@@ -85,6 +85,8 @@ impl AgentHarnessRpcAdapter {
             Call::UninstallPlugin(value) => unary!(value, uninstall_plugin, UninstallPlugin),
             Call::EnablePlugin(value) => unary!(value, enable_plugin, EnablePlugin),
             Call::DisablePlugin(value) => unary!(value, disable_plugin, DisablePlugin),
+            Call::DesktopOpen(value) => unary!(value, desktop_open, DesktopOpen),
+            Call::Browser(value) => unary!(value, browser, Browser),
             Call::ListMcpServers(value) => unary!(value, list_mcp_servers, ListMcpServers),
             Call::ReadMcpAuthentication(value) => {
                 unary!(value, read_mcp_authentication, ReadMcpAuthentication)

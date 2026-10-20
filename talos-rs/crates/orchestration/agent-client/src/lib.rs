@@ -52,3 +52,5 @@ fn decode_rpc_status(status: tonic::Status) -> talos_error::TalosError {
 mod environment;
 pub use environment::AgentEnvironmentClient;
 mod coordinator_commands;
+mod desktop;
+pub use desktop::DesktopReservation;

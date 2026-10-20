@@ -128,7 +128,8 @@ impl DeepSeekProvider {
     fn reasoning_effort(reasoning_effort: Option<ReasoningEffort>) -> Option<String> {
         reasoning_effort.map(|effort| {
             match effort {
-                ReasoningEffort::Light | ReasoningEffort::Medium | ReasoningEffort::High => "high",
+                ReasoningEffort::Light => "low",
+                ReasoningEffort::Medium | ReasoningEffort::High => "high",
                 ReasoningEffort::XHigh => "max",
             }
             .to_string()

@@ -169,7 +169,10 @@ impl FileStorageConfig {
                 || !(infer::is_mime_supported(mime_type)
                     || matches!(
                         mime_type.as_str(),
-                        "application/msword" | "application/vnd.ms-excel" | "text/csv"
+                        "application/msword"
+                            | "application/vnd.ms-excel"
+                            | "text/csv"
+                            | "text/markdown"
                     ))
             {
                 return Err(TalosError::new(
@@ -327,6 +330,7 @@ fn default_allowed_file_mime_types() -> BTreeSet<String> {
         "image/png",
         "image/webp",
         "text/csv",
+        "text/markdown",
     ]
     .into_iter()
     .map(str::to_string)

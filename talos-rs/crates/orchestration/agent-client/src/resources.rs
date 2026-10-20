@@ -35,6 +35,12 @@ pub struct AgentSessionDataClient {
 }
 
 impl AgentSessionDataClient {
+    pub async fn open_desktop_media(
+        &self,
+        request: talos_types::WorkerDesktopOpen,
+    ) -> TalosResult<talos_browser::DesktopTransport> {
+        crate::desktop::worker(self.channel.clone(), self.current_auth(), request).await
+    }
     pub async fn connect(
         endpoint: &str,
         trust: AgentTlsTrust,
@@ -481,8 +487,16 @@ impl AgentSessionDataClient {
     }
 
     async fn save_tool_image(&self, image: Attachment) -> TalosResult<FileInfo> {
+        self.save_tool_file(image, pb::ToolFilePurpose::Image).await
+    }
+
+    async fn save_tool_file(
+        &self,
+        image: Attachment,
+        purpose: pb::ToolFilePurpose,
+    ) -> TalosResult<FileInfo> {
         const CHUNK_BYTES: usize = 64 * 1024;
-        if image.kind != AttachmentKind::Image {
+        if purpose == pb::ToolFilePurpose::Image && image.kind != AttachmentKind::Image {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 "Tool image upload requires an image attachment",
@@ -502,6 +516,7 @@ impl AgentSessionDataClient {
                     auth: Some(node_pb::encode_auth(auth.clone())),
                     body: Some(pb::save_tool_image_request::Body::Metadata(
                         pb::SaveToolImageMetadata {
+                            purpose: purpose as i32,
                             filename,
                             media_type,
                             size_bytes,
@@ -599,6 +614,31 @@ impl AgentControl for AgentSessionDataClient {
 }
 
 impl ToolImageStore for AgentSessionDataClient {
+    fn save_files<'a>(
+        &'a self,
+        _user_id: &'a str,
+        files: Vec<talos_types::ToolOutputFile>,
+    ) -> futures_util::future::BoxFuture<'a, TalosResult<Vec<FileInfo>>> {
+        Box::pin(async move {
+            let mut saved = Vec::new();
+            for file in files {
+                saved.push(
+                    self.save_tool_file(
+                        Attachment::new(
+                            AttachmentKind::File,
+                            file.filename,
+                            "application/octet-stream",
+                            file.bytes,
+                        ),
+                        pb::ToolFilePurpose::BrowserDownload,
+                    )
+                    .await?,
+                );
+            }
+            Ok(saved)
+        })
+    }
+
     fn save<'a>(
         &'a self,
         _user_id: &'a str,

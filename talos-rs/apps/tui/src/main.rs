@@ -16,6 +16,12 @@ use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--browser-mcp") {
+        if let Err(error) = talos_base::run_browser_mcp().await {
+            talos_base::exit_with_error("Browser MCP failed", error);
+        }
+        return Ok(());
+    }
     match cli::parse_terminal_mode() {
         cli::TerminalMode::Tui => run_embedded_tui().await,
         cli::TerminalMode::Command(command) => {

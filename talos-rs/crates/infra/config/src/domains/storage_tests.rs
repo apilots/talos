@@ -35,6 +35,7 @@ fn default_config_resolves_the_local_file_root() {
                 "image/png".to_string(),
                 "image/webp".to_string(),
                 "text/csv".to_string(),
+                "text/markdown".to_string(),
             ]),
         }
     );
@@ -185,6 +186,7 @@ fn file_storage_accepts_suffix_and_parser_validated_mime_types() {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_string(),
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string(),
         "text/csv".to_string(),
+        "text/markdown".to_string(),
     ]);
 
     config.validate_runtime().unwrap();

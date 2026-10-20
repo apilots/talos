@@ -12,6 +12,7 @@ pub(crate) struct WorkerHarness {
     pub config: Arc<std::sync::RwLock<talos_config::Config>>,
     pub execution_gate: Arc<tokio::sync::RwLock<()>>,
     pub workspace_memory: Arc<UserWorkspaceMemoryService>,
+    pub browser: Arc<talos_browser::BrowserRuntime>,
 }
 
 impl WorkerHarness {
@@ -45,8 +46,13 @@ impl AgentHarness for WorkerHarness {
             let guard = self.execution_gate.clone().read_owned().await;
             let mut params = params;
             self.resolve_context(&mut params.context)?;
+            let browser_guard = BrowserTurnGuard {
+                browser: self.browser.clone(),
+                session_id: params.context.session.session_id.clone(),
+                turn_id: params.context.turn_id.clone(),
+            };
             let execution = self.execution.start(params).await?;
-            Ok(guard_execution(execution, guard))
+            Ok(guard_execution(execution, guard, Some(browser_guard)))
         })
     }
     fn submit_input(
@@ -70,7 +76,7 @@ impl AgentHarness for WorkerHarness {
             let mut context = context;
             self.resolve_context(&mut context)?;
             let execution = self.execution.compact_session(context).await?;
-            Ok(guard_execution(execution, guard))
+            Ok(guard_execution(execution, guard, None))
         })
     }
     fn clear_session(
@@ -174,13 +180,15 @@ fn scope(context: AgentSessionContext) -> MemoryScope {
 fn guard_execution(
     mut execution: AgentRunExecution,
     guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    browser_guard: Option<BrowserTurnGuard>,
 ) -> AgentRunExecution {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let settlement = execution.settlement;
     tokio::spawn(async move {
         let result = settlement.recv().await;
-        let _ = sender.send(result);
+        drop(browser_guard);
         drop(guard);
+        let _ = sender.send(result);
     });
     execution.settlement = AgentRunSettlementReceiver::new(receiver);
     execution
@@ -189,3 +197,14 @@ fn guard_execution(
 #[cfg(test)]
 #[path = "harness_tests.rs"]
 mod tests;
+
+struct BrowserTurnGuard {
+    browser: Arc<talos_browser::BrowserRuntime>,
+    session_id: String,
+    turn_id: String,
+}
+impl Drop for BrowserTurnGuard {
+    fn drop(&mut self) {
+        self.browser.finish_turn(&self.session_id, &self.turn_id);
+    }
+}

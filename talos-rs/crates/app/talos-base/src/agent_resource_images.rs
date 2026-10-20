@@ -116,7 +116,12 @@ impl NodeToolImageRpc {
                     "Tool image exceeds the upload byte limit",
                 ));
             }
-            if metadata.filename.is_empty() || !metadata.media_type.starts_with("image/") {
+            let purpose = pb::ToolFilePurpose::try_from(metadata.purpose)
+                .map_err(|_| invalid_resource_request())?;
+            if metadata.filename.is_empty()
+                || (purpose == pb::ToolFilePurpose::Image
+                    && !metadata.media_type.starts_with("image/"))
+            {
                 return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
                     "Tool image metadata is invalid",
@@ -166,18 +171,29 @@ impl NodeToolImageRpc {
                     "Tool image byte length does not match metadata",
                 ));
             }
-            let mut files = self
-                .images
-                .save(
-                    &owner,
-                    vec![Attachment::new(
-                        AttachmentKind::Image,
-                        metadata.filename,
-                        metadata.media_type,
-                        bytes.into(),
-                    )],
-                )
-                .await?;
+            let mut files = if purpose == pb::ToolFilePurpose::BrowserDownload {
+                self.images
+                    .save_files(
+                        &owner,
+                        vec![talos_types::ToolOutputFile {
+                            filename: metadata.filename,
+                            bytes: bytes.into(),
+                        }],
+                    )
+                    .await?
+            } else {
+                self.images
+                    .save(
+                        &owner,
+                        vec![Attachment::new(
+                            AttachmentKind::Image,
+                            metadata.filename,
+                            metadata.media_type,
+                            bytes.into(),
+                        )],
+                    )
+                    .await?
+            };
             if files.len() != 1 {
                 return Err(TalosError::internal(
                     "Tool image Store returned an invalid result count",

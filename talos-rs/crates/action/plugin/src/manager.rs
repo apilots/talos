@@ -11,6 +11,10 @@ use crate::PluginStateStore;
 mod matchers;
 mod mcp;
 pub use mcp::{McpChangeHook, McpDiscovery};
+mod builtin;
+#[cfg(test)]
+#[path = "manager/builtin_tests.rs"]
+mod builtin_tests;
 mod read;
 use matchers::{plugin_matches_list, plugin_matches_search};
 use talos_config::{
@@ -306,6 +310,16 @@ impl PluginManager {
                 crate::installer::manual_mcp_candidate(self.prepare_manual_mcp(*server)?.1)?
             }
         };
+        if candidate.plugin.id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID
+            || candidate.plugin.metadata.name == talos_types::BUILTIN_BROWSER_SERVER_NAME
+            || matches!(&candidate.plugin.definition, talos_types::PluginDefinition::McpServer(mcp)
+                if mcp.server.name == talos_types::BUILTIN_BROWSER_SERVER_NAME)
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "This plugin identity is reserved for the bundled Browser.",
+            ));
+        }
         let enabled = request.enable != Some(false);
         let previous_installs = self.state.load_installs()?;
         let activation = install_plugin(&self.state, candidate, request.conflict_policy, enabled)?;
@@ -355,7 +369,22 @@ impl PluginManager {
                 )
             })?;
         let enabled = install.enabled;
+        if install.plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "The built-in Browser is updated with Talos.",
+            ));
+        }
         let candidate = self.update_candidate(install)?;
+        if candidate.plugin.metadata.name == talos_types::BUILTIN_BROWSER_SERVER_NAME
+            || matches!(&candidate.plugin.definition,talos_types::PluginDefinition::McpServer(mcp)
+                if mcp.server.name==talos_types::BUILTIN_BROWSER_SERVER_NAME)
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "This plugin identity is reserved for the bundled Browser.",
+            ));
+        }
         if request.expected_source_commit.is_some()
             && candidate.plugin.source_commit != request.expected_source_commit
         {
@@ -410,6 +439,15 @@ impl PluginManager {
             .iter()
             .find(|install| install.id == request.install_id)
             .cloned();
+        if removed_install
+            .as_ref()
+            .is_some_and(|install| install.plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID)
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "The built-in Browser can be disabled, but cannot be uninstalled.",
+            ));
+        }
         installs
             .installs
             .retain(|install| install.id != request.install_id);

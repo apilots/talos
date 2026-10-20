@@ -47,6 +47,7 @@ struct Connections {
     servers: RwLock<BTreeMap<String, Arc<Server>>>,
     cleanup: Arc<crate::cleanup::Cleanup>,
     startup_slots: Arc<Semaphore>,
+    browser_socket: Option<std::path::PathBuf>,
 }
 
 struct Server {
@@ -87,10 +88,16 @@ impl Default for TalosMcpRuntime {
 
 impl TalosMcpRuntime {
     pub fn new() -> Self {
+        Self::with_builtin_browser_socket(None)
+    }
+
+    /// Per-process private bridge, never serialized in an MCP definition.
+    pub fn with_builtin_browser_socket(socket: Option<std::path::PathBuf>) -> Self {
         Self(Arc::new(Connections {
             servers: RwLock::new(BTreeMap::new()),
             cleanup: Arc::default(),
             startup_slots: Arc::new(Semaphore::new(4)),
+            browser_socket: socket,
         }))
     }
 
@@ -98,7 +105,44 @@ impl TalosMcpRuntime {
     /// durable commit and publication with configuration changes and shutdown.
     pub fn prepare(&self, descriptors: Vec<McpConnectionInput>) -> TalosResult<PreparedMcpUpdate> {
         let mut desired = BTreeMap::new();
-        for descriptor in descriptors {
+        for mut descriptor in descriptors {
+            let builtin = matches!(&descriptor.descriptor.source,
+                talos_types::McpServerSource::Plugin { plugin_id, .. }
+                if plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID);
+            if builtin {
+                let valid = descriptor.descriptor.server.name
+                    == talos_types::BUILTIN_BROWSER_SERVER_NAME
+                    && descriptor.descriptor.server.credentials.is_none()
+                    && matches!(&descriptor.descriptor.server.transport,
+                        talos_types::McpTransportDefinition::Stdio { command, args, env, .. }
+                        if std::env::current_exe().is_ok_and(|path| path == std::path::Path::new(command))
+                            && args == &["--browser-mcp"] && env.is_empty());
+                if !valid || descriptor.credentials.is_some() {
+                    return Err(TalosError::new(
+                        ErrorCode::PermissionDenied,
+                        "The bundled Browser definition does not match this Talos executable.",
+                    ));
+                }
+                if let Some(socket) = &self.0.browser_socket {
+                    descriptor.credentials = Some(crate::McpConnectionCredentials::Token(
+                        talos_types::McpCredentialValues {
+                            authentication: talos_types::McpAuthentication::None,
+                            token: None,
+                            headers: None,
+                            env: Some(std::collections::BTreeMap::from([(
+                                "TALOS_BROWSER_SOCKET".into(),
+                                socket.to_string_lossy().into_owned(),
+                            )])),
+                        },
+                    ));
+                }
+            } else if descriptor.descriptor.server.name == talos_types::BUILTIN_BROWSER_SERVER_NAME
+            {
+                return Err(TalosError::new(
+                    ErrorCode::PermissionDenied,
+                    "The Browser MCP name is reserved for the bundled plugin.",
+                ));
+            }
             talos_types::validate_mcp_server_name(&descriptor.descriptor.server.name)?;
             if desired
                 .insert(descriptor.descriptor.server.name.clone(), descriptor)

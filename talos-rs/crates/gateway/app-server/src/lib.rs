@@ -1,5 +1,7 @@
 mod application;
 mod auth;
+mod desktop_host;
+pub use desktop_host::{DesktopHostBridge, DesktopHostEvent};
 mod runtime;
 
 pub use application::{

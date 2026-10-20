@@ -117,6 +117,23 @@ impl GatewayClient for EmbeddedServerClient {
             .await
     }
 
+    async fn open_desktop(
+        &mut self,
+        request: talos_sdk::DesktopOpenRequest,
+    ) -> TalosResult<talos_sdk::DesktopViewGrant> {
+        self.runtime
+            .gateway
+            .open_desktop(&self.actor, request)
+            .await
+    }
+
+    async fn browser(
+        &mut self,
+        request: talos_sdk::BrowserRequest,
+    ) -> TalosResult<talos_sdk::BrowserSnapshot> {
+        self.runtime.gateway.browser(&self.actor, request).await
+    }
+
     async fn list_mcp_servers(
         &mut self,
         request: talos_sdk::McpServerListRequest,

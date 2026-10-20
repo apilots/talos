@@ -22,6 +22,7 @@ use tokio::task::JoinSet;
 
 #[derive(Clone)]
 pub struct ToolExecutionContext {
+    pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,
     pub turn_id: String,
     pub agent_id: String,
@@ -134,6 +135,7 @@ fn build_tool_context(
             execution_context.user_id.clone(),
             Some(execution_context.kernel_config.clone()),
         )
+        .with_browser_uploads(execution_context.browser_uploads.clone())
         .with_turn_id(execution_context.turn_id.clone())
         .with_agent_id(execution_context.agent_id.clone())
         .with_sandbox_environment(sandbox_environment);

@@ -1,0 +1,36 @@
+[package]
+name = "talos-browser"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Worker-owned browser invocation, input fencing and browser backends"
+
+[dependencies]
+bytes.workspace = true
+tempfile = "3"
+rmcp = { workspace = true, features = ["server", "transport-io"] }
+url = "2"
+tokio-tungstenite = "0.29"
+process-wrap = { version = "9.1.0", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
+libc.workspace = true
+base64.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+sha2 = "0.10"
+talos-error.workspace = true
+talos-logging.workspace = true
+talos-fs.workspace = true
+talos-types.workspace = true
+tokio = { workspace = true, features = ["io-util", "io-std", "fs", "process", "net", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt", "codec"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+rmcp = { workspace = true, features = ["client"] }
+tempfile = "3"
+
+[lints]
+workspace = true

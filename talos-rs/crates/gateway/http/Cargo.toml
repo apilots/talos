@@ -19,7 +19,7 @@ talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }
-axum = { version = "0.7", features = ["macros", "multipart"] }
+axum = { version = "0.7", features = ["macros", "multipart", "ws"] }
 tokio = { workspace = true, features = ["net", "signal"] }
 tokio-util = { workspace = true }
 tokio-stream = "0.1"

@@ -1,0 +1,13 @@
+{
+  "name": "talos_browser",
+  "display_name": "Browser",
+  "description": "Built-in browser automation for this Computer.",
+  "credentials": null,
+  "transport": {
+    "type": "stdio",
+    "command": "talos",
+    "args": ["--browser-mcp"],
+    "env": {},
+    "cwd": null
+  }
+}

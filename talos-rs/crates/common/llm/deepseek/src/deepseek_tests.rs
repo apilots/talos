@@ -6,18 +6,45 @@ use talos_llm_provider::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-async fn spawn_sse_server(body: String) -> String {
+async fn spawn_sse_server(body: String) -> (String, tokio::sync::oneshot::Receiver<Value>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("test server should bind");
     let address = listener
         .local_addr()
         .expect("test server address should exist");
+    let (captured, request) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.expect("request should arrive");
-        let mut buffer = vec![0; 4096];
-        let read = socket.read(&mut buffer).await.expect("request should read");
-        assert!(read > 0, "request should not be empty");
+        let mut buffer = Vec::new();
+        loop {
+            let mut chunk = [0; 4096];
+            let read = socket.read(&mut chunk).await.expect("request should read");
+            assert!(read > 0, "request should not be empty");
+            buffer.extend_from_slice(&chunk[..read]);
+            let Some(header_end) = buffer.windows(4).position(|part| part == b"\r\n\r\n") else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&buffer[..header_end]);
+            let length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':')
+                        .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                })
+                .expect("content length should exist")
+                .1
+                .trim()
+                .parse()
+                .expect("content length should be valid");
+            if buffer.len() < header_end + 4 + length {
+                continue;
+            }
+            let value = serde_json::from_slice(&buffer[header_end + 4..header_end + 4 + length])
+                .expect("request JSON should be valid");
+            let _ = captured.send(value);
+            break;
+        }
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
@@ -27,7 +54,36 @@ async fn spawn_sse_server(body: String) -> String {
             .await
             .expect("response should write");
     });
-    format!("http://{address}")
+    (format!("http://{address}"), request)
+}
+
+#[tokio::test]
+async fn light_effort_reaches_both_deepseek_transports_as_low() {
+    for protocol in [DeepSeekProtocol::Chat, DeepSeekProtocol::Messages] {
+        let (base_url, captured) = spawn_sse_server(String::new()).await;
+        let provider = DeepSeekProvider::new(
+            DeepSeekConfig::new("test-key")
+                .with_base_url(base_url)
+                .with_protocol(protocol),
+        );
+        provider
+            .send_stream(
+                ChatRequest::builder()
+                    .model("deepseek-v4-flash-vision-exp")
+                    .message("Inspect the page")
+                    .reasoning_effort(Some(ReasoningEffort::Light))
+                    .build(),
+            )
+            .await
+            .expect("actual request should succeed");
+        let actual = captured.await.expect("request should be captured");
+        assert_eq!(actual["model"], "deepseek-v4-flash-vision-exp");
+        assert_eq!(actual["thinking"]["type"], "enabled");
+        match protocol {
+            DeepSeekProtocol::Chat => assert_eq!(actual["reasoning_effort"], "low"),
+            DeepSeekProtocol::Messages => assert_eq!(actual["output_config"]["effort"], "low"),
+        }
+    }
 }
 
 async fn collect_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEvent> {
@@ -82,10 +138,10 @@ fn vision_chat_encodes_user_and_tool_images_without_changing_tool_identity() {
 
 #[test]
 fn chat_maps_supported_efforts_and_omits_disabled_reasoning() {
-    for effort in [
-        ReasoningEffort::Light,
-        ReasoningEffort::Medium,
-        ReasoningEffort::High,
+    for (effort, expected) in [
+        (ReasoningEffort::Light, "low"),
+        (ReasoningEffort::Medium, "high"),
+        (ReasoningEffort::High, "high"),
     ] {
         let request = ChatRequest::builder()
             .model("deepseek-v4-pro")
@@ -98,7 +154,7 @@ fn chat_maps_supported_efforts_and_omits_disabled_reasoning() {
             serde_json::to_value(DeepSeekProvider::build_chat_request(request, false).unwrap())
                 .unwrap();
         assert_eq!(actual["thinking"]["type"], "enabled");
-        assert_eq!(actual["reasoning_effort"], "high");
+        assert_eq!(actual["reasoning_effort"], expected);
         assert!(actual.get("temperature").is_none());
         assert!(actual.get("top_p").is_none());
     }
@@ -176,7 +232,7 @@ async fn chat_stream_reasoning_content_replays_after_tool_call() {
         "data: [DONE]\n\n"
     )
     .to_string();
-    let base_url = spawn_sse_server(body).await;
+    let (base_url, _) = spawn_sse_server(body).await;
     let provider = DeepSeekProvider::new(
         DeepSeekConfig::new("test-key")
             .with_base_url(base_url)

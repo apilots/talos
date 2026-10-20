@@ -166,6 +166,7 @@ impl GeneralTurnResult {
 
 #[derive(Debug, Clone)]
 pub struct PreparedGeneralTurn {
+    pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,
     pub user_id: String,
     pub invocation_id: String,
@@ -316,6 +317,7 @@ pub enum GeneralTurnStepDisposition {
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnLoopState {
+    pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub started_at: Instant,
     pub messages: Vec<ChatMessage>,
     pub round: u32,
@@ -380,6 +382,7 @@ impl GeneralTurnLoopState {
             execution_summary_streamed: false,
             elapsed_duration_ms: 0,
             active_turn_attachment_tokens: 0,
+            browser_uploads: Vec::new(),
         }
     }
 

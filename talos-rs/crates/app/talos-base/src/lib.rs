@@ -41,6 +41,7 @@ mod application_sync_metrics;
 #[path = "application_sync_tests.rs"]
 mod application_sync_tests;
 mod desktop_application;
+mod desktop_media;
 mod desktop_worker;
 mod dream_memory_maintenance;
 mod memory_progress;
@@ -77,6 +78,7 @@ pub struct TalosServerRuntime {
     lifecycle: Arc<ServerLifecycle>,
     automation: Automation,
     plugins: PluginManagerService,
+    browser: Arc<talos_browser::BrowserRuntime>,
     worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     resource_rpc: Arc<local_resource_rpc::LocalResourceRpc>,
     worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
@@ -248,6 +250,11 @@ pub async fn run_server() -> TalosResult<()> {
 /// This entrypoint owns the full startup lifecycle for embedded clients: startup logging,
 /// resource preparation, config loading, serial upgrades, and runtime assembly.
 /// Lower-level runtime builders must not repeat startup lifecycle work.
+///
+/// The bundled Browser MCP re-enters the current executable with `--browser-mcp`.
+/// Embedding hosts must handle that argument before normal CLI parsing or startup
+/// by awaiting [`run_browser_mcp`] and then returning. Keep stdout reserved for
+/// MCP in that branch; it requires neither authentication nor model configuration.
 pub async fn run_embedded_app_server(
     options: Option<&TalosServerOptions>,
 ) -> TalosResult<EmbeddedAppServer> {
@@ -461,6 +468,7 @@ impl TalosServerRuntime {
             lifecycle,
             automation,
             plugins,
+            browser,
             worker_rpc,
             resource_rpc,
             worker_registration,
@@ -523,6 +531,7 @@ impl TalosServerRuntime {
         )
         .await;
         let result = application_automation::combine(result, registration);
+        let result = application_automation::combine(result, browser.shutdown().await);
         let result = application_automation::combine(result, sync_stores.shutdown().await);
         let result = application_automation::combine(result, shutdown_result);
         let result = application_automation::combine(result, worker_rpc.shutdown().await);
@@ -627,6 +636,7 @@ async fn start_server_after_startup(
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
         plugins: runtime.worker.plugin_manager(),
+        browser: runtime.worker.browser(),
         worker_rpc: runtime.worker_rpc,
         resource_rpc: runtime.resource_rpc,
         worker_registration: runtime.worker_registration,
@@ -651,14 +661,24 @@ async fn run_json_rpc_stdio_after_startup(
             .saturating_add(1024 * 1024),
     )
     .unwrap_or(usize::MAX);
-    let desktop_host = std::env::var("TALOS_DESKTOP_HOSTNAME").ok();
+    let desktop_host_name = std::env::var("TALOS_DESKTOP_HOSTNAME").ok();
     // Desktop enrollment verifies the current saved login before attaching a
     // cloud identity. A saved node credential alone must not bypass that check.
     let mut runtime_config = config.clone();
-    if desktop_host.is_some() {
+    if desktop_host_name.is_some() {
         runtime_config.agent_node.runner = None;
     }
     let runtime = build_application_runtime_after_startup(runtime_config, startup_report).await?;
+    let desktop_host_bridge = if desktop_host_name.is_some() {
+        let bridge = talos_app_server::DesktopHostBridge::new();
+        runtime
+            .worker
+            .browser()
+            .set_backend(talos_browser::NativeBrowser::new(bridge.clone()))?;
+        Some(bridge)
+    } else {
+        None
+    };
     let automation = runtime.automation.clone();
     let plugins = runtime.worker.plugin_manager();
     let worker_rpc = runtime.worker_rpc.clone();
@@ -675,11 +695,14 @@ async fn run_json_rpc_stdio_after_startup(
         runtime.auth_service.clone(),
         service.account.clone(),
     ));
-    let app: Arc<dyn talos_app_server::AppServerApplication> = match desktop_host {
+    let app: Arc<dyn talos_app_server::AppServerApplication> = match desktop_host_name {
         Some(device_name) => Arc::new(desktop_application::DesktopApplication::new(
             &runtime,
             device_name,
             app,
+            desktop_host_bridge
+                .clone()
+                .expect("Desktop host bridge is composed together"),
         )),
         None => app,
     };
@@ -687,6 +710,7 @@ async fn run_json_rpc_stdio_after_startup(
         app,
         validator,
         talos_app_server::AppServerConfig {
+            desktop_host: desktop_host_bridge,
             auth_enabled: config.gateway.auth,
             cloud_auth_url: Some(config.cloud.web_base_url.clone()),
             ..talos_app_server::AppServerConfig::default()
@@ -706,6 +730,7 @@ async fn run_json_rpc_stdio_after_startup(
         None => Ok(()),
     };
     let result = application_automation::combine(result, registration);
+    let result = application_automation::combine(result, runtime.worker.browser().shutdown().await);
     let result = application_automation::combine(result, worker_rpc.shutdown().await);
     let result = application_automation::combine(result, runtime.shutdown_sync().await);
     application_automation::combine(result, runtime.resource_rpc.shutdown().await)
@@ -743,3 +768,5 @@ fn apply_runtime_options(mut config: Config, options: Option<&TalosServerOptions
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+pub use talos_worker::run_browser_mcp;

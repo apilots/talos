@@ -11,6 +11,14 @@ pub fn encode_failure(error: &TalosError) -> pb::Failure {
 
 pub fn encode_api_error(api: ApiError) -> pb::ApiError {
     let localization = api.localization.map(|value| match value {
+        ErrorLocalization::BrowserCapabilityUnavailable { operation, reason } => {
+            pb::api_error::Localization::BrowserCapabilityUnavailable(
+                pb::BrowserCapabilityUnavailable {
+                    operation: browser_operation_to_wire(operation),
+                    reason: browser_reason_to_wire(reason),
+                },
+            )
+        }
         ErrorLocalization::ComputerDeletionActive => {
             pb::api_error::Localization::ComputerDeletionActive(pb::Empty {})
         }
@@ -46,29 +54,40 @@ pub fn decode_failure(failure: pb::Failure) -> TalosResult<TalosError> {
 
 pub fn decode_api_error(error: pb::ApiError) -> TalosResult<ApiError> {
     let code = decode_code(error.code)?;
-    let localization = error.localization.map(|value| match value {
-        pb::api_error::Localization::ComputerDeletionActive(_) => {
-            ErrorLocalization::ComputerDeletionActive
-        }
-        pb::api_error::Localization::ComputerRegistrationRemoved(_) => {
-            ErrorLocalization::ComputerRegistrationRemoved
-        }
-        pb::api_error::Localization::ComputerDeletionUnverified(_) => {
-            ErrorLocalization::ComputerDeletionUnverified
-        }
-        pb::api_error::Localization::ModelNotConfigured(value) => {
-            ErrorLocalization::ModelNotConfigured {
-                provider: value.provider,
-                model: value.model,
-            }
-        }
-        pb::api_error::Localization::AttachmentCountExceeded(value) => {
-            ErrorLocalization::AttachmentCountExceeded {
-                limit: value.limit,
-                actual: value.actual,
-            }
-        }
-    });
+    let localization = error
+        .localization
+        .map(|value| -> TalosResult<ErrorLocalization> {
+            Ok(match value {
+                pb::api_error::Localization::BrowserCapabilityUnavailable(value) => {
+                    ErrorLocalization::BrowserCapabilityUnavailable {
+                        operation: browser_operation_from_wire(value.operation)?,
+                        reason: browser_reason_from_wire(value.reason)?,
+                    }
+                }
+                pb::api_error::Localization::ComputerDeletionActive(_) => {
+                    ErrorLocalization::ComputerDeletionActive
+                }
+                pb::api_error::Localization::ComputerRegistrationRemoved(_) => {
+                    ErrorLocalization::ComputerRegistrationRemoved
+                }
+                pb::api_error::Localization::ComputerDeletionUnverified(_) => {
+                    ErrorLocalization::ComputerDeletionUnverified
+                }
+                pb::api_error::Localization::ModelNotConfigured(value) => {
+                    ErrorLocalization::ModelNotConfigured {
+                        provider: value.provider,
+                        model: value.model,
+                    }
+                }
+                pb::api_error::Localization::AttachmentCountExceeded(value) => {
+                    ErrorLocalization::AttachmentCountExceeded {
+                        limit: value.limit,
+                        actual: value.actual,
+                    }
+                }
+            })
+        })
+        .transpose()?;
     ApiError::from_wire_parts(code, error.message, localization)
 }
 
@@ -306,3 +325,29 @@ mod tests {
         ));
     }
 }
+
+macro_rules! browser_enum {
+    ($encode:ident,$decode:ident,$kind:ident,$($variant:ident),+) => {
+        fn $encode(value:talos_error::$kind)->i32 {match value {$(talos_error::$kind::$variant=>pb::$kind::$variant as i32,)+}}
+        fn $decode(value:i32)->TalosResult<talos_error::$kind> {match pb::$kind::try_from(value).map_err(|_|malformed_failure())? {$(pb::$kind::$variant=>Ok(talos_error::$kind::$variant),)+_=>Err(malformed_failure())}}
+    };
+}
+browser_enum!(
+    browser_operation_to_wire,
+    browser_operation_from_wire,
+    BrowserCapabilityOperation,
+    RemoteDesktop,
+    TakeControl,
+    ReleaseControl,
+    OpenLocal
+);
+browser_enum!(
+    browser_reason_to_wire,
+    browser_reason_from_wire,
+    BrowserCapabilityReason,
+    NativeHost,
+    NotBundled,
+    HostPolicy,
+    UnsupportedVersion,
+    ClientMismatch
+);
