@@ -80,11 +80,14 @@ flowchart TB
   subgraph Docker["受控 Docker Worker：不发布桌面端口"]
     W["原 WorkerEnvironment / PluginManager\nBrowser MCP、控制状态"]
     B["受管 Chromium\n独立 profile、loopback CDP"]
+    HOME["ManagedBrowser 监督的离线首页\n仅三份静态资源、loopback HTTP"]
     X["Xvfb + Openbox + x11vnc\n容器私有显示、loopback RFB"]
     L["容器本地 UI：xterm / PCManFM\nUID 10001；不增加模型工具"]
     A["浏览器驱动 + Docker 输入门禁\n专用媒体 adapter"]
     W --> A
     A --> B
+    W --> HOME
+    B --> HOME
     B --> X
     L --> X
     A <--> X
@@ -116,6 +119,7 @@ flowchart TB
 | 位置 / 路径 | 可达范围与部署要求 |
 | --- | --- |
 | CDP，例如 `127.0.0.1:9222` | 仅容器内部，实际端口由运行时分配/记录；无 Docker `ports`、host network 或公网调试地址 |
+| Docker 离线首页 HTTP | 仅 `127.0.0.1` 的动态端口；由 ManagedBrowser 监督，固定提供首页三份静态资源，不提供目录、文件 API 或宿主端口映射 |
 | x11vnc RFB，例如 `127.0.0.1:5900` | 仅同一容器内 Worker adapter 可连；原生端不启动 |
 | Xvfb X 显示 | 容器内部 Unix socket，禁止 X TCP listen；不挂宿主 X11/Wayland socket |
 | noVNC JS | 由原 Talos Web 静态资源分发；生产 Worker 不另开 6080 Web 页面，也不要求 websockify 服务 |
@@ -151,9 +155,9 @@ flowchart TB
 | `talos-app/web/src/app/layouts/` and `shared/store/ui-slice.ts` | Compose application navigation and the right workspace. Own only ephemeral typed window descriptors, active selection, visibility and geometry; count actual descriptors; deduplicate Computer/Markdown by resource identity, and preserve independent webpage tabs by stable UI identity. Clear through the existing app-store connection-scope subscription. No media grants, Worker control state or new persisted registry. |
 | `talos-app/web/src/features/settings/` and `features/computers/` | MCP settings remain enable/disable only. Computer content owns browser configuration and capability-gated view/actions; its active viewer owns media admission and cleanup, not application layout or a second window store. No authoritative client control state. |
 | `talos-app/desktop/src/` | Reuse bundled Chromium in an isolated local website view, with typed host operations through the existing app-server controller/server-request boundary. Also render Docker viewer and user-Chrome selection; no VNC server, capture or product-renderer debugging. |
-| `talos-app/shared/browser-home/` | Packaged offline home shared by managed Docker and native Desktop browsers; static presentation only, with no service, credentials or runtime authority. Existing Desktop and Worker builds own asset inclusion. |
+| `talos-app/shared/browser-home/` | Packaged offline home shared by managed Docker and native Desktop browsers; assets own static presentation only, without credentials or runtime authority. Existing builds own asset inclusion. ManagedBrowser supervises Docker's private loopback HTTP transport; native Desktop retains its packaged file URL. |
 | `talos-app/ts-sdk/` | Reuse generated shared types; HTTP/RPC/embedded command parity. sdk-browser owns authenticated WebSocket admission; sdk-app-server owns protected preload media framing, backpressure, error and close semantics. Both expose desktop.connect(grant); Web owns noVNC and reconnect UX. |
-| `build/worker/` and `deploy/docker/talos-worker/` | Standard Docker assets, neutral wallpaper and compact Browser/Terminal/File manager launchers; all local applications use the existing managed display/process lifecycle. Persistent state, non-root execution and zero added inbound ports. Server image browser packaging is outside this increment. |
+| `build/worker/` and `deploy/docker/talos-worker/` | Standard Docker assets, restrained Talos wallpaper and compact Browser/Terminal/File manager launchers; all local applications use the existing managed display/process lifecycle. Persistent state, non-root execution and zero added inbound ports. Server image browser packaging is outside this increment. |
 
 ## 4. 目标与能力模型
 
@@ -183,7 +187,7 @@ flowchart LR
   N --> U["display unavailable\n无屏幕串流、无远程接管"]
 ```
 
-`nodeId` 决定执行位置，`targetId` 决定其浏览器；修改只影响后续准入，不迁移 Session 或在途动作。只读旁观其他 Computer 不改变任务绑定。
+`nodeId` 决定执行位置，`targetId` 决定其浏览器；修改只影响后续准入，不迁移 Session 或在途动作。只读旁观其他 Computer 不改变任务绑定。 Native 宿主观察缓存同时绑定 managed/connected 类型；切换类型时清除当前标签与元素引用，不能把自带浏览器的标签 ID 发给用户 Chrome，反向切换亦然。同一类型且控制 epoch 未改变的新 Turn 可保留当前标签，但仍需获取新的元素引用；账号或控制 epoch 改变时，沿原撤销边界清除当前标签，避免插件关闭并重新启用后复用已关闭的宿主视图。
 
 ### 4.1 Desktop 自带浏览器与外接 Chrome
 
@@ -379,7 +383,7 @@ Desktop 自带网页由本机宿主呈现；用户可直接在该视图或自己
 ### 6.3 Docker 本地应用与浏览器重开
 
 1. 用户在 Session 侧栏或 ComputerInspector 的原能力入口查看同一容器桌面；只读画面可以观察应用，不接受键盘/鼠标。明确接管并完成原控制流握手后，才可点击 dock 的 Browser、Terminal 或 File manager。
-2. Browser 首次显示打包的离线首页。关闭最后一个浏览器窗口后，受监督 Chromium/CDP、桌面背景和 dock 保持可用；Browser 入口在同一 profile/进程中重新打开窗口，不静默重建浏览器实例或清空登录态。旧 target 的动作仍须拒绝，后续工具通过显式观察恢复。
+2. Browser 首次显示打包的离线首页。Docker 由 ManagedBrowser 在原启动期限内监督一个 loopback HTTP 子进程，仅以 GET/HEAD 提供预载的 `home.html`、`home.js` 和 `talos-logo.svg`；首次窗口、`--homepage` 与 dock 重开使用同一受信 URL，不放宽 Browser Use 的文件安全策略。关闭最后一个浏览器窗口后，受监督 Chromium/CDP、桌面背景和 dock 保持可用；Browser 入口在同一 profile/进程中重新打开窗口，不静默重建浏览器实例或清空登录态。旧 target 的动作仍须拒绝，后续工具通过显式观察恢复。
 3. Terminal 与 File manager 分别打开真实的 xterm 和 PCManFM 窗口，默认工作目录为 Worker home 下的 `browser/workspace`。PCManFM 使用 `--no-desktop`，不接管背景或启动另一套桌面；文本文件可通过既有 xterm 中的只读预览打开，不为此增加编辑器。它们继承同一容器用户、受保护显示环境及容器文件权限，不需要另一组凭据/监听端口，不运行宿主命令或挂载宿主显示。它们不成为 Browser targets，也不扩展 Browser MCP 的 DOM、截图或文件授权接口。
 4. 手动命令和文件操作作用于该容器用户实际可达的文件；只有既有持久卷/工作区内的内容按原挂载语义保留，容器层内容不承诺跨替换保存。原 File API 的 Turn 附件授权仍适用于模型工具，不能用桌面入口给模型附加任意文件权限。
 5. 交还、断线和关闭 viewer 继续遵守原控制权语义。交还撤销后续远程输入，不回滚已经执行的 shell 命令、文件操作或网站副作用；关闭 viewer 不关闭应用。Worker 退出回收该显示栈和自有进程，不留下独立桌面服务。
@@ -472,15 +476,15 @@ Viewer 通过请求序号和当前 account/Computer/generation/display capabilit
 
 Web 与 Desktop 使用同一组三类资源 Tab。Computer Tab 按执行电脑的 canonical `BrowserSnapshot.host` / `display` 能力呈现，不能仅凭查看端 `isDesktop` 禁用远程桌面：本机原生电脑无远程桌面；Desktop 连接具备 `dockerDesktop` 能力的 Docker Worker 时仍可查看并经原鉴权接管。
 
-应用外壳是三个全高同级宏区：全局 Computer rail｜中间业务区（会话/Project 侧栏 + 主页面）｜右工作区。内部导航、rail、侧栏、主页面和工作区内容仍各自独立组件化，由 AppLayout 最后组装；`AppBusinessRegion` 只组合本区 header 与 sidebar/main 内容行。沿用固定 56px rail 和默认 296px 的业务侧栏、原页面/会话内容与 Composer 和既有主题 token。各宏区的 header 与下方内容由同一垂直边界包围，右工作区的分界线从自身 header 贯通 Tab/内容区，不能以跨中右的一整条 header 或两张留白卡片代替这三个区域；通过同级区域结构对齐，不引入测量或新的 layout framework。
+应用外壳是三个全高同级宏区：全局 Computer rail｜中间业务区（会话/Project 侧栏 + 主页面）｜右工作区。内部导航、rail、侧栏、主页面和工作区内容仍各自独立组件化，由 AppLayout 最后组装；`AppBusinessRegion` 只组合本区 header 与 sidebar/main 内容行。沿用固定 56px rail 和默认 296px 的业务侧栏、原页面/会话内容与 Composer 和既有主题 token。各宏区的 header 与下方内容由同一垂直边界包围，右工作区的分界线从自身 header 贯通 Tab/内容区，不能以跨中右的一整条 header 或两张留白卡片代替这三个区域；通过同级区域结构对齐，不引入测量或新的 layout framework。 全局 rail 与各区顶导复用同一轻量 surface 底色，连续衔接；其下的侧栏、主内容与右内容各用小圆角和低对比细边界，贴合顶导，不新增厚重色块、阴影或外部留白。侧栏与外壳仅轻微底色差异，沿原主题 token 同时适配明暗色。
 
 分栏状态中，中间 header 拥有可用时的 `PanelLeft`、前进/后退、新聊天和当前页面/Session 与 Project 上下文；`PanelLeft` 只控制中区侧栏，不控制全局 rail 或右工作区，顶导不提供“查看电脑”。页面内部移除重复公共导航，保留各自业务内容和动作。右工作区只有一行顶部资源条，将 Tabs、“＋”、整体放大/还原和收起/显示控件放在同一行，不再增加一整行“右工作区”文字 header；下方直接为所选内容（网页的地址栏与 body 等）。`PanelRight` 与 `PanelLeft` 对称。工作区收起或无 Tab 时，通用入口在中间 header 末尾，不保留重复的一套。窄屏/整体展开 modal 的右区同样只有资源与工作区控件；中区仍由原 owner 保留并进入 inert/aria-hidden，不把导航或 Session 上下文投影进右区。Worker 的暂停/继续、接管/交还和浏览器配置仍在具体 Computer 内容。
 
-原 globe 网页快捷入口保留。最右工作区主开关在无 Tab 时显示 Plus 且可点击，调用原 `createWorkspaceWebpage` 创建 empty Tab 并展开 New Tab；已有 Tab 时显示 PanelRight 和实际 Tab 数，展开/收起均显示数量，点击仅 toggle，不追加 Tab。
+顶导不再提供独立 globe 网页快捷按钮。最右工作区主开关在无 Tab 时显示 Plus 且可点击，调用原 `createWorkspaceWebpage` 创建 empty Tab 并展开 New Tab；已有 Tab 时显示 PanelRight 和实际 Tab 数，展开/收起均显示数量，点击仅 toggle，不追加 Tab。
 
 “你的电脑 / Your computer”属于中间侧栏：`SidebarComputerEntry` 经原 SidebarContainer/SidebarPrimaryNav 插槽放在“新会话”下，仅目标 snapshot 的 `host = docker` 且 `display.kind = dockerDesktop` 时显示，点击原 `computer/nodeId` Tab。Session 路由使用其已绑定的 `nodeId`，未加载前不借用 rail 选择；非 Session 页面才使用当前选中 Computer。Web/Desktop 都按执行端能力判断，Desktop 连接 Docker 仍可见，本机原生电脑不出现远程入口。ComputerInspector 原浏览器配置入口继续保留，Desktop bundled/My Chrome 的选择、连接与本地动作仍可达。
 
-中间业务 header 内部再按 sidebar/main 分成左右两段：左段 AppNavigation 与侧栏同宽、边界相接，右段 AppSessionContext（Session/Project 上下文）与主页面对齐。AppBusinessRegion 的唯一 sidebar 宽度同时控制 header/body 两行，展开为原侧栏宽度、关闭为零；使用 200ms ease-out CSS 抽屉过渡：侧栏向左退场并由所属容器裁切，main/composer 同步扩展铺开；侧栏内部保持固定宽度，避免文字被挤压换行。`prefers-reduced-motion` 时禁用过渡。宽屏业务侧栏采用普通 aside，只有窄屏覆盖场景使用原 native modal dialog，不以宽屏非模态 dialog 维持抽屉。关闭动作立即将侧栏内容设为 inert/aria-hidden，并按原焦点规则返回可见开关，不等待动画；唯一 AppNavigation DOM 在收起期间保持可达，主内容 header 连续让位，不能把导航开关一起 inert。关闭后不留固定空列或重复入口。动画只改变布局，不重新挂载保留的网页 DOM，不申请或恢复 Agent/远程输入权限。
+中间业务 header 内部再按 sidebar/main 分成左右两段：左段 AppNavigation 与侧栏同宽、边界相接，右段 AppSessionContext（Session/Project 上下文）与主页面对齐。AppBusinessRegion 的唯一 sidebar 宽度同时控制 header/body 两行，展开为原侧栏宽度、关闭为零；使用 200ms ease-out CSS 抽屉过渡：侧栏向左退场并由所属容器裁切，main/composer 同步扩展铺开；侧栏内部保持固定宽度，避免文字被挤压换行。`prefers-reduced-motion` 时禁用过渡。宽屏业务侧栏采用普通 aside，只有窄屏覆盖场景使用原 native modal dialog，不以宽屏非模态 dialog 维持抽屉。关闭动作立即将侧栏内容设为 inert/aria-hidden，并按原焦点规则返回可见开关，不等待动画；唯一 AppNavigation DOM 在收起期间保持可达，主内容 header 连续让位，不能把导航开关一起 inert。关闭后不留固定空列或重复入口。 右工作区展开/收起同样使用 200ms ease-out 抽屉过渡，中区随宽度接过空间；原生 dialog 的显示/overlay 过渡只负责视觉，隐藏立即 inert/aria-hidden、清理 Computer 媒体并恢复所需焦点，不能等动画结束才撤销输入。reduced-motion 和拖宽期间禁用抽屉动画，不增加计时器、动画状态机或权限 owner。动画只改变布局，不重新挂载保留的网页 DOM，不申请或恢复 Agent/远程输入权限。 初次渲染、刷新和被动宽度变化不因当前焦点在 body 而主动聚焦导航开关；只在真实关闭或移除持有焦点的区域时恢复到所属可见入口，不抢占已移到其他区域的焦点。保留键盘 focus-visible 提示，覆盖展开/收起初载与刷新、真实 Escape/关闭及模态切换回归。 宽屏 sidebarOpen 保留持久布局偏好；窄屏侧栏抽屉只由 AppLayout 的瞬时交互状态打开，初始关闭，不从宽屏偏好或被动 resize 自动推导为打开，离开窄屏或显示工作区时关闭。组件以明确回调执行所属关闭动作，不各自修改另一种布局的状态。工作区在模态/分栏之间切换时保留仍可见的地址栏焦点，不无条件移到 Tab；跨域 iframe 使用浏览器允许的 Window.focus 恢复所属浏览上下文，不读取子 DOM 或增加 host bridge。原生 showModal 会清除跨域子页面的内层输入焦点，进入窄屏 modal 后需用户重新点选输入；同一 iframe、草稿和滚动状态保留。退出 modal 回到分栏时保留子页面当前输入焦点。只有显式新开、选 Tab 或原聚焦内容被移除时才恢复到 Tab/入口。
 
 仅 sidebar/main 与 middle/workspace 两条竖向边界可拖宽，固定 56px rail 不参与 resize。原 UiSlice 的 `sidebarWidth`、`workspaceWidth`、`resizingPane` 是唯一临时展示宽度 owner，与窗口描述一起按账号/连接 scope 清空且不持久化；计算后的有效宽度共享给 header/body 和侧栏内部。min/max 同时考虑视口和中区剩余空间，不能将主业务挤没。两处复用具体的 `AppResizeHandle` 键盘 separator（左右方向键、Home/End、可见焦点）；pointer capture 拖动时实时改宽并暂禁抽屉过渡，松手/取消/失去 capture/卸载时释放 capture 并清理 resize 状态，恢复原 200ms/reduced-motion 策略。拖宽只改变几何，不重新挂载资源、不恢复 Agent 权限，不新增配置服务或布局框架。
 
@@ -498,11 +502,11 @@ Web 与 Desktop 使用同一组三类资源 Tab。Computer Tab 按执行电脑�
 
 同一 Computer/Markdown 资源重复打开选中已有项。每次新建网页 Tab 都生成新的稳定 UI 身份，同 URL 的多个网页 Tab 可独立共存；地址变更不更换该 Tab 身份，不按 URL 合并。标题、地址、票据或正在加载的网络请求不成为网页 Tab 身份。`createWorkspaceWebpage` 在原 UI slice 中生成新 `id` 和空 `url`；导航只更新同一描述的 `url`，不接受调用者另建一套网页身份 owner。
 
-三类真实描述在右工作区以浏览器式多个 Tab 共存，一项描述对应一个 Tab；不是把 Agent 浏览器内部标签搬到外壳，也不要求所有内容后台活跃。Tab 条末尾的“＋”立即创建并选中新的真实空网页 Tab，计入已开 Tab 数；页内地址栏接受输入，未导航时呈现可操作的 New Tab 空态，不先弹 URL dialog，也不把空态当作地址错误。空地址不创建 iframe，不声称已访问网站；刷新/外部打开在未导航时不可用，“输入地址”只聚焦页内地址栏。工作区收起或尚无 Tab 时，中间 header 末尾保留新网页 Tab 入口；工作区可见时入口集中到 Tab 条，避免重复。Tab 条使用 `tablist` / `tab` / `tabpanel` 语义和明确关联，当前 Tab 为键盘入口，左右箭头及 Home/End 切换，关闭后焦点落在合适的相邻/当前 Tab；最后一项关闭后返回可见顶栏入口。同时只有选中的可见 panel 可交互；网页组件跨 Tab/收起保留 DOM，以 `hidden` + `inert` 隔离非活动 panel 并保留表单和滚动。Computer 仍只在 selected 且 visible 时挂载媒体内容，Markdown 只挂载当前项并复用查询缓存；原 Computer viewer cleanup、重新鉴权和 Human 暂停语义保持不变。
+三类真实描述在右工作区以浏览器式多个 Tab 共存，一项描述对应一个 Tab；不是把 Agent 浏览器内部标签搬到外壳，也不要求所有内容后台活跃。Tab 条末尾的“＋”立即创建并选中新的真实空网页 Tab，计入已开 Tab 数；页内地址栏接受输入，未导航时呈现可操作的 New Tab 空态，不先弹 URL dialog，也不把空态当作地址错误。空地址不创建 iframe，不声称已访问网站；刷新/外部打开在未导航时不可用，“输入地址”只聚焦页内地址栏。尚无 Tab 时，中间 header 末尾的 Plus 创建新网页 Tab；已有 Tab 的收起态只提供 PanelRight 与数量，先展开再通过 Tab 条 Plus 新建，避免重复入口。Tab 条使用 `tablist` / `tab` / `tabpanel` 语义和明确关联，当前 Tab 为键盘入口，左右箭头及 Home/End 切换，关闭后焦点落在合适的相邻/当前 Tab；最后一项关闭后返回可见顶栏入口。同时只有选中的可见 panel 可交互；网页组件跨 Tab/收起保留 DOM，以 `hidden` + `inert` 隔离非活动 panel 并保留表单和滚动。Computer 仍只在 selected 且 visible 时挂载媒体内容，Markdown 只挂载当前项并复用查询缓存；原 Computer viewer cleanup、重新鉴权和 Human 暂停语义保持不变。
 
 资源内容、外壳和授权各有原 owner：Markdown 展示复用原 File API 取内容及既有 MarkdownRenderer，从真实 Files 项进入，不建立第二套文件存储/读取服务。原 FileService 对 `.md` / `.markdown` 的完整上传内容验证有效 UTF-8 文本（除换行、回车、制表外不接受控制字符），以 `text/markdown` 识别，并继续交给 `storage.files.allowed_mime_types` 白名单与原文件大小/所有权规则；客户端扩展名或 Content-Type 不能绕过服务端准入，配置排除该类型时仍拒绝上传。网页或本地服务预览是独立 iframe 内容，独立于 Agent 使用的受管/用户浏览器，不共享其 profile、标签、CDP、控制权或浏览历史；不创建 Browser MCP 目标，不驱动 Desktop 浏览器宿主。预览服从页面自己的 CSP/X-Frame-Options 等嵌入限制，不绕过限制，也不增加转发 Worker localhost 的代理。预览可访问性由查看客户端原有网络环境决定，不能把其 localhost 解释为远端 Computer 的 localhost。外壳负责真实窗口身份和可见性；各内容组件负责加载、渲染和释放，既有文件/浏览器/媒体能力继续负责鉴权。
 
-真实入口与内容组件分离：Files 详情中的 Markdown 预览按钮创建 `markdown/fileId` 窗口；Tab 条“＋”或工作区收起/为空时中间 header 末尾的新网页 Tab 入口立即创建独立网页 Tab，地址在页内输入；不复制参考图中未实现的 Tools、recents 或 Terminal 占位功能。MarkdownFilePreview 先读取原共享元数据，确认类型后读取原内容，按 account/connection/file 身份缓存；提供加载、空内容、无权限/加载失败和明确重试，沿既有 MarkdownRenderer 渲染，不执行原始 HTML。Markdown 中合规的绝对 HTTP/HTTPS 链接经原外部打开路径处理，不导航产品主窗。WebPagePreview 提供 New Tab 空态、页内地址、刷新和外部打开；地址变化交回 UI owner 更新同一稳定 Tab 的描述，刷新或显式重新提交同地址只重建自己的 iframe，不新建或合并 Tab。地址栏反映本 UI 显式提交的目标地址，不能观察或宣称同步跨域 iframe 内部的跳转和浏览历史。iframe 固定 `sandbox="allow-scripts allow-forms"`、`referrerPolicy="no-referrer"`，不授予 same-origin、popup 或 top-navigation，不注入 Talos token、preload 或宿主 bridge。页面始终提示嵌入/本地地址限制；iframe 的 load/error 事件不能可靠判定加载成功、网络失败或拒绝嵌入，产品不据此宣告结果；由浏览器呈现实际策略/加载画面，用户可刷新、修改地址或外部打开。
+真实入口与内容组件分离：Files 详情中的 Markdown 预览按钮创建 `markdown/fileId` 窗口；Tab 条“＋”或工作区为空时中间 header 末尾的 Plus 入口立即创建独立网页 Tab，地址在页内输入；不复制参考图中未实现的 Tools、recents 或 Terminal 占位功能。MarkdownFilePreview 先读取原共享元数据，确认类型后读取原内容，按 account/connection/file 身份缓存；提供加载、空内容、无权限/加载失败和明确重试，沿既有 MarkdownRenderer 渲染，不执行原始 HTML。Markdown 中合规的绝对 HTTP/HTTPS 链接经原外部打开路径处理，不导航产品主窗。WebPagePreview 提供 New Tab 空态、页内地址、刷新和外部打开；地址变化交回 UI owner 更新同一稳定 Tab 的描述，刷新或显式重新提交同地址只重建自己的 iframe，不新建或合并 Tab。地址栏反映本 UI 显式提交的目标地址，不能观察或宣称同步跨域 iframe 内部的跳转和浏览历史。iframe 固定 `sandbox="allow-scripts allow-forms"`、`referrerPolicy="no-referrer"`，不授予 same-origin、popup 或 top-navigation，不注入 Talos token、preload 或宿主 bridge。页面始终提示嵌入/本地地址限制；iframe 的 load/error 事件不能可靠判定加载成功、网络失败或拒绝嵌入，产品不据此宣告结果；由浏览器呈现实际策略/加载画面，用户可刷新、修改地址或外部打开。
 
 同一 Computer 再次打开时选中已有窗口并显示工作区，不重复计数。多个 Computer 可分别打开、选择和关闭；关闭当前项后选择相邻项，关闭最后一项后工作区为空。窗口数来自实际保留的描述集合，包含收起后的窗口，不取在线数、媒体流数或浏览器内部标签数。打开/选择呈现窗口不修改 rail 的 Computer 选择，也不迁移 Session 已绑定的执行 Computer。账号或管理端连接 scope 变化通过原 app-store 订阅清空整个窗口集合、选择和布局状态；单纯刷新凭据不产生另一组窗口。
 
@@ -526,7 +530,7 @@ Web 与 Desktop 使用同一组三类资源 Tab。Computer Tab 按执行电脑�
 
 新增区块复用原图标、Badge、圆角、间距、配色与按钮层级；设置选择采用现有列表风格，viewer 明确区分查看/接管与连接反馈。标准 16:10 远程画面完整缩放，不拉伸或裁掉应用/dock；自然比例之外保留克制的留白。主要操作紧邻画面下方并居中排列，状态提示与操作层级清楚，窄栏按钮不逐词换行。整体展开与窄屏继续按比例显示，按可用视口高度限制画面尺寸，过小窗口保留滚动和返回路径；Computer 业务按钮不重复提供应用工作区的收起、关闭或整区放大控制。
 
-Docker 桌面使用中性、无 Talos 标志或文字的背景，轻量 Openbox/tint2 dock 紧凑展示 Browser、Terminal、File manager 三个真实可点击入口；不摆放伪应用、Dashboard 卡片或大型品牌欢迎文字。首次查看有真实浏览器窗口与离线首页，关闭最后一个窗口仍可从 dock 重开。固定版本 Chrome for Testing 使用 keep-alive 保留同一个受监督进程和 CDP；崩溃仍显式不可用。首页是浏览器内的静态内容，只提供时钟、网址输入和固定官网/源码链接，不提供业务状态、网络服务或浏览器授权；它与无品牌桌面背景是不同层次。模型只可额外观察这个固定资源的 file URI，不能导航任意本地文件。Desktop 自带浏览器复用该首页与独立导航栏，用户 Chrome 保持原窗口 UI。远程画面始终来自真实应用/Xvfb；原型中的发布清单仍只是示例网页，不新增 Dashboard 业务。
+Docker 桌面保留现有浅冷色背景，在中央以低对比玻璃质感 Talos 图形与细轨道线作克制点缀，不增加宣传文字，轻量 Openbox/tint2 dock 紧凑展示 Browser、Terminal、File manager 三个真实可点击入口；不摆放伪应用、Dashboard 卡片或大型品牌欢迎文字。首次查看有真实浏览器窗口与离线首页，关闭最后一个窗口仍可从 dock 重开。固定版本 Chrome for Testing 使用 keep-alive 保留同一个受监督进程和 CDP；崩溃仍显式不可用。首页是浏览器内的静态内容，只提供时钟、网址输入和固定官网/源码链接，不提供业务状态或浏览器授权；它与桌面装饰背景是不同层次。Docker 的私有 HTTP 首页只传输固定打包资源，不暴露任意本地文件、目录或写入能力；其进程复用 ManagedBrowser 的健康检查与清理，不新增 Dashboard 服务。Desktop 自带浏览器复用该首页与独立导航栏，仍从打包文件加载；用户 Chrome 保持原窗口 UI。远程画面始终来自真实应用/Xvfb；原型中的发布清单仍只是示例网页，不新增 Dashboard 业务。
 
 | 执行宿主 / 视图 | 展示与操作 |
 | --- | --- |
@@ -563,15 +567,15 @@ Docker 桌面使用中性、无 Talos 标志或文字的背景，轻量 Openbox/
 | 端口 | 默认 Compose 无 ports；宿主无新增 5900/6080/9222，容器内部限定 loopback/X Unix；真实 NAT Worker 可通过新媒体流显示 |
 | 任务 | Session 绑定不变；工具 DOM/键鼠/截图/上传下载真实有效；旧 DOM 引用失效、文件权限不扩大；完成后汇总遵循 Turn 终态，已恢复的单次工具错误保留记录和计数，不覆盖已完成状态 |
 | Docker 接管 | 慢调用/取消失败/在途输入、按键释放、epoch、双控制者、controller 断线/重启/manualHold；ACK 后无旧派发 |
-| Docker 桌面应用 | 中性背景无品牌文字/标志；Openbox ready、背景和 dock 可见；Browser/Terminal/File manager 经真实接管输入逐一打开正确窗口；应用 UID/GID 10001、同一私有 display 与 `browser/workspace`；终端创建测试文件，文件管理器显示并打开只读文本预览；关闭窗口/dock 重开、零浏览器窗口时同 CDP/profile/媒体连接；终端/文件管理不增加端口、MCP 或 Browser target |
+| Docker 桌面应用 | 浅冷色背景与中央克制 Talos 装饰，无宣传文字；Openbox ready、背景和 dock 可见；Browser/Terminal/File manager 经真实接管输入逐一打开正确窗口；应用 UID/GID 10001、同一私有 display 与 `browser/workspace`；终端创建测试文件，文件管理器显示并打开只读文本预览；关闭窗口/dock 重开、零浏览器窗口时同 CDP/profile/媒体连接；终端/文件管理不增加端口、MCP 或 Browser target |
 | Desktop | 自带浏览器默认可用、真实网页与 MCP 同目标、host/Worker generation、桥身份/fencing、无产品 preload/renderer暴露、标签/下载/detach/退出；当前标签外部关闭后，旧 target 的动作明确拒绝，由显式 state/标签操作重新选择；本地显示无媒体连接 |
 | 用户 Chrome | Session 电脑页两种目标切换不丢偏好；明确连接、版本/profile/策略失败、pause/resume、无屏幕服务、默认 profile 不修改/复制 |
 | 媒体 | 同实例画面、两 viewer、匿名/错账号/过期票据/Origin拒绝、注销撤销、慢 viewer/断线不影响心跳和任务；同一 viewer 释放后重接管，延迟旧 RFB 字节不能进入新 owner；迟到旧 close 不暂停新流 |
 | 分发 | Linux amd64/arm64 Docker 独立构建/运行；原生驱动仅承诺经验证平台；升级/资源/优雅退出 |
-| 应用工作区 | 三全高宏区及其header/内容边界贯通、中区header/body共用侧栏宽度与分段边界/200ms过渡和reduced-motion/即时inert及焦点、五独立组件组装并保持原内容/布局tokens、页面导航去重、Settings与工作区并存；真实Markdown沿原文件授权/渲染、网页独立预览及嵌入限制、无Worker localhost代理；中区导航/PanelLeft、侧栏Your computer能力入口与右区单行Tabs/工作区控制/PanelRight责任边界；两处竖线拖宽/键盘separator/约束与取消清理；三类真实资源Tab共存、＋立即空网页Tab、同URL网页独立共存、保留globe入口/最右0Tab Plus创建及已有Tab PanelRight仅toggle并常显计数、tablist键盘/关闭焦点；真实多 Computer 描述去重、选择、相邻关闭、收起保留计数、scope 清空；网页切Tab/收起保留表单滚动且hidden/inert、关闭/scope清空真正销毁iframe；仅当前可见Computer持有媒体，切换/收起清理且重新显示重新鉴权；Human 暂停不被外层布局自动恢复；窄屏/展开的焦点隔离和入口恢复 |
+| 应用工作区 | 三全高宏区及其header/内容边界贯通、中区header/body共用侧栏宽度与分段边界/200ms过渡和reduced-motion/即时inert及焦点、五独立组件组装并保持原内容/布局tokens、页面导航去重、Settings与工作区并存；真实Markdown沿原文件授权/渲染、网页独立预览及嵌入限制、无Worker localhost代理；中区导航/PanelLeft、侧栏Your computer能力入口与右区单行Tabs/工作区控制/PanelRight责任边界；两处竖线拖宽/键盘separator/约束与取消清理；三类真实资源Tab共存、＋立即空网页Tab、同URL网页独立共存、移除顶导globe/最右0Tab Plus创建及已有Tab PanelRight仅toggle并常显计数、tablist键盘/关闭焦点；真实多 Computer 描述去重、选择、相邻关闭、收起保留计数、scope 清空；网页切Tab/收起保留表单滚动且hidden/inert、关闭/scope清空真正销毁iframe；仅当前可见Computer持有媒体，切换/收起清理且重新显示重新鉴权；Human 暂停不被外层布局自动恢复；窄屏抽屉仅显式用户打开、初载/刷新/被动变窄不自动打开、宽屏偏好独立保留；窄屏/展开的焦点隔离和入口恢复 |
 | 客户端 | Web/Desktop 显示能力分支、正常 Settings 路径、窄屏与键盘；画面比例/留白、紧邻居中控制、可见 dock、接管/断线反馈；shared home/native 导航栏与用户 Chrome 原 UI 边界；SDK/HTTP/RPC错误语义和TUI状态 |
 
-GitHub PR gate 使用受控网页覆盖 Docker 插件/工具图片、桌面三入口及关闭重开、fencing、鉴权/背压与 native 无显示的代表用例。共享首页、logo 和 Desktop 导航栏属于实际构建输入，相关变更必须选择该 gate；普通无关 Web 静态资源保持原成本分流。真实 NAT、反代 HTTP/2/WSS、私有 CA、用户 Chrome 连接需额外本地验收，不以 mock 或单独组件 proof 冒充产品 E2E。
+GitHub PR gate 使用受控网页覆盖 Docker 插件/工具图片、首次非导航操作与后台首页共存、桌面三入口及关闭重开、fencing、鉴权/背压与 native 无显示的代表用例。共享首页、logo 和 Desktop 导航栏属于实际构建输入，相关变更必须选择该 gate；普通无关 Web 静态资源保持原成本分流。真实 NAT、反代 HTTP/2/WSS、私有 CA、用户 Chrome 连接需额外本地验收，不以 mock 或单独组件 proof 冒充产品 E2E。
 
 真实网站/模型任务与确定性回归分开记录：在本地功能检查、独立 Review 修复和最终视觉验收完成后，最后执行经用户授权的自然语言任务。从产品模型选择器选择 dev 配置中支持图片输入的 DeepSeek-v4-flash-vision-exp 和最低档 light，通过普通输入框提交阅读与滚动 `talos.love` 的任务，由模型自主决定浏览器调用，形成有真实工具证据、截图和来源链接的功能分析。推理强度应同时核对实际 Session 选择和 provider 请求映射；DeepSeek 的 light 对应 API low。管理端 `agent.inner_model` 独立负责标题等辅助工作，不随执行 Worker 的模型选择改变；真实验收必须分别记录两者并确保标题生成使用所选真实配置。确定性 fixture 区分标题文本与 memory reflection 的有限响应契约，未知辅助请求明确拒绝；完成后同时检查 Session 详情和列表标题。旧 fixture 污染会话保留为历史证据，不通过 UI 替换、猜测 JSON 或直接改库掩盖。不得以固定 fixture 输出或搜索/抓取替代浏览器，也不得在运行前写为通过；凭据、实际输出及未验收限制仅记入忽略的 output/计划。
 

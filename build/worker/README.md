@@ -64,8 +64,9 @@ when a task first invokes Browser.
 Browser resources start lazily under UID/GID 10001. Chromium keeps its own
 profile and downloads under the protected Worker home. Xvfb is a virtual X server;
 Openbox supplies the lightweight window manager. Startup waits for its readiness
-before preparing the application windows. A neutral wallpaper without Talos logos
-or text and a compact tint2 dock provide three real application launchers:
+before preparing the application windows. The existing cool wallpaper palette carries a restrained central Talos emblem
+and fine orbital accents, with no promotional text. A compact tint2 dock provides
+three real application launchers:
 
 | Entry | Local application and behavior |
 | --- | --- |
@@ -88,16 +89,23 @@ existing persistence and ownership rather than a new store or mount.
 The original Turn/File API authorization remains the model tool boundary.
 
 This is a small container desktop, without a full desktop environment, login
-manager, Dashboard service or additional listener. It does not capture a physical
-host screen. CDP uses an ephemeral loopback port, RFB uses loopback 5900, and X11
+manager or Dashboard service. It does not capture a physical host screen.
+CDP uses an ephemeral loopback port, RFB uses loopback 5900, and X11
 TCP is disabled. The image does not expose these ports or include a
 websockify/noVNC HTTP server. noVNC belongs to the product Web client and reaches
 the Worker only through the authenticated media relay. Native Desktop and Server
 packages do not gain these container desktop resources.
 
 The static home lives in `talos-app/shared/browser-home/` and is also packaged by
-the native Desktop browser build. It has no service or authority of its own. The
-Docker wallpaper, dock and local application entries live in
+the native Desktop browser build. Its assets have no credentials or runtime
+authority. ManagedBrowser supervises a private HTTP child bound to an ephemeral
+`127.0.0.1` port within its existing startup and cleanup lifecycle. This child
+preloads only `home.html`, `home.js` and `talos-logo.svg`, accepts GET/HEAD for
+those exact paths, and exposes no directories, arbitrary files or writes. Initial
+Chromium, its homepage setting and dock reopening share this trusted URL. This
+keeps the home compatible with Browser Use without bypassing its file security
+policy or adding a published port. Native Desktop still loads the packaged file.
+The Docker wallpaper, dock and local application entries live in
 `build/worker/browser/desktop/`. Native Desktop's bundled browser keeps its local
 toolbar, and user Chrome keeps its original UI; neither gains these Linux apps
 or a native screen-sharing service.

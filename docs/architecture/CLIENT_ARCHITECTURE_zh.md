@@ -155,6 +155,8 @@ Web 多台时明确选择。环境和列表携带目标 nodeId，已有 Session 
 文件；Harness/WorkerEnvironment 屏蔽传输，远端 OAuth 回到原 Worker attempt。
 
 
+Native Browser 后端的当前标签和元素引用同时绑定 managed/connected 类型。切换类型时先清除旧观察，不能向用户 Chrome 发送自带浏览器的标签 ID，反向切换亦然。同类型的新 Turn 可保留当前标签，元素引用仍需重新观察。账号或控制 epoch 改变时也清除当前标签，包括插件关闭并重新启用后自有网页视图重建的情况。
+
 ## 应用外壳与右工作区
 
 Web 与 Desktop 具有相同的三类资源 Tab；Computer 内容按执行电脑的 canonical
@@ -166,6 +168,8 @@ AppLayout 组装三个全高同级宏区：全局 Computer rail｜中间业务�
 AppBusinessRegion 只组合自己的 header 和 sidebar/main 行。各区 header 位于本区
 贯穿内容的垂直边界内，右分界线由自身 header 贯穿 Tab/内容；不能用一条跨中右的
 header 或两张内缩卡片替代分区。复用既有 token 和普通区域结构，不靠测量或新布局框架。
+rail 与顶导复用连续的轻量底色，侧栏、主内容、右内容在顶导下以小圆角和低对比细边界
+衔接，不增加外部留白或厚重色块。
 
 分栏时中间 header 拥有 PanelLeft（仅中区业务侧栏）、前后导航、新聊天及页面/
 Session/Project 上下文，不提供查看电脑入口。右区顶部只有一行 Tabs、＋、放大/还原
@@ -181,7 +185,7 @@ SidebarComputerEntry 经原 SidebarContainer/SidebarPrimaryNav 插槽位于“�
 其他页面使用当前 Computer。Desktop 查看 Docker Worker 仍可显示，本机原生无远程
 入口；ComputerInspector 保留 bundled/My Chrome 配置及本地动作入口。
 
-保留原 globe 网页快捷入口。最右工作区主开关在 0 Tab 时显示可点击 Plus，调用原
+顶导不提供单独的 globe 网页快捷入口。最右工作区主开关在 0 Tab 时显示可点击 Plus，调用原
 createWorkspaceWebpage 创建空网页 Tab 并展开 New Tab；已有 Tab 时显示 PanelRight
 和真实数量，展开/收起均显示，点击仅 toggle，不再创建 Tab。
 
@@ -193,7 +197,17 @@ header/body 两列，以 200ms ease-out CSS 在原宽度与零之间做抽屉过
 使用 native modal dialog，不用宽屏非模态 dialog 保持抽屉。关闭立即让侧栏内容 inert/aria-hidden 并按原规则返回可见开关焦点，
 不等动画；唯一 AppNavigation DOM 保持可达，主内容 header 连续让位，不能把开关
 一并 inert；关闭后不留固定空列或重复入口。几何动画不重挂载保留的
-网页 DOM，也不申请或恢复 Agent/远端输入权限。
+网页 DOM，也不申请或恢复 Agent/远端输入权限。右抽屉复用同一 200ms/reduced-motion/
+resize 策略，以原生 display/overlay 过渡呈现；隐藏立即 inert/aria-hidden 并清理
+Computer 媒体，不用计时器或延迟权限回收。
+
+初载、刷新和被动视口变化不因 body 获焦而聚焦导航。宽屏 sidebarOpen 是持久布局偏好，
+AppLayout 的窄屏抽屉是初始关闭、仅显式 toggle 打开的瞬时状态；进入工作区或离开窄屏
+时关闭，组件接受所属关闭/切换回调。工作区呈现变化保留仍存活地址框的焦点。
+跨域 iframe 仅用浏览器允许的 Window.focus 恢复浏览上下文，不读取子 DOM 或添加 bridge：
+Chromium 的原生 modal 进入会清除子页面内层输入焦点，用户需重新点选，但 DOM/草稿保留；
+退出 modal 保留其当前输入焦点。只有真实关闭/移除才恢复焦点，不抢占已移到其他区域的
+焦点，保留键盘焦点提示。
 
 只有 sidebar/main 和 middle/workspace 两条竖线支持拖宽，56px rail 固定。原 UiSlice
 中的 sidebarWidth/workspaceWidth/resizingPane 统一拥有临时几何，按账号/连接 scope

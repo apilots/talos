@@ -38,8 +38,12 @@ noVNC viewer. GitHub PR coverage requires this native media path. The controlled
 Docker scenario must cover these desktop behaviors through actual authenticated
 RFB input, not just invoke launcher commands directly:
 
+- Make the first Browser MCP call a non-navigation tab-open operation. Keep the
+  original private HTTP homepage as a background tab while navigating the new
+  task tab; verify both actual target identities and URLs remain observable.
 - Wait for Openbox readiness, then observe the neutral wallpaper and compact
-  Browser, Terminal and File manager dock. The wallpaper has no Talos mark/text.
+  Browser, Terminal and File manager dock. The cool wallpaper has a restrained
+  central Talos accent without promotional text.
 - Observe the packaged offline home and live clock; close every browser window
   while retaining the same CDP process/profile and an updating RFB connection.
   Reopen through the real dock and supported Openbox browser shortcut.

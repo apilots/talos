@@ -287,6 +287,14 @@ Computer management and synchronization controls stay on the dedicated right-han
 page; the business sidebar only shows the selected Computer and its resources.
 
 
+The native Browser backend scopes its current page and element references to the
+selected managed/connected target kind. Switching kinds clears those observations
+before the next action; tab IDs from the bundled host must never reach prepared
+Chrome, or vice versa. A new Turn on the same kind may retain its current tab,
+but element references still require a fresh observation. Account/control-epoch
+changes also invalidate the current page, including plugin disable/re-enable after
+owned website views are closed.
+
 ## Application shell and right workspace
 
 Web and Desktop expose the same three resource-tab kinds. Computer content branches
@@ -302,7 +310,9 @@ Each region's header belongs inside the same vertical boundary as its content;
 the workspace divider continues from its own header through tabs and content.
 Do not substitute a single header spanning middle and right, or two inset cards.
 Use the existing tokens and normal region structure, without measurement or a new
-layout framework.
+layout framework. The rail and region headers share the same subtle surface color;
+sidebar, main and right content use small rounded corners and light borders directly
+below their headers, without inset gutters or heavy color blocks.
 
 In split view, the middle header owns PanelLeft (only its business sidebar),
 back/forward, new chat and page/Session/Project context; it has no view-Computer
@@ -324,7 +334,7 @@ other pages use the selected Computer. Desktop viewing a Docker Worker is allowe
 a native local Computer has no remote entry. The ComputerInspector browser entry
 retains native bundled/My Chrome configuration and local actions.
 
-Retain the globe webpage shortcut. The rightmost workspace control shows an enabled
+Do not add a separate globe shortcut to the header. The rightmost workspace control shows an enabled
 Plus when there are no tabs, creating an empty webpage tab through the existing
 createWorkspaceWebpage action and opening New Tab. With existing tabs it shows
 PanelRight and the real count in both expanded/collapsed states; clicking only
@@ -342,7 +352,22 @@ content inert/aria-hidden and returns focus through the existing rule, without
 waiting for animation. The single AppNavigation DOM remains reachable while main
 header context moves aside continuously; do not make its toggle inert. The collapsed
 layout has no permanent empty column or duplicate navigation entry. Geometry animation must neither remount retained webpage DOM nor
-request or restore Agent/remote-input authority.
+request or restore Agent/remote-input authority. The right drawer follows the same
+200ms/reduced-motion/resize policy using native display/overlay transitions; hiding
+immediately makes it inert/aria-hidden and retires Computer media, without timers
+or delayed authority cleanup.
+
+Initial render, refresh and passive viewport changes must not focus navigation
+because the document body is active. Keep the persisted wide sidebar preference
+separate from AppLayout's transient narrow drawer, which starts closed and opens
+only from an explicit toggle. Close that drawer on workspace takeover or leaving
+the narrow layout; components receive the owning close/toggle callbacks.
+Preserve a live address input during workspace presentation changes. Restore a
+cross-origin iframe through its allowed Window.focus API, without child-DOM access
+or a bridge: entering a native modal clears its inner input focus in Chromium and
+requires the user to refocus it, while the DOM/draft remain. Exiting the modal
+preserves its current inner input focus. Genuine close/removal restores focus;
+never steal a focus already moved elsewhere, and retain keyboard focus indicators.
 
 Only the sidebar/main and middle/workspace vertical dividers resize; the 56px rail
 is fixed. The existing UiSlice sidebarWidth/workspaceWidth/resizingPane fields own
