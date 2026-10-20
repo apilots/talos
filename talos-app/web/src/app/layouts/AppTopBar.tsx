@@ -6,19 +6,16 @@ import { Button } from "@/shared/ui/Button";
 import { cn } from "@/shared/lib/cn";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useProjectsQuery, useSessionQuery } from "@/features/chat";
-import { OpenWebpageButton } from "@/features/web-preview";
 import { normalizeProjects } from "@/shared/store/ui-slice";
 
 /** Middle-region navigation and Session context own no workspace geometry. */
-export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisible }: {
-  sidebarAvailable: boolean; sidebarVisible: boolean; sidebarToggleRef: Ref<HTMLButtonElement>;
+export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisible, onToggleSidebar }: {
+  sidebarAvailable: boolean; sidebarVisible: boolean; sidebarToggleRef: Ref<HTMLButtonElement>; onToggleSidebar: () => void;
 }) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
-  const sidebarOpen = useAppStore(state => state.sidebarOpen);
-  const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
   return <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
-    {sidebarAvailable ? <Button ref={sidebarToggleRef} variant="ghost" className="p-2" aria-label={t(sidebarVisible ? "navigation.hideSidebar" : "navigation.showSidebar")} aria-controls="talos-sidebar" aria-expanded={sidebarVisible} onClick={() => setSidebarOpen(!sidebarOpen)}><PanelLeft aria-hidden="true" size={16} /></Button> : null}
+    {sidebarAvailable ? <Button ref={sidebarToggleRef} variant="ghost" className="p-2" aria-label={t(sidebarVisible ? "navigation.hideSidebar" : "navigation.showSidebar")} aria-controls="talos-sidebar" aria-expanded={sidebarVisible} onClick={onToggleSidebar}><PanelLeft aria-hidden="true" size={16} /></Button> : null}
     <div role="group" aria-label={t("navigation.history")} className="flex shrink-0 items-center gap-0.5">
       <Button variant="ghost" className="p-2" aria-label={t("navigation.back")} onClick={() => navigate(-1)}><ArrowLeft aria-hidden="true" size={16} /></Button>
       <Button variant="ghost" className="p-2" aria-label={t("navigation.forward")} onClick={() => navigate(1)}><ArrowRight aria-hidden="true" size={16} /></Button>
@@ -55,7 +52,7 @@ export function AppSessionContext() {
 /** A header belongs to one full-height region, with its own vertical boundary. */
 export function AppTopBar({ children, label, className }: { children: ReactNode; label?: string; className?: string }) {
   const { t } = useTranslation("common");
-  return <header aria-label={label ?? t("workspace.navigation")} className={cn("flex h-12 shrink-0 items-center gap-2 border-b border-border/70 bg-background px-2 sm:px-4", className)}>{children}</header>;
+  return <header aria-label={label ?? t("workspace.navigation")} className={cn("flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-surface px-2 sm:px-4", className)}>{children}</header>;
 }
 
 /** Geometry/count controls know no Computer authority or Session context. */
@@ -69,7 +66,6 @@ export function WorkspaceControls({ toggleRef }: { toggleRef: Ref<HTMLButtonElem
   const createWebpage = useAppStore(state => state.createWorkspaceWebpage);
   const toggleLabel = windows.length ? t(visible ? "workspace.hide" : "workspace.show", { count: windows.length }) : t("workspace.create");
   return <div role="group" aria-label={t("workspace.controls")} className="ml-auto flex shrink-0 items-center gap-1">
-    {!visible ? <OpenWebpageButton icon="globe" /> : null}
     <Button variant="ghost" className="p-2" disabled={!visible} aria-label={t(expanded ? "workspace.restore" : "workspace.expand")} title={t(expanded ? "workspace.restore" : "workspace.expand")} onClick={() => setExpanded(!expanded)}>
       {expanded ? <Minimize2 aria-hidden="true" size={16} /> : <Maximize2 aria-hidden="true" size={16} />}
     </Button>

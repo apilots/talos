@@ -1,4 +1,5 @@
-import { useEffect, useRef, type RefObject, type KeyboardEvent } from "react";
+import { useEffect, useRef, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
+import "./RightWorkspace.css";
 import { FileText, Globe2, Monitor, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ComputerDesktop, useComputer, useProductScope } from "@/features/computers";
@@ -60,12 +61,15 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const setWidth = useAppStore(state => state.setWorkspaceWidth);
   const setResizing = useAppStore(state => state.setResizingPane);
   const setOpen = useAppStore(state => state.setWorkspaceOpen);
+  const resizing = useAppStore(state => state.resizingPane !== null);
   const dialog = useRef<HTMLDialogElement>(null);
   const selectedTab = useRef<HTMLButtonElement>(null);
+  const previous = useRef({ visible: false, modal });
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const panel = dialog.current;
     return () => {
+      if (panel?.isConnected) return;
       if (panel?.open) panel.close();
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && focused !== document.body && !panel?.contains(focused)) return;
@@ -76,13 +80,34 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   useEffect(() => {
     const panel = dialog.current;
     if (!panel) return;
+    const opening = visible && !previous.current.visible;
+    const changingMode = visible && previous.current.visible && previous.current.modal !== modal;
+    const closing = !visible && previous.current.visible;
+    previous.current = { visible, modal: visible ? modal : previous.current.modal };
+    if (!opening && !changingMode && !closing) return;
     const focus = document.activeElement;
-    const restoreFocus = focus === document.body || (focus instanceof Node && panel.contains(focus));
-    if (panel.open) panel.close();
-    if (visible) {
-      if (modal) panel.showModal(); else panel.open = true;
-      selectedTab.current?.focus();
-    } else if (restoreFocus) toggleRef.current?.focus();
+    const inside = focus instanceof HTMLElement && panel.contains(focus);
+    const restoreFocus = focus === document.body || inside;
+    // Do not make a live iframe non-rendered between the two native presentations.
+    const display = panel.style.display;
+    if (changingMode) panel.style.display = "flex";
+    try {
+      if (panel.open) panel.close();
+      if (visible) {
+        if (modal) panel.showModal(); else panel.open = true;
+        if (changingMode && inside) {
+          if (focus.isConnected && !focus.closest("[hidden], [inert]")) {
+            // Native modal entry may clear a cross-origin frame's inner input.
+            // Restore its browsing context without reading its protected DOM.
+            if (focus instanceof HTMLIFrameElement) focus.contentWindow?.focus();
+            else focus.focus();
+          } else selectedTab.current?.focus();
+        } else if (opening || modal) selectedTab.current?.focus();
+        else if (focus instanceof HTMLElement && focus !== document.body && focus.isConnected) focus.focus();
+      } else if (restoreFocus) toggleRef.current?.focus();
+    } finally {
+      if (changingMode) panel.style.display = display;
+    }
     // Unmount cleanup lives above. Closing during dependency cleanup would let
     // the native dialog restore its opener before this update observes focus.
   }, [modal, visible, toggleRef]);
@@ -90,9 +115,10 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     if (!visible) return;
     selectedTab.current?.focus();selectedTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [active, visible]);
-  return <dialog style={modal ? undefined : { width }} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
-    "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-border bg-background p-0 text-ink open:flex backdrop:bg-black/20",
-    modal ? "fixed inset-y-0 left-14 right-0 z-40 h-screen w-[calc(100vw-56px)]" : "relative h-full shrink-0",
+  const modalPresentation = visible ? modal : previous.current.modal;
+  return <dialog style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
+    "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-border bg-surface p-0 text-ink open:flex backdrop:bg-black/20",
+    modalPresentation ? "fixed inset-y-0 left-14 right-0 z-40 h-screen w-[calc(100vw-56px)]" : "relative h-full shrink-0",
   )}>
     {!modal && visible ? <AppResizeHandle label={t("workspace.resize")} controls="talos-right-workspace" value={width} min={WORKSPACE_WIDTH.min} max={maxWidth} direction={-1} onResize={setWidth} onDragging={dragging => setResizing(dragging ? "workspace" : null)} className="-left-1 inset-y-0" /> : null}
     <AppTopBar label={t("workspace.controls")} className="gap-1.5 px-3 sm:px-3">
@@ -114,14 +140,15 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
       <OpenWebpageButton icon="plus" />
       {visible ? <WorkspaceControls toggleRef={toggleRef} /> : null}
     </AppTopBar>
-    <div className="min-h-0 flex-1">
+    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/50 bg-background">
       {windows.map(window => {
         const key=workspaceWindowKey(window);
-        const selected=visible && key===active;
-        return <div key={key} id={`${tabId(key)}-panel`} role="tabpanel" aria-labelledby={tabId(key)} hidden={!selected} inert={!selected} className="h-full min-h-0">
+        const activeWindow=key===active;
+        const selected=visible && activeWindow;
+        return <div key={key} id={`${tabId(key)}-panel`} role="tabpanel" aria-labelledby={tabId(key)} hidden={!activeWindow} inert={!selected} className="h-full min-h-0">
           {window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={url => navigateWebpage(key,url)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
-            : selected && window.kind === "markdown" ? <MarkdownFilePreview fileId={window.fileId} connectionKey={scope} /> : null}
+            : activeWindow && window.kind === "markdown" ? <MarkdownFilePreview fileId={window.fileId} connectionKey={scope} /> : null}
         </div>;
       })}
     </div>

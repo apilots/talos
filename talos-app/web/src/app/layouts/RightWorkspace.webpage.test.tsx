@@ -27,7 +27,7 @@ beforeEach(()=>{
 });
 afterEach(cleanup);
 it("preserves the actual webpage iframe and address draft across resource switching and collapse",()=>{
- render(<Harness/>);fireEvent.click(screen.getByRole("button",{name:"New webpage tab"}));
+ render(<Harness/>);fireEvent.click(screen.getByRole("button",{name:"New workspace tab"}));
  const first=useAppStore.getState().workspaceActiveKey!;
  const address=screen.getByRole("textbox",{name:"Web address"});
  fireEvent.change(address,{target:{value:"http://localhost:3010/"}});fireEvent.submit(address.closest("form")!);
@@ -44,7 +44,8 @@ it("preserves the actual webpage iframe and address draft across resource switch
  fireEvent.click(screen.getByRole("button",{name:"Restore workspace"}));
  expect(screen.getByTitle("Web preview: http://localhost:3010/")).toBe(frame);
  fireEvent.click(screen.getByRole("button",{name:/^Hide workspace/}));
- expect(frame.isConnected).toBe(true);expect(panel).toHaveAttribute("hidden");expect(panel).toHaveAttribute("inert");
+ expect(frame.isConnected).toBe(true);expect(panel).not.toHaveAttribute("hidden");expect(panel).toHaveAttribute("inert");
+ expect(panel.closest("dialog")).toHaveAttribute("aria-hidden","true");
  expect(screen.getByRole("button",{name:/^Show workspace/})).toHaveFocus();
  fireEvent.click(screen.getByRole("button",{name:/^Show workspace/}));
  expect(screen.getByTitle("Web preview: http://localhost:3010/")).toBe(frame);
@@ -67,7 +68,7 @@ it("returns focus to the workspace toggle after native dialog close restores a p
  render(<><button type="button">Previous opener</button><Harness/></>);
  const opener=screen.getByRole("button",{name:"Previous opener"});
  HTMLDialogElement.prototype.close=function(){this.open=false;opener.focus();};
- fireEvent.click(screen.getByRole("button",{name:"New webpage tab"}));
+ fireEvent.click(screen.getByRole("button",{name:"New workspace tab"}));
  fireEvent.click(screen.getByRole("button",{name:"Expand workspace"}));
  const panel=screen.getByRole("dialog",{name:"Right workspace"});
  screen.getByRole("tab").focus();

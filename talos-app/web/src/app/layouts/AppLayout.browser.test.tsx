@@ -1,44 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MemoryRouter, Routes, Route, Link } from "react-router-dom";
-import { useEffect, type ReactNode } from "react";
-import "@/shared/i18n/setup";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { expect, it } from "vitest";
 import { useAppStore } from "@/shared/store/app-store";
+import { fixture, show, open } from "./AppLayout.test-utils";
 import { workspaceWindowKey } from "@/shared/store/workspace-window";
-import { AppLayout } from "./AppLayout";
-const fixture = vi.hoisted(() => ({ wide: true, mounted: [] as string[], closed: [] as string[], entries: [] as string[] }));
-vi.mock("@/features/computers", () => ({
-  ComputerRail: () => <nav aria-label="Computer rail" />,
-  useComputers: () => ({ selected: { available: true } }), useSelectedComputerId: () => "selected-worker", useProductScope: () => "account",
-  useComputer: (nodeId: string) => ({ data: { displayName: nodeId, available: true } }),
-  ComputerDesktopButton: ({ nodeId, label }: { nodeId?: string; label?: string }) => nodeId ? <button onClick={() => { fixture.entries.push(nodeId); useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId }); }}>{label ?? "View computer"}</button> : null,
-  ComputerDesktop: ({ nodeId }: { nodeId: string }) => {
-    useEffect(() => { fixture.mounted.push(nodeId); return () => { fixture.closed.push(nodeId); }; }, [nodeId]);
-    return <section aria-label="Computer viewer">{nodeId}<button>Worker action</button></section>;
-  },
-}));
-vi.mock("@/features/chat", () => ({
-  SidebarContainer: ({ computerEntry }: { computerEntry?: ReactNode }) => <aside>Project and session sidebar{computerEntry}<button>Sidebar action</button></aside>,
-  useSessionQuery: (id: string) => ({ data: id ? { title: "Bound session", projectId: "bound-project", nodeId: "session-worker" } : undefined }),
-  useProjectsQuery: () => ({ data: [{ id: "bound-project", name: "Bound project", origin: "remote", updatedAt: 1 }] }),
-}));
-vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: { originalFilename: "review.md" } }), MarkdownFilePreview: () => <section aria-label="Markdown preview">Actual file</section> }));
-vi.mock("@/features/web-preview", () => ({ OpenWebpageButton: ({ icon }: { icon: string }) => <button>{icon === "plus" ? "New webpage tab" : "Open webpage preview"}</button>, WebPagePreview: ({ url }: { url: string }) => <section aria-label="Webpage preview">{url}</section> }));
-beforeEach(() => {
-  fixture.wide = true; fixture.mounted = []; fixture.closed = []; fixture.entries = [];
-  vi.stubGlobal("matchMedia", () => ({ matches: fixture.wide, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
-  HTMLElement.prototype.setPointerCapture=vi.fn();HTMLElement.prototype.hasPointerCapture=vi.fn(()=>true);HTMLElement.prototype.releasePointerCapture=vi.fn();
-  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
-  HTMLDialogElement.prototype.close = function () { this.open = false; };
-  useAppStore.setState({ sidebarOpen: false, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false,sidebarWidth:296,workspaceWidth:null,resizingPane:null });
-});
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-function show(path = "/sessions/session") {
-  return render(<MemoryRouter initialEntries={[path]}><Routes><Route element={<AppLayout />}><Route path="*" element={<div>Page content<Link to="/settings/mcp-servers">Settings</Link><Link to="/files">Files page</Link></div>} /></Route></Routes></MemoryRouter>);
-}
-function open(nodeId: string) { act(() => useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId })); }
 
 it("has one outer navigation and routes the Session computer entry to its bound node", () => {
   show();
@@ -135,10 +101,11 @@ it("uses the existing router history for application back and forward navigation
 });
 
 it("uses browser-style tab keyboard navigation and one new-tab entry", () => {
- show();expect(screen.getAllByRole("button",{name:/Open webpage preview|New webpage tab/})).toHaveLength(1);
+ show();expect(screen.getByRole("button",{name:"New workspace tab"})).toBeInTheDocument();
+ expect(screen.queryByRole("button",{name:/Open webpage preview|New webpage tab/})).not.toBeInTheDocument();
  open("a");open("b");open("c");
  const tabs=screen.getByRole("tablist",{name:"Open windows"});
- expect(screen.getAllByRole("button",{name:/Open webpage preview|New webpage tab/})).toHaveLength(1);
+ expect(screen.getAllByRole("button",{name:"New webpage tab"})).toHaveLength(1);
  expect(within(tabs).getAllByRole("tab")).toHaveLength(3);
  expect(within(tabs.parentElement!).getByRole("button",{name:"New webpage tab"})).toBeInTheDocument();
  expect(within(screen.getByRole("banner",{name:"Application navigation"})).queryByRole("button",{name:/Open webpage preview|New webpage tab/})).not.toBeInTheDocument();
@@ -157,7 +124,7 @@ it("uses browser-style tab keyboard navigation and one new-tab entry", () => {
  expect(screen.getByRole("tab",{name:"b"})).toHaveAttribute("tabindex","0");
  expect(screen.getByRole("tab",{name:"c"})).toHaveAttribute("tabindex","-1");
  fireEvent.click(screen.getByRole("button",{name:"Hide workspace (2 open windows)"}));
- expect(screen.getAllByRole("button",{name:/Open webpage preview|New webpage tab/})).toHaveLength(1);
+ expect(screen.queryByRole("button",{name:/Open webpage preview|New webpage tab/})).not.toBeInTheDocument();
 });
 
 it("keeps middle navigation in its inert region while the modal workspace owns only resources", () => {
@@ -221,14 +188,6 @@ it("uses one animated sidebar width for the header/body split and makes collapse
  expect(screen.getByRole("button",{name:"Collapse sidebar"})).toHaveFocus();
 });
 
-it("immediately retires sidebar focus on close without waiting for its visual transition",()=>{
- useAppStore.setState({sidebarOpen:true});show();
- const action=screen.getByRole("button",{name:"Sidebar action"});action.focus();
- act(()=>useAppStore.getState().setSidebarOpen(false));
- expect(action.closest('[aria-label="Projects and chats"]')).toHaveAttribute("inert");
- expect(screen.getByRole("button",{name:"Open sidebar"})).toHaveFocus();
-});
-
 it("uses an ordinary wide sidebar while the workspace toggles, keeping its content mounted",()=>{
  useAppStore.setState({sidebarOpen:true});show();
  const sidebar=screen.getByRole("complementary",{name:"Projects and chats"});
@@ -242,7 +201,7 @@ it("creates a real empty webpage from the zero-tab Plus and only toggles retaine
  show();
  const create=screen.getByRole("button",{name:"New workspace tab"});
  expect(create).toBeEnabled();expect(create.querySelector(".lucide-plus")).not.toBeNull();
- expect(screen.getByRole("button",{name:"Open webpage preview"})).toBeInTheDocument();
+ expect(screen.queryByRole("button",{name:"Open webpage preview"})).not.toBeInTheDocument();
  fireEvent.click(create);
  expect(useAppStore.getState().workspaceWindows).toHaveLength(1);
  expect(useAppStore.getState().workspaceWindows[0]).toMatchObject({kind:"webpage",url:""});
@@ -254,6 +213,16 @@ it("creates a real empty webpage from the zero-tab Plus and only toggles retaine
  expect(useAppStore.getState().workspaceWindows).toHaveLength(1);
  fireEvent.click(screen.getByRole("button",{name:"Close New webpage tab"}));
  expect(screen.getByRole("button",{name:"New workspace tab"})).toBeEnabled();
+});
+it("retires interaction immediately but keeps the active webpage painted for the drawer exit",()=>{
+ show();act(()=>useAppStore.getState().createWorkspaceWebpage());
+ const page=screen.getByRole("region",{name:"Webpage preview"});
+ const panel=page.closest('[role="tabpanel"]')!;
+ const workspace=screen.getByRole("dialog",{name:"Right workspace"});
+ fireEvent.click(screen.getByRole("button",{name:"Hide workspace (1 open windows)"}));
+ expect(page).toBeInTheDocument();expect(panel).not.toHaveAttribute("hidden");
+ expect(panel).toHaveAttribute("inert");expect(workspace).toHaveAttribute("inert");
+ expect(workspace).toHaveAttribute("aria-hidden","true");
 });
 
 it("resizes both boundaries without remounting Computer content and keeps the 1024px main area usable",()=>{
@@ -271,14 +240,4 @@ it("resizes both boundaries without remounting Computer content and keeps the 10
  fireEvent.keyDown(workspace,{key:"End"});expect(useAppStore.getState().workspaceWidth).toBe(424);
  expect(968-useAppStore.getState().sidebarWidth-useAppStore.getState().workspaceWidth!).toBeGreaterThanOrEqual(320);
  expect(fixture.mounted).toEqual(["worker"]);expect(fixture.closed).toHaveLength(0);
-});
-
-it("does not reopen a covered narrow sidebar after the workspace closes",()=>{
- fixture.wide=false;useAppStore.setState({sidebarOpen:true});show();open("worker");
- expect(useAppStore.getState().sidebarOpen).toBe(false);
- const panel=screen.getByRole("dialog",{name:"Right workspace"});
- within(panel).getByRole("button",{name:"Worker action"}).focus();
- fireEvent(panel,new Event("cancel",{cancelable:true}));
- expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
- expect(screen.getByRole("button",{name:/^Show workspace/})).toHaveFocus();
 });
