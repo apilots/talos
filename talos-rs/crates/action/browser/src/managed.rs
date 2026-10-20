@@ -17,7 +17,12 @@ use std::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::FileSystem;
 use talos_types::{BrowserReadiness, BrowserTargetKind, McpCallToolResponse};
-use tokio::{net::TcpStream, process::Command, sync::Mutex as AsyncMutex};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    net::TcpStream,
+    process::Command,
+    sync::Mutex as AsyncMutex,
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -190,6 +195,37 @@ impl ManagedBrowser {
             endpoint: String::new(),
             _profile_lock: lock,
         };
+        let mut homepage = command(&self.package.python, &authority);
+        homepage
+            .arg("-I")
+            .arg("/opt/talos/browser/desktop/home_server.py")
+            .stdout(Stdio::piped());
+        let mut homepage = BrowserProcess::spawn(homepage, self.driver.cleanup.clone())?;
+        let output = homepage
+            .inner_mut()
+            .stdout()
+            .take()
+            .ok_or_else(|| unavailable("The packaged homepage startup output is missing."))?;
+        let mut ready = String::new();
+        BufReader::new(output.take(7))
+            .read_line(&mut ready)
+            .await
+            .map_err(|error| {
+                TalosError::internal_with_source("The packaged homepage did not start.", error)
+            })?;
+        let port = ready
+            .strip_suffix('\n')
+            .filter(|line| {
+                !line.is_empty()
+                    && line.len() <= 5
+                    && line.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            .and_then(|line| line.parse::<u16>().ok())
+            .filter(|port| *port != 0)
+            .ok_or_else(|| unavailable("The packaged homepage endpoint is invalid."))?;
+        let home_url = format!("http://127.0.0.1:{port}/home.html");
+        running.children.push(homepage);
+        running.ensure_running()?;
         let mut xvfb = command("/usr/bin/Xvfb", &authority);
         xvfb.args([
             ":99",
@@ -222,7 +258,8 @@ impl ManagedBrowser {
             "--config-file",
             "/opt/talos/browser/desktop/openbox.xml",
         ])
-        .env("TALOS_BROWSER_PROFILE", &profile);
+        .env("TALOS_BROWSER_PROFILE", &profile)
+        .env("TALOS_BROWSER_HOME_URL", &home_url);
         running
             .children
             .push(BrowserProcess::spawn(wm, self.driver.cleanup.clone())?);
@@ -263,7 +300,8 @@ impl ManagedBrowser {
         }
         let mut dock = command("/usr/bin/tint2", &authority);
         dock.args(["-c", "/opt/talos/browser/desktop/tint2rc"])
-            .env("TALOS_BROWSER_PROFILE", &profile);
+            .env("TALOS_BROWSER_PROFILE", &profile)
+            .env("TALOS_BROWSER_HOME_URL", &home_url);
         running
             .children
             .push(BrowserProcess::spawn(dock, self.driver.cleanup.clone())?);
@@ -287,8 +325,8 @@ impl ManagedBrowser {
             .arg(format!("--user-data-dir={}", profile.display()))
             .arg("--window-size=1280,760")
             .arg("--window-position=80,50")
-            .arg("--homepage=file:///opt/talos/browser/desktop/home.html")
-            .arg("file:///opt/talos/browser/desktop/home.html");
+            .arg(format!("--homepage={home_url}"))
+            .arg(home_url);
         running.browser_index = running.children.len();
         running
             .children

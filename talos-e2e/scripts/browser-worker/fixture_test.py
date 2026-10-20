@@ -89,6 +89,42 @@ class AuxiliaryModelTest(unittest.TestCase):
                 status, _ = self.request(self.title_prompt, {}, messages=messages)
                 self.assertEqual(status, 400)
 
+    def test_docker_background_home_prefix_keeps_file_steps_and_native_flow(self):
+        names = ['browser_tab', 'browser_navigate', 'browser_state', 'browser_fill',
+                 'browser_click', 'browser_screenshot', 'browser_upload', 'browser_download']
+        catalog = [{'type': 'function', 'function': {'name': 'mcp__talos_browser__' + name}}
+                   for name in names]
+        elements = [{'element': 'name', 'tag': 'input', 'attributes': {}},
+                    {'element': 'submit', 'tag': 'button', 'attributes': {}},
+                    {'element': 'upload', 'tag': 'input', 'attributes': {'type': 'file'}},
+                    {'element': 'download', 'tag': 'a', 'attributes': {}}]
+        previous = list(fixture.calls)
+        self.addCleanup(lambda: fixture.calls.__setitem__(slice(None), previous))
+        for keep_home in (False, True):
+            with self.subTest(keep_home=keep_home):
+                fixture.calls.clear()
+                messages = [{'role': 'user', 'content': ('BROWSER_KEEP_HOME ' if keep_home else '')
+                             + 'BROWSER_UPLOAD_FILE_ID=attached-file'}]
+                observed = []
+                for _ in range(14 if keep_home else 13):
+                    status, body = self.request('', {}, messages=messages, tools=catalog)
+                    self.assertEqual(status, 200)
+                    message = body['choices'][0]['message']
+                    call = message['tool_calls'][0]
+                    observed.append((call['function']['name'].split('__')[-1],
+                                     json.loads(call['function']['arguments'])))
+                    messages.extend([message, {'role': 'tool', 'tool_call_id': call['id'],
+                                               'content': json.dumps({'elements': elements})}])
+                if keep_home:
+                    self.assertEqual(observed[0], ('browser_tab', {'action': 'open', 'url': 'about:blank'}))
+                else:
+                    self.assertEqual(observed[0][0], 'browser_navigate')
+                uploads = [args['fileId'] for name, args in observed if name == 'browser_upload']
+                self.assertEqual(uploads, ['not-attached-to-this-turn', 'attached-file'])
+                clicks = [args['element'] for name, args in observed if name == 'browser_click']
+                self.assertEqual(clicks, ['submit', 'download'])
+                self.assertEqual(observed[-1][0], 'browser_download')
+
 
 if __name__ == '__main__':
     unittest.main()

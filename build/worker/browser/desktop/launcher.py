@@ -23,4 +23,4 @@ with socket.create_connection(("127.0.0.1", port), timeout=2):
 package = json.loads(Path("/opt/talos/browser/runtime.json").read_text())
 os.execv(package["chromium"], [package["chromium"], "--user-data-dir=" + str(profile),
     "--no-first-run", "--no-default-browser-check", "--new-window",
-    "file:///opt/talos/browser/desktop/home.html"])
+    os.environ["TALOS_BROWSER_HOME_URL"]])

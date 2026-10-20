@@ -171,6 +171,8 @@ class Fixture(BaseHTTPRequestHandler):
         name, args = None, {}
         file_match=re.search(r'BROWSER_UPLOAD_FILE_ID=([a-zA-Z0-9_-]+)',json.dumps(request['messages']))
         sequence = ['browser_navigate', 'browser_state', 'browser_fill', 'browser_state', 'browser_click', 'browser_state', 'browser_screenshot']
+        if 'BROWSER_KEEP_HOME' in json.dumps(request['messages']):
+            sequence.insert(0, 'browser_tab')
         if file_match:
             sequence += ['browser_state','browser_upload','browser_upload','browser_state','browser_click','browser_download']
         if not any('browser_navigate' in n for n in names):
@@ -182,16 +184,18 @@ class Fixture(BaseHTTPRequestHandler):
                 name = next((n for n in names if n.endswith(suffix)), None)
                 if suffix == 'browser_navigate':
                     args = {'url': 'http://127.0.0.1:18080/'}
+                elif suffix == 'browser_tab':
+                    args = {'action': 'open', 'url': 'about:blank'}
                 elif suffix in ('browser_fill', 'browser_click', 'browser_upload'):
                     elements=next((found for item in reversed(tools) if (found:=find_elements(item['content']))),[])
-                    tag = 'input' if suffix in ('browser_fill','browser_upload') else ('a' if step>7 else 'button')
+                    tag = 'input' if suffix in ('browser_fill','browser_upload') else ('a' if file_match and step>sequence.index('browser_upload') else 'button')
                     chosen = next((e for e in elements if e['tag'] == tag and (suffix!='browser_upload' or e.get('attributes',{}).get('type')=='file')), None)
                     require(chosen, 'State did not expose fixture ' + tag)
                     args = {'element': chosen['element']}
                     if suffix == 'browser_fill':
                         args['text'] = 'Worker'
                     elif suffix == 'browser_upload':
-                        args['fileId']='not-attached-to-this-turn' if step==8 else file_match.group(1)
+                        args['fileId']='not-attached-to-this-turn' if step==sequence.index('browser_upload') else file_match.group(1)
         if step < len(sequence):
             require(name, 'Requested browser tool absent; catalog=' + repr(names))
             calls.append('ToolSearch' if name.lower() == 'toolsearch' else name)
@@ -205,7 +209,7 @@ class Fixture(BaseHTTPRequestHandler):
                 require(any('acceptance=retained' in str(m['content']) for m in tools),'Profile cookie was not retained after replacement')
             if file_match:
                 require(any('report.csv' in str(m['content']) for m in tools),'Completed browser download was not persisted')
-                (REPORT/'file-tool-model-replies.json').write_text(json.dumps(tools[7:],indent=2))
+                (REPORT/'file-tool-model-replies.json').write_text(json.dumps(tools[sequence.index('browser_upload')-1:],indent=2))
                 require(any('permission_rejection' in str(m['content']) for m in tools),'Unauthorized attachment was not rejected')
                 require(any('browser-upload.png' in str(m['content']) for m in tools),'Authorized attachment did not reach the browser')
             delta, finish = {'role': 'assistant', 'content': 'BROWSER_WORKER_ACCEPTANCE_OK'}, 'stop' 
@@ -250,7 +254,7 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     session = 'sess_browser_' + uuid.uuid4().hex
     ack = data(http(url + '/v1/turns/start', {'sessionId': session, 'nodeId': node, 'userPermissionMode': 'fullAccess',
         'modelSelection': {'modelRef': {'provider': 'openai', 'id': 'browser-fixture'}, 'reasoningEffort': None},
-        'input': {'content': [{'type': 'text', 'text': 'BROWSER_WORKER_ACCEPTANCE '+('BROWSER_VERIFY_COOKIE ' if verify_cookie else '')+'BROWSER_UPLOAD_FILE_ID='+attachment},{'type':'file','fileId':attachment}]}}))
+        'input': {'content': [{'type': 'text', 'text': 'BROWSER_WORKER_ACCEPTANCE BROWSER_KEEP_HOME '+('BROWSER_VERIFY_COOKIE ' if verify_cookie else '')+'BROWSER_UPLOAD_FILE_ID='+attachment},{'type':'file','fileId':attachment}]}}))
     req = urllib.request.Request(url + f'/v1/sessions/{session}/events?limit=10000&turn_id=' + ack['turnId'], headers={'Authorization': 'Bearer ' + TOKEN})
     events = []
     with urllib.request.urlopen(req, timeout=150) as response:
@@ -274,8 +278,15 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     require(len(calls) >= 7, 'Browser task skipped actions')
     results = [e['payload']['data']['block']['content']['data'] for e in events
         if e['payload']['type'] == 'messageBlockCompleted' and e['payload']['data']['block']['content']['type'] == 'toolResult']
-    require(len(results)==13,'A real browser tool was skipped')
+    require(len(results)==14,'A real browser tool was skipped')
     require(sum(result['isError'] for result in results)==1,'Expected only the forged attachment rejection')
+    from home import is_home_url
+    opened = next(c['value'] for c in results[0]['content'] if c['type']=='json' and 'targetId' in c.get('value',{}))
+    first_state = next(c['value'] for c in results[2]['content'] if c['type']=='json' and 'tabs' in c.get('value',{}))
+    require(opened['url']=='about:blank' and first_state['targetId']==opened['targetId'],
+            'Browser task did not navigate its newly opened tab')
+    require(any(is_home_url(tab['url']) and tab['tabId']!=opened['targetId'] for tab in first_state['tabs']),
+            'Browser Use closed the packaged background homepage')
     images = [c for result in results for c in result['content'] if c['type'] == 'image']
     require(len(images) == 1 and images[0].get('fileId'), 'Screenshot did not use the original file callback')
     file_id = images[0]['fileId']

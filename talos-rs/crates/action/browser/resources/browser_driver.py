@@ -45,8 +45,7 @@ async def observe(request):
     async with websockets.connect(request["cdp"], origin=None, max_size=8 * 1024 * 1024, compression=None) as ws:
         cdp = Cdp(ws)
         targets = [target for target in (await cdp.call("Target.getTargets"))["targetInfos"]
-                   if target["type"] == "page" and (target.get("url", "").startswith(("http://", "https://", "about:blank"))
-                       or target.get("url") == "file:///opt/talos/browser/desktop/home.html")]
+                   if target["type"] == "page" and target.get("url", "").startswith(("http://", "https://", "about:blank"))]
         target = next((target for target in targets if target["targetId"] == request.get("targetId")), None)
         if target is None:
             if request.get("targetId") and request["action"]["kind"] != "state":

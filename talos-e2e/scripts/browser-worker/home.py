@@ -1,12 +1,16 @@
 """Real packaged home, zero-window desktop and same-process launcher acceptance."""
 import json
+import re
 import subprocess
 import time
 import uuid
 from media import Viewer
 
-HOME = 'file:///opt/talos/browser/desktop/home.html'
 WORKSPACE = '/home/talos/.talos/browser/workspace'
+
+def is_home_url(value):
+    match = re.fullmatch(r'http://127\.0\.0\.1:([0-9]+)/home\.html', value)
+    return bool(match and 0 < int(match[1]) < 65536)
 
 def desktop_windows(container):
     code = '''import json,pathlib,re,subprocess
@@ -136,7 +140,7 @@ def desktop_home(url, node, container, http, data, wait, report):
     viewers=[viewer]
     def state():return data(http(url+'/v1/browser', {'nodeId':node, 'operation':{'kind':'read'}}))
     def inspect(close=False):
-        code = '''import asyncio,json,pathlib,websockets
+        code = '''import asyncio,json,pathlib,re,websockets
 async def run():
  lines=pathlib.Path('/home/talos/.talos/browser/profile/DevToolsActivePort').read_text().splitlines()
  async with websockets.connect('ws://127.0.0.1:'+lines[0]+lines[1],origin=None) as ws:
@@ -161,7 +165,8 @@ async def run():
    assert not pages,'Closed windows did not retire'
   result={'port':lines[0],'pages':[p['url'] for p in pages]}
   if pages:
-   target=next(p for p in pages if p['url']=='file:///opt/talos/browser/desktop/home.html')
+   target=next(p for p in pages if re.fullmatch(r'http://127\\.0\\.0\\.1:[0-9]+/home\\.html',p['url']))
+   result['homeUrl']=target['url']
    session=(await call('Target.attachToTarget',{'targetId':target['targetId'],'flatten':True}))['sessionId']
    result['home']=(await call('Runtime.evaluate',{'expression':'document.querySelector("h1")?.textContent','returnByValue':True},session))['result'].get('value')
    result['clock']=(await call('Runtime.evaluate',{'expression':'document.querySelector("#clock")?.textContent','returnByValue':True},session))['result'].get('value')
@@ -174,7 +179,8 @@ asyncio.run(run())'''.replace('CLOSE', str(close))
         return value if value.get('home')=='Ready when you are.' and value.get('clock') not in (None,'--:--') else None
     try:
         before = wait(loaded, 'Packaged browser home')
-        assert before['pages']==[HOME] and before['home']=='Ready when you are.', before
+        assert before['pages']==[before['homeUrl']] and is_home_url(before['homeUrl']), before
+        assert before['home']=='Ready when you are.', before
         assert before['clock'] and before['clock']!='--:--', before
         viewer.frame()
         closed = inspect(close=True)
@@ -189,14 +195,14 @@ for p in pathlib.Path('/proc').iterdir():
   name=(p/'comm').read_text().strip()
   if name in ['openbox','tint2']:
    env=dict(entry.split('=',1) for entry in (p/'environ').read_text().split('\\0') if '=' in entry)
-   result[name]={key:env.get(key) for key in ['DISPLAY','XAUTHORITY','TALOS_BROWSER_PROFILE']}
+   result[name]={key:env.get(key) for key in ['DISPLAY','XAUTHORITY','TALOS_BROWSER_PROFILE','TALOS_BROWSER_HOME_URL']}
  except (FileNotFoundError,PermissionError,ProcessLookupError):pass
 print(json.dumps(result))"""
         environments={}
         def owners_ready():
             nonlocal environments
             environments=json.loads(subprocess.check_output(['docker','exec',container,'python3','-c',environment_code],text=True))
-            expected={'DISPLAY':':99','XAUTHORITY':'/home/talos/.talos/browser/Xauthority','TALOS_BROWSER_PROFILE':'/home/talos/.talos/browser/profile'}
+            expected={'DISPLAY':':99','XAUTHORITY':'/home/talos/.talos/browser/Xauthority','TALOS_BROWSER_PROFILE':'/home/talos/.talos/browser/profile','TALOS_BROWSER_HOME_URL':before['homeUrl']}
             # A missing /proc entry is only retried until the bounded deadline;
             # a running owner with the wrong environment is always a failure.
             for process in ['openbox','tint2']:
@@ -215,19 +221,19 @@ print(json.dumps(result))"""
         # Exercise the actual Openbox shortcut through authenticated RFB input.
         viewer.key(0xffeb,True);viewer.press(ord('b'));viewer.key(0xffeb,False)
         reopened=wait(loaded,'Openbox browser shortcut')
-        assert reopened['port']==before['port'] and reopened['home']==before['home'],reopened
+        assert reopened['port']==before['port'] and reopened['homeUrl']==before['homeUrl'] and reopened['home']==before['home'],reopened
         inspect(close=True);viewer.frame(report/'desktop-before-dock.png')
         desktop_apps(viewer,container,wait,report)
         # Fixed packaged 1440x900 display / centered 180x56 dock, first icon.
         viewer.click(666,852)
         reopened=wait(loaded,'Dock browser launcher')
-        assert reopened['port']==before['port'] and reopened['home']==before['home'],reopened
+        assert reopened['port']==before['port'] and reopened['homeUrl']==before['homeUrl'] and reopened['home']==before['home'],reopened
         viewer.frame()
         current=state()
         data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'releaseControl',
             'expectedRevision':current['control']['revision'],'controllerId':current['control']['owner']['controllerId']}}))
         (report/'desktop-home-acceptance.json').write_text(json.dumps({'status':'passed',
-            'offlineHome':True,'liveClock':True,'zeroWindowsKeepsCdp':True,
+            'offlineHome':True,'loopbackHttpHome':before['homeUrl'],'liveClock':True,'zeroWindowsKeepsCdp':True,
             'sameRfbStreamPaintsDesktop':True,'launcherReusesProfileAndProcess':True,'realOpenboxShortcut':True,'realDockPointer':True,'actualLauncherOwnerEnvironments':True,
             'threeRealLaunchers':True,'terminalCreatedFile':True,'fileManagerOpenedFile':True,'applicationsRunAsUid10001':True,'terminalAndFilesReopened':True,
             'threeApplicationClientAndTitlebarFocus':True,'terminalKeyboardDeliveredAfterFocusRoundtrip':True},indent=2))
