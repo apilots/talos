@@ -5,7 +5,7 @@ import {createHash} from "node:crypto";
 import type {AppProtocol} from "@talos/sdk-core";
 import {tmpdir} from "node:os";
 import path from "node:path";
-const fixture=vi.hoisted(()=>({home:"",sessions:new Map<string,unknown>(),states:[] as unknown[]}));
+const fixture=vi.hoisted(()=>({home:"",sessions:new Map<string,unknown>(),states:[] as unknown[],load:undefined as ((url:string)=>Promise<void>)|undefined}));
 vi.mock("electron",async()=>{
   const {EventEmitter}=await import("node:events");let nextId=0;
   class Contents extends EventEmitter {
@@ -13,7 +13,7 @@ vi.mock("electron",async()=>{
     debugger={attach:vi.fn(),sendCommand:async()=>({})};
     navigationHistory={canGoBack:()=>false,canGoForward:()=>false};
     setWindowOpenHandler(){}focus(){}getURL(){return this.url;}getTitle(){return "Downloads";}isLoading(){return false;}isDestroyed(){return this.destroyed;}
-    async loadURL(url:string){this.url=url;this.emit("did-finish-load");}
+    async loadURL(url:string){this.url=url;await fixture.load?.(url);this.emit("did-finish-load");}
     send(_channel:string,value:unknown){fixture.states.push(value);}
     close(){this.destroyed=true;this.emit("destroyed");}
   }
@@ -31,7 +31,7 @@ import {WebsiteAccount,checkedUrl,downloadRoot} from "./browser-website";
 import {DesktopBrowserHost} from "./browser-host";
 import {parseBrowserChromeAction} from "./browser-window-contract";
 let host:DesktopBrowserHost;
-beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-website-"));fixture.sessions.clear();fixture.states=[];host=new DesktopBrowserHost();});
+beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-website-"));fixture.sessions.clear();fixture.states=[];fixture.load=undefined;host=new DesktopBrowserHost();});
 afterEach(async()=>{await host.reset();vi.restoreAllMocks();rmSync(fixture.home,{recursive:true,force:true});});
 it.each(["b","c"])("closing tab %s retains another active tab or chooses a remaining one",async(id)=>{
   const account=new WebsiteAccount("alice");
@@ -117,4 +117,28 @@ it("rejects oversized completed bytes and lets the user retry with a fresh downl
   const retry=begin("report.pdf","successful retry");retry.finish();
   expect(await collect()).toEqual([{filename:"report.pdf",dataBase64:Buffer.from("successful retry").toString("base64")}]);
   expect(fixture.states.at(-1)).toMatchObject({error:null});
+});
+
+it.each(["chrome","page"] as const)("reset interrupts a stalled managed %s load and prevents late target recreation",async(kind)=>{
+  let started!:()=>void,finish!:()=>void;
+  const loading=new Promise<void>(resolve=>{started=resolve;}),loaded=new Promise<void>(resolve=>{finish=resolve;});
+  const load=vi.fn(async(url:string)=>{
+    if(kind==="chrome"?url.endsWith("/browser-window/index.html"):url==="https://pending.test/"){started();await loaded;}
+  });
+  fixture.load=load;
+  const close=vi.spyOn(WebsiteAccount.prototype,"close");
+  const action=host.execute("loading",request({kind:"execute",action:kind==="chrome"?{kind:"state"}:{kind:"tab",action:"open",url:"https://pending.test/",tabId:null},targetId:null,element:null,upload:null}));
+  const cancelled=expect(action).rejects.toThrow("cancelled");
+  await loading;
+  let reset=false;
+  const resetting=host.reset().then(()=>{reset=true;});
+  const count=load.mock.calls.length;
+  try {
+    await new Promise(resolve=>setImmediate(resolve));
+    expect(reset).toBe(true);expect(close).toHaveBeenCalledOnce();
+  } finally {finish();await cancelled;await resetting;}
+  await new Promise(resolve=>setImmediate(resolve));
+  expect(load).toHaveBeenCalledTimes(count);
+  fixture.load=undefined;
+  await expect(collect()).resolves.toEqual([]);
 });

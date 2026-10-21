@@ -6,7 +6,7 @@ import { WebsiteAccount, checkedUrl, downloadRoot, MAX_TABS, type WebsiteTab as 
 import { trackInputs, release, type Send, type RecordValue } from "./browser-input";
 import type { AppProtocol as P } from "@talos/sdk-core";
 
-type Operation = { cancelled: boolean; user: string; generation: string; epoch: number };
+type Operation = { cancelled: boolean; stop:AbortController; user: string; generation: string; epoch: number };
 const keyCodes: Record<string, number> = { Enter:13, Tab:9, Escape:27, Backspace:8, Delete:46, ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Home:36, End:35, PageUp:33, PageDown:34, Space:32 };
 
 /** Only dedicated website views are attached. The product renderer is never a target. */
@@ -19,8 +19,25 @@ export class DesktopBrowserHost {
   private connecting: Promise<void> | undefined;
   private generation: string | undefined;
   private resetting:Promise<void>|undefined;
+  private executing:Promise<void>=Promise.resolve();
+  private settling:Promise<void>=Promise.resolve();
+  private inputFailure:Error|undefined;
 
-  cancel(id: string): void { const call=this.operations.get(id); if (call) call.cancelled=true; }
+  private async settleInputs(cleanup:()=>Promise<void>):Promise<void> {
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    // A deadline reports failure without cancelling a CDP command already sent.
+    // Explicit recovery must also wait for that cleanup's actual settlement.
+    const pending=this.settling.then(cleanup);
+    this.settling=pending.catch(()=>{});
+    try {
+      await Promise.race([pending,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("Browser input cleanup timed out.")),3000);})]);
+    } catch(error) {
+      this.inputFailure=new Error("Browser input cleanup failed. Release browser inputs before retrying.",{cause:error});
+      throw this.inputFailure;
+    } finally {clearTimeout(timer);}
+  }
+
+  cancel(id: string): void { const call=this.operations.get(id); if (call) {call.cancelled=true;call.stop.abort();} }
   reset():Promise<void> {
     if(this.resetting)return this.resetting;
     const pending=this.resetOwnedTargets().finally(()=>{if(this.resetting===pending)this.resetting=undefined;});
@@ -28,28 +45,52 @@ export class DesktopBrowserHost {
   }
   private async resetOwnedTargets(): Promise<void> {
     this.chromeRevision++;
-    for (const call of this.operations.values()) call.cancelled=true;
+    for (const id of this.operations.keys()) this.cancel(id);
     this.operations.clear();
-    try {await this.chrome?.releaseInputs();}catch(error){console.error("Chrome input cleanup failed",error);}finally{this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;}
+    await this.executing;
+    await this.settleInputs(async()=>{
+      for(const account of this.accounts.values())await account.releaseInputs();
+      await this.chrome?.releaseInputs();
+    });
+    this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;
     for (const account of this.accounts.values()) account.close();
-    this.accounts.clear(); this.generation=undefined;
+    this.accounts.clear(); this.generation=undefined;this.inputFailure=undefined;
   }
   async execute(id:string, request:P.BrowserHostRequest): Promise<P.BrowserHostResponse> {
     if(this.resetting)await this.resetting;
     if (!request.userId || !request.generation || !Number.isSafeInteger(request.epoch) || this.operations.size>=8) throw new Error("Invalid browser host context.");
     if (this.generation && this.generation!==request.generation) await this.reset();
     this.generation=request.generation;
-    const op:Operation={cancelled:false,user:request.userId,generation:request.generation,epoch:request.epoch};
+    const op:Operation={cancelled:false,stop:new AbortController(),user:request.userId,generation:request.generation,epoch:request.epoch};
     this.operations.set(id,op);
     const check=()=> { if (op.cancelled || this.generation!==op.generation) throw new Error("Browser operation cancelled."); };
+    const wait=async<T>(work:()=>Promise<T>):Promise<T>=>{
+      check();
+      let abort!:()=>void;
+      const cancelled=new Promise<never>((_,reject)=>{abort=()=>reject(new Error("Browser operation cancelled."));op.stop.signal.addEventListener("abort",abort,{once:true});});
+      try {const result=await Promise.race([work(),cancelled]);check();return result;}
+      finally {op.stop.signal.removeEventListener("abort",abort);}
+    };
+    const operation=request.operation;
+    let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined;
+    if(operation.kind==="execute" || operation.kind==="releaseInputs" || operation.kind==="disconnect") {
+      previous=this.executing;
+      this.executing=new Promise(resolve=>{finished=resolve;});
+    }
+    if(operation.kind==="releaseInputs" || (operation.kind==="disconnect"&&this.chromeOwner===request.userId)) {
+      for(const other of this.operations.keys())if(other!==id)this.cancel(other);
+    }
     try {
-      const operation=request.operation;
+      if(previous)await previous;
+      if(operation.kind==="execute") {check();if(this.inputFailure)throw this.inputFailure;}
       if(operation.kind==="probe")return {kind:"readiness",connected:this.chromeOwner===request.userId&&Boolean(this.chrome?.isConnected())};
-      if (operation.kind==="releaseInputs" || operation.kind==="shutdown") {
-        for (const [other,call] of this.operations) if (other!==id) call.cancelled=true;
-        for (const account of this.accounts.values()) await account.releaseInputs();
-        await this.chrome?.releaseInputs();
-        if (operation.kind==="shutdown") await this.reset();
+      if(operation.kind==="shutdown") {await this.reset();return {kind:"done"};}
+      if (operation.kind==="releaseInputs") {
+        await this.settleInputs(async()=>{
+          for (const account of this.accounts.values()) await account.releaseInputs();
+          await this.chrome?.releaseInputs();
+        });
+        this.inputFailure=undefined;
         return {kind:"done"};
       }
       if (operation.kind==="connect") {
@@ -61,6 +102,12 @@ export class DesktopBrowserHost {
           if (previous) await previous.catch(() => {});
           check();
           if (revision !== this.chromeRevision) throw new Error("Browser connection superseded.");
+          if(this.chrome) {
+            await this.executing;
+            await this.settleInputs(async()=>{await this.chrome?.releaseInputs();});
+            check();
+            if(revision!==this.chromeRevision)throw new Error("Browser connection superseded.");
+          }
           this.chrome?.close(); this.chrome=undefined; this.chromeOwner=undefined;
           const candidate = await ChromeConnection.connect(request.userId);
           try {
@@ -81,11 +128,12 @@ export class DesktopBrowserHost {
       if (operation.kind==="disconnect") {
         this.chromeRevision++;
         if (this.chromeOwner!==request.userId) throw new Error("Chrome belongs to another account.");
-        try {await this.chrome?.releaseInputs();}finally{this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;}return {kind:"done"};
+        await this.settleInputs(async()=>{await this.chrome?.releaseInputs();});
+        this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;return {kind:"done"};
       }
       let account=this.accounts.get(request.userId);
       if (!account) { if(this.accounts.size>=2) throw new Error("Browser account capacity exceeded."); account=new WebsiteAccount(request.userId); this.accounts.set(request.userId,account); }
-      if (operation.kind==="show") {await account.ensure();check();account.show();return {kind:"done"};}
+      if (operation.kind==="show") {await wait(()=>account.ensure(check));account.show();return {kind:"done"};}
       if(operation.kind==="acknowledgeDownloads") {
         if(operation.files.length>5)throw new Error("Too many browser file receipts.");
         if(request.target==="connected"&&(!this.chrome||this.chromeOwner!==request.userId))throw new Error("The connected browser owner changed.");
@@ -101,7 +149,7 @@ export class DesktopBrowserHost {
       const connected=request.target==="connected";
       if (connected && (!this.chrome || this.chromeOwner!==request.userId)) throw new Error("Connect your prepared Chrome profile in Browser settings first.");
       const owner=connected ? this.chrome! : account;
-      let tabs=await owner.tabs();check();
+      let tabs=await wait(()=>owner.tabs(check));
       let tab:Tab|undefined=operation.targetId ? tabs.find(t=>t.id===operation.targetId) : tabs[0];
       const action=operation.action;
       if (operation.targetId && !tab && action.kind!=="state" && action.kind!=="tab") {
@@ -109,18 +157,20 @@ export class DesktopBrowserHost {
       }
       if (!tab && action.kind==="state") tab=tabs[0];
       if (action.kind==="tab") {
-        if (action.action==="open") { tab=await owner.open(checkedUrl(action.url ?? "about:blank"),check);check(); }
+        if (action.action==="open") { tab=await wait(()=>owner.open(checkedUrl(action.url ?? "about:blank"),check)); }
         else {
           const tabId=action.tabId ?? (action.action==="close" ? operation.targetId : null);
           tab=tabs.find(t=>t.id===tabId);
           if(!tab) throw new Error("Unknown browser tab.");
-          if (action.action==="close") {check();await owner.remove(tab.id);const remaining=await owner.tabs();tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
-          else {check();await owner.focus(tab.id);}
+          const selectedId=tab.id;
+          if (action.action==="close") {check();await wait(()=>owner.remove(selectedId));const remaining=await wait(()=>owner.tabs(check));tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
+          else {check();await wait(()=>owner.focus(selectedId));}
         }
       }
-      if (!tab) {check();tab=await owner.open("about:blank",check);}
+      if (!tab) {check();tab=await wait(()=>owner.open("about:blank",check));}
       const current=tab;
-      const send:Send=async(method,params)=>{check(); const result=await current.send(method,params);check();return result;};
+      input=current.send;
+      const send:Send=(method,params)=>wait(()=>current.send(method,params));
       const prepareInput=async()=>{
         await send("Input.setIgnoreInputEvents",{ignore:false});
         await send("Emulation.setFocusEmulationEnabled",{enabled:true});
@@ -196,9 +246,17 @@ export class DesktopBrowserHost {
       const titleResult=object((await send("Runtime.evaluate",{expression:"document.title.slice(0,512)",returnByValue:true})).result);
       const screenshot=action.kind==="screenshot" ? String((await send("Page.captureScreenshot",{format:"png",captureBeyondViewport:false})).data) : null;
       if(screenshot && screenshot.length>6*1024*1024)throw new Error("Browser screenshot is too large.");
-      tabs=await owner.tabs();check();
+      tabs=await wait(()=>owner.tabs(check));
       return {kind:"observation",page:{targetId:current.id,url:current.url()==="about:blank"?"about:blank":String(frame.url??current.url()),title:String(titleResult.value??current.title()),text:String(textResult.value??""),tabs:tabs.slice(0,32).map(t=>({tabId:t.id,title:t.title(),url:t.url()}))},loaderId,elements,screenshot,downloads};
-    } finally { this.operations.delete(id); }
+    } finally {
+      try {
+        // Cleanup uses the raw tracked sender: the cancelled operation's wrapper
+        // must not reject its own key/button release. Keep admission fenced until
+        // the release is acknowledged, or block it explicitly on cleanup failure.
+        const sender=input;
+        if(sender)await this.settleInputs(()=>release(sender));
+      } finally {this.operations.delete(id);finished?.();}
+    }
   }
 }
 function object(value:unknown):RecordValue {return typeof value==="object"&&value!==null ? value as RecordValue : {};}
@@ -288,8 +346,9 @@ class ChromeConnection {
     if(this.socket.readyState!==WebSocket.OPEN||this.pending.size>=32)throw new Error("Chrome connection is unavailable.");
     const id=++this.nextId;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);reject(new Error("Chrome command timed out."));},3000);this.pending.set(id,{resolve,reject,timer});this.socket.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));});
   }
-  async tabs():Promise<Tab[]> {
+  async tabs(check:()=>void=()=>{}):Promise<Tab[]> {
     const targets=(await this.send("Target.getTargets")).targetInfos as {targetId:string;type:string;url:string;title:string}[];
+    check();
     return Promise.all(targets.filter(t=>t.type==="page"&&(t.url==="about:blank"||/^https?:/.test(t.url))).slice(0,32).map(async t=>{let id=this.sessions.get(t.targetId);if(!id){id=String((await this.send("Target.attachToTarget",{targetId:t.targetId,flatten:true})).sessionId);this.sessions.set(t.targetId,id);}let sender=this.senders.get(t.targetId);if(!sender){sender=trackInputs((method:string,params?:RecordValue)=>this.send(method,params,id));this.senders.set(t.targetId,sender);}return {id:t.targetId,send:sender,url:()=>t.url,title:()=>t.title};}));
   }
   async open(url:string,check:()=>void=()=>{}):Promise<Tab> {if((await this.tabs()).length>=MAX_TABS)throw new Error("Chrome tab capacity exceeded.");check();const id=String((await this.send("Target.createTarget",{url})).targetId);const tab=(await this.tabs()).find(t=>t.id===id);if(!tab)throw new Error("Chrome tab was not created.");return tab;}
@@ -308,7 +367,12 @@ class ChromeConnection {
     throw new Error("Chrome tab close timed out.");
   }
   async focus(id:string):Promise<void> {await this.send("Target.activateTarget",{targetId:id});}
-  async releaseInputs():Promise<void> {for(const tab of await this.tabs())await release(tab.send);}
+  async releaseInputs():Promise<void> {
+    // A dead transport cannot release inputs; retire it so explicit reconnect can
+    // recover. Live transports still report cleanup failure and retain ownership.
+    if(!this.isConnected())return;
+    for(const tab of await this.tabs())await release(tab.send);
+  }
   close():void {if(this.socket.readyState===WebSocket.OPEN)for(const sessionId of this.sessions.values())this.socket.send(JSON.stringify({id:++this.nextId,sessionId,method:"Emulation.setFocusEmulationEnabled",params:{enabled:false}}));if(this.socket.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify({id:++this.nextId,method:"Browser.setDownloadBehavior",params:{behavior:"default"}}));this.fail();this.socket.close();}
 }
 

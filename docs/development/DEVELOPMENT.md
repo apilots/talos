@@ -90,11 +90,21 @@ Shared Rust/Node/pnpm versions come from `.github/release-toolchain.env`. Rust
 caches are isolated by platform, architecture, profile, toolchain and the resolved
 Cargo graph. Cache hits never replace compilation or behavioral checks.
 Changes limited to `talos-app/web/src/**` and `talos-app/web/public/**` run
-frontend quality and the Computer-registration browser E2E against the real native
-service. Native contract tests and the full E2E matrix still apply to SDK, Desktop,
-dependency, configuration, build, backend, scenario or E2E-selector/workflow inputs.
-Mixed changes use the full route. The fixed `talos-pr-e2e` gate requires the selected
-checks and fails on missing scope output, failure or unexpected skips.
+frontend quality and Computer-registration acceptance against the real native
+service, plus lightweight resource acceptance or the Browser group according to
+its existing owner selection. Changes limited to `talos-app/desktop/src/**` and
+`talos-app/desktop/resources/**` run frontend quality and native Browser cases
+`20/02`, `20/03`, and `20/04` in the dedicated Browser job, without generic E2E,
+Rust contract tests, or a Worker image. Desktop media, preload, IPC, and controller
+owners also retain `20/05` and its packaged Docker Worker image.
+
+SDK, dependency, configuration, build, backend, scenario, toolchain, and mixed
+Web/Desktop inputs retain the full route. The existing unified selector owns all
+these decisions. Its own routing definitions and regressions are checked by the
+always-on policy workflow; including those files does not widen an otherwise
+bounded product diff. Routing-only changes remain conservative. The fixed
+`talos-pr-e2e` gate requires selected checks to succeed, unselected jobs to skip,
+and valid scope outputs; an empty acceptance selection for product changes fails.
 
 CI success does not substitute for unrun scoped tests, snapshots or real-path
 acceptance. Error changes require source/disclosure, transport/replay coverage

@@ -7,23 +7,10 @@ const fixture=vi.hoisted(()=>({home:""}));
 vi.mock("electron",()=>({app:{getPath:()=>fixture.home},BaseWindow:class{},WebContentsView:class{},session:{},ipcMain:{on:vi.fn(),removeListener:vi.fn()}}));
 import {DesktopBrowserHost} from "./browser-host";
 import {WebsiteAccount,downloadRoot} from "./browser-website";
-class Socket extends EventTarget {
-  static OPEN=1;
-  static all:Socket[]=[];
-  static targets:Array<{targetId:string;type:string;url:string;title:string}>=[];
-  readyState=0;
-  commands:Array<{id:number;method:string;params?:Record<string,unknown>}>=[];
-  constructor(){super();Socket.all.push(this);queueMicrotask(()=>{this.readyState=1;this.dispatchEvent(new Event("open"));});}
-  send(text:string){
-    const command=JSON.parse(text);this.commands.push(command);
-    const result=command.method==="Browser.getBrowserCommandLine"?{arguments:["--enable-automation",`--user-data-dir=${fixture.home}`]}:command.method==="Target.getTargets"?{targetInfos:Socket.targets}:{};
-    queueMicrotask(()=>this.dispatchEvent(new MessageEvent("message",{data:JSON.stringify({id:command.id,result})})));
-  }
-  close(){this.readyState=3;this.dispatchEvent(new Event("close"));}
-}
+import {BrowserHostSocket as Socket} from "./browser-host.fixture";
 const request=(kind:"connect"|"probe"):AppProtocol.BrowserHostRequest=>({userId:"alice",generation:"one",epoch:1,target:"connected",operation:{kind}});
 let host:DesktopBrowserHost;
-beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-chrome-"));host=new DesktopBrowserHost();Socket.all=[];Socket.targets=[];vi.stubGlobal("WebSocket",Socket);});
+beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-chrome-"));host=new DesktopBrowserHost();Socket.all=[];Socket.targets=[];Socket.profileRoot=fixture.home;vi.stubGlobal("WebSocket",Socket);});
 afterEach(async()=>{vi.restoreAllMocks();await host.reset();vi.unstubAllGlobals();rmSync(fixture.home,{recursive:true,force:true});});
 function delayHandshake(){let finish!:()=>void;const pending=new Promise<Response>(resolve=>{finish=()=>resolve({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})} as Response);});return{pending,finish};}
 it.each(["reset","cancel"])("closes a Chrome candidate completed after %s",async(action)=>{

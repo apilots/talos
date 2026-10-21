@@ -153,9 +153,14 @@ retained form state across switching/collapse, keyboard selection, native modal
 and Escape focus, close/account-scope destruction, and authenticated Markdown
 rendering with non-owner metadata/content rejection. Web-only changes run this
 case alongside Computer registration without requiring a Docker Worker or model.
-Browser owner changes run the complete numbered [group 20](scenarios/20_browser_workspace/README.md)
-once through the standard runner in the dedicated Browser job; the generic matrix
-does not duplicate its resource case.
+Desktop-only source/resource changes select native cases `20/02`, `20/03`, and
+`20/04` through the standard runner in the dedicated Browser job. Media, preload,
+IPC, and controller changes also select Docker case `20/05` and its image build;
+other Desktop-only changes require neither Docker nor generic E2E/Rust contracts.
+Web Browser owners and shared SDK/backend/build/scenario inputs retain the complete
+numbered [group 20](scenarios/20_browser_workspace/README.md) once, without duplicating
+its resource case in the generic matrix. The unified selector and fixed aggregate
+gate own this routing; see [development validation](../docs/development/DEVELOPMENT.md#validation-by-delivery-stage).
 Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
 does not claim a live remote desktop connection.

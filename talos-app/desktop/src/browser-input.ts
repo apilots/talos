@@ -7,8 +7,9 @@ export function trackInputs(raw:Send):Send {
     const key=method==="Input.dispatchKeyEvent" ? `key:${String(params.key)}` : method==="Input.dispatchMouseEvent" ? `mouse:${String(params.button)}` : null;
     const down=params.type==="keyDown"||params.type==="rawKeyDown"||params.type==="mousePressed", up=params.type==="keyUp"||params.type==="mouseReleased";
     if(key&&down) {if(held.size>=256)throw new Error("Pressed input capacity exceeded.");held.set(key,{method,params:{...params,type:params.type==="mousePressed"?"mouseReleased":"keyUp",modifiers:0,buttons:0}});}
+    const releasing=key&&up?held.get(key):undefined;
     const result=await raw(method,params);
-    if(key&&up)held.delete(key);
+    if(key&&up&&held.get(key)===releasing)held.delete(key);
     return result;
   };
   heldInputs.set(send,held);return send;

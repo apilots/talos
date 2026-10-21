@@ -62,6 +62,14 @@ CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`�
 平台、架构、构建模式、工具链及解析后的依赖图隔离，缓存命中不替代编译或行为检查。
 标签 pre-push 只核对元数据，发布脚本和发布 CI 仍要求精确源码候选证据。
 
+Web 源码/公共资源改动沿用统一 selector 的轻量资源或 Browser owner 分流。
+仅 Desktop `src/**`、`resources/**` 改动保留前端质量检查及 `20/02`、`20/03`、
+`20/04` 原生浏览器验收，跳过通用 E2E、Rust 契约测试及 Worker 镜像；媒体、preload、
+IPC、controller owner 另保留 `20/05` 与 Docker 镜像。SDK、依赖、配置、构建、后端、
+场景、工具链及 Web/Desktop 混合改动仍走完整检查。selector/workflow 本身由常驻 policy
+回归验证，与范围明确的产品改动一起提交时不扩大场景；单独修改分流定义仍走保守完整路线。
+固定门禁核对所选任务成功、未选任务跳过，并拒绝缺失或空的产品验收选择。
+
 ## 端到端测试
 
 ```bash
