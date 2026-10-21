@@ -182,6 +182,6 @@ Cloud 测试服务和相同的 Python/Node 依赖。Sync 固定为公开 v0.1.3 
 
 ## 20 浏览器与资源工作区
 
-新增标准编号组 `20_browser_workspace`，按场景分为 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop MCP、Docker Worker 五个用例。每个用例验证独立的产品边界，不把单元测试重复包装成 E2E。执行 `just e2e-group 20_browser_workspace`；轻量资源改动仅选择 `20_browser_workspace/01_resource_tabs`，浏览器宿主与后端改动在 PR gate 通过标准 runner 执行完整组，避免重复跑同一场景。
+新增标准编号组 `20_browser_workspace`，按场景分为 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop MCP、Docker Worker 五个用例。每个用例验证独立的产品边界，不把单元测试重复包装成 E2E。执行 `just e2e-group 20_browser_workspace`；轻量资源改动仅选择 `20_browser_workspace/01_resource_tabs`，仅 Desktop 源码/资源改动选择 02、03、04；媒体、preload、IPC、controller owner 另保留 05 与 Docker 镜像，其余 Desktop-only 改动跳过无关通用场景及 Rust 契约。Web Browser owner、共享 SDK、后端、构建或场景改动仍运行完整组，不在普通矩阵重复资源场景。分流统一由现有 selector 决定，固定门禁验证所选任务。
 
 前置条件、断言、隔离清理、截图归档和真实模型验收边界见[组说明](scenarios/20_browser_workspace/README.md)。公共网页与本地 Markdown 同时覆盖 Web/Desktop；远程电脑 Tab 只由 Docker Worker 能力提供。受控模型链路验证不等同于真实模型自主浏览与产品分析。

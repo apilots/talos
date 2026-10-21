@@ -70,11 +70,13 @@ they must not attach to a user's interactive browser or retained review Worker.
 
 ## CI and provider-backed acceptance
 
-The secretless PR Browser job builds the standard image and runs this complete
-group through `run_e2e.sh`. Lightweight Web preview/Markdown-only edits run case
-01 through the same runner without Docker. Heavy Browser owners run the full
-group once, without duplicating case 01 in the generic scenario matrix. Missing
-dependencies, unsupported runtime or an incomplete fixture result fail explicitly.
+The secretless PR Browser job uses the unified change selector. Desktop-only
+source/resource changes run cases 02/03/04; media, preload, IPC and controller
+owners also run 05 with the standard packaged Worker image. Lightweight Web
+preview/Markdown edits run case 01 without Docker; Web Browser owners and shared
+SDK/backend/build/scenario inputs run this complete group once, without duplicating
+01 in the generic matrix. Every selected target uses `run_e2e.sh`; missing
+dependencies, unsupported runtime or incomplete fixture results fail explicitly.
 
 Cases 04/05 use a deterministic model endpoint to prove product integration and
 permission/lifecycle behavior without provider secrets. They do **not** claim

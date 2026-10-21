@@ -15,6 +15,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
+E2E_ROUTING_INPUTS = (".github/workflows/pr-e2e.yml", ".github/scripts/pr_change_scope*.py")
 SCOPES = {
     "rust": ("talos-rs/", "justfile"),
     "frontend": ("talos-app/",),
@@ -30,7 +31,7 @@ SCOPES = {
 CI_INPUTS = {
     "rust": ("scripts/check_error_contract*.py", ".github/workflows/talos-rust.yml"),
     "frontend": ("scripts/check_error_contract.py", ".github/workflows/talos-frontend-app.yml"),
-    "pr-e2e": ("build.sh", "build/*", ".github/workflows/pr-e2e.yml", ".github/scripts/pr_change_scope*.py"),
+    "pr-e2e": ("build.sh", "build/*", *E2E_ROUTING_INPUTS),
     "tui-install": (".github/workflows/talos-tui-install.yml",),
 }
 E2E_SCENARIOS = [
@@ -70,12 +71,33 @@ def should_run(scope: str, paths: list[str], *, product_only: bool = False) -> b
     return any(scope_matches(scope, path, product_only=product_only) for path in paths)
 
 
+def e2e_product_paths(paths: list[str]) -> list[str]:
+    inputs = [path for path in paths if scope_matches("pr-e2e", path)]
+    product = [path for path in inputs if not any(
+        fnmatch.fnmatchcase(path, pattern) for pattern in E2E_ROUTING_INPUTS
+    )]
+    # Always-on policy tests exercise routing/gate definitions. Their inclusion
+    # must not broaden a bounded product diff; routing-only edits stay conservative.
+    return product or inputs
+
+
+def frontend_e2e_scope(paths: list[str]) -> str | None:
+    paths = e2e_product_paths(paths)
+    for kind, prefixes in (
+        ("web", ("talos-app/web/src/", "talos-app/web/public/")),
+        ("desktop", ("talos-app/desktop/src/", "talos-app/desktop/resources/")),
+    ):
+        if paths and all(path.startswith(prefixes) for path in paths):
+            return kind
+    return None
+
+
 def e2e_plan(paths: list[str]) -> tuple[bool, dict]:
-    # This real browser scenario exercises the shared Web UI against a native
-    # service. SDK, Desktop, dependency, build and CI inputs retain full checks.
-    web_only = bool(paths) and all(
-        path.startswith(("talos-app/web/src/", "talos-app/web/public/")) for path in paths
-    )
+    frontend = frontend_e2e_scope(paths)
+    if frontend == "desktop":
+        # The dedicated Browser job owns native resources/host/MCP acceptance.
+        return False, {"include": []}
+    web_only = frontend == "web"
     scenarios = [s for s in E2E_SCENARIOS if s["name"] == "computer-registration"] if web_only else list(E2E_SCENARIOS)
     # Heavy Browser owners run the complete numbered group in its dedicated job.
     # Lightweight resource-only edits retain the real product scenario once.
@@ -89,6 +111,7 @@ def browser_e2e_applies(paths: list[str]) -> bool:
     """Keep Browser lifecycle coverage for its real owners without taxing unrelated Web edits."""
     if not paths:
         return True
+    paths = e2e_product_paths(paths)
     web_owners = (
         "talos-app/web/src/features/computers/", "talos-app/web/src/features/settings/",
         "talos-app/web/src/app/", "talos-app/web/src/pages/chat/",
@@ -102,6 +125,24 @@ def browser_e2e_applies(paths: list[str]) -> bool:
         or path.startswith(web_owners)
         or path == "talos-app/web/public/talos-logo.svg"
     ) for path in paths)
+
+
+def browser_e2e_plan(paths: list[str]) -> tuple[list[str], bool]:
+    if not browser_e2e_applies(paths):
+        return [], False
+    if frontend_e2e_scope(paths) != "desktop":
+        return ["group:20_browser_workspace"], True
+    targets = [f"case:20_browser_workspace/{case}" for case in (
+        "02_desktop_resources", "03_desktop_browser", "04_desktop_mcp",
+    )]
+    media_owners = tuple(f"talos-app/desktop/src/{name}" for name in (
+        "desktop-media", "desktop-ipc", "desktop-server-requests", "ipc-guard",
+        "ipc.", "preload.", "app-server-controller",
+    ))
+    docker = any(path.startswith(media_owners) for path in e2e_product_paths(paths))
+    if docker:
+        targets.append("case:20_browser_workspace/05_docker_worker")
+    return targets, docker
 
 
 def version_files() -> set[str]:
@@ -191,7 +232,11 @@ def main() -> int:
         with open(output, "a", encoding="utf-8") as stream:
             if args.scope == "pr-e2e":
                 native, matrix = e2e_plan(paths)
-                stream.write(f"run_browser={str(relevant and browser_e2e_applies(paths)).lower()}\n")
+                targets, docker = browser_e2e_plan(paths)
+                stream.write(f"run_browser={str(relevant and bool(targets)).lower()}\n")
+                stream.write(f"browser_targets={' '.join(targets)}\n")
+                stream.write(f"browser_docker={str(relevant and docker).lower()}\n")
+                stream.write(f"run_scenarios={str(relevant and bool(matrix['include'])).lower()}\n")
                 stream.write(f"run_contracts={str(relevant and native).lower()}\n")
                 stream.write(f"scenario_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
             stream.write(f"run_workflow={str(relevant).lower()}\n")

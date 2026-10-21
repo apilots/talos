@@ -19,6 +19,9 @@ jobs:
       run_workflow: ${{ steps.scope.outputs.run_workflow }}
       run_contracts: ${{ steps.scope.outputs.run_contracts }}
       run_browser: ${{ steps.scope.outputs.run_browser }}
+      run_scenarios: ${{ steps.scope.outputs.run_scenarios }}
+      browser_targets: ${{ steps.scope.outputs.browser_targets }}
+      browser_docker: ${{ steps.scope.outputs.browser_docker }}
       scenario_matrix: ${{ steps.scope.outputs.scenario_matrix }}
     steps:
       - name: Check out repository
@@ -84,7 +87,7 @@ jobs:
 
   scenarios:
     needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_scenarios == 'true') }}
     name: E2E ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
@@ -196,6 +199,7 @@ jobs:
           RUN_WORKFLOW: ${{ needs.change-scope.outputs.run_workflow }}
           RUN_CONTRACTS: ${{ needs.change-scope.outputs.run_contracts }}
           RUN_BROWSER: ${{ needs.change-scope.outputs.run_browser }}
+          RUN_SCENARIOS: ${{ needs.change-scope.outputs.run_scenarios }}
           CONTRACT_RESULT: ${{ needs.contract-tests.result }}
           SCENARIO_RESULT: ${{ needs.scenarios.result }}
           BROWSER_RESULT: ${{ needs.browser-worker.result }}
@@ -219,7 +223,15 @@ jobs:
             false) expected_browser=skipped ;;
             *) echo "Invalid Browser scope output." >&2; exit 1 ;;
           esac
-          if [[ "${CONTRACT_RESULT}" != "${expected_contract}" || "${SCENARIO_RESULT}" != "success" || "${BROWSER_RESULT}" != "${expected_browser}" ]]; then
+          case "${RUN_SCENARIOS}" in
+            true) expected_scenarios=success ;;
+            false) expected_scenarios=skipped ;;
+            *) echo "Invalid E2E scenario scope output." >&2; exit 1 ;;
+          esac
+          if [[ "${RUN_CONTRACTS}" == "false" && "${RUN_SCENARIOS}" == "false" && "${RUN_BROWSER}" == "false" ]]; then
+            echo "Product E2E scope selected no acceptance checks." >&2; exit 1
+          fi
+          if [[ "${CONTRACT_RESULT}" != "${expected_contract}" || "${SCENARIO_RESULT}" != "${expected_scenarios}" || "${BROWSER_RESULT}" != "${expected_browser}" ]]; then
             echo "Public PR validation failed: contract=${CONTRACT_RESULT}, scenarios=${SCENARIO_RESULT}, browser=${BROWSER_RESULT}." >&2
             exit 1
           fi
@@ -231,6 +243,9 @@ jobs:
     if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_browser == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      BROWSER_TARGETS: ${{ needs.change-scope.outputs.browser_targets }}
+      BROWSER_DOCKER: ${{ needs.change-scope.outputs.browser_docker }}
     defaults:
       run:
         working-directory: talos
@@ -268,8 +283,17 @@ jobs:
       - name: Verify Browser fixture workload contracts
         run: python -m unittest discover -s talos-e2e/scripts/browser-worker -p '*_test.py'
       - name: Build the current product binaries
-        run: cargo build --locked --release --manifest-path talos-rs/Cargo.toml -p talos-server -p talos-worker-bin -p talos-linux-sandbox -p app-server
+        run: |
+          set -euo pipefail
+          packages=(-p talos-server -p talos-linux-sandbox -p app-server)
+          case "${BROWSER_DOCKER}" in
+            true) packages+=(-p talos-worker-bin) ;;
+            false) ;;
+            *) echo "Invalid Browser image scope output." >&2; exit 1 ;;
+          esac
+          cargo build --locked --release --manifest-path talos-rs/Cargo.toml "${packages[@]}"
       - name: Assemble the standard packaged Worker image
+        if: env.BROWSER_DOCKER == 'true'
         run: |
           mkdir -p .release-product/bin
           cp talos-rs/target/release/talos-worker talos-rs/target/release/talos-linux-sandbox-launcher .release-product/bin/
@@ -281,13 +305,27 @@ jobs:
       - name: Install isolated scenario Chrome
         id: chrome
         uses: browser-actions/setup-chrome@v1
-      - name: Run numbered Browser workspace group
+      - name: Run selected Browser workspace scenarios
         env:
           TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
           TALOS_E2E_WORKER_IMAGE: talos-worker:browser-e2e
           TALOS_E2E_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/talos-server
           TALOS_E2E_APP_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/app-server
-        run: xvfb-run -a ./talos-e2e/run_e2e.sh --group 20_browser_workspace
+        run: |
+          set -euo pipefail
+          read -r -a targets <<<"${BROWSER_TARGETS}"
+          [[ "${#targets[@]}" -gt 0 ]] || { echo "Missing Browser targets." >&2; exit 1; }
+          result=0
+          for target in "${targets[@]}"; do
+            kind="${target%%:*}"
+            value="${target#*:}"
+            case "${kind}" in
+              case|group) ;;
+              *) echo "Invalid Browser target kind." >&2; exit 1 ;;
+            esac
+            xvfb-run -a ./talos-e2e/run_e2e.sh "--${kind}" "${value}" || result=1
+          done
+          exit "${result}"
       - name: Print browser scenario failures
         if: failure()
         run: python3 talos-e2e/scripts/report_failures.py
