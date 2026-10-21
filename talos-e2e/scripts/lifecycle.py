@@ -115,7 +115,7 @@ def remove_docker(record):
     if found.returncode:
         # A daemon failure is not proof that an owned resource has disappeared.
         subprocess.run(['docker', 'info'], check=True, capture_output=True, timeout=15)
-        if 'No such' in found.stderr or 'not found' in found.stderr.lower():
+        if 'no such' in found.stderr.lower() or 'not found' in found.stderr.lower():
             return
         raise RuntimeError(found.stderr.strip())
     doc = json.loads(found.stdout)[0]
@@ -165,6 +165,8 @@ def cleanup(scope=None):
 
 def adopt_case_processes(directory):
     """Backstop for product/MCP children that detach and outlive their parent."""
+    prefixes = {str(directory) + '/', str(directory.resolve()) + '/'}
+    directory = directory.resolve()
     if sys.platform == 'linux':
         paths = []
         for proc in Path('/proc').glob('[0-9]*/cwd'):
@@ -184,7 +186,7 @@ def adopt_case_processes(directory):
     arguments = {}
     for line in subprocess.check_output(['ps', '-axo', 'pid=,command='], text=True).splitlines():
         parts = line.strip().split(None, 1)
-        if len(parts) == 2 and str(directory) + '/' in parts[1]:
+        if len(parts) == 2 and any(prefix in parts[1] for prefix in prefixes):
             arguments[int(parts[0])] = str(directory)
     paths.extend(arguments.items())
     ledger = root() / 'resources.jsonl'

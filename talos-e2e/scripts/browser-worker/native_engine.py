@@ -102,6 +102,7 @@ def main():
     ) if key in os.environ}
     with tempfile.TemporaryDirectory(prefix='talos-native-browser-') as temporary:
         env.update(HOME=temporary, TALOS_ACCEPTANCE_CHROME='1',
+                   TALOS_RESOURCE_DIR=str(ROOT),
                    TALOS_SCENARIO_REPORT_DIR=str(report))
         with owned_chrome(report, temporary, env):
             native = subprocess.Popen(

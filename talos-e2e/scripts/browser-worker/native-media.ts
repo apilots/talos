@@ -18,7 +18,7 @@ async function run(){await app.whenReady();
  try{
   await controller.connect();registerDesktopIpcHandlers(controller);
   window=new BrowserWindow({width:1200,height:760,show:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:path.join(root,'talos-app/desktop/dist/preload.cjs')}});
-  await window.loadFile(path.join(root,'.tmp/browser-worker/native/viewer-dist/index.html'),{query:{node:process.env.TALOS_E2E_REMOTE_NODE!}});
+  await window.loadFile(path.join(import.meta.dirname,'../viewer-dist/index.html'),{query:{node:process.env.TALOS_E2E_REMOTE_NODE!}});
   const deadline=Date.now()+45000;let result:unknown;
   while(Date.now()<deadline){const error=await window.webContents.executeJavaScript('window.nativeMediaError');if(error)throw new Error(JSON.stringify(error));result=await window.webContents.executeJavaScript('window.nativeMediaResult');if(result)break;await new Promise(r=>setTimeout(r,100));}
   assert(result,'Actual noVNC did not connect through Desktop IPC');

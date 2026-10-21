@@ -215,6 +215,21 @@ has_real_llm_key() { return 1; }
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / "executed").read_text(), "18_existing/one:\n")
 
+    def test_distinct_runs_in_the_same_second_keep_separate_reports(self):
+        date = self.bin/'date'
+        date.write_text('#!/bin/sh\necho 20260101_000000\n')
+        date.chmod(0o755)
+        children = [subprocess.Popen(['bash', str(self.root/'run_e2e.sh'), '--case', name],
+                                    env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    for name in ['one', 'two']]
+        for child in children:
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 0, stdout+stderr)
+        reports = list((self.root/'reports').glob('e2e_report_*.md'))
+        self.assertEqual(len(reports), 2)
+        self.assertEqual(sorted('one.sh' if 'one.sh' in report.read_text() else 'two.sh' for report in reports),
+                         ['one.sh', 'two.sh'])
+
     def test_runner_interrupt_cleans_active_case_before_returning(self):
         case = self.scenarios / '01_root.sh'
         case.write_text('printf "%s" "$TALOS_E2E_RESOURCE_ROOT" > "$TALOS_E2E_DIR/ready"\nsleep 60\n')

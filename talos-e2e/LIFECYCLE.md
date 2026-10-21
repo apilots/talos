@@ -10,8 +10,9 @@ Docker CLI shim, or scenario registry is introduced.
 - Before a case, allocate private temporary storage and launch its shell in an
   owned process group. Set TMPDIR/TMP/TEMP, a private tmux socket namespace and
   the existing E2E home/temp/native output roots. Unix sockets use a short
-  marked private directory under /tmp, registered for case/run cleanup; this
-  avoids the socket path limit in nested worktrees without sharing a tmux server.
+  marked private directory under /tmp for TMPDIR and tmux, registered for
+  case/run cleanup and linked from the case tmp path. This avoids Chromium/tmux
+  socket limits in nested worktrees. Detached children in either path are owned.
   Reports remain outside disposable storage. Never infer ownership from a port.
 - Keep scenario-specific traps/finally blocks for graceful shutdown. Register
   detached process groups and Docker resources at their existing creation sites,
@@ -89,3 +90,10 @@ failure/interruption path leaves unrelated resources intact. Do not weaken busin
 assertions to accommodate cleanup. A cleanup error retains the ledger at
 `$TALOS_E2E_RESOURCE_ROOT/resources.jsonl`; with the same run ID/root, use
 `python3 talos-e2e/scripts/lifecycle.py cleanup` to retry only recorded resources.
+
+Docker-hosted Rust builds put target output in a registered case-owned named
+volume. A root container must not write disposable build artifacts into a host
+bind directory: a non-root Linux runner cannot reliably remove those files.
+Retain the existing report bind mount for evidence, and retire the build volume
+after its container. Native fixture assets resolve beside the emitted bundle;
+fixture relocation must not retain repository-global output/profile paths.

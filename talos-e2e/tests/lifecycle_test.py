@@ -114,6 +114,56 @@ python3 -c 'import subprocess;from pathlib import Path;p=subprocess.Popen(["slee
             self.assertTrue(lifecycle.cleanup())
         self.assertTrue((lifecycle.root()/'resources.jsonl').read_text())
 
+    def test_already_removed_docker_volume_is_idempotent_for_daemon_error_casing(self):
+        for message in ['Error response from daemon: get owned: no such volume', 'No such volume: owned']:
+            lifecycle.register('volume', 'owned')
+            def command(args, **kwargs):
+                if args[1] == 'info':
+                    return subprocess.CompletedProcess(args, 0, '', '')
+                self.assertEqual(args[1:3], ['volume', 'inspect'])
+                return subprocess.CompletedProcess(args, 1, '', message)
+            with patch.object(lifecycle.subprocess, 'run', side_effect=command):
+                self.assertEqual(lifecycle.cleanup(), [])
+
+    def test_sandbox_build_target_is_a_registered_volume_not_a_host_bind(self):
+        binary = self.root/'bin'
+        binary.mkdir()
+        calls = self.root/'docker-calls'
+        docker = binary/'docker'
+        docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_CALLS"\n'
+                          'if [ "$1" = image ]; then exit 1; fi\n')
+        docker.chmod(0o755)
+        env = dict(self.env, PATH=str(binary)+os.pathsep+self.env['PATH'], DOCKER_CALLS=str(calls))
+        source = f'source "{SCRIPTS}/common.sh"\nsource "{SCRIPTS}/sandbox.sh"\nrun_linux_docker_sandbox_group'
+        result = subprocess.run(['bash', '-c', source], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        records = [json.loads(line) for line in (lifecycle.root()/'resources.jsonl').read_text().splitlines()]
+        volume = next(record['value'] for record in records if record['kind'] == 'volume')
+        self.assertIn(f'volume create --label {lifecycle.LABEL}=owned-test {volume}', calls.read_text())
+        self.assertIn(f'-v {volume}:/workspace/talos/talos-rs/target', calls.read_text())
+        self.assertNotIn('sandbox-linux-target', calls.read_text())
+
+    def test_deep_case_root_keeps_chromium_socket_short_and_retires_temp_orphans(self):
+        private = self.root / ('nested-worktree-' * 12)
+        self.env['TALOS_E2E_RESOURCE_ROOT'] = str(private)
+        source = '''set -e
+python3 - <<'CASE'
+import os, socket, subprocess
+from pathlib import Path
+p=Path(os.environ['TMPDIR'])/'org.chromium.Chromium.123456'
+p.mkdir()
+s=socket.socket(socket.AF_UNIX);s.bind(str(p/'SingletonSocket'))
+child=subprocess.Popen(['sleep','60'],cwd=p,start_new_session=True)
+Path(''' + repr(str(self.root/'temp-child')) + ''').write_text(str(child.pid))
+CASE
+'''
+        code, log = self.run_case(source)
+        self.assertEqual(code, 0, log)
+        pid = int((self.root/'temp-child').read_text())
+        found = subprocess.run(['ps', '-p', str(pid), '-o', 'stat='], capture_output=True, text=True)
+        self.assertTrue(found.returncode != 0 or found.stdout.strip().startswith('Z'))
+        self.assertFalse((private/'cases/20_fixture/case').exists())
+
     def test_case_and_run_scopes_remove_only_owned_resources_in_dependency_order(self):
         for kind in ['image', 'network', 'volume', 'container']:
             lifecycle.register(kind, 'owned-' + kind, 'run' if kind == 'image' else None)

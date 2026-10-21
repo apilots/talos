@@ -100,7 +100,7 @@ export TALOS_E2E_SINGLE_CASE=""
 if [[ -n "${case_name}" ]]; then export TALOS_E2E_SINGLE_CASE="${selected_cases[0]}"; fi
 timestamp="$(date '+%Y%m%d_%H%M%S')"
 export TALOS_E2E_RUN_ID="${timestamp}-$$"
-report_file="${REPORT_ROOT}/e2e_report_${timestamp}.md"
+report_file="${REPORT_ROOT}/e2e_report_${TALOS_E2E_RUN_ID}.md"
 latest_file="${REPORT_ROOT}/latest_report.md"
 mkdir -p "${REPORT_ROOT}"
 preflight_log="${REPORT_ROOT}/preflight_${TALOS_E2E_RUN_ID}.log"

@@ -19,11 +19,10 @@ def run(script):
         raise ValueError('Case ID must be a relative catalog path')
     directory = root() / 'cases' / case
     directory.mkdir(parents=True, exist_ok=False)
-    temporary = directory / 'tmp'
-    temporary.mkdir()
-    tmux_root = socket_directory()
+    temporary = socket_directory()
+    (directory / 'tmp').symlink_to(temporary, target_is_directory=True)
     env = dict(os.environ, TALOS_E2E_TMP_ROOT=str(directory), TMPDIR=str(temporary) + '/',
-               TMP=str(temporary), TEMP=str(temporary), TALOS_E2E_NATIVE_ROOT=str(directory / "native"), TMUX_TMPDIR=str(tmux_root))
+               TMP=str(temporary), TEMP=str(temporary), TALOS_E2E_NATIVE_ROOT=str(directory / "native"), TMUX_TMPDIR=str(temporary))
     env.pop("TMUX", None)
     os.environ.update(TALOS_E2E_TMP_ROOT=str(directory))
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -40,7 +39,7 @@ def run(script):
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, signal.SIG_IGN)
         errors = []
-        for socket in tmux_root.glob('tmux-*/default'):
+        for socket in temporary.glob('tmux-*/default'):
             if socket.is_socket():
                 try:
                     subprocess.run(['tmux', '-S', str(socket), 'kill-server'], capture_output=True,
@@ -49,6 +48,7 @@ def run(script):
                     errors.append(f'Private tmux server cleanup failed: {error}')
         try:
             adopt_case_processes(directory)
+            adopt_case_processes(temporary)
         except (OSError, subprocess.SubprocessError) as error:
             errors.append(f'Case process discovery failed: {error}')
         errors.extend(cleanup(case))

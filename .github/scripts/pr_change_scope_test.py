@@ -452,6 +452,9 @@ run_linux_docker_tui_install
         self.assertIn(f'--build-arg RUST_VERSION={version}', calls.read_text())
         self.assertIn('build --label love.talos.e2e.run=toolchain-test', calls.read_text())
         self.assertIn(f'-v {self.root}:/workspace/talos:ro', calls.read_text())
+        self.assertIn('volume create --label love.talos.e2e.run=toolchain-test tui-install-target-', calls.read_text())
+        self.assertRegex(calls.read_text(), r'-v tui-install-target-toolchain-test-\d+:/workspace/talos/talos-rs/target')
+        self.assertNotIn(f'-v {self.root}/tmp', calls.read_text())
         self.assertNotIn('/workspace/talos/talos-rs/Cargo.lock', calls.read_text())
         self.assertEqual((self.root / 'talos-rs/Cargo.lock').read_bytes(),
                          (ROOT / 'talos-rs/Cargo.lock').read_bytes())
