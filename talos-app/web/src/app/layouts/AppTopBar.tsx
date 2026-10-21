@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from "react";
-import { ArrowLeft, ArrowRight, FileText, Home, Maximize2, Minimize2, PanelLeft, PanelRight, PencilLine, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText, Maximize2, Minimize2, PanelLeft, PanelRight, PencilLine, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/shared/store/app-store";
 import { Button } from "@/shared/ui/Button";
@@ -22,13 +22,6 @@ export function AppNavigation({ canCreateChat, sidebarAvailable, sidebarToggleRe
       {canCreateChat ? <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link> : null}
     </div>
 
-  </div>;
-}
-
-export function AppHomeContext() {
-  const { t } = useTranslation("computers");
-  return <div className="flex min-w-0 flex-1 items-center gap-2 text-xs font-medium">
-    <Home size={14} aria-hidden="true" className="text-muted" />{t("home.title")}
   </div>;
 }
 

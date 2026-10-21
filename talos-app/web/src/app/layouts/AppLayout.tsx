@@ -3,7 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { ComputerRail, useComputers, useSelectedComputerId, useProductScope } from "@/features/computers";
 import { SidebarContainer } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { AppHomeContext, AppNavigation, AppSessionContext, AppTopBar, WorkspaceControls } from "./AppTopBar";
+import { AppNavigation, AppSessionContext, AppTopBar, WorkspaceControls } from "./AppTopBar";
 import { ComputerHomePage } from "@/pages/home/ComputerHomePage";
 import { RightWorkspace } from "./RightWorkspace";
 import { AppSidebar } from "./AppSidebar";
@@ -56,7 +56,7 @@ export function AppLayout() {
     if (workspaceVisible && !workspaceModal && workspaceWidth !== Math.round(sizes.workspace)) setWorkspaceWidth(sizes.workspace);
   }, [workspaceVisible, workspaceModal, workspaceWidth, sizes.workspace, setWorkspaceWidth]);
   const navigation = <AppNavigation canCreateChat={!choosingComputer} sidebarVisible={sidebarVisible} sidebarAvailable={sidebarAvailable} sidebarToggleRef={sidebarToggle} onToggleSidebar={() => wide ? setSidebarOpen(!sidebarOpen) : setSidebarDrawerOpen(open => !open)} />;
-  const context = choosingComputer ? <AppHomeContext /> : <AppSessionContext />;
+  const context = choosingComputer ? null : <AppSessionContext />;
   const sidebarExpanded = wide && sidebarVisible;
   const mainHeader = <AppTopBar className="h-full border-b-0">{context}{!workspaceVisible && !choosingComputer ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
   const modalHeader = <AppTopBar>{navigation}{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
