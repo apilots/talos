@@ -6,10 +6,10 @@ import { StrictMode, useEffect, type ReactNode } from "react";
 import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
 import { AppLayout } from "./AppLayout";
-const fixture = vi.hoisted(() => ({ wide: true, mounted: [] as string[], closed: [] as string[], entries: [] as string[] }));
+const fixture = vi.hoisted(() => ({ wide: true, selectedId: "selected-worker" as string | undefined, available: true, mounted: [] as string[], closed: [] as string[], entries: [] as string[] }));
 vi.mock("@/features/computers", () => ({
   ComputerRail: () => <nav aria-label="Computer rail" />,
-  useComputers: () => ({ selected: { available: true } }), useSelectedComputerId: () => "selected-worker", useProductScope: () => "account",
+  useComputers: () => ({ selected: { available: fixture.available } }), useSelectedComputerId: () => fixture.selectedId, useProductScope: () => "account",
   useComputer: (nodeId: string) => ({ data: { displayName: nodeId, available: true } }),
   ComputerDesktopButton: ({ nodeId, label }: { nodeId?: string; label?: string }) => nodeId ? <button onClick={() => { fixture.entries.push(nodeId); useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId }); }}>{label ?? "View computer"}</button> : null,
   ComputerDesktop: ({ nodeId }: { nodeId: string }) => {
@@ -17,6 +17,7 @@ vi.mock("@/features/computers", () => ({
     return <section aria-label="Computer viewer">{nodeId}<button>Worker action</button></section>;
   },
 }));
+vi.mock("@/pages/home/ComputerHomePage", () => ({ ComputerHomePage: () => <h1>Choose a computer</h1> }));
 vi.mock("@/features/chat", () => ({
   SidebarContainer: ({ computerEntry }: { computerEntry?: ReactNode }) => <aside>Project and session sidebar{computerEntry}<button>Sidebar action</button></aside>,
   useSessionQuery: (id: string) => ({ data: id ? { title: "Bound session", projectId: "bound-project", nodeId: "session-worker" } : undefined }),
@@ -25,7 +26,7 @@ vi.mock("@/features/chat", () => ({
 vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: { originalFilename: "review.md" } }), MarkdownFilePreview: () => <section aria-label="Markdown preview">Actual file</section> }));
 vi.mock("@/features/web-preview", () => ({ OpenWebpageButton: ({ icon }: { icon: string }) => <button>{icon === "plus" ? "New webpage tab" : "Open webpage preview"}</button>, WebPagePreview: ({ url }: { url: string }) => <section aria-label="Webpage preview">{url}<input aria-label="Preview address" /><iframe title="Preview content" /></section> }));
 beforeEach(() => {
-  fixture.wide = true; fixture.mounted = []; fixture.closed = []; fixture.entries = [];
+  fixture.wide = true; fixture.selectedId = "selected-worker"; fixture.available = true; fixture.mounted = []; fixture.closed = []; fixture.entries = [];
   vi.stubGlobal("matchMedia", () => ({ get matches() { return fixture.wide; }, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   HTMLElement.prototype.setPointerCapture=vi.fn();HTMLElement.prototype.hasPointerCapture=vi.fn(()=>true);HTMLElement.prototype.releasePointerCapture=vi.fn();
   HTMLDialogElement.prototype.showModal = function () { this.open = true;this.querySelector<HTMLElement>("button,input,[tabindex]")?.focus(); };

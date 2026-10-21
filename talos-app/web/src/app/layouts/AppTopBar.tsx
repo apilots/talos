@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from "react";
-import { ArrowLeft, ArrowRight, FileText, Maximize2, Minimize2, PanelLeft, PanelRight, PencilLine, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText, Home, Maximize2, Minimize2, PanelLeft, PanelRight, PencilLine, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/shared/store/app-store";
 import { Button } from "@/shared/ui/Button";
@@ -9,8 +9,8 @@ import { useProjectsQuery, useSessionQuery } from "@/features/chat";
 import { normalizeProjects } from "@/shared/store/ui-slice";
 
 /** Middle-region navigation and Session context own no workspace geometry. */
-export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisible, onToggleSidebar }: {
-  sidebarAvailable: boolean; sidebarVisible: boolean; sidebarToggleRef: Ref<HTMLButtonElement>; onToggleSidebar: () => void;
+export function AppNavigation({ canCreateChat, sidebarAvailable, sidebarToggleRef, sidebarVisible, onToggleSidebar }: {
+  canCreateChat: boolean; sidebarAvailable: boolean; sidebarVisible: boolean; sidebarToggleRef: Ref<HTMLButtonElement>; onToggleSidebar: () => void;
 }) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
@@ -19,9 +19,16 @@ export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisib
     <div role="group" aria-label={t("navigation.history")} className="flex shrink-0 items-center gap-0.5">
       <Button variant="ghost" className="p-2" aria-label={t("navigation.back")} onClick={() => navigate(-1)}><ArrowLeft aria-hidden="true" size={16} /></Button>
       <Button variant="ghost" className="p-2" aria-label={t("navigation.forward")} onClick={() => navigate(1)}><ArrowRight aria-hidden="true" size={16} /></Button>
-      <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link>
+      {canCreateChat ? <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link> : null}
     </div>
 
+  </div>;
+}
+
+export function AppHomeContext() {
+  const { t } = useTranslation("computers");
+  return <div className="flex min-w-0 flex-1 items-center gap-2 text-xs font-medium">
+    <Home size={14} aria-hidden="true" className="text-muted" />{t("home.title")}
   </div>;
 }
 

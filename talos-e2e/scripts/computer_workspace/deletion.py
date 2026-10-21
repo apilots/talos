@@ -88,6 +88,37 @@ def run(cluster):
         rejected = cluster.rpc('AgentNodeControl', 'Register', {'auth': {'node_id': old, 'token': records[1]['credential']['token']}, 'params': {'deployments': [{'agent_id': 'default'}]}})
         require(rejected.get('failure', {}).get('error', {}).get('code') == 'ERROR_CODE_UNAUTHENTICATED', 'Deleted registration credential was accepted')
         require(data(public(cluster, path, 'DELETE'))['nodeId'] == old, 'Deletion retry is not idempotent')
+
+        # Clearing a removed selection must lead to a usable homepage, not an
+        # empty Projects/Chats sidebar. The remaining registered Computer is offline.
+        page.goto(url + '/')
+        expect(page.get_by_role('heading', name='Choose a computer', exact=True)).to_be_visible()
+        expect(page.locator('#talos-sidebar')).to_have_count(0)
+        expect(page.get_by_role('link', name='New chat', exact=True)).to_have_count(0)
+        page.screenshot(path=str(REPORT / 'homepage-choose-computer.png'), full_page=True)
+        page.locator('main').get_by_role('button', name=re.compile('开发笔记本')).click()
+        expect(page.locator('#talos-sidebar')).to_be_visible()
+        expect(page.get_by_role('heading', name='Start with one clear prompt')).to_be_visible()
+        remaining = records[0]['node']['nodeId']
+        require(data(public(cluster, '/v1/computers/' + remaining, 'DELETE'))['nodeId'] == remaining,
+                'Final disposable Computer was not removed')
+        expect(page.get_by_role('heading', name='Connect your first computer')).to_be_visible(timeout=15000)
+        expect(page.locator('#talos-sidebar')).to_have_count(0)
+        for width in (1560, 390):
+            page.set_viewport_size({'width': width, 'height': 900})
+            page.reload()
+            expect(page.get_by_role('heading', name='Connect your first computer')).to_be_visible()
+            expect(page.get_by_role('dialog')).to_have_count(0)
+            trigger = page.get_by_role('button', name='Connect a computer', exact=True)
+            trigger.click()
+            expect(page.get_by_role('dialog', name='Connect a computer')).to_contain_text('same account')
+            if width == 1560:
+                page.screenshot(path=str(REPORT / 'homepage-connect-guide.png'), full_page=True)
+            page.keyboard.press('Escape')
+            expect(page.get_by_role('dialog')).to_have_count(0)
+            expect(trigger).to_be_focused()
+        page.screenshot(path=str(REPORT / 'homepage-no-computers.png'), full_page=True)
+        print('CASE computer_home_selection_empty_directory_and_connection_guide PASS', flush=True)
         browser.close()
     print('CASE computer_delete_owner_offline_status_cancel_confirm_i18n_selection_credentials PASS', flush=True)
 
