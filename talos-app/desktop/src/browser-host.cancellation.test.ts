@@ -157,3 +157,14 @@ it.each(["managed","connected"] as const)("releases cancelled %s input while its
     await interrupted;
   } finally {acknowledged.resolve();await interrupted;}
 });
+
+
+it.each(["connect","releaseInputs","disconnect","shutdown"] as const)("recovers through %s after the prepared Chrome socket closes",async(kind)=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  await host.execute("connect",request("connect"));
+  Socket.all[0].close();
+  expect(await host.execute("probe",request("probe"))).toEqual({kind:"readiness",connected:false});
+  await expect(host.execute("recover",{...request("probe"),operation:{kind}})).resolves.toEqual({kind:"done"});
+  if(kind!=="connect")await host.execute("reconnect",request("connect"));
+  expect(await host.execute("ready",request("probe"))).toEqual({kind:"readiness",connected:true});
+});

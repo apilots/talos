@@ -84,7 +84,8 @@ export class WebsiteAccount {
     }
     throw new Error("Browser download filename capacity exceeded.");
   }
-  async ensure():Promise<void> {
+  async ensure(check:()=>void=()=>{}):Promise<void> {
+    check();
     if(!this.window || this.window.isDestroyed()) {
       this.window=new BaseWindow({width:1180,height:840,title:"Talos browser",show:true});
       this.window.on("resize",()=>this.resize());this.window.on("close",event=>{event.preventDefault();this.window?.hide();});
@@ -94,15 +95,16 @@ export class WebsiteAccount {
       this.chrome.webContents.on("did-finish-load",()=>this.updateChrome());
       ipcMain.on(BROWSER_CHROME_ACTION,this.onChromeAction);
       this.window.contentView.addChildView(this.chrome);this.resize();
-      await this.chrome.webContents.loadURL(chromeUrl);
+      await this.chrome.webContents.loadURL(chromeUrl);check();
     }
-    if(!this.views.size)await this.open("about:blank");
+    if(!this.views.size)await this.open("about:blank",check);
   }
   show():void {this.window?.show();this.window?.focus();}
-  async tabs():Promise<WebsiteTab[]> {await this.ensure();return [...this.views.values()];}
+  async tabs(check:()=>void=()=>{}):Promise<WebsiteTab[]> {await this.ensure(check);check();return [...this.views.values()];}
   async open(url:string,check:()=>void=()=>{}):Promise<WebsiteTab> {
+    check();
     if(this.views.size>=MAX_TABS)throw new Error("Browser tab capacity exceeded.");
-    if(!this.window || this.window.isDestroyed()){await this.ensure();if(url==="about:blank")return [...this.views.values()][0];}
+    if(!this.window || this.window.isDestroyed()){await this.ensure(check);check();if(url==="about:blank")return [...this.views.values()][0];}
     const browserSession=session.fromPartition(this.partition);
     if(this.downloadSession!==browserSession) {
       this.downloadSession?.removeListener("will-download",this.onDownload);
@@ -127,7 +129,7 @@ export class WebsiteAccount {
     wc.setWindowOpenHandler(({url:target})=>{try{checkedUrl(target);void this.open(target).catch(error=>console.error("Website popup failed",error));}catch{/* Unsupported website popups are denied. */}return {action:"deny"};});
     const navigation=(event:Electron.Event,target:string)=>{try{if(target!==homeUrl)checkedUrl(target);}catch{event.preventDefault();}};
     wc.on("will-navigate",navigation);wc.on("will-redirect",navigation);
-    check();await this.focus(id);check();await wc.loadURL(url==="about:blank"?homeUrl:checkedUrl(url));this.updateChrome();return tab;
+    check();await this.focus(id);check();await wc.loadURL(url==="about:blank"?homeUrl:checkedUrl(url));check();this.updateChrome();return tab;
   }
   async focus(id:string):Promise<void> {
     const tab=this.views.get(id);if(!tab?.view || !this.window)throw new Error("Unknown tab.");

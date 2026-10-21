@@ -64,6 +64,13 @@ export class DesktopBrowserHost {
     const op:Operation={cancelled:false,stop:new AbortController(),user:request.userId,generation:request.generation,epoch:request.epoch};
     this.operations.set(id,op);
     const check=()=> { if (op.cancelled || this.generation!==op.generation) throw new Error("Browser operation cancelled."); };
+    const wait=async<T>(work:()=>Promise<T>):Promise<T>=>{
+      check();
+      let abort!:()=>void;
+      const cancelled=new Promise<never>((_,reject)=>{abort=()=>reject(new Error("Browser operation cancelled."));op.stop.signal.addEventListener("abort",abort,{once:true});});
+      try {const result=await Promise.race([work(),cancelled]);check();return result;}
+      finally {op.stop.signal.removeEventListener("abort",abort);}
+    };
     const operation=request.operation;
     let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined;
     if(operation.kind==="execute" || operation.kind==="releaseInputs" || operation.kind==="disconnect") {
@@ -126,7 +133,7 @@ export class DesktopBrowserHost {
       }
       let account=this.accounts.get(request.userId);
       if (!account) { if(this.accounts.size>=2) throw new Error("Browser account capacity exceeded."); account=new WebsiteAccount(request.userId); this.accounts.set(request.userId,account); }
-      if (operation.kind==="show") {await account.ensure();check();account.show();return {kind:"done"};}
+      if (operation.kind==="show") {await wait(()=>account.ensure(check));account.show();return {kind:"done"};}
       if(operation.kind==="acknowledgeDownloads") {
         if(operation.files.length>5)throw new Error("Too many browser file receipts.");
         if(request.target==="connected"&&(!this.chrome||this.chromeOwner!==request.userId))throw new Error("The connected browser owner changed.");
@@ -142,7 +149,7 @@ export class DesktopBrowserHost {
       const connected=request.target==="connected";
       if (connected && (!this.chrome || this.chromeOwner!==request.userId)) throw new Error("Connect your prepared Chrome profile in Browser settings first.");
       const owner=connected ? this.chrome! : account;
-      let tabs=await owner.tabs();check();
+      let tabs=await wait(()=>owner.tabs(check));
       let tab:Tab|undefined=operation.targetId ? tabs.find(t=>t.id===operation.targetId) : tabs[0];
       const action=operation.action;
       if (operation.targetId && !tab && action.kind!=="state" && action.kind!=="tab") {
@@ -150,25 +157,20 @@ export class DesktopBrowserHost {
       }
       if (!tab && action.kind==="state") tab=tabs[0];
       if (action.kind==="tab") {
-        if (action.action==="open") { tab=await owner.open(checkedUrl(action.url ?? "about:blank"),check);check(); }
+        if (action.action==="open") { tab=await wait(()=>owner.open(checkedUrl(action.url ?? "about:blank"),check)); }
         else {
           const tabId=action.tabId ?? (action.action==="close" ? operation.targetId : null);
           tab=tabs.find(t=>t.id===tabId);
           if(!tab) throw new Error("Unknown browser tab.");
-          if (action.action==="close") {check();await owner.remove(tab.id);const remaining=await owner.tabs();tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
-          else {check();await owner.focus(tab.id);}
+          const selectedId=tab.id;
+          if (action.action==="close") {check();await wait(()=>owner.remove(selectedId));const remaining=await wait(()=>owner.tabs(check));tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
+          else {check();await wait(()=>owner.focus(selectedId));}
         }
       }
-      if (!tab) {check();tab=await owner.open("about:blank",check);}
+      if (!tab) {check();tab=await wait(()=>owner.open("about:blank",check));}
       const current=tab;
       input=current.send;
-      const send:Send=async(method,params)=>{
-        check();
-        let abort!:()=>void;
-        const cancelled=new Promise<never>((_,reject)=>{abort=()=>reject(new Error("Browser operation cancelled."));op.stop.signal.addEventListener("abort",abort,{once:true});});
-        try {const result=await Promise.race([current.send(method,params),cancelled]);check();return result;}
-        finally {op.stop.signal.removeEventListener("abort",abort);}
-      };
+      const send:Send=(method,params)=>wait(()=>current.send(method,params));
       const prepareInput=async()=>{
         await send("Input.setIgnoreInputEvents",{ignore:false});
         await send("Emulation.setFocusEmulationEnabled",{enabled:true});
@@ -244,7 +246,7 @@ export class DesktopBrowserHost {
       const titleResult=object((await send("Runtime.evaluate",{expression:"document.title.slice(0,512)",returnByValue:true})).result);
       const screenshot=action.kind==="screenshot" ? String((await send("Page.captureScreenshot",{format:"png",captureBeyondViewport:false})).data) : null;
       if(screenshot && screenshot.length>6*1024*1024)throw new Error("Browser screenshot is too large.");
-      tabs=await owner.tabs();check();
+      tabs=await wait(()=>owner.tabs(check));
       return {kind:"observation",page:{targetId:current.id,url:current.url()==="about:blank"?"about:blank":String(frame.url??current.url()),title:String(titleResult.value??current.title()),text:String(textResult.value??""),tabs:tabs.slice(0,32).map(t=>({tabId:t.id,title:t.title(),url:t.url()}))},loaderId,elements,screenshot,downloads};
     } finally {
       try {
@@ -344,8 +346,9 @@ class ChromeConnection {
     if(this.socket.readyState!==WebSocket.OPEN||this.pending.size>=32)throw new Error("Chrome connection is unavailable.");
     const id=++this.nextId;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{this.pending.delete(id);reject(new Error("Chrome command timed out."));},3000);this.pending.set(id,{resolve,reject,timer});this.socket.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));});
   }
-  async tabs():Promise<Tab[]> {
+  async tabs(check:()=>void=()=>{}):Promise<Tab[]> {
     const targets=(await this.send("Target.getTargets")).targetInfos as {targetId:string;type:string;url:string;title:string}[];
+    check();
     return Promise.all(targets.filter(t=>t.type==="page"&&(t.url==="about:blank"||/^https?:/.test(t.url))).slice(0,32).map(async t=>{let id=this.sessions.get(t.targetId);if(!id){id=String((await this.send("Target.attachToTarget",{targetId:t.targetId,flatten:true})).sessionId);this.sessions.set(t.targetId,id);}let sender=this.senders.get(t.targetId);if(!sender){sender=trackInputs((method:string,params?:RecordValue)=>this.send(method,params,id));this.senders.set(t.targetId,sender);}return {id:t.targetId,send:sender,url:()=>t.url,title:()=>t.title};}));
   }
   async open(url:string,check:()=>void=()=>{}):Promise<Tab> {if((await this.tabs()).length>=MAX_TABS)throw new Error("Chrome tab capacity exceeded.");check();const id=String((await this.send("Target.createTarget",{url})).targetId);const tab=(await this.tabs()).find(t=>t.id===id);if(!tab)throw new Error("Chrome tab was not created.");return tab;}
@@ -364,7 +367,12 @@ class ChromeConnection {
     throw new Error("Chrome tab close timed out.");
   }
   async focus(id:string):Promise<void> {await this.send("Target.activateTarget",{targetId:id});}
-  async releaseInputs():Promise<void> {for(const tab of await this.tabs())await release(tab.send);}
+  async releaseInputs():Promise<void> {
+    // A dead transport cannot release inputs; retire it so explicit reconnect can
+    // recover. Live transports still report cleanup failure and retain ownership.
+    if(!this.isConnected())return;
+    for(const tab of await this.tabs())await release(tab.send);
+  }
   close():void {if(this.socket.readyState===WebSocket.OPEN)for(const sessionId of this.sessions.values())this.socket.send(JSON.stringify({id:++this.nextId,sessionId,method:"Emulation.setFocusEmulationEnabled",params:{enabled:false}}));if(this.socket.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify({id:++this.nextId,method:"Browser.setDownloadBehavior",params:{behavior:"default"}}));this.fail();this.socket.close();}
 }
 
