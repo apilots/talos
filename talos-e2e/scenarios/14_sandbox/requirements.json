@@ -16,6 +16,9 @@
     "99_linux_docker.sh": {
       "checks": [
         "docker"
+      ],
+      "commands": [
+        "docker"
       ]
     }
   }

@@ -118,7 +118,8 @@ def check_dependency(kind, value, root):
 
 
 def preflight(root, cases):
-    dependencies = {}
+    # The existing shared Linux launcher build needs Cargo even for container cases.
+    dependencies = {("commands", "cargo"): set(cases)} if platform.system() == "Linux" else {}
     for case in cases:
         req = requirements(root, case)
         for kind, values in req.items():
@@ -126,12 +127,12 @@ def preflight(root, cases):
                 continue
             entries = [",".join(values)] if kind == "platforms" else values
             for value in entries:
-                dependencies.setdefault((kind, value), []).append(case)
+                dependencies.setdefault((kind, value), set()).add(case)
     failures = []
     for (kind, value), affected in sorted(dependencies.items()):
         problem = check_dependency(kind, value, root)
         if problem:
-            failures.append(f"BLOCKED {kind}:{value}: {problem}\n  cases: {', '.join(affected)}")
+            failures.append(f"BLOCKED {kind}:{value}: {problem}\n  cases: {', '.join(sorted(affected))}")
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1

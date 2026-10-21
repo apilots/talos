@@ -207,6 +207,23 @@ has_real_llm_key() { return 1; }
         self.assertIn("Docker daemon", output.getvalue())
         self.assertNotIn("never-print-this-value", output.getvalue())
 
+    def test_container_cases_do_not_require_native_host_packaging_dependencies(self):
+        # A clean Linux runner has Docker/Cargo but no native packaging protoc/PyYAML.
+        with patch.object(runner.platform, "system", return_value="Linux"), \
+             patch.object(runner, "executable", side_effect=lambda name: name in {"docker", "cargo"}), \
+             patch.object(runner, "probe", side_effect=lambda argv: argv == ["docker", "info"]), \
+             contextlib.redirect_stdout(io.StringIO()):
+            for case in ["14_sandbox/99_linux_docker.sh", "15_tui_install/02_linux_docker.sh"]:
+                with self.subTest(case=case):
+                    self.assertEqual(runner.preflight(E2E / "scenarios", [case]), 0)
+
+    def test_native_installer_checks_build_tools_without_unneeded_yaml_or_bubblewrap(self):
+        with patch.object(runner.platform, "system", return_value="Linux"), \
+             patch.object(runner, "executable", side_effect=lambda name: name in {"cargo", "protoc", "curl", "tar", "python3"}), \
+             patch.object(runner, "probe", return_value=False), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.preflight(E2E / "scenarios", ["15_tui_install/01_native_install.sh"]), 0)
+
     def test_real_catalog_has_valid_dependencies_and_build_ownership(self):
         catalog = runner.discover(E2E / "scenarios")
         self.assertTrue(catalog)
