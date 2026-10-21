@@ -195,9 +195,17 @@ def run(cluster):
         driver.wait_final('web', 'PROJECT_CONTINUED_OK')
         require((Path(project_directory) / 'continued.txt').read_text().strip() == 'PROJECT_CONTINUED_OK', 'Project continuation used another directory')
         driver.call('web', 'evaluate', expression='document.querySelector(`button[aria-label="Collapse sidebar"]`).click()')
-        driver.call('web', 'wait', expression='Boolean(document.querySelector("main")?.textContent.includes("Computer Project"))')
+        project_title = data(public(cluster, f'/v1/sessions/{project_session}'))['session']['title']
+        require(bool(project_title), 'Project Session has no task title')
+        project_header = ('location.pathname === ' + json.dumps(f'/sessions/{project_session}')
+            + ' && Array.from(document.querySelectorAll("header")).some(header => '
+            + '!header.closest("[inert], [aria-hidden=true]") && header.textContent.includes("Computer Project") '
+            + '&& header.textContent.includes(' + json.dumps(project_title) + '))')
+        driver.call('web', 'wait', expression=project_header)
+        driver.call('web', 'screenshot', path=str(REPORT / 'project-header-collapsed.png'))
         driver.call('web', 'reload')
-        driver.call('web', 'wait', expression='Boolean(document.querySelector("main")?.textContent.includes("Computer Project"))')
+        driver.call('web', 'wait', expression=project_header)
+        driver.call('web', 'screenshot', path=str(REPORT / 'project-header-reloaded.png'))
         passed('owned_project_continuation_and_collapsed_title_survive_reload')
         driver.call('web', 'viewport', width=700, height=820)
         driver.call('web', 'evaluate', expression='document.querySelector(`aside button[aria-label="Open sidebar"]`).focus();document.querySelector(`aside button[aria-label="Open sidebar"]`).click()')

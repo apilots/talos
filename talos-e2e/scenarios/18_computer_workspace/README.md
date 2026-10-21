@@ -16,7 +16,7 @@ controlled RPC tests do not replace these scenarios.
 | `10_oauth` | Public relay, real SDK PKCE/issuer/code exchange and MCP tool, Worker-only credentials, restart, stale/duplicate callbacks, disable/disconnect, original ten-minute expiry and logout |
 | `09_plugins` | Real source/install/update/enable/credentials, DeepSeek MCP tool effects, node isolation, concurrent admission, restart and offline rejection |
 | `07_environment` | Two real Workers: same document/date/Memory ID isolation, stale-version rejection, index replacement, Skills operations, real Harness document context, owner/offline rejection and restart preservation |
-| `11_product_ui` | Two isolated real Chrome clients and one central Server: device login, owned Computer selection, real Worker file effects and live final replies, same-Computer continuation, running-task switch, rename/disable/rejoin, owned Project continuation/title/reload, narrow Sidebar/Escape/focus, model settings, drafts, 22-node pagination, offline history, themes/language and logout/account isolation |
+| `11_product_ui` | Two isolated real Chrome clients and one central Server: device login, owned Computer selection, real Worker file effects and live final replies, same-Computer continuation, running-task switch, rename/disable/rejoin, externally-created owned Project continuation with Project/task title in the collapsed header before and after reload, narrow Sidebar/Escape/focus, model settings, drafts, 22-node pagination, offline history, themes/language and logout/account isolation |
 
 Prerequisites: `TALOS_CLOUD_SERVER_BIN` pointing to the Cloud fixture executable
 (or `cloud-server` on `PATH`), Rust, Node.js, installed pnpm workspace dependencies,

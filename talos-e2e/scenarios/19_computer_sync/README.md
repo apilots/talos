@@ -108,8 +108,10 @@ and is stopped with the fixture. Automated cases never wait for manual capture.
 Screenshots must be taken while that topology is
 alive; an older manual environment is not evidence for this group.
 
-NAT acceptance re-applies and verifies ingress rules after restart using current
-container addresses; real memory/reflection and child-agent callbacks return to
+NAT acceptance checks the exact directory UUID set: the original four Alice-owned
+Computers plus each newly enrolled NAT management host. Every row must retain the
+same account owner, with no missing, duplicate or foreign Computer. It re-applies
+and verifies ingress rules after restart using current container addresses; real memory/reflection and child-agent callbacks return to
 the current coordinator. Live Linux SQLite evidence is read from the Linux helper,
 never opened concurrently by a Mac SQLite process.
 

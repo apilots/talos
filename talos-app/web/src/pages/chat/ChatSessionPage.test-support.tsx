@@ -4,6 +4,7 @@ const mocks = {
   sendText: vi.fn(),
   sendTurn: vi.fn(),
   setDraft: vi.fn(),
+  refetchProjects: vi.fn(),
   mutateModel: vi.fn(),
   mutatePermissionMode: vi.fn(),
   submitUserAction: vi.fn(),
@@ -108,6 +109,7 @@ export async function createChatFeatureMock(
       },
     }),
     useProjectsView: () => ({
+      refetch: mocks.refetchProjects,
       activeProjectId: "__unbound_project__",
       projects: [
         {

@@ -41,7 +41,12 @@ export function ChatSessionPage() {
   useEffect(() => { if (session?.nodeId) selectComputer(scope, session.nodeId); }, [session?.nodeId, sessionId, scope, selectComputer]);
   const { data: modelCatalog } = useModelsQuery(nodeId);
   const models = modelCatalog?.models;
-  const projectsView = useProjectsView();
+  const projectsView = useProjectsView(nodeId);
+  const { refetch: refetchProjects } = projectsView;
+  useEffect(() => {
+    // Another client may have created this Project while the sidebar stayed mounted.
+    if (session?.projectId) void refetchProjects();
+  }, [session?.projectId, session?.nodeId, refetchProjects]);
   const chat = useChatSession(sessionId, session?.messageCount);
   const {
     blocks,

@@ -87,8 +87,8 @@ export function useProjectsQuery(nodeId?: string) {
   });
 }
 
-export function useProjectsView() {
-  const query = useProjectsQuery();
+export function useProjectsView(nodeId?: string) {
+  const query = useProjectsQuery(nodeId);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
   const projects = normalizeProjects(query.data);
