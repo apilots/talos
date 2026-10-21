@@ -6,7 +6,7 @@ import { WebsiteAccount, checkedUrl, downloadRoot, MAX_TABS, type WebsiteTab as 
 import { trackInputs, release, type Send, type RecordValue } from "./browser-input";
 import type { AppProtocol as P } from "@talos/sdk-core";
 
-type Operation = { cancelled: boolean; user: string; generation: string; epoch: number };
+type Operation = { cancelled: boolean; stop:AbortController; user: string; generation: string; epoch: number };
 const keyCodes: Record<string, number> = { Enter:13, Tab:9, Escape:27, Backspace:8, Delete:46, ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Home:36, End:35, PageUp:33, PageDown:34, Space:32 };
 
 /** Only dedicated website views are attached. The product renderer is never a target. */
@@ -37,7 +37,7 @@ export class DesktopBrowserHost {
     } finally {clearTimeout(timer);}
   }
 
-  cancel(id: string): void { const call=this.operations.get(id); if (call) call.cancelled=true; }
+  cancel(id: string): void { const call=this.operations.get(id); if (call) {call.cancelled=true;call.stop.abort();} }
   reset():Promise<void> {
     if(this.resetting)return this.resetting;
     const pending=this.resetOwnedTargets().finally(()=>{if(this.resetting===pending)this.resetting=undefined;});
@@ -45,7 +45,7 @@ export class DesktopBrowserHost {
   }
   private async resetOwnedTargets(): Promise<void> {
     this.chromeRevision++;
-    for (const call of this.operations.values()) call.cancelled=true;
+    for (const id of this.operations.keys()) this.cancel(id);
     this.operations.clear();
     await this.executing;
     await this.settleInputs(async()=>{
@@ -61,7 +61,7 @@ export class DesktopBrowserHost {
     if (!request.userId || !request.generation || !Number.isSafeInteger(request.epoch) || this.operations.size>=8) throw new Error("Invalid browser host context.");
     if (this.generation && this.generation!==request.generation) await this.reset();
     this.generation=request.generation;
-    const op:Operation={cancelled:false,user:request.userId,generation:request.generation,epoch:request.epoch};
+    const op:Operation={cancelled:false,stop:new AbortController(),user:request.userId,generation:request.generation,epoch:request.epoch};
     this.operations.set(id,op);
     const check=()=> { if (op.cancelled || this.generation!==op.generation) throw new Error("Browser operation cancelled."); };
     const operation=request.operation;
@@ -71,7 +71,7 @@ export class DesktopBrowserHost {
       this.executing=new Promise(resolve=>{finished=resolve;});
     }
     if(operation.kind==="releaseInputs" || (operation.kind==="disconnect"&&this.chromeOwner===request.userId)) {
-      for(const [other,call] of this.operations)if(other!==id)call.cancelled=true;
+      for(const other of this.operations.keys())if(other!==id)this.cancel(other);
     }
     try {
       if(previous)await previous;
@@ -162,7 +162,13 @@ export class DesktopBrowserHost {
       if (!tab) {check();tab=await owner.open("about:blank",check);}
       const current=tab;
       input=current.send;
-      const send:Send=async(method,params)=>{check(); const result=await current.send(method,params);check();return result;};
+      const send:Send=async(method,params)=>{
+        check();
+        let abort!:()=>void;
+        const cancelled=new Promise<never>((_,reject)=>{abort=()=>reject(new Error("Browser operation cancelled."));op.stop.signal.addEventListener("abort",abort,{once:true});});
+        try {const result=await Promise.race([current.send(method,params),cancelled]);check();return result;}
+        finally {op.stop.signal.removeEventListener("abort",abort);}
+      };
       const prepareInput=async()=>{
         await send("Input.setIgnoreInputEvents",{ignore:false});
         await send("Emulation.setFocusEmulationEnabled",{enabled:true});
