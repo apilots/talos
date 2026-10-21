@@ -73,8 +73,8 @@ jobs:
         with:
           tool: just,cargo-nextest
 
-      - name: Test Cloud, Desktop, TUI, SQLite and cross-coordinator boundaries
-        run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui
+      - name: Test Cloud, Desktop, TUI, SQLite and Provider boundaries
+        run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui -p talos-llm-deepseek
 
       - name: Test E2E discovery and prerequisite checks
         run: python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
@@ -288,6 +288,9 @@ jobs:
           TALOS_E2E_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/talos-server
           TALOS_E2E_APP_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/app-server
         run: xvfb-run -a ./talos-e2e/run_e2e.sh --group 20_browser_workspace
+      - name: Print browser scenario failures
+        if: failure()
+        run: python3 talos-e2e/scripts/report_failures.py
       - name: Upload browser acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7

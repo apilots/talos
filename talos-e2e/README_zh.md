@@ -111,6 +111,8 @@ GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secret
 适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
 Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
 
+既有 contract job 同时运行 `talos-llm-deepseek` 的受控 loopback 传输回归，无需真实 Provider 凭据。
+
 维护者可从 `main` 手动运行provider集成工作流 `trusted-e2e.yml`，包含需要真实模型
 凭据的完整 `09_app_server` 执行、MCP、Memory和Skills场景。公开app-server smoke
 复用原客户端，实际验证模型列表、Session创建、配置及Workspace/Memory API读取，

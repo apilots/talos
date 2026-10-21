@@ -122,6 +122,9 @@ Worker reservation barriers, and the imported-history/Shared-confirmation race. 
 its own four-platform native and Linux Docker gate. The PR workflow does not
 receive repository secrets and does not check out private repositories.
 
+The existing contract job also runs `talos-llm-deepseek` transport regressions
+against controlled loopback responses; those tests require no provider credentials.
+
 Maintainers can manually run the provider-backed `trusted-e2e.yml` workflow from
 `main`, including the full `09_app_server` group whose execution, MCP, memory and
 skills cases need real model credentials. The public app-server smoke case reuses

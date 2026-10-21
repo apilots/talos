@@ -239,6 +239,8 @@ sequenceDiagram
 
 Chrome 连接候选必须在当前 operation/host generation 校验后才发布；reset/logout/cancel 后完成的候选立即断开，不改变后来的连接成员。固定同一 Chrome 的握手串行退役，避免旧候选清理覆盖新连接的全局下载行为。用户窗口始终保留。
 
+用户 Chrome 的标签关闭由原连接 owner 确认完成：`Target.closeTarget` 回应后，在有界观察窗口中确认目标已离开目录，再退役该目标的 CDP session 与输入 sender，随后选择剩余标签。关闭过程不重连正在销毁的目标，不把短暂滞后的目录当作存活标签；观察超时明确失败，不以固定延迟假定成功，也不增加关闭标签 registry。既有当前标签关闭、显式焦点和失效引用语义不变。
+
 ### 4.2 持久化
 
 | 内容 | Owner / persistence |

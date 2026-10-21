@@ -138,3 +138,43 @@ it.each([null,"other"])("closes the current tab by default and respects explicit
   expect(remove).toHaveBeenCalledWith(tabId??"current");
   await expect(host.execute("focus",{...operation,operation:{...operation.operation as Extract<AppProtocol.BrowserHostOperation,{kind:"execute"}>,action:{kind:"tab",action:"focus",tabId:null,url:null}}})).rejects.toThrow("Unknown browser tab");
 });
+
+it("waits for Chrome to retire a closing target before inspecting remaining tabs",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  Socket.targets=["other","current"].map(targetId=>({targetId,type:"page",url:"about:blank",title:targetId}));
+  const originalSend=Socket.prototype.send;
+  let closing:string|undefined,closingSnapshots=0,reattachAttempts=0;
+  vi.spyOn(Socket.prototype,"send").mockImplementation(function(this:Socket,text:string){
+    const command=JSON.parse(text);
+    let result:Record<string,unknown>|undefined,error:Record<string,unknown>|undefined;
+    if(command.method==="Target.closeTarget") {closing=command.params.targetId;result={success:true};}
+    else if(command.method==="Target.getTargets"&&closing) {
+      closingSnapshots++;
+      if(closingSnapshots>1)Socket.targets=Socket.targets.filter(target=>target.targetId!==closing);
+      result={targetInfos:Socket.targets};
+    } else if(command.method==="Target.attachToTarget"&&command.params.targetId===closing) {
+      reattachAttempts++;error={code:-32000,message:"Target is closing"};
+    } else {originalSend.call(this,text);return;}
+    this.commands.push(command);
+    queueMicrotask(()=>this.dispatchEvent(new MessageEvent("message",{data:JSON.stringify({id:command.id,...(error?{error}:{result})})})));
+  });
+  await host.execute("connect",request("connect"));
+  const response=await host.execute("close",{...request("probe"),operation:{kind:"execute",targetId:"current",element:null,upload:null,action:{kind:"tab",action:"close",tabId:null,url:null}}});
+  expect(response.kind).toBe("observation");
+  if(response.kind!=="observation")throw Error("Expected remaining tab observation.");
+  expect(response.page.targetId).toBe("other");
+  expect(response.page.tabs.map(tab=>tab.tabId)).toEqual(["other"]);
+  expect(closingSnapshots).toBeGreaterThan(1);
+  expect(reattachAttempts).toBe(0);
+});
+
+it("fails explicitly when Chrome never removes an acknowledged closing target",async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>({json:async()=>({Browser:"Chrome/140.0",webSocketDebuggerUrl:"ws://127.0.0.1:9222/devtools/browser/test"})})));
+  Socket.targets=[{targetId:"current",type:"page",url:"about:blank",title:"Current"}];
+  await host.execute("connect",request("connect"));
+  let now=0;vi.spyOn(Date,"now").mockImplementation(()=>now+=1500);
+  await expect(host.execute("close",{...request("probe"),operation:{kind:"execute",targetId:"current",element:null,upload:null,action:{kind:"tab",action:"close",tabId:null,url:null}}})).rejects.toThrow("Chrome tab close timed out");
+  expect(Socket.all[0].commands.filter(command=>command.method==="Target.closeTarget")).toHaveLength(1);
+  expect(Socket.all[0].commands.filter(command=>command.method==="Target.attachToTarget")).toHaveLength(1);
+  expect(Socket.all[0].commands.some(command=>command.method==="Page.enable")).toBe(false);
+});

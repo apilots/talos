@@ -293,7 +293,20 @@ class ChromeConnection {
     return Promise.all(targets.filter(t=>t.type==="page"&&(t.url==="about:blank"||/^https?:/.test(t.url))).slice(0,32).map(async t=>{let id=this.sessions.get(t.targetId);if(!id){id=String((await this.send("Target.attachToTarget",{targetId:t.targetId,flatten:true})).sessionId);this.sessions.set(t.targetId,id);}let sender=this.senders.get(t.targetId);if(!sender){sender=trackInputs((method:string,params?:RecordValue)=>this.send(method,params,id));this.senders.set(t.targetId,sender);}return {id:t.targetId,send:sender,url:()=>t.url,title:()=>t.title};}));
   }
   async open(url:string,check:()=>void=()=>{}):Promise<Tab> {if((await this.tabs()).length>=MAX_TABS)throw new Error("Chrome tab capacity exceeded.");check();const id=String((await this.send("Target.createTarget",{url})).targetId);const tab=(await this.tabs()).find(t=>t.id===id);if(!tab)throw new Error("Chrome tab was not created.");return tab;}
-  async remove(id:string):Promise<void> {await this.send("Target.closeTarget",{targetId:id});this.sessions.delete(id);}
+  async remove(id:string):Promise<void> {
+    await this.send("Target.closeTarget",{targetId:id});
+    // Close acknowledgement can precede target destruction. Do not reattach a
+    // still-listed closing target while choosing the next observation.
+    const deadline=Date.now()+3000;
+    do {
+      const targets=(await this.send("Target.getTargets")).targetInfos as {targetId:string}[];
+      if(!targets.some(target=>target.targetId===id)) {
+        this.sessions.delete(id);this.senders.delete(id);return;
+      }
+      await new Promise(resolve=>setTimeout(resolve,50));
+    } while(Date.now()<deadline);
+    throw new Error("Chrome tab close timed out.");
+  }
   async focus(id:string):Promise<void> {await this.send("Target.activateTarget",{targetId:id});}
   async releaseInputs():Promise<void> {for(const tab of await this.tabs())await release(tab.send);}
   close():void {if(this.socket.readyState===WebSocket.OPEN)for(const sessionId of this.sessions.values())this.socket.send(JSON.stringify({id:++this.nextId,sessionId,method:"Emulation.setFocusEmulationEnabled",params:{enabled:false}}));if(this.socket.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify({id:++this.nextId,method:"Browser.setDownloadBehavior",params:{behavior:"default"}}));this.fail();this.socket.close();}
