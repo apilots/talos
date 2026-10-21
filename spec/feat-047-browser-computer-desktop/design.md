@@ -587,6 +587,10 @@ Docker 桌面保留现有浅冷色背景，在中央以低对比玻璃质感 Tal
 
 GitHub PR gate 使用受控网页覆盖 Docker 插件/工具图片、首次非导航操作与后台首页共存、桌面三入口及关闭重开、fencing、鉴权/背压与 native 无显示的代表用例。共享首页、logo 和 Desktop 导航栏属于实际构建输入，相关变更必须选择该 gate；普通无关 Web 静态资源保持原成本分流。真实 NAT、反代 HTTP/2/WSS、私有 CA、用户 Chrome 连接需额外本地验收，不以 mock 或单独组件 proof 冒充产品 E2E。
 
+DeepSeek 模型兼容由 `talos-llm-deepseek` 私有实现负责，不让共享协议或浏览器层依赖模型名称。Flash 的 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 工具请求，在既有 system 前缀与对话消息之间增加一条短的参数保真提示：历史 XML 编码是上下文数据，新工具调用保留最新请求原始拼写，也保留用户有意指定的实体字面量。Chat 和 Messages 使用同一请求入口；无工具及其他模型不增加该提示。不解析、重写历史 XML，不自动解码或修补模型返回的命令，不改变权限和审批绑定。新增提示为固定短文本，低于 1K tokens，既有上下文顺序和缓存标记保持不变。兼容提示先经过真实 API 的精确参数与实体字面量控制验证，再集成；英文 TODO 关联 PR #50，未来 Flash 升级时复查并依据真实 API 与回归结果决定移除。
+
+开启思考不意味着每次原生响应都有非空 `reasoning_content`。Provider 保持上游的空思考语义，不补占位思考、不为补齐思考自动重试成功请求；非空思考保留其展示和续接内容。确定性传输回归负责空思考正常结束与非空思考、工具参数保真，真实模型 CLI E2E 负责工具执行及结果，不以每轮必须存在思考事件作为成功条件。精确命令、工具身份和审批副作用验收保持不变；未来模型契约变更通过私有 TODO 复查，不散落跨层兼容分支。
+
 真实网站/模型任务与确定性回归分开记录：在本地功能检查、独立 Review 修复和最终视觉验收完成后，最后执行经用户授权的自然语言任务。从产品模型选择器选择 dev 配置中支持图片输入的 DeepSeek-v4-flash-vision-exp 和最低档 light，通过普通输入框提交阅读与滚动 `talos.love` 的任务，由模型自主决定浏览器调用，形成有真实工具证据、截图和来源链接的功能分析。推理强度应同时核对实际 Session 选择和 provider 请求映射；DeepSeek 的 light 对应 API low。管理端 `agent.inner_model` 独立负责标题等辅助工作，不随执行 Worker 的模型选择改变；真实验收必须分别记录两者并确保标题生成使用所选真实配置。确定性 fixture 区分标题文本与 memory reflection 的有限响应契约，未知辅助请求明确拒绝；完成后同时检查 Session 详情和列表标题。旧 fixture 污染会话保留为历史证据，不通过 UI 替换、猜测 JSON 或直接改库掩盖。不得以固定 fixture 输出或搜索/抓取替代浏览器，也不得在运行前写为通过；凭据、实际输出及未验收限制仅记入忽略的 output/计划。
 
 轻量的托管产品资源工作区 E2E 与 Docker/native Browser 工具 gate 分工：前者必须挂载实际 AppLayout，使用受控本地网页与真实 File API 验证同 URL 多 Tab、切换/收起保留实例、关闭/账户 scope 清理、Markdown 授权及原生 dialog/键盘焦点；后者负责真实工具与媒体/失活清理。Web/Markdown owner 变更选择轻量产品场景，不能仅扩充 Docker job 路径白名单代替实际覆盖。

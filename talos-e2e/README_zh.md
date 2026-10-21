@@ -176,6 +176,8 @@ Cloud 测试服务和相同的 Python/Node 依赖。Sync 固定为公开 v0.1.3 
 - 复用共享 runner helper 和 fixture，不重复 setup。
 - 需要手工证据时，保留能够证明关键行为的日志或报告。
 
+`06_tools/cli_bash` 接受上游没有思考文本的响应，即使请求已开启思考；仍要求 Bash 成功执行及工具调用身份一致，不要求伪造思考事件。空思考正常结束、非空思考和工具参数原样传递，由确定性的 Provider 传输回归验证。`13_interaction/user_action_http` 保留精确命令、审批、副作用及终态历史检查，不把实体转义后的命令视为等价命令。
+
 ## 20 浏览器与资源工作区
 
 新增标准编号组 `20_browser_workspace`，按场景分为 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop MCP、Docker Worker 五个用例。每个用例验证独立的产品边界，不把单元测试重复包装成 E2E。执行 `just e2e-group 20_browser_workspace`；轻量资源改动仅选择 `20_browser_workspace/01_resource_tabs`，浏览器宿主与后端改动在 PR gate 通过标准 runner 执行完整组，避免重复跑同一场景。

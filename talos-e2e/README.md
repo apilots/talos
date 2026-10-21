@@ -248,6 +248,14 @@ the location. These directories are generated output, not source documentation.
 - Reuse shared runner helpers and fixtures instead of duplicating setup.
 - Preserve logs or reports that prove the critical behavior when manual evidence is required.
 
+`06_tools/cli_bash` accepts an upstream response with no reasoning text, including
+when thinking is enabled. It still requires successful Bash execution and matching
+tool-call identities; it does not require a synthetic thinking event. Deterministic
+Provider transport regressions verify empty completion and exact nonempty reasoning
+and argument preservation. `13_interaction/user_action_http` retains exact command,
+approval, side-effect, and terminal-history checks; entity-escaped commands do not
+qualify as equivalent commands.
+
 Group `12_files` retains Local attachment and S3 upload/list/read/delete coverage.
 Its S3 helper owns a standalone Versity Gateway process and temporary directory
 under `scenarios/12_files/.tmp/`; the scenario EXIT trap stops the process and
