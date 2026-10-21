@@ -208,7 +208,7 @@ def run(cluster):
         driver.call('web', 'screenshot', path=str(REPORT / 'project-header-reloaded.png'))
         passed('owned_project_continuation_and_collapsed_title_survive_reload')
         driver.call('web', 'viewport', width=700, height=820)
-        driver.call('web', 'evaluate', expression='document.querySelector(`aside button[aria-label="Open sidebar"]`).focus();document.querySelector(`aside button[aria-label="Open sidebar"]`).click()')
+        driver.call('web', 'evaluate', expression='document.querySelector(`header button[aria-label="Open sidebar"]`).focus();document.querySelector(`header button[aria-label="Open sidebar"]`).click()')
         driver.call('web', 'wait', expression='Boolean(document.querySelector("dialog[open]")) && document.querySelector("dialog").matches(":modal")')
         driver.call('web', 'screenshot', path=str(REPORT / 'narrow-sidebar.png'))
         driver.call('web', 'key', key='Escape')
