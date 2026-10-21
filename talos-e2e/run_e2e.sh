@@ -135,7 +135,21 @@ finish_run() {
     fi
     [[ "${status}" != 0 ]] || status=1
   fi
-  if [[ -f "${report_file}" ]]; then cp "${report_file}" "${latest_file}"; fi
+  if [[ -f "${report_file}" ]]; then
+    python3 - "${report_file}" "${latest_file}" "${TALOS_E2E_RUN_ID}" <<'PY'
+import os
+from pathlib import Path
+import shutil
+import sys
+source, latest, run_id = sys.argv[1:]
+temporary = Path(latest + '.' + run_id + '.tmp')
+try:
+    shutil.copyfile(source, temporary)
+    os.replace(temporary, latest)
+finally:
+    temporary.unlink(missing_ok=True)
+PY
+  fi
   if [[ "${status}" == 0 ]]; then echo "E2E passed. Report: ${report_file}"; fi
   exit "${status}"
 }
@@ -219,8 +233,6 @@ done
   echo "- 通过: ${pass_count}"
   echo "- 失败: ${fail_count}"
 } >> "${report_file}"
-
-cp "${report_file}" "${latest_file}"
 
 if [[ "${fail_count}" -gt 0 ]]; then
   echo "E2E failed. Report: ${report_file}" >&2
