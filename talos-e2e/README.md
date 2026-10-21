@@ -140,7 +140,12 @@ offline Auth rejection; no provider completion is required.
 `09_app_server/computer_deletion` runs real Chrome, HTTP Gateway/Service/Store and
 node gRPC with an explicitly selected secretless upstream Auth contract fixture.
 It covers owner isolation, offline inspection, disable/enable, cancel/confirm,
-English/Chinese prompts, clearing selection and rejected old credentials. Run
+English/Chinese prompts, clearing selection and rejected old credentials. The
+same case covers the homepage after selection is cleared, selecting an offline
+Computer, the zero-registration prompt, and the connection guide with Escape
+focus recovery on wide and narrow layouts. A 25-Computer directory also verifies
+internal list scrolling, server search beyond the initially loaded results, and
+clearing a search; the homepage has no pagination controls. Run
 `talos-e2e/scripts/computer_workspace/deletion.py` without `--contract-auth` for
 local acceptance with real disposable Cloud Auth (`TALOS_CLOUD_SERVER_BIN`). Both
 modes require Python Playwright and installed Chrome (`TALOS_E2E_CHROME_BIN`).
