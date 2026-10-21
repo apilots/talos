@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
-require_command "${TALOS_RS_DIR}/target/debug/talos"
+require_command "${TALOS_E2E_CLI_BIN:-${TALOS_RS_DIR}/target/debug/talos}"
 
 if ! has_real_llm_key; then
   echo "CASE cli_stream_real_llm_precheck FAIL missing provider key in .env"
@@ -16,7 +16,7 @@ echo "CASE cli_stream_real_llm_precheck PASS key_detected=true"
 build_binaries
 prepare_talos_home
 
-cli="${TALOS_RS_DIR}/target/debug/talos"
+cli="${TALOS_E2E_CLI_BIN:-${TALOS_RS_DIR}/target/debug/talos}"
 
 run_cli() {
   "${cli}" "$@" 2>&1

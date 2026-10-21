@@ -1,5 +1,6 @@
 import importlib.util,json,os,subprocess,threading,uuid
 from pathlib import Path
+from lifecycle import own_process
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from native_engine import owned_chrome, stop_owned
 ROOT=Path(__file__).resolve().parents[3]
@@ -15,7 +16,7 @@ class Page(BaseHTTPRequestHandler):
   html=b'''<title>Native Worker fixture</title><input name="name"><button onclick="document.querySelector('p').textContent='Hello '+document.querySelector('input').value">Submit</button><p>Ready</p><input id="upload" type="file" onchange="document.querySelector('#uploaded').textContent=this.files[0].name"><p id="uploaded"></p><a href="/report.csv">Download</a>'''
   self.send_response(200);self.send_header('Content-Type','text/html');self.send_header('Content-Length',str(len(html)));self.end_headers();self.wfile.write(html)
 page=ThreadingHTTPServer(('127.0.0.1',18080),Page);threading.Thread(target=page.serve_forever,daemon=True).start()
-home=ROOT/'.tmp/browser-worker/native'/('mcp-home-'+uuid.uuid4().hex[:8]);home.mkdir()
+home=Path(os.environ['TALOS_E2E_TMP_ROOT'])/('mcp-home-'+uuid.uuid4().hex[:8]);home.mkdir()
 config=fixture.config(home,fixture.free_port(),mock.server_port)
 config['gateway']['auth']=False;config['agent_node']={}
 config['cloud']['agent_base_url']='https://127.0.0.1:'+str(fixture.free_port())
@@ -27,7 +28,8 @@ if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/
 result_file=fixture.REPORT/'native-mcp-acceptance.json';result_file.unlink(missing_ok=True)
 try:
  with owned_chrome(fixture.REPORT, home, env):
-  native=subprocess.Popen([str(electron),str(ROOT/'.tmp/browser-worker/native/mcp-dist')],env=env,start_new_session=True)
+  native=subprocess.Popen([str(electron),str(Path(os.environ['TALOS_E2E_NATIVE_ROOT'])/'mcp-dist')],env=env,start_new_session=True)
+  own_process(native)
   try:
    if native.wait(timeout=210):raise RuntimeError('Desktop MCP acceptance failed')
   finally:stop_owned(native)

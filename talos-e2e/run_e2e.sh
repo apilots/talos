@@ -33,12 +33,14 @@ build_required_binaries() {
     case "${binary}" in
       server) build_server_binary ;;
       cli) build_cli_binary ;;
+      worker) build_worker_binary ;;
+      app_server) prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server ;;
+      test_client) prepare_binary TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN talos-app-server-test-client talos-app-server-test-client ;;
+      sandbox) if [[ "$(uname -s)" == "Linux" ]]; then build_sandbox_binary; fi ;;
     esac
   done <<< "${binaries}"
   # Linux execution discovers the sandbox launcher beside runtime binaries.
-  if [[ "$(uname -s)" == "Linux" ]]; then
-    (cd "${TALOS_RS_DIR}" && cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher)
-  fi
+  if [[ "$(uname -s)" == "Linux" && -n "${binaries}" ]]; then build_sandbox_binary; fi
   export TALOS_E2E_REQUIRED_BINARIES_READY=1
 }
 
@@ -112,6 +114,34 @@ if [[ "${check_only}" == 1 ]]; then exit 0; fi
 mkdir -p "${TALOS_E2E_TMP_ROOT}"
 export npm_config_cache="${TALOS_E2E_NPM_CACHE:-${TALOS_E2E_TMP_ROOT}/npm-cache}"
 mkdir -p "${npm_config_cache}"
+export TALOS_E2E_RESOURCE_ROOT="${TALOS_E2E_TMP_ROOT}/runs/${TALOS_E2E_RUN_ID}"
+export PYTHONPATH="${TALOS_E2E_DIR}/scripts${PYTHONPATH:+:${PYTHONPATH}}"
+mkdir -p "${TALOS_E2E_RESOURCE_ROOT}/shared"
+active_case=""
+finish_run() {
+  local status=$?
+  trap - EXIT
+  trap '' INT TERM
+  if [[ -n "${active_case}" ]]; then
+    kill -TERM "${active_case}" 2>/dev/null || true
+    wait "${active_case}" 2>/dev/null || true
+  fi
+  if python3 "${TALOS_E2E_DIR}/scripts/lifecycle.py" cleanup; then
+    rm -rf "${TALOS_E2E_RESOURCE_ROOT}"
+  else
+    echo "Run cleanup failed; ownership records retained: ${TALOS_E2E_RESOURCE_ROOT}" >&2
+    if [[ -f "${report_file}" ]]; then
+      printf '\n## Run cleanup\n\nFAIL: owned resources remain in `%s`.\n' "${TALOS_E2E_RESOURCE_ROOT}" >> "${report_file}"
+    fi
+    [[ "${status}" != 0 ]] || status=1
+  fi
+  if [[ -f "${report_file}" ]]; then cp "${report_file}" "${latest_file}"; fi
+  if [[ "${status}" == 0 ]]; then echo "E2E passed. Report: ${report_file}"; fi
+  exit "${status}"
+}
+trap finish_run EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 build_required_binaries
 
 pass_count=0
@@ -124,8 +154,8 @@ fail_count=0
   echo "- 工作目录: ${REPO_ROOT}"
   echo "- E2E 目录: ${TALOS_E2E_DIR}"
   echo "- Rust 目录: ${TALOS_RS_DIR}"
-  echo "- 服务端: talos-rs/target/debug/talos-server（按场景需要构建）"
-  echo "- 终端客户端: talos-rs/target/debug/talos（按场景需要构建）"
+  echo "- 服务端: ${TALOS_E2E_SERVER_BIN:-not required}"
+  echo "- 终端客户端: ${TALOS_E2E_CLI_BIN:-not required}"
   echo
   echo "## 场景执行结果"
   echo
@@ -135,11 +165,9 @@ for scenario in "${scenarios[@]}"; do
   script_path="${scenario}"
   scenario_name="${script_path#${SCENARIO_ROOT}/}"
   scenario_report_dir="${REPORT_ROOT}/${scenario_name%.sh}"
-  scenario_home_dir="$(TALOS_SCENARIO_NAME="${scenario_name%.sh}" default_talos_home)"
   log_file="${scenario_report_dir}/scenario.log"
   reset_case_directory "${REPORT_ROOT}" "${scenario_report_dir}"
   mkdir -p "${scenario_report_dir}"
-  reset_case_directory "${E2E_TMP_ROOT}/homes" "${scenario_home_dir}"
   scenario_started_at="$(python3 - <<'PY'
 import time
 print(time.time())
@@ -151,13 +179,16 @@ PY
   # each native sandbox case's standalone Docker expansion before case99.
   effective_group="${group_name}"
   if [[ -z "${case_name}" && "${scenario_name}" == */* ]]; then effective_group="${scenario_name%%/*}"; fi
-  if TALOS_E2E_GROUP_NAME="${effective_group}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" "${script_path}" >"${log_file}" 2>&1; then
+  TALOS_E2E_CASE_ID="${scenario_name%.sh}" TALOS_E2E_GROUP_NAME="${effective_group}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" python3 "${TALOS_E2E_DIR}/scripts/case_run.py" "${script_path}" >"${log_file}" 2>&1 &
+  active_case=$!
+  if wait "${active_case}"; then
     status="PASS"
     pass_count=$((pass_count + 1))
   else
     status="FAIL"
     fail_count=$((fail_count + 1))
   fi
+  active_case=""
   scenario_elapsed_secs="$(SCENARIO_STARTED_AT="${scenario_started_at}" python3 - <<'PY'
 import os
 import time
@@ -195,5 +226,3 @@ if [[ "${fail_count}" -gt 0 ]]; then
   echo "E2E failed. Report: ${report_file}" >&2
   exit 1
 fi
-
-echo "E2E passed. Report: ${report_file}"

@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / 'multi_node'))
 from fixture import Cluster, REPORT, ROOT, data, free_port, http, require, wait_for
 sys.path.append(str(Path(__file__).resolve().parents[1] / 'computer_workspace'))
 from registration import Desktop
+from lifecycle import container_args
 
 
 class SyncCluster(Cluster):
@@ -24,7 +25,7 @@ class SyncCluster(Cluster):
 
     def docker(self, name, image, home, extra=(), command=()):
         container = 'talos-sync-e2e-' + name + '-' + uuid.uuid4().hex[:10]
-        command = ['docker', 'run', '--detach', '--name', container, '--user', f'{os.getuid()}:{os.getgid()}',
+        command = ['docker', 'run', '--detach', *container_args(container), '--user', f'{os.getuid()}:{os.getgid()}',
                    '--mount', f'type=bind,source={home},target=/home/talos/.talos',
                    '--env', 'HOME=/home/talos/.talos', '--env', 'TALOS_HOME=/home/talos/.talos', *extra, image, *command]
         self.containers.append(container)
@@ -155,7 +156,7 @@ class SyncCluster(Cluster):
             record['container'] = self.docker(name.lower(), os.environ.get('TALOS_WORKER_E2E_IMAGE', 'talos-worker:sync-e2e'), home,
                                                ['--env', 'TALOS_CONFIG=/home/talos/.talos/conf/talos.yaml'])
         else:
-            record['process'] = self.start_process(name, [str(ROOT / 'talos-rs/target/debug/talos-worker')],
+            record['process'] = self.start_process(name, [os.environ.get('TALOS_E2E_WORKER_BIN', str(ROOT / 'talos-rs/target/debug/talos-worker'))],
                                                     dict(os.environ, HOME=str(home), TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT)))
         self.nodes[name] = record
         def available():

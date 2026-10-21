@@ -6,10 +6,7 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 export TALOS_SCENARIO_REPORT_DIR="${SCENARIO_REPORT_DIR}"
 for command in cargo node pnpm python3; do require_command "${command}"; done
 python3 -c 'import yaml'
-if [[ -z "${TALOS_E2E_APP_SERVER_BIN:-}" ]]; then
-  (cd "${TALOS_RS_DIR}" && cargo build --locked -p app-server)
-  export TALOS_E2E_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-fi
+prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
 [[ -x "${TALOS_E2E_APP_SERVER_BIN}" ]] || { echo "Current app-server binary is required" >&2; exit 1; }
 pnpm --dir "${TALOS_APP_DIR}/desktop" build:main
 node "${TALOS_E2E_DIR}/scripts/browser-worker/build-native.mjs" mcp

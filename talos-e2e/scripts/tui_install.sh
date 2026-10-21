@@ -10,7 +10,7 @@ TUI_INSTALL_E2E_VERSION="${TUI_INSTALL_E2E_VERSION:-$(awk '
     exit
   }
 ' "${REPO_ROOT}/talos-rs/Cargo.toml")}"
-TUI_INSTALL_DOCKER_IMAGE="talos-tui-install-e2e:ubuntu-24.04"
+TUI_INSTALL_DOCKER_IMAGE="${TUI_INSTALL_DOCKER_IMAGE:-}"
 
 normalize_tui_install_platform() {
   case "$1" in
@@ -241,14 +241,14 @@ run_linux_docker_tui_install() {
     echo "The shared toolchain must specify RELEASE_RUST_VERSION." >&2
     return 1
   }
-  docker build --build-arg "RUST_VERSION=${rust_version}" \
-    -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
-  docker run --rm \
+  local image
+  image="$(e2e_image talos-tui-install-e2e "${TUI_INSTALL_DOCKER_IMAGE}" --build-arg "RUST_VERSION=${rust_version}" -f "${dockerfile}" "${REPO_ROOT}")"
+  e2e_docker container "tui-install-${TALOS_E2E_RUN_ID}-${RANDOM}" --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
     -v "${target_dir}:/workspace/talos/talos-rs/target" \
     -v "${container_report_dir}:/tmp/talos-e2e-report" \
     -e TALOS_E2E_TMP_ROOT=/tmp/talos-e2e \
     -e TALOS_SCENARIO_REPORT_DIR=/tmp/talos-e2e-report \
-    "${TUI_INSTALL_DOCKER_IMAGE}" \
+    "${image}" \
     bash -lc "/workspace/talos/talos-e2e/scenarios/15_tui_install/01_native_install.sh"
 }

@@ -8,10 +8,7 @@ export TALOS_E2E_CADDY_BIN="${TALOS_E2E_CADDY_BIN:-caddy}"
 for command in cargo node pnpm openssl protoc python3 "${TALOS_E2E_CADDY_BIN}"; do require_command "${command}"; done
 python3 -c 'import grpc, yaml, playwright; from google.protobuf import descriptor_pool'
 build_server_binary
-if [[ -z "${TALOS_E2E_APP_SERVER_BIN:-}" ]]; then
-  (cd "${TALOS_RS_DIR}" && cargo build --locked -p app-server)
-  export TALOS_E2E_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-fi
+prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
 [[ -x "${TALOS_E2E_APP_SERVER_BIN}" ]] || { echo "Current app-server binary is required" >&2; exit 1; }
 pnpm --dir "${TALOS_APP_DIR}/desktop" build:main
 python3 "${TALOS_E2E_DIR}/scripts/computer_workspace/desktop_resources.py"

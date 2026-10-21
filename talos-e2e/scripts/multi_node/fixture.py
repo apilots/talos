@@ -222,13 +222,13 @@ class Cluster:
         self.model = next((model for identifier in preferred for model in models if model['id'] == identifier), models[0])
 
     def start_server(self):
-        self.server = self.start_process('server', [str(ROOT / 'talos-rs/target/debug/talos-server')], self.server_env)
+        self.server = self.start_process('server', [os.environ.get('TALOS_E2E_SERVER_BIN', str(ROOT / 'talos-rs/target/debug/talos-server'))], self.server_env)
         wait_for(lambda: http(self.url + '/health'), 'Server startup')
         grpc.channel_ready_future(self.channel).result(timeout=20)
 
     def start_worker(self, name):
         node = self.nodes[name]
-        node['process'] = self.start_process(name, [str(ROOT / 'talos-rs/target/debug/talos-worker')], node['env'])
+        node['process'] = self.start_process(name, [os.environ.get('TALOS_E2E_WORKER_BIN', str(ROOT / 'talos-rs/target/debug/talos-worker'))], node['env'])
 
     def info(self, name):
         result = self.manage(self.nodes[name]['owner'], 'GetNode', {'node_id': self.nodes[name]['node_id']})

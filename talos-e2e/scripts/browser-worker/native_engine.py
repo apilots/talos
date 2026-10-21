@@ -14,6 +14,8 @@ import time
 from urllib.request import urlopen
 
 
+from lifecycle import own_process
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -63,6 +65,7 @@ def owned_chrome(report, profile_root, env):
             '--enable-automation', '--no-first-run', '--no-default-browser-check',
             '--new-window', 'about:blank',
         ], env=chrome_env, stdout=log, stderr=log, start_new_session=True)
+        own_process(process)
         try:
             deadline = time.monotonic() + 30
             while True:
@@ -102,9 +105,10 @@ def main():
                    TALOS_SCENARIO_REPORT_DIR=str(report))
         with owned_chrome(report, temporary, env):
             native = subprocess.Popen(
-                [str(electron), str(ROOT / '.tmp/browser-worker/native/dist')],
+                [str(electron), str(Path(os.environ['TALOS_E2E_NATIVE_ROOT']) / 'dist')],
                 env=env, start_new_session=True,
             )
+            own_process(native)
             try:
                 if native.wait(timeout=180):
                     raise RuntimeError('Desktop browser host acceptance failed')

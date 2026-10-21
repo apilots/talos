@@ -153,7 +153,7 @@ wait_for_action_state() {
 }
 
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
-  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_RESOURCE_DIR='${TALOS_RESOURCE_DIR}' ./target/debug/talos"
+  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_RESOURCE_DIR='${TALOS_RESOURCE_DIR}' '${TALOS_E2E_CLI_BIN}'"
 if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message, Ctrl+V an image, or use /help" 120 0.25 "${PANE_SNAPSHOT}"; then
   dump_failure_context
   echo "CASE tui_user_action_bootstrap FAIL"
@@ -221,7 +221,7 @@ if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Talos needs your input" 80 0.25 "$
 fi
 tui_stop "${TUI_SESSION_NAME}"
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
-  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_RESOURCE_DIR='${TALOS_RESOURCE_DIR}' ./target/debug/talos"
+  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_RESOURCE_DIR='${TALOS_RESOURCE_DIR}' '${TALOS_E2E_CLI_BIN}'"
 if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message, Ctrl+V an image, or use /help" 120 0.25 "${PANE_SNAPSHOT}"; then
   dump_failure_context
   echo "CASE tui_question_reconnect_bootstrap FAIL"

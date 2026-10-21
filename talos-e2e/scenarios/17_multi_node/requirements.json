@@ -16,7 +16,8 @@
       "model"
     ],
     "binaries": [
-      "server"
+      "server",
+      "worker"
     ]
   },
   "cases": {

@@ -56,7 +56,9 @@ helper 或未编号目录；新增用例、编号组不需要修改 runner。精
 字段为 `commands`、`python_modules`、`checks`、`platforms`、`env` 和 `binaries`；
 `checks` 检查 Docker、Cloud 可执行文件、复用 `has_real_llm_key` 的模型密钥检测、Chrome、
 Linux Desktop 显示、Caddy、Worker 镜像是否存在及原生 sandbox 依赖。`binaries` 声明
-共享 `server`/`cli` 预构建；专门构建仍由原场景 wrapper 负责，Linux launcher 预构建保留。
+`server`、`cli`、`worker`、`app_server`、`test_client`、`sandbox` 的统一预构建；专门构建仍由原场景
+wrapper 负责。Linux launcher 只为选中的原生二进制／sandbox case 预构建；纯容器
+case 不构建宿主机 launcher。
 不会输出密钥和环境值。声明示例：
 
 ```json
@@ -169,6 +171,20 @@ Cloud 测试服务和相同的 Python/Node 依赖。Sync 固定为公开 v0.1.3 
 生成证据写入 `talos-e2e/reports/`。临时 Talos home 和场景数据默认使用
 `talos-e2e/.tmp/`，可通过 `TALOS_E2E_TMP_ROOT` 覆盖。这些目录是生成输出，
 不是源码文档。
+
+所有自动发现的 case 统一经过前后清理边界，各自使用私有临时目录、默认 home、
+原生验收构建目录、shell 进程组和 tmux 服务。创建 Docker 资源或独立进程的 fixture
+必须使用[生命周期接口](LIFECYCLE.md)登记归属。成功、失败及 INT/TERM 都触发清理；
+清理失败会使验收失败并保留归属记录，报告继续保留。只删除本轮资源，不清共享镜像、
+调用方二进制、包缓存和构建缓存，也不执行全局 Docker prune。
+
+本轮构建镜像使用唯一 run tag 和 label，跨 case 复用，整轮结束后删除；显式提供的
+镜像视为外部输入，不重建、不删除。二进制可通过 `TALOS_E2E_SERVER_BIN`、
+`TALOS_E2E_CLI_BIN`、`TALOS_E2E_WORKER_BIN`、`TALOS_E2E_APP_SERVER_BIN`、
+`TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN`、`TALOS_E2E_SANDBOX_BIN` 指定可执行文件。
+runner 统一解析、导出并复用；指定路径无效直接失败，不回退。未指定时按已有
+locked Cargo 流程构建。Linux 优先复用所选二进制旁的 sandbox launcher；缺失时只构建
+匹配的 debug/release launcher，避免为 release 验收额外构建 debug 依赖图。
 
 ## 测试规则
 

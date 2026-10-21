@@ -58,7 +58,8 @@
         "caddy"
       ],
       "binaries": [
-        "server"
+        "server",
+        "app_server"
       ]
     },
     "05_docker_worker.sh": {
@@ -77,6 +78,15 @@
       "checks": [
         "docker",
         "worker_image"
+      ],
+      "binaries": [
+        "server",
+        "app_server"
+      ]
+    },
+    "04_desktop_mcp.sh": {
+      "binaries": [
+        "app_server"
       ]
     }
   }
