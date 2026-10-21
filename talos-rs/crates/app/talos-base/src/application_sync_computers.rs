@@ -98,7 +98,10 @@ impl ApplicationSyncHost {
         {
             return Ok(true);
         }
-        let local = self.local_computer_id()?;
+        let local = talos_config::YamlConfigStore::new(self.config.source_path())
+            .load_agent_node()?
+            .runner
+            .map_or_else(|| "embedded".into(), |runner| runner.node_id);
         let identity = RequestIdentity {
             user_id: actor.user_id.clone(),
             username: actor.username.clone(),
@@ -118,8 +121,7 @@ impl ApplicationSyncHost {
             }))
     }
     pub(crate) async fn local_computer(&self, actor: &Actor) -> TalosResult<Option<String>> {
-        self.refresh_saved_registration_removal().await?;
-        let local = self.local_computer_id()?;
+        let local = self.local_computer_id().await?;
         Ok(self.owns_local_computer(actor).await?.then_some(local))
     }
     pub(crate) async fn local_node(&self, actor: &Actor, computer_id: &str) -> TalosResult<String> {
@@ -146,7 +148,7 @@ impl ApplicationSyncHost {
         if computer_id == "embedded" || actor.auth_disabled {
             return self.local_node(actor, computer_id).await;
         }
-        let local = self.local_computer_id()?;
+        let local = self.local_computer_id().await?;
         if computer_id == local && self.owns_local_computer(actor).await? {
             return Ok("embedded".into());
         }
@@ -165,7 +167,7 @@ impl ApplicationSyncHost {
         actor: &Actor,
         mut info: NodeInfo,
     ) -> TalosResult<NodeInfo> {
-        let local = self.local_computer_id()?;
+        let local = self.local_computer_id().await?;
         let own = self.owns_local_computer(actor).await?;
         if own && info.node_id == "embedded" {
             info.node_id = local.clone();

@@ -68,15 +68,13 @@ export class DesktopAppServerController {
     this.closed = false;
     this.emitRuntimeState("starting", null);
     const bridge = this.ensureBridge();
-    const epoch = this.subscriptionEpoch;
     const response = await bridge.connect();
     if (this.closed || this.bridge !== bridge) return response;
     if (this.options.desktopHost && response.server_info.auth_enabled) {
-      const session = await bridge.invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
+      await bridge.invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {});
       if (this.closed || this.bridge !== bridge) return response;
       this.initializeResponse = response;
       this.emitRuntimeState("ready", null);
-      if (session.session && epoch === this.subscriptionEpoch) { await this.enrollWorker(bridge, session.session.access_token, epoch); }
       return response;
     }
     this.initializeResponse = response;
@@ -126,12 +124,6 @@ export class DesktopAppServerController {
     if (method === "auth/session/read" && current) {
       this.retainAccountSubscriptions((result as AppProtocol.AuthSessionReadResponse).session?.user.user_id ?? null);
     }
-    if (current && this.options.desktopHost && this.initializeResponse?.server_info.auth_enabled) {
-      const login = method === "auth/login/status" ? result as AppProtocol.CloudLoginStatusResponse : null;
-      const session = method === "auth/session/read" ? (result as AppProtocol.AuthSessionReadResponse).session : null;
-      const token = login?.status === "authenticated" ? login.access_token : session?.access_token;
-      if (token) await this.enrollWorker(bridge, token, this.subscriptionEpoch);
-    }
     if (method === "desktop/workerEnroll" && current) this.emitRuntimeState("ready", null);
     if (subscription && this.subscriptions.get(subscription.sessionId) === subscription) {
       for (const [subscriptionId, sessionId] of this.sessionsBySubscriptionId) {
@@ -154,29 +146,6 @@ export class DesktopAppServerController {
     this.clearSubscriptions();
     await bridge?.close();
     this.emitRuntimeState("stopped", null);
-  }
-
-  /** Enrollment is independent of successful login; report its failure without rewriting auth. */
-  private async enrollWorker(bridge: AppServerBridge, token: string, epoch: number): Promise<void> {
-    try {
-      await bridge.invoke("sync/status", null, {
-        actorCredentials: { credential: { type: "existing_session_token", token } },
-      });
-      if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
-      this.emitRuntimeState("ready", null);
-    } catch (error) {
-      if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
-      if (!(error instanceof TalosApiError)) { console.error("Desktop Worker enrollment failed", error); }
-      this.options.onRuntimeState?.({
-        kind: "error",
-        message: "Worker registration failed. Recover or reconnect this computer to retry.",
-        error: error instanceof TalosApiError ? error.apiError : {
-          code: AppProtocol.ErrorCode.InternalError,
-          message: "Worker registration failed; technical details are available in the desktop log.",
-          localization: null,
-        },
-      });
-    }
   }
 
   private ensureBridge(): AppServerBridge {

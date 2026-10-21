@@ -807,7 +807,7 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
         Some("user-1")
     );
     assert_eq!(
-        fixture.runtime.sync_host.local_computer_id().unwrap(),
+        fixture.runtime.sync_host.local_computer_id().await.unwrap(),
         "embedded"
     );
     assert!(!host.rpc.is_finished());
@@ -866,6 +866,84 @@ async fn embedded_shutdown_retires_browser_ipc_before_returning() {
     assert!(!socket.parent().unwrap().exists());
     assert!(tokio::net::UnixStream::connect(&socket).await.is_err());
     fixture.runtime.shutdown_sync().await.unwrap();
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn retained_metadata_and_identity_do_not_wait_for_registration_retirement() {
+    use talos_app_protocol::{
+        requests::{ClientRequest, ClientRequestParams},
+        ClientMethod,
+    };
+    use talos_app_server::AppServerApplication;
+    let fixture = DesktopFixture::new().await;
+    fixture.login("user-1");
+    let host = fixture.host("Local metadata");
+    let registered = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    let retirement = fixture
+        .runtime
+        .sync_host
+        .registration_retirement
+        .lock()
+        .await;
+    YamlConfigStore::new(fixture.config.source_path())
+        .mark_registration_removed(&registered, "user-1")
+        .unwrap();
+    let actor = Actor::regular("user-1").with_access_token("user-1");
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        let identity = host
+            .dispatch(
+                &actor,
+                ClientRequest {
+                    method: ClientMethod::DesktopWorkerIdentity,
+                    params: ClientRequestParams::DesktopWorkerIdentity(Default::default()),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(identity.body["nodeId"], "embedded");
+        assert_eq!(
+            fixture
+                .runtime
+                .sync_host
+                .local_computer_for_client(&actor)
+                .await
+                .unwrap(),
+            Some("embedded".into())
+        );
+        fixture
+            .runtime
+            .service
+            .list_sessions(
+                &actor,
+                talos_types::SessionListRequest {
+                    node_id: Some("embedded".into()),
+                    limit: None,
+                    offset: None,
+                    project_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        fixture
+            .runtime
+            .service
+            .list_projects(
+                &actor,
+                talos_types::ProjectListRequest {
+                    node_id: Some("embedded".into()),
+                },
+            )
+            .await
+            .unwrap();
+        fixture.runtime.service.sync_status(&actor).await.unwrap();
+    })
+    .await
+    .expect("retained reads must not await registration cleanup");
+    drop(retirement);
+    host.stop_registration().await.unwrap();
+    fixture.runtime.shutdown().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }

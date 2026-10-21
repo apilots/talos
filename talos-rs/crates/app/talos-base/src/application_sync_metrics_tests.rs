@@ -51,6 +51,17 @@ pub(super) async fn verify_late_enrollment(
         .unwrap()
         .computers
         .is_empty());
+    runtime.service.resume_account_sync(actor);
+    wait_for("background late enrollment", async || {
+        runtime
+            .service
+            .sync_status(actor)
+            .await
+            .unwrap()
+            .local_computer_id
+            .is_some()
+    })
+    .await;
     let status = runtime.service.sync_status(actor).await.unwrap();
     let local = status
         .local_computer_id
@@ -58,6 +69,7 @@ pub(super) async fn verify_late_enrollment(
     assert!(Arc::ptr_eq(
         &handle,
         runtime
+            .sync_host
             .sync_stores
             .handles
             .lock()

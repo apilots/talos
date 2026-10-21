@@ -16,6 +16,7 @@ pub(crate) struct ApplicationSyncStores {
     pub nodes: Arc<DatabaseAgentNodeStore>,
     pub files: Arc<DatabaseFileStore>,
     pub handles: tokio::sync::Mutex<HashMap<String, Arc<SyncHandle>>>,
+    pub observers: std::sync::Mutex<super::application_sync_observer::SyncObservers>,
     pub credentials: std::sync::RwLock<HashMap<String, talos_sync_sdk::CredentialCallback>>,
     pub connections: tokio::sync::Mutex<
         HashMap<
@@ -49,12 +50,25 @@ pub(crate) struct ApplicationSyncHost {
     pub local_owner: std::sync::RwLock<Option<String>>,
     pub tokens: std::sync::RwLock<HashMap<String, Arc<std::sync::RwLock<String>>>>,
     pub lifecycle: tokio::sync::Mutex<()>,
+    pub background: std::sync::Mutex<super::application_sync_background::RefreshTasks>,
     pub failures: std::sync::RwLock<HashMap<String, talos_error::ApiError>>,
+}
+
+impl Drop for ApplicationSyncHost {
+    fn drop(&mut self) {
+        // Resource callbacks also retain the Stores. Break observer captures here
+        // even when the host is dropped without its asynchronous shutdown path.
+        self.sync_stores
+            .observers
+            .lock()
+            .expect("Sync observers lock")
+            .drain();
+    }
 }
 
 impl crate::TalosApplicationRuntime {
     pub async fn shutdown_sync(&self) -> TalosResult<()> {
-        self.sync_stores.shutdown().await
+        self.sync_host.shutdown().await
     }
     pub async fn start_account_sync(
         &self,
@@ -76,6 +90,15 @@ impl crate::TalosApplicationRuntime {
 }
 
 impl ApplicationSyncHost {
+    pub(crate) async fn shutdown(&self) -> TalosResult<()> {
+        self.shutdown_refreshes().await;
+        for account_id in self.sync_stores.handles.lock().await.keys() {
+            self.service.remove_sync_handle(account_id);
+        }
+        self.tokens.write().expect("management tokens lock").clear();
+        self.sync_stores.shutdown().await
+    }
+
     fn coordinator_resource_handler(
         &self,
         computer_id: String,
@@ -215,6 +238,12 @@ impl ApplicationSyncHost {
         self.verify_computer_aliases(&verified, &binding.computers)
             .await?;
         let mut installed = self.sync_stores.handles.lock().await;
+        if self.refreshes_closed() {
+            return Err(TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Synchronization host has stopped.",
+            ));
+        }
         if let Some(handle) = installed.get(&verified.user_id) {
             return Ok(handle.clone());
         }
@@ -247,50 +276,7 @@ impl ApplicationSyncHost {
         adapter.attach_handle(Arc::downgrade(&handle));
         self.service
             .install_sync_handle(verified.user_id.clone(), handle.clone());
-        let mut changes = handle.subscribe_changes();
-        let mut status = handle.subscribe();
-        let service = self.service.clone();
-        let account_id = verified.user_id.clone();
-        let events = self.event_service.clone();
-        let sessions = self.sync_stores.sessions.clone();
-        let host = self.self_weak.clone();
-        let retirement_actor = verified.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    summary = changes.recv() => {
-                        let summary = match summary {
-                            Ok(summary) => summary,
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                if let Some(host) = host.upgrade() {
-                                    if let Err(error) = host.refresh_removed_registration(&retirement_actor).await { talos_logging::report_error(&error); }
-                                }
-                                if let Err(error) = publish_account_changes(&sessions, &events, &account_id).await {
-                                    talos_logging::report_error(&error);
-                                }
-                                continue;
-                            }
-                        };
-                        if matches!(summary.resource, talos_sync::SyncResourceKey::Computer { .. }) {
-                            if let Some(host) = host.upgrade() {
-                                if let Err(error) = host.refresh_removed_registration(&retirement_actor).await { talos_logging::report_error(&error); }
-                            }
-                        }
-                        if let talos_sync::SyncResourceKey::Session { session_id } = summary.resource {
-                            if let Err(error) = events.publish_imported(&session_id).await { talos_logging::report_error(&error); }
-                        }
-                    },
-                    changed = status.changed() => {
-                        if changed.is_err() { break; }
-                        let connected = status.borrow_and_update().connection == talos_sync::SyncConnectionState::Connected;
-                        if connected {
-                            if let Err(error) = service.retry_shared_session_heads(&account_id).await { talos_logging::report_error(&error); }
-                        }
-                    }
-                }
-            }
-        });
+        self.observe_sync(&verified.user_id, &handle);
         installed.insert(verified.user_id, handle.clone());
         Ok(handle)
     }
@@ -395,7 +381,7 @@ impl ApplicationSyncHost {
 
 /// Recover a bounded notification gap from the original durable projections.
 /// The runner has already committed these facts; this does not replay execution.
-async fn publish_account_changes(
+pub(super) async fn publish_account_changes(
     sessions: &DatabaseSessionStore,
     events: &talos_service::TimelineEventService,
     account_id: &str,
@@ -423,17 +409,33 @@ async fn publish_account_changes(
 }
 
 impl ApplicationSyncStores {
-    pub(crate) async fn shutdown(&self) -> TalosResult<()> {
-        for connection in self
-            .connections
-            .lock()
-            .await
-            .drain()
-            .filter_map(|(_, (_, connection))| connection.upgrade())
-        {
-            connection.close();
+    pub(crate) async fn remove_handle(&self, account_id: &str) -> Option<Arc<SyncHandle>> {
+        let (handle, observer) = {
+            let mut handles = self.handles.lock().await;
+            let handle = handles.remove(account_id);
+            let observer = self
+                .observers
+                .lock()
+                .expect("Sync observers lock")
+                .remove(account_id);
+            (handle, observer)
+        };
+        if let Some(task) = observer {
+            super::application_sync_observer::join_observer(task).await;
         }
-        let handles = std::mem::take(&mut *self.handles.lock().await);
+        handle
+    }
+
+    pub(crate) async fn shutdown_handles(&self) -> TalosResult<()> {
+        let (handles, observers) = {
+            let mut installed = self.handles.lock().await;
+            let handles = std::mem::take(&mut *installed);
+            let observers = self.observers.lock().expect("Sync observers lock").drain();
+            (handles, observers)
+        };
+        for observer in observers {
+            super::application_sync_observer::join_observer(observer).await;
+        }
         let mut failure = None;
         for handle in handles.into_values() {
             if let Err(error) = handle.shutdown().await {
@@ -445,5 +447,22 @@ impl ApplicationSyncStores {
             }
         }
         failure.map_or(Ok(()), Err)
+    }
+
+    pub(crate) async fn shutdown(&self) -> TalosResult<()> {
+        for connection in self
+            .connections
+            .lock()
+            .await
+            .drain()
+            .filter_map(|(_, (_, connection))| connection.upgrade())
+        {
+            connection.close();
+        }
+        self.credentials
+            .write()
+            .expect("Sync credentials lock")
+            .clear();
+        self.shutdown_handles().await
     }
 }

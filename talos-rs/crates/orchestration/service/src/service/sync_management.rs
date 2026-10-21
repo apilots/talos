@@ -8,6 +8,11 @@ use talos_types::{SyncEnableRequest, SyncStatusResponse};
 /// Installed by the management host. Pure Worker processes do not implement this port.
 /// Credentials are verified by the original AuthService, never by sync metadata.
 pub trait ManagementSync: Send + Sync {
+    /// Resume the account's owned lifecycle after startup/login authentication.
+    /// Snapshot reads must not initialize or repair remote resources.
+    fn resume(&self, actor: &Actor);
+    /// Explicit login may reuse a credential that was suspended on this host.
+    fn resume_login(&self, actor: &Actor);
     fn metrics<'a>(
         &'a self,
         actor: &'a Actor,
@@ -42,6 +47,30 @@ pub trait ManagementSync: Send + Sync {
 }
 
 impl super::TalosService {
+    /// Authentication/startup entry points resume the host's account lifecycle.
+    /// The host verifies candidate credentials before using remote resources.
+    pub fn resume_account_sync(&self, actor: &Actor) {
+        if let Some(host) = self
+            .sync_management
+            .read()
+            .expect("sync management lock")
+            .as_ref()
+            .and_then(Weak::upgrade)
+        {
+            host.resume(actor);
+        }
+    }
+    pub fn resume_account_sync_after_login(&self, actor: &Actor) {
+        if let Some(host) = self
+            .sync_management
+            .read()
+            .expect("sync management lock")
+            .as_ref()
+            .and_then(Weak::upgrade)
+        {
+            host.resume_login(actor);
+        }
+    }
     /// A weak port prevents the host's resource callbacks retaining their own Service.
     pub fn set_sync_management(&self, host: Weak<dyn ManagementSync>) {
         *self.sync_management.write().expect("sync management lock") = Some(host);

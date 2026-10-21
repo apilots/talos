@@ -79,7 +79,8 @@ impl DesktopApplication {
                 if actor.access_token.is_some()
                     && self
                         .account
-                        .read_auth_session(actor, Default::default())?
+                        .read_auth_session(actor, Default::default())
+                        .map_err(project_error)?
                         .session
                         .is_none()
                 {
@@ -98,15 +99,8 @@ impl DesktopApplication {
     }
 
     async fn worker_identity(&self) -> TalosResult<DesktopWorkerIdentityResponse> {
-        self.sync_host.refresh_saved_registration_removal().await?;
-        let removed = self.store.removed_registration_owner()?.is_some();
-        let runner = self.store.load_agent_node()?.runner.filter(|_| !removed);
         Ok(DesktopWorkerIdentityResponse {
-            node_id: Some(
-                runner
-                    .as_ref()
-                    .map_or_else(|| "embedded".into(), |runner| runner.node_id.clone()),
-            ),
+            node_id: Some(self.sync_host.local_computer_id().await?),
             control_plane_endpoint: Some(self.config.cloud.agent_base_url.clone()),
         })
     }
@@ -177,6 +171,24 @@ impl AppServerApplication for DesktopApplication {
                 request.params,
                 ClientRequestParams::AuthLogout(_) | ClientRequestParams::AuthSessionClear(_)
             ) {
+                // Enrollment may hold the Worker lock while G is unavailable.
+                // Cancel its account owner before taking that lock for logout.
+                let account = if matches!(request.params, ClientRequestParams::AuthSessionClear(_))
+                {
+                    self.account
+                        .read_auth_session(actor, Default::default())
+                        .map_err(project_error)?
+                        .session
+                        .map(|session| Actor::regular(session.user.user_id))
+                } else {
+                    Some(actor.clone())
+                };
+                if let Some(account) = account {
+                    self.service
+                        .suspend_account_sync(&account)
+                        .await
+                        .map_err(project_error)?;
+                }
                 self.media.close_all().await;
                 let browser = self.execution.browser().reset_account(&actor.user_id).await;
                 let cleanup = self.stop_registration().await;
@@ -225,6 +237,7 @@ impl AppServerApplication for DesktopApplication {
     }
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
+        self.sync_host.shutdown_refreshes().await;
         self.media.close_all().await;
         self.stop_registration().await?;
         self.local.drain_background_tasks(timeout).await

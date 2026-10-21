@@ -119,14 +119,6 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       await controller.connect();
       const sessionId = crypto.randomUUID();
 
-      await rendererClient.subscribeEvents({
-        sessionId,
-        turnId: null,
-        sinceEventId: null,
-        replayLimit: 50,
-        closeWhenIdle: null,
-        closeOnTerminal: null,
-      });
       await rendererClient.startTurn({
         sessionId,
         input: { content: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }] },
@@ -135,6 +127,15 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
         projectId: null,
         currentDirectory: null,
         clientRequestId: "desktop-crash-recovery-before",
+      });
+      // A Session is owned and readable after its first Turn is acknowledged.
+      await rendererClient.subscribeEvents({
+        sessionId,
+        turnId: null,
+        sinceEventId: null,
+        replayLimit: 50,
+        closeWhenIdle: null,
+        closeOnTerminal: null,
       });
       await waitForEvent(
         sdkEvents,

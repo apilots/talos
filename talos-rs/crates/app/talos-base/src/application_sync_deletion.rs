@@ -6,40 +6,6 @@ use talos_error::TalosResult;
 use talos_store::node::AgentNodeStore;
 
 impl ApplicationSyncHost {
-    pub(crate) async fn refresh_saved_registration_removal(&self) -> TalosResult<()> {
-        let store = YamlConfigStore::new(self.config.source_path());
-        let Some(runner) = store.load_agent_node()?.runner else {
-            return Ok(());
-        };
-        let owner = match store.removed_registration_owner()? {
-            Some(owner) => Some(owner),
-            None => {
-                self.sync_stores
-                    .nodes
-                    .deletion_owner(&runner.node_id)
-                    .await?
-            }
-        };
-        if let Some(owner) = owner {
-            let session = self
-                .service
-                .account
-                .read_auth_session(&talos_service::Actor::regular(&owner), Default::default())?
-                .session;
-            let actor = RequestIdentity {
-                user_id: owner.clone(),
-                username: None,
-                role: talos_auth::UserRole::User,
-                auth_disabled: false,
-                access_token: session
-                    .filter(|session| session.user.user_id == owner)
-                    .map(|session| session.access_token),
-            };
-            self.observe_registration_removal(&actor, &runner.node_id)
-                .await?;
-        }
-        Ok(())
-    }
     pub(crate) async fn refresh_removed_registration(
         &self,
         actor: &RequestIdentity,

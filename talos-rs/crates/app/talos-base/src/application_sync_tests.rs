@@ -10,10 +10,14 @@ use talos_store::session::SessionQuery;
 use talos_sync::SyncConnectionState;
 use talos_types::{AgentUserContent, AgentUserInput, StartTurnRequest};
 
+#[path = "application_sync_access_tests.rs"]
+mod access;
 #[path = "application_sync_login_tests.rs"]
 mod login;
 #[path = "application_sync_metrics_tests.rs"]
 mod metrics;
+#[path = "application_sync_status_flow_tests.rs"]
+mod status_flow;
 
 struct HubProcess(std::process::Child);
 impl HubProcess {
@@ -83,6 +87,8 @@ fn config(home: &Path, api: &str) -> Config {
     paths.ensure_base_dirs().unwrap();
     let mut config = Config::default().with_runtime_paths(paths);
     config.apply_derived_paths();
+    // This topology uses controlled local Sync/Auth/model services, not external MCP servers.
+    config.agent.kernel.tools.enable_mcp_tools = false;
     config.cloud.api_base_url = api.into();
     config.gateway.host = "127.0.0.1".into();
     config.gateway.port = port().port();
@@ -386,6 +392,15 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
     late_config.sync.trusted_ca_file = Some(cert.clone());
     std::fs::write(late_config.source_path(), persisted_config(&late_config)).unwrap();
     metrics::verify_late_enrollment(late_config, &migration, &actor, &scope).await;
+    let mut restore_config = config(&directory.path().join("desktop-sync-restore"), &api);
+    restore_config.sync.hub_endpoint = format!("wss://{hub_address}/v1/sync");
+    restore_config.sync.trusted_ca_file = Some(cert.clone());
+    std::fs::write(
+        restore_config.source_path(),
+        persisted_config(&restore_config),
+    )
+    .unwrap();
+    status_flow::verify(restore_config, &migration, &actor, &scope).await;
     let mut fresh_config = config(&directory.path().join("desktop-login"), &api);
     fresh_config.cloud.agent_base_url = endpoint.clone();
     fresh_config.cloud.agent_trusted_ca_file = Some(cert.clone());
@@ -442,6 +457,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
             )
             .await
             .unwrap();
+        peer.service.resume_account_sync(&actor);
         let status = peer.service.sync_status(&actor).await.unwrap();
         assert_eq!(
             status.local_computer_id.as_deref(),
@@ -455,8 +471,18 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
                     .as_str()
             )
         );
+        wait_for("background account Sync installed", async || {
+            peer.sync_host
+                .sync_stores
+                .handles
+                .lock()
+                .await
+                .contains_key(ACCOUNT)
+        })
+        .await;
         handles.push(
-            peer.sync_stores
+            peer.sync_host
+                .sync_stores
                 .handles
                 .lock()
                 .await
@@ -473,6 +499,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
     })
     .await;
     metrics::verify(&a, &b, &actor, gateway_http_port).await;
+    access::verify_unconnected_remote_deletion(&a, &b, &actor).await;
     let local_llm = a
         .service
         .get_config(
@@ -640,6 +667,17 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
         },
     )
     .await;
+    let deletion_error = tokio::time::timeout(
+        Duration::from_secs(1),
+        remote.service.delete_session(&actor, "shared-session"),
+    )
+    .await
+    .expect("synced live activity must reject deletion locally")
+    .unwrap_err();
+    assert_eq!(
+        deletion_error.error_code(),
+        talos_error::ErrorCode::ActiveTurnRunning
+    );
     let input_identity = talos_types::AgentTurnRef::new("shared-session", &accepted.turn_id);
     let input = remote
         .service
@@ -888,6 +926,7 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
         .await
         .unwrap();
     handles[0] = a
+        .sync_host
         .sync_stores
         .handles
         .lock()
@@ -917,6 +956,43 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
                 .unwrap()
     })
     .await;
+    // The shared-session fixture was deliberately cleared above. Retain a
+    // non-empty mirrored History before disconnecting H, then compare it after
+    // the source exits rather than expecting post-disconnect writes to sync.
+    let retained_request = talos_types::SessionHistoryRequest {
+        session_id: "paused-sharing".into(),
+        cursor: None,
+        limit: None,
+    };
+    wait_for(
+        "retained full History imported before disconnect",
+        async || {
+            let source = a
+                .session_store
+                .get_history_cursor("paused-sharing")
+                .await
+                .unwrap();
+            let mirrored = b
+                .session_store
+                .get_history_cursor("paused-sharing")
+                .await
+                .unwrap();
+            source.is_some()
+                && source == mirrored
+                && b.service
+                    .get_session_history(&actor, retained_request.clone())
+                    .await
+                    .is_ok_and(|history| !history.data.is_empty())
+        },
+    )
+    .await;
+    // Timeline replay sequence numbers belong to each local database. Compare
+    // this database's complete response before and after source shutdown.
+    let retained_history = b
+        .service
+        .get_session_history(&actor, retained_request.clone())
+        .await
+        .unwrap();
     hub.stop();
     a.service
         .start_turn(
@@ -1041,8 +1117,41 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
             .history_generation,
         2
     );
-    close(b).await;
+    // Retained facts remain readable after both H and the source Worker stop.
     close(a).await;
+    let retained = tokio::time::timeout(Duration::from_secs(1), async {
+        let session = b
+            .service
+            .get_session(&actor, "shared-session")
+            .await
+            .unwrap();
+        let history = b
+            .service
+            .get_session_history(&actor, retained_request)
+            .await
+            .unwrap();
+        assert_eq!(session.id, "shared-session");
+        assert_eq!(history, retained_history);
+    })
+    .await;
+    assert!(
+        retained.is_ok(),
+        "retained History must not contact the source Worker"
+    );
+    assert!(tokio::time::timeout(
+        Duration::from_secs(3),
+        b.service.delete_session(&actor, "shared-session")
+    )
+    .await
+    .expect("offline deletion must return promptly")
+    .is_err());
+    assert!(b
+        .session_store
+        .get_session_record("shared-session")
+        .await
+        .unwrap()
+        .is_some());
+    close(b).await;
     server_handle.shutdown().await.unwrap();
     gateway_task.await.unwrap().unwrap();
     http.abort();

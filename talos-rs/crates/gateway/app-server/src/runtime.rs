@@ -1,4 +1,6 @@
 mod desktop_host;
+mod local_requests;
+mod subscriptions;
 use desktop_host::{complete_host_error, complete_host_response};
 
 mod notifications;
@@ -24,7 +26,7 @@ use talos_app_protocol::version::ProtocolVersion;
 use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
 use talos_logging::report_error;
 use talos_service::{Actor, TimelineSubscription, TimelineSubscriptionMessage};
-use talos_types::{ApiResponse, EventUnsubscribeResponse};
+use talos_types::ApiResponse;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
@@ -141,7 +143,16 @@ where
             )
         })?;
     // Host responses must progress while a serialized business command awaits them.
-    // Keep business dispatch serial; only transport framing/correlation runs alongside it.
+    // Worker commands remain serial; retained queries and bounded deletion progress independently.
+    let subscriptions = Arc::new(subscriptions::Subscriptions::new(
+        config.subscription_capacity,
+    ));
+    let local_requests = Arc::new(local_requests::LocalRequests::new(
+        app.clone(),
+        validator.clone(),
+        config.auth_enabled,
+        subscriptions.clone(),
+    ));
     let stop = tokio_util::sync::CancellationToken::new();
     let (line_tx, mut line_rx) = mpsc::channel(16);
     let read_loop = desktop_host::read_requests(
@@ -151,11 +162,18 @@ where
         outgoing_tx.clone(),
         line_tx,
         stop.clone(),
+        local_requests.clone(),
     );
     let host_loop =
         desktop_host::forward_requests(browser_requests, outgoing_tx.clone(), stop.clone());
     let serve_loop = async {
-        let mut state = RuntimeState::default();
+        let mut state = RuntimeState {
+            actor: None,
+            session_source: None,
+            initialized_notification_seen: false,
+            owned_turn_sessions: HashMap::new(),
+            subscriptions: subscriptions.clone(),
+        };
         let mut line = Vec::new();
         let mut _frame_permit = None;
         let mut writer_finished = false;
@@ -222,6 +240,7 @@ where
                             {
                                 break;
                             }
+                            if let Some(actor) = &state.actor { local_requests.initialized(actor); }
                         }
                         Ok(BoundedLineRead::Eof) => break,
                         Ok(BoundedLineRead::LimitExceeded) => {
@@ -280,17 +299,7 @@ where
         // Keep subscriptions alive while background drains run so final turn events can still be
         // forwarded. After the drain boundary, abort them explicitly; idle subscriptions wait on
         // the TalosService stream and would otherwise keep stdio shutdown from completing.
-        for (_, task) in state.subscription_tasks {
-            task.abort();
-            if let Err(error) = task.await {
-                if !error.is_cancelled() {
-                    report_error(&TalosError::internal_with_source(
-                        "The event subscription task failed.",
-                        error,
-                    ));
-                }
-            }
-        }
+        subscriptions.shutdown().await;
 
         stop.cancel();
         drop(outgoing_tx);
@@ -352,13 +361,12 @@ where
     }
 }
 
-#[derive(Default)]
 struct RuntimeState {
     actor: Option<Actor>,
     session_source: Option<talos_types::talos::SessionSource>,
     initialized_notification_seen: bool,
     owned_turn_sessions: HashMap<String, OwnedTurn>,
-    subscription_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    subscriptions: Arc<subscriptions::Subscriptions>,
 }
 
 struct OwnedTurn {
@@ -485,9 +493,9 @@ async fn handle_request(
                     .await;
             }
             let actor = match resolve_request_actor(
-                state,
+                state.actor.as_ref(),
                 validator.as_ref(),
-                config,
+                config.auth_enabled,
                 decoded.method,
                 request_actor_credentials,
             )
@@ -496,29 +504,10 @@ async fn handle_request(
                 Ok(actor) => actor,
                 Err(error) => return send_application_error(outgoing_tx, id, error).await,
             };
-            match app.subscribe_timeline_events(&actor, params).await {
-                Ok(subscription) => {
-                    let response = subscription.response();
-                    let subscription_id = response.subscription_id.clone();
-                    send_result(
-                        outgoing_tx.clone(),
-                        id,
-                        serde_json::to_value(&response).map_err(|error| {
-                            AppServerErrorBody::invalid_request(error.to_string())
-                        }),
-                    )
-                    .await?;
-                    let task = spawn_subscription(
-                        subscription_id.clone(),
-                        subscription,
-                        outgoing_tx,
-                        config.subscription_capacity,
-                    );
-                    state.subscription_tasks.insert(subscription_id, task);
-                    Ok(())
-                }
-                Err(error) => send_application_error(outgoing_tx, id, error).await,
-            }
+            state
+                .subscriptions
+                .subscribe(app.as_ref(), &actor, params, outgoing_tx, id)
+                .await
         }
         ClientRequestParams::EventUnsubscribe(params) => {
             if !state.initialized_notification_seen {
@@ -526,9 +515,9 @@ async fn handle_request(
                     .await;
             }
             if let Err(error) = resolve_request_actor(
-                state,
+                state.actor.as_ref(),
                 validator.as_ref(),
-                config,
+                config.auth_enabled,
                 decoded.method,
                 request_actor_credentials,
             )
@@ -536,37 +525,16 @@ async fn handle_request(
             {
                 return send_application_error(outgoing_tx, id, error).await;
             }
-            let unsubscribed =
-                if let Some(task) = state.subscription_tasks.remove(&params.subscription_id) {
-                    task.abort();
-                    if let Err(error) = task.await {
-                        if !error.is_cancelled() {
-                            report_error(&TalosError::internal_with_source(
-                                "The event subscription task failed.",
-                                error,
-                            ));
-                        }
-                    }
-                    true
-                } else {
-                    false
-                };
-            send_result(
-                outgoing_tx,
-                id,
-                serde_json::to_value(EventUnsubscribeResponse {
-                    subscription_id: params.subscription_id,
-                    unsubscribed,
-                })
-                .map_err(|error| AppServerErrorBody::invalid_request(error.to_string())),
-            )
-            .await
+            state
+                .subscriptions
+                .unsubscribe(params, outgoing_tx, id)
+                .await
         }
         params => {
             let actor = match resolve_request_actor(
-                state,
+                state.actor.as_ref(),
                 validator.as_ref(),
-                config,
+                config.auth_enabled,
                 decoded.method,
                 request_actor_credentials,
             )
@@ -614,13 +582,13 @@ async fn handle_request(
 }
 
 async fn resolve_request_actor(
-    state: &RuntimeState,
+    initialized_actor: Option<&Actor>,
     validator: &dyn ActorCredentialValidator,
-    config: &AppServerConfig,
+    auth_enabled: bool,
     method: ClientMethod,
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, ApiError> {
-    if !config.auth_enabled {
+    if !auth_enabled {
         return Ok(Actor::auth_disabled());
     }
 
@@ -635,9 +603,8 @@ async fn resolve_request_actor(
             | ClientMethod::AuthSessionClear
     ) && request_actor_credentials.is_none()
     {
-        return state
-            .actor
-            .clone()
+        return initialized_actor
+            .cloned()
             .ok_or_else(|| ApiError::new(ErrorCode::Unauthenticated));
     }
 
@@ -646,62 +613,60 @@ async fn resolve_request_actor(
     validator.validate(&credentials).await
 }
 
-fn spawn_subscription(
+async fn forward_subscription(
     subscription_id: String,
     mut source: TimelineSubscription,
     outgoing_tx: mpsc::Sender<OutgoingMessage>,
     _subscription_capacity: usize,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let session_id = source.session_id.clone();
-        while let Some(message) = source.events.recv().await {
-            match message {
-                TimelineSubscriptionMessage::ActiveTurnChanged(change) => {
-                    if send_active_turn_changed(change, &outgoing_tx)
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                TimelineSubscriptionMessage::Event(record) => {
-                    if send_event(&subscription_id, *record, &outgoing_tx)
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                TimelineSubscriptionMessage::MessageQueueChanged(change) => {
-                    if send_message_queue_changed(change, &outgoing_tx)
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                TimelineSubscriptionMessage::Closed(closed) => {
-                    let _ = send_subscription_terminated(
-                        &subscription_id,
-                        &session_id,
-                        map_subscription_close_reason(closed.reason),
-                        &closed.message,
-                        &outgoing_tx,
-                    )
-                    .await;
+) {
+    let session_id = source.session_id.clone();
+    while let Some(message) = source.events.recv().await {
+        match message {
+            TimelineSubscriptionMessage::ActiveTurnChanged(change) => {
+                if send_active_turn_changed(change, &outgoing_tx)
+                    .await
+                    .is_err()
+                {
                     return;
                 }
             }
+            TimelineSubscriptionMessage::Event(record) => {
+                if send_event(&subscription_id, *record, &outgoing_tx)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            TimelineSubscriptionMessage::MessageQueueChanged(change) => {
+                if send_message_queue_changed(change, &outgoing_tx)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            TimelineSubscriptionMessage::Closed(closed) => {
+                let _ = send_subscription_terminated(
+                    &subscription_id,
+                    &session_id,
+                    map_subscription_close_reason(closed.reason),
+                    &closed.message,
+                    &outgoing_tx,
+                )
+                .await;
+                return;
+            }
         }
-        let _ = send_subscription_terminated(
-            &subscription_id,
-            &session_id,
-            SubscriptionTerminatedReason::Interrupted,
-            "event subscription closed without a close reason",
-            &outgoing_tx,
-        )
-        .await;
-    })
+    }
+    let _ = send_subscription_terminated(
+        &subscription_id,
+        &session_id,
+        SubscriptionTerminatedReason::Interrupted,
+        "event subscription closed without a close reason",
+        &outgoing_tx,
+    )
+    .await;
 }
 
 async fn send_result(

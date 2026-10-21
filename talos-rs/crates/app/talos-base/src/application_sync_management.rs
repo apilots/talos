@@ -90,19 +90,26 @@ impl ApplicationSyncHost {
         })
     }
 
-    pub(crate) fn local_computer_id(&self) -> TalosResult<String> {
-        if YamlConfigStore::new(self.config.source_path())
-            .removed_registration_owner()?
+    /// Read identity and durable removal locally; retirement belongs to maintenance.
+    pub(crate) async fn local_computer_id(&self) -> TalosResult<String> {
+        let store = YamlConfigStore::new(self.config.source_path());
+        if store.removed_registration_owner()?.is_some() {
+            return Ok("embedded".into());
+        }
+        let Some(runner) = store.load_agent_node()?.runner else {
+            return Ok("embedded".into());
+        };
+        use talos_store::node::AgentNodeStore;
+        if self
+            .sync_stores
+            .nodes
+            .deletion_owner(&runner.node_id)
+            .await?
             .is_some()
         {
             return Ok("embedded".into());
         }
-        Ok(self
-            .config
-            .reload()?
-            .agent_node
-            .runner
-            .map_or_else(|| "embedded".into(), |runner| runner.node_id))
+        Ok(runner.node_id)
     }
 
     /// The central Server's first administrator claims its Worker. Later logins
@@ -285,47 +292,8 @@ impl ApplicationSyncHost {
         if !self.sync.enabled(&actor.user_id).await? {
             return Ok(());
         }
-        if let Some(binding) = self.sync.account_binding(actor).await? {
-            if !binding
-                .computers
-                .iter()
-                .any(|alias| alias.source_node_id == "embedded")
-            {
-                if let Some(local) = self
-                    .local_computer(
-                        &Actor::regular(&actor.user_id)
-                            .with_access_token(actor.access_token.clone().expect("verified token")),
-                    )
-                    .await?
-                    .filter(|id| id != "embedded")
-                {
-                    self.verify_computer_aliases(
-                        actor,
-                        &[ComputerAlias {
-                            source_node_id: "embedded".into(),
-                            computer_id: local.clone(),
-                        }],
-                    )
-                    .await?;
-                    self.stop_account_sync(&actor.user_id).await?;
-                    let mut computers = binding.computers;
-                    computers.push(ComputerAlias {
-                        source_node_id: "embedded".into(),
-                        computer_id: local,
-                    });
-                    self.sync
-                        .bind_account(
-                            actor,
-                            SyncBindParams {
-                                scope: binding.scope,
-                                source_user_id: binding.source_user_id,
-                                computers,
-                            },
-                        )
-                        .await?;
-                }
-            }
-        }
+        // Late enrollment refreshes presence without rewriting capture aliases
+        // or replacing the account's running document synchronization handle.
         let installed = self
             .sync_stores
             .handles
@@ -419,7 +387,8 @@ impl ApplicationSyncHost {
 
     async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
         self.service.remove_sync_handle(account_id);
-        if let Some(handle) = self.sync_stores.handles.lock().await.remove(account_id) {
+        let handle = self.sync_stores.remove_handle(account_id).await;
+        if let Some(handle) = handle {
             handle.shutdown().await?;
         }
         Ok(())
@@ -451,9 +420,61 @@ impl ApplicationSyncHost {
         Ok(())
     }
 
+    /// Called only by owned maintenance or an explicit mutation lifecycle.
+    pub(crate) async fn refresh_account(&self, actor: &Actor) -> TalosResult<()> {
+        let verified = self.verified_actor(actor).await?;
+        if YamlConfigStore::new(self.config.source_path())
+            .load_sync()?
+            .enabled
+            == Some(false)
+        {
+            // Operator opt-out stops H but retains the local Worker's registration.
+            let accounts = self
+                .sync_stores
+                .handles
+                .lock()
+                .await
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            for account_id in accounts {
+                self.service.remove_sync_handle(&account_id);
+            }
+            self.sync_stores.shutdown_handles().await?;
+            self.attach_signed_in(&verified).await?;
+            return Ok(());
+        }
+        // Restore document transport from its durable binding before any Worker
+        // registration RPC. An unavailable G must not delay an existing H handle.
+        if self.sync.enabled(&verified.user_id).await? {
+            if let Some(binding) = self.sync.account_binding(&verified).await? {
+                self.start_account_sync(
+                    &verified,
+                    SyncBindParams {
+                        scope: binding.scope,
+                        source_user_id: binding.source_user_id,
+                        computers: binding.computers,
+                    },
+                    self.credentials(&verified),
+                )
+                .await?;
+            }
+        }
+        self.bind_signed_in(&verified).await
+    }
+
     async fn read_status(&self, actor: &Actor) -> TalosResult<SyncStatusResponse> {
         let config = YamlConfigStore::new(self.config.source_path()).load_sync()?;
-        let local_computer_id = self.local_computer_for_client(actor).await?;
+        // Snapshot identity without triggering retirement, registration or RPC.
+        let local_computer_id = if actor.auth_disabled {
+            Some("embedded".into())
+        } else {
+            if self.owns_local_computer(actor).await? {
+                Some(self.local_computer_id().await?)
+            } else {
+                None
+            }
+        };
         let handle = self
             .sync_stores
             .handles
@@ -493,11 +514,17 @@ impl ApplicationSyncHost {
             .read()
             .expect("sync failures lock")
             .contains_key(&actor.user_id);
-        let connection = if connection == SyncConnectionState::Disabled
-            && configured_enabled != Some(false)
-            && failed
+        let connection = if configured_enabled == Some(false) {
+            SyncConnectionState::Disabled
+        } else if connection == SyncConnectionState::Disabled
+            && !actor.auth_disabled
+            && actor.access_token.is_some()
         {
-            SyncConnectionState::Disconnected
+            if failed {
+                SyncConnectionState::Disconnected
+            } else {
+                SyncConnectionState::Connecting
+            }
         } else {
             connection
         };
@@ -523,6 +550,12 @@ impl ApplicationSyncHost {
 }
 
 impl ManagementSync for ApplicationSyncHost {
+    fn resume(&self, actor: &Actor) {
+        self.schedule_refresh(actor);
+    }
+    fn resume_login(&self, actor: &Actor) {
+        ApplicationSyncHost::resume_login(self, actor);
+    }
     fn metrics<'a>(
         &'a self,
         actor: &'a Actor,
@@ -530,56 +563,15 @@ impl ManagementSync for ApplicationSyncHost {
         Box::pin(self.read_metrics(actor))
     }
     fn status<'a>(&'a self, actor: &'a Actor) -> AgentFuture<'a, TalosResult<SyncStatusResponse>> {
-        Box::pin(async move {
-            let _guard = self.lifecycle.lock().await;
-            if !actor.auth_disabled && actor.access_token.is_some() {
-                let verified = self.verified_actor(actor).await?;
-                if let Err(error) = self.attach_signed_in(&verified).await {
-                    self.worker_failures
-                        .send_replace(Some(error.to_api_error()));
-                }
-                if YamlConfigStore::new(self.config.source_path())
-                    .load_sync()?
-                    .enabled
-                    == Some(false)
-                {
-                    let handles: Vec<_> = self.sync_stores.handles.lock().await.drain().collect();
-                    for (account_id, _) in &handles {
-                        self.service.remove_sync_handle(account_id);
-                    }
-                    let mut failure = None;
-                    for (_, handle) in handles {
-                        if let Err(error) = handle.shutdown().await {
-                            failure.get_or_insert(error);
-                        }
-                    }
-                    if let Some(error) = failure {
-                        return Err(error);
-                    }
-                    return self.read_status(actor).await;
-                }
-                if let Err(error) = self.bind_signed_in(&verified).await {
-                    self.failures
-                        .write()
-                        .expect("sync failures lock")
-                        .insert(actor.user_id.clone(), error.to_api_error());
-                } else {
-                    self.failures
-                        .write()
-                        .expect("sync failures lock")
-                        .remove(&actor.user_id);
-                }
-            }
-            self.read_status(actor).await
-        })
+        Box::pin(self.read_status(actor))
     }
+
     fn enable<'a>(
         &'a self,
         actor: &'a Actor,
         request: SyncEnableRequest,
     ) -> AgentFuture<'a, TalosResult<SyncStatusResponse>> {
         Box::pin(async move {
-            let _guard = self.lifecycle.lock().await;
             let verified = self.verified_actor(actor).await?;
             if YamlConfigStore::new(self.config.source_path())
                 .load_sync()?
@@ -591,45 +583,69 @@ impl ManagementSync for ApplicationSyncHost {
                     "Synchronization is disabled by this server's operator.",
                 ));
             }
-            if request.claim_local_history {
-                if !self.trusted_local_host {
-                    return Err(TalosError::new(
-                        ErrorCode::PermissionDenied,
-                        "Anonymous history can only be claimed on its trusted local host.",
-                    ));
+            let pause = self.pause_refresh(&actor.user_id).await;
+            let _guard = self.lifecycle.lock().await;
+            let result = async {
+                if request.claim_local_history {
+                    if !self.trusted_local_host {
+                        return Err(TalosError::new(
+                            ErrorCode::PermissionDenied,
+                            "Anonymous history can only be claimed on its trusted local host.",
+                        ));
+                    }
+                    self.service.claim_local_history(&verified.user_id).await?;
                 }
-                self.service.claim_local_history(&verified.user_id).await?;
+                self.sync.set_enabled(&verified.user_id, true).await?;
+                self.bind_signed_in(&verified).await?;
+                self.failures
+                    .write()
+                    .expect("sync failures lock")
+                    .remove(&actor.user_id);
+                self.read_status(actor).await
             }
-            self.sync.set_enabled(&verified.user_id, true).await?;
-            self.bind_signed_in(&verified).await?;
-            self.failures
-                .write()
-                .expect("sync failures lock")
-                .remove(&actor.user_id);
-            self.read_status(actor).await
+            .await;
+            drop(pause);
+            self.schedule_refresh(actor);
+            result
         })
     }
     fn disable<'a>(&'a self, actor: &'a Actor) -> AgentFuture<'a, TalosResult<SyncStatusResponse>> {
         Box::pin(async move {
+            let verified = if actor.auth_disabled {
+                None
+            } else {
+                Some(self.verified_actor(actor).await?)
+            };
+            let pause = self.pause_refresh(&actor.user_id).await;
             let _guard = self.lifecycle.lock().await;
-            if !actor.auth_disabled {
-                let verified = self.verified_actor(actor).await?;
-                self.sync.set_enabled(&verified.user_id, false).await?;
-                // Only H stops. G remains available for RPC and source FileService callbacks.
-                self.service.remove_sync_handle(&actor.user_id);
-                if let Some(handle) = self.sync_stores.handles.lock().await.remove(&actor.user_id) {
-                    handle.shutdown().await?;
+            let result = async {
+                if let Some(verified) = verified {
+                    self.sync.set_enabled(&verified.user_id, false).await?;
+                    // Only H stops. G remains available for RPC and source FileService callbacks.
+                    self.service.remove_sync_handle(&actor.user_id);
+                    let handle = self.sync_stores.remove_handle(&actor.user_id).await;
+                    if let Some(handle) = handle {
+                        handle.shutdown().await?;
+                    }
                 }
+                self.failures
+                    .write()
+                    .expect("sync failures lock")
+                    .remove(&actor.user_id);
+                self.read_status(actor).await
             }
-            self.failures
-                .write()
-                .expect("sync failures lock")
-                .remove(&actor.user_id);
-            self.read_status(actor).await
+            .await;
+            drop(pause);
+            self.schedule_refresh(actor);
+            result
         })
     }
     fn suspend<'a>(&'a self, actor: &'a Actor) -> AgentFuture<'a, TalosResult<()>> {
-        Box::pin(self.stop_account(&actor.user_id))
+        Box::pin(async move {
+            let _pause = self.suspend_refresh(actor).await;
+            let _guard = self.lifecycle.lock().await;
+            self.stop_account(&actor.user_id).await
+        })
     }
     fn connect_computer<'a>(
         &'a self,

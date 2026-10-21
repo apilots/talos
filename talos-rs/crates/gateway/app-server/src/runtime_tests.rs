@@ -22,6 +22,8 @@ use crate::auth::ActorCredentialValidator;
 #[derive(Default)]
 struct MockApp {
     desktop_host: Option<Arc<talos_browser::NativeBrowser>>,
+    blocked_model: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+    blocked_deletion: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
     dispatched: Mutex<Vec<String>>,
     dispatched_actors: Mutex<Vec<String>>,
     dispatched_auth_disabled: Mutex<Vec<bool>>,
@@ -41,6 +43,15 @@ impl AppServerApplication for MockApp {
         actor: &Actor,
         request: talos_app_protocol::requests::ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        let blocked = match request.method {
+            ClientMethod::ModelList => self.blocked_model.as_ref(),
+            ClientMethod::SessionDelete => self.blocked_deletion.as_ref(),
+            _ => None,
+        };
+        if let Some((entered, release)) = blocked {
+            entered.notify_one();
+            release.notified().await;
+        }
         self.dispatched
             .lock()
             .expect("dispatch lock")
@@ -1260,3 +1271,6 @@ fn desktop_host_initialize_request() -> String {
     request["params"]["client_info"]["kind"] = json!("desktop");
     format!("{request}\n{}", initialized_notification())
 }
+
+#[path = "runtime/local_requests_tests.rs"]
+mod local_requests_tests;

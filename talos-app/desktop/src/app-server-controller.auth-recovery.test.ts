@@ -277,7 +277,7 @@ describe("authenticated Desktop restart recovery", () => {
       read.resolve(snapshot);
       await stale;
       const bindings = initial.requests.mock.calls.filter(([method]) => method === "sync/status");
-      expect(bindings.map(([, , options]) => options?.actorCredentials?.credential.token)).toEqual(["current-token", "bob-token"]);
+      expect(bindings).toEqual([]);
     } finally { read.resolve(snapshot); await stale; await controller.close(); }
   });
 

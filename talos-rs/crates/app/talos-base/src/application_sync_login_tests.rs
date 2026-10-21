@@ -145,7 +145,12 @@ pub(super) async fn verify(
         status.connection,
         talos_types::SyncConnectionState::Disabled
     );
-    assert!(fresh.sync_stores.handles.lock().await.is_empty());
+    wait_for("operator opt-out stops Sync in background", async || {
+        fresh.service.sync_status(actor).await.unwrap();
+        fresh.sync_host.sync_stores.handles.lock().await.is_empty()
+    })
+    .await;
+    assert!(fresh.sync_host.sync_stores.handles.lock().await.is_empty());
 
     fresh
 }

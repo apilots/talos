@@ -155,8 +155,12 @@ export function useDeleteProjectMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteProject,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: chatKeys.projects(connectionKey) });
+    onSuccess: (_, projectId) => {
+      queryClient.setQueriesData<ProjectView[]>(
+        { queryKey: ["talos"], predicate: (query) => query.queryKey.includes("projects") && query.queryKey.includes(connectionKey) },
+        (current) => current?.filter((project) => project.id !== projectId),
+      );
+      void queryClient.invalidateQueries({ queryKey: chatKeys.projects(connectionKey) });
     },
   });
 }
@@ -264,10 +268,15 @@ export function useDeleteSessionMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: deleteSession,
-    onSuccess: async (_, sessionId) => {
-      await queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
+    onSuccess: (_, sessionId) => {
+      queryClient.setQueriesData<SessionInfo[]>(
+        { queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") },
+        (current) => current?.filter((session) => session.id !== sessionId),
+      );
       queryClient.removeQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
       queryClient.removeQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
+      queryClient.removeQueries({ queryKey: chatKeys.activeTurn(connectionKey, sessionId) });
+      void queryClient.invalidateQueries({ queryKey: ["talos"], predicate: (query) => query.queryKey.includes("sessions") });
     },
   });
 }

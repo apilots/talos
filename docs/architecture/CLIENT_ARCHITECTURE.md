@@ -143,6 +143,57 @@ proof the user's input has been rendered. Queue revision only invalidates queue
 state, not a second execution-state owner. Start/retry finish their request at
 ACK; stopping execution uses the actual interrupt API.
 
+Session and Project metadata and Session History are read from the current
+management host's account-scoped database. Project read/list returns retained
+metadata without probing the Worker's filesystem; path validation belongs to
+operations that use the directory. Removing a Project record does not require
+its directory to exist or its Worker to be online; ownership and retained-file
+constraints still apply.
+
+App Server dispatches these local queries, Timeline subscriptions and metadata
+deletions independently of serialized Worker commands, with separate bounded query
+and deletion capacity and the original per-request authentication. Subscriptions
+retain one connection-owned task registry, remove completed streams automatically,
+and abort remaining tasks on unsubscribe, connection drop or shutdown.
+Session deletion rejects locally observed active parent/child Turns, including
+synced activity, and bounds Worker
+connection setup, verification/cleanup and admission-lock acquisition to two seconds.
+Cold remote deletion establishes authenticated execution access inside that preflight;
+metadata and History reads never establish it. Desktop restores login and reads its
+local Worker identity/cache independently of registration. The native host resumes
+one owned account supervisor from the saved login at startup, successful login,
+or authenticated account restoration. That supervisor verifies credentials,
+registers/reconnects the Worker and starts or reuses the account's existing
+`SyncHandle`. A saved document binding restores H before Worker registration RPC,
+so Gateway outages cannot delay that account's synchronization transport.
+Periodic maintenance and the SDK's reconnect lifecycle need no UI polling.
+Later authentication refreshes its credentials without creating another
+supervisor or replacing the handle. Desktop does not use status queries to enroll.
+
+`sync/status` returns a local account-scoped snapshot of configuration, connection
+observations, pending changes, errors and Computer identity. It neither starts
+maintenance nor takes the registration lifecycle lock or retires registrations.
+Login suspension and host shutdown cancel the supervisor before tearing down
+connections. Account lifecycle mutations pause concurrent resumes until cancellation
+and mutation complete. Late responses with a suspended credential cannot undo logout;
+a new credential or explicit successful login resumes the same owner. Sync import/recovery
+observers are owned alongside each handle and are aborted and joined before its
+shutdown. Registration retirement runs in account maintenance, never in local identity
+mapping or import notification processing. Explicit Sync enable/disable remain lifecycle mutations. Polling only
+observes asynchronous enrollment or failure; an initial enabled account reports
+`connecting` until a connection observation is available. Transport authentication
+remains required. Graceful shutdown cancels account maintenance before closing
+transports; process termination relies on socket closure and peer liveness expiry,
+with the durable binding restored at the next authenticated startup.
+
+An unavailable Worker is not evidence of idleness: failed verification preserves
+the records and explains that idle execution could not be confirmed.
+The durable Store deletion and Sync capture occur only after successful preflight,
+outside that timeout. UI completion updates retained list caches immediately and
+does not wait for background list reconciliation. Sync recovery runs alongside
+import notifications and is triggered by connection transitions, not ordinary
+pending-count updates.
+
 The Web/Desktop transcript drains every history page on entry before subscribing
 to unfinished execution. `lastStableEventId` is the opaque exclusive event cursor
 of the last completed Turn returned by a history page; use the final page's value

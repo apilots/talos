@@ -132,7 +132,10 @@ impl SubagentService {
         })
     }
 
-    pub(crate) async fn ensure_tree_inactive(&self, tree_root_session_id: &str) -> TalosResult<()> {
+    pub(crate) async fn ensure_tree_locally_inactive(
+        &self,
+        tree_root_session_id: &str,
+    ) -> TalosResult<()> {
         if self
             .sessions
             .has_active_subagent_turn(tree_root_session_id)
@@ -143,6 +146,29 @@ impl SubagentService {
                 format!("session tree '{tree_root_session_id}' has an active subagent turn"),
             ));
         }
+        for record in self
+            .sessions
+            .list_subagent_tree_records(tree_root_session_id.into(), None)
+            .await?
+        {
+            if self
+                .timeline
+                .display_active_turn(&record.id)
+                .await?
+                .is_some()
+            {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::ActiveTurnRunning,
+                    "Session tree has a nonterminal Turn and cannot be deleted.",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn ensure_tree_inactive(&self, tree_root_session_id: &str) -> TalosResult<()> {
+        self.ensure_tree_locally_inactive(tree_root_session_id)
+            .await?;
         for record in self
             .sessions
             .list_subagent_tree_records(tree_root_session_id.into(), None)

@@ -44,7 +44,18 @@ impl ServiceGateway {
         _actor: &Actor,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        self.service.account.cloud_login_status(request).await
+        let response = self.service.account.cloud_login_status(request).await?;
+        if let CloudLoginStatusResponse::Authenticated {
+            access_token, user, ..
+        } = &response
+        {
+            self.service.resume_account_sync_after_login(
+                &Actor::regular(&user.user_id)
+                    .with_role(user.role)
+                    .with_access_token(access_token),
+            );
+        }
+        Ok(response)
     }
 
     pub(crate) async fn cancel_cloud_login(
@@ -93,6 +104,7 @@ impl ServiceGateway {
             .account
             .current_user_with_request(actor, request)
             .await?;
+        self.service.resume_account_sync(actor);
         Ok(UserCurrentResponse { user })
     }
 }

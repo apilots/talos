@@ -195,7 +195,10 @@ impl ResourceAccessService {
         Ok(())
     }
 
-    pub(crate) async fn delete_session(&self, session: SessionRecord) -> TalosResult<bool> {
+    pub(crate) async fn prepare_session_deletion(
+        &self,
+        session: SessionRecord,
+    ) -> TalosResult<SessionRecord> {
         let session = self.sessions.prepare_execution(&session).await?;
         let expected_history_cursor = self.sessions.ensure_worker_idle(&session).await?;
         let context = self.sessions.build_agent_session_context(&session).await?;
@@ -205,7 +208,7 @@ impl ResourceAccessService {
         self.coordinator
             .close_session(context, expected_history_cursor)
             .await?;
-        self.sessions.delete_session(session).await
+        Ok(session)
     }
 
     pub(crate) async fn list_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {

@@ -119,9 +119,9 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
             .await
             .unwrap();
         let handle = server.handle();
-        let sync_host = server._sync_host.clone();
-        let nodes = server._sync_host.service.nodes.clone();
-        let worker_failures = server._sync_host.worker_failures.subscribe();
+        let sync_host = server.sync_host.clone();
+        let nodes = server.sync_host.service.nodes.clone();
+        let worker_failures = server.sync_host.worker_failures.subscribe();
         let task = tokio::spawn(server.run());
         wait_for("central RPC ready", async || {
             tokio::net::TcpStream::connect(rpc).await.is_ok()
@@ -175,15 +175,29 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
         } else {
             ADMIN_TOKEN
         };
-        let status: Value = client
-            .get(format!("{url}/v1/sync/status"))
-            .bearer_auth(owner_token)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
+        sync_host.schedule_refresh(
+            &talos_service::Actor::regular("server-admin")
+                .with_role(if owner_token == ADMIN_TOKEN {
+                    talos_auth::UserRole::Admin
+                } else {
+                    talos_auth::UserRole::User
+                })
+                .with_access_token(owner_token),
+        );
+        let mut status = Value::Null;
+        wait_for("background Server enrollment", async || {
+            status = client
+                .get(format!("{url}/v1/sync/status"))
+                .bearer_auth(owner_token)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            status["data"]["localComputerId"].is_string()
+        })
+        .await;
         let id = status["data"]["localComputerId"]
             .as_str()
             .expect("claiming account keeps its personal Server Worker")

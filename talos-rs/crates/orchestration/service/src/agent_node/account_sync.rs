@@ -19,13 +19,8 @@ impl AgentNodeService {
             .as_ref()
             .and_then(Weak::upgrade);
         if let Some(sync) = sync {
-            let actor = actor.clone();
             // H outage never changes the success or durability of G provisioning.
-            tokio::spawn(async move {
-                if let Err(error) = sync.status(&actor).await {
-                    talos_logging::report_error(&error);
-                }
-            });
+            sync.resume(actor);
         }
     }
 }

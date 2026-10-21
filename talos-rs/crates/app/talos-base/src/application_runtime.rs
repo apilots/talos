@@ -241,6 +241,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         nodes: node_store,
         files: file_store,
         handles: Default::default(),
+        observers: Default::default(),
         credentials: Default::default(),
         connections: Default::default(),
     });
@@ -348,6 +349,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         local_owner: Default::default(),
         tokens: Default::default(),
         lifecycle: Default::default(),
+        background: Default::default(),
         failures: Default::default(),
     });
     sync_host.install_peer_access();
@@ -356,13 +358,26 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     }
     let management: Arc<dyn talos_service::ManagementSync> = sync_host.clone();
     service.set_sync_management(Arc::downgrade(&management));
+    if let Some(session) = service
+        .account
+        .read_auth_session(
+            &talos_service::Actor::regular("anonymous"),
+            Default::default(),
+        )?
+        .session
+    {
+        service.resume_account_sync(
+            &talos_service::Actor::regular(session.user.user_id)
+                .with_role(session.user.role)
+                .with_access_token(session.access_token),
+        );
+    }
     if config.agent_node.control_plane.is_some() {
         node_service.set_account_sync(Arc::downgrade(&management));
     }
     Ok(TalosApplicationRuntime {
         sync_host,
         sync,
-        sync_stores,
         worker,
         worker_rpc,
         resource_rpc,

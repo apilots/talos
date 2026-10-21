@@ -69,7 +69,7 @@ export function SidebarSessionDeleteDialog({
             onClick={() => void submitDelete()}
             type="button"
           >
-            {t("common:delete")}
+            {deleting ? t("deletingSession") : t("common:delete")}
           </Button>
         </div>
       </div>
