@@ -19,7 +19,7 @@ try:
     path.write_text(yaml.safe_dump(config, sort_keys=False))
     env['HOME'] = str(cluster.server_home)
     def start():
-        process = cluster.start_process('local-server', [str(ROOT / 'talos-rs/target/debug/talos-server')], env)
+        process = cluster.start_process('local-server', [os.environ.get('TALOS_E2E_SERVER_BIN', str(ROOT / 'talos-rs/target/debug/talos-server'))], env)
         wait_for(lambda: http(cluster.url + '/health'), 'Unregistered local Server startup')
         return process
     server = start()

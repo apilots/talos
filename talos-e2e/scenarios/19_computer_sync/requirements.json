@@ -20,7 +20,9 @@
       "docker"
     ],
     "binaries": [
-      "server"
+      "server",
+      "worker",
+      "app_server"
     ],
     "platforms": [
       "Darwin"
@@ -43,6 +45,9 @@
         "yaml",
         "grpc",
         "google.protobuf"
+      ],
+      "binaries": [
+        "server"
       ]
     }
   }

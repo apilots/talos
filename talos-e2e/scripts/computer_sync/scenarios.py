@@ -218,7 +218,7 @@ def recovery(cluster):
             subprocess.run(['docker', 'restart', node['container']], check=True, capture_output=True)
         else:
             cluster.stop(node['process'])
-            node['process'] = cluster.start_process(name + '-restart', [str(ROOT / 'talos-rs/target/debug/talos-worker')],
+            node['process'] = cluster.start_process(name + '-restart', [os.environ.get('TALOS_E2E_WORKER_BIN', str(ROOT / 'talos-rs/target/debug/talos-worker'))],
                 dict(os.environ, HOME=str(node['home']), TALOS_HOME=str(node['home']), TALOS_CONFIG=str(node['home'] / 'conf/talos.yaml'), TALOS_RESOURCE_DIR=str(ROOT)))
         wait_for(lambda name=name: cluster.info(name).get('available'), 'Renamed Worker recovered')
         require(cluster.info(name)['node_id'] == previous, 'Restart or rename changed Worker UUID')

@@ -428,13 +428,17 @@ class GitScopeTests(unittest.TestCase):
     def test_docker_install_uses_shared_toolchain(self):
         self.write('.github/release-toolchain.env', (ROOT / '.github/release-toolchain.env').read_text())
         binary = self.write('bin/docker', '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_CALLS"\n'
+                            'if [ "$1" = image ]; then exit 1; fi\n'
                             'if [ "$1" = info ] && [ "$2" = --format ]; then echo x86_64; fi\n')
         binary.chmod(0o755)
         calls = self.root / 'docker-calls.log'
         env = dict(os.environ, PATH=f'{binary.parent}:{os.environ["PATH"]}', DOCKER_CALLS=str(calls))
         script = f'''set -euo pipefail
+source "{ROOT}/talos-e2e/scripts/common.sh"
+export TALOS_E2E_RESOURCE_ROOT="{self.root}/resources"
+export TALOS_E2E_RUN_ID=toolchain-test TALOS_E2E_CASE_ID=15_tui_install/02_linux_docker
 REPO_ROOT="{self.root}"
-TALOS_E2E_DIR="{self.root}/talos-e2e"
+TALOS_E2E_DIR="{ROOT}/talos-e2e"
 TALOS_E2E_TMP_ROOT="{self.root}/tmp"
 SCENARIO_REPORT_DIR="{self.root}/reports"
 require_command() {{ command -v "$1" >/dev/null; }}
@@ -445,8 +449,12 @@ run_linux_docker_tui_install
         self.assertEqual(result.returncode, 0, result.stderr)
         version = next(line.split('=', 1)[1] for line in (ROOT / '.github/release-toolchain.env').read_text().splitlines()
                        if line.startswith('RELEASE_RUST_VERSION='))
-        self.assertIn(f'build --build-arg RUST_VERSION={version}', calls.read_text())
+        self.assertIn(f'--build-arg RUST_VERSION={version}', calls.read_text())
+        self.assertIn('build --label love.talos.e2e.run=toolchain-test', calls.read_text())
         self.assertIn(f'-v {self.root}:/workspace/talos:ro', calls.read_text())
+        self.assertIn('volume create --label love.talos.e2e.run=toolchain-test tui-install-target-', calls.read_text())
+        self.assertRegex(calls.read_text(), r'-v tui-install-target-toolchain-test-\d+:/workspace/talos/talos-rs/target')
+        self.assertNotIn(f'-v {self.root}/tmp', calls.read_text())
         self.assertNotIn('/workspace/talos/talos-rs/Cargo.lock', calls.read_text())
         self.assertEqual((self.root / 'talos-rs/Cargo.lock').read_bytes(),
                          (ROOT / 'talos-rs/Cargo.lock').read_bytes())

@@ -17,7 +17,9 @@
       "model"
     ],
     "binaries": [
-      "server"
+      "server",
+      "worker",
+      "app_server"
     ]
   },
   "cases": {
@@ -33,6 +35,10 @@
       "checks": [
         "cloud",
         "caddy"
+      ],
+      "binaries": [
+        "server",
+        "app_server"
       ]
     },
     "10_oauth.sh": {

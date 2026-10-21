@@ -14,7 +14,7 @@ python3 -c 'import grpc, yaml; from google.protobuf import descriptor_pool' || {
 }
 # This slice exercises registration only; no model credential is required.
 build_server_binary
-(cd "${TALOS_RS_DIR}" && cargo build -q -p app-server)
+prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
 export TALOS_CLOUD_SERVER_BIN="$(resolve_cloud_server_binary)"
 export TALOS_SCENARIO_REPORT_DIR="${SCENARIO_REPORT_DIR}"
 pnpm --dir "${TALOS_APP_DIR}/desktop" exec vite build --config "${SCRIPT_DIR}/../../scripts/computer_workspace/vite.config.ts"

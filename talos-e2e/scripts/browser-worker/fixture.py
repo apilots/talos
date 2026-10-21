@@ -17,9 +17,11 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yaml
 
+from lifecycle import container_args, docker_create
+
 ROOT = Path(__file__).resolve().parents[3]
 REPORT = Path(os.environ.get('TALOS_SCENARIO_REPORT_DIR', str(ROOT / 'output/browser-worker')))
-RUN = ROOT / '.tmp/browser-worker/task-run' / uuid.uuid4().hex
+RUN = Path(os.environ.get('TALOS_E2E_TMP_ROOT', ROOT / '.tmp/browser-worker')) / 'task-run' / uuid.uuid4().hex
 REPORT.mkdir(parents=True,exist_ok=True)
 RUN.mkdir(parents=True, exist_ok=True)
 IMAGE=os.environ.get('TALOS_E2E_WORKER_IMAGE','talos-worker:browser-e2e')
@@ -313,7 +315,7 @@ def native_media(document,node,server_home):
     electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
     if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'
     with (REPORT/'native-docker-media.log').open('wb') as log:
-        subprocess.run([str(electron),str(ROOT/'.tmp/browser-worker/native/media-dist')],env=env,stdout=log,stderr=log,timeout=100,check=True)
+        subprocess.run([str(electron),str(Path(os.environ['TALOS_E2E_NATIVE_ROOT'])/'media-dist')],env=env,stdout=log,stderr=log,timeout=100,check=True)
     require('NATIVE_DOCKER_MEDIA_ACCEPTANCE_PASS' in (REPORT/'native-docker-media.log').read_text(),'Desktop viewer exited without completing acceptance')
 
 def run():
@@ -367,10 +369,10 @@ class H(BaseHTTPRequestHandler):
  def log_message(self,*a): pass
 HTTPServer(('127.0.0.1',18080),H).serve_forever()
 ''')
-        subprocess.run(['docker', 'volume', 'create', volume], check=True, capture_output=True)
-        subprocess.run(['docker', 'run', '--rm', '--user', '0', '-v', volume + ':/home/talos/.talos', '-v', str(fixture) + ':/fixture:ro',
+        docker_create('volume', volume, [])
+        subprocess.run(['docker', 'run', *container_args(name+'-init'), '--rm', '--user', '0', '-v', volume + ':/home/talos/.talos', '-v', str(fixture) + ':/fixture:ro',
             IMAGE, '/bin/bash', '-ec', 'mkdir -p /home/talos/.talos/conf; cp /fixture/* /home/talos/.talos/conf/; chown -R 10001:10001 /home/talos/.talos; chmod 700 /home/talos/.talos; chmod 600 /home/talos/.talos/conf/node.credential'], check=True, capture_output=True)
-        worker_command=['docker', 'run', '-d', '--name', name, '--add-host','host.docker.internal:host-gateway', '--shm-size=1g', '--security-opt', 'no-new-privileges:true', '--security-opt',
+        worker_command=['docker', 'run', '-d', *container_args(name), '--add-host','host.docker.internal:host-gateway', '--shm-size=1g', '--security-opt', 'no-new-privileges:true', '--security-opt',
             'seccomp=' + str(ROOT / 'deploy/docker/talos-worker/chromium-seccomp.json'), '-v', volume + ':/home/talos/.talos',
             '-e', 'TALOS_CONFIG=/home/talos/.talos/conf/talos.yaml', IMAGE, '/bin/bash', '-ec',
             'python3 /home/talos/.talos/conf/website.py & exec /opt/talos/bin/talos-worker']

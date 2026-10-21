@@ -12,7 +12,7 @@ require_command python3
 
 # Keep the fixture binary, process logs and storage inside this group.
 mkdir -p "${SCRIPT_DIR}/.tmp"
-TMP_DIR="$(mktemp -d "${SCRIPT_DIR}/.tmp/s3.XXXXXX")"
+TMP_DIR="$(make_e2e_temp_dir s3)"
 CONFIG_TEMPLATE="${TMP_DIR}/talos.yaml"
 FIXTURE_PATH="${REPO_ROOT}/build/desktop/icons/icon.png"
 # shellcheck disable=SC1091

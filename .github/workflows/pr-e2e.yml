@@ -79,7 +79,7 @@ jobs:
       - name: Test Cloud, Desktop, TUI, SQLite and Provider boundaries
         run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui -p talos-llm-deepseek
 
-      - name: Test E2E discovery and prerequisite checks
+      - name: Test E2E discovery, lifecycle and binary reuse
         run: python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
 
       - name: Test isolated current-checkout Docker contexts
@@ -281,7 +281,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: talos/talos-app/pnpm-lock.yaml
       - name: Verify Browser fixture workload contracts
-        run: python -m unittest discover -s talos-e2e/scripts/browser-worker -p '*_test.py'
+        run: PYTHONPATH=talos-e2e/scripts python -m unittest discover -s talos-e2e/scripts/browser-worker -p '*_test.py'
       - name: Build the current product binaries
         run: |
           set -euo pipefail

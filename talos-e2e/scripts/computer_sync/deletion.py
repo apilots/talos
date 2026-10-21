@@ -86,7 +86,7 @@ def run(cluster):
     # Restart using exactly the original UUID/config/credential, never a fabricated
     # database mutation. Rejected registration cannot republish an old Computer.
     worker['process'] = cluster.start_process('Mac-Worker-deleted-restart',
-        [str(ROOT / 'talos-rs/target/debug/talos-worker')],
+        [os.environ.get('TALOS_E2E_WORKER_BIN', str(ROOT / 'talos-rs/target/debug/talos-worker'))],
         dict(os.environ, TALOS_HOME=str(worker['home']), TALOS_CONFIG=str(worker['home'] / 'conf/talos.yaml'),
              TALOS_RESOURCE_DIR=str(ROOT)))
     rejected = cluster.rpc('AgentNodeControl', 'Register', {

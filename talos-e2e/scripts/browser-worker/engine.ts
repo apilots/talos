@@ -6,7 +6,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {app,BrowserWindow,webContents} from 'electron';
 import type {AppProtocol} from '@talos/sdk-core';
 import {DesktopBrowserHost} from '../../../talos-app/desktop/src/browser-host';
-const root=path.resolve(import.meta.dirname,'../../../..');
+const root=process.env.TALOS_RESOURCE_DIR!;
 const output=process.env.TALOS_SCENARIO_REPORT_DIR??path.join(root,'output/browser-worker');
 mkdirSync(output,{recursive:true});
 const tracePath=path.join(output,'native-engine-cdp.jsonl');
@@ -36,7 +36,7 @@ class ObservedChromeSocket extends NativeSocket {
 }
 globalThis.WebSocket=ObservedChromeSocket;
 app.on('window-all-closed',()=>{});
-app.setPath('userData',path.join(root,'.tmp/browser-worker/native/profile-'+randomUUID()));
+app.setPath('userData',path.join(import.meta.dirname,'../profile-'+randomUUID()));
 async function run(){
 console.log('NATIVE_START');
 await app.whenReady();
@@ -130,7 +130,7 @@ try {
  await downloadLifecycle();
  await assert.rejects(operation({kind:'execute',action:{kind:'click',element:'forged'},targetId,element:button,upload:null},'bob'));
  assert.equal(BrowserWindow.getAllWindows().length,0);
- for(const contents of webContents.getAllWebContents()){const prefs=contents.getLastWebPreferences();assert.equal(prefs.nodeIntegration,false);assert.equal(prefs.contextIsolation,true);assert.equal(prefs.sandbox,true);if(prefs.preload){assert.equal(prefs.preload,path.join(root,".tmp/browser-worker/native/dist/browser-window/preload.cjs"));assert.equal(contents.debugger.isAttached(),false);}}
+ for(const contents of webContents.getAllWebContents()){const prefs=contents.getLastWebPreferences();assert.equal(prefs.nodeIntegration,false);assert.equal(prefs.contextIsolation,true);assert.equal(prefs.sandbox,true);if(prefs.preload){assert.equal(prefs.preload,path.join(import.meta.dirname,"browser-window/preload.cjs"));assert.equal(contents.debugger.isAttached(),false);}}
  await tabLifecycle();
  // A detached dedicated target must fail explicitly, never redirect an old action.
  const detached=webContents.fromId(Number(targetId));assert(detached);detached.debugger.detach();

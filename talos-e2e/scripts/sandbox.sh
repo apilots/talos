@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SANDBOX_DOCKER_IMAGE="talos-sandbox-e2e:ubuntu-24.04"
+SANDBOX_DOCKER_IMAGE="${SANDBOX_DOCKER_IMAGE:-}"
 
 run_native_sandbox_case() {
   local case_name="$1"
   local helper=""
 
   if [[ "$(uname -s)" == "Linux" ]]; then
-    (
-      cd "${TALOS_RS_DIR}"
-      cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher
-    )
-    helper="${TALOS_RS_DIR}/target/debug/talos-linux-sandbox-launcher"
+    build_sandbox_binary
+    helper="${TALOS_E2E_SANDBOX_BIN}"
   fi
 
   (
@@ -25,27 +22,29 @@ run_native_sandbox_case() {
 run_linux_docker_sandbox_case() {
   local case_name="$1"
   local dockerfile="${TALOS_RS_DIR}/crates/action/linux-sandbox/tests/docker/ubuntu-24.04.Dockerfile"
-  local target_dir="${TALOS_E2E_TMP_ROOT}/sandbox-linux-target"
-  mkdir -p "${target_dir}"
+  local target_volume="sandbox-target-${TALOS_E2E_RUN_ID}-${RANDOM}"
+  e2e_docker volume "${target_volume}" >/dev/null
 
-  docker build -t "${SANDBOX_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
-  docker run --rm --privileged \
+  local image
+  image="$(e2e_image talos-sandbox-e2e "${SANDBOX_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}")"
+  e2e_docker container "sandbox-${TALOS_E2E_RUN_ID}-${RANDOM}" --rm --privileged \
     -v "${REPO_ROOT}:/workspace/talos" \
-    -v "${target_dir}:/workspace/talos/talos-rs/target" \
-    "${SANDBOX_DOCKER_IMAGE}" \
+    -v "${target_volume}:/workspace/talos/talos-rs/target" \
+    "${image}" \
     bash -lc "cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher && SHELL=/bin/sh TALOS_LINUX_SANDBOX_HELPER=/workspace/talos/talos-rs/target/debug/talos-linux-sandbox-launcher just test -p talos-tools sandbox_e2e_tests::${case_name} --no-capture --run-ignored ignored-only"
 }
 
 run_linux_docker_sandbox_group() {
   local dockerfile="${TALOS_RS_DIR}/crates/action/linux-sandbox/tests/docker/ubuntu-24.04.Dockerfile"
-  local target_dir="${TALOS_E2E_TMP_ROOT}/sandbox-linux-target"
-  mkdir -p "${target_dir}"
+  local target_volume="sandbox-target-${TALOS_E2E_RUN_ID}-${RANDOM}"
+  e2e_docker volume "${target_volume}" >/dev/null
 
-  docker build -t "${SANDBOX_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
-  docker run --rm --privileged \
+  local image
+  image="$(e2e_image talos-sandbox-e2e "${SANDBOX_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}")"
+  e2e_docker container "sandbox-${TALOS_E2E_RUN_ID}-${RANDOM}" --rm --privileged \
     -v "${REPO_ROOT}:/workspace/talos" \
-    -v "${target_dir}:/workspace/talos/talos-rs/target" \
-    "${SANDBOX_DOCKER_IMAGE}" \
+    -v "${target_volume}:/workspace/talos/talos-rs/target" \
+    "${image}" \
     bash -lc "cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher && SHELL=/bin/sh TALOS_LINUX_SANDBOX_HELPER=/workspace/talos/talos-rs/target/debug/talos-linux-sandbox-launcher just test -p talos-tools sandbox_e2e_tests --no-capture --run-ignored ignored-only"
 }
 
