@@ -29,7 +29,6 @@ export function ComputerPicker({ total, localId, onSelect }: {
           </div> : <>
             {list.data.pages.flatMap((page) => page.data).map((node) => <ComputerItem key={node.nodeId} node={node} local={node.nodeId === localId} onSelect={() => onSelect(node.nodeId)} />)}
             {list.data.pages[0]?.total === 0 ? <p role="status" className="p-3 text-center text-sm text-muted">{t("computers:empty")}</p> : null}
-            {list.hasNextPage ? <Button variant="ghost" className="w-full" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>{t("common:showMore")}</Button> : null}
           </>}
       </div>
     </div>

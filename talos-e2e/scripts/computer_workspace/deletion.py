@@ -123,6 +123,34 @@ def run(cluster):
             expect(trigger).to_be_focused()
         page.screenshot(path=str(REPORT / 'homepage-no-computers.png'), full_page=True)
         print('CASE computer_home_selection_empty_directory_and_connection_guide PASS', flush=True)
+
+        # Search must discover a Computer outside the initial directory response.
+        registered = [data(public(cluster, '/v1/computers', 'POST', {
+            'displayName': f'Homepage Worker {index:02}', 'credentialExpiresAt': 2_000_000_000,
+        }))['node'] for index in range(1, 26)]
+        initial = data(public(cluster, '/v1/computers?limit=20'))
+        loaded = {node['nodeId'] for node in initial['data']}
+        target = next(node for node in registered if node['nodeId'] not in loaded)
+        page.set_viewport_size({'width': 1560, 'height': 900})
+        page.reload()
+        search = page.get_by_role('searchbox', name='Search computers')
+        expect(search).to_be_visible()
+        rows = page.locator('main [data-computer-id]')
+        expect(rows).to_have_count(len(initial['data']))
+        expect(page.get_by_role('button', name='Show more', exact=True)).to_have_count(0)
+        require(rows.first.evaluate('(row) => row.parentElement.scrollHeight > row.parentElement.clientHeight'),
+                'Long homepage list does not scroll internally')
+        page.screenshot(path=str(REPORT / 'homepage-long-list.png'), full_page=True)
+        search.fill(target['displayName'])
+        expect(rows).to_have_count(1)
+        expect(page.locator(f'main [data-computer-id="{target["nodeId"]}"]')).to_be_visible()
+        page.screenshot(path=str(REPORT / 'homepage-search-match.png'), full_page=True)
+        search.fill('no-such-homepage-computer')
+        expect(page.locator('main').get_by_text('No computers found', exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='Choose a computer', exact=True)).to_be_visible()
+        search.fill('')
+        expect(rows).to_have_count(len(initial['data']))
+        print('CASE computer_home_long_list_server_search_and_clear PASS', flush=True)
         browser.close()
     print('CASE computer_delete_owner_offline_status_cancel_confirm_i18n_selection_credentials PASS', flush=True)
 

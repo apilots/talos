@@ -72,16 +72,14 @@ it("does not confuse directory loading or failure with zero registered computers
   expect(await screen.findByRole("heading", { name: "Connect your first computer" })).toBeVisible();
 });
 
-it("searches the server and loads more computers without treating no matches as an unregistered account", async () => {
+it("searches beyond the initial computer list without treating no matches as an unregistered account", async () => {
   const more = { ...topologyNodes[0], nodeId: "remote", displayName: "Remote office" };
-  list.mockImplementation(async ({ query: search, cursor }) => search
+  list.mockImplementation(async ({ query: search }) => search
     ? { data: search === "office" ? [more] : [], total: search === "office" ? 1 : 0, nextCursor: null }
-    : { data: cursor ? [more] : topologyNodes, total: 21, nextCursor: cursor ? null : "next" });
+    : { data: topologyNodes, total: 21, nextCursor: "next" });
   show();
-  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
-  expect(await screen.findByRole("button", { name: "Remote office · Connected" })).toBeVisible();
-  expect(list).toHaveBeenCalledWith(expect.objectContaining({ cursor: "next" }));
-  const search = screen.getByRole("searchbox", { name: "Search computers" });
+  const search = await screen.findByRole("searchbox", { name: "Search computers" });
+  expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   fireEvent.change(search, { target: { value: "office" } });
   await waitFor(() => expect(list).toHaveBeenCalledWith(expect.objectContaining({ query: "office" })));
   expect(await screen.findByRole("button", { name: "Remote office · Connected" })).toBeVisible();
