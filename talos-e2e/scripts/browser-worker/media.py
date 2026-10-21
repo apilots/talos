@@ -116,10 +116,11 @@ def media(url,node,container,http,data,wait,report):
         wait(lambda:state()['control']['owner']['kind']=='human','Controller handshake')
         controller=state()['control']['owner']['controllerId']
         current=state();before=current['control'].copy()
-        rejected=http(url+'/v1/desktop/open',{'nodeId':node,'targetId':'managed','viewerId':viewer_id,
-            'generation':before['generation'],'inputMode':'control','controllerId':str(uuid.uuid4()),'inputEpoch':before['epoch']-1})
-        assert rejected['status']=='error','Stale control open was admitted'
-        assert state()['control']==before,'Rejected replacement changed the current controller'
+        for _ in range(3):
+            rejected=http(url+'/v1/desktop/open',{'nodeId':node,'targetId':'managed','viewerId':viewer_id,
+                'generation':before['generation'],'inputMode':'control','controllerId':str(uuid.uuid4()),'inputEpoch':before['epoch']-1})
+            assert rejected.get('error',{}).get('code')=='permissionDenied', 'Failed Worker admission leaked an ingress reservation: '+json.dumps(rejected)
+            assert state()['control']==before,'Rejected replacement changed the current controller'
         control.frame()  # The same original RFB socket must remain usable.
         control.key(0xffe1,True)
         time.sleep(.15)

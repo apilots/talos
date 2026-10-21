@@ -7,6 +7,12 @@ use talos_types::{
     BUILTIN_BROWSER_PLUGIN_ID, BUILTIN_BROWSER_SERVER_NAME,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinBrowserProvision {
+    Ready,
+    NameConflict,
+}
+
 impl PluginManager {
     /// Reads the original installation record; no separate enabled flag.
     pub fn builtin_browser_enabled(&self) -> TalosResult<bool> {
@@ -21,7 +27,10 @@ impl PluginManager {
     /// Provision the bundled Browser through the original activation transaction.
     /// Only the composition root calls this method; user imports cannot claim its
     /// identity. Repeated startup and executable upgrades preserve explicit disable.
-    pub fn provision_builtin_browser(&self, executable: &Path) -> TalosResult<()> {
+    pub fn provision_builtin_browser(
+        &self,
+        executable: &Path,
+    ) -> TalosResult<BuiltinBrowserProvision> {
         if !executable.is_absolute() {
             return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
@@ -37,32 +46,45 @@ impl PluginManager {
         if let McpTransportDefinition::Stdio { command, .. } = &mut server.transport {
             *command = executable.to_string_lossy().into_owned();
         }
-        self.state.with_exclusive_lock("plugin.builtin.browser", || {
-            let previous = self.state.load_installs()?;
-            let installed = previous.installs.iter()
-                .find(|install| install.plugin_id.0 == BUILTIN_BROWSER_PLUGIN_ID);
-            if previous.installs.iter().any(|install|
-                install.name == BUILTIN_BROWSER_SERVER_NAME && install.plugin_id.0 != BUILTIN_BROWSER_PLUGIN_ID) {
-                return Err(TalosError::new(talos_error::ErrorCode::Conflict,
-                    "An existing plugin uses the reserved Browser name; rename it before enabling the bundled Browser."));
-            }
-            if let Some(install) = installed {
-                let current = crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(
-                    &install.installed_path,
-                )?;
-                // Installed relative cwd is derived at read time, not persisted.
-                let mut expected = server.clone();
-                if let McpTransportDefinition::Stdio { cwd, .. } = &mut expected.transport {
-                    *cwd = Some(install.installed_path.clone());
+        self.state
+            .with_exclusive_lock("plugin.builtin.browser", || {
+                let previous = self.state.load_installs()?;
+                let installed = previous
+                    .installs
+                    .iter()
+                    .find(|install| install.plugin_id.0 == BUILTIN_BROWSER_PLUGIN_ID);
+                if previous.installs.iter().any(|install| {
+                    install.name == BUILTIN_BROWSER_SERVER_NAME
+                        && install.plugin_id.0 != BUILTIN_BROWSER_PLUGIN_ID
+                }) {
+                    // Existing user state remains manageable; the composition root
+                    // reports the unavailable bundled capability without blocking startup.
+                    return Ok(BuiltinBrowserProvision::NameConflict);
                 }
-                if current == expected { return Ok(()); }
-            }
-            let enabled = installed.is_none_or(|install| install.enabled);
-            let mut candidate = manual_mcp_candidate(server)?;
-            candidate.plugin.id = PluginId(BUILTIN_BROWSER_PLUGIN_ID.into());
-            let activation = install_plugin(&self.state, candidate,
-                PluginInstallConflictPolicy::Replace, enabled)?;
-            self.finish_install(previous, activation).map(|_| ())
-        })
+                if let Some(install) = installed {
+                    let current = crate::scanner::mcp_manifest::server_from_installed_mcp_manifest(
+                        &install.installed_path,
+                    )?;
+                    // Installed relative cwd is derived at read time, not persisted.
+                    let mut expected = server.clone();
+                    if let McpTransportDefinition::Stdio { cwd, .. } = &mut expected.transport {
+                        *cwd = Some(install.installed_path.clone());
+                    }
+                    if current == expected {
+                        return Ok(BuiltinBrowserProvision::Ready);
+                    }
+                }
+                let enabled = installed.is_none_or(|install| install.enabled);
+                let mut candidate = manual_mcp_candidate(server)?;
+                candidate.plugin.id = PluginId(BUILTIN_BROWSER_PLUGIN_ID.into());
+                let activation = install_plugin(
+                    &self.state,
+                    candidate,
+                    PluginInstallConflictPolicy::Replace,
+                    enabled,
+                )?;
+                self.finish_install(previous, activation)
+                    .map(|_| BuiltinBrowserProvision::Ready)
+            })
     }
 }

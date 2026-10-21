@@ -88,7 +88,8 @@ async function tabLifecycle(){
  await assert.rejects(action({kind:'fill',element:'old-tab-reference',text:'must not enter another tab'},oldElement));
  const third=(await action({kind:'tab',action:'open',tabId:null,url:`http://127.0.0.1:${address.port}/third`})).page.targetId;
  assert.equal((await action({kind:'tab',action:'close',tabId:second,url:null})).page.targetId,third);
- await action({kind:'tab',action:'close',tabId:third,url:null});
+ const closedCurrent=await action({kind:'tab',action:'close',tabId:null,url:null});
+ assert(!closedCurrent.page.tabs.some(tab=>tab.tabId===third));
 
 
  const switched=await action({kind:'tab',action:'focus',tabId:first,url:null});assert.equal(switched.page.targetId,first);

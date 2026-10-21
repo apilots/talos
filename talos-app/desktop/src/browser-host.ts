@@ -111,7 +111,8 @@ export class DesktopBrowserHost {
       if (action.kind==="tab") {
         if (action.action==="open") { tab=await owner.open(checkedUrl(action.url ?? "about:blank"),check);check(); }
         else {
-          tab=tabs.find(t=>t.id===action.tabId);
+          const tabId=action.tabId ?? (action.action==="close" ? operation.targetId : null);
+          tab=tabs.find(t=>t.id===tabId);
           if(!tab) throw new Error("Unknown browser tab.");
           if (action.action==="close") {check();await owner.remove(tab.id);const remaining=await owner.tabs();tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
           else {check();await owner.focus(tab.id);}

@@ -53,6 +53,32 @@ impl crate::AgentNodeClient {
             }
         }
     }
+    pub async fn cancel_desktop(
+        &self,
+        token: &str,
+        node_id: String,
+        stream_id: String,
+        ticket: String,
+    ) -> TalosResult<()> {
+        let mut request = Request::new(pb::DesktopCancelRequest {
+            node_id,
+            stream_id,
+            ticket,
+        });
+        authorize(&mut request, token)?;
+        request.set_timeout(std::time::Duration::from_secs(10));
+        let response = client(self.channel.clone())
+            .cancel(request)
+            .await
+            .map_err(crate::decode_rpc_status)?
+            .into_inner();
+        match response.result.ok_or_else(invalid)? {
+            pb::desktop_cancel_response::Result::Value(_) => Ok(()),
+            pb::desktop_cancel_response::Result::Failure(error) => {
+                Err(error_pb::decode_failure(error)?)
+            }
+        }
+    }
     pub async fn view_desktop(
         &self,
         token: &str,

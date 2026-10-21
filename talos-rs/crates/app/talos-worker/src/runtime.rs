@@ -101,7 +101,11 @@ impl TalosWorker {
                 error,
             )
         })?;
-        manager.provision_builtin_browser(&executable)?;
+        if manager.provision_builtin_browser(&executable)?
+            == talos_plugin::BuiltinBrowserProvision::NameConflict
+        {
+            tracing::warn!("Built-in Browser unavailable: an existing MCP plugin uses talos_browser. Remove or reimport it under another name in Settings, then restart to provision the built-in Browser.");
+        }
         let enabled_manager = manager.clone();
         let browser = talos_browser::BrowserRuntime::new(
             config.talos_paths().talos_home.clone(),

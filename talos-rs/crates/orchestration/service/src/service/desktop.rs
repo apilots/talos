@@ -104,50 +104,67 @@ impl TalosService {
         let reservation = ingress
             .reserve_desktop(token, request.node_id.clone(), binding.clone())
             .await?;
-        environment
-            .desktop_open(
-                actor.worker_environment_context(),
-                WorkerDesktopOpen {
-                    binding: binding.clone(),
-                    nonce: reservation.nonce,
-                },
-            )
-            .await?;
-        let ticket = uuid::Uuid::new_v4().to_string();
-        let key: [u8; 32] = Sha256::digest(ticket.as_bytes()).into();
-        {
-            let mut routes = self
-                .desktop_routes
-                .lock()
-                .map_err(|_| TalosError::internal("Desktop ticket state is poisoned."))?;
-            routes.retain(|_, route| route.expires > std::time::Instant::now());
-            if routes.len() >= 64 {
-                return Err(TalosError::new(
-                    ErrorCode::Conflict,
-                    "Desktop viewer capacity is exhausted.",
-                ));
+        let result = async {
+            environment
+                .desktop_open(
+                    actor.worker_environment_context(),
+                    WorkerDesktopOpen {
+                        binding: binding.clone(),
+                        nonce: reservation.nonce,
+                    },
+                )
+                .await?;
+            let ticket = uuid::Uuid::new_v4().to_string();
+            let key: [u8; 32] = Sha256::digest(ticket.as_bytes()).into();
+            {
+                let mut routes = self
+                    .desktop_routes
+                    .lock()
+                    .map_err(|_| TalosError::internal("Desktop ticket state is poisoned."))?;
+                routes.retain(|_, route| route.expires > std::time::Instant::now());
+                if routes.len() >= 64 {
+                    return Err(TalosError::new(
+                        ErrorCode::Conflict,
+                        "Desktop viewer capacity is exhausted.",
+                    ));
+                }
+                routes.insert(
+                    key,
+                    ViewerRoute {
+                        actor: actor.clone(),
+                        node_id: request.node_id.clone(),
+                        binding: binding.clone(),
+                        ingress_ticket: reservation.ticket.clone(),
+                        expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                    },
+                );
             }
-            routes.insert(
-                key,
-                ViewerRoute {
-                    actor: actor.clone(),
-                    node_id: request.node_id,
-                    binding: binding.clone(),
-                    ingress_ticket: reservation.ticket,
-                    expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
-                },
-            );
+            Ok(DesktopViewGrant {
+                ticket,
+                stream_id: binding.stream_id.clone(),
+                viewer_id: binding.viewer_id.clone(),
+                generation: binding.generation.clone(),
+                input_mode: binding.input_mode,
+                controller_id: binding.controller_id.clone(),
+                input_epoch: binding.input_epoch,
+                expires_at: reservation.expires_at,
+            })
         }
-        Ok(DesktopViewGrant {
-            ticket,
-            stream_id: binding.stream_id,
-            viewer_id: binding.viewer_id,
-            generation: binding.generation,
-            input_mode: binding.input_mode,
-            controller_id: binding.controller_id,
-            input_epoch: binding.input_epoch,
-            expires_at: reservation.expires_at,
-        })
+        .await;
+        if result.is_err() {
+            if let Err(error) = ingress
+                .cancel_desktop(
+                    token,
+                    request.node_id,
+                    binding.stream_id.clone(),
+                    reservation.ticket,
+                )
+                .await
+            {
+                talos_logging::report_error(&error);
+            }
+        }
+        result
     }
     /// The same-origin WSS handler consumes a ticket once in its first message.
     /// Ingress rechecks the original account token, node ownership and live lease.

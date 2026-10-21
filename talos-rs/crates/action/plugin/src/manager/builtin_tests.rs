@@ -66,3 +66,64 @@ fn builtin_browser_upgrade_rolls_back_when_state_commit_fails() {
     assert_eq!(state.load_installs().unwrap(), before);
     assert_eq!(std::fs::read(path).unwrap(), manifest);
 }
+
+#[test]
+fn builtin_browser_collision_preserves_startup_and_user_management() {
+    for enabled in [true, false] {
+        let temp = tempfile::tempdir().unwrap();
+        let state = PluginStateStore::new(temp.path());
+        let manager = manager_with_state(state.clone());
+        // Model a valid installation imported before this name became reserved.
+        let server = serde_json::from_value(serde_json::json!({
+            "name": BUILTIN_BROWSER_SERVER_NAME, "display_name": "Existing browser",
+            "description": "User-owned server", "transport": {
+                "type": "stdio", "command": "existing-browser", "args": [], "env": {}, "cwd": null
+            }
+        }))
+        .unwrap();
+        let previous = state.load_installs().unwrap();
+        let candidate = crate::installer::manual_mcp_candidate(server).unwrap();
+        let activation = crate::installer::install_plugin(
+            &state,
+            candidate,
+            PluginInstallConflictPolicy::Reject,
+            enabled,
+        )
+        .unwrap();
+        let custom = manager.finish_install(previous, activation).unwrap();
+        let before = state.load_installs().unwrap();
+        let path = custom.install.installed_path.join("talos-mcp.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let executable = temp.path().join("worker");
+        for _ in 0..2 {
+            assert_eq!(
+                manager.provision_builtin_browser(&executable).unwrap(),
+                super::builtin::BuiltinBrowserProvision::NameConflict
+            );
+            assert!(!manager.builtin_browser_enabled().unwrap());
+            assert_eq!(state.load_installs().unwrap(), before);
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+            let listed = manager
+                .list_plugins(PluginListRequest {
+                    node_id: None,
+                    kind: None,
+                    status: None,
+                    source_id: None,
+                    include_disabled: true,
+                })
+                .unwrap();
+            assert_eq!(listed.plugins.len(), 1);
+        }
+        manager
+            .uninstall(PluginUninstallRequest {
+                node_id: None,
+                install_id: custom.install.id,
+            })
+            .unwrap();
+        assert_eq!(
+            manager.provision_builtin_browser(&executable).unwrap(),
+            super::builtin::BuiltinBrowserProvision::Ready
+        );
+        assert!(manager.builtin_browser_enabled().unwrap());
+    }
+}

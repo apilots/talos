@@ -228,6 +228,35 @@ impl pb::agent_desktop_media_server::AgentDesktopMedia for DesktopMediaRpc {
             }),
         }))
     }
+    async fn cancel(
+        &self,
+        request: Request<pb::DesktopCancelRequest>,
+    ) -> Result<Response<pb::DesktopCancelResponse>, Status> {
+        let result = async {
+            let actor = self.management.actor(&request).await?;
+            let request = request.into_inner();
+            self.owner(&actor, &request.node_id).await?;
+            let entry = self.entry(&request.stream_id).await?;
+            if entry.owner != actor.user_id
+                || entry.node != request.node_id
+                || hash(&request.ticket) != entry.ticket
+            {
+                return Err(denied());
+            }
+            self.remove(&entry).await;
+            Ok(())
+        }
+        .await;
+        Ok(Response::new(pb::DesktopCancelResponse {
+            result: Some(match result {
+                Ok(()) => pb::desktop_cancel_response::Result::Value(pb::Empty {}),
+                Err(error) => {
+                    talos_logging::report_error(&error);
+                    pb::desktop_cancel_response::Result::Failure(error_pb::encode_failure(&error))
+                }
+            }),
+        }))
+    }
     async fn worker(
         &self,
         request: Request<tonic::Streaming<pb::DesktopWorkerFrame>>,

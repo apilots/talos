@@ -127,3 +127,14 @@ it("keeps unfinished Chrome GUID sources private after reconnecting",async()=>{
   expect(await collect()).toEqual([{filename,dataBase64:Buffer.from("%PDF-1.7 final file").toString("base64")}]);
   expect(readFileSync(path.join(sourceDirectory,guid),"utf8")).toBe("incomplete source");
 });
+
+it.each([null,"other"])("closes the current tab by default and respects explicit tab %s",async(tabId)=>{
+  const tab=(id:string)=>({id,send:async()=>({}),url:()=>"about:blank",title:()=>id});
+  let tabs=[tab("other"),tab("current")];
+  vi.spyOn(WebsiteAccount.prototype,"tabs").mockImplementation(async()=>tabs);
+  const remove=vi.spyOn(WebsiteAccount.prototype,"remove").mockImplementation(async(id)=>{tabs=tabs.filter(tab=>tab.id!==id);});
+  const operation:AppProtocol.BrowserHostRequest={...request("probe"),target:"managed",operation:{kind:"execute",targetId:"current",element:null,upload:null,action:{kind:"tab",action:"close",tabId,url:null}}};
+  await host.execute("close",operation);
+  expect(remove).toHaveBeenCalledWith(tabId??"current");
+  await expect(host.execute("focus",{...operation,operation:{...operation.operation as Extract<AppProtocol.BrowserHostOperation,{kind:"execute"}>,action:{kind:"tab",action:"focus",tabId:null,url:null}}})).rejects.toThrow("Unknown browser tab");
+});

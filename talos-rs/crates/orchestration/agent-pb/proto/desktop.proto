@@ -8,6 +8,8 @@ import "types.proto";
 // authentication plus a single-use, 30-second reservation ticket.
 service AgentDesktopMedia {
   rpc Reserve(DesktopReserveRequest) returns (DesktopReserveResponse);
+  // Cancel a failed admission using the original account and reservation ticket.
+  rpc Cancel(DesktopCancelRequest) returns (DesktopCancelResponse);
   rpc Worker(stream DesktopWorkerFrame) returns (stream DesktopChunk);
   rpc Viewer(stream DesktopViewerFrame) returns (stream DesktopChunk);
 }
@@ -30,3 +32,6 @@ message DesktopChunk { bytes data = 1; }
 message DesktopWorkerFrame { oneof body { DesktopWorkerHello hello = 1; DesktopChunk chunk = 2; } }
 message DesktopViewerFrame { oneof body { DesktopViewerHello hello = 1; DesktopChunk chunk = 2; } }
 message WorkerDesktopOpenParams { DesktopBinding binding = 1; string nonce = 2; }
+
+message DesktopCancelRequest { string node_id = 1; string stream_id = 2; string ticket = 3; }
+message DesktopCancelResponse { oneof result { Empty value = 1; Failure failure = 2; } }

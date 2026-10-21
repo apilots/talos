@@ -11,7 +11,7 @@ use crate::PluginStateStore;
 mod matchers;
 mod mcp;
 pub use mcp::{McpChangeHook, McpDiscovery};
-mod builtin;
+pub(crate) mod builtin;
 #[cfg(test)]
 #[path = "manager/builtin_tests.rs"]
 mod builtin_tests;

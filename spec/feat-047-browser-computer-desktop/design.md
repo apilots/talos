@@ -257,7 +257,10 @@ Chrome 连接候选必须在当前 operation/host generation 校验后才发布�
 ```mermaid
 flowchart TD
   Boot["Computer runtime 启动"] --> Read["读取原 PluginStateStore"]
-  Read --> Exists{"已有内置 Browser 身份？"}
+  Read --> Collision{"用户插件已占用 talos_browser？"}
+  Collision -->|"是"| Unavailable["保留用户插件；报告内置不可用；继续启动"]
+  Unavailable --> Recover["Settings 移除并换名导入；重启后初始化"]
+  Collision -->|"否"| Exists{"已有内置 Browser 身份？"}
   Exists -->|"是"| Keep["保留启停与连接偏好"]
   Exists -->|"否"| Add["随包 manifest 原 installer 原子初始化"]
   Add --> Enabled["默认 enabled"]
@@ -270,6 +273,8 @@ flowchart TD
 ```
 
 仓库维护 `talos-mcp.json` 与简短使用说明，随包提供，使用原 installer 的 manifest 激活、内容摘要和回滚事务；内置身份固定为 `builtin_browser`，不增加可编辑的外部 source，安装记录复用原 Manual 形态但拒绝替换内置身份；用户无需单独安装 Skill，首次调用不 pip install。成功关闭插件保留 profile；活动 Turn 导致 commit_guard 冲突时 enabled/连接/owner 均不改变，显示原 Conflict 错误并引导先暂停浏览器或按原操作停止当前任务后重试。暂停只关闭浏览器准入，不伪装插件已关闭；不自动取消其他工具/Turn，不修改通用插件锁语义。内置项不提供卸载，通用卸载 API 同样拒绝其内置身份，不能只隐藏按钮；不新增 tombstone 系统。
+
+A preexisting user MCP installation named `talos_browser` remains unchanged and manageable. Provisioning returns a typed name-conflict outcome; the composition root reports that the bundled capability is unavailable and continues startup. Users can remove/reimport the existing server under a different name in Settings, then restart to provision the bundled plugin. Other provisioning failures remain startup errors; no blanket Conflict suppression or automatic rename is allowed.
 
 内置 manifest 通过当前宿主可执行文件的隐藏 `--browser-mcp` 入口启动薄 stdio adapter。仓库自有 Server、Worker、app-server 和 TUI/CLI 都在普通参数解析、账号认证与运行时初始化前分派该入口；握手无需账号、模型或有效业务配置。外部嵌入宿主须在自身 main 中遵守同一入口契约，SDK/composition rustdoc 明确该要求；不为 TUI 新增浏览器 backend 或本机远程桌面。
 
@@ -432,6 +437,8 @@ Gateway 与 ingress 同宿主时省去中间跳。只接受已配置受信 ingre
 - 媒体 chunk ≤ 64 KiB、单连接待发队列 ≤ 4 MiB、每目标最多两个 viewer/一个 controller。标准 Docker 显示为 1440×900（16:10）；客户端只按比例缩放，不提供任意 X 分辨率调整。
 - RFB 是连续协议，不能丢弃任意字节降帧。慢 viewer 关闭并重新握手，不占用任务队列锁、心跳或原 Connect 窗口；无第二套 JPEG/viewport 协议。
 - 新 viewer 先预留有界候选，不销毁已有连接；同 viewer 最多两个 reservation（当前流及短时候选），候选有 30 秒 TTL。只有匹配 nonce/NodeAuth 的 Worker hello 证明权威 generation/controller/epoch admission 后才退役旧 reservation。迟到或被拒绝的 Control open 不得断开有效 Human 流，也不得改变暂停状态。
+- Failed Worker admission or local grant publication cancels the candidate through the same trusted ingress using the original account, node, stream and reservation ticket. Cancellation retires only that reservation and its attached media, preserves any older valid viewer, and immediately releases capacity. Cleanup failures are reported while the original open error is returned; the existing TTL remains the transport-failure safety net.
+
 - Worker 完整解析固定支持的 RFB framing/长度；查看连接可发必要协商/更新请求，KeyEvent、PointerEvent、ClientCutText 逐条检查 controller/epoch。未知扩展显式拒绝；旧连接缓存输入在交还/断开时失效，不自动重放。
 - 剪贴板默认不传输；将来显式粘贴必须有方向、大小上限与控制校验。本期不实现后台剪贴板同步或用户系统剪贴板读取。
 
@@ -608,3 +615,7 @@ GitHub PR gate 使用受控网页覆盖 Docker 插件/工具图片、首次非�
 本功能沉淀到现有编号顺序的 `20_browser_workspace` 组，由标准 `run_e2e.sh` 发现并执行。01 验证真实 Web AppLayout 的资源实例、焦点、账户清理和 File 授权；02 验证实际生产 Desktop 主进程/renderer 的公共预览与本地 Markdown；03 验证 Desktop 浏览器宿主和明确授权的本地 Chrome；04 验证 Desktop controller → embedded Worker → MCP → File 链路；05 验证 Docker Worker 工具、真实三入口桌面、私有媒体、接管和 profile 恢复。关联断言在同一旅程内细化，不按每个断言重复启动整套任务；单元测试保留原 owner。
 
 轻量 Web 资源改动由普通 PR 场景选择 01；浏览器宿主、后端、镜像及其调用 owner 变更由专门 Browser job 运行整个 20 组，不在普通矩阵重复 01。测试前置条件、可观测结果与 provider-backed 验收边界以[组说明](../../talos-e2e/scenarios/20_browser_workspace/README.md)为准。真实网站分析仍从普通 Composer 提交配置中的视觉模型任务、使用最低推理强度，独立保留实际调用/恢复错误/图片展示证据；受控模型工具序列不等同于该验收。
+
+### Browser tab close parity
+
+`browser_tab` close accepts an omitted/null `tabId` to close the current operation target on Docker, built-in Desktop and prepared Chrome. An explicit tab ID takes precedence. Focus always requires an explicit tab ID; a stale/missing target must not select another page implicitly.
