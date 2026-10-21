@@ -6,6 +6,7 @@ const controller = new DesktopAppServerController({
   command: process.env.TALOS_APP_SERVER_BIN,
   env: process.env,
   desktopHost: true,
+  clientKind: "desktop",
   onRuntimeState: (state) => {
     if (state.kind === "error") {
       process.stderr.write(`Desktop runtime error: ${state.error?.code ?? "internalError"}\n`);

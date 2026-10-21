@@ -112,6 +112,13 @@ Computer 注册与主动执行验收组：`18_computer_workspace`。仅注册运
 覆盖范围与证据见
 [场景说明](scenarios/18_computer_workspace/README.md)。
 
+多控制面同步运行 `just e2e-group 19_computer_sync`，需要真实 macOS、Docker、
+Cloud 测试服务和相同的 Python/Node 依赖。Sync 固定为公开 v0.1.3 Release 的
+不可变镜像 digest，与锁定 SDK/types 版本对齐；不再默认编译旁边的源码仓库。
+该组属于本地拓扑验收，不能称为已有 GitHub PR 门禁通过；构建目录隔离的轻量
+回归已纳入 CI。执行类场景需要有额度的模型，注册场景不需要，详见
+[场景说明](scenarios/19_computer_sync/README.md)。
+
 ## 证据和临时数据
 
 生成证据写入 `talos-e2e/reports/`。临时 Talos home 和场景数据默认使用

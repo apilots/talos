@@ -76,6 +76,9 @@ jobs:
       - name: Test Cloud, Desktop, TUI, SQLite and cross-coordinator boundaries
         run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui
 
+      - name: Test isolated current-checkout Docker contexts
+        run: python3 -m unittest discover -s talos-e2e/scripts/computer_sync -p '*_test.py' -v
+
   scenarios:
     needs: change-scope
     if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}

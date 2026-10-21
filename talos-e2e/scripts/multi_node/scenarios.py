@@ -383,6 +383,8 @@ def parity(cluster):
 
     embedded_marker = uuid.uuid4().hex
     embedded_file = f'embedded-{embedded_marker}.txt'
+    cluster.enroll_management_host('admin')
+    passed('management_host_enrolled_through_public_sign_in_bootstrap')
     embedded_session, _, _ = cluster.turn('admin', f"Use Bash to run printf '{embedded_marker}' > {embedded_file}, then acknowledge.", node_id='embedded')
     require(cluster.query('SELECT execution_node_id FROM sessions WHERE session_key=?', (embedded_session,)) == [('embedded',)],
             'User without remote nodes did not retain embedded routing')

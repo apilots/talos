@@ -244,6 +244,16 @@ class Cluster:
         with sqlite3.connect(f'file:{self.server_home}/data/talos.db?mode=ro', uri=True) as connection:
             return connection.execute(sql, args).fetchall()
 
+    def enroll_management_host(self, user):
+        # Product sign-in reads Sync status to enroll this host; Cloud login
+        # alone does not grant Computer ownership, even to an administrator.
+        host = data(http(self.url + '/v1/sync/status', token=self.users[user]['access_token']))
+        host_id = host['localComputerId']
+        require(host_id and str(uuid.UUID(host_id)) == host_id, 'Management host was not enrolled')
+        owned = self.manage(user, 'GetNode', {'node_id': host_id})['node']
+        require(owned['owner_user_id'] == self.users[user]['user']['user_id'], 'Management host has the wrong owner')
+        return host_id
+
     def start_turn(self, user, prompt, session=None, file_ids=(), node_id=None, project_id=None):
         if node_id is None and session is None:
             node_id = next(node['node_id'] for node in self.nodes.values() if node['owner'] == user)

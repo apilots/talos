@@ -169,13 +169,16 @@ execution acceptance has resumed after provider funding. See the
 [scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
 
 Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
-Mac with Docker, the adjacent `talos-sync` source, a Cloud fixture executable,
-and the same protobuf/Python/Node prerequisites. The group builds current Worker and Sync
-images, starts isolated real services, and checks owner isolation, hardware
+Mac with Docker, the pinned public Sync v0.1.3 image, a Cloud fixture executable,
+and the same protobuf/Python/Node prerequisites. The group builds the current Worker
+image and pulls the immutable Sync Release digest without a sibling source checkout.
+It starts isolated real services and checks owner isolation, hardware
 registration, realtime history, same-Computer continuation, offline outbox,
 and restart recovery. Only execution/recovery cases need funded model access;
 registration does not. See the [scenario contract](scenarios/19_computer_sync/README.md).
 The Cloud frontend is not required: the fixture uses real device authorization APIs.
+This complete macOS/Docker/Cloud topology remains local acceptance, separate from
+the secretless hosted PR gate. Its isolated Docker-context regressions run in CI.
 
 ## Evidence and temporary data
 
