@@ -19,6 +19,23 @@ export class DesktopBrowserHost {
   private connecting: Promise<void> | undefined;
   private generation: string | undefined;
   private resetting:Promise<void>|undefined;
+  private executing:Promise<void>=Promise.resolve();
+  private settling:Promise<void>=Promise.resolve();
+  private inputFailure:Error|undefined;
+
+  private async settleInputs(cleanup:()=>Promise<void>):Promise<void> {
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    // A deadline reports failure without cancelling a CDP command already sent.
+    // Explicit recovery must also wait for that cleanup's actual settlement.
+    const pending=this.settling.then(cleanup);
+    this.settling=pending.catch(()=>{});
+    try {
+      await Promise.race([pending,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("Browser input cleanup timed out.")),3000);})]);
+    } catch(error) {
+      this.inputFailure=new Error("Browser input cleanup failed. Release browser inputs before retrying.",{cause:error});
+      throw this.inputFailure;
+    } finally {clearTimeout(timer);}
+  }
 
   cancel(id: string): void { const call=this.operations.get(id); if (call) call.cancelled=true; }
   reset():Promise<void> {
@@ -30,9 +47,14 @@ export class DesktopBrowserHost {
     this.chromeRevision++;
     for (const call of this.operations.values()) call.cancelled=true;
     this.operations.clear();
-    try {await this.chrome?.releaseInputs();}catch(error){console.error("Chrome input cleanup failed",error);}finally{this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;}
+    await this.executing;
+    await this.settleInputs(async()=>{
+      for(const account of this.accounts.values())await account.releaseInputs();
+      await this.chrome?.releaseInputs();
+    });
+    this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;
     for (const account of this.accounts.values()) account.close();
-    this.accounts.clear(); this.generation=undefined;
+    this.accounts.clear(); this.generation=undefined;this.inputFailure=undefined;
   }
   async execute(id:string, request:P.BrowserHostRequest): Promise<P.BrowserHostResponse> {
     if(this.resetting)await this.resetting;
@@ -42,14 +64,26 @@ export class DesktopBrowserHost {
     const op:Operation={cancelled:false,user:request.userId,generation:request.generation,epoch:request.epoch};
     this.operations.set(id,op);
     const check=()=> { if (op.cancelled || this.generation!==op.generation) throw new Error("Browser operation cancelled."); };
+    const operation=request.operation;
+    let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined;
+    if(operation.kind==="execute" || operation.kind==="releaseInputs" || operation.kind==="disconnect") {
+      previous=this.executing;
+      this.executing=new Promise(resolve=>{finished=resolve;});
+    }
+    if(operation.kind==="releaseInputs" || (operation.kind==="disconnect"&&this.chromeOwner===request.userId)) {
+      for(const [other,call] of this.operations)if(other!==id)call.cancelled=true;
+    }
     try {
-      const operation=request.operation;
+      if(previous)await previous;
+      if(operation.kind==="execute") {check();if(this.inputFailure)throw this.inputFailure;}
       if(operation.kind==="probe")return {kind:"readiness",connected:this.chromeOwner===request.userId&&Boolean(this.chrome?.isConnected())};
-      if (operation.kind==="releaseInputs" || operation.kind==="shutdown") {
-        for (const [other,call] of this.operations) if (other!==id) call.cancelled=true;
-        for (const account of this.accounts.values()) await account.releaseInputs();
-        await this.chrome?.releaseInputs();
-        if (operation.kind==="shutdown") await this.reset();
+      if(operation.kind==="shutdown") {await this.reset();return {kind:"done"};}
+      if (operation.kind==="releaseInputs") {
+        await this.settleInputs(async()=>{
+          for (const account of this.accounts.values()) await account.releaseInputs();
+          await this.chrome?.releaseInputs();
+        });
+        this.inputFailure=undefined;
         return {kind:"done"};
       }
       if (operation.kind==="connect") {
@@ -61,6 +95,12 @@ export class DesktopBrowserHost {
           if (previous) await previous.catch(() => {});
           check();
           if (revision !== this.chromeRevision) throw new Error("Browser connection superseded.");
+          if(this.chrome) {
+            await this.executing;
+            await this.settleInputs(async()=>{await this.chrome?.releaseInputs();});
+            check();
+            if(revision!==this.chromeRevision)throw new Error("Browser connection superseded.");
+          }
           this.chrome?.close(); this.chrome=undefined; this.chromeOwner=undefined;
           const candidate = await ChromeConnection.connect(request.userId);
           try {
@@ -81,7 +121,8 @@ export class DesktopBrowserHost {
       if (operation.kind==="disconnect") {
         this.chromeRevision++;
         if (this.chromeOwner!==request.userId) throw new Error("Chrome belongs to another account.");
-        try {await this.chrome?.releaseInputs();}finally{this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;}return {kind:"done"};
+        await this.settleInputs(async()=>{await this.chrome?.releaseInputs();});
+        this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;return {kind:"done"};
       }
       let account=this.accounts.get(request.userId);
       if (!account) { if(this.accounts.size>=2) throw new Error("Browser account capacity exceeded."); account=new WebsiteAccount(request.userId); this.accounts.set(request.userId,account); }
@@ -120,6 +161,7 @@ export class DesktopBrowserHost {
       }
       if (!tab) {check();tab=await owner.open("about:blank",check);}
       const current=tab;
+      input=current.send;
       const send:Send=async(method,params)=>{check(); const result=await current.send(method,params);check();return result;};
       const prepareInput=async()=>{
         await send("Input.setIgnoreInputEvents",{ignore:false});
@@ -198,7 +240,15 @@ export class DesktopBrowserHost {
       if(screenshot && screenshot.length>6*1024*1024)throw new Error("Browser screenshot is too large.");
       tabs=await owner.tabs();check();
       return {kind:"observation",page:{targetId:current.id,url:current.url()==="about:blank"?"about:blank":String(frame.url??current.url()),title:String(titleResult.value??current.title()),text:String(textResult.value??""),tabs:tabs.slice(0,32).map(t=>({tabId:t.id,title:t.title(),url:t.url()}))},loaderId,elements,screenshot,downloads};
-    } finally { this.operations.delete(id); }
+    } finally {
+      try {
+        // Cleanup uses the raw tracked sender: the cancelled operation's wrapper
+        // must not reject its own key/button release. Keep admission fenced until
+        // the release is acknowledged, or block it explicitly on cleanup failure.
+        const sender=input;
+        if(sender)await this.settleInputs(()=>release(sender));
+      } finally {this.operations.delete(id);finished?.();}
+    }
   }
 }
 function object(value:unknown):RecordValue {return typeof value==="object"&&value!==null ? value as RecordValue : {};}

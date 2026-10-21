@@ -46,7 +46,7 @@ async function createController(): Promise<DesktopAppServerController> {
     onMessageQueueChanged: broadcastMessageQueueChanged,
     onEvent: (event) => broadcastTimelineEvent(event),
     onSubscriptionTerminated: (notification) => broadcastSubscriptionTerminated(notification),
-    onRuntimeState: (state) => { if(["starting","restarting"].includes(state.kind)) { desktopMediaHost.reset(); void desktopBrowserHost.reset(); } broadcastRuntimeState(state); },
+    onRuntimeState: (state) => { if(["starting","restarting"].includes(state.kind)) { desktopMediaHost.reset(); void desktopBrowserHost.reset().catch(error=>console.error("Desktop browser reset failed",error)); } broadcastRuntimeState(state); },
     onServerRequest: (request) => handleDesktopServerRequest(request),
   });
 }
