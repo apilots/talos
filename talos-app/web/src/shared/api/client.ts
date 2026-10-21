@@ -45,6 +45,8 @@ export type TalosWebClient = {
   memory: Methods<BrowserTalosClient["memory"], "list" | "get" | "put" | "search" | "getEntry">;
   workspaceDocs: Methods<BrowserTalosClient["workspaceDocs"], "info" | "get" | "put">;
   skills: Methods<BrowserTalosClient["skills"], "list" | "suggest" | "read">;
+  desktop: Methods<BrowserTalosClient["desktop"], "open" | "connect">;
+  browser: Methods<BrowserTalosClient["browser"], "operate">;
   mcp: Methods<BrowserTalosClient["mcp"], "list" | "import" | "startAuthentication" | "readAuthentication" | "updateCredentials">;
   plugin: Methods<
     BrowserTalosClient["plugin"],
@@ -59,13 +61,12 @@ export type TalosClientFactory = () => TalosWebClient;
 let clientFactory: TalosClientFactory | undefined;
 
 function createDefaultBrowserClient() {
-  const token = getAuthTokenForRequests();
   const desktopBridge = getDesktopBridge();
-  if (desktopBridge) return createDesktopTalosClient(desktopBridge, () => token);
+  if (desktopBridge) return createDesktopTalosClient(desktopBridge, getAuthTokenForRequests);
 
   return createBrowserTalosClient({
     baseUrl: resolveServerBaseUrl(),
-    getToken: () => token,
+    getToken: getAuthTokenForRequests,
   });
 }
 

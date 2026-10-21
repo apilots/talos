@@ -78,3 +78,28 @@ fn object_suffix_is_normalized_only_for_the_closed_safe_alphabet() {
         )
     );
 }
+
+#[test]
+fn markdown_validation_checks_complete_utf8_content_across_upload_chunks() {
+    use super::MediaTypeValidator;
+
+    for filename in ["review.md", "review.MarkDown"] {
+        let mut validator = MediaTypeValidator::new(filename);
+        // A character split between chunks remains valid after the complete body arrives.
+        let content = "# Review\n\n模块边界\n".as_bytes();
+        for byte in content {
+            validator.observe(std::slice::from_ref(byte));
+        }
+        assert_eq!(validator.detected_mime_type(), Some("text/markdown".into()));
+    }
+    for tail in [b"\xff".as_slice(), b"\0", b"\x1b[31m", b"\xe4\xb8"] {
+        let mut validator = MediaTypeValidator::new("review.md");
+        validator.observe(&vec![b'a'; super::MIME_SNIFF_BYTES + 1]);
+        validator.observe(tail);
+        assert_eq!(validator.detected_mime_type(), None);
+    }
+    assert_eq!(
+        MediaTypeValidator::new("empty.md").detected_mime_type(),
+        Some("text/markdown".into())
+    );
+}

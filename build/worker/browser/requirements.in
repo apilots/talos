@@ -1,0 +1,2 @@
+# Browser Use actor primitives; Talos remains the Agent and MCP authority owner.
+browser-use==0.13.11

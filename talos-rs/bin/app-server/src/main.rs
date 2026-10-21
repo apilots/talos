@@ -1,6 +1,13 @@
 #[tokio::main]
 async fn main() {
     let command = std::env::args().nth(1);
+    if command.as_deref() == Some("--browser-mcp") {
+        if let Err(error) = talos_base::run_browser_mcp().await {
+            eprintln!("Browser MCP failed: {}", error.to_api_error().message);
+            std::process::exit(1);
+        }
+        return;
+    }
     if talos_base::should_print_version(command.as_deref()) {
         println!("app-server {}", env!("CARGO_PKG_VERSION"));
         return;

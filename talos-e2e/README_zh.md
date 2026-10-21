@@ -23,6 +23,9 @@ talos-e2e/
 从仓库根目录运行：
 
 ```bash
+just e2e --list                     # 核对全部发现范围
+just e2e --check                    # 只检查依赖，不构建、不跑 case
+just e2e                            # 执行全部发现的场景
 just e2e-case 01_health_and_models
 just e2e-group 09_app_server
 just e2e-group 14_sandbox
@@ -35,7 +38,45 @@ talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
 talos-e2e/run_e2e.sh --group 15_tui_install
 ```
 
-Runner 只预构建所选场景需要的二进制。开发时优先运行单个 case，交付前运行所属 group。
+默认运行、`--case` 和 `--group` 统一从同一份排序后的目录发现结果筛选：`scenarios/`
+根目录的 `NN_name.sh`，以及编号 `NN_name/` 目录内直接放置的 `*.sh`。不包含嵌套
+helper 或未编号目录；新增用例、编号组不需要修改 runner。精确相对路径优先于 basename；
+重名 basename 显式失败，selector 不能混用或重复；仍支持省略 `.sh`。
+
+`--list` 可以组合单 case/group，只输出相对路径，不加载 `.env`、不探测依赖、不生成
+报告、不构建或执行。`--check` 使用相同范围并加载正常 `.env`，只检查执行前依赖。
+缺失项连同受影响 case 一并写入 `reports/preflight_*.log`，在任何构建或场景执行前
+阻断所选运行；Docker case 不再被静默排除。预检不证明凭据有效性、网络、浏览器策略或
+运行时行为，这些仍由原场景断言负责。
+
+每个组旁边的 `requirements.json` 声明依赖：`default` 是当前目录默认值，`cases`
+按文件名替换个别字段，可用空列表表示无需密钥等例外。根目录旧用例使用根目录的声明，
+组不会继承根声明。这不是另一份 case 注册表：新增 case 自动继承组默认值；新增组
+需补本组依赖声明才能执行。缺失声明、过期 case override、未知字段均显式失败。
+字段为 `commands`、`python_modules`、`checks`、`platforms`、`env` 和 `binaries`；
+`checks` 检查 Docker、Cloud 可执行文件、复用 `has_real_llm_key` 的模型密钥检测、Chrome、
+Linux Desktop 显示、Caddy、Worker 镜像是否存在及原生 sandbox 依赖。`binaries` 声明
+共享 `server`/`cli` 预构建；专门构建仍由原场景 wrapper 负责，Linux launcher 预构建保留。
+不会输出密钥和环境值。声明示例：
+
+```json
+{"default":{"commands":["cargo","protoc"],"checks":["model"],"binaries":["cli"]},
+ "cases":{"catalog.sh":{"checks":[]}}}
+```
+
+按组要求配置 `TALOS_CLOUD_SERVER_BIN`、`TALOS_E2E_CHROME_BIN`、
+`TALOS_E2E_CADDY_BIN`、`TALOS_E2E_WORKER_IMAGE` 等。19 组保留原生 macOS 与固定
+公开 Sync release 的本地验收要求；默认全量在不支持的平台会明确阻断。
+默认全量为每个 case 传入所属组，与 `--group` 一致，避免 native sandbox case 在专门
+Docker case 前重复隐式运行 Docker；显式单个 sandbox case 保留原 macOS + Docker 语义。
+
+开发时优先运行单个 case，交付前运行所属 group。runner 自身的轻量回归不执行产品场景：
+
+```bash
+python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
+```
+
+发现逻辑需要 Python3.9+；`--help` 只需要 Bash。
 
 ## 场景职责
 
@@ -48,7 +89,9 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 | `14` | 统一 Sandbox 和权限执行 |
 | `15` | Release bundle 安装和已安装 TUI 启动 |
 | `17` | 三个 Worker：公开接口注册、归属隔离、路由、续租、协同与 Workspace 归属 |
-| `18` | Computer 云注册：真实 Desktop 登录、持久 UUID、出站注册与续租 |
+| `18` | Computer workspace：真实 Desktop 登录、持久 UUID、出站注册续租及产品 UI |
+| `19` | 多管理端 Sync：原生 Mac Desktop、Mac/Docker Worker、真实认证、NAT 与模型任务 |
+| `20` | Browser MCP 与资源工作区：Web/Desktop Tabs、Markdown、原生浏览器与 Docker 桌面/媒体 |
 
 运行 `just e2e-group 17_multi_node` 会启动 Cloud Auth fixture、一个 Server 和三个 Worker，
 使用独立 HOME 和端口。通过 `TALOS_CLOUD_SERVER_BIN` 指定 fixture 可执行文件，或将
@@ -67,6 +110,8 @@ GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secret
 `14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
 适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
 Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
+
+既有 contract job 同时运行 `talos-llm-deepseek` 的受控 loopback 传输回归，无需真实 Provider 凭据。
 
 维护者可从 `main` 手动运行provider集成工作流 `trusted-e2e.yml`，包含需要真实模型
 凭据的完整 `09_app_server` 执行、MCP、Memory和Skills场景。公开app-server smoke
@@ -112,6 +157,13 @@ Computer 注册与主动执行验收组：`18_computer_workspace`。仅注册运
 覆盖范围与证据见
 [场景说明](scenarios/18_computer_workspace/README.md)。
 
+多控制面同步运行 `just e2e-group 19_computer_sync`，需要真实 macOS、Docker、
+Cloud 测试服务和相同的 Python/Node 依赖。Sync 固定为公开 v0.1.3 Release 的
+不可变镜像 digest，与锁定 SDK/types 版本对齐；不再默认编译旁边的源码仓库。
+该组属于本地拓扑验收，不能称为已有 GitHub PR 门禁通过；构建目录隔离的轻量
+回归已纳入 CI。执行类场景需要有额度的模型，注册场景不需要，详见
+[场景说明](scenarios/19_computer_sync/README.md)。
+
 ## 证据和临时数据
 
 生成证据写入 `talos-e2e/reports/`。临时 Talos home 和场景数据默认使用
@@ -125,3 +177,11 @@ Computer 注册与主动执行验收组：`18_computer_workspace`。仅注册运
 - 只有明确负责集成的场景才使用真实服务。
 - 复用共享 runner helper 和 fixture，不重复 setup。
 - 需要手工证据时，保留能够证明关键行为的日志或报告。
+
+`06_tools/cli_bash` 接受上游没有思考文本的响应，即使请求已开启思考；仍要求 Bash 成功执行及工具调用身份一致，不要求伪造思考事件。空思考正常结束、非空思考和工具参数原样传递，由确定性的 Provider 传输回归验证。`13_interaction/user_action_http` 保留精确命令、审批、副作用及终态历史检查，不把实体转义后的命令视为等价命令。
+
+## 20 浏览器与资源工作区
+
+新增标准编号组 `20_browser_workspace`，按场景分为 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop MCP、Docker Worker 五个用例。每个用例验证独立的产品边界，不把单元测试重复包装成 E2E。执行 `just e2e-group 20_browser_workspace`；轻量资源改动仅选择 `20_browser_workspace/01_resource_tabs`，浏览器宿主与后端改动在 PR gate 通过标准 runner 执行完整组，避免重复跑同一场景。
+
+前置条件、断言、隔离清理、截图归档和真实模型验收边界见[组说明](scenarios/20_browser_workspace/README.md)。公共网页与本地 Markdown 同时覆盖 Web/Desktop；远程电脑 Tab 只由 Docker Worker 能力提供。受控模型链路验证不等同于真实模型自主浏览与产品分析。

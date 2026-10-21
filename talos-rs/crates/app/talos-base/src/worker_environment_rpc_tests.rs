@@ -109,6 +109,14 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
     })
     .await
     .unwrap();
+    let context = WorkerEnvironmentContext {
+        user_id: "user-1".into(),
+        username: None,
+        workspace_id: None,
+    };
+    // A published environment must already be able to dispatch its first call.
+    // Do not hide Connect handshake ordering behind the later direct TLS setup.
+    let first_outbound = outbound.workspace_info(context.clone()).await.unwrap();
     let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let pem = certificate.cert.pem();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -139,13 +147,9 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
     )
     .await
     .unwrap();
-    let context = WorkerEnvironmentContext {
-        user_id: "user-1".into(),
-        username: None,
-        workspace_id: None,
-    };
     let expected = environment.workspace_info(context.clone()).await.unwrap();
     assert_eq!(expected.workspace_id, "pc");
+    assert_eq!(first_outbound, expected);
     assert_eq!(
         direct.workspace_info(context.clone()).await.unwrap(),
         expected

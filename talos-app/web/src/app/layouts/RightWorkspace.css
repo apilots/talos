@@ -1,0 +1,40 @@
+#talos-right-workspace {
+  opacity: 0;
+  transform: translateX(100%);
+  transition: width 200ms ease-out, transform 200ms ease-out, opacity 200ms ease-out,
+    display 200ms allow-discrete, overlay 200ms allow-discrete;
+}
+
+#talos-right-workspace[open] {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+#talos-right-workspace[data-presentation="split"] {
+  width: var(--workspace-width);
+}
+
+#talos-right-workspace[data-presentation="split"]:not([open]) {
+  width: 0;
+}
+
+@starting-style {
+  #talos-right-workspace[open] {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+
+  #talos-right-workspace[data-presentation="split"][open] {
+    width: 0;
+  }
+}
+
+#talos-right-workspace[data-resizing="true"] {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #talos-right-workspace {
+    transition: none;
+  }
+}

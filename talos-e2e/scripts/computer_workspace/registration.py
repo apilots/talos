@@ -102,6 +102,7 @@ def public(cluster, path, user='alice', method='GET', body=None):
 def start_ingress(cluster):
     if not hasattr(cluster, 'ingress'):
         cluster.ingress = f'https://127.0.0.1:{free_port()}'
+    # Ubuntu 24.04 ships Caddy 2.6; this CA-file directive also works on newer Caddy.
     config = cluster.root / 'Caddyfile'
     config.write_text(f'''{{
     admin off
@@ -113,7 +114,7 @@ def start_ingress(cluster):
     handle @grpc {{
         reverse_proxy https://127.0.0.1:{cluster.rpc_port} {{
             transport http {{
-                tls_trust_pool file {cluster.cert}
+                tls_trusted_ca_certs {cluster.cert}
             }}
         }}
     }}

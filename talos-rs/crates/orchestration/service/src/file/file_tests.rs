@@ -908,3 +908,77 @@ async fn recovery_removes_more_than_one_bounded_batch() {
         .unwrap()
         .is_empty());
 }
+
+#[tokio::test]
+async fn markdown_upload_reads_original_bytes_and_keeps_owner_and_allowlist_checks() {
+    let files = TestFiles::new(|_| {}).await;
+    let owner = Actor::regular("markdown-owner");
+    let content =
+        "# 模块化工作区\n\n| Resource | Owner |\n| --- | --- |\n| Markdown | FileService |\n";
+    let uploaded = files
+        .service
+        .upload(
+            &owner,
+            FileUploadRequest {
+                filename: "workspace.Markdown".into(),
+                scope: FileScope::Personal,
+                tags: vec![],
+                metadata: BTreeMap::new(),
+            },
+            Box::pin(stream::iter(
+                content
+                    .as_bytes()
+                    .chunks(1)
+                    .map(|chunk| Ok(Bytes::copy_from_slice(chunk)))
+                    .collect::<Vec<_>>(),
+            )),
+        )
+        .await
+        .unwrap()
+        .file;
+    assert_eq!(uploaded.mime_type, "text/markdown");
+    assert_eq!(uploaded.size_bytes, content.len() as u64);
+    let request = FileReadRequest {
+        file_id: uploaded.file_id,
+    };
+    let read = files
+        .service
+        .read_content(&owner, request.clone())
+        .await
+        .unwrap();
+    assert_eq!(read.bytes.as_ref(), content.as_bytes());
+    let error = files
+        .service
+        .read_content(&Actor::regular("other-user"), request)
+        .await
+        .err()
+        .unwrap();
+    assert!(error.is_code(ErrorCode::ResourceNotFound));
+
+    let restricted = TestFiles::new(|config| {
+        config.allowed_mime_types.remove("text/markdown");
+    })
+    .await;
+    let error = restricted
+        .service
+        .upload(
+            &owner,
+            FileUploadRequest {
+                filename: "review.md".into(),
+                scope: FileScope::Personal,
+                tags: vec![],
+                metadata: BTreeMap::new(),
+            },
+            bytes_stream(b"# Review\n"),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is_code(ErrorCode::UnsupportedMediaType));
+    assert!(restricted
+        .service
+        .list(&owner, FileListRequest::default())
+        .await
+        .unwrap()
+        .data
+        .is_empty());
+}

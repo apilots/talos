@@ -57,3 +57,17 @@ This directory is a deployment example, not part of the production Server
 rollout. Nothing in the Server Compose files starts or deploys this Worker.
 See the [Worker image guide](../../../build/worker/README.md) for image/runtime
 details.
+
+### Browser runtime
+
+Keep `chromium-seccomp.json` beside `docker-compose.yml`; the standard image's
+managed Chromium requires the supplied user-namespace seccomp allowances and
+private shared memory. The browser, virtual display and VNC processes start
+lazily as the Worker user. No Worker port mapping is added. Browser/CDP/VNC
+ports stay private to the container; the product viewer uses the configured
+trusted Agent ingress and the authenticated same-origin WSS route. It does not
+share the Docker host or a native Desktop screen.
+
+See [Worker image browser boundary](../../../build/worker/README.md#managed-browser-boundary)
+for pins, profile origin and sandbox requirements. Retain the Worker home when
+replacing the container to preserve browser login and explicit pause choices.

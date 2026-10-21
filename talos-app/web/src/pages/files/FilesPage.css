@@ -1,0 +1,19 @@
+.files-page-content {
+  container: files-page / inline-size;
+}
+
+.files-page-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container files-page (min-width: 32rem) {
+  .files-page-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container files-page (min-width: 48rem) {
+  .files-page-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

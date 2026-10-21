@@ -92,22 +92,22 @@ function McpServerRow({
   server: McpServerView;
 }) {
   const { t } = useTranslation(["plugins", "settings"]);
-
+  const builtin = server.id === "builtin_browser";
   return (
-    <div className="grid min-h-[4.5rem] grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] items-center gap-4 border-b border-border/65 px-5 last:border-b-0 max-sm:grid-cols-3 max-sm:py-3">
-      <div className="min-w-0 max-sm:col-span-3">
+    <div className={cn("grid min-h-[4.5rem] items-center gap-4 border-b border-border/65 px-5 last:border-b-0 max-sm:py-3", builtin ? "grid-cols-[minmax(0,1fr)_max-content_max-content] max-sm:grid-cols-[minmax(0,1fr)_max-content]" : "grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] max-sm:grid-cols-3")}>
+      <div className={cn("min-w-0",!builtin&&"max-sm:col-span-3")}>
         <span className="block truncate text-sm font-medium text-ink">{server.name}</span>
         <span className="mt-0.5 block truncate text-xs text-muted max-sm:whitespace-normal max-sm:break-words">
-          {server.transport ?? t("settings:mcpServers.unknownTransport")}
+          {server.id === "builtin_browser" ? t("settings:mcpServers.browser.builtIn") : server.transport ?? t("settings:mcpServers.unknownTransport")}
           {server.connection ? ` · ${t(`settings:mcpServers.connectionState.${server.connection.status.status}`)} · ${t("settings:mcpServers.toolsCount", { count: server.connection.toolCount })}` : ""}
         </span>
         {server.connection && "error" in server.connection.status ? <p className="mt-1 text-xs text-danger">{apiErrorMessage(server.connection.status.error)}</p> : null}
       </div>
-      <span className="inline-flex items-center gap-2 text-sm text-muted max-sm:col-span-3">
+      <span className={cn("inline-flex items-center gap-2 text-sm text-muted",builtin?"max-sm:hidden":"max-sm:col-span-3")}>
         <span className={cn("size-1.5 rounded-full", server.enabled ? "bg-success" : "bg-muted/60")} />
         {server.enabled ? t("plugins:status.enabled") : t("plugins:status.disabled")}
       </span>
-      <button
+      {!builtin ? <button
         aria-label={t("settings:mcpServers.openPlugin")}
         className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-card/80 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         disabled={busy}
@@ -115,7 +115,7 @@ function McpServerRow({
         type="button"
       >
         <Settings aria-hidden="true" size={16} />
-      </button>
+      </button> : null}
       <button
         aria-label={server.enabled ? t("plugins:actions.disable") : t("plugins:actions.enable")}
         className={cn(
@@ -128,7 +128,7 @@ function McpServerRow({
       >
         {server.enabled ? <ToggleRight aria-hidden="true" size={28} /> : <ToggleLeft aria-hidden="true" size={28} />}
       </button>
-      <button
+      {!builtin ? <button
         aria-label={t("plugins:actions.uninstall")}
         className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-danger/10 hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/25"
         disabled={busy}
@@ -136,7 +136,7 @@ function McpServerRow({
         type="button"
       >
         <Trash2 aria-hidden="true" size={16} />
-      </button>
+      </button> : null}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Button } from "@/shared/ui/Button";
 import { useComputer, useProductScope } from "../hooks";
 import { ComputerDetails } from "../ComputerDetails";
+import { ComputerDesktopButton } from "../ComputerDesktop";
 import { SyncPeerDetails } from "./SyncPeerDetails";
 import { ComputerRegistrationActions } from "./ComputerRegistrationActions";
 import { computerPeers } from "./observations";
@@ -108,6 +109,7 @@ export function ComputerInspector({
       {!node.available ? (
         <p className="cmp-footnote">{t("computers:offlineHelp")}</p>
       ) : null}
+      <ComputerDesktopButton nodeId={node.nodeId} online={node.available} />
       <SyncPeerDetails
         peers={peers}
         metrics={metrics}

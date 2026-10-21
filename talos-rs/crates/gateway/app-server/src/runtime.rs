@@ -1,3 +1,6 @@
+mod desktop_host;
+use desktop_host::{complete_host_error, complete_host_response};
+
 mod notifications;
 use notifications::{
     map_subscription_close_reason, send_active_turn_changed, send_event,
@@ -22,7 +25,7 @@ use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
 use talos_logging::report_error;
 use talos_service::{Actor, TimelineSubscription, TimelineSubscriptionMessage};
 use talos_types::{ApiResponse, EventUnsubscribeResponse};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::application::{AppServerApplication, ProtocolResult};
@@ -32,6 +35,7 @@ const DEFAULT_MAX_INCOMING_FRAME_BYTES: usize = 68 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct AppServerConfig {
+    pub desktop_host: Option<Arc<crate::DesktopHostBridge>>,
     pub outgoing_capacity: usize,
     pub subscription_capacity: usize,
     pub server_name: String,
@@ -43,6 +47,7 @@ pub struct AppServerConfig {
 impl Default for AppServerConfig {
     fn default() -> Self {
         Self {
+            desktop_host: None,
             outgoing_capacity: 256,
             subscription_capacity: 256,
             server_name: "talos-app-server".to_string(),
@@ -54,6 +59,7 @@ impl Default for AppServerConfig {
 }
 
 enum OutgoingMessage {
+    Request(JsonRpcRequest),
     Response(JsonRpcResponse),
     Error(JsonRpcErrorResponse),
     Notification(JsonRpcNotification),
@@ -123,155 +129,186 @@ where
     let max_incoming_frame_bytes = max_incoming_frame_bytes.max(1);
     let (outgoing_tx, outgoing_rx) = mpsc::channel(config.outgoing_capacity.max(1));
     let mut writer_task = tokio::spawn(write_loop(writer, outgoing_rx));
-    let mut state = RuntimeState::default();
-    let mut reader = BufReader::new(reader);
-    let mut line = Vec::new();
-    let mut writer_finished = false;
-    let mut worker_failures = app.subscribe_worker_failures();
+    let browser_requests = config
+        .desktop_host
+        .as_ref()
+        .map(|host| host.take_receiver())
+        .transpose()
+        .map_err(|error| {
+            AppServerErrorBody::new(
+                AppServerErrorCode::InternalError,
+                error.to_api_error().message,
+            )
+        })?;
+    // Host responses must progress while a serialized business command awaits them.
+    // Keep business dispatch serial; only transport framing/correlation runs alongside it.
+    let stop = tokio_util::sync::CancellationToken::new();
+    let (line_tx, mut line_rx) = mpsc::channel(16);
+    let read_loop = desktop_host::read_requests(
+        reader,
+        max_incoming_frame_bytes,
+        config.desktop_host.clone(),
+        outgoing_tx.clone(),
+        line_tx,
+        stop.clone(),
+    );
+    let host_loop =
+        desktop_host::forward_requests(browser_requests, outgoing_tx.clone(), stop.clone());
+    let serve_loop = async {
+        let mut state = RuntimeState::default();
+        let mut line = Vec::new();
+        let mut _frame_permit = None;
+        let mut writer_finished = false;
+        let mut worker_failures = app.subscribe_worker_failures();
 
-    loop {
-        tokio::select! {
-            changed = async {
-                match &mut worker_failures {
-                    Some(receiver) => receiver.changed().await,
-                    None => std::future::pending().await,
-                }
-            } => {
-                if changed.is_err() {
-                    worker_failures = None;
-                } else if let Some(error) = worker_failures.as_ref().and_then(|receiver| receiver.borrow().clone()) {
-                    let params = match serde_json::to_value(error) {
-                        Ok(params) => params,
-                        Err(source) => {
-                            report_error(&TalosError::internal_with_source("Serialize Worker registration failure.", source));
-                            break;
-                        }
-                    };
-                    if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
-                        "desktop/worker/failed", Some(params),
-                    ))).await.is_err() { break; }
-                } else if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
-                    "desktop/worker/ready", None,
-                ))).await.is_err() { break; }
-            }
-
-            line_result = read_bounded_line(
-                &mut reader,
-                &mut line,
-                max_incoming_frame_bytes,
-            ) => {
-                match line_result {
-                    Ok(BoundedLineRead::Line) => {
-                        let line = match std::str::from_utf8(&line) {
-                            Ok(line) => line,
-                            Err(error) => {
-                                let error = TalosError::from_source(
-                                    ErrorCode::InvalidRequest,
-                                    "The app-server request is not valid UTF-8.",
-                                    error,
-                                );
-                                report_error(&error);
-                                // A disconnected receiver is already handled by the output task.
-                                let _ = outgoing_tx
-                                    .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
-                                        None,
-                                        AppServerErrorBody::parse_error(error.to_api_error().message),
-                                    )))
-                                    .await;
+        loop {
+            tokio::select! {
+                changed = async {
+                    match &mut worker_failures {
+                        Some(receiver) => receiver.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if changed.is_err() {
+                        worker_failures = None;
+                    } else if let Some(error) = worker_failures.as_ref().and_then(|receiver| receiver.borrow().clone()) {
+                        let params = match serde_json::to_value(error) {
+                            Ok(params) => params,
+                            Err(source) => {
+                                report_error(&TalosError::internal_with_source("Serialize Worker registration failure.", source));
                                 break;
                             }
                         };
-                        if handle_line(
-                            line,
-                            &mut state,
-                            app.clone(),
-                            validator.clone(),
-                            &config,
-                            outgoing_tx.clone(),
-                        )
-                        .await
-                        .is_err()
-                        {
+                        if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
+                            "desktop/worker/failed", Some(params),
+                        ))).await.is_err() { break; }
+                    } else if outgoing_tx.send(OutgoingMessage::Notification(JsonRpcNotification::new(
+                        "desktop/worker/ready", None,
+                    ))).await.is_err() { break; }
+                }
+
+                line_result = async {match line_rx.recv().await {Some((result,frame,permit))=>{line=frame;_frame_permit=permit;result},None=>Ok(BoundedLineRead::Eof)}} => {
+                    match line_result {
+                        Ok(BoundedLineRead::Line) => {
+                            let line = match std::str::from_utf8(&line) {
+                                Ok(line) => line,
+                                Err(error) => {
+                                    let error = TalosError::from_source(
+                                        ErrorCode::InvalidRequest,
+                                        "The app-server request is not valid UTF-8.",
+                                        error,
+                                    );
+                                    report_error(&error);
+                                    // A disconnected receiver is already handled by the output task.
+                                    let _ = outgoing_tx
+                                        .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
+                                            None,
+                                            AppServerErrorBody::parse_error(error.to_api_error().message),
+                                        )))
+                                        .await;
+                                    break;
+                                }
+                            };
+                            if handle_line(
+                                line,
+                                &mut state,
+                                app.clone(),
+                                validator.clone(),
+                                &config,
+                                outgoing_tx.clone(),
+                            )
+                            .await
+                            .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Ok(BoundedLineRead::Eof) => break,
+                        Ok(BoundedLineRead::LimitExceeded) => {
+                            // A disconnected receiver is already handled by the output task.
+                            let _ = send_error(
+                                outgoing_tx.clone(),
+                                /*id*/ None,
+                                AppServerErrorBody::parse_error(format!(
+                                    "incoming JSONL frame exceeds {max_incoming_frame_bytes} bytes"
+                                )),
+                            ).await;
+                            break;
+                        }
+                        Err(err) => {
+                            let error = TalosError::internal_with_source(
+                                "Failed to read the app-server request stream.",
+                                err,
+                            );
+                            report_error(&error);
+                            // A disconnected receiver is already handled by the output task.
+                            let _ = outgoing_tx
+                                .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
+                                    None,
+                                    AppServerErrorBody::parse_error(error.to_api_error().message),
+                                )))
+                                .await;
                             break;
                         }
                     }
-                    Ok(BoundedLineRead::Eof) => break,
-                    Ok(BoundedLineRead::LimitExceeded) => {
-                        // A disconnected receiver is already handled by the output task.
-                        let _ = send_error(
-                            outgoing_tx.clone(),
-                            /*id*/ None,
-                            AppServerErrorBody::parse_error(format!(
-                                "incoming JSONL frame exceeds {max_incoming_frame_bytes} bytes"
-                            )),
-                        ).await;
-                        break;
+                    line=Vec::new();
+                    _frame_permit=None;
+                }
+                writer_result = &mut writer_task => {
+                    match writer_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => report_error(&err),
+                        Err(err) => report_error(&TalosError::internal_with_source("The app-server output task stopped unexpectedly.", err)),
                     }
-                    Err(err) => {
-                        let error = TalosError::internal_with_source(
-                            "Failed to read the app-server request stream.",
-                            err,
-                        );
-                        report_error(&error);
-                        // A disconnected receiver is already handled by the output task.
-                        let _ = outgoing_tx
-                            .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
-                                None,
-                                AppServerErrorBody::parse_error(error.to_api_error().message),
-                            )))
-                            .await;
-                        break;
-                    }
+                    writer_finished = true;
+                    break;
                 }
             }
-            writer_result = &mut writer_task => {
-                match writer_result {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => report_error(&err),
-                    Err(err) => report_error(&TalosError::internal_with_source("The app-server output task stopped unexpectedly.", err)),
+        }
+
+        if let Some(host) = &config.desktop_host {
+            host.close();
+        }
+        cancel_owned_turns(app.clone(), &state.owned_turn_sessions).await;
+
+        const DRAIN_BACKGROUND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+        if let Err(err) = app.drain_background_tasks(DRAIN_BACKGROUND_TIMEOUT).await {
+            report_error(&err.context("drain background tasks during shutdown"));
+        }
+
+        // Keep subscriptions alive while background drains run so final turn events can still be
+        // forwarded. After the drain boundary, abort them explicitly; idle subscriptions wait on
+        // the TalosService stream and would otherwise keep stdio shutdown from completing.
+        for (_, task) in state.subscription_tasks {
+            task.abort();
+            if let Err(error) = task.await {
+                if !error.is_cancelled() {
+                    report_error(&TalosError::internal_with_source(
+                        "The event subscription task failed.",
+                        error,
+                    ));
                 }
-                writer_finished = true;
-                break;
             }
         }
-    }
 
-    cancel_owned_turns(app.clone(), &state.owned_turn_sessions).await;
+        stop.cancel();
+        drop(outgoing_tx);
 
-    const DRAIN_BACKGROUND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-    if let Err(err) = app.drain_background_tasks(DRAIN_BACKGROUND_TIMEOUT).await {
-        report_error(&err.context("drain background tasks during shutdown"));
-    }
-
-    // Keep subscriptions alive while background drains run so final turn events can still be
-    // forwarded. After the drain boundary, abort them explicitly; idle subscriptions wait on
-    // the TalosService stream and would otherwise keep stdio shutdown from completing.
-    for (_, task) in state.subscription_tasks {
-        task.abort();
-        if let Err(error) = task.await {
-            if !error.is_cancelled() {
-                report_error(&TalosError::internal_with_source(
-                    "The event subscription task failed.",
-                    error,
-                ));
+        if !writer_finished {
+            match writer_task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => report_error(&err),
+                Err(err) => report_error(&TalosError::internal_with_source(
+                    "The app-server output task stopped unexpectedly.",
+                    err,
+                )),
             }
         }
-    }
-
-    drop(outgoing_tx);
-
-    if !writer_finished {
-        match writer_task.await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => report_error(&err),
-            Err(err) => report_error(&TalosError::internal_with_source(
-                "The app-server output task stopped unexpectedly.",
-                err,
-            )),
-        }
-    }
-    Ok(())
+        Ok(())
+    };
+    let (_, _, result) = tokio::join!(read_loop, host_loop, serve_loop);
+    result
 }
 
 enum BoundedLineRead {
@@ -351,10 +388,26 @@ async fn handle_line(
         JsonRpcMessage::Notification(notification) => {
             if notification.method == "initialized" {
                 state.initialized_notification_seen = true;
+                if state.actor.is_some() {
+                    if let Some(host) = &config.desktop_host {
+                        host.activate();
+                    }
+                }
             }
             Ok(())
         }
-        JsonRpcMessage::Response(_) | JsonRpcMessage::Error(_) => Ok(()),
+        JsonRpcMessage::Response(response) => {
+            if let Some(host) = &config.desktop_host {
+                complete_host_response(host, response);
+            }
+            Ok(())
+        }
+        JsonRpcMessage::Error(response) => {
+            if let Some(host) = &config.desktop_host {
+                complete_host_error(host, response);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -388,6 +441,16 @@ async fn handle_request(
                     AppServerErrorBody::new(
                         ALREADY_INITIALIZED,
                         "app-server is already initialized",
+                    ),
+                )
+                .await;
+            }
+            if config.desktop_host.is_some() && params.client_info.kind != ClientKind::Desktop {
+                return send_error(
+                    outgoing_tx,
+                    Some(id),
+                    AppServerErrorBody::invalid_params(
+                        "This connection requires the bound Desktop client.",
                     ),
                 )
                 .await;
@@ -719,6 +782,7 @@ where
 {
     while let Some(message) = rx.recv().await {
         let line = match message {
+            OutgoingMessage::Request(request) => serde_json::to_string(&request),
             OutgoingMessage::Response(response) => serde_json::to_string(&response),
             OutgoingMessage::Error(error) => serde_json::to_string(&error),
             OutgoingMessage::Notification(notification) => serde_json::to_string(&notification),

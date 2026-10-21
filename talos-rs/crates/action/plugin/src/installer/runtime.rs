@@ -38,6 +38,7 @@ pub(crate) fn installed_plugin(
     install: &PluginInstall,
     enabled: bool,
 ) -> Plugin {
+    plugin.id = install.plugin_id.clone();
     plugin.status = PluginStatus::Installed {
         install_id: install.id.clone(),
         installed_path: install.installed_path.clone(),

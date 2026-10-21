@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Blocks, Brain, FileText, PenLine } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -6,10 +7,11 @@ import { SidebarNavItem } from "./SidebarNavItem";
 import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 interface SidebarPrimaryNavProps {
+  computerEntry?: ReactNode;
   onCreateThread: () => Promise<void> | void;
 }
 
-export function SidebarPrimaryNav({ onCreateThread }: SidebarPrimaryNavProps) {
+export function SidebarPrimaryNav({ onCreateThread, computerEntry }: SidebarPrimaryNavProps) {
   const { t } = useTranslation(["chat", "common", "sidebar"]);
 
   return (
@@ -25,6 +27,7 @@ export function SidebarPrimaryNav({ onCreateThread }: SidebarPrimaryNavProps) {
         <PenLine aria-hidden="true" size={16} />
         <span>{t("chat:newThread")}</span>
       </button>
+      {computerEntry}
       <SidebarNavItem icon={<Brain aria-hidden="true" size={16} />} label={t("sidebar:memory")} to="/memory" />
       <SidebarNavItem icon={<Blocks aria-hidden="true" size={16} />} label={t("sidebar:plugins")} to="/plugins" />
       <SidebarNavItem icon={<FileText aria-hidden="true" size={16} />} label={t("sidebar:files")} to="/files" />

@@ -27,6 +27,7 @@ fn build_turn_execution_metrics_includes_elapsed_duration() {
         execution_summary_streamed: false,
         elapsed_duration_ms: 0,
         active_turn_attachment_tokens: 0,
+        browser_uploads: Vec::new(),
     };
 
     let metrics = build_turn_execution_metrics(&state, StopReason::EndTurn);

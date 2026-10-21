@@ -13,6 +13,8 @@ use talos_types::{DesktopWorkerIdentityResponse, StartTurnRequest, SubscribeTime
 use tokio::sync::Mutex;
 
 pub(crate) struct DesktopApplication {
+    service: Arc<talos_service::TalosService>,
+    media: crate::desktop_media::DesktopMedia,
     pub(crate) config: Config,
     pub(crate) store: YamlConfigStore,
     pub(crate) account: AccountService,
@@ -31,8 +33,11 @@ impl DesktopApplication {
         runtime: &crate::TalosApplicationRuntime,
         device_name: String,
         local: Arc<dyn AppServerApplication>,
+        host: Arc<talos_app_server::DesktopHostBridge>,
     ) -> Self {
         Self {
+            service: runtime.service.clone(),
+            media: crate::desktop_media::DesktopMedia::new(host),
             sync_host: runtime.sync_host.clone(),
             store: YamlConfigStore::new(runtime.config.source_path()),
             config: runtime.config.clone(),
@@ -60,6 +65,15 @@ impl DesktopApplication {
         request: ClientRequest,
     ) -> TalosResult<serde_json::Value> {
         match request.params {
+            ClientRequestParams::DesktopStreamOpen(params) => {
+                value(self.media.open(&self.service, actor, params).await?)
+            }
+            ClientRequestParams::DesktopStreamSend(params) => {
+                value(self.media.send(actor, params).await?)
+            }
+            ClientRequestParams::DesktopStreamClose(params) => {
+                value(self.media.close(actor, params).await?)
+            }
             ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity().await?),
             ClientRequestParams::DesktopWorkerEnroll(params) => {
                 if actor.access_token.is_some()
@@ -111,9 +125,51 @@ impl AppServerApplication for DesktopApplication {
         actor: &Actor,
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        if let ClientRequestParams::Browser(params) = &request.params {
+            if matches!(params.operation, talos_types::BrowserOperation::OpenLocal) {
+                let identity = self.worker_identity().await.map_err(project_error)?;
+                if params.node_id.as_deref() != identity.node_id.as_deref() {
+                    return Err(project_error(TalosError::localized(
+                        talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
+                            operation: talos_error::BrowserCapabilityOperation::OpenLocal,
+                            reason: talos_error::BrowserCapabilityReason::ClientMismatch,
+                        },
+                    )));
+                }
+                // Verify the same local Worker through the regular actor-scoped Service read.
+                self.local
+                    .dispatch(
+                        actor,
+                        ClientRequest {
+                            method: talos_app_protocol::ClientMethod::Browser,
+                            params: ClientRequestParams::Browser(talos_types::BrowserRequest {
+                                node_id: params.node_id.clone(),
+                                operation: talos_types::BrowserOperation::Read,
+                            }),
+                        },
+                    )
+                    .await?;
+                let snapshot = self
+                    .execution
+                    .browser()
+                    .operate(
+                        actor.user_id.clone(),
+                        talos_types::BrowserOperation::OpenLocal,
+                    )
+                    .await
+                    .map_err(project_error)?;
+                return Ok(ApplicationResponse {
+                    body: value(snapshot).map_err(project_error)?,
+                    started_turn: None,
+                });
+            }
+        }
         let host_method = matches!(
             request.params,
-            ClientRequestParams::DesktopWorkerIdentity(_)
+            ClientRequestParams::DesktopStreamOpen(_)
+                | ClientRequestParams::DesktopStreamSend(_)
+                | ClientRequestParams::DesktopStreamClose(_)
+                | ClientRequestParams::DesktopWorkerIdentity(_)
                 | ClientRequestParams::DesktopWorkerEnroll(_)
         );
         if !host_method {
@@ -121,7 +177,10 @@ impl AppServerApplication for DesktopApplication {
                 request.params,
                 ClientRequestParams::AuthLogout(_) | ClientRequestParams::AuthSessionClear(_)
             ) {
+                self.media.close_all().await;
+                let browser = self.execution.browser().reset_account(&actor.user_id).await;
                 let cleanup = self.stop_registration().await;
+                let cleanup = browser.and(cleanup);
                 let result = self.local.dispatch(actor, request).await;
                 cleanup.map_err(project_error)?;
                 return result;
@@ -166,6 +225,7 @@ impl AppServerApplication for DesktopApplication {
     }
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
+        self.media.close_all().await;
         self.stop_registration().await?;
         self.local.drain_background_tasks(timeout).await
     }

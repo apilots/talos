@@ -14,6 +14,8 @@ import {
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 
+import "./FilesPage.css";
+
 function iconForFile(category: FileCategory) {
   switch (category) {
     case "code":
@@ -56,7 +58,7 @@ export function FilesPage() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-8 py-7">
+        <div className="files-page-content mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-8 py-7">
           <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Input
@@ -144,7 +146,7 @@ export function FilesPage() {
               {t("files:loading")}
             </Panel>
           ) : files.view === "grid" ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="files-page-grid grid gap-4">
               <button
                 aria-label={t("files:upload")}
                 className="rounded-[1.3rem] border border-dashed border-border/80 bg-card/60 p-4 text-left transition hover:border-brand/40 hover:bg-card/90 disabled:opacity-50"
@@ -191,45 +193,47 @@ export function FilesPage() {
               })}
             </div>
           ) : (
-            <Panel className="overflow-hidden rounded-[1.4rem] border-border/80 bg-card/82">
-              <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-border/80 px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-muted">
-                <div>{t("files:table.name")}</div>
-                <div>{t("files:table.type")}</div>
-                <div>{t("files:table.size")}</div>
-                <div>{t("files:table.updated")}</div>
-              </div>
-              <button
-                aria-label={t("files:upload")}
-                className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-dashed border-border/80 bg-background/20 px-5 py-4 text-left transition hover:border-brand/40 hover:bg-background/35 disabled:opacity-50"
-                disabled={files.isUploading}
-                onClick={() => fileInputRef.current?.click()}
-                type="button"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-dashed border-border bg-background/50 text-brand">
-                    <Plus size={15} />
-                  </span>
-                  <span className="truncate text-sm font-medium text-ink">
-                    {files.isUploading ? t("files:uploading") : t("files:upload")}
-                  </span>
+            <Panel className="overflow-x-auto rounded-[1.4rem] border-border/80 bg-card/82">
+              <div className="min-w-[640px]">
+                <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-border/80 px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-muted">
+                  <div>{t("files:table.name")}</div>
+                  <div>{t("files:table.type")}</div>
+                  <div>{t("files:table.size")}</div>
+                  <div>{t("files:table.updated")}</div>
                 </div>
-                <div className="col-span-3 self-center truncate text-xs text-muted">
-                  {t("files:noFilesDetail")}
-                </div>
-              </button>
-              {files.filteredItems.map((file) => (
                 <button
-                  className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-border/60 px-5 py-4 text-left last:border-b-0 hover:bg-background/35"
-                  key={file.fileId}
-                  onClick={() => files.selectFile(file.fileId)}
+                  aria-label={t("files:upload")}
+                  className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-dashed border-border/80 bg-background/20 px-5 py-4 text-left transition hover:border-brand/40 hover:bg-background/35 disabled:opacity-50"
+                  disabled={files.isUploading}
+                  onClick={() => fileInputRef.current?.click()}
                   type="button"
                 >
-                  <div className="truncate text-sm font-medium text-ink">{file.originalFilename}</div>
-                  <div className="truncate font-mono text-xs text-muted">{file.mimeType}</div>
-                  <div className="text-xs text-muted">{formatFileSize(file.sizeBytes)}</div>
-                  <div className="text-xs text-muted">{formatFileMeta(file.updatedAt, locale)}</div>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-dashed border-border bg-background/50 text-brand">
+                      <Plus size={15} />
+                    </span>
+                    <span className="truncate text-sm font-medium text-ink">
+                      {files.isUploading ? t("files:uploading") : t("files:upload")}
+                    </span>
+                  </div>
+                  <div className="col-span-3 self-center truncate text-xs text-muted">
+                    {t("files:noFilesDetail")}
+                  </div>
                 </button>
-              ))}
+                {files.filteredItems.map((file) => (
+                  <button
+                    className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-border/60 px-5 py-4 text-left last:border-b-0 hover:bg-background/35"
+                    key={file.fileId}
+                    onClick={() => files.selectFile(file.fileId)}
+                    type="button"
+                  >
+                    <div className="truncate text-sm font-medium text-ink">{file.originalFilename}</div>
+                    <div className="truncate font-mono text-xs text-muted">{file.mimeType}</div>
+                    <div className="text-xs text-muted">{formatFileSize(file.sizeBytes)}</div>
+                    <div className="text-xs text-muted">{formatFileMeta(file.updatedAt, locale)}</div>
+                  </button>
+                ))}
+              </div>
             </Panel>
           )}
 

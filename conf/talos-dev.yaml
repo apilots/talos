@@ -109,23 +109,9 @@ agent:
         path: ~/.codex/skills
         read_only: true
     planner_mode: built_in
+    # Browser is provisioned by the built-in plugin owner, not an on-demand npx server.
     mcp:
-      servers:
-      - name: playwright
-        transport:
-          type: stdio
-          command: npx
-          args:
-          - -y
-          - '@playwright/mcp@latest'
-          - --headless
-          - --isolated
-          - --viewport-size
-          - 1280x900
-          - --executable-path
-          - ${TALOS_PLAYWRIGHT_MCP_BROWSER}
-          - --output-dir
-          - ${TALOS_PLAYWRIGHT_MCP_E2E_OUTPUT}
+      servers: []
     prompt:
       window:
         reserved_output_tokens:
@@ -570,6 +556,7 @@ storage:
       - "image/jpeg"
       - "image/webp"
       - "text/csv"
+      - "text/markdown"
       - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       - "application/vnd.openxmlformats-officedocument.presentationml.presentation"

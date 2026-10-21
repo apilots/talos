@@ -82,6 +82,7 @@ fn memory_get_keeps_the_full_tool_result() {
         execution_summary_streamed: false,
         elapsed_duration_ms: 0,
         active_turn_attachment_tokens: 0,
+        browser_uploads: Vec::new(),
     };
     let body = "x".repeat(1_500);
     let output = ToolExecutionOutput {

@@ -58,7 +58,7 @@ class SyncCluster(Cluster):
                 f'const upstream=net.connect({self.cloud_port},"host.docker.internal");'
                 'socket.pipe(upstream).pipe(socket); upstream.on("error",()=>socket.destroy());'
                 'socket.on("error",()=>upstream.destroy());}).listen(8080,"127.0.0.1");'])
-        self.hub_container = self.docker('hub', os.environ.get('TALOS_SYNC_E2E_IMAGE', 'talos-sync:sync-e2e'), home,
+        self.hub_container = self.docker('hub', os.environ['TALOS_SYNC_E2E_IMAGE'], home,
                                          ['--network', 'container:' + proxy], command=['--config', '/home/talos/.talos/config.yaml'])
         super().start_server()
 

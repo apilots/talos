@@ -1,0 +1,29 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": [
+      "server",
+      "cli"
+    ],
+    "checks": [
+      "model"
+    ]
+  },
+  "cases": {
+    "bilingual_chat.sh": {
+      "checks": [
+        "model"
+      ],
+      "binaries": [
+        "server"
+      ]
+    }
+  }
+}

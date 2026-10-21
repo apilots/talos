@@ -1,0 +1,83 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "node",
+      "pnpm"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "checks": [
+      "chrome",
+      "display"
+    ],
+    "binaries": []
+  },
+  "cases": {
+    "01_resource_tabs.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "curl",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "grpc",
+        "google.protobuf",
+        "playwright"
+      ],
+      "checks": [
+        "chrome"
+      ],
+      "binaries": [
+        "server"
+      ]
+    },
+    "02_desktop_resources.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "grpc",
+        "google.protobuf",
+        "playwright"
+      ],
+      "checks": [
+        "chrome",
+        "display",
+        "caddy"
+      ],
+      "binaries": [
+        "server"
+      ]
+    },
+    "05_docker_worker.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "docker",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "websockets"
+      ],
+      "checks": [
+        "docker",
+        "worker_image"
+      ]
+    }
+  }
+}

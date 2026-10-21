@@ -30,6 +30,7 @@ pub struct ResolvedAttachment {
 /// application for already accepted inputs.
 #[derive(Debug, Clone)]
 pub struct ActiveTurnInput {
+    pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub input: UserInput,
     pub message: ChatMessage,
     pub attachment_tokens: usize,

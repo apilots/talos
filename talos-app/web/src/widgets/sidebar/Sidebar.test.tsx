@@ -63,7 +63,6 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof Sidebar>> = {}, 
       userId: "user-1",
     },
     currentPath: "/sessions/project-session-1",
-    onCollapse: vi.fn(),
     onCreateProjectThread: vi.fn(),
     onCreateThread: vi.fn(),
     onLogout: vi.fn(),
@@ -272,14 +271,6 @@ describe("Sidebar", () => {
     await waitFor(() => {
       expect(props.onRemoveProject).toHaveBeenCalledWith("project-talos");
     });
-  });
-
-  it("can collapse the app sidebar", () => {
-    const { props } = renderSidebar();
-
-    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-
-    expect(props.onCollapse).toHaveBeenCalledOnce();
   });
 
   it("shows settings from the account menu", () => {

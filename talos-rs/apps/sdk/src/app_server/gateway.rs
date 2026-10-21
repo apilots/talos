@@ -475,6 +475,20 @@ impl GatewayClient for AppServerClient {
             .await
     }
 
+    async fn open_desktop(
+        &mut self,
+        request: talos_types::DesktopOpenRequest,
+    ) -> TalosResult<talos_types::DesktopViewGrant> {
+        self.request_typed("desktop/open", request).await
+    }
+
+    async fn browser(
+        &mut self,
+        request: talos_types::BrowserRequest,
+    ) -> TalosResult<talos_types::BrowserSnapshot> {
+        self.request_typed("browser/operate", request).await
+    }
+
     async fn list_mcp_servers(
         &mut self,
         request: talos_types::McpServerListRequest,

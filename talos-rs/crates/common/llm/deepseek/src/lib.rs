@@ -7,10 +7,22 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
-    validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatRequest,
-    ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
+    validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatMessage,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort, Role,
 };
 use tracing::info;
+
+// TODO(PR #50): Revalidate this mitigation on future DeepSeek Flash revisions;
+// remove it after native API acceptance and argument-fidelity regressions pass.
+const TOOL_ARGUMENT_FIDELITY_GUIDANCE: &str = concat!(
+    "Tool argument fidelity: Historical context may quote text in XML using entities ",
+    "such as &amp;, &lt;, and &gt;. These encodings describe historical data, not ",
+    "replacement values for a new tool call. Subject to existing tool policies, ",
+    "preserve the latest request's tool-argument text exactly. Do not copy entity ",
+    "spellings from historical previews in place of literal operators such as && ",
+    "or >. Preserve intentionally literal entity text when it is part of the ",
+    "requested value; do not automatically HTML-decode tool arguments."
+);
 
 /// DeepSeek wire protocol selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,7 +140,8 @@ impl DeepSeekProvider {
     fn reasoning_effort(reasoning_effort: Option<ReasoningEffort>) -> Option<String> {
         reasoning_effort.map(|effort| {
             match effort {
-                ReasoningEffort::Light | ReasoningEffort::Medium | ReasoningEffort::High => "high",
+                ReasoningEffort::Light => "low",
+                ReasoningEffort::Medium | ReasoningEffort::High => "high",
                 ReasoningEffort::XHigh => "max",
             }
             .to_string()
@@ -180,10 +193,30 @@ impl DeepSeekProvider {
 
     fn request_body(
         &self,
-        request: ChatRequest,
+        mut request: ChatRequest,
         stream: bool,
     ) -> TalosResult<(&'static str, Value)> {
         self.validate_request_attachments(&request)?;
+        if matches!(
+            request.model.as_str(),
+            "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp"
+        ) && request
+            .tools
+            .as_ref()
+            .is_some_and(|tools| !tools.is_empty())
+        {
+            let index = request
+                .messages
+                .iter()
+                .position(|message| message.role != Role::System)
+                .unwrap_or(request.messages.len());
+            request
+                .messages
+                .insert(index, ChatMessage::system(TOOL_ARGUMENT_FIDELITY_GUIDANCE));
+        }
+        // TODO(PR #50): Recheck empty reasoning_content on future Flash revisions.
+        // Preserve upstream emptiness in both transports; never synthesize reasoning
+        // or retry a successful response merely to obtain a thinking block.
         let (endpoint, body) = match self.config.protocol {
             DeepSeekProtocol::Chat => (
                 "chat/completions",

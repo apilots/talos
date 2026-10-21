@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=View text file
+Exec=/usr/bin/xterm -hold -title File -fa Monospace -fs 11 -e /usr/bin/cat -- %f
+Terminal=false
+NoDisplay=true
+MimeType=text/plain;

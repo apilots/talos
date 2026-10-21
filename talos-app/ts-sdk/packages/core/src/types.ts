@@ -1,4 +1,5 @@
 export type {
+  BrowserRequest, BrowserOperation, BrowserSnapshot, BrowserTarget, BrowserReadiness, BrowserControlState, BrowserDisplayCapability, DesktopViewGrant, DesktopOpenRequest, BrowserInputMode,
   SyncMetricsResponse, SyncPeerMetrics, SyncMetadataCounts,
   SyncEnableRequest, SyncStatusResponse, SyncConnectionState,
   ComputerListRequest,

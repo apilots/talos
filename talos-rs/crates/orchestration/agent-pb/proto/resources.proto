@@ -87,7 +87,8 @@ message ListSubagentsParams { AgentCaller caller = 1; }
 message ListSubagentsRequest { NodeAuth auth = 1; ListSubagentsParams params = 2; CoordinatorCallContext caller = 3; }
 message ListSubagentsResponse { oneof result { AgentTree tree = 1; Failure failure = 2; } }
 
-message SaveToolImageMetadata { string filename = 1; string media_type = 2; uint64 size_bytes = 3; }
+enum ToolFilePurpose { TOOL_FILE_PURPOSE_IMAGE = 0; TOOL_FILE_PURPOSE_BROWSER_DOWNLOAD = 1; }
+message SaveToolImageMetadata { string filename = 1; string media_type = 2; uint64 size_bytes = 3; ToolFilePurpose purpose = 4; }
 message SaveToolImageRequest {
   NodeAuth auth = 1;
   CoordinatorCallContext caller = 4;

@@ -405,6 +405,16 @@ pub trait GatewayClient: Send {
         request: talos_types::McpCredentialsUpdateRequest,
     ) -> TalosResult<talos_types::McpAuthenticationResponse>;
 
+    async fn open_desktop(
+        &mut self,
+        request: talos_types::DesktopOpenRequest,
+    ) -> TalosResult<talos_types::DesktopViewGrant>;
+
+    async fn browser(
+        &mut self,
+        request: talos_types::BrowserRequest,
+    ) -> TalosResult<talos_types::BrowserSnapshot>;
+
     async fn list_mcp_servers(
         &mut self,
         request: talos_types::McpServerListRequest,

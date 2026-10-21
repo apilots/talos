@@ -113,6 +113,12 @@ pub async fn execute_general_turn_loop_with_policy(
                 execution_mode: execution_settings.tool_execution_mode,
                 max_parallelism: kernel_config.tool_parallelism,
                 execution_context: ToolExecutionContext {
+                    browser_uploads: prepared
+                        .browser_uploads
+                        .iter()
+                        .chain(&state.browser_uploads)
+                        .cloned()
+                        .collect(),
                     session_id: prepared.session_id.clone(),
                     turn_id: prepared.invocation_id.clone(),
                     agent_id: prepared.agent_id.clone(),
@@ -207,6 +213,7 @@ pub async fn execute_general_turn_loop_with_policy(
         } else {
             execute_general_turn_tool_batch(
                 &prepared,
+                &state.browser_uploads,
                 tool_executor.clone(),
                 tool_executor_port.clone(),
                 kernel_config.clone(),
@@ -287,6 +294,7 @@ async fn apply_running_messages(
         )
         .await;
         let message = delivery.acknowledge();
+        state.browser_uploads.extend(message.browser_uploads);
         state.active_turn_attachment_tokens = state
             .active_turn_attachment_tokens
             .saturating_add(message.attachment_tokens);
@@ -390,6 +398,7 @@ async fn apply_general_turn_resume(
     state.messages.extend(resume.tool_messages.clone());
     let mut replay_batch = execute_general_turn_tool_batch(
         prepared,
+        &state.browser_uploads,
         tool_executor,
         tool_executor_port,
         kernel_config.clone(),

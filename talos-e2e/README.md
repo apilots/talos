@@ -24,6 +24,9 @@ talos-e2e/
 From the repository root:
 
 ```bash
+just e2e --list                     # Review the complete discovered scope
+just e2e --check                    # Check prerequisites; no builds or cases
+just e2e                            # Run all discovered scenarios
 just e2e-case 01_health_and_models
 just e2e-group 09_app_server
 just e2e-group 14_sandbox
@@ -36,8 +39,59 @@ talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
 talos-e2e/run_e2e.sh --group 15_tui_install
 ```
 
-The runner prebuilds only binaries required by the selected scenarios. Prefer a
-single case during development and the owning group before handoff.
+Default, `--case` and `--group` use one sorted filesystem catalog: numbered
+`NN_name.sh` files at `scenarios/` root and top-level `*.sh` cases inside numbered
+`NN_name/` directories. Nested helpers and unnumbered directories are excluded.
+New cases and numbered groups are discovered without updating the runner. Exact
+relative paths take precedence over basename lookup; ambiguous basenames fail.
+Selectors cannot be combined or repeated. Optional `.sh` suffixes remain supported.
+
+`--list` can accompany a selector and only prints its selected relative paths. It
+does not load `.env`, probe dependencies, create reports, build or run anything.
+`--check` uses the same scope and loads the normal `.env`; it checks prerequisites
+without building, starting services or calling models. Missing prerequisites are
+reported together with affected cases in `reports/preflight_*.log` and block the
+whole selected run before any build/case. Docker cases are never silently omitted.
+A prerequisite check does not prove credentials, network reachability, browser
+policy or runtime behavior; original scenario checks remain authoritative.
+
+Dependencies live beside their cases in `requirements.json`. `default` applies to
+that directory; `cases` provides filename-specific field replacements, including
+empty lists for secretless/platform-independent exceptions. Root legacy cases use
+`scenarios/requirements.json`; group declarations do not inherit that root file.
+The declaration is not a case registry: new files inherit their group defaults,
+and a new group must declare its dependencies before execution. Unknown fields,
+stale overrides and missing declarations fail explicitly. Supported fields are
+`commands`, `python_modules`, `checks`, `platforms`, `env`, and `binaries`.
+`checks` covers concrete existing prerequisites: Docker daemon, Cloud fixture,
+real model key via `has_real_llm_key`, installed Chrome, Linux Desktop display,
+Caddy, current Worker image availability and native sandbox dependencies.
+`binaries` declares the shared `server`/`cli` prebuild; scenario-owned specialized
+builds stay with their existing wrappers. The Linux launcher prebuild is retained.
+Environment values and secrets are never printed. Example:
+
+```json
+{"default":{"commands":["cargo","protoc"],"checks":["model"],"binaries":["cli"]},
+ "cases":{"catalog.sh":{"checks":[]}}}
+```
+
+Use `TALOS_CLOUD_SERVER_BIN`, `TALOS_E2E_CHROME_BIN`, `TALOS_E2E_CADDY_BIN`,
+`TALOS_E2E_WORKER_IMAGE`, and the owning group's documented prerequisites as needed.
+Group19 requires native macOS and the pinned public Sync release; it remains local
+acceptance, so a default full run on an unsupported platform is blocked explicitly.
+Default full runs pass each case's group identity, matching `--group` semantics:
+native sandbox cases are not implicitly repeated in Docker before the dedicated
+Docker case. An explicitly selected standalone sandbox case retains its existing
+macOS-plus-Docker behavior.
+
+Prefer a single case during development and the owning group before handoff.
+Runner regressions are lightweight and do not execute product scenarios:
+
+```bash
+python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
+```
+
+Python3.9+ is required for discovery. `--help` requires only Bash.
 
 ## Scenario ownership
 
@@ -52,6 +106,7 @@ single case during development and the owning group before handoff.
 | `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
 | `18` | Computer workspace: real Desktop device login, durable UUID, outbound registration and renewal |
 | `19` | Multi-control-plane sync: two native Mac Desktop runtimes, native and Docker Workers, Docker WSS hub, real auth and model tasks |
+| `20` | Browser MCP and resource workspace: shared Web/Desktop tabs and local Markdown, native browser host/MCP, Docker desktop/media/control and profile recovery |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 Groups `04` and `10` are not assigned; use the scenario directory rather than assuming
@@ -59,13 +114,16 @@ that group numbers are contiguous. Frontend unit tests belong to the frontend
 quality workflow and are not repeated as an E2E scenario.
 
 The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `12_files`, and
+`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `20_browser_workspace/01_resource_tabs`, `12_files`, and
 `14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
 `talos-agent` and `talos-service` package tests. These cover public Cloud SDK
 adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
 Worker reservation barriers, and the imported-history/Shared-confirmation race. `15_tui_install` has
 its own four-platform native and Linux Docker gate. The PR workflow does not
 receive repository secrets and does not check out private repositories.
+
+The existing contract job also runs `talos-llm-deepseek` transport regressions
+against controlled loopback responses; those tests require no provider credentials.
 
 Maintainers can manually run the provider-backed `trusted-e2e.yml` workflow from
 `main`, including the full `09_app_server` group whose execution, MCP, memory and
@@ -87,6 +145,20 @@ modes require Python Playwright and installed Chrome (`TALOS_E2E_CHROME_BIN`).
 This case does not exercise a multi-manager Sync deployment; that topology
 remains local group 19 acceptance, with deletion/history covered separately by
 owning-package two-peer Store/CRDT tests.
+
+`20_browser_workspace/01_resource_tabs` mounts the actual product layout in an isolated
+system Chrome instance against real Server/File APIs. Only upstream Auth is a
+contract fixture. Deterministic local previews cover independent same-URL tabs,
+retained form state across switching/collapse, keyboard selection, native modal
+and Escape focus, close/account-scope destruction, and authenticated Markdown
+rendering with non-owner metadata/content rejection. Web-only changes run this
+case alongside Computer registration without requiring a Docker Worker or model.
+Browser owner changes run the complete numbered [group 20](scenarios/20_browser_workspace/README.md)
+once through the standard runner in the dedicated Browser job; the generic matrix
+does not duplicate its resource case.
+Computer live media teardown is covered separately by the Browser Worker
+acceptance and the owning ComputerDesktop component tests; this lightweight case
+does not claim a live remote desktop connection.
 
 `09_app_server/desktop_recovery` uses the real controller, SDK, Server and
 app-server processes with controlled loopback Auth/model HTTP fixtures. It checks
@@ -154,13 +226,16 @@ execution acceptance has resumed after provider funding. See the
 [scenario contract](scenarios/18_computer_workspace/README.md) for scope and evidence.
 
 Multi-control-plane synchronization uses `just e2e-group 19_computer_sync` on a
-Mac with Docker, the adjacent `talos-sync` source, a Cloud fixture executable,
-and the same protobuf/Python/Node prerequisites. The group builds current Worker and Sync
-images, starts isolated real services, and checks owner isolation, hardware
+Mac with Docker, the pinned public Sync v0.1.3 image, a Cloud fixture executable,
+and the same protobuf/Python/Node prerequisites. The group builds the current Worker
+image and pulls the immutable Sync Release digest without a sibling source checkout.
+It starts isolated real services and checks owner isolation, hardware
 registration, realtime history, same-Computer continuation, offline outbox,
 and restart recovery. Only execution/recovery cases need funded model access;
 registration does not. See the [scenario contract](scenarios/19_computer_sync/README.md).
 The Cloud frontend is not required: the fixture uses real device authorization APIs.
+This complete macOS/Docker/Cloud topology remains local acceptance, separate from
+the secretless hosted PR gate. Its isolated Docker-context regressions run in CI.
 
 ## Evidence and temporary data
 
@@ -175,6 +250,14 @@ the location. These directories are generated output, not source documentation.
 - Use real services only in scenarios that explicitly own that integration.
 - Reuse shared runner helpers and fixtures instead of duplicating setup.
 - Preserve logs or reports that prove the critical behavior when manual evidence is required.
+
+`06_tools/cli_bash` accepts an upstream response with no reasoning text, including
+when thinking is enabled. It still requires successful Bash execution and matching
+tool-call identities; it does not require a synthetic thinking event. Deterministic
+Provider transport regressions verify empty completion and exact nonempty reasoning
+and argument preservation. `13_interaction/user_action_http` retains exact command,
+approval, side-effect, and terminal-history checks; entity-escaped commands do not
+qualify as equivalent commands.
 
 Group `12_files` retains Local attachment and S3 upload/list/read/delete coverage.
 Its S3 helper owns a standalone Versity Gateway process and temporary directory

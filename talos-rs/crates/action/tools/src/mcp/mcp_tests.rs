@@ -156,6 +156,9 @@ async fn screenshot_result_persists_bytes_and_emits_only_a_file_reference() {
     );
     let serialized = serde_json::to_string(&envelope).unwrap();
     assert!(serialized.contains("screenshot-1"));
+    assert!(envelope.content_items.iter().any(|item| matches!(item,
+        TalosContentItem::Text { text } if text.contains("![Image](talos-file://screenshot-1)")
+    )));
     assert!(!serialized.contains("aW1hZ2UtYnl0ZXM="));
     payload.validate_canonical_result().unwrap();
 }

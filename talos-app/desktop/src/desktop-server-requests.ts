@@ -1,10 +1,20 @@
 import type { AppProtocol } from "@talos/sdk-core";
+import { desktopMediaHost } from "./desktop-media";
+import { desktopBrowserHost } from "./browser-host";
 import { BrowserWindow } from "electron";
 
 export async function handleDesktopServerRequest(
   request: AppProtocol.JsonRpcRequest,
 ): Promise<unknown> {
   switch (request.method) {
+    case "client/desktop/frame":
+      return desktopMediaHost.frame(String(request.id),request.params as AppProtocol.DesktopMediaFrame);
+    case "client/browser/execute":
+      return desktopBrowserHost.execute(String(request.id), request.params as AppProtocol.BrowserHostRequest);
+    case "client/browser/cancel":
+      desktopMediaHost.cancel((request.params as AppProtocol.BrowserHostCancel).requestId);
+      desktopBrowserHost.cancel((request.params as AppProtocol.BrowserHostCancel).requestId);
+      return { kind: "done" };
     case "client/user_input/request":
       return requestDesktopUserInput(request.params as AppProtocol.RequestUserInputParams);
     default:

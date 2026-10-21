@@ -92,10 +92,25 @@ pub fn build_active_turn_input(
         ChatMessage::user_with_attachments(input.text.clone(), attachments)?
     };
     Ok(ActiveTurnInput {
+        browser_uploads: browser_uploads(&resolved_attachments),
         input,
         message,
         attachment_tokens,
     })
+}
+
+/// Preserve original File identities and shared bytes for browser upload admission.
+pub(super) fn browser_uploads(
+    attachments: &[ResolvedAttachment],
+) -> Vec<talos_types::ToolInputFile> {
+    attachments
+        .iter()
+        .map(|file| talos_types::ToolInputFile {
+            file_id: file.file_id.clone(),
+            filename: file.filename.clone(),
+            bytes: file.bytes.clone(),
+        })
+        .collect()
 }
 
 pub(super) fn reserve_prompt_attachment_tokens(

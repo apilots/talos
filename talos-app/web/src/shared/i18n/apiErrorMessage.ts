@@ -7,6 +7,8 @@ export function apiErrorMessage(error: AppProtocol.ApiError | TalosApiError): st
   const descriptor = apiError.localization;
   if (!descriptor) return apiError.message;
   switch (descriptor.type) {
+    case "browserCapabilityUnavailable":
+      return i18n.t(`errors:browserCapability.${descriptor.reason}`, { defaultValue: apiError.message });
     case "computerDeletionActive":
     case "computerRegistrationRemoved":
     case "computerDeletionUnverified":

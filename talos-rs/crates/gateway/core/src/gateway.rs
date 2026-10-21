@@ -381,6 +381,18 @@ pub trait Gateway: Send + Sync {
         request: talos_types::McpCredentialsUpdateRequest,
     ) -> TalosResult<talos_types::McpAuthenticationResponse>;
 
+    async fn open_desktop(
+        &self,
+        actor: &Actor,
+        request: talos_types::DesktopOpenRequest,
+    ) -> TalosResult<talos_types::DesktopViewGrant>;
+
+    async fn browser(
+        &self,
+        actor: &Actor,
+        request: talos_types::BrowserRequest,
+    ) -> TalosResult<talos_types::BrowserSnapshot>;
+
     async fn list_mcp_servers(
         &self,
         actor: &Actor,

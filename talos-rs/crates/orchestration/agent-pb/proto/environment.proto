@@ -1,6 +1,8 @@
 syntax = "proto3";
 package talos.agent.v1;
 import "auth.proto";
+import "desktop.proto";
+import "environment_browser.proto";
 import "environment_config.proto";
 import "environment_plugins.proto";
 import "environment_skills.proto";
@@ -300,6 +302,8 @@ message CompleteMcpAuthenticationResponse {
   oneof result { McpAuthenticationResult value = 1; Failure failure = 2; }
 }
 service WorkerEnvironmentRpc {
+  rpc DesktopOpen(DesktopOpenRpcRequest) returns (DesktopOpenRpcResponse);
+  rpc Browser(BrowserRpcRequest) returns (BrowserRpcResponse);
   rpc CompleteMcpAuthentication(CompleteMcpAuthenticationRequest) returns (CompleteMcpAuthenticationResponse);
   rpc StartMcpAuthentication(StartMcpAuthenticationRequest) returns (StartMcpAuthenticationResponse);
   rpc ImportMcpServer(ImportMcpServerRequest) returns (ImportMcpServerResponse);
@@ -406,3 +410,9 @@ message ImportMcpServerResponse { oneof result { PluginInstallResult value = 1; 
 
 message StartMcpAuthenticationRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; McpAuthenticationStartParams params = 3; McpOAuthCallbackTarget callback_target = 4; }
 message StartMcpAuthenticationResponse { oneof result { McpAuthenticationStartResult value = 1; Failure failure = 2; } }
+
+message BrowserRpcRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; BrowserParams params = 3; }
+message BrowserRpcResponse { oneof result { BrowserSnapshot value = 1; Failure failure = 2; } }
+
+message DesktopOpenRpcRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; WorkerDesktopOpenParams params = 3; }
+message DesktopOpenRpcResponse { oneof result { Empty value = 1; Failure failure = 2; } }

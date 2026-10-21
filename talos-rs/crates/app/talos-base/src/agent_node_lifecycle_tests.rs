@@ -3,6 +3,8 @@ use talos_coordinator::AgentCoordinator;
 
 #[path = "agent_node_connect_tests.rs"]
 mod connect;
+#[path = "agent_desktop_rpc_tests.rs"]
+mod desktop;
 
 struct Fixture {
     management: NodeManagementRpc,

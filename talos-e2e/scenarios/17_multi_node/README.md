@@ -24,6 +24,10 @@ SQLite 只读检查持久化结果。每个场景失败即失败，后续独立�
 `06_parity` 使用支持图片的真实模型，默认 `deepseek-v4-flash-vision-exp`，可通过
 `TALOS_E2E_IMAGE_MODEL` 指定已配置且可访问的视觉模型。默认文本模型继续用于其他场景。
 
+内嵌执行前，通过产品公开的登录后 Sync status 引导注册管理宿主，并验证其电脑归属。
+直接向 Cloud 登录只取得账号凭据，管理员角色本身不等于拥有尚未注册的本机电脑；
+fixture 不直接写注册状态或放宽生产权限校验。
+
 前置条件见 [E2E README](../../README.md)。设置 `TALOS_MULTI_NODE_KEEP_TMP=1` 可保留
 临时环境用于诊断；其中包含测试凭证。日志、带接收时间的 SSE 和结果保存在
 `talos-e2e/reports/17_multi_node/`。

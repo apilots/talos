@@ -5,6 +5,7 @@ async fn active_turn_delivery_reports_kernel_acceptance() {
     let (accepted_tx, accepted_rx) = oneshot::channel();
     let delivery = ActiveTurnInputDelivery::new(
         ActiveTurnInput {
+            browser_uploads: Vec::new(),
             input: UserInput {
                 text: "focus on tests".to_string(),
                 file_ids: Vec::new(),
@@ -26,6 +27,7 @@ async fn dropped_active_turn_delivery_reports_rejection() {
     let (accepted_tx, accepted_rx) = oneshot::channel();
     let delivery = ActiveTurnInputDelivery::new(
         ActiveTurnInput {
+            browser_uploads: Vec::new(),
             input: UserInput::default(),
             message: ChatMessage::user(String::new()),
             attachment_tokens: 0,

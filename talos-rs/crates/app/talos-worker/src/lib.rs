@@ -20,3 +20,5 @@ pub use registration::RegisteredWorker;
 pub use rpc_host::WorkerRpcHost;
 pub use runtime::{TalosWorker, TalosWorkerResources};
 pub use standalone::run as run_standalone;
+
+pub use talos_browser::run_stdio as run_browser_mcp;

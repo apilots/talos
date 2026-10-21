@@ -59,9 +59,13 @@ if [[ -z "${stdout_text}" ]]; then
   echo "CASE cli_chat_stream_tool_exec FAIL empty_stdout"
   exit 1
 fi
-if ! echo "${events_text}" | grep -Eq "THINKING block=|SUMMARY "; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event events=${events_text}"
-  exit 1
+# Providers may return empty reasoning even with thinking enabled. Nonempty
+# reasoning fidelity belongs to deterministic Provider regressions; this real-model
+# scenario verifies successful tool execution and output without requiring it.
+if echo "${events_text}" | grep -Eq "THINKING block=|SUMMARY "; then
+  echo "DETAIL cli_chat_stream_reasoning=present"
+else
+  echo "DETAIL cli_chat_stream_reasoning=empty"
 fi
 if ! echo "${events_text}" | grep -q "TOOL_CALL_STARTED name=Bash internal=Bash"; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_started events=${events_text}"

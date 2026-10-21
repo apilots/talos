@@ -1,6 +1,8 @@
 import type { AppProtocol } from "@talos/sdk-core";
 
 export const TALOS_IPC = {
+  desktopFrame:"talos:desktop-frame",
+  desktopFrameAck:"talos:desktop-frame-ack",
   connect: "talos:connect",
   workerIdentity: "desktop/workerIdentity",
   event: "talos:event",
@@ -16,6 +18,7 @@ export type { TalosRuntimeStateKind, TalosRuntimeState } from "@talos/sdk-app-se
 import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 
 export interface TalosDesktopBridge {
+  onDesktopFrame(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;
   workerIdentity(): Promise<AppProtocol.ApiResponse<AppProtocol.DesktopWorkerIdentityResponse>>;
   connect(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke<T>(

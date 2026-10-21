@@ -2,7 +2,7 @@
 
 [Chinese](RUST_MODULES_zh.md)
 
-The Talos Rust workspace currently contains 55 members. `talos-rs/Cargo.toml`
+The Talos Rust workspace currently contains 58 members. `talos-rs/Cargo.toml`
 is the authoritative membership source; this document explains ownership rather
 than replacing the manifest.
 
@@ -12,8 +12,8 @@ than replacing the manifest.
 | Infrastructure | 7 | `talos-error`, `talos-config`, `talos-logging`, `talos-storage`, `talos-auth`, `talos-automation`, `talos-system-info` |
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
-| Action | 10 | `talos-mcp`, `talos-plugin`, `talos-skills`, tools, policy, sandbox SPI, and platform sandboxes |
-| Orchestration | 12 | `agent-pb`, `agent-protocol`, `agent-client`, `talos-agent-api`, `talos-run-control`, `talos-agent-kernel`, `talos-agent-provider-kernel`, `talos-agent`, `talos-store`, `talos-service`, `talos-router`, `talos-coordinator` |
+| Action | 11 | `talos-browser`, `talos-mcp`, `talos-plugin`, `talos-skills`, tools, policy, sandbox SPI, and platform sandboxes |
+| Orchestration | 13 | `agent-pb`, `agent-protocol`, `agent-client`, `talos-agent-api`, `talos-run-control`, `talos-agent-kernel`, `talos-agent-provider-kernel`, `talos-agent`, `talos-store`, `talos-sync`, `talos-service`, `talos-router`, `talos-coordinator` |
 | Gateway | 4 | `talos-gateway`, `talos-gateway-http`, `talos-app-protocol`, `talos-app-server` |
 | Application composition | 3 | `talos-base`, `talos-worker`, `talos-upgrade` |
 | Apps and SDKs | 4 | `talos-sdk`, `talos-sdk-embedded`, `talos-app-server-test-client`, `talos-tui` |
@@ -64,3 +64,5 @@ than replacing the manifest.
 
 When membership changes, update this inventory from `Cargo.toml`. Historical
 translations must link to the current inventory rather than claim a stale count.
+
+- `crates/action/browser/`: Worker browser state, private invocation/input fences and concrete Docker/native backends. The injected native host port has no gateway dependency; app-server owns JSONL correlation and media consumption.

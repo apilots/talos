@@ -65,6 +65,10 @@ pub struct AppProtocolSchemaRoot {
     pub file_upload_response: talos_types::FileUploadResponse,
     pub mcp_authentication_start_response: talos_types::McpAuthenticationStartResponse,
     pub mcp_authentication_response: talos_types::McpAuthenticationResponse,
+    pub browser_host_response: talos_types::BrowserHostResponse,
+    pub browser_snapshot: talos_types::BrowserSnapshot,
+    pub desktop_view_grant: talos_types::DesktopViewGrant,
+    pub desktop_open_request: talos_types::DesktopOpenRequest,
     pub mcp_server_list_response: talos_types::McpServerListResponse,
     pub file_list_response: talos_types::FileListResponse,
     pub file_read_response: talos_types::FileReadResponse,
@@ -89,6 +93,23 @@ pub fn generate_typescript() -> String {
         "export const PROTOCOL_VERSION = {version} as const;\n\n"
     ));
     output.push_str(&export::<crate::jsonrpc::RequestId>());
+    output.push_str(&export::<talos_types::BrowserAction>());
+    output.push_str(&export::<talos_types::BrowserTabAction>());
+    output.push_str(&export::<talos_types::BrowserHostRequest>());
+    output.push_str(&export::<talos_types::BrowserHostOperation>());
+    output.push_str(&export::<talos_types::BrowserHostResponse>());
+    output.push_str(&export::<talos_types::BrowserHostElement>());
+    output.push_str(&export::<talos_types::BrowserHostPage>());
+    output.push_str(&export::<talos_types::BrowserHostTab>());
+    output.push_str(&export::<talos_types::BrowserHostCancel>());
+    output.push_str(&export::<talos_types::BrowserHostUpload>());
+    output.push_str(&export::<talos_types::BrowserHostFile>());
+    output.push_str(&export::<talos_types::BrowserDownloadReceipt>());
+    output.push_str(&export::<talos_types::DesktopMediaFrame>());
+    output.push_str(&export::<talos_types::DesktopStreamOpen>());
+    output.push_str(&export::<talos_types::DesktopStreamSend>());
+    output.push_str(&export::<talos_types::DesktopStreamClose>());
+
     output.push_str(&export_app_server_error_code());
     output.push_str(&export::<crate::errors::AppServerErrorBody>());
     output.push_str(&export::<crate::requests::ClientMethod>());
@@ -394,6 +415,22 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::McpAuthenticationResponse>());
     output.push_str(&export::<talos_types::McpAuthenticationState>());
     output.push_str(&export::<talos_types::McpServerImportRequest>());
+    output.push_str(&export::<talos_types::BrowserHostKind>());
+    output.push_str(&export::<talos_types::BrowserTargetKind>());
+    output.push_str(&export::<talos_types::BrowserReadiness>());
+    output.push_str(&export::<talos_types::BrowserDisplayUnavailableReason>());
+    output.push_str(&export::<talos_types::BrowserDisplayCapability>());
+    output.push_str(&export::<talos_types::BrowserLocalOpenCapability>());
+    output.push_str(&export::<talos_types::BrowserTarget>());
+    output.push_str(&export::<talos_types::BrowserSuspensionReason>());
+    output.push_str(&export::<talos_types::BrowserControlOwner>());
+    output.push_str(&export::<talos_types::BrowserControlState>());
+    output.push_str(&export::<talos_types::BrowserSnapshot>());
+    output.push_str(&export::<talos_types::BrowserOperation>());
+    output.push_str(&export::<talos_types::BrowserRequest>());
+    output.push_str(&export::<talos_types::BrowserInputMode>());
+    output.push_str(&export::<talos_types::DesktopViewGrant>());
+    output.push_str(&export::<talos_types::DesktopOpenRequest>());
     output.push_str(&export::<talos_types::McpServerListRequest>());
     output.push_str(&export::<talos_types::McpServerListResponse>());
     output.push_str(&export::<talos_types::McpServerStatus>());
@@ -488,6 +525,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_error::ErrorCode>());
     output.push_str(&export_error_code_runtime_enum());
     output.push_str(&export::<talos_error::ApiError>());
+    output.push_str(&export::<talos_error::BrowserCapabilityOperation>());
+    output.push_str(&export::<talos_error::BrowserCapabilityReason>());
     output.push_str(&export::<talos_error::ErrorLocalization>());
     output.push_str(&export::<
         talos_types::ApiResponse<talos_types::UserCurrentResponse>,

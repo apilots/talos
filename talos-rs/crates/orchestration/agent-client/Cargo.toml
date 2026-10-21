@@ -21,6 +21,7 @@ talos-agent-api = { workspace = true }
 talos-error = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-tools = { workspace = true }
+talos-browser = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

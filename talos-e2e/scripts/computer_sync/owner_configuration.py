@@ -51,6 +51,7 @@ def run(cluster):
         print('CASE sync_owner_configures_models_and_web_search_' + name.lower().replace('-', '_') + ' PASS', flush=True)
     denied = http(cluster.url + '/v1/config/llm?nodeId=embedded', token=cluster.users['alice']['access_token'])
     require(denied.get('error', {}).get('code') == 'permissionDenied', 'An owner of another Computer acquired G private configuration')
+    cluster.enroll_management_host('admin')
     require(http(cluster.url + '/v1/config/llm?nodeId=embedded', token=cluster.users['admin']['access_token'])['status'] == 'success',
             'G administrator cannot configure its own private Computer')
     print('CASE sync_center_private_configuration_requires_its_administrator PASS', flush=True)

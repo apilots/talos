@@ -167,7 +167,12 @@ impl DesktopFixture {
             self.runtime.service.clone(),
             128,
         ));
-        let mut host = DesktopApplication::new(&self.runtime, device_name.into(), app);
+        let mut host = DesktopApplication::new(
+            &self.runtime,
+            device_name.into(),
+            app,
+            talos_app_server::DesktopHostBridge::new(),
+        );
         host.account = account;
         host
     }
@@ -843,6 +848,23 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
     );
     assert!(!host.rpc.is_finished());
     host.stop_registration().await.unwrap();
+    fixture.runtime.shutdown_sync().await.unwrap();
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn embedded_shutdown_retires_browser_ipc_before_returning() {
+    let fixture = DesktopFixture::new().await;
+    let browser = fixture.runtime.worker.browser();
+    let socket = browser.start_ipc(fixture.home.path()).await.unwrap();
+    assert!(tokio::net::UnixStream::connect(&socket).await.is_ok());
+    fixture.runtime.shutdown().await.unwrap();
+    assert!(browser.shutdown_token().is_cancelled());
+    assert!(!socket.exists());
+    assert!(!socket.parent().unwrap().exists());
+    assert!(tokio::net::UnixStream::connect(&socket).await.is_err());
     fixture.runtime.shutdown_sync().await.unwrap();
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();

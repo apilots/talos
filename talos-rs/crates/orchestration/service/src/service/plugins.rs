@@ -196,6 +196,70 @@ impl TalosService {
             .disable_plugin(actor.worker_environment_context(), request)
             .await
     }
+    pub async fn browser(
+        &self,
+        actor: &Actor,
+        mut request: BrowserRequest,
+    ) -> TalosResult<BrowserSnapshot> {
+        if matches!(request.operation, BrowserOperation::OpenLocal) {
+            return Err(TalosError::localized(
+                talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
+                    operation: talos_error::BrowserCapabilityOperation::OpenLocal,
+                    reason: talos_error::BrowserCapabilityReason::ClientMismatch,
+                },
+            ));
+        }
+        let node = request.node_id.take().ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Select a Computer for Browser settings.",
+            )
+        })?;
+        let environment = self.worker_environment(actor, Some(&node)).await?;
+        if matches!(
+            request.operation,
+            BrowserOperation::TakeControl { .. } | BrowserOperation::ReleaseControl { .. }
+        ) {
+            let snapshot = environment
+                .browser(
+                    actor.worker_environment_context(),
+                    BrowserRequest {
+                        node_id: None,
+                        operation: BrowserOperation::Read,
+                    },
+                )
+                .await?;
+            if !matches!(
+                snapshot.display,
+                BrowserDisplayCapability::DockerDesktop { .. }
+            ) {
+                return Err(TalosError::localized(
+                    talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
+                        operation: if matches!(
+                            request.operation,
+                            BrowserOperation::TakeControl { .. }
+                        ) {
+                            talos_error::BrowserCapabilityOperation::TakeControl
+                        } else {
+                            talos_error::BrowserCapabilityOperation::ReleaseControl
+                        },
+                        reason: if matches!(
+                            snapshot.host,
+                            BrowserHostKind::Desktop | BrowserHostKind::Native
+                        ) {
+                            talos_error::BrowserCapabilityReason::NativeHost
+                        } else {
+                            talos_error::BrowserCapabilityReason::NotBundled
+                        },
+                    },
+                ));
+            }
+        }
+        environment
+            .browser(actor.worker_environment_context(), request)
+            .await
+    }
+
     pub async fn list_mcp_servers(
         &self,
         actor: &Actor,

@@ -11,6 +11,35 @@ use talos_types::{FileInfo, FileScope, FileUploadRequest};
 pub(crate) struct ToolImages(pub Arc<FileService>);
 
 impl ToolImageStore for ToolImages {
+    fn save_files<'a>(
+        &'a self,
+        user_id: &'a str,
+        files: Vec<talos_types::ToolOutputFile>,
+    ) -> BoxFuture<'a, TalosResult<Vec<FileInfo>>> {
+        Box::pin(async move {
+            let actor = Actor::regular(user_id);
+            let mut saved = Vec::new();
+            for file in files {
+                saved.push(
+                    self.0
+                        .upload(
+                            &actor,
+                            FileUploadRequest {
+                                filename: file.filename,
+                                scope: FileScope::Personal,
+                                tags: vec!["browser".into()],
+                                metadata: Default::default(),
+                            },
+                            Box::pin(futures_util::stream::once(async move { Ok(file.bytes) })),
+                        )
+                        .await?
+                        .file,
+                );
+            }
+            Ok(saved)
+        })
+    }
+
     fn save<'a>(
         &'a self,
         user_id: &'a str,

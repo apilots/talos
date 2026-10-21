@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use talos_browser::BrowserActionExt;
 
 use serde_json::{json, Value};
 use talos_error::{TalosError, TalosResult};
@@ -27,11 +28,21 @@ mod tests;
 #[derive(Clone)]
 pub struct McpConnectionManager {
     runtime: Arc<TalosMcpRuntime>,
+    browser: Option<Arc<talos_browser::BrowserRuntime>>,
 }
 
 impl McpConnectionManager {
     pub fn from_runtime(runtime: Arc<TalosMcpRuntime>) -> Self {
-        Self { runtime }
+        Self {
+            runtime,
+            browser: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_browser(mut self, browser: Arc<talos_browser::BrowserRuntime>) -> Self {
+        self.browser = Some(browser);
+        self
     }
 
     pub fn all_tool_specs(&self) -> Vec<RegisteredToolSpec> {
@@ -88,16 +99,69 @@ impl McpConnectionManager {
         arguments: Option<Value>,
         context: &ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let response = connection
-            .call_tool(
-                McpCallToolRequest {
-                    server_name: connection.name().to_string(),
-                    tool_name: tool.to_string(),
-                    arguments: arguments.unwrap_or(Value::Null),
+        let arguments = arguments.unwrap_or(Value::Null);
+        let request = McpCallToolRequest {
+            server_name: connection.name().to_string(),
+            tool_name: tool.to_string(),
+            arguments: arguments.clone(),
+        };
+        let response = if connection.is_builtin_browser() {
+            let browser = self.browser.as_ref().ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    "Browser execution is unavailable.",
+                )
+            })?;
+            let required = |value: Option<&str>| {
+                value
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        TalosError::new(
+                            talos_error::ErrorCode::PermissionDenied,
+                            "A trusted browser Turn is required.",
+                        )
+                    })
+            };
+            let action = talos_browser::BrowserAction::parse(tool, arguments)?;
+            let lease = browser.authorize(
+                talos_browser::BrowserInvocationIdentity {
+                    user_id: context.user_id().to_owned(),
+                    session_id: context.session_id().to_owned(),
+                    turn_id: required(context.turn_id())?,
+                    call_id: required(context.current_call_id())?,
                 },
-                cancelled(context),
-            )
-            .await?;
+                &action,
+            )?;
+            if let talos_browser::BrowserAction::Upload { file_id, .. } = &action {
+                let file = context.browser_upload(file_id).ok_or_else(|| {
+                    TalosError::new(
+                        talos_error::ErrorCode::PermissionDenied,
+                        "Use a file attached to this Turn.",
+                    )
+                })?;
+                browser.attach_upload(lease.token(), file)?;
+            }
+            let mut response = connection
+                .call_builtin_browser_tool(request, lease.token(), cancelled(context))
+                .await?;
+            let downloads = browser.take_downloads(lease.token())?;
+            if !downloads.is_empty() {
+                let files = context
+                    .image_store()?
+                    .save_files(context.user_id(), downloads.clone())
+                    .await?;
+                browser.downloads_saved(lease.token(), downloads).await?;
+                let payload = json!({"files":files});
+                response.content.push(McpContent::Text {
+                    text: payload.to_string(),
+                });
+                response.structured_content = Some(payload);
+            }
+            response
+        } else {
+            connection.call_tool(request, cancelled(context)).await?
+        };
         call_tool_payload(response, context).await
     }
 
@@ -277,6 +341,10 @@ fn mcp_content_to_payload(
                 let file = files.next().ok_or_else(|| {
                     TalosError::internal("MCP image storage returned incomplete results.")
                 })?;
+                let reference = format!(
+                    "To include this image in your reply, use ![Image](talos-file://{}). This reference requires the reader's File access.",
+                    file.file_id
+                );
                 let item = TalosContentItem::Image {
                     file_id: file.file_id,
                     mime_type: file.mime_type,
@@ -286,6 +354,7 @@ fn mcp_content_to_payload(
                     TalosError::internal_with_source("Failed to encode MCP image reference.", error)
                 })?);
                 content_items.push(item);
+                content_items.push(TalosContentItem::Text { text: reference });
             }
             McpContent::Resource { resource } => {
                 let raw = serde_json::to_value(resource).map_err(|err| {

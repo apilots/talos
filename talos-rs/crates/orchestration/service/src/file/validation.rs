@@ -26,7 +26,7 @@ impl MediaTypeValidator {
 
     pub(super) fn observe(&mut self, bytes: &[u8]) {
         let capture_limit = match self.suffix.as_str() {
-            ".csv" | ".xls" | ".xlsx" => usize::MAX,
+            ".csv" | ".xls" | ".xlsx" | ".md" | ".markdown" => usize::MAX,
             ".doc" | ".docx" => 0,
             _ => MIME_SNIFF_BYTES,
         };
@@ -40,11 +40,12 @@ impl MediaTypeValidator {
             ".doc" => "application/msword",
             ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ".csv" if is_csv(&self.content) => "text/csv",
+            ".md" | ".markdown" if is_markdown_text(&self.content) => "text/markdown",
             ".xls" if Xls::new(Cursor::new(&self.content)).is_ok() => "application/vnd.ms-excel",
             ".xlsx" if Xlsx::new(Cursor::new(&self.content)).is_ok() => {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             }
-            ".csv" | ".xls" | ".xlsx" => return None,
+            ".csv" | ".xls" | ".xlsx" | ".md" | ".markdown" => return None,
             _ => return infer::get(&self.content).map(|kind| kind.mime_type().to_string()),
         };
         Some(mime_type.to_string())
@@ -168,6 +169,16 @@ pub(super) fn normalized_suffix(filename: &str) -> String {
         return String::new();
     }
     format!(".{suffix}")
+}
+
+// Validate the whole upload within FileService's existing upload-size limit.
+// A suffix or a valid sniffed prefix cannot turn a binary tail into text.
+fn is_markdown_text(content: &[u8]) -> bool {
+    std::str::from_utf8(content).is_ok_and(|text| {
+        !text
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    })
 }
 
 fn is_csv(content: &[u8]) -> bool {

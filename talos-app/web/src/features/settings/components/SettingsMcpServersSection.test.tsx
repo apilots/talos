@@ -93,6 +93,18 @@ describe("SettingsMcpServersSection", () => {
     vi.clearAllMocks();
   });
 
+  it("shows only plugin enablement for the built-in Browser", async () => {
+    const plugin = mcpPlugin(true); plugin.id = "builtin_browser";
+    if (plugin.definition.kind === "mcp_server") plugin.definition.plugin.server.display_name = "Browser";
+    apiMocks.listManagedMcpPlugins.mockResolvedValue({ plugins: [plugin], warnings: [] });
+    render(<SettingsMcpServersSection />, { wrapper: createWrapper() });
+    await screen.findByText("Browser");
+    expect(screen.queryByRole("button", { name: "Uninstall" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open MCP plugin" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeEnabled();
+    expect(screen.queryByRole("textbox", { name: "Command to launch" })).not.toBeInTheDocument();
+  });
+
   it("renders installed MCP plugins from the plugin API", async () => {
     apiMocks.listManagedMcpPlugins.mockResolvedValue({
       plugins: [mcpPlugin(true)],

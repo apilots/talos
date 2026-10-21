@@ -21,6 +21,7 @@ dependencies = [
  "subtle",
  "talos-agent",
  "talos-agent-api",
+ "talos-browser",
  "talos-error",
  "talos-llm-provider",
  "talos-logging",
@@ -373,6 +374,7 @@ dependencies = [
  "async-trait",
  "axum-core 0.4.5",
  "axum-macros",
+ "base64 0.22.1",
  "bytes",
  "futures-util",
  "http 1.4.0",
@@ -392,8 +394,10 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
+ "sha1 0.10.6",
  "sync_wrapper 1.0.2",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
@@ -6214,6 +6218,7 @@ dependencies = [
  "talos-agent-api",
  "talos-app-protocol",
  "talos-auth",
+ "talos-browser",
  "talos-config",
  "talos-error",
  "talos-gateway",
@@ -6224,6 +6229,7 @@ dependencies = [
  "talos-types",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
 ]
@@ -6285,6 +6291,7 @@ dependencies = [
  "agent-protocol",
  "async-trait",
  "axum 0.7.9",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures-util",
@@ -6303,6 +6310,7 @@ dependencies = [
  "talos-app-server",
  "talos-auth",
  "talos-automation",
+ "talos-browser",
  "talos-channel",
  "talos-config",
  "talos-coordinator",
@@ -6332,6 +6340,32 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "talos-browser"
+version = "0.1.13-SNAPSHOT"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "libc",
+ "process-wrap",
+ "rmcp",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "talos-error",
+ "talos-fs",
+ "talos-logging",
+ "talos-types",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tokio-util",
+ "url",
  "uuid",
 ]
 
@@ -6828,6 +6862,7 @@ dependencies = [
 name = "talos-service"
 version = "0.1.13-SNAPSHOT"
 dependencies = [
+ "agent-client",
  "agent-protocol",
  "async-trait",
  "base64 0.22.1",
@@ -6848,6 +6883,7 @@ dependencies = [
  "talos-agent",
  "talos-agent-api",
  "talos-auth",
+ "talos-browser",
  "talos-config",
  "talos-coordinator",
  "talos-error",
@@ -6951,7 +6987,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.29.0",
  "tokio-util",
  "tracing",
  "url",
@@ -6975,7 +7011,7 @@ dependencies = [
  "serde_json",
  "talos-sync-types",
  "tokio",
- "tokio-tungstenite",
+ "tokio-tungstenite 0.29.0",
  "tokio-util",
  "url",
 ]
@@ -7021,6 +7057,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "talos-browser",
  "talos-config",
  "talos-error",
  "talos-llm-provider",
@@ -7090,6 +7127,7 @@ dependencies = [
  "talos-sdk-embedded",
  "talos-tools-policy",
  "talos-types",
+ "tempfile",
  "tokio",
  "tracing",
  "unicode-width",
@@ -7100,6 +7138,7 @@ dependencies = [
 name = "talos-types"
 version = "0.1.13-SNAPSHOT"
 dependencies = [
+ "bytes",
  "chrono",
  "schemars 0.8.22",
  "serde",
@@ -7157,6 +7196,7 @@ dependencies = [
  "talos-agent",
  "talos-agent-api",
  "talos-agent-provider-kernel",
+ "talos-browser",
  "talos-config",
  "talos-error",
  "talos-llm-anthropic",
@@ -7536,6 +7576,18 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
+name = "tokio-tungstenite"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c"
@@ -7547,7 +7599,7 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
- "tungstenite",
+ "tungstenite 0.29.0",
 ]
 
 [[package]]
@@ -7878,6 +7930,24 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "termcolor",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http 1.4.0",
+ "httparse",
+ "log",
+ "rand 0.8.5",
+ "sha1 0.10.6",
+ "thiserror 1.0.69",
+ "utf-8",
 ]
 
 [[package]]

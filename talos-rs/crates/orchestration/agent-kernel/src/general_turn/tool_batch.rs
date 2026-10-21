@@ -373,6 +373,7 @@ fn build_model_tool_result_text(reduced: &ReducedToolExecutionOutput) -> String 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_general_turn_tool_batch(
     prepared: &PreparedGeneralTurn,
+    browser_uploads: &[talos_types::ToolInputFile],
     tool_executor: Arc<dyn ToolExecutor>,
     tool_registry: Arc<dyn ToolExecutorPort>,
     kernel_config: Arc<AgentKernelConfig>,
@@ -385,6 +386,12 @@ pub async fn execute_general_turn_tool_batch(
     stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
+        browser_uploads: prepared
+            .browser_uploads
+            .iter()
+            .chain(browser_uploads)
+            .cloned()
+            .collect(),
         session_id: prepared.session_id.clone(),
         turn_id: prepared.invocation_id.clone(),
         agent_id: prepared.agent_id.clone(),

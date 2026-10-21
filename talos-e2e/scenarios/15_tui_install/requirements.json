@@ -1,0 +1,29 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl",
+      "tar",
+      "python3"
+    ],
+    "python_modules": [],
+    "checks": [],
+    "binaries": [],
+    "platforms": [
+      "Darwin",
+      "Linux"
+    ]
+  },
+  "cases": {
+    "02_linux_docker.sh": {
+      "checks": [
+        "docker"
+      ],
+      "commands": [
+        "docker"
+      ],
+      "python_modules": []
+    }
+  }
+}

@@ -99,6 +99,7 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
     let registry = Arc::new(ToolRegistry::new());
     registry.register(Arc::new(DelayedTextTool));
     let execution_context = ToolExecutionContext {
+        browser_uploads: Vec::new(),
         session_id: "agent-a1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-a1".to_string(),

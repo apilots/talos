@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <title>Talos — Quiet orbit</title>
+  <desc>A restrained glass Talos emblem and fine orbital lines on the existing cool desktop palette.</desc>
+  <defs>
+    <radialGradient id="wash" cx=".5" cy=".38" r=".85">
+      <stop stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#e6edf5"/>
+    </radialGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#f9fdff" stop-opacity=".95"/>
+      <stop offset=".45" stop-color="#c7deee" stop-opacity=".58"/>
+      <stop offset="1" stop-color="#9cbad7" stop-opacity=".7"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff"/>
+      <stop offset=".5" stop-color="#91b5d6" stop-opacity=".6"/>
+      <stop offset="1" stop-color="#fff" stop-opacity=".8"/>
+    </linearGradient>
+    <filter id="shadow" x="-.5" y="-.5" width="2" height="2">
+      <feGaussianBlur stdDeviation="45"/>
+    </filter>
+    <path id="body" d="M245 340C249 239 313 136 414 105C514 75 624 113 690 162C750 136 824 137 885 154C992 184 1051 275 1055 383C1154 414 1222 495 1221 606C1220 701 1177 771 1094 816C1084 915 1035 1023 947 1083C870 1135 773 1161 684 1127C635 1108 612 1108 565 1123C477 1151 379 1137 300 1091C210 1039 132 931 127 810C47 772 17 691 34 584C50 484 129 398 245 340Z"/>
+    <path id="mark" d="M424 459C464 452 498 494 545 513C598 535 648 532 708 508C753 490 785 451 823 459C859 466 879 493 867 527C854 565 819 575 782 560C749 547 716 559 685 585C658 608 657 648 661 692C665 738 692 782 671 814C650 845 608 839 584 810C559 780 577 738 582 697C589 650 585 611 552 585C523 562 494 553 466 563C429 576 394 565 381 533C366 496 386 465 424 459Z"/>
+  </defs>
+  <rect width="1440" height="900" fill="url(#wash)"/>
+  <g fill="none" stroke="#91acc9" stroke-width="1">
+    <ellipse cx="720" cy="422" rx="223" ry="70" transform="rotate(-24 720 422)" opacity=".2"/>
+    <path d="M549 506A223 70-24 0 0 907 350" opacity=".25"/>
+    <ellipse cx="720" cy="422" rx="164" ry="158" opacity=".09"/>
+  </g>
+  <g transform="translate(601 292) scale(.19)">
+    <use href="#body" transform="translate(0 64)" fill="#6b8fb5" opacity=".16" filter="url(#shadow)"/>
+    <use href="#body" fill="url(#glass)" stroke="url(#edge)" stroke-width="5"/>
+    <use href="#body" fill="none" stroke="#fff" stroke-width="3" opacity=".7" transform="translate(12 8) scale(.98)"/>
+    <use href="#mark" fill="#f8fcff" opacity=".88" transform="translate(25 32.5) scale(.96 .95)"/>
+  </g>
+  <circle cx="519" cy="468" r="3" fill="#a3bfd6" opacity=".65"/>
+  <circle cx="909" cy="354" r="2" fill="#a3bfd6" opacity=".55"/>
+</svg>

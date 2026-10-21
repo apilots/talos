@@ -1,11 +1,13 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     for source in [
         "auth.proto",
+        "desktop.proto",
         "coordinator.proto",
         "memory.proto",
         "node.proto",
         "connection.proto",
         "environment.proto",
+        "environment_browser.proto",
         "environment_skills.proto",
         "environment_memory.proto",
         "environment_config.proto",
@@ -25,11 +27,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "proto/auth.proto",
+                "proto/desktop.proto",
                 "proto/coordinator.proto",
                 "proto/memory.proto",
                 "proto/node.proto",
                 "proto/connection.proto",
                 "proto/environment.proto",
+                "proto/environment_browser.proto",
                 "proto/environment_skills.proto",
                 "proto/environment_memory.proto",
                 "proto/environment_config.proto",

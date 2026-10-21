@@ -514,6 +514,22 @@ impl Gateway for ServiceGateway {
         self.service.update_mcp_credentials(actor, request).await
     }
 
+    async fn open_desktop(
+        &self,
+        actor: &Actor,
+        request: talos_types::DesktopOpenRequest,
+    ) -> TalosResult<talos_types::DesktopViewGrant> {
+        self.service.open_desktop(actor, request).await
+    }
+
+    async fn browser(
+        &self,
+        actor: &Actor,
+        request: talos_types::BrowserRequest,
+    ) -> TalosResult<talos_types::BrowserSnapshot> {
+        self.service.browser(actor, request).await
+    }
+
     async fn list_mcp_servers(
         &self,
         actor: &Actor,

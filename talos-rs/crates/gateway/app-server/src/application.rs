@@ -212,7 +212,10 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(talos_error_to_api_error)?;
                 to_value(snapshot)
             }
-            ClientRequestParams::DesktopWorkerIdentity(_)
+            ClientRequestParams::DesktopStreamOpen(_)
+            | ClientRequestParams::DesktopStreamSend(_)
+            | ClientRequestParams::DesktopStreamClose(_)
+            | ClientRequestParams::DesktopWorkerIdentity(_)
             | ClientRequestParams::DesktopWorkerEnroll(_) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest))
             }
@@ -592,6 +595,18 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::McpCredentialsUpdate(params) => to_value(
                 self.gateway
                     .update_mcp_credentials(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::DesktopOpen(params) => to_value(
+                self.gateway
+                    .open_desktop(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::Browser(params) => to_value(
+                self.gateway
+                    .browser(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),

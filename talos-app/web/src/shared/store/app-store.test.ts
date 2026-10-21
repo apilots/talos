@@ -52,6 +52,17 @@ describe("app store persistence", () => {
     expect(persisted.state).not.toHaveProperty("transientStatuses");
   });
 
+  it("does not persist workspace resources, active selection or geometry", () => {
+    useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId: "private-computer" });
+    useAppStore.getState().openWorkspaceWindow({ kind: "markdown", fileId: "private-file" });
+    useAppStore.getState().setWorkspaceExpanded(true);
+    useAppStore.getState().setSidebarWidth(340);useAppStore.getState().setWorkspaceWidth(700);useAppStore.getState().setResizingPane("sidebar");
+    const persisted = JSON.parse(storage.get("talos-web-ui") ?? "{}") as { state: Record<string, unknown> };
+    for (const field of ["workspaceWindows", "workspaceActiveKey", "workspaceOpen", "workspaceExpanded", "sidebarWidth", "workspaceWidth", "resizingPane"]) {
+      expect(persisted.state).not.toHaveProperty(field);
+    }
+  });
+
   it("does not persist browser auth token or user snapshot", () => {
     useAppStore.getState().setConnection({
       authToken: "cloud-token",

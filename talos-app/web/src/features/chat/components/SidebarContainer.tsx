@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -14,12 +15,11 @@ import { Sidebar } from "@/widgets/sidebar/Sidebar";
 import type { SidebarProjectGroup } from "@/widgets/sidebar/SidebarProjectSection";
 import type { SidebarSessionItem } from "@/widgets/sidebar/SidebarSessionRow";
 
-export function SidebarContainer({ computer }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo } = {}) {
+export function SidebarContainer({ computer, computerEntry }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo; computerEntry?: ReactNode } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const connection = useAppStore((state) => state.connection);
   const handleLogout = useLogout();
-  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const aliases = useAppStore((state) => state.sessionAliases);
   const statuses = useAppStore((state) => state.transientStatuses);
   const streams = useAppStore((state) => state.streams);
@@ -62,11 +62,11 @@ export function SidebarContainer({ computer }: { computer?: import("@talos/sdk-c
   return (
     <Sidebar
       computer={computer}
+      computerEntry={computerEntry}
       showAccount={false}
       chats={chats}
       connection={connection}
       currentPath={location.pathname}
-      onCollapse={() => setSidebarOpen(false)}
       onCreateThread={async () => {
         navigate("/");
       }}

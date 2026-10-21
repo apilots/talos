@@ -184,6 +184,20 @@ pub(super) async fn disable_plugin_handler(
     Ok(api_success(response))
 }
 
+pub(super) async fn browser_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<talos_types::BrowserRequest>,
+) -> Result<JsonResponse<talos_types::BrowserSnapshot>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .browser(&actor, request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
+}
+
 pub(super) async fn list_mcp_servers_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,

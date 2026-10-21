@@ -36,6 +36,12 @@ pub use client_method::ClientMethod;
 pub enum ClientRequestParams {
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
+    #[serde(rename = "desktop/streamOpen")]
+    DesktopStreamOpen(talos_types::DesktopStreamOpen),
+    #[serde(rename = "desktop/streamSend")]
+    DesktopStreamSend(talos_types::DesktopStreamSend),
+    #[serde(rename = "desktop/streamClose")]
+    DesktopStreamClose(talos_types::DesktopStreamClose),
     #[serde(rename = "desktop/workerIdentity")]
     DesktopWorkerIdentity(Option<()>),
     #[serde(rename = "desktop/workerEnroll")]
@@ -178,6 +184,10 @@ pub enum ClientRequestParams {
     PluginSourceRemove(PluginSourceRemoveRequest),
     #[serde(rename = "plugin/search")]
     PluginSearch(PluginSearchRequest),
+    #[serde(rename = "browser/operate")]
+    Browser(talos_types::BrowserRequest),
+    #[serde(rename = "desktop/open")]
+    DesktopOpen(talos_types::DesktopOpenRequest),
     #[serde(rename = "mcp/server/list")]
     McpServerList(talos_types::McpServerListRequest),
     #[serde(rename = "mcp/server/credentials/update")]
@@ -252,6 +262,15 @@ impl ClientRequest {
         });
         let params = match method_kind {
             ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
+            ClientMethod::DesktopStreamOpen => {
+                ClientRequestParams::DesktopStreamOpen(decode(params_value)?)
+            }
+            ClientMethod::DesktopStreamSend => {
+                ClientRequestParams::DesktopStreamSend(decode(params_value)?)
+            }
+            ClientMethod::DesktopStreamClose => {
+                ClientRequestParams::DesktopStreamClose(decode(params_value)?)
+            }
             ClientMethod::DesktopWorkerIdentity => {
                 ClientRequestParams::DesktopWorkerIdentity(decode(params_value)?)
             }
@@ -413,6 +432,8 @@ impl ClientRequest {
             ClientMethod::McpCredentialsUpdate => {
                 ClientRequestParams::McpCredentialsUpdate(decode(params_value)?)
             }
+            ClientMethod::DesktopOpen => ClientRequestParams::DesktopOpen(decode(params_value)?),
+            ClientMethod::Browser => ClientRequestParams::Browser(decode(params_value)?),
             ClientMethod::McpServerList => {
                 ClientRequestParams::McpServerList(decode(params_value)?)
             }

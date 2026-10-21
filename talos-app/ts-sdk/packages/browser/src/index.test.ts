@@ -282,3 +282,13 @@ function installPendingXhr(autoFinish = false): FakeXhr {
   vi.stubGlobal("XMLHttpRequest", FakeXmlHttpRequest);
   return xhr;
 }
+
+ it("connects desktop media through the SDK and sends current credentials only in the first frame",()=>{
+  let token="old";const sockets:Array<EventTarget & {send:ReturnType<typeof vi.fn>}>=[];
+  const constructor=vi.fn(function(this:EventTarget){const socket=Object.assign(new EventTarget(),{send:vi.fn()});sockets.push(socket);return socket;});vi.stubGlobal("WebSocket",constructor);
+  const client=createBrowserTalosClient({baseUrl:"https://talos.example",getToken:()=>token});
+  const grant={ticket:"ticket-secret",streamId:"stream"} as AppProtocol.DesktopViewGrant;
+  client.desktop.connect(grant);token="current";sockets[0].dispatchEvent(new Event("open"));
+  expect(constructor).toHaveBeenCalledWith("wss://talos.example/v1/desktop/stream");
+  expect(sockets[0].send).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ticket:"ticket-secret",accessToken:"current"}));
+ });

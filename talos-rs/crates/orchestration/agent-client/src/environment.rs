@@ -215,6 +215,28 @@ macro_rules! environment_method {
 }
 impl WorkerEnvironment for AgentEnvironmentClient {
     environment_method!(
+        desktop_open,
+        WorkerDesktopOpen,
+        (),
+        DesktopOpenRpcRequest,
+        DesktopOpen,
+        desktop_open_rpc_response,
+        Value,
+        encode_desktop_open_params,
+        decode_desktop_open_result
+    );
+    environment_method!(
+        browser,
+        BrowserRequest,
+        BrowserSnapshot,
+        BrowserRpcRequest,
+        Browser,
+        browser_rpc_response,
+        Value,
+        encode_browser_params,
+        decode_browser_result
+    );
+    environment_method!(
         list_plugin_sources,
         PluginSourceListRequest,
         PluginSourceListResponse,

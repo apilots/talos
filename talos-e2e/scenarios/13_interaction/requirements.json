@@ -1,0 +1,44 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": [
+      "server"
+    ],
+    "checks": [
+      "model"
+    ]
+  },
+  "cases": {
+    "user_action_desktop.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "node",
+        "pnpm"
+      ],
+      "checks": [
+        "model",
+        "display"
+      ],
+      "binaries": []
+    },
+    "user_action_tui.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "tmux",
+        "sqlite3"
+      ],
+      "binaries": [
+        "cli"
+      ]
+    }
+  }
+}

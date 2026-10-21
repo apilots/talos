@@ -16,6 +16,7 @@ pub struct WorkerEnvironmentService {
     memory_service: Option<crate::MemoryService>,
     plugins: Option<crate::PluginManagerService>,
     config_service: Option<crate::ConfigService>,
+    browser: Option<Arc<talos_browser::BrowserRuntime>>,
 }
 
 impl WorkerEnvironmentService {
@@ -28,6 +29,7 @@ impl WorkerEnvironmentService {
             memory_service: None,
             plugins: None,
             config_service: None,
+            browser: None,
         }
     }
     #[must_use]
@@ -50,6 +52,11 @@ impl WorkerEnvironmentService {
     }
     pub fn with_config_service(mut self, service: crate::ConfigService) -> Self {
         self.config_service = Some(service);
+        self
+    }
+
+    pub fn with_browser(mut self, browser: Arc<talos_browser::BrowserRuntime>) -> Self {
+        self.browser = Some(browser);
         self
     }
 
@@ -147,6 +154,45 @@ macro_rules! plugin_environment_method {
     };
 }
 impl WorkerEnvironment for WorkerEnvironmentService {
+    fn desktop_open(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerDesktopOpen,
+    ) -> AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.browser
+                .as_ref()
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::ServiceUnavailable,
+                        "Browser is unavailable on this Computer.",
+                    )
+                })?
+                .open_desktop(context.user_id, params)
+                .await
+        })
+    }
+
+    fn browser(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: BrowserRequest,
+    ) -> AgentFuture<'_, TalosResult<BrowserSnapshot>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.browser
+                .as_ref()
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::ServiceUnavailable,
+                        "Browser is unavailable on this Computer.",
+                    )
+                })?
+                .operate(context.user_id.clone(), params.operation)
+                .await
+        })
+    }
     plugin_environment_method!(list_plugin_sources(PluginSourceListRequest) -> PluginSourceListResponse => sync list_sources);
     plugin_environment_method!(add_plugin_source(PluginSourceAddRequest) -> PluginSourceAddResponse => sync add_source);
     plugin_environment_method!(refresh_plugin_source(PluginSourceRefreshRequest) -> PluginSourceRefreshResponse => sync refresh_source);

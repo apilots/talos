@@ -53,7 +53,7 @@ export function SettingsMcpServersSection() {
   const plugins = pluginsQuery.data?.plugins ?? [];
   const servers = plugins.map((plugin) => ({ ...mapServerView(plugin), connection: connections.find((server) => server.source.kind === "plugin" && "install_id" in plugin.status && server.source.installId === plugin.status.install_id) }));
   async function saved() { await pluginsQuery.refetch(); await connectionsQuery.refetch(); setFormState(null); }
-  const sources = sourceViews(plugins, (count) => t("mcpServers.serverCount", { count }));
+  const sources = sourceViews(plugins, (count) => t("mcpServers.serverCount", { count }), t("mcpServers.browser.builtInSource"));
 
   async function runPluginAction(plugin: Plugin, action: (plugin: Plugin) => Promise<unknown>) {
     setActionError(null);
@@ -129,7 +129,7 @@ export function SettingsMcpServersSection() {
         onAdd={() => setFormState({ mode: "create" })}
         onDisable={(plugin) => void runPluginAction(plugin, disablePlugin)}
         onEnable={(plugin) => void runPluginAction(plugin, enablePlugin)}
-        onOpen={(plugin) => setFormState({ mode: "update", pluginId: plugin.id })}
+        onOpen={(plugin) => { if (plugin.id !== "builtin_browser") setFormState({ mode: "update", pluginId: plugin.id }); }}
         onUninstall={(plugin) => void runPluginAction(plugin, uninstallPlugin)}
         servers={servers}
         title={t("mcpServers.servers")}
@@ -159,17 +159,17 @@ function mapServerView(plugin: Plugin): McpServerView {
   };
 }
 
-function sourceViews(plugins: Plugin[], formatCount: (count: number) => string): McpSourceView[] {
+function sourceViews(plugins: Plugin[], formatCount: (count: number) => string, builtInName: string): McpSourceView[] {
   const counts = new Map<string, number>();
   for (const plugin of plugins) {
-    const sourceId = plugin.source_id ?? "manual";
+    const sourceId = plugin.id === "builtin_browser" ? "builtin" : plugin.source_id ?? "manual";
     counts.set(sourceId, (counts.get(sourceId) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([id, count]) => ({
       id,
-      name: id,
+      name: id === "builtin" ? builtInName : id,
       count: formatCount(count),
     }));
 }

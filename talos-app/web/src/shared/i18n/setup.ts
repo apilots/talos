@@ -19,6 +19,7 @@ void i18n.use(initReactI18next).init({
     "chat",
     "memory",
     "files",
+    "webPreview",
     "settings",
     "auth",
     "workspaceDocs",

@@ -9,6 +9,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
     let prepared = PreparedGeneralTurn {
+        browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
         invocation_id: "i1".to_string(),

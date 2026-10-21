@@ -1664,6 +1664,1214 @@
       ],
       "type": "object"
     },
+    "BrowserAction": {
+      "description": "Internal closed action, parsed before acquiring any browser authority.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "state"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "navigate"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "element": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "click"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "element",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "element": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "fill"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "element",
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "key"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "delta_x": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "delta_y": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "scroll"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delta_x",
+            "delta_y",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/BrowserTabAction"
+            },
+            "kind": {
+              "enum": [
+                "tab"
+              ],
+              "type": "string"
+            },
+            "tab_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "screenshot"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "download"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "element": {
+              "type": "string"
+            },
+            "file_id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "upload"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "element",
+            "file_id",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserCapabilityOperation": {
+      "enum": [
+        "remoteDesktop",
+        "takeControl",
+        "releaseControl",
+        "openLocal"
+      ],
+      "type": "string"
+    },
+    "BrowserCapabilityReason": {
+      "enum": [
+        "nativeHost",
+        "notBundled",
+        "hostPolicy",
+        "unsupportedVersion",
+        "clientMismatch"
+      ],
+      "type": "string"
+    },
+    "BrowserControlOwner": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "idle"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "controller_id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "handingOver"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "controller_id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "controller_id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "human"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "controller_id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "suspended"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/BrowserSuspensionReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserControlState": {
+      "properties": {
+        "epoch": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/definitions/BrowserControlOwner"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "epoch",
+        "generation",
+        "owner",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "BrowserDisplayCapability": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "dockerDesktop"
+              ],
+              "type": "string"
+            },
+            "target_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/BrowserDisplayUnavailableReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserDisplayUnavailableReason": {
+      "enum": [
+        "nativeHost",
+        "notBundled",
+        "hostPolicy",
+        "unsupportedVersion"
+      ],
+      "type": "string"
+    },
+    "BrowserDownloadReceipt": {
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "BrowserHostCancel": {
+      "properties": {
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "BrowserHostElement": {
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "backendNodeId": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "loaderId": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attributes",
+        "backendNodeId",
+        "loaderId",
+        "tag",
+        "targetId"
+      ],
+      "type": "object"
+    },
+    "BrowserHostFile": {
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "filename"
+      ],
+      "type": "object"
+    },
+    "BrowserHostKind": {
+      "enum": [
+        "docker",
+        "desktop",
+        "native",
+        "server"
+      ],
+      "type": "string"
+    },
+    "BrowserHostOperation": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "probe"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/BrowserAction"
+            },
+            "element": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/BrowserHostElement"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "enum": [
+                "execute"
+              ],
+              "type": "string"
+            },
+            "target_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "upload": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/BrowserHostUpload"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "files": {
+              "items": {
+                "$ref": "#/definitions/BrowserDownloadReceipt"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "acknowledgeDownloads"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "files",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "connect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "disconnect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "show"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "releaseInputs"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "shutdown"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserHostPage": {
+      "properties": {
+        "tabs": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/BrowserHostTab"
+          },
+          "type": "array"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "targetId",
+        "title",
+        "url"
+      ],
+      "type": "object"
+    },
+    "BrowserHostRequest": {
+      "properties": {
+        "epoch": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/definitions/BrowserHostOperation"
+        },
+        "target": {
+          "$ref": "#/definitions/BrowserTargetKind"
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "epoch",
+        "generation",
+        "operation",
+        "target",
+        "userId"
+      ],
+      "type": "object"
+    },
+    "BrowserHostResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connected": {
+              "type": "boolean"
+            },
+            "kind": {
+              "enum": [
+                "readiness"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "connected",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "done"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "downloads": {
+              "items": {
+                "$ref": "#/definitions/BrowserHostFile"
+              },
+              "type": "array"
+            },
+            "elements": {
+              "items": {
+                "$ref": "#/definitions/BrowserHostElement"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "observation"
+              ],
+              "type": "string"
+            },
+            "loader_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "page": {
+              "$ref": "#/definitions/BrowserHostPage"
+            },
+            "screenshot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "downloads",
+            "elements",
+            "kind",
+            "page"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserHostTab": {
+      "properties": {
+        "tabId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tabId",
+        "title",
+        "url"
+      ],
+      "type": "object"
+    },
+    "BrowserHostUpload": {
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "filename"
+      ],
+      "type": "object"
+    },
+    "BrowserInputMode": {
+      "enum": [
+        "readOnly",
+        "control"
+      ],
+      "type": "string"
+    },
+    "BrowserLocalOpenCapability": {
+      "enum": [
+        "desktopOwned",
+        "externalUserWindow",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "BrowserOperation": {
+      "description": "Closed environment operations; neither model arguments nor arbitrary CDP.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "read"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "selectTarget"
+              ],
+              "type": "string"
+            },
+            "target_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "kind",
+            "target_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "connect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "disconnect"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "pause"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "resume"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "takeControl"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected_revision",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "controller_id": {
+              "type": "string"
+            },
+            "expected_revision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "releaseControl"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "controller_id",
+            "expected_revision",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "openLocal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserReadiness": {
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "stopped"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "starting"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "ready"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "needsConnection"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ApiError"
+            },
+            "status": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrowserRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operation": {
+          "$ref": "#/definitions/BrowserOperation"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "type": "object"
+    },
+    "BrowserSnapshot": {
+      "properties": {
+        "control": {
+          "$ref": "#/definitions/BrowserControlState"
+        },
+        "display": {
+          "$ref": "#/definitions/BrowserDisplayCapability"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "host": {
+          "$ref": "#/definitions/BrowserHostKind"
+        },
+        "selectedTargetId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/definitions/BrowserTarget"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "control",
+        "display",
+        "enabled",
+        "host",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "BrowserSuspensionReason": {
+      "enum": [
+        "userPaused",
+        "viewerDisconnected",
+        "workerRestarted",
+        "takeoverFailed",
+        "pluginDisabled"
+      ],
+      "type": "string"
+    },
+    "BrowserTabAction": {
+      "enum": [
+        "open",
+        "close",
+        "focus"
+      ],
+      "type": "string"
+    },
+    "BrowserTarget": {
+      "properties": {
+        "displayName": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/BrowserTargetKind"
+        },
+        "localOpen": {
+          "$ref": "#/definitions/BrowserLocalOpenCapability"
+        },
+        "readiness": {
+          "$ref": "#/definitions/BrowserReadiness"
+        },
+        "targetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "displayName",
+        "kind",
+        "localOpen",
+        "readiness",
+        "targetId"
+      ],
+      "type": "object"
+    },
+    "BrowserTargetKind": {
+      "enum": [
+        "managed",
+        "connected"
+      ],
+      "type": "string"
+    },
     "ClientCapabilities": {
       "properties": {
         "protocol_version": {
@@ -1729,6 +2937,60 @@
             },
             "params": {
               "$ref": "#/definitions/InitializeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/streamOpen"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopStreamOpen"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/streamSend"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopStreamSend"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/streamClose"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopStreamClose"
             }
           },
           "required": [
@@ -3019,6 +4281,42 @@
           "properties": {
             "method": {
               "enum": [
+                "browser/operate"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/BrowserRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "desktop/open"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopOpenRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "mcp/server/list"
               ],
               "type": "string"
@@ -4073,6 +5371,157 @@
       ],
       "type": "object"
     },
+    "DesktopMediaFrame": {
+      "description": "Protected Desktop IPC last mile for the separate Agent media stream.",
+      "properties": {
+        "dataBase64": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "streamId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "streamId"
+      ],
+      "type": "object"
+    },
+    "DesktopOpenRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "controllerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generation": {
+          "type": "string"
+        },
+        "inputEpoch": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inputMode": {
+          "$ref": "#/definitions/BrowserInputMode"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "targetId": {
+          "type": "string"
+        },
+        "viewerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "inputMode",
+        "nodeId",
+        "targetId",
+        "viewerId"
+      ],
+      "type": "object"
+    },
+    "DesktopStreamClose": {
+      "additionalProperties": false,
+      "properties": {
+        "streamId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "streamId"
+      ],
+      "type": "object"
+    },
+    "DesktopStreamOpen": {
+      "additionalProperties": false,
+      "properties": {
+        "streamId": {
+          "type": "string"
+        },
+        "ticket": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "streamId",
+        "ticket"
+      ],
+      "type": "object"
+    },
+    "DesktopStreamSend": {
+      "additionalProperties": false,
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "streamId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "streamId"
+      ],
+      "type": "object"
+    },
+    "DesktopViewGrant": {
+      "description": "Secret single-use ticket. Never include it in URLs, logs or model input.",
+      "properties": {
+        "controllerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "inputEpoch": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "inputMode": {
+          "$ref": "#/definitions/BrowserInputMode"
+        },
+        "streamId": {
+          "type": "string"
+        },
+        "ticket": {
+          "type": "string"
+        },
+        "viewerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expiresAt",
+        "generation",
+        "inputMode",
+        "streamId",
+        "ticket",
+        "viewerId"
+      ],
+      "type": "object"
+    },
     "DesktopWorkerEnrollParams": {
       "properties": {
         "nodeId": {
@@ -4180,6 +5629,28 @@
     "ErrorLocalization": {
       "description": "Exact business explanations with real localized consumers. Extend only when a domain has a stable, parameterized message; never add arbitrary translation keys, diagnostic data, or presentation policy here.",
       "oneOf": [
+        {
+          "properties": {
+            "operation": {
+              "$ref": "#/definitions/BrowserCapabilityOperation"
+            },
+            "reason": {
+              "$ref": "#/definitions/BrowserCapabilityReason"
+            },
+            "type": {
+              "enum": [
+                "browserCapabilityUnavailable"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "reason",
+            "type"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "type": {
@@ -8143,6 +9614,60 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "client/browser/execute"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/BrowserHostRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "client/browser/cancel"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/BrowserHostCancel"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "client/desktop/frame"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DesktopMediaFrame"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -10812,6 +12337,12 @@
     "auth_session_read_response": {
       "$ref": "#/definitions/AuthSessionReadResponse"
     },
+    "browser_host_response": {
+      "$ref": "#/definitions/BrowserHostResponse"
+    },
+    "browser_snapshot": {
+      "$ref": "#/definitions/BrowserSnapshot"
+    },
     "client_request_params": {
       "$ref": "#/definitions/ClientRequestParams"
     },
@@ -10835,6 +12366,12 @@
     },
     "delete_computer_response": {
       "$ref": "#/definitions/DeleteComputerResponse"
+    },
+    "desktop_open_request": {
+      "$ref": "#/definitions/DesktopOpenRequest"
+    },
+    "desktop_view_grant": {
+      "$ref": "#/definitions/DesktopViewGrant"
     },
     "desktop_worker_identity_response": {
       "$ref": "#/definitions/DesktopWorkerIdentityResponse"
@@ -10976,6 +12513,8 @@
     "auth_logout_response",
     "auth_session_clear_response",
     "auth_session_read_response",
+    "browser_host_response",
+    "browser_snapshot",
     "client_request_params",
     "cloud_login_cancel_response",
     "cloud_login_start_response",
@@ -10984,6 +12523,8 @@
     "computer_list_response",
     "created_node",
     "delete_computer_response",
+    "desktop_open_request",
+    "desktop_view_grant",
     "desktop_worker_identity_response",
     "error",
     "event_unsubscribe_response",

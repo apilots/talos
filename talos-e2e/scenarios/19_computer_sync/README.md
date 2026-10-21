@@ -63,18 +63,31 @@ execution and synchronization use public APIs, original SDKs and WSS/TLS.
   old credentials/startup must fail and the Workspace proof file must remain.
   No application database is mutated by the fixture.
 
-Requires a real macOS host, Docker, the adjacent `talos-sync` source, a Cloud
+Requires a real macOS host, Docker, access to the pinned public Sync image, a Cloud
 fixture executable (`TALOS_CLOUD_SERVER_BIN` or `cloud-server` on `PATH`),
 Node/pnpm, Python grpcio/protobuf/PyYAML, and existing DEV configuration.
 Execution cases use the configured funded DeepSeek provider in `.env`; no model
-key is baked into an image. Each runner invocation builds the current candidate images once, verifies their
-exact image IDs before every case, and reuses release caches without accepting
-stale images from a prior invocation. Worker build contexts contain Git-listed
-source from the current checkout, so a differently named worktree cannot pick up
-another checkout's code or ignored credentials. NAT additionally builds the current Server
+key is baked into an image. Sync uses the public
+[v0.1.3 Release](https://github.com/apilots/talos-sync/releases/tag/v0.1.3),
+locked in `scripts/computer_sync/run.sh` to its release-manifest multi-platform
+digest, matching the public SDK/types versions in Cargo.lock. No adjacent source
+checkout or moving `latest` tag is used. `TALOS_SYNC_E2E_IMAGE` may select another
+explicit digest; tag-only overrides fail before setup. Updating the pin requires
+checking the Release manifest checksum, platform digests and registry manifest.
+Each runner invocation pulls this exact Sync image and builds the current Worker
+candidate once, then verifies both image IDs before every case. Server and Worker
+build contexts contain Git-listed inputs from the current checkout, including
+browser resources, so a differently named worktree cannot pick up another
+checkout's code, ignored credentials, dependencies or build outputs. NAT builds the current Server
 image and a small test-only iptables helper; NET_ADMIN applies solely to these
-isolated fixture network namespaces, never to the host or unrelated containers. `TALOS_SYNC_REPO`,
-`TALOS_WORKER_E2E_IMAGE` and `TALOS_SYNC_E2E_IMAGE` select inputs.
+isolated fixture network namespaces, never to the host or unrelated containers.
+`TALOS_WORKER_E2E_IMAGE` and `TALOS_SERVER_E2E_IMAGE` name the locally built candidates.
+
+Group 19 remains local topology acceptance rather than a hosted PR check: its
+native macOS controllers, Linux Docker networks, real Cloud executable and funded
+model calls need an explicitly provisioned environment. The pinned public Sync
+image removes one private-repository prerequisite; it does not claim that this
+whole topology now runs in the existing secretless GitHub PR matrix.
 
 Accounts are registered and authenticated through the real Cloud service; database
 connections in assertions are read-only. All homes, credentials and volumes are
@@ -95,8 +108,10 @@ and is stopped with the fixture. Automated cases never wait for manual capture.
 Screenshots must be taken while that topology is
 alive; an older manual environment is not evidence for this group.
 
-NAT acceptance re-applies and verifies ingress rules after restart using current
-container addresses; real memory/reflection and child-agent callbacks return to
+NAT acceptance checks the exact directory UUID set: the original four Alice-owned
+Computers plus each newly enrolled NAT management host. Every row must retain the
+same account owner, with no missing, duplicate or foreign Computer. It re-applies
+and verifies ingress rules after restart using current container addresses; real memory/reflection and child-agent callbacks return to
 the current coordinator. Live Linux SQLite evidence is read from the Linux helper,
 never opened concurrently by a Mac SQLite process.
 

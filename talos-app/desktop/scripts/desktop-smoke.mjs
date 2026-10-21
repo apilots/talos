@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectCdp, waitForPage, waitForExpression, waitForEvaluate } from "./desktop-cdp.mjs";
 import { evaluate } from "./desktop-smoke-evaluate.mjs";
+import { verifySidebarFocus } from "./desktop-smoke-focus.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, "..");
@@ -141,15 +142,8 @@ try {
   await evaluate(cdp, "location.hash = '#/'; undefined");
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
   await captureScreenshot(cdp, path.join(artifactDir, "home.png"));
-  await cdp.call("Page.reload");
-  await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
-  assert(await evaluate(cdp, 'document.activeElement!==document.querySelector(`button[aria-label="Collapse sidebar"]`)'), "Refreshing the sidebar automatically focused Collapse.");
-  await captureScreenshot(cdp, path.join(artifactDir, "sidebar-default.png"));
+  await verifySidebarFocus(cdp, name => captureScreenshot(cdp, path.join(artifactDir, name)));
   await installSmokeInvoke(cdp);
-  await evaluate(cdp, 'document.querySelector(`button[aria-label="Collapse sidebar"]`).focus()');
-  assert(await evaluate(cdp, '(()=>{const style=getComputedStyle(document.querySelector(`button[aria-label="Collapse sidebar"]`));return style.outlineStyle==="none" || style.outlineColor==="rgba(0, 0, 0, 0)";})()'), "Sidebar retained native accent outline.");
-  await captureScreenshot(cdp, path.join(artifactDir, "sidebar-focus.png"));
-  await evaluate(cdp, "document.activeElement.blur()");
 
   const interaction = process.env.TALOS_DESKTOP_SMOKE_INTERACTION === "1"
     ? await runInteractionSmoke(cdp, artifactDir)

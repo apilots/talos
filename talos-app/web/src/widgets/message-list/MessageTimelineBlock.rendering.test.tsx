@@ -12,7 +12,7 @@ describe("MessageTimelineBlock rendering", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders a compact process timeline with distinct thinking and commentary roles", async () => {
+  it("keeps a completed turn successful after a recovered tool failure and preserves its diagnostics", async () => {
     const { container, getAllByText, getByText } = render(
       <MessageList
         blocks={[
@@ -23,8 +23,8 @@ describe("MessageTimelineBlock rendering", () => {
               state: "completed",
               modelRounds: 2,
               toolCalls: 1,
-              toolSuccesses: 1,
-              toolErrors: 0,
+              toolSuccesses: 0,
+              toolErrors: 1,
               usage: {
                 input_tokens: 12,
                 output_tokens: 34,
@@ -58,11 +58,11 @@ describe("MessageTimelineBlock rendering", () => {
                 itemId: "tool-1",
                 kind: "tool_call",
                 phase: "acting",
-                status: "completed",
+                status: "failed",
                 callId: "call-1",
                 toolName: "Bash",
                 arguments: { cmd: "pnpm test" },
-                output: "ok",
+                output: "Stale element reference",
                 progress: [{ kind: "stdout", message: "running" }],
                 startedAtMs: 25,
                 completedAtMs: 325,
@@ -98,6 +98,7 @@ describe("MessageTimelineBlock rendering", () => {
       expect(getByText("Execution summary")).not.toBeNull();
       expect(getByText("Validation completed.")).not.toBeNull();
       expect(getAllByText(/Bash/)).toHaveLength(1);
+      expect(getByText("Failed")).not.toBeNull();
       expect(getByText(/300ms/)).not.toBeNull();
       expect(container.querySelectorAll('[data-tool-call-card="true"]')).toHaveLength(1);
       expect(container.querySelector('[data-timeline-role="thinking"]')).not.toBeNull();

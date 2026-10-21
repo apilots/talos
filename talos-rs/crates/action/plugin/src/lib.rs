@@ -5,6 +5,7 @@ mod scanner;
 mod source;
 mod state;
 
+pub use manager::builtin::BuiltinBrowserProvision;
 pub use manager::{McpChangeHook, McpDiscovery, PluginManager};
 pub use source::source_id_for;
 pub use state::{MarketplaceSourcesFile, PluginStateStore};

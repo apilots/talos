@@ -93,6 +93,7 @@ pub struct ToolContext {
     agent_control: Option<Arc<dyn AgentControl>>,
     memory_reader: Option<Arc<dyn MemoryReader>>,
     image_store: Option<Arc<dyn crate::ToolImageStore>>,
+    browser_uploads: Vec<talos_types::ToolInputFile>,
     user_workspace_memory_writer: Option<Arc<dyn UserWorkspaceMemoryWriter>>,
     memory_scope: Option<MemoryScope>,
     session_state: Arc<SessionToolState>,
@@ -135,6 +136,7 @@ impl ToolContext {
             agent_control: None,
             memory_reader: None,
             image_store: None,
+            browser_uploads: Vec::new(),
             user_workspace_memory_writer: None,
             memory_scope: None,
             session_state: get_session_tool_state(&session_id),
@@ -164,6 +166,16 @@ impl ToolContext {
         self
     }
 
+    pub fn with_browser_uploads(mut self, files: Vec<talos_types::ToolInputFile>) -> Self {
+        self.browser_uploads = files;
+        self
+    }
+    pub fn browser_upload(&self, id: &str) -> Option<talos_types::ToolInputFile> {
+        self.browser_uploads
+            .iter()
+            .find(|file| file.file_id == id)
+            .cloned()
+    }
     pub fn with_image_store(mut self, store: Arc<dyn crate::ToolImageStore>) -> Self {
         self.image_store = Some(store);
         self

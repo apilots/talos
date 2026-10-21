@@ -20,6 +20,7 @@ pub struct PluginManagerService {
     pub(crate) execution_gate: Arc<RwLock<()>>,
     pub(super) mcp: Option<McpContext>,
     pub(super) config_service: Option<crate::ConfigService>,
+    browser: Option<Arc<talos_browser::BrowserRuntime>>,
 }
 
 #[derive(Clone)]
@@ -37,6 +38,7 @@ impl PluginManagerService {
             execution_gate: Arc::default(),
             mcp: None,
             config_service: None,
+            browser: None,
         }
     }
 
@@ -46,7 +48,14 @@ impl PluginManagerService {
             execution_gate: Arc::default(),
             mcp: None,
             config_service: None,
+            browser: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_browser(mut self, browser: Arc<talos_browser::BrowserRuntime>) -> Self {
+        self.browser = Some(browser);
+        self
     }
 
     /// Attaches the Worker's existing atomic configuration publisher for configured MCP credentials.
@@ -213,10 +222,14 @@ impl PluginManagerService {
 
     pub async fn enable(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
         let _guard = self.commit_guard()?;
-        self.manager.enable(request).map(|mut response| {
-            super::redaction::plugin(&mut response.plugin);
-            response
-        })
+        let mut response = self.manager.enable(request)?;
+        if response.plugin.id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
+            if let Some(browser) = &self.browser {
+                browser.plugin_enabled().await?;
+            }
+        }
+        super::redaction::plugin(&mut response.plugin);
+        Ok(response)
     }
 
     pub async fn disable(
@@ -229,7 +242,13 @@ impl PluginManagerService {
             response
         });
         self.recover_credentials();
-        result
+        let response = result?;
+        if response.plugin.id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
+            if let Some(browser) = &self.browser {
+                browser.plugin_disabled().await?;
+            }
+        }
+        Ok(response)
     }
 
     pub(super) fn commit_guard(&self) -> TalosResult<tokio::sync::RwLockWriteGuard<'_, ()>> {

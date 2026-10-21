@@ -27,6 +27,16 @@ pub struct WorkerEnvironmentContext {
 /// Callers authorize the selected node; network adapters additionally verify its lease
 /// and actor. Implementations own path validation and I/O, never product persistence.
 pub trait WorkerEnvironment: Send + Sync {
+    fn desktop_open(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: talos_types::WorkerDesktopOpen,
+    ) -> AgentFuture<'_, AgentResult<()>>;
+    fn browser(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: talos_types::BrowserRequest,
+    ) -> AgentFuture<'_, AgentResult<talos_types::BrowserSnapshot>>;
     fn list_plugin_sources(
         &self,
         context: WorkerEnvironmentContext,

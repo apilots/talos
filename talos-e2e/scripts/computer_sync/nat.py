@@ -48,7 +48,25 @@ class NatHosts:
         wait_for(lambda: self.healthy(name), name + ' original HTTP API')
         self.firewall(name)
         wait_for(lambda: data(self.api(name, '/v1/sync/status'))['connection'] == 'connected', name + ' authenticated WSS')
-        wait_for(lambda: len(data(self.api(name, '/v1/computers'))['data']) == 4, name + ' same-account directory imported')
+        node = data(self.api(name, '/v1/sync/status'))['localComputerId']
+        require(node and str(uuid.UUID(node)) == node, name + ' did not enroll its own Computer')
+        self.hosts[name]['node'] = node
+        expected = ({d['node'] for d in cluster.desktops.values()}
+            | {cluster.nodes[n]['node_id'] for n in ('Mac-Worker', 'Docker-Worker')}
+            | {host['node'] for host in self.hosts.values()})
+        require(len(expected) == 4 + len(self.hosts), 'NAT hosts reused another Computer UUID')
+        owner = cluster.users['alice']['user']['user_id']
+
+        def imported():
+            rows = data(self.api(name, '/v1/computers'))['data']
+            if (len(rows) == len(expected) and {row['nodeId'] for row in rows} == expected
+                    and all(row['ownerUserId'] == owner for row in rows)):
+                return rows
+            return False
+
+        rows = wait_for(imported, name + ' exact same-account directory imported')
+        (REPORT / (name + '-directory.json')).write_text(json.dumps({
+            'expectedComputerIds': sorted(expected), 'ownerUserId': owner, 'directory': rows}, indent=2))
 
     def firewall(self, name):
         command(['docker', 'run', '--rm', '--network', 'container:' + self.hosts[name]['container'], '--cap-add', 'NET_ADMIN',

@@ -58,6 +58,24 @@ macro_rules! environment_rpc {
 #[tonic::async_trait]
 impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpcAdapter {
     environment_rpc!(
+        desktop_open,
+        DesktopOpenRpcRequest,
+        DesktopOpenRpcResponse,
+        desktop_open_rpc_response,
+        Value,
+        decode_desktop_open_params,
+        encode_desktop_open_result
+    );
+    environment_rpc!(
+        browser,
+        BrowserRpcRequest,
+        BrowserRpcResponse,
+        browser_rpc_response,
+        Value,
+        decode_browser_params,
+        encode_browser_result
+    );
+    environment_rpc!(
         list_plugin_sources,
         ListPluginSourcesRequest,
         ListPluginSourcesResponse,

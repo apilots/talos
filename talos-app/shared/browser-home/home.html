@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self'; navigate-to https: http:">
+<title>Talos · Home</title>
+<link rel="icon" href="talos-logo.svg">
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#30343b;background:#fbfcfd;color-scheme:light;font-synthesis:none;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:radial-gradient(ellipse at 50% 35%,#fff 0%,#fbfcfd 65%)}header{display:flex;align-items:center;gap:9px;padding:22px 28px;font-size:13px;font-weight:600;letter-spacing:-.2px}header img{width:22px;height:22px}header span{margin-left:auto;color:#737e8d;font-size:11px;font-weight:400;letter-spacing:.2px}main{width:min(496px,calc(100% - 48px));margin:auto;text-align:center;padding:32px 0 38px}time{display:block;font-size:76px;line-height:1;letter-spacing:-4px;font-weight:300;font-variant-numeric:tabular-nums;color:#363c45}#date{font-size:12px;color:#727d8b;line-height:1.6;margin:14px 0 38px}h1{font-size:21px;font-weight:500;letter-spacing:-.55px;margin:0 0 10px}p{font-size:13px;color:#727d8b;line-height:1.7;margin:0}form{display:flex;align-items:center;gap:4px;padding:6px 6px 6px 16px;margin:27px 0 20px;border:1px solid #e5e9ee;border-radius:14px;background:#fff;box-shadow:0 4px 18px #26364d05;transition:border-color .15s,box-shadow .15s}.address-icon{width:17px;height:17px;flex:none;color:#a2a9b3}input{width:100%;min-width:0;padding:12px 9px;border:0;outline:0;background:transparent;font:inherit;font-size:13px;color:#404752}input::placeholder{color:#7b8593}form:focus-within{border-color:#a1aab9;box-shadow:0 0 0 3px #34405408}button{display:inline-flex;align-items:center;gap:9px;border:0;border-radius:9px;background:#34383e;color:#fff;font:inherit;font-size:12px;font-weight:500;padding:11px 14px;cursor:pointer;transition:background .15s}button svg{width:13px;height:13px}nav{display:flex;justify-content:center;gap:8px}a{display:inline-flex;align-items:center;gap:7px;color:#6d7888;text-decoration:none;font-size:11px;padding:8px 11px;border-radius:8px;transition:background .15s,color .15s}a svg{width:11px;height:11px;opacity:.7}a:hover{background:#f0f3f6;color:#3a414c}button:hover{background:#4b515a}button:focus-visible,a:focus-visible{outline:2px solid #65738a;outline-offset:3px}#error{color:#b53e3e;min-height:20px;font-size:11px;margin-top:9px}footer{font-size:10px;letter-spacing:.1px;color:#7a8594;padding:18px 24px 22px;text-align:center}@media(max-height:560px){header{padding:16px 24px}main{padding:12px 0 0}time{font-size:58px}#date{margin:10px 0 20px}form{margin-top:20px}footer{padding:10px 20px}}@media(max-width:420px){header span{display:none}main{width:calc(100% - 36px)}time{font-size:64px}form{padding-left:12px}button{padding:11px 12px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<script src="home.js" defer></script>
+</head>
+<body>
+<header><img src="talos-logo.svg" alt=""><strong>Talos</strong><span>Browser workspace</span></header>
+<main>
+<time id="clock" aria-label="Current time">--:--</time><div id="date"></div>
+<h1>Ready when you are.</h1><p>Your browser, in a dedicated workspace.</p>
+<form id="navigate"><svg class="address-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18Z"/></svg><input id="address" aria-label="Website address" placeholder="Enter a website address" autocomplete="url" spellcheck="false" required><button type="submit">Open<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></button></form>
+<nav aria-label="Quick links"><a href="https://talos.love">Talos website<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M4 12 12 4M4 4h8v8"/></svg></a><a href="https://github.com/apilots/talos">GitHub<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M4 12 12 4M4 4h8v8"/></svg></a></nav><p id="error" role="alert"></p>
+</main>
+<footer>Your browsing stays in this dedicated profile.</footer>
+</body>
+</html>

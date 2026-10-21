@@ -45,6 +45,7 @@ For unfamiliar ownership, consult the relevant entry in [Rust modules](docs/refe
 - Choose checks for the affected behavior. Fix failures caused by the change and continue through authorized implementation and verification; a first implementation or successful compile alone is not completion. Broaden or repeat checks only for changed behavior, failures, or unresolved risk.
 - Review the requested diff for missing behavior and unnecessary code, fixtures, conversions, or workarounds. Remove obsolete paths introduced or replaced by the change; leave no TODO without an associated issue or plan. Preserve unrelated user work.
 - Do not disable tests, lint, or hooks to pass checks. Report unavailable verification and its impact rather than claiming completion. If user input is required, finish independent authorized work and present the concrete unresolved decision.
+- Preserve focus intent in application layouts: initial render, page refresh and passive responsive changes must not focus navigation or drawer toggles merely because `document.activeElement` is `body`, or open a narrow modal from a persisted wide-layout preference. Restore focus only when a user-driven close or hidden/removed focused surface requires it, and do not steal focus already moved elsewhere. Keep keyboard focus-visible indicators. When changing drawer/modal lifecycle, cover initial and refreshed pages plus genuine close/Escape focus recovery in the owning regression and representative browser scenario.
 
 ## E2E quality gates
 

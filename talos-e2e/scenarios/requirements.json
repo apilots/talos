@@ -1,0 +1,22 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": [
+      "server"
+    ]
+  },
+  "cases": {
+    "03_messages_http_sse.sh": {
+      "checks": [
+        "model"
+      ]
+    }
+  }
+}

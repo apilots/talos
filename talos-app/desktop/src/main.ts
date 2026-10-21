@@ -14,6 +14,8 @@ import {
   broadcastSubscriptionTerminated,
   registerDesktopIpcHandlers,
 } from "./desktop-ipc";
+import { desktopMediaHost } from "./desktop-media";
+import { desktopBrowserHost } from "./browser-host";
 import { handleDesktopServerRequest } from "./desktop-server-requests";
 import { resolveRendererEntryPath } from "./renderer-entry";
 import { resolveAppServerEnvironment } from "./shell-environment";
@@ -44,7 +46,7 @@ async function createController(): Promise<DesktopAppServerController> {
     onMessageQueueChanged: broadcastMessageQueueChanged,
     onEvent: (event) => broadcastTimelineEvent(event),
     onSubscriptionTerminated: (notification) => broadcastSubscriptionTerminated(notification),
-    onRuntimeState: (state) => broadcastRuntimeState(state),
+    onRuntimeState: (state) => { if(["starting","restarting"].includes(state.kind)) { desktopMediaHost.reset(); void desktopBrowserHost.reset(); } broadcastRuntimeState(state); },
     onServerRequest: (request) => handleDesktopServerRequest(request),
   });
 }
@@ -96,7 +98,9 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   if (quitState === "closing") { return; }
   quitState = "closing";
+  desktopMediaHost.reset();
   void (controller?.close() ?? Promise.resolve())
+    .finally(()=>desktopBrowserHost.reset())
     .catch((error: unknown) => console.error("Desktop host shutdown failed", error))
     .finally(() => { quitState = "closed"; app.quit(); });
 });
