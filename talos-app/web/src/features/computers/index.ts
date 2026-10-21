@@ -1,5 +1,7 @@
 export { ComputerRail } from "./ComputerRail";
 export { ComputerItem } from "./ComputerItem";
+export { ComputerPicker } from "./ComputerPicker";
+export { ComputerConnectDialog } from "./ComputerConnectDialog";
 export { useEnvironmentKey, useComputers, useComputerList, useComputer, useSelectedComputerId, useProductScope, useCanManageComputer } from "./hooks";
 
 export { SyncControl } from "./SyncControl";
