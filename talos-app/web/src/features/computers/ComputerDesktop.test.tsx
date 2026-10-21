@@ -18,7 +18,7 @@ vi.mock("@/features/chat",()=>({useSessionQuery:()=>({data:undefined}),useProjec
 function WorkspaceHarness() {
  const windows=useAppStore(state=>state.workspaceWindows),expanded=useAppStore(state=>state.workspaceExpanded),visible=useAppStore(state=>state.workspaceOpen);
  const toggle=useRef<HTMLButtonElement>(null),sidebar=useRef<HTMLButtonElement>(null);
- const navigation=<AppNavigation canCreateChat sidebarVisible={false} sidebarAvailable={false} sidebarToggleRef={sidebar} onToggleSidebar={()=>{}}/>;
+ const navigation=<AppNavigation sidebarVisible={false} sidebarAvailable={false} sidebarToggleRef={sidebar} onToggleSidebar={()=>{}}/>;
  return <MemoryRouter><ComputerDesktopButton nodeId="worker" online/><ComputerDesktopButton nodeId="worker" online remoteOnly label="Your computer"/>{!expanded?<AppTopBar>{navigation}{!visible?<WorkspaceControls toggleRef={toggle}/>:null}</AppTopBar>:null}{windows.length?<RightWorkspace modal={expanded} toggleRef={toggle} width={600} maxWidth={900}/>:null}</MemoryRouter>;
 }
 vi.mock("@/shared/api/desktop-client",()=>({isDesktopRuntime:()=>true,getDesktopBridge:()=>null}));

@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { useAppStore } from "@/shared/store/app-store";
 import { fixture, show } from "./AppLayout.test-utils";
 
-it.each([true, false])("shows the computer homepage without sidebar or new-chat controls (wide=%s)", wide => {
+it.each([true, false])("shows the computer homepage without sidebar or top navigation (wide=%s)", wide => {
   fixture.wide = wide;
   fixture.selectedId = undefined;
   useAppStore.setState({ sidebarOpen: true });
@@ -15,6 +15,8 @@ it.each([true, false])("shows the computer homepage without sidebar or new-chat 
   expect(screen.queryByRole("link", { name: "New chat" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /sidebar/i })).not.toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "Workspace controls" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+  expect(screen.queryByRole("group", { name: "Navigation history" })).not.toBeInTheDocument();
   expect(document.body).toHaveFocus();
   fireEvent(window, new Event("resize"));
   expect(document.body).toHaveFocus();
@@ -30,6 +32,8 @@ it.each([true, false])("restores the existing work area for a selected computer 
   expect(screen.queryByRole("heading", { name: "Choose a computer" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sidebar action" })).toBeVisible();
   expect(screen.getByRole("link", { name: "New chat" })).toBeVisible();
+  expect(screen.getByRole("banner", { name: "Application navigation" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Back" })).toBeVisible();
   expect(screen.getByText("Page content")).toBeVisible();
   expect(useAppStore.getState().sidebarOpen).toBe(true);
 });

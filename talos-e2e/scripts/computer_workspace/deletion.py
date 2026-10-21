@@ -93,6 +93,8 @@ def run(cluster):
         # empty Projects/Chats sidebar. The remaining registered Computer is offline.
         page.goto(url + '/')
         expect(page.get_by_role('heading', name='Choose a computer', exact=True)).to_be_visible()
+        expect(page.get_by_role('banner')).to_have_count(0)
+        require(page.get_by_role('main').bounding_box()['y'] <= 1, 'Hidden homepage header left empty space')
         expect(page.locator('#talos-sidebar')).to_have_count(0)
         expect(page.get_by_role('link', name='New chat', exact=True)).to_have_count(0)
         page.screenshot(path=str(REPORT / 'homepage-choose-computer.png'), full_page=True)
@@ -108,6 +110,8 @@ def run(cluster):
             page.set_viewport_size({'width': width, 'height': 900})
             page.reload()
             expect(page.get_by_role('heading', name='Connect your first computer')).to_be_visible()
+            expect(page.get_by_role('banner')).to_have_count(0)
+            require(page.get_by_role('main').bounding_box()['y'] <= 1, 'Empty directory retained a header spacer')
             expect(page.get_by_role('dialog')).to_have_count(0)
             trigger = page.get_by_role('button', name='Connect a computer', exact=True)
             trigger.click()

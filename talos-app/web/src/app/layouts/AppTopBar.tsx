@@ -9,8 +9,8 @@ import { useProjectsQuery, useSessionQuery } from "@/features/chat";
 import { normalizeProjects } from "@/shared/store/ui-slice";
 
 /** Middle-region navigation and Session context own no workspace geometry. */
-export function AppNavigation({ canCreateChat, sidebarAvailable, sidebarToggleRef, sidebarVisible, onToggleSidebar }: {
-  canCreateChat: boolean; sidebarAvailable: boolean; sidebarVisible: boolean; sidebarToggleRef: Ref<HTMLButtonElement>; onToggleSidebar: () => void;
+export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisible, onToggleSidebar }: {
+  sidebarAvailable: boolean; sidebarVisible: boolean; sidebarToggleRef: Ref<HTMLButtonElement>; onToggleSidebar: () => void;
 }) {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
@@ -19,7 +19,7 @@ export function AppNavigation({ canCreateChat, sidebarAvailable, sidebarToggleRe
     <div role="group" aria-label={t("navigation.history")} className="flex shrink-0 items-center gap-0.5">
       <Button variant="ghost" className="p-2" aria-label={t("navigation.back")} onClick={() => navigate(-1)}><ArrowLeft aria-hidden="true" size={16} /></Button>
       <Button variant="ghost" className="p-2" aria-label={t("navigation.forward")} onClick={() => navigate(1)}><ArrowRight aria-hidden="true" size={16} /></Button>
-      {canCreateChat ? <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link> : null}
+      <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link>
     </div>
 
   </div>;
