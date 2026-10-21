@@ -24,6 +24,9 @@ talos-e2e/
 From the repository root:
 
 ```bash
+just e2e --list                     # Review the complete discovered scope
+just e2e --check                    # Check prerequisites; no builds or cases
+just e2e                            # Run all discovered scenarios
 just e2e-case 01_health_and_models
 just e2e-group 09_app_server
 just e2e-group 14_sandbox
@@ -36,8 +39,59 @@ talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
 talos-e2e/run_e2e.sh --group 15_tui_install
 ```
 
-The runner prebuilds only binaries required by the selected scenarios. Prefer a
-single case during development and the owning group before handoff.
+Default, `--case` and `--group` use one sorted filesystem catalog: numbered
+`NN_name.sh` files at `scenarios/` root and top-level `*.sh` cases inside numbered
+`NN_name/` directories. Nested helpers and unnumbered directories are excluded.
+New cases and numbered groups are discovered without updating the runner. Exact
+relative paths take precedence over basename lookup; ambiguous basenames fail.
+Selectors cannot be combined or repeated. Optional `.sh` suffixes remain supported.
+
+`--list` can accompany a selector and only prints its selected relative paths. It
+does not load `.env`, probe dependencies, create reports, build or run anything.
+`--check` uses the same scope and loads the normal `.env`; it checks prerequisites
+without building, starting services or calling models. Missing prerequisites are
+reported together with affected cases in `reports/preflight_*.log` and block the
+whole selected run before any build/case. Docker cases are never silently omitted.
+A prerequisite check does not prove credentials, network reachability, browser
+policy or runtime behavior; original scenario checks remain authoritative.
+
+Dependencies live beside their cases in `requirements.json`. `default` applies to
+that directory; `cases` provides filename-specific field replacements, including
+empty lists for secretless/platform-independent exceptions. Root legacy cases use
+`scenarios/requirements.json`; group declarations do not inherit that root file.
+The declaration is not a case registry: new files inherit their group defaults,
+and a new group must declare its dependencies before execution. Unknown fields,
+stale overrides and missing declarations fail explicitly. Supported fields are
+`commands`, `python_modules`, `checks`, `platforms`, `env`, and `binaries`.
+`checks` covers concrete existing prerequisites: Docker daemon, Cloud fixture,
+real model key via `has_real_llm_key`, installed Chrome, Linux Desktop display,
+Caddy, current Worker image availability and native sandbox dependencies.
+`binaries` declares the shared `server`/`cli` prebuild; scenario-owned specialized
+builds stay with their existing wrappers. The Linux launcher prebuild is retained.
+Environment values and secrets are never printed. Example:
+
+```json
+{"default":{"commands":["cargo","protoc"],"checks":["model"],"binaries":["cli"]},
+ "cases":{"catalog.sh":{"checks":[]}}}
+```
+
+Use `TALOS_CLOUD_SERVER_BIN`, `TALOS_E2E_CHROME_BIN`, `TALOS_E2E_CADDY_BIN`,
+`TALOS_E2E_WORKER_IMAGE`, and the owning group's documented prerequisites as needed.
+Group19 requires native macOS and the pinned public Sync release; it remains local
+acceptance, so a default full run on an unsupported platform is blocked explicitly.
+Default full runs pass each case's group identity, matching `--group` semantics:
+native sandbox cases are not implicitly repeated in Docker before the dedicated
+Docker case. An explicitly selected standalone sandbox case retains its existing
+macOS-plus-Docker behavior.
+
+Prefer a single case during development and the owning group before handoff.
+Runner regressions are lightweight and do not execute product scenarios:
+
+```bash
+python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
+```
+
+Python3.9+ is required for discovery. `--help` requires only Bash.
 
 ## Scenario ownership
 

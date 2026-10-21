@@ -23,6 +23,9 @@ talos-e2e/
 从仓库根目录运行：
 
 ```bash
+just e2e --list                     # 核对全部发现范围
+just e2e --check                    # 只检查依赖，不构建、不跑 case
+just e2e                            # 执行全部发现的场景
 just e2e-case 01_health_and_models
 just e2e-group 09_app_server
 just e2e-group 14_sandbox
@@ -35,7 +38,45 @@ talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
 talos-e2e/run_e2e.sh --group 15_tui_install
 ```
 
-Runner 只预构建所选场景需要的二进制。开发时优先运行单个 case，交付前运行所属 group。
+默认运行、`--case` 和 `--group` 统一从同一份排序后的目录发现结果筛选：`scenarios/`
+根目录的 `NN_name.sh`，以及编号 `NN_name/` 目录内直接放置的 `*.sh`。不包含嵌套
+helper 或未编号目录；新增用例、编号组不需要修改 runner。精确相对路径优先于 basename；
+重名 basename 显式失败，selector 不能混用或重复；仍支持省略 `.sh`。
+
+`--list` 可以组合单 case/group，只输出相对路径，不加载 `.env`、不探测依赖、不生成
+报告、不构建或执行。`--check` 使用相同范围并加载正常 `.env`，只检查执行前依赖。
+缺失项连同受影响 case 一并写入 `reports/preflight_*.log`，在任何构建或场景执行前
+阻断所选运行；Docker case 不再被静默排除。预检不证明凭据有效性、网络、浏览器策略或
+运行时行为，这些仍由原场景断言负责。
+
+每个组旁边的 `requirements.json` 声明依赖：`default` 是当前目录默认值，`cases`
+按文件名替换个别字段，可用空列表表示无需密钥等例外。根目录旧用例使用根目录的声明，
+组不会继承根声明。这不是另一份 case 注册表：新增 case 自动继承组默认值；新增组
+需补本组依赖声明才能执行。缺失声明、过期 case override、未知字段均显式失败。
+字段为 `commands`、`python_modules`、`checks`、`platforms`、`env` 和 `binaries`；
+`checks` 检查 Docker、Cloud 可执行文件、复用 `has_real_llm_key` 的模型密钥检测、Chrome、
+Linux Desktop 显示、Caddy、Worker 镜像是否存在及原生 sandbox 依赖。`binaries` 声明
+共享 `server`/`cli` 预构建；专门构建仍由原场景 wrapper 负责，Linux launcher 预构建保留。
+不会输出密钥和环境值。声明示例：
+
+```json
+{"default":{"commands":["cargo","protoc"],"checks":["model"],"binaries":["cli"]},
+ "cases":{"catalog.sh":{"checks":[]}}}
+```
+
+按组要求配置 `TALOS_CLOUD_SERVER_BIN`、`TALOS_E2E_CHROME_BIN`、
+`TALOS_E2E_CADDY_BIN`、`TALOS_E2E_WORKER_IMAGE` 等。19 组保留原生 macOS 与固定
+公开 Sync release 的本地验收要求；默认全量在不支持的平台会明确阻断。
+默认全量为每个 case 传入所属组，与 `--group` 一致，避免 native sandbox case 在专门
+Docker case 前重复隐式运行 Docker；显式单个 sandbox case 保留原 macOS + Docker 语义。
+
+开发时优先运行单个 case，交付前运行所属 group。runner 自身的轻量回归不执行产品场景：
+
+```bash
+python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
+```
+
+发现逻辑需要 Python3.9+；`--help` 只需要 Bash。
 
 ## 场景职责
 
@@ -48,7 +89,9 @@ Runner 只预构建所选场景需要的二进制。开发时优先运行单个 
 | `14` | 统一 Sandbox 和权限执行 |
 | `15` | Release bundle 安装和已安装 TUI 启动 |
 | `17` | 三个 Worker：公开接口注册、归属隔离、路由、续租、协同与 Workspace 归属 |
-| `18` | Computer 云注册：真实 Desktop 登录、持久 UUID、出站注册与续租 |
+| `18` | Computer workspace：真实 Desktop 登录、持久 UUID、出站注册续租及产品 UI |
+| `19` | 多管理端 Sync：原生 Mac Desktop、Mac/Docker Worker、真实认证、NAT 与模型任务 |
+| `20` | Browser MCP 与资源工作区：Web/Desktop Tabs、Markdown、原生浏览器与 Docker 桌面/媒体 |
 
 运行 `just e2e-group 17_multi_node` 会启动 Cloud Auth fixture、一个 Server 和三个 Worker，
 使用独立 HOME 和端口。通过 `TALOS_CLOUD_SERVER_BIN` 指定 fixture 可执行文件，或将

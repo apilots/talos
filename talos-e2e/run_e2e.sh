@@ -5,126 +5,41 @@ TALOS_E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${TALOS_E2E_DIR}/scripts/common.sh"
 
-timestamp="$(date '+%Y%m%d_%H%M%S')"
-export TALOS_E2E_RUN_ID="${timestamp}-$$"
-report_file="${REPORT_ROOT}/e2e_report_${timestamp}.md"
-latest_file="${REPORT_ROOT}/latest_report.md"
-mkdir -p "${REPORT_ROOT}"
-mkdir -p "${TALOS_E2E_TMP_ROOT}"
-export npm_config_cache="${TALOS_E2E_NPM_CACHE:-${TALOS_E2E_TMP_ROOT}/npm-cache}"
-mkdir -p "${npm_config_cache}"
-
 SCENARIO_ROOT="${TALOS_E2E_DIR}/scenarios"
+RUNNER="${TALOS_E2E_DIR}/scripts/runner.py"
 
 usage() {
   cat <<'EOF'
 Usage:
-  talos-e2e/run_e2e.sh
-  talos-e2e/run_e2e.sh --group 06_tools
-  talos-e2e/run_e2e.sh --case 05_cli/full_flow
+  talos-e2e/run_e2e.sh [--list | --check]
+  talos-e2e/run_e2e.sh --group 06_tools [--list | --check]
+  talos-e2e/run_e2e.sh --case 05_cli/full_flow [--list | --check]
 
 Options:
-  --group <name>   Run all cases under scenarios/<name>/
-  --case <name>    Run one case by relative path or basename without .sh
+  --group <name>   Select one discovered numbered group
+  --case <name>    Select one discovered case by relative path or unique basename
+  --list          List selected paths only; no .env, preflight, builds or reports
+  --check         Check selected environment prerequisites without running cases
+
+Without a selector, discover every numbered root case and group. Missing
+prerequisites block execution; scenarios are never silently omitted.
 EOF
 }
 
-find_case_path() {
-  local case_name="$1"
-
-  if [[ -f "${SCENARIO_ROOT}/${case_name}.sh" ]]; then
-    printf '%s\n' "${SCENARIO_ROOT}/${case_name}.sh"
-    return 0
-  fi
-
-  if [[ -f "${SCENARIO_ROOT}/${case_name}" ]]; then
-    printf '%s\n' "${SCENARIO_ROOT}/${case_name}"
-    return 0
-  fi
-
-  find "${SCENARIO_ROOT}" -type f -name "${case_name}.sh" | sort
-}
-
-collect_group_cases() {
-  local group_name="$1"
-  local group_dir="${SCENARIO_ROOT}/${group_name}"
-
-  if [[ ! -d "${group_dir}" ]]; then
-    echo "Unknown scenario group: ${group_name}" >&2
-    exit 1
-  fi
-
-  while IFS= read -r scenario; do
-    if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" ]]; then
-      if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-        continue
-      fi
-    fi
-    if [[ "${group_name}" == "15_tui_install" && "$(basename "${scenario}")" == "02_linux_docker.sh" ]]; then
-      if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
-        continue
-      fi
-    fi
-    printf '%s\n' "${scenario}"
-  done < <(find "${group_dir}" -type f -name '*.sh' | sort)
-}
-
-scenario_needs_server_binary() {
-  local scenario="$1"
-  grep -q 'start_server' "${scenario}"
-}
-
-scenario_needs_cli_binary() {
-  local scenario_name="$1"
-  case "${scenario_name}" in
-    05_cli/full_flow.sh|06_tools/cli_bash.sh|06_tools/cli_memory_search.sh|08_tui/*|11_auth/cloud_gateway.sh|13_interaction/user_action_tui.sh)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 build_required_binaries() {
-  local scenario
-  local scenario_name
-  local needs_server=0
-  local needs_cli=0
-
-  for scenario in "${scenarios[@]}"; do
-    if scenario_needs_server_binary "${scenario}"; then
-      needs_server=1
-    fi
-
-    scenario_name="${scenario#${SCENARIO_ROOT}/}"
-    if scenario_needs_cli_binary "${scenario_name}"; then
-      needs_cli=1
-    fi
-  done
-
-  if [[ "${needs_server}" == "1" ]]; then
-    build_server_binary
-  fi
-
-  if [[ "${needs_cli}" == "1" ]]; then
-    build_cli_binary
-  fi
-
-  # Linux execution discovers the sandbox launcher beside the runtime binaries.
+  local binaries binary
+  binaries="$(python3 "${RUNNER}" binaries "${SCENARIO_ROOT}" "${selected_cases[@]}")"
+  while IFS= read -r binary; do
+    case "${binary}" in
+      server) build_server_binary ;;
+      cli) build_cli_binary ;;
+    esac
+  done <<< "${binaries}"
+  # Linux execution discovers the sandbox launcher beside runtime binaries.
   if [[ "$(uname -s)" == "Linux" ]]; then
     (cd "${TALOS_RS_DIR}" && cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher)
   fi
-
   export TALOS_E2E_REQUIRED_BINARIES_READY=1
-}
-
-append_lines_to_array() {
-  local line
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] || continue
-    scenarios+=("${line}")
-  done
 }
 
 reset_case_directory() {
@@ -141,67 +56,62 @@ reset_case_directory() {
   rm -rf "${case_dir}"
 }
 
-declare -a scenarios=()
+declare -a scenarios=() selected_cases=()
 case_name=""
 group_name=""
-
+list_only=0
+check_only=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --case)
-      case_name="${2:-}"
+    --case|--group)
+      if [[ -z "${2:-}" || "${2}" == -* || -n "${case_name}${group_name}" ]]; then
+        echo "Provide exactly one --case or --group selector with a value" >&2
+        exit 2
+      fi
+      if [[ "$1" == --case ]]; then case_name="$2"; else group_name="$2"; fi
       shift 2
       ;;
-    --group)
-      group_name="${2:-}"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      usage >&2
-      exit 1
-      ;;
+    --list) list_only=1; shift ;;
+    --check) check_only=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
-
-if [[ -n "${case_name}" && -n "${group_name}" ]]; then
-  echo "--case and --group are mutually exclusive" >&2
-  exit 1
+if [[ "${list_only}" == 1 && "${check_only}" == 1 ]]; then
+  echo "--list and --check are mutually exclusive" >&2
+  exit 2
 fi
-
-if [[ -n "${case_name}" ]]; then
-  append_lines_to_array < <(find_case_path "${case_name}")
-  if [[ "${#scenarios[@]}" -eq 0 ]]; then
-    echo "Unknown scenario case: ${case_name}" >&2
-    exit 1
-  fi
-  if [[ "${#scenarios[@]}" -gt 1 ]]; then
-    echo "Ambiguous scenario case: ${case_name}" >&2
-    printf 'Matched:\n' >&2
-    printf '  %s\n' "${scenarios[@]}" >&2
-    exit 1
-  fi
-elif [[ -n "${group_name}" ]]; then
-  append_lines_to_array < <(collect_group_cases "${group_name}")
-else
-  scenarios=(
-    "${SCENARIO_ROOT}/01_health_and_models.sh"
-    "${SCENARIO_ROOT}/02_session_lifecycle.sh"
-    "${SCENARIO_ROOT}/03_messages_http_sse.sh"
-  )
-  append_lines_to_array < <(collect_group_cases "05_cli")
-  append_lines_to_array < <(collect_group_cases "06_tools")
-  append_lines_to_array < <(collect_group_cases "07_memory")
-  append_lines_to_array < <(collect_group_cases "08_tui")
-  append_lines_to_array < <(collect_group_cases "09_app_server")
-  append_lines_to_array < <(collect_group_cases "11_auth")
-  append_lines_to_array < <(collect_group_cases "12_files")
+command -v python3 >/dev/null || { echo "Python 3.9+ is required for scenario discovery" >&2; exit 2; }
+selection="$(python3 "${RUNNER}" select "${SCENARIO_ROOT}" "${group_name}" "${case_name}")"
+while IFS= read -r scenario; do
+  selected_cases+=("${scenario}")
+  scenarios+=("${SCENARIO_ROOT}/${scenario}")
+done <<< "${selection}"
+if [[ "${list_only}" == 1 ]]; then
+  printf '%s\n' "${selected_cases[@]}"
+  exit 0
 fi
 
 load_env
+# Preserve the existing standalone sandbox case's extra Linux acceptance.
+export TALOS_E2E_SINGLE_CASE=""
+if [[ -n "${case_name}" ]]; then export TALOS_E2E_SINGLE_CASE="${selected_cases[0]}"; fi
+timestamp="$(date '+%Y%m%d_%H%M%S')"
+export TALOS_E2E_RUN_ID="${timestamp}-$$"
+report_file="${REPORT_ROOT}/e2e_report_${timestamp}.md"
+latest_file="${REPORT_ROOT}/latest_report.md"
+mkdir -p "${REPORT_ROOT}"
+preflight_log="${REPORT_ROOT}/preflight_${TALOS_E2E_RUN_ID}.log"
+if ! python3 "${RUNNER}" check "${SCENARIO_ROOT}" "${selected_cases[@]}" >"${preflight_log}" 2>&1; then
+  cat "${preflight_log}" >&2
+  echo "E2E blocked before build/execution. Prerequisites: ${preflight_log}" >&2
+  exit 1
+fi
+cat "${preflight_log}"
+if [[ "${check_only}" == 1 ]]; then exit 0; fi
+mkdir -p "${TALOS_E2E_TMP_ROOT}"
+export npm_config_cache="${TALOS_E2E_NPM_CACHE:-${TALOS_E2E_TMP_ROOT}/npm-cache}"
+mkdir -p "${npm_config_cache}"
 build_required_binaries
 
 pass_count=0
@@ -237,7 +147,11 @@ PY
 )"
   chmod +x "${script_path}"
   echo "Running ${scenario_name}..."
-  if TALOS_E2E_GROUP_NAME="${group_name}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" "${script_path}" >"${log_file}" 2>&1; then
+  # Full runs use the same group semantics as --group, without repeating
+  # each native sandbox case's standalone Docker expansion before case99.
+  effective_group="${group_name}"
+  if [[ -z "${case_name}" && "${scenario_name}" == */* ]]; then effective_group="${scenario_name%%/*}"; fi
+  if TALOS_E2E_GROUP_NAME="${effective_group}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" "${script_path}" >"${log_file}" 2>&1; then
     status="PASS"
     pass_count=$((pass_count + 1))
   else

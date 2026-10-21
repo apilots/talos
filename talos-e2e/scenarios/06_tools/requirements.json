@@ -1,0 +1,37 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl",
+      "rg"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": [
+      "server"
+    ],
+    "checks": [
+      "model"
+    ]
+  },
+  "cases": {
+    "cli_bash.sh": {
+      "binaries": [
+        "cli"
+      ]
+    },
+    "cli_memory_search.sh": {
+      "binaries": [
+        "cli"
+      ]
+    },
+    "web_search.sh": {
+      "env": [
+        "TALOS_WEB_SEARCH_FIRECRAWL_API_KEY",
+        "TALOS_WEB_SEARCH_TAVILY_API_KEY"
+      ]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "tmux"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": [
+      "cli"
+    ],
+    "checks": [
+      "model"
+    ]
+  }
+}

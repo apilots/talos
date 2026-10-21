@@ -1,0 +1,62 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl",
+      "openssl",
+      "lsof"
+    ],
+    "python_modules": [
+      "yaml",
+      "grpc",
+      "google.protobuf"
+    ],
+    "checks": [
+      "cloud",
+      "model"
+    ],
+    "binaries": [
+      "server"
+    ]
+  },
+  "cases": {
+    "01_registration.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "curl",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "checks": [
+        "cloud",
+        "caddy"
+      ]
+    },
+    "10_oauth.sh": {
+      "checks": [
+        "cloud",
+        "model",
+        "caddy"
+      ]
+    },
+    "11_product_ui.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "curl",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "checks": [
+        "cloud",
+        "model",
+        "caddy",
+        "chrome"
+      ]
+    }
+  }
+}

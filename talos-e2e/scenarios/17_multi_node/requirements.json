@@ -1,0 +1,29 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl",
+      "openssl"
+    ],
+    "python_modules": [
+      "yaml",
+      "grpc",
+      "google.protobuf"
+    ],
+    "checks": [
+      "cloud",
+      "model"
+    ],
+    "binaries": [
+      "server"
+    ]
+  },
+  "cases": {
+    "07_lease_expiry.sh": {
+      "checks": [
+        "cloud"
+      ]
+    }
+  }
+}

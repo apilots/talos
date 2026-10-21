@@ -41,16 +41,16 @@ Docker 桌面提供 Browser、Terminal 和 File manager 三个真实的本地入
 
 ## 2. 当前事实与取舍
 
-| 当前事实 | 拟定增量 |
+| 既有基础与约束 | 当前实现 |
 | --- | --- |
 | `TalosWorker` 已组装 PluginManager、MCP runtime、工具与凭据 | 同一 owner 增加 Browser adapter 和少量浏览器运行状态 |
 | MCP 页面已有列表、详情、启停；PluginManager 的 commit_guard 与整段 Turn 读锁互斥 | 新增内置 Browser；enabled/readiness 独立，禁用在活动 Turn 冲突时不改变状态，先暂停或按原流程停止任务 |
-| 当前通用 MCP 调用仅传工具参数和 cancellation，没有完整可信 ToolContext；Rust app-server 出站尚只有 Response/Error/Notification | 浏览器需要明确的调用上下文桥和 Desktop typed request/response 出站实现，不能当作已具备的能力 |
+| 通用第三方 MCP 调用只传工具参数和 cancellation，不承载 Browser 身份 | 经过内置身份核验的 Browser 分支从真实 ToolContext 创建单次调用授权；Rust app-server 的 typed host request/response 关联独立承载 Desktop 宿主执行 |
 | 标准 Worker 基于 Ubuntu 24.04、非 root；Compose 无 `ports`；执行使用 outbound Connect | 仅该镜像增加浏览器/虚拟桌面依赖，继续零新增 Worker 入站 |
 | 当前 Connect 是 typed RPC 与有限公平队列，不能直接承载 VNC | 短命令保持原路径；另加独立媒体流及网关 WSS 路由 |
-| Desktop 已随 Electron 自带 Chromium；当前 main.ts 创建产品主 BrowserWindow，尚无独立网站控制 owner | 复用自带引擎和现有 Desktop 宿主/IPC，在隔离网页视图上接通浏览器工具；不把产品主 renderer 当浏览器目标，不另装 Chromium |
+| Desktop 已随 Electron 自带 Chromium；产品主 BrowserWindow 与网站目标必须隔离 | DesktopBrowserHost / WebsiteAccount 复用自带引擎和现有宿主 IPC，拥有独立 BaseWindow、网站 WebContentsView 与持久 partition；产品主 renderer 不属于浏览器目标 |
 | 用户 Chrome 的授权、版本、策略、profile 不由产品完全控制 | 明确连接、能力检测和可操作的失败状态；不承诺默认已打开的 Chrome 可附着 |
-| Browser Use 能连 CDP，上游 CLI MCP 有 Python 执行 | 复用底层 primitives；产品只暴露有类型、可撤销的工具 |
+| Browser Use 能连 CDP，上游 CLI MCP 有 Python 执行 | Docker 使用固定版本 Browser Use primitives；产品只暴露有类型、可撤销的工具 |
 
 统一的是**能力发现和命令语义**，不是强制部署同一套桌面服务。`managed`/`connected` 仍是浏览器目标类型；首版 Docker 和 Desktop 自带浏览器使用 managed，用户 Chrome 使用 connected；无 Desktop 的原生 Worker 只提供 connected。Docker 身份也不等同于已获远程桌面能力，服务端以受信 Worker 上报并校验的具体能力为准。
 
@@ -148,7 +148,8 @@ flowchart TB
 | `talos-rs/crates/orchestration/service/src/worker_environment.rs` | Verify Actor and Computer routing, expose concrete target/control/display capabilities; reject unsupported operations server-side. |
 | `talos-rs/crates/action/plugin/src/` | Bundle repository-format manifest, idempotent provision, preserve explicit disable and built-in identity. |
 | `talos-rs/crates/action/mcp/src/` and `talos-rs/crates/action/tools/src/mcp/` | Original lifecycle, typed tool admission/cancellation, image delivery. |
-| `talos-rs/crates/orchestration/agent-protocol/src/environment.rs` and `agent-pb/proto/` | Canonical typed browser contract and Docker-only media messages; no generic JSON bus. |
+| `talos-rs/crates/common/types/src/browser.rs`, `browser_action.rs` and `browser_host.rs` | Canonical browser capabilities, operations, host requests/results and stream bindings; generated clients reuse these domain types. Private invocation authority stays in `talos-browser`, outside public DTOs. |
+| `talos-rs/crates/orchestration/agent-protocol/src/environment.rs` and `agent-pb/proto/` | Typed WorkerEnvironment projection and Docker-only media wire messages; reuse the canonical domain types, with no generic JSON bus. |
 | `talos-rs/crates/orchestration/agent-client/src/` | Original authenticated dispatch and cancellation; dedicated authenticated media client. |
 | `talos-rs/crates/app/talos-base/src/` | Trusted ingress relay composition and bounded transient state; existing HTTP gateway owns WSS admission. Embedded/Server/stdio exits await BrowserRuntime shutdown and private IPC cleanup. |
 | `talos-rs/crates/gateway/app-server/src/desktop_host.rs` | Own the existing JSONL generation, outgoing host queue, pending response correlation, timeouts and cancellation. Inject BrowserHostPort into the concrete native backend; media consumption ACK has independent semantics/capacity. |
@@ -169,8 +170,8 @@ flowchart TB
 | `BrowserLocalOpenCapability` | desktopOwned for a local Desktop-owned website target; externalUserWindow for connected Chrome; unavailable otherwise. Local opening is restricted to the matching Desktop/Computer, never a network video capability. |
 | `BrowserControlState` | Runtime generation, monotonic revision, epoch and owner. Worker is authoritative; bounded per-call invocations remain private, not a second single current-invocation mirror. |
 | `BrowserControlOwner` | idle, agent with Session/Turn, suspended with typed reason; operation failures return ApiError, and unconfirmed cleanup blocks Resume with that error; handingOver and human/controllerId are Docker-only variants. |
-| `BrowserCommandContext` | Verified actor, node/target, Session/Turn/tool identity, generation and epoch derived from original dispatch; never model arguments. |
-| `DesktopViewGrant` | Docker-only, single-use grant: actor, node, target, generation, viewer, streamId, inputMode and expiry. Control mode also fixes controllerId and inputEpoch; read-only grants have no input authority. Never carries NodeAuth/CDP address. |
+| `BrowserInvocationIdentity` / `BrowserDispatch` | Private Worker invocation identity and dispatch capability. The real ToolContext supplies user/Session/Turn/call identity; the runtime binds the selected target, normalized action digest, generation lifetime, epoch and cancellation. Computer routing belongs to the enclosing WorkerEnvironment; these are not model arguments or public context DTOs. |
+| `DesktopViewGrant` | Docker-only, single-use reservation bound to actor/node/target on the trusted relay. The public grant carries only its opaque ticket, generation, viewer, streamId, inputMode and expiry. Control mode also fixes controllerId and inputEpoch; read-only grants have no input authority. Never carries actor credentials, NodeAuth or CDP address. |
 
 Unavailability reasons are capability facts, not permission grants. Actual dependency/startup failure belongs in readiness with ApiError. A bundled Docker display capability remains stable when a supervised component exits or initialization fails; the existing viewer then reports the actual readiness/connection error rather than switching to native-host messaging. Determine Docker display support from bundled resources and trusted runtime configuration plus successful capability checks, never from OS name, browser CDP reachability or UI guesses. Native defaults remain unavailable even on Linux. Authorization is rechecked at Service and Worker for every view/control operation.
 
@@ -280,7 +281,7 @@ A preexisting user MCP installation named `talos_browser` remains unchanged and 
 
 ### 5.1 可信调用上下文与浏览器执行桥
 
-当前 `action/tools/src/mcp/mod.rs` 的通用 MCP executor 不会把完整 ToolContext 传给 server；不能假定 stdio 天然带有可信 Session/Turn/epoch，也不能把身份字段加到 model 可填的工具参数中。
+`action/tools/src/mcp/mod.rs` 的通用第三方 MCP 分支不传完整 ToolContext；经核验的内置 Browser 分支从该上下文创建专用调用授权。stdio 本身不提供可信 Session/Turn/epoch，也不能把身份字段加到 model 可填的工具参数中。
 
 在该既有 executor 中，仅对核验过的内置 Browser 安装身份建立 **BrowserInvocationBridge**（Worker 内具体模块，不是通用 RPC bus）：
 
@@ -296,9 +297,9 @@ Browser Use 的每次操作从部分启动开始即由同一 `try/finally` 负�
 
 ### 5.2 工具面
 
-拟定工具：browser_state、browser_navigate、browser_click、browser_fill、browser_key、browser_scroll、browser_tab、browser_screenshot、browser_download、browser_upload。参数限目标内元素引用/坐标/URL/已授权文件引用；引用绑定 target + document revision，导航后旧引用失效。model 不指定 node、调试地址、profile 路径、epoch。
+公开工具：browser_state、browser_navigate、browser_click、browser_fill、browser_key、browser_scroll、browser_tab、browser_screenshot、browser_download、browser_upload。参数采用目标内元素引用、URL、文本/按键、滚动增量、标签操作和已授权文件引用；点击只接受最新元素引用，不提供任意坐标点击工具。元素引用绑定 target + document revision，导航后旧引用失效。model 不指定 node、调试地址、profile 路径、epoch。
 
-- Browser Use / Harness 是 Docker 受控 CDP 的 primitives 依赖；Desktop 复用已有引擎的页面宿主适配，不额外依赖本机 Python。stdio MCP 握手和调用沿原 runtime。不直接暴露 browser_exec、任意 Python/JS 或裸 CDP。
+- Browser Use 是 Docker 受控 CDP 的 primitives 依赖；Desktop 复用已有引擎的页面宿主适配，不额外依赖本机 Python。stdio MCP 握手和调用沿原 runtime。不直接暴露 browser_exec、任意 Python/JS 或裸 CDP。
 - 每个真实 CDP/input 步骤在 Worker 核对 generation/epoch；不能只在长脚本入口检查。Driver 组装在原 Worker owner 中，不增加第二个 Agent。
 - 截图作为标准 MCP image content 沿原附件/图片链路回传；截图不等于实时画面，也不会因此开启用户屏幕共享。
 - 最终 Markdown 图片采用显式 `![说明](talos-file://<fileId>)` 引用。MCP 工具图片结果保留原 typed image，并给模型该引用的简短文本；不把图片字节写入历史。客户端仅对完整合法的图片引用复用原 File API 授权读取和 FileImage 展示/释放，普通相对路径及裸 fileId 不隐式升级成文件授权；引用不是下载地址或权限凭证。拒绝访问必须可见，刷新重新鉴权，预览 dialog 挂载到顶层以保持有效 HTML 与焦点行为。
@@ -381,7 +382,7 @@ ACK 的承诺是之后不再派发旧控制者输入；已经提交的网站异�
 
 ### 6.2 原生人工操作
 
-Desktop 自带网页由本机宿主呈现；用户可直接在该视图或自己的 Chrome 窗口操作。原生自动化协调使用 pauseAutomation/resumeAutomation：暂停设置 manualHold、推进 epoch、撤销 Talos 后续浏览器输入；用户在自带网页或本机 Chrome 手动操作，再明确继续。无远程输入 controller、无 Human grant、无实时播放器，不调用 desktop/open 或 takeControl。
+Desktop 自带网页由本机宿主呈现；用户可直接在该视图或自己的 Chrome 窗口操作。原生自动化协调使用 `BrowserRequest.operation.kind` 的 `pause` / `resume`：暂停设置 manualHold、推进 epoch、撤销 Talos 后续浏览器输入；用户在自带网页或本机 Chrome 手动操作，再明确继续。无远程输入 controller、无 Human grant、无实时播放器，不调用 desktop/open 或 takeControl。
 
 这个暂停只能约束 Talos 的浏览器工具。用户、企业策略、扩展和其他 OS 进程仍可能操作同一 Chrome；不承诺独占用户电脑。每次恢复重新观察页面，不把上次 DOM 当作当前状态，不自动重试副作用。属于用户的外接 Chrome 窗口在禁用/断开/退出 Talos 后保持打开；Desktop 自带网页随其宿主生命周期关闭，持久 partition 保留。
 
@@ -452,12 +453,12 @@ Gateway 与 ingress 同宿主时省去中间跳。只接受已配置受信 ingre
 | browser/selectTarget | 目标需属于选定 Computer；无在途 mutation；expectedRevision；不迁移 Session |
 | browser/openLocal | 仅匹配当前 Desktop 本机 Computer 的自带目标；原 Desktop IPC 负责聚焦/本地呈现，无网络流 grant；Web/其他 Desktop 返回不支持本地呈现 |
 | browser/connect / disconnect | 用户 Chrome 的明确授权本机连接意图；自带浏览器无需此步骤；断开保留用户窗口 |
-| browser/pauseAutomation / resumeAutomation | 明确暂停/继续 Talos 浏览器准入；native 无远程控制权；恢复先重新观察 |
+| browser/pause / resume | `BrowserRequest.operation.kind` 的 `pause` / `resume`；明确暂停/继续 Talos 浏览器准入，native 无远程控制权，恢复先重新观察 |
 | browser/takeControl / releaseControl | 仅 dockerDesktop；经过 Worker fencing 的权威结果 |
 | desktop/open / close | 仅 dockerDesktop，单次有界 view grant/连接回收；无持久视频资源 |
 | 原 plugin/enable / disable | 保持原提交锁和原子状态；活动 Turn 冲突时无副作用；成功关闭才撤销浏览器连接/显示授权；不新增 browserEnabled 副本 |
 
-Browser 通过上述单一闭合控制接口；桌面使用 HTTP `/v1/desktop/*`；WSS `/v1/desktop/stream`；Agent ingress 新增独立 typed DesktopMedia RPC。SDK parity 指相同命令/错误语义，不代表各宿主必须有同一种显示能力。原生 desktop/open、takeControl 由 Service 和 Worker 两层拒绝，使用现有 `invalidRequest` 加拟新增 typed localization `browserCapabilityUnavailable { operation, reason }`（字段为封闭枚举）；当前 ErrorCode 没有通用 unsupportedOperation，不能虚构错误码或只隐藏按钮。
+Browser 通过上述单一闭合控制接口；桌面使用 HTTP `/v1/desktop/*`；WSS `/v1/desktop/stream`；Agent ingress 新增独立 typed DesktopMedia RPC。SDK parity 指相同命令/错误语义，不代表各宿主必须有同一种显示能力。原生 desktop/open、takeControl 由 Service 和 Worker 两层拒绝，使用现有 `invalidRequest` 加 typed localization `browserCapabilityUnavailable { operation, reason }`（字段为封闭枚举）；当前 ErrorCode 没有通用 unsupportedOperation，不能虚构错误码或只隐藏按钮。
 
 状态返回完整 snapshot，客户端用 generation/revision 拒绝旧回复；可见状态按现有查询模式 2 秒刷新，重连先读 snapshot。显示失败不切换 Computer，不自动开启裸端口。错误复用现有 ErrorCode 与 typed localization，具体新增定位类型在实施时按原统一错误契约生成，不用英语消息分支。
 

@@ -1,0 +1,49 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "git",
+      "docker",
+      "openssl",
+      "node",
+      "pnpm"
+    ],
+    "python_modules": [
+      "yaml",
+      "grpc",
+      "google.protobuf"
+    ],
+    "checks": [
+      "cloud",
+      "model",
+      "docker"
+    ],
+    "binaries": [
+      "server"
+    ],
+    "platforms": [
+      "Darwin"
+    ]
+  },
+  "cases": {
+    "04_local_without_cloud.sh": {
+      "commands": [
+        "cargo",
+        "protoc"
+      ],
+      "checks": [
+        "model"
+      ],
+      "platforms": [
+        "Darwin",
+        "Linux"
+      ],
+      "python_modules": [
+        "yaml",
+        "grpc",
+        "google.protobuf"
+      ]
+    }
+  }
+}

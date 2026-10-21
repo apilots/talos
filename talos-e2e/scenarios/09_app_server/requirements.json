@@ -1,0 +1,75 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "timeout"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": []
+  },
+  "cases": {
+    "protocol_e2e.sh": {
+      "checks": [
+        "model"
+      ]
+    },
+    "mcp_e2e.sh": {
+      "checks": [
+        "model"
+      ],
+      "commands": [
+        "cargo",
+        "protoc",
+        "timeout",
+        "node",
+        "npx"
+      ]
+    },
+    "memory_e2e.sh": {
+      "checks": [
+        "model"
+      ]
+    },
+    "skills_e2e.sh": {
+      "checks": [
+        "model"
+      ]
+    },
+    "desktop_recovery.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "node",
+        "pnpm"
+      ],
+      "binaries": [
+        "server"
+      ]
+    },
+    "computer_deletion.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "curl",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "grpc",
+        "google.protobuf",
+        "playwright"
+      ],
+      "checks": [
+        "chrome"
+      ],
+      "binaries": [
+        "server"
+      ]
+    }
+  }
+}

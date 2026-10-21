@@ -1,0 +1,24 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl",
+      "openssl",
+      "pnpm",
+      "node"
+    ],
+    "python_modules": [
+      "yaml",
+      "grpc",
+      "google.protobuf"
+    ],
+    "checks": [
+      "cloud"
+    ],
+    "binaries": [
+      "server",
+      "cli"
+    ]
+  }
+}
