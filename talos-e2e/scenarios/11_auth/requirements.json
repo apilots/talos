@@ -18,7 +18,9 @@
     ],
     "binaries": [
       "server",
-      "cli"
+      "cli",
+      "app_server",
+      "test_client"
     ]
   }
 }

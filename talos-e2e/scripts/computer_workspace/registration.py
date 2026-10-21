@@ -24,7 +24,7 @@ class Desktop:
         self.log = (REPORT / f'{name}.log').open('ab')
         env = dict(os.environ, HOME=str(home), TALOS_HOME=str(home), TALOS_CONFIG=str(home / 'conf/talos.yaml'),
                    TALOS_RESOURCE_DIR=str(ROOT), TALOS_DESKTOP_HOSTNAME=name,
-                   TALOS_APP_SERVER_BIN=str(ROOT / 'talos-rs/target/debug/app-server'))
+                   TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN', str(ROOT / 'talos-rs/target/debug/app-server')))
         self.process = subprocess.Popen(['node', str(REPORT / 'desktop-host.mjs')], env=env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log)
         self.selector = selectors.DefaultSelector()

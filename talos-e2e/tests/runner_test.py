@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -28,6 +30,8 @@ class RunnerTests(unittest.TestCase):
         self.scenarios.mkdir()
         shutil.copy2(E2E / "run_e2e.sh", self.root / "run_e2e.sh")
         shutil.copy2(E2E / "scripts/runner.py", self.root / "scripts/runner.py")
+        for helper in ["case_run.py", "lifecycle.py"]:
+            shutil.copy2(E2E / "scripts" / helper, self.root / "scripts" / helper)
         (self.root / "scripts/common.sh").write_text('''
 export TALOS_E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="${TALOS_E2E_DIR}/.."
@@ -38,6 +42,7 @@ E2E_TMP_ROOT="${TALOS_E2E_TMP_ROOT}"
 load_env() { touch "${TALOS_E2E_DIR}/env-loaded"; }
 build_server_binary() { echo server >> "${TALOS_E2E_DIR}/built"; }
 build_cli_binary() { echo cli >> "${TALOS_E2E_DIR}/built"; }
+build_sandbox_binary() { echo sandbox >> "${TALOS_E2E_DIR}/built"; }
 default_talos_home() { printf '%s/homes/%s' "${E2E_TMP_ROOT}" "${TALOS_SCENARIO_NAME}"; }
 has_real_llm_key() { return 1; }
 ''')
@@ -170,6 +175,18 @@ has_real_llm_key() { return 1; }
         self.assertIn("server", (self.root / "built").read_text())
         self.assertNotIn("cli", (self.root / "built").read_text())
 
+    def test_container_only_case_does_not_build_native_sandbox(self):
+        self.declare(self.scenarios, {'checks': ['docker']})
+        uname = self.bin / 'uname'
+        uname.write_text('#!/bin/sh\necho Linux\n')
+        uname.chmod(0o755)
+        docker = self.bin / 'docker'
+        docker.write_text('#!/bin/sh\nexit 0\n')
+        docker.chmod(0o755)
+        result = self.call('--case', '01_root')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root/'built').exists())
+
     def test_missing_or_stale_dependency_declarations_are_explicit_errors(self):
         folder = self.add_case("25_new/new.sh").parent
         (folder / "requirements.json").unlink()
@@ -198,6 +215,58 @@ has_real_llm_key() { return 1; }
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / "executed").read_text(), "18_existing/one:\n")
 
+    def test_distinct_runs_in_the_same_second_keep_separate_reports(self):
+        date = self.bin/'date'
+        date.write_text('#!/bin/sh\necho 20260101_000000\n')
+        date.chmod(0o755)
+        children = [subprocess.Popen(['bash', str(self.root/'run_e2e.sh'), '--case', name],
+                                    env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    for name in ['one', 'two']]
+        for child in children:
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 0, stdout+stderr)
+        reports = list((self.root/'reports').glob('e2e_report_*.md'))
+        self.assertEqual(len(reports), 2)
+        self.assertEqual(sorted('one.sh' if 'one.sh' in report.read_text() else 'two.sh' for report in reports),
+                         ['one.sh', 'two.sh'])
+
+    def test_runner_interrupt_cleans_active_case_before_returning(self):
+        case = self.scenarios / '01_root.sh'
+        case.write_text('printf "%s" "$TALOS_E2E_RESOURCE_ROOT" > "$TALOS_E2E_DIR/ready"\nsleep 60\n')
+        for sig in [signal.SIGINT, signal.SIGTERM]:
+            with self.subTest(signal=sig):
+                ready = self.root / 'ready'
+                ready.unlink(missing_ok=True)
+                child = subprocess.Popen(['bash', str(self.root / 'run_e2e.sh'), '--case', '01_root'],
+                                         env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists():
+                        if child.poll() is not None or time.monotonic() > deadline:
+                            self.fail('runner did not start case')
+                        time.sleep(.02)
+                    child.send_signal(sig)
+                    stdout, stderr = child.communicate(timeout=12)
+                    self.assertEqual(child.returncode, 128 + sig, stdout + stderr)
+                    self.assertFalse(Path(ready.read_text()).exists())
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.communicate()
+
+    def test_run_cleanup_failure_is_not_reported_as_pass(self):
+        docker = self.bin / 'docker'
+        docker.write_text('#!/bin/sh\nexit 1\n')
+        docker.chmod(0o755)
+        case = self.scenarios / '01_root.sh'
+        case.write_text('python3 "$TALOS_E2E_DIR/scripts/lifecycle.py" register image owned:run run\n')
+        result = self.call('--case', '01_root')
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('E2E passed', result.stdout)
+        self.assertIn('Run cleanup failed', result.stderr)
+        self.assertIn('FAIL: owned resources remain', (self.root / 'reports/latest_report.md').read_text())
+        self.assertTrue(list((self.root / 'tmp/runs').glob('*/resources.jsonl')))
+
     def test_preflight_deduplicates_probes_and_preserves_secrets(self):
         self.declare(self.scenarios / "18_existing", {"checks": ["docker"], "env": ["E2E_TEST_SECRET"]})
         output = io.StringIO()
@@ -210,7 +279,7 @@ has_real_llm_key() { return 1; }
     def test_container_cases_do_not_require_native_host_packaging_dependencies(self):
         # A clean Linux runner has Docker/Cargo but no native packaging protoc/PyYAML.
         with patch.object(runner.platform, "system", return_value="Linux"), \
-             patch.object(runner, "executable", side_effect=lambda name: name in {"docker", "cargo"}), \
+             patch.object(runner, "executable", side_effect=lambda name: name in {"docker", "ps"}), \
              patch.object(runner, "probe", side_effect=lambda argv: argv == ["docker", "info"]), \
              contextlib.redirect_stdout(io.StringIO()):
             for case in ["14_sandbox/99_linux_docker.sh", "15_tui_install/02_linux_docker.sh"]:
@@ -219,7 +288,7 @@ has_real_llm_key() { return 1; }
 
     def test_native_installer_checks_build_tools_without_unneeded_yaml_or_bubblewrap(self):
         with patch.object(runner.platform, "system", return_value="Linux"), \
-             patch.object(runner, "executable", side_effect=lambda name: name in {"cargo", "protoc", "curl", "tar", "python3"}), \
+             patch.object(runner, "executable", side_effect=lambda name: name in {"cargo", "protoc", "curl", "tar", "python3", "ps"}), \
              patch.object(runner, "probe", return_value=False), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.preflight(E2E / "scenarios", ["15_tui_install/01_native_install.sh"]), 0)
@@ -232,7 +301,7 @@ has_real_llm_key() { return 1; }
                 runner.requirements(E2E / "scenarios", case)
         command = [sys.executable, str(E2E / "scripts/runner.py"), "binaries", str(E2E / "scenarios")]
         smoke = subprocess.run(command + ["09_app_server/smoke_e2e.sh"], capture_output=True, text=True, check=True)
-        self.assertEqual(smoke.stdout.strip(), "")
+        self.assertEqual(smoke.stdout.splitlines(), ["app_server", "test_client"])
         cli = subprocess.run(command + ["06_tools/cli_bash.sh"], capture_output=True, text=True, check=True)
         self.assertEqual(cli.stdout.strip(), "cli")
 

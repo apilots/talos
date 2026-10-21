@@ -64,7 +64,7 @@ def requirements(root, case):
     if set(result) - FIELDS or any(not isinstance(v, list) or
             any(not isinstance(item, str) for item in v) for v in result.values()):
         raise ValueError(f"Invalid dependency declaration: {path}")
-    if set(result.get("checks", [])) - CHECKS or set(result.get("binaries", [])) - {"server", "cli"}:
+    if set(result.get("checks", [])) - CHECKS or set(result.get("binaries", [])) - {"server", "cli", "worker", "app_server", "test_client", "sandbox"}:
         raise ValueError(f"Unknown dependency or binary: {path}")
     return result
 
@@ -118,8 +118,9 @@ def check_dependency(kind, value, root):
 
 
 def preflight(root, cases):
-    # The existing shared Linux launcher build needs Cargo even for container cases.
-    dependencies = {("commands", "cargo"): set(cases)} if platform.system() == "Linux" else {}
+    dependencies = {("commands", "ps"): set(cases)}
+    if platform.system() == "Darwin":
+        dependencies[("commands", "lsof")] = set(cases)
     for case in cases:
         req = requirements(root, case)
         for kind, values in req.items():

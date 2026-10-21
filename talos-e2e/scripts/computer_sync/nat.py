@@ -5,6 +5,7 @@ import os
 import subprocess
 import uuid
 import yaml
+from lifecycle import docker_create
 from cluster import SyncCluster, REPORT, require, wait_for, data
 
 
@@ -39,7 +40,7 @@ class NatHosts:
         credentials.write_text('silent\nshow-error\nnoproxy = "*"\nheader = "Authorization: Bearer ' + cluster.users['alice']['access_token'] + '"\n')
         credentials.chmod(0o600)
         network = 'talos-sync-nat-' + uuid.uuid4().hex[:10]
-        command(['docker', 'network', 'create', network])
+        docker_create('network', network, [])
         self.networks.append(network)
         container = cluster.docker(name.lower(), os.environ.get('TALOS_SERVER_E2E_IMAGE', 'talos-server:sync-e2e'), home,
                                   ['--network', network, '--env', 'TALOS_CONFIG=' + base + '/conf/talos.yaml'])
@@ -69,15 +70,14 @@ class NatHosts:
             'expectedComputerIds': sorted(expected), 'ownerUserId': owner, 'directory': rows}, indent=2))
 
     def firewall(self, name):
-        command(['docker', 'run', '--rm', '--network', 'container:' + self.hosts[name]['container'], '--cap-add', 'NET_ADMIN',
-                 'talos-e2e-firewall:local'])
+        docker_create('container', 'talos-firewall-'+uuid.uuid4().hex[:10], ['--rm', '--network', 'container:' + self.hosts[name]['container'], '--cap-add', 'NET_ADMIN', os.environ['TALOS_E2E_FIREWALL_IMAGE']])
 
     def database(self, name, query, values=()):
         # Keep readers in the same Linux locking domain as the live WAL writer.
         source = "import json,sqlite3,sys; db=sqlite3.connect('file:/data/data/talos.db?mode=ro',uri=True); print(json.dumps(db.execute(sys.argv[1],json.loads(sys.argv[2])).fetchall()))"
-        result = command(['docker', 'run', '--rm', '--network', 'none', '--user', f'{os.getuid()}:{os.getgid()}',
+        result = docker_create('container', 'talos-sql-'+uuid.uuid4().hex[:10], ['--rm', '--network', 'none', '--user', f'{os.getuid()}:{os.getgid()}',
             '--cap-drop', 'ALL', '--volume', str(self.hosts[name]['home']) + ':/data', '--entrypoint', 'python3',
-            'talos-e2e-firewall:local', '-c', source, query, json.dumps(values)])
+            os.environ['TALOS_E2E_FIREWALL_IMAGE'], '-c', source, query, json.dumps(values)])
         return [tuple(row) for row in json.loads(result)]
 
     def raw(self, name, path, body=None, method=None, content_type='application/json'):

@@ -71,22 +71,8 @@ cleanup_stale_server() {
     return 0
   fi
 
-  local existing_comm
-  existing_comm="$(ps -o comm= -p "${existing_pid}" 2>/dev/null | tr -d '[:space:]' || true)"
-  existing_comm="$(basename "${existing_comm}")"
-  if [[ "${existing_comm}" != "talos" && "${existing_comm}" != "talos-server" ]]; then
-    echo "Port ${PORT} is already in use by PID ${existing_pid}. Stop the existing server first." >&2
-    exit 1
-  fi
-
-  terminate_pid "${existing_pid}" TERM
-  if ! wait_for_port_release 10; then
-    terminate_pid "${existing_pid}" KILL
-    if ! wait_for_port_release 5; then
-      echo "Port ${PORT} is still in use by stale Talos PID ${existing_pid} after forced shutdown." >&2
-      exit 1
-    fi
-  fi
+  echo "Port ${PORT} is already in use by PID ${existing_pid}; refusing to stop a process not owned by this case." >&2
+  return 1
 }
 
 load_env() {
@@ -535,7 +521,7 @@ start_server() {
   prepare_talos_home
   : > "${SERVER_LOG}"
   TALOS_RESOURCE_DIR="${REPO_ROOT}" \
-    "${TALOS_RS_DIR}/target/debug/talos-server" >>"${SERVER_LOG}" 2>&1 &
+    "${TALOS_E2E_SERVER_BIN:-${TALOS_RS_DIR}/target/debug/talos-server}" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!
   if ! wait_for_health 90; then
     echo "Server failed to start. See log: ${SERVER_LOG}" >&2
@@ -556,65 +542,58 @@ stop_server() {
   fi
 }
 
-build_server_binary() {
-  if [[ "${TALOS_SERVER_BINARY_READY:-}" == "1" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-server" ]]; then
-    return 0
+# Explicit paths are contracts: never silently replace an invalid supplied binary.
+prepare_binary() {
+  local variable="$1" filename="$2" package="$3" profile="${4:-debug}" configured resolved
+  local command=(build --locked -p "${package}" --bin "${filename}")
+  configured="${!variable:-}"
+  if [[ -n "${configured}" ]]; then
+    [[ -x "${configured}" ]] || { echo "Invalid ${variable}: executable required" >&2; return 1; }
+    resolved="$(cd "$(dirname "${configured}")" && pwd)/$(basename "${configured}")"
+  else
+    if [[ "${profile}" == release ]]; then command+=(--release); fi
+    (cd "${TALOS_RS_DIR}" && cargo "${command[@]}" >/dev/null)
+    resolved="${TALOS_RS_DIR}/target/${profile}/${filename}"
   fi
-
-  mkdir -p "${REPORT_ROOT}"
-  (cd "${TALOS_RS_DIR}" && cargo build -p talos-server >/dev/null)
-  export TALOS_SERVER_BINARY_READY=1
+  export "${variable}=${resolved}"
+}
+build_server_binary() { prepare_binary TALOS_E2E_SERVER_BIN talos-server talos-server; }
+build_worker_binary() { prepare_binary TALOS_E2E_WORKER_BIN talos-worker talos-worker-bin; }
+build_cli_binary() { prepare_binary TALOS_E2E_CLI_BIN talos talos-tui; }
+build_sandbox_binary() {
+  local runtime="${TALOS_E2E_SERVER_BIN:-${TALOS_E2E_CLI_BIN:-${TALOS_E2E_APP_SERVER_BIN:-${TALOS_E2E_WORKER_BIN:-}}}}" candidate
+  if [[ -n "${TALOS_E2E_SANDBOX_BIN:-}" ]]; then
+    prepare_binary TALOS_E2E_SANDBOX_BIN talos-linux-sandbox-launcher talos-linux-sandbox
+    export TALOS_LINUX_SANDBOX_HELPER="${TALOS_E2E_SANDBOX_BIN}"
+    return
+  fi
+  candidate="$(dirname "${runtime:-${TALOS_RS_DIR}/target/debug/talos-server}")/talos-linux-sandbox-launcher"
+  if [[ -x "${candidate}" ]]; then
+    export TALOS_E2E_SANDBOX_BIN="${candidate}" TALOS_LINUX_SANDBOX_HELPER="${candidate}"; return
+  fi
+  local profile=debug
+  if [[ "$(basename "$(dirname "${candidate}")")" == release ]]; then profile=release; fi
+  prepare_binary TALOS_E2E_SANDBOX_BIN talos-linux-sandbox-launcher talos-linux-sandbox "${profile}"
+  export TALOS_LINUX_SANDBOX_HELPER="${TALOS_E2E_SANDBOX_BIN}"
 }
 
-build_worker_binary() {
-  if [[ "${TALOS_WORKER_BINARY_READY:-}" == "1" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-worker" ]]; then
-    return 0
-  fi
-
-  mkdir -p "${REPORT_ROOT}"
-  (cd "${TALOS_RS_DIR}" && cargo build -p talos-worker-bin >/dev/null)
-  export TALOS_WORKER_BINARY_READY=1
-}
-
-build_cli_binary() {
-  if [[ "${TALOS_CLI_BINARY_READY:-}" == "1" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
-    return 0
-  fi
-
-  mkdir -p "${REPORT_ROOT}"
-  (cd "${TALOS_RS_DIR}" && cargo build -p talos-tui >/dev/null)
-  export TALOS_CLI_BINARY_READY=1
-}
+e2e_resource() { python3 "${TALOS_E2E_DIR}/scripts/lifecycle.py" register "$@"; }
+e2e_docker() { python3 "${TALOS_E2E_DIR}/scripts/lifecycle.py" docker "$@"; }
+e2e_image() { python3 "${TALOS_E2E_DIR}/scripts/lifecycle.py" image "$@"; }
 
 build_binaries() {
   if [[ "${TALOS_E2E_REQUIRED_BINARIES_READY:-}" == "1" ]]; then
     return 0
   fi
 
-  if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-server" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
-    return 0
-  fi
 
   build_server_binary
   build_cli_binary
-  export TALOS_BINARIES_READY=1
 }
 
 build_app_server_binaries() {
-  if [[ "${TALOS_APP_SERVER_BINARIES_READY:-}" == "1" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/app-server" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-app-server-test-client" ]]; then
-    return 0
-  fi
-
-  mkdir -p "${REPORT_ROOT}"
-  (cd "${TALOS_RS_DIR}" && cargo build -p app-server -p talos-app-server-test-client >/dev/null)
-  export TALOS_APP_SERVER_BINARIES_READY=1
+  prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
+  prepare_binary TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN talos-app-server-test-client talos-app-server-test-client
 }
 
 api_data_json() {

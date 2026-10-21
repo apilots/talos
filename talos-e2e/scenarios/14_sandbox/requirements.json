@@ -10,7 +10,9 @@
       "sandbox",
       "standalone_docker"
     ],
-    "binaries": []
+    "binaries": [
+      "sandbox"
+    ]
   },
   "cases": {
     "99_linux_docker.sh": {
@@ -19,7 +21,8 @@
       ],
       "commands": [
         "docker"
-      ]
+      ],
+      "binaries": []
     }
   }
 }

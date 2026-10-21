@@ -95,7 +95,7 @@ PY
 
 mkdir -p "${TARGET_DIR}"
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
-  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_RESOURCE_DIR='${TALOS_RESOURCE_DIR}' ./target/debug/talos"
+  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_RESOURCE_DIR='${TALOS_RESOURCE_DIR}' '${TALOS_E2E_CLI_BIN}'"
 wait_for_tui_ready
 
 warmup_prompt="Reply exactly TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}. Do not call any tools."

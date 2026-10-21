@@ -5,12 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
-require_command "${TALOS_RS_DIR}/target/debug/talos"
+require_command "${TALOS_E2E_CLI_BIN:-${TALOS_RS_DIR}/target/debug/talos}"
 
 build_binaries
 prepare_talos_home
 
-cli="${TALOS_RS_DIR}/target/debug/talos"
+cli="${TALOS_E2E_CLI_BIN:-${TALOS_RS_DIR}/target/debug/talos}"
 
 run_cli() {
   "${cli}" "$@" 2>&1

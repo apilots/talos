@@ -18,7 +18,7 @@ config['agent']['kernel']['mcp']['servers'] = [server for server in servers if s
 path.write_text(yaml.safe_dump(config, sort_keys=False))
 PYTHON
 
-export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
+export TALOS_APP_SERVER_BIN="${TALOS_E2E_APP_SERVER_BIN:-${TALOS_RS_DIR}/target/debug/app-server}"
 export TALOS_PLAYWRIGHT_MCP_BROWSER="${TALOS_PLAYWRIGHT_MCP_BROWSER:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 
 playwright_output_dir="$(scenario_report_path "playwright-mcp")"
@@ -27,7 +27,7 @@ export TALOS_PLAYWRIGHT_MCP_E2E_OUTPUT="${playwright_output_dir}"
 
 log_file="$(scenario_report_path "app_server_mcp_e2e.log")"
 if timeout "${TALOS_APP_SERVER_MCP_SCENARIO_TIMEOUT_SECS:-300}" \
-  "${TALOS_RS_DIR}/target/debug/talos-app-server-test-client" mcp-e2e >"${log_file}" 2>&1; then
+  "${TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN:-${TALOS_RS_DIR}/target/debug/talos-app-server-test-client}" mcp-e2e >"${log_file}" 2>&1; then
   echo "CASE app_server_mcp_e2e PASS"
   echo "CASE app_server_mcp_e2e ARTIFACTS ${playwright_output_dir}"
 else

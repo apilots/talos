@@ -10,7 +10,7 @@ TUI_INSTALL_E2E_VERSION="${TUI_INSTALL_E2E_VERSION:-$(awk '
     exit
   }
 ' "${REPO_ROOT}/talos-rs/Cargo.toml")}"
-TUI_INSTALL_DOCKER_IMAGE="talos-tui-install-e2e:ubuntu-24.04"
+TUI_INSTALL_DOCKER_IMAGE="${TUI_INSTALL_DOCKER_IMAGE:-}"
 
 normalize_tui_install_platform() {
   case "$1" in
@@ -219,20 +219,18 @@ run_installed_tui_acceptance() {
 run_linux_docker_tui_install() {
   local dockerfile="${TALOS_E2E_DIR}/docker/tui-install-ubuntu-24.04.Dockerfile"
   local container_report_dir
-  local docker_arch
-  local target_dir
+  local target_volume
   local rust_version
 
   require_command docker
   docker info >/dev/null
-  docker_arch="$(docker info --format '{{.Architecture}}')"
-  target_dir="${TALOS_E2E_TMP_ROOT}/tui-install-linux-target-${docker_arch}"
+  target_volume="tui-install-target-${TALOS_E2E_RUN_ID}-${RANDOM}"
   container_report_dir="${SCENARIO_REPORT_DIR}/container"
   [[ -s "${REPO_ROOT}/talos-rs/Cargo.lock" ]] || {
     echo "The committed talos-rs/Cargo.lock is required for Docker installation acceptance." >&2
     return 1
   }
-  mkdir -p "${target_dir}" "${container_report_dir}"
+  mkdir -p "${container_report_dir}"
   mkdir -p "${REPO_ROOT}/talos-rs/target"
 
   rust_version="$(awk -F= '$1 == "RELEASE_RUST_VERSION" { print $2 }' \
@@ -241,14 +239,15 @@ run_linux_docker_tui_install() {
     echo "The shared toolchain must specify RELEASE_RUST_VERSION." >&2
     return 1
   }
-  docker build --build-arg "RUST_VERSION=${rust_version}" \
-    -t "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}"
-  docker run --rm \
+  e2e_docker volume "${target_volume}" >/dev/null
+  local image
+  image="$(e2e_image talos-tui-install-e2e "${TUI_INSTALL_DOCKER_IMAGE}" --build-arg "RUST_VERSION=${rust_version}" -f "${dockerfile}" "${REPO_ROOT}")"
+  e2e_docker container "tui-install-${TALOS_E2E_RUN_ID}-${RANDOM}" --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
-    -v "${target_dir}:/workspace/talos/talos-rs/target" \
+    -v "${target_volume}:/workspace/talos/talos-rs/target" \
     -v "${container_report_dir}:/tmp/talos-e2e-report" \
     -e TALOS_E2E_TMP_ROOT=/tmp/talos-e2e \
     -e TALOS_SCENARIO_REPORT_DIR=/tmp/talos-e2e-report \
-    "${TUI_INSTALL_DOCKER_IMAGE}" \
+    "${image}" \
     bash -lc "/workspace/talos/talos-e2e/scenarios/15_tui_install/01_native_install.sh"
 }

@@ -66,8 +66,10 @@ stale overrides and missing declarations fail explicitly. Supported fields are
 `checks` covers concrete existing prerequisites: Docker daemon, Cloud fixture,
 real model key via `has_real_llm_key`, installed Chrome, Linux Desktop display,
 Caddy, current Worker image availability and native sandbox dependencies.
-`binaries` declares the shared `server`/`cli` prebuild; scenario-owned specialized
-builds stay with their existing wrappers. The Linux launcher prebuild is retained.
+`binaries` declares the shared `server`, `cli`, `worker`, `app_server` and
+`test_client`/`sandbox` prebuild; scenario-owned specialized
+builds stay with their existing wrappers. The Linux launcher is prepared only for selected native binary/sandbox cases;
+container-only cases do not build a host launcher.
 Environment values and secrets are never printed. Example:
 
 ```json
@@ -252,6 +254,26 @@ the secretless hosted PR gate. Its isolated Docker-context regressions run in CI
 Generated evidence is written under `talos-e2e/reports/`. Temporary Talos homes
 and scenario data use `talos-e2e/.tmp/` unless `TALOS_E2E_TMP_ROOT` overrides
 the location. These directories are generated output, not source documentation.
+
+All discovered cases use the same before/after cleanup boundary. Each case gets
+private temp/home/native-output paths, an owned shell process group and a private
+tmux server. Resource-owning fixtures register Docker resources and detached
+processes through the [lifecycle contract](LIFECYCLE.md). Cleanup runs after
+success, failure and INT/TERM; cleanup errors fail the run and retain ownership
+records for diagnosis. Reports survive cleanup. Only this invocation's resources
+are removed; shared images, supplied binaries and package/build caches stay intact.
+
+Images built by the runner use a unique run tag/label, are reused between cases,
+and are removed at run end. Image overrides are pre-existing inputs and are never
+rebuilt or deleted. Avoid global `docker prune` operations.
+
+Binary overrides (`TALOS_E2E_SERVER_BIN`, `TALOS_E2E_CLI_BIN`,
+`TALOS_E2E_WORKER_BIN`, `TALOS_E2E_APP_SERVER_BIN`,
+`TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN`, `TALOS_E2E_SANDBOX_BIN`) must point to
+executables. The runner resolves and exports them once; an invalid explicit path
+fails without fallback. Otherwise it uses the existing locked Cargo build.
+On Linux, reuse the sandbox launcher beside the chosen binary, or build only the
+matching debug/release launcher when it is absent.
 
 ## Test rules
 

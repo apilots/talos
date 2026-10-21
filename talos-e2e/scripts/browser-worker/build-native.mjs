@@ -10,6 +10,6 @@ for(const mode of selected)if(!['engine','mcp','media','viewer'].includes(mode))
 for(const [mode,output,main] of [['engine','dist','acceptance.mjs'],['mcp','mcp-dist','mcp.mjs'],['media','media-dist','media.mjs'],['viewer']]) {
  if(selected.size&&!selected.has(mode))continue;
  await build({configFile:path.join(directory,'vite.config.mjs'),mode});
- if(output)await cp(path.join(root,'talos-app/desktop/dist/browser-window'),path.join(root,'.tmp/browser-worker/native',output,'browser-window'),{recursive:true});
- if(output)await writeFile(path.join(root,'.tmp/browser-worker/native',output,'package.json'),JSON.stringify({name:`talos-browser-${mode}-acceptance`,version:'1.0.0',type:'module',main}));
+ if(output)await cp(path.join(root,'talos-app/desktop/dist/browser-window'),path.join(process.env.TALOS_E2E_NATIVE_ROOT || path.join(root,'.tmp/browser-worker/native'),output,'browser-window'),{recursive:true});
+ if(output)await writeFile(path.join(process.env.TALOS_E2E_NATIVE_ROOT || path.join(root,'.tmp/browser-worker/native'),output,'package.json'),JSON.stringify({name:`talos-browser-${mode}-acceptance`,version:'1.0.0',type:'module',main}));
 }

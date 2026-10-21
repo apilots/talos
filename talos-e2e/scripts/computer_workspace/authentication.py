@@ -53,11 +53,11 @@ def run(cluster):
             return subprocess.run(argv, executable=argv[0], env=env, stdout=output, stderr=diagnostic,
                                   close_fds=False, timeout=45)
 
-    env['TALOS_APP_SERVER_BIN'] = str(ROOT / 'talos-rs/target/debug/app-server')
-    app = command('app-server-cache', [str(ROOT / 'talos-rs/target/debug/talos-app-server-test-client'), 'cloud-session-cache'])
+    env['TALOS_APP_SERVER_BIN'] = os.environ.get('TALOS_E2E_APP_SERVER_BIN', str(ROOT / 'talos-rs/target/debug/app-server'))
+    app = command('app-server-cache', [os.environ.get('TALOS_E2E_APP_SERVER_TEST_CLIENT_BIN', str(ROOT / 'talos-rs/target/debug/talos-app-server-test-client')), 'cloud-session-cache'])
     require(app.returncode == 0, 'Cached app-server authorization failed; inspect app-server-cache.log')
     proof('app_server_existing_owned_session')
-    cli = [str(ROOT / 'talos-rs/target/debug/talos'), 'models', '--format', 'json']
+    cli = [os.environ.get('TALOS_E2E_CLI_BIN', str(ROOT / 'talos-rs/target/debug/talos')), 'models', '--format', 'json']
     result = command('cli-cache', cli)
     require(result.returncode == 0, 'Cached CLI authorization failed; inspect cli-cache.log')
     models = json.loads((REPORT / 'cli-cache.stdout').read_text())

@@ -17,11 +17,12 @@ README. Install `requirements.txt` in a test Python environment.
 
 For native coverage, install the repository's existing frontend dependencies and
 Electron development runtime, run `pnpm --dir talos-app/desktop build:main`, then
-`node talos-e2e/scripts/browser-worker/build-native.mjs`. Native fixtures use only
+the standard runner case builds its native fixture into private case storage.
+`build-native.mjs` is the shared implementation helper. Native fixtures use only
 owned disposable profiles and the existing product preload, controller, stdio and
 browser-host modules. Linux runs require Xvfb and normal Electron sandbox support.
 
-Run the built engine fixture with Electron (`.tmp/browser-worker/native/dist`) to
+Use `--case 20_browser_workspace/03_desktop_browser` through the standard runner to
 verify the shared offline home, isolated native toolbar, real tab
 open/focus/close, stale tab/document rejection, explicit debugger detach failure
 and reset recovery. Website views must have no toolbar/product preload, and the
@@ -29,10 +30,11 @@ toolbar must be absent from automation targets. Closing a background tab must
 preserve the current tab; closing the local browser window hides it, and reopening
 retains the dedicated profile. Prepared user Chrome keeps its own UI.
 
-Run `native_mcp.py` with `TALOS_E2E_APP_SERVER_BIN` pointing to the current
-app-server. It executes a second real MCP task after revision-bound pause/resume
+Use `--case 20_browser_workspace/04_desktop_mcp` with
+`TALOS_E2E_APP_SERVER_BIN` pointing to the current app-server. It executes a second real MCP task after revision-bound pause/resume
 and requires fresh successful observations.
-Run `fixture.py` with `TALOS_E2E_SERVER_BIN`, `TALOS_E2E_APP_SERVER_BIN`, and
+Use `--case 20_browser_workspace/05_docker_worker` with
+`TALOS_E2E_SERVER_BIN`, `TALOS_E2E_APP_SERVER_BIN`, and
 `TALOS_E2E_WORKER_IMAGE`; set `TALOS_E2E_NATIVE_MEDIA=1` to require the actual Desktop
 noVNC viewer. GitHub PR coverage requires this native media path. The controlled
 Docker scenario must cover these desktop behaviors through actual authenticated
