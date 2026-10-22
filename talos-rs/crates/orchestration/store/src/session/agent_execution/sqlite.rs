@@ -19,7 +19,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_read_transaction().await?;
         let Some(adapter) = self
             .sync
             .resource(
@@ -430,7 +430,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         &self,
         identity: &AgentTurnRef,
     ) -> TalosResult<Option<AgentContinuationBindingRecord>> {
-        let mut transaction = self.storage.begin_transaction().await?;
+        let mut transaction = self.storage.begin_read_transaction().await?;
         let binding = load_continuation_binding(transaction.as_mut(), identity).await?;
         transaction.rollback().await?;
         Ok(binding)

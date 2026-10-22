@@ -102,3 +102,12 @@ updating the product alone cannot change a previously released service image.
 Full selected-session History and running-Turn Live remain the existing local
 Store/subscription model. Deletion retains known-active and bounded unconfirmed
 remote-execution guards.
+
+Local display reads also remain independent of Sync's database writer. Shared
+Session metadata, History cursors, active-Turn display and account associations
+use consistent deferred WAL read snapshots through the existing Storage owner;
+they never acquire its write gate or begin an immediate write transaction.
+Single-query Sync preferences use the existing pooled read. Write/capture/import
+transactions retain their original serialization and atomicity. A read snapshot
+cannot be upgraded through the transaction write API, and SQLx owns rollback on
+drop/cancellation. This does not change History loading or Sync ownership.

@@ -8,6 +8,9 @@ use talos_storage::{SqliteStorage, Storage};
 use talos_sync::{ComputerAlias, SyncBindParams, SyncOptions, SyncScope};
 use talos_types::*;
 
+#[path = "read_snapshot_tests.rs"]
+mod read_snapshot_tests;
+
 const COMPUTER: &str = "d4383755-33d1-43fd-a6ef-cf14dc2a823d";
 struct Peer {
     storage: Arc<SqliteStorage>,
