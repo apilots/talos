@@ -83,7 +83,10 @@ impl McpProcess {
     }
 
     pub(super) async fn shutdown(mut self) -> TalosResult<()> {
-        let result = cleanup(self.child.take().expect("MCP process is owned")).await;
+        // Keep the child in this Drop guard while awaiting. If the caller is
+        // cancelled, the existing tracked Drop cleanup must still own the group.
+        let result = cleanup(self.child.as_deref_mut().expect("MCP process is owned")).await;
+        self.child.take();
         self.stderr.abort();
         result
     }
@@ -91,11 +94,11 @@ impl McpProcess {
 
 impl Drop for McpProcess {
     fn drop(&mut self) {
-        if let Some(child) = self.child.take() {
+        if let Some(mut child) = self.child.take() {
             let stderr = self.stderr.clone();
             let cleanup_owner = self.cleanup.clone();
             self.cleanup.tasks.spawn(async move {
-                if let Err(error) = cleanup(child).await {
+                if let Err(error) = cleanup(&mut *child).await {
                     cleanup_owner.record(error);
                 }
                 stderr.abort();
@@ -104,29 +107,30 @@ impl Drop for McpProcess {
     }
 }
 
-async fn cleanup(mut child: Box<dyn ChildWrapper>) -> TalosResult<()> {
+async fn cleanup(child: &mut dyn ChildWrapper) -> TalosResult<()> {
+    let deadline = tokio::time::Instant::now() + crate::CLEANUP_TIMEOUT;
     let kill_result = child.start_kill();
-    // Darwin reports EPERM for a group containing only an unreaped zombie.
-    // Reap our exited root and retry; never treat a permission failure as success.
+    // Darwin can reject signals during proc_exit before WNOHANG can reap the
+    // root. Await the existing wrapper, then confirm the group signal again.
+    // A genuine permission failure is never accepted as successful cleanup.
     #[cfg(target_os = "macos")]
-    let kill_result = if kill_result
-        .as_ref()
-        .is_err_and(|error| error.raw_os_error() == Some(libc::EPERM))
-        && child
-            .inner_mut()
-            .try_wait()
-            .map_err(|error| {
-                TalosError::from_source(
+    let kill_result = match kill_result {
+        Err(error) if error.raw_os_error() == Some(libc::EPERM) => {
+            tokio::time::timeout_at(deadline, child.wait())
+                .await
+                .map_err(|_| TalosError::from_source(
+                    ErrorCode::RunCleanupUnconfirmed,
+                    "The MCP process tree could not be terminated.",
+                    error,
+                ).context("The root did not become waitable before the cleanup deadline after a rejected group signal."))?
+                .map_err(|error| TalosError::from_source(
                     ErrorCode::RunCleanupUnconfirmed,
                     "The MCP process exit could not be confirmed.",
                     error,
-                )
-            })?
-            .is_some()
-    {
-        child.start_kill()
-    } else {
-        kill_result
+                ))?;
+            child.start_kill()
+        }
+        result => result,
     };
     if let Err(error) = kill_result {
         #[cfg(unix)]
@@ -141,7 +145,7 @@ async fn cleanup(mut child: Box<dyn ChildWrapper>) -> TalosResult<()> {
             ));
         }
     }
-    tokio::time::timeout(crate::CLEANUP_TIMEOUT, child.wait())
+    tokio::time::timeout_at(deadline, child.wait())
         .await
         .map_err(|_| {
             TalosError::new(
@@ -163,27 +167,6 @@ pub(super) fn process_error(message: &'static str, error: std::io::Error) -> Tal
     TalosError::from_source(ErrorCode::ToolExecutionFailed, message, error)
 }
 
-#[cfg(all(test, target_os = "macos"))]
-#[tokio::test]
-async fn cleanup_reaps_an_exited_root_before_confirming_its_process_group_is_gone() {
-    let cleanup_owner = Arc::new(Cleanup::default());
-    let mut command = Command::new("/usr/bin/true");
-    command
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let (pipes, process) = McpProcess::spawn(command, &cleanup_owner).unwrap();
-    let pid = process.child.as_ref().unwrap().id().unwrap();
-    // Observe the real kernel exit without reaping it. macOS killpg returns
-    // EPERM for this zombie-only group until its parent consumes the exit.
-    let mut status: libc::siginfo_t = unsafe { std::mem::zeroed() };
-    assert_eq!(
-        unsafe { libc::waitid(libc::P_PID, pid, &mut status, libc::WEXITED | libc::WNOWAIT) },
-        0
-    );
-    drop(pipes);
-    process.shutdown().await.unwrap();
-    cleanup_owner.tasks.close();
-    cleanup_owner.tasks.wait().await;
-    cleanup_owner.result().unwrap();
-}
+#[cfg(all(test, unix))]
+#[path = "process_tests.rs"]
+mod tests;
