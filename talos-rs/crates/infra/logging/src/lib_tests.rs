@@ -3,6 +3,88 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn codec_noise_is_precise_and_explicitly_enableable() {
+    for (name, level) in [("quiet", LogLevel::Warn), ("diagnostic", LogLevel::Info)] {
+        let path = temp_log_path(name);
+        let mut config = LoggingConfig {
+            file: Some(path.to_string_lossy().into()),
+            stdout: false,
+            ..Default::default()
+        };
+        config.target_levels.insert(
+            "loro_internal::oplog::change_store::block_encode".into(),
+            level,
+        );
+        // Target overrides cannot silence a product handling-owner report.
+        config
+            .target_levels
+            .insert("talos::diagnostic".into(), LogLevel::Off);
+        let (dispatch, guard) = build_dispatch(&config).unwrap();
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(target: "loro_internal::oplog::change_store::block_encode", "codec-info");
+            tracing::warn!(target: "loro_internal::oplog::change_store::block_encode", "codec-warning");
+            tracing::info!(target: "talos_sync::runner", "transport-started");
+            report_error(&talos_error::TalosError::new(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                "protected-turn",
+            ));
+        });
+        drop(dispatch);
+        drop(guard);
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text.contains("codec-info"), name == "diagnostic");
+        for expected in [
+            "codec-warning",
+            "transport-started",
+            "protected-turn",
+            "backtrace",
+        ] {
+            assert!(text.contains(expected));
+        }
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn rotation_limits_and_maintained_templates_use_the_same_config() {
+    for limits in [
+        LogRotation {
+            max_bytes: 0,
+            max_files: 5,
+        },
+        LogRotation {
+            max_bytes: 100,
+            max_files: 1,
+        },
+    ] {
+        let config = LoggingConfig {
+            rotation: Some(limits),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_dispatch(&config).unwrap_err().error_code(),
+            talos_error::ErrorCode::InvalidRequest
+        );
+    }
+    for filename in ["talos.yaml", "talos-dev.yaml", "talos-prod.yaml"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../conf")
+            .join(filename);
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        let actual: LoggingConfig = serde_yaml::from_value(value["logging"].clone()).unwrap();
+        assert_eq!(
+            serde_yaml::to_value(actual).unwrap(),
+            serde_yaml::to_value(LoggingConfig::default()).unwrap()
+        );
+    }
+    let disabled: LoggingConfig =
+        serde_yaml::from_str("rotation: null\ntarget_levels: {}\n").unwrap();
+    assert!(disabled.rotation.is_none());
+    assert!(disabled.target_levels.is_empty());
+}
+
+#[test]
 fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
     let log_path = temp_log_path("failures.log");
     let config = LoggingConfig {
@@ -129,7 +211,7 @@ fn saturated_file_queue_preserves_every_write_and_flushes_on_shutdown() {
     );
 }
 
-fn temp_log_path(name: &str) -> PathBuf {
+pub(super) fn temp_log_path(name: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after epoch")

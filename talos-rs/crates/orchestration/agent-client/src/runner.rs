@@ -14,6 +14,15 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const RENEW_INTERVAL: Duration = Duration::from_secs(30);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
+#[derive(Debug)]
+enum NodeOperation {
+    Register,
+    Heartbeat,
+    RenewLease,
+    ExecutionConnection,
+    Unregister,
+}
+
 /// Independent node registration lifecycle. It never persists a Turn or
 /// fabricates Harness capabilities. A caller must stop execution admission
 /// when this runner ends with an expired or rejected lease.
@@ -80,6 +89,7 @@ impl AgentNodeRunner {
         let cleanup = self.publish_lease(None);
         cleanup?;
         if let Some(auth) = result? {
+            let started = Instant::now();
             let unregister = tokio::time::timeout(
                 Duration::from_secs(10),
                 self.client.unregister(NodeRequest { auth, params: () }),
@@ -93,7 +103,7 @@ impl AgentNodeRunner {
                 ))
             });
             if let Err(error) = unregister {
-                tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node unregister was not confirmed");
+                self.report_failure(NodeOperation::Unregister, started, &error);
             }
         }
         Ok(())
@@ -116,6 +126,7 @@ impl AgentNodeRunner {
                 return Ok(Some(lease.auth));
             }
             self.publish_lease(Some(lease.clone()))?;
+            let connection_started = Instant::now();
             connection = self.execution_adapter.as_ref().map(|adapter| {
                 let stop = shutdown.child_token();
                 let task_stop = stop.clone();
@@ -147,7 +158,7 @@ impl AgentNodeRunner {
                     } => {
                         if let Err(error) = result? {
                             if !is_transient(&error) { return Err(error); }
-                            tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent execution connection ended");
+                            self.report_failure(NodeOperation::ExecutionConnection, connection_started, &error);
                         }
                         self.publish_lease(None)?;
                         tokio::select! { _ = shutdown.cancelled() => return Ok(Some(lease.auth)), _ = sleep(RETRY_INTERVAL) => {} }
@@ -159,6 +170,7 @@ impl AgentNodeRunner {
                         continue 'registered;
                     }
                     _ = heartbeat.tick() => {
+                        let sent_at = Instant::now();
                         let result = tokio::select! {
                             biased;
                             _ = shutdown.cancelled() => return Ok((Instant::now() < lease.deadline).then_some(lease.auth.clone())),
@@ -178,7 +190,7 @@ impl AgentNodeRunner {
                                 continue 'registered
                             },
                             Err(error) if is_transient(&error) => {
-                                tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node heartbeat could not reach control plane");
+                                self.report_failure(NodeOperation::Heartbeat, sent_at, &error);
                             }
                             Err(error) => return Err(error),
                         }
@@ -204,7 +216,7 @@ impl AgentNodeRunner {
                                 continue 'registered
                             },
                             Err(error) if is_transient(&error) => {
-                                tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node lease renewal could not reach control plane");
+                                self.report_failure(NodeOperation::RenewLease, sent_at, &error);
                             }
                             Err(error) => return Err(error),
                         }
@@ -219,6 +231,14 @@ impl AgentNodeRunner {
             Some(observer) => observer(update),
             None => Ok(()),
         }
+    }
+
+    // Transient failures are consumed by this retry owner. Report the original
+    // cause here; terminal errors still propagate to the existing host owner.
+    fn report_failure(&self, operation: NodeOperation, started: Instant, error: &TalosError) {
+        let span = tracing::warn_span!("agent_node_operation_failed", node_id = %self.node_id, ?operation, elapsed_ms = started.elapsed().as_millis() as u64);
+        let _entered = span.enter();
+        talos_logging::report_error(error);
     }
 
     async fn register_until_success(
@@ -250,7 +270,7 @@ impl AgentNodeRunner {
                     return Ok(Some(active_lease(&self.node_id, registration, sent_at)?))
                 }
                 Err(error) if is_transient(&error) => {
-                    tracing::warn!(node_id = %self.node_id, code = ?error.error_code(), "Agent node registration could not reach control plane");
+                    self.report_failure(NodeOperation::Register, sent_at, &error);
                     tokio::select! {
                         _ = shutdown.cancelled() => return Ok(None),
                         _ = sleep(RETRY_INTERVAL) => {}

@@ -250,6 +250,10 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         4
     );
     assert!(log.contains("sync_account_initialization_failed"));
+    assert!(log.contains("phase=VerifyAccount"));
+    assert!(log.contains("phase=ReconcileWorkerAndBinding"));
+    assert!(log.contains("wake_reason=TemporaryFailureRetry"));
+    assert!(log.contains("elapsed_ms="));
     assert_eq!(
         log.matches("code=Conflict").count(),
         1,

@@ -220,7 +220,12 @@ async fn run<A: SyncDataAdapter>(
     mut channels: RunnerChannels,
 ) -> TalosResult<()> {
     let _lifetime = RunnerLifetime(params.binding.scope.account_id.clone());
-    tracing::info!(account_id = %params.binding.scope.account_id, "Sync transport runner started");
+    // Only the origin is diagnostic; configured URLs may carry private paths,
+    // query strings or user information that must never become log fields.
+    let endpoint_origin = url::Url::parse(sync.hub_endpoint())
+        .ok()
+        .map(|url| url.origin().ascii_serialization());
+    tracing::info!(account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, "Sync transport runner started");
     loop {
         let enabled = match sync.enabled(&params.binding.scope.account_id).await {
             Ok(enabled) => enabled,
@@ -241,12 +246,15 @@ async fn run<A: SyncDataAdapter>(
         channels.status.send_modify(|value| {
             value.connection = SyncConnectionState::Connecting;
         });
-        let result = transport::connected(&sync, &*adapter, &params, &stop, &mut channels).await;
+        let started = std::time::Instant::now();
+        let mut phase = transport::ConnectionPhase::Bootstrap;
+        let result =
+            transport::connected(&sync, &*adapter, &params, &stop, &mut channels, &mut phase).await;
         if stop.is_cancelled() {
             break;
         }
         if let Err(error) = result {
-            let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id);
+            let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, ?phase, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_ms = params.reconnect_delay.as_millis() as u64);
             let _entered = span.enter();
             talos_logging::report_error(&error);
             channels.status.send_modify(|value| {

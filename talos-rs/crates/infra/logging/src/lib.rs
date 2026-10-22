@@ -1,7 +1,6 @@
 //! Talos Logging - 基于 tracing 的日志系统
 
 use chrono_tz::Tz;
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use talos_error::TalosResult;
 use tracing::Dispatch;
@@ -12,34 +11,9 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod error_report;
 pub use error_report::report_error;
-
-/// 日志配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingConfig {
-    #[serde(default = "default_level")]
-    pub level: String,
-    #[serde(default = "default_format")]
-    pub format: String,
-    #[serde(default)]
-    pub file: Option<String>,
-    #[serde(default = "default_true")]
-    pub stdout: bool,
-    /// IANA timezone name for log timestamps (e.g. "Asia/Shanghai"). Defaults to UTC.
-    #[serde(default)]
-    pub timezone: Option<String>,
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            level: default_level(),
-            format: default_format(),
-            file: None,
-            stdout: default_true(),
-            timezone: None,
-        }
-    }
-}
+mod config;
+mod rotation;
+pub use config::{LogLevel, LogRotation, LoggingConfig};
 
 /// Custom timer that formats timestamps in a specific IANA timezone.
 struct TzTimer(Tz);
@@ -49,16 +23,6 @@ impl FormatTime for TzTimer {
         let now = chrono::Utc::now().with_timezone(&self.0);
         write!(w, "{}", now.format("%Y-%m-%dT%H:%M:%S%.3f%:z"))
     }
-}
-
-fn default_level() -> String {
-    "info".into()
-}
-fn default_format() -> String {
-    "text".into()
-}
-fn default_true() -> bool {
-    true
 }
 
 /// 日志守卫
@@ -196,18 +160,41 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
         .filter(|s| !s.is_empty() && *s != "UTC")
         .and_then(|s| s.parse::<Tz>().ok());
 
-    let filter = EnvFilter::try_new(&config.level)
-        .map_err(|e| {
-            TalosError::new(
+    let mut filter = EnvFilter::try_new(&config.level).map_err(|e| {
+        TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid logging.level: {}", e),
+        )
+    })?;
+    for (target, level) in &config.target_levels {
+        if target.is_empty()
+            || !target
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '-'))
+        {
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
-                format!("invalid logging.level: {}", e),
+                "logging.target_levels requires tracing target names without span filters.",
+            ));
+        }
+        let level: tracing::level_filters::LevelFilter = (*level).into();
+        filter = filter.add_directive(format!("{target}={level}").parse().map_err(|error| {
+            TalosError::from_source(
+                talos_error::ErrorCode::InvalidRequest,
+                "The logging target threshold is invalid.",
+                error,
             )
-        })?
-        .add_directive(
-            "talos::diagnostic=warn"
-                .parse()
-                .expect("valid diagnostic directive"),
-        );
+        })?);
+    }
+    // Product handling-owner diagnostics retain their severity and stack contract.
+    filter = filter.add_directive(
+        "talos::diagnostic=warn"
+            .parse()
+            .expect("valid diagnostic directive"),
+    );
+    if let Some(rotation) = &config.rotation {
+        rotation::validate(rotation)?;
+    }
     let (writer, guard) = build_writer(config)?;
     let enable_ansi = config.stdout && config.file.is_none() && config.format != "json";
 
@@ -271,7 +258,7 @@ fn private_dependency_events(metadata: &tracing::Metadata<'_>) -> bool {
 fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)> {
     match (config.stdout, config.file.as_deref()) {
         (true, Some(path)) => {
-            let (file_writer, file_guard) = create_file_writer(path)?;
+            let (file_writer, file_guard) = create_file_writer(path, config.rotation.as_ref())?;
             Ok((
                 BoxMakeWriter::new(std::io::stdout.and(file_writer)),
                 LogGuard {
@@ -281,7 +268,7 @@ fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)
         }
         (true, None) => Ok((BoxMakeWriter::new(std::io::stdout), LogGuard::default())),
         (false, Some(path)) => {
-            let (file_writer, file_guard) = create_file_writer(path)?;
+            let (file_writer, file_guard) = create_file_writer(path, config.rotation.as_ref())?;
             Ok((
                 BoxMakeWriter::new(file_writer),
                 LogGuard {
@@ -293,7 +280,10 @@ fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)
     }
 }
 
-fn create_file_writer(path: &str) -> TalosResult<(NonBlocking, WorkerGuard)> {
+fn create_file_writer(
+    path: &str,
+    rotation: Option<&LogRotation>,
+) -> TalosResult<(NonBlocking, WorkerGuard)> {
     use talos_error::TalosError;
 
     let file_path = PathBuf::from(path);
@@ -307,6 +297,16 @@ fn create_file_writer(path: &str) -> TalosResult<(NonBlocking, WorkerGuard)> {
         })?;
     }
 
+    if let Some(rotation) = rotation {
+        let writer =
+            rotation::RotatingFile::open(file_path, rotation.clone()).map_err(|error| {
+                TalosError::internal_with_source(
+                    "The rotating log file could not be opened.",
+                    error,
+                )
+            })?;
+        return Ok(file_writer_builder().finish(writer));
+    }
     let directory = file_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = file_path.file_name().ok_or_else(|| {
         TalosError::new(

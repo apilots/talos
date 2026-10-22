@@ -11,6 +11,12 @@ pub(crate) struct DocumentRecord {
     pub acknowledged: SyncVersion,
 }
 
+pub(crate) struct AcknowledgementRecord {
+    pub exported: SyncVersion,
+    pub current: SyncVersion,
+    pub acknowledged: SyncVersion,
+}
+
 pub(crate) struct OutboxRecord {
     pub seq: i64,
     pub changes: Vec<talos_sync_types::SyncChange>,
@@ -192,6 +198,52 @@ pub(crate) async fn save_document(
         ],
     )
     .await?;
+    Ok(())
+}
+
+pub(crate) async fn acknowledgement(
+    tx: &mut dyn StorageTransaction,
+    batch: &crate::SyncExportBatch,
+) -> TalosResult<Option<AcknowledgementRecord>> {
+    // A missing outbox row is an already committed ACK. A missing document for
+    // an existing row is corrupt state, so keep the LEFT JOIN and validate it.
+    let rows = tx.query("SELECT o.exported_version_json, hex(d.version_vector) AS vector, d.generation, hex(d.acknowledged_vector) AS acknowledged, d.acknowledged_generation FROM sync_outbox o LEFT JOIN sync_documents d ON d.hub_id = o.hub_id AND d.account_id = o.account_id AND d.kind = o.kind AND d.resource_id = o.resource_id WHERE o.seq = ? AND o.hub_id = ? AND o.account_id = ? AND o.kind = ? AND o.resource_id = ?", &[&batch.through_sequence.to_string(), &batch.scope.hub_id, &batch.scope.account_id, batch.resource.kind().as_str(), batch.resource.id()]).await?;
+    rows.first()
+        .map(|row| {
+            Ok(AcknowledgementRecord {
+                exported: json(row, "exported_version_json")?,
+                current: SyncVersion {
+                    version_vector: unhex(&text(row, "vector")?)?,
+                    history_generation: u64::try_from(
+                        row.get_i64("generation").ok_or_else(corrupt_record)?,
+                    )
+                    .map_err(|_| corrupt_record())?,
+                },
+                acknowledged: SyncVersion {
+                    version_vector: unhex(&text(row, "acknowledged")?)?,
+                    history_generation: u64::try_from(
+                        row.get_i64("acknowledged_generation")
+                            .ok_or_else(corrupt_record)?,
+                    )
+                    .map_err(|_| corrupt_record())?,
+                },
+            })
+        })
+        .transpose()
+}
+
+pub(crate) async fn save_acknowledgement(
+    tx: &mut dyn StorageTransaction,
+    scope: &SyncScope,
+    resource: &SyncResourceKey,
+    acknowledged: &SyncVersion,
+) -> TalosResult<()> {
+    let generation =
+        i64::try_from(acknowledged.history_generation).map_err(|_| corrupt_record())?;
+    let affected = tx.execute("UPDATE sync_documents SET acknowledged_vector = unhex(?), acknowledged_generation = ? WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&hex(&acknowledged.version_vector), &generation.to_string(), &scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    if affected != 1 {
+        return Err(corrupt_record());
+    }
     Ok(())
 }
 

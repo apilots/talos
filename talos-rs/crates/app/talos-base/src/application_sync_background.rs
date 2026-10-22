@@ -1,5 +1,6 @@
 //! Account maintenance is owned by the host, never awaited by snapshot queries.
 use super::application_sync::ApplicationSyncHost;
+use super::application_sync_management::RefreshPhase;
 use std::collections::HashMap;
 use talos_service::Actor;
 use tokio::task::JoinHandle;
@@ -49,6 +50,15 @@ impl Drop for RefreshTasks {
 }
 
 struct RefreshLifetime(String);
+
+#[derive(Debug)]
+enum RefreshWake {
+    Started,
+    AccountOrComputerChanged,
+    TemporaryFailureRetry,
+    WorkerStateChanged,
+    WorkerConnectionEnded,
+}
 
 impl Drop for RefreshLifetime {
     fn drop(&mut self) {
@@ -180,14 +190,18 @@ async fn maintain_account(
     mut failures: tokio::sync::watch::Receiver<Option<talos_error::ApiError>>,
     _lifetime: RefreshLifetime,
 ) {
+    let mut wake_reason = RefreshWake::Started;
     loop {
         let Some(owner) = host.upgrade() else { break };
         let actor = updates.borrow_and_update().clone();
         failures.borrow_and_update();
+        let started = std::time::Instant::now();
+        let mut phase = RefreshPhase::AwaitLifecycle;
         let result = {
             let _guard = owner.lifecycle.lock().await;
             async {
-                owner.refresh_account(&actor).await?;
+                owner.refresh_account(&actor, &mut phase).await?;
+                phase = RefreshPhase::ObserveWorker;
                 let local = talos_config::YamlConfigStore::new(owner.config.source_path())
                     .load_agent_node()?
                     .runner;
@@ -217,7 +231,7 @@ async fn maintain_account(
         let retry_after_seconds = retryable.then_some(5_u64);
         let connection = match result {
             Err(error) => {
-                let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, retry_after_seconds);
+                let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, ?phase, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_seconds);
                 let _entered = span.enter();
                 talos_logging::report_error(&error);
                 owner
@@ -233,7 +247,7 @@ async fn maintain_account(
                     .write()
                     .expect("sync failures lock")
                     .remove(&actor.user_id);
-                tracing::info!(account_id = %actor.user_id, "Sync account initialized; waiting for lifecycle changes");
+                tracing::info!(account_id = %actor.user_id, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, "Sync account initialized; waiting for lifecycle changes");
                 connection
             }
         };
@@ -241,9 +255,12 @@ async fn maintain_account(
         // needs a lifecycle wake when its stream ends.
         drop(owner);
         if failed {
-            tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if retryable => {},
-                changed = updates.changed() => if changed.is_err() { break },
+            wake_reason = tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if retryable => RefreshWake::TemporaryFailureRetry,
+                changed = updates.changed() => {
+                    if changed.is_err() { break }
+                    RefreshWake::AccountOrComputerChanged
+                },
                 // Ignore our own failure publication. Only successful explicit
                 // Worker recovery clears it and can unblock terminal enrollment.
                 recovered = async {
@@ -255,22 +272,29 @@ async fn maintain_account(
                     }
                 } => {
                     if recovered.is_err() { break }
+                    RefreshWake::WorkerStateChanged
                 },
-            }
+            };
             continue;
         }
-        tokio::select! {
-            changed = updates.changed() => if changed.is_err() { break },
+        wake_reason = tokio::select! {
+            changed = updates.changed() => {
+                if changed.is_err() { break }
+                RefreshWake::AccountOrComputerChanged
+            },
             // Explicit credential recovery clears the registration error;
             // it wakes reconciliation just like a terminal failure.
-            changed = failures.changed() => if changed.is_err() { break },
+            changed = failures.changed() => {
+                if changed.is_err() { break }
+                RefreshWake::WorkerStateChanged
+            },
             _ = async {
                 match &connection {
                     Some(connection) => connection.ended().await,
                     None => std::future::pending().await,
                 }
-            } => {},
-        }
+            } => RefreshWake::WorkerConnectionEnded,
+        };
     }
 }
 

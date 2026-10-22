@@ -505,6 +505,14 @@ logging:
   format: "text"
   stdout: true
   timezone: null
+  # Exact dependency target thresholds; set this entry to info for codec diagnostics.
+  target_levels:
+    loro_internal::oplog::change_store::block_encode: warn
+  # Total files include talos.log. A single oversized record remains intact.
+  # Set rotation: null to disable. Follow rotations with tail -F.
+  rotation:
+    max_bytes: 20971520
+    max_files: 5
 
 storage:
   database_type: "sqlite"

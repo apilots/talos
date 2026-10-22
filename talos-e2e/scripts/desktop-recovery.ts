@@ -166,9 +166,17 @@ try {
   assert((await fetch(`${httpOrigin}/v1/user`, { headers })).ok);
   const beforeOffline = { introspections, accountReads };
   cloudAvailable = false;
-  const started = performance.now();
   const writer = new DatabaseSync(path.join(home, "data", "talos.db"));
-  writer.exec("BEGIN IMMEDIATE");
+  // Post-Turn effects may still own a short write transaction. Acquire the
+  // fixture lock before timing reads, yielding so the HTTP fixture can settle.
+  await waitFor(async () => {
+    try { writer.exec("BEGIN IMMEDIATE"); return true; }
+    catch (error) {
+      if (error instanceof Error && "errcode" in error && error.errcode === 5) return false;
+      throw error;
+    }
+  }, 2000).catch((error: unknown) => { writer.close(); throw error; });
+  const started = performance.now();
   let readDeadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const reads = Promise.all([
@@ -232,8 +240,8 @@ async function waitForOwnedComputer(
   assert(computerId);
   return computerId;
 }
-async function waitFor(probe: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 30000;
+async function waitFor(probe: () => Promise<boolean>, timeoutMs = 30000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { if (await probe()) return; await new Promise((resolve) => setTimeout(resolve, 20)); }
   throw new Error("Desktop recovery scenario timed out.");
 }
