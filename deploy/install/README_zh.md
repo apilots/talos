@@ -23,6 +23,19 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh -s -- --version 0.1.7
 ```
 
+离线安装本地 release 包，无需网络或 `curl`。保留原始
+`Talos-TUI-<version>-<platform>-<arch>.tar.gz` 文件名，并将该版本的
+`checksums.txt` 放在同一目录：
+
+```bash
+sh install.sh --package ./Talos-TUI-0.1.12-linux-arm64.tar.gz
+```
+
+Installer 从文件名解析版本，并校验当前系统、架构、checksum 和包内资源。
+若指定 `--version` 或 `TALOS_VERSION`，必须与包版本一致。本地重复安装会重新
+校验输入包，并拒绝用不同内容替换已安装的同一版本。本地模式与在线模式共用
+安装目录和 launcher，不改变二进制对系统库的要求。
+
 默认路径：
 
 ```text

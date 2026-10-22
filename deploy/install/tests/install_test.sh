@@ -443,6 +443,85 @@ test_activation_failure_does_not_expose_command() {
   [[ ! -e "${case_root}/install/.install-lock" ]] || fail "failed activation left its lock"
 }
 
+run_local_installer() {
+  local case_root="$1"
+  local package_path="$2"
+  shift 2
+  local mock_bin="${case_root}/offline-bin"
+  local tool
+  write_mock_uname "${mock_bin}"
+  # An isolated PATH makes a curl dependency or accidental network lookup fail.
+  for tool in sh tar gzip mktemp awk tr find sort cmp cat grep mkdir rmdir rm mv ln chmod readlink dirname cp; do
+    ln -sf "$(command -v "${tool}")" "${mock_bin}/${tool}"
+  done
+  if command -v sha256sum >/dev/null 2>&1; then
+    ln -sf "$(command -v sha256sum)" "${mock_bin}/sha256sum"
+  else
+    ln -sf "$(command -v shasum)" "${mock_bin}/shasum"
+  fi
+  HOME="${case_root}/home" PATH="${mock_bin}" \
+    MOCK_UNAME_S=Linux MOCK_UNAME_M=aarch64 \
+    TALOS_INSTALL_ROOT="${case_root}/install" TALOS_BIN_DIR="${case_root}/bin" \
+    TALOS_VERSION='' TALOS_RELEASE_BASE_URL=https://must-not-be-contacted.invalid/releases \
+    "${INSTALLER}" --package "${package_path}" "$@"
+}
+
+test_local_install_without_curl_and_repeat_integrity() {
+  local case_root="${TEST_ROOT}/local install"
+  local release_root="${case_root}/release files"
+  local package_path="${release_root}/download/v1.2.3/Talos-TUI-1.2.3-linux-arm64.tar.gz"
+  local repeat_output
+  create_release_bundle "${release_root}" 1.2.3 linux arm64
+  run_local_installer "${case_root}" "${package_path}"
+  assert_eq "$("${case_root}/bin/talos")" "talos 1.2.3 linux-arm64" "local launcher"
+  repeat_output="$(run_local_installer "${case_root}" "${package_path}" --version v1.2.3)"
+  grep -Fq 'is already installed' <<<"${repeat_output}" || fail "local repeat was not idempotent"
+
+  printf 'corrupt\n' >>"${package_path}"
+  if run_local_installer "${case_root}" "${package_path}"; then
+    fail "local repeat must verify the supplied archive checksum"
+  fi
+  printf '%s  ./%s\n' "$(sha256_file "${package_path}")" "${package_path##*/}" \
+    >"$(dirname "${package_path}")/checksums.txt"
+  if run_local_installer "${case_root}" "${package_path}"; then
+    fail "same-version local package replacement must fail even with a matching checksum"
+  fi
+  assert_eq "$(readlink "${case_root}/install/current")" "versions/1.2.3-linux-arm64" \
+    "current after rejected local replacement"
+  assert_eq "$("${case_root}/bin/talos")" "talos 1.2.3 linux-arm64" "preserved local launcher"
+  [[ ! -e "${case_root}/install/.install-lock" ]] || fail "local rejection left the install lock"
+}
+
+test_local_package_input_validation() {
+  local case_root="${TEST_ROOT}/local-input"
+  local release_root="${case_root}/releases"
+  local package_dir="${release_root}/download/v2.0.0"
+  local package_path="${package_dir}/Talos-TUI-2.0.0-linux-arm64.tar.gz"
+  create_release_bundle "${release_root}" 2.0.0 linux arm64
+  if run_local_installer "${case_root}" "${package_path}" --version 3.0.0; then
+    fail "local package version mismatch must fail"
+  fi
+  create_release_bundle "${release_root}" 2.0.0 linux amd64
+  if run_local_installer "${case_root}" "${package_dir}/Talos-TUI-2.0.0-linux-amd64.tar.gz"; then
+    fail "local package architecture mismatch must fail"
+  fi
+  rm "${package_dir}/checksums.txt"
+  if run_local_installer "${case_root}" "${package_path}"; then
+    fail "local installation without checksums.txt must fail"
+  fi
+  if run_local_installer "${case_root}" "${package_dir}/missing.tar.gz"; then
+    fail "missing local package must fail"
+  fi
+  [[ ! -e "${case_root}/install/current" ]] || fail "invalid local input activated a release"
+
+  create_release_bundle "${release_root}" 2.0.0 linux arm64
+  (
+    cd "${case_root}"
+    run_local_installer "${case_root}" 'releases/download/v2.0.0/Talos-TUI-2.0.0-linux-arm64.tar.gz'
+  )
+  assert_eq "$("${case_root}/bin/talos")" "talos 2.0.0 linux-arm64" "relative local package path"
+}
+
 test_installs_linux_amd64_bundle
 test_installs_macos_arm64_bundle
 test_maps_remaining_target_aliases
@@ -455,5 +534,7 @@ test_rejects_relative_install_paths
 test_cleanup_failure_still_releases_lock
 test_signal_exits_without_installing
 test_activation_failure_does_not_expose_command
+test_local_install_without_curl_and_repeat_integrity
+test_local_package_input_validation
 
 echo "Talos installer tests passed."
