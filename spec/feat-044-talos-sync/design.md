@@ -70,6 +70,14 @@ Account restoration (`user/current`, HTTP
 credential. Unknown credentials fail immediately. Account ownership checks still
 belong to the business Service.
 
+Device login keeps the one-time Cloud approval in the existing login owner until
+account admission and optional local-cache persistence succeed. Concurrent status
+requests serialize per login; retryable admission failures return Pending with
+the original polling interval without consuming another Cloud grant. No token is
+delivered or persisted before verification. Cancelled/expired logins and failed
+commits invalidate any admitted but undelivered token, preventing an orphan Auth
+refresh task. This uses the same AuthService and adds no background task.
+
 Auth refresh runs every 60 seconds with stable +/-10% credential jitter, with a
 5-second remote timeout. A verified context lasts at most 120 seconds and never
 past token expiry. Known rejection invalidates it immediately; transient errors

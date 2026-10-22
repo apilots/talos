@@ -36,11 +36,13 @@ fn lookup_pending_returns_expired_and_removes_stale_login() {
     let now_ms = CloudSessionCache::now_ms();
     service.pending.lock().expect("lock pending").insert(
         "login-1".to_string(),
-        PendingCloudLogin {
+        Arc::new(PendingCloudLogin {
             device_code: "device-1".to_string(),
             persistence: CloudLoginPersistence::None,
             expires_at_ms: now_ms - 1,
-        },
+            interval_ms: 1000,
+            approved: Default::default(),
+        }),
     );
 
     let lookup = service.lookup_pending("login-1").expect("lookup pending");
@@ -60,19 +62,23 @@ fn lookup_pending_cleans_other_expired_logins() {
     service.pending.lock().expect("lock pending").extend([
         (
             "active".to_string(),
-            PendingCloudLogin {
+            Arc::new(PendingCloudLogin {
                 device_code: "device-active".to_string(),
                 persistence: CloudLoginPersistence::None,
                 expires_at_ms: now_ms + 60_000,
-            },
+                interval_ms: 1000,
+                approved: Default::default(),
+            }),
         ),
         (
             "expired".to_string(),
-            PendingCloudLogin {
+            Arc::new(PendingCloudLogin {
                 device_code: "device-expired".to_string(),
                 persistence: CloudLoginPersistence::None,
                 expires_at_ms: now_ms - 1,
-            },
+                interval_ms: 1000,
+                approved: Default::default(),
+            }),
         ),
     ]);
 

@@ -139,11 +139,9 @@ impl AccountService {
         &self,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        let status = self.cloud_login()?.status(request).await?;
-        if let CloudLoginStatusResponse::Authenticated { access_token, .. } = &status {
-            self.auth_service.verify_access_token(access_token).await?;
-        }
-        Ok(status)
+        self.cloud_login()?
+            .status(request, self.auth_service.as_ref())
+            .await
     }
 
     pub async fn cancel_cloud_login(&self, request: CloudLoginCancelRequest) -> TalosResult<()> {
