@@ -97,4 +97,24 @@ version_output="$(HOME="${TEST_ROOT}/home" "${TEST_ROOT}/bin/talos" --version)"
   exit 1
 }
 
+# Retry tooling can come from a newer workflow revision than the tagged installer.
+# Enforce local installation only when that immutable source advertises the mode.
+installer_help="$("${ASSETS_DIR}/install.sh" --help)"
+if grep -Fq -- '--package' <<<"${installer_help}"; then
+  for attempt in 1 2; do
+    echo "Local release installation attempt ${attempt}"
+    HOME="${TEST_ROOT}/home" \
+      TALOS_INSTALL_ROOT="${TEST_ROOT}/local-install" \
+      TALOS_BIN_DIR="${TEST_ROOT}/local-bin" \
+      "${ASSETS_DIR}/install.sh" --package "${ASSETS_DIR}/${asset_name}"
+  done
+  local_version="$(HOME="${TEST_ROOT}/home" "${TEST_ROOT}/local-bin/talos" --version)"
+  [[ "${local_version}" == "${version_output}" ]] || {
+    echo "Local and online release installations returned different versions" >&2
+    exit 1
+  }
+else
+  echo "Tagged installer does not advertise --package; online installation validated."
+fi
+
 echo "Final release assets installation passed for ${platform}-${arch}."

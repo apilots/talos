@@ -25,6 +25,21 @@ curl --proto '=https' --tlsv1.2 -fsSL \
   | sh -s -- --version 0.1.7
 ```
 
+Install a local release bundle without network access or `curl`. Keep the original
+`Talos-TUI-<version>-<platform>-<arch>.tar.gz` filename and its release
+`checksums.txt` in the same directory:
+
+```bash
+sh install.sh --package ./Talos-TUI-0.1.12-linux-arm64.tar.gz
+```
+
+The installer derives the version from the filename and checks the current platform,
+architecture, checksum and bundle contents. If `--version` or `TALOS_VERSION` is
+provided, it must match. A local repeat installation verifies the supplied archive
+again and rejects different contents for an already installed version. The local
+mode uses the same installation directories and launcher as online installation.
+It does not change the binary's system-library requirements.
+
 Default paths:
 
 ```text

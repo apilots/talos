@@ -7,6 +7,7 @@ LEGACY_RELEASE_BASE_URL="https://github.com/apilots/talos-releases/releases"
 release_url_override="${TALOS_RELEASE_BASE_URL:-}"
 release_base_url="${release_url_override:-${DEFAULT_RELEASE_BASE_URL}}"
 requested_version="${TALOS_VERSION:-}"
+local_package=""
 temp_dir=""
 staging_dir=""
 current_temp=""
@@ -19,7 +20,11 @@ usage() {
 Install the Talos TUI release bundle for the current platform.
 
 Usage:
-  install.sh [--version <version>]
+  install.sh [--version <version>] [--package <path>]
+
+--package installs a local Talos-TUI-<version>-<platform>-<arch>.tar.gz
+with checksums.txt from the same directory, without network access or curl.
+An explicit version must match the package filename.
 
 Environment:
   TALOS_VERSION             Release version when --version is omitted.
@@ -104,6 +109,48 @@ sha256_file() {
   else
     die "sha256sum or shasum is required"
   fi
+}
+
+prepare_release_files() {
+  checksums_path="${temp_dir}/checksums.txt"
+  archive_path="${temp_dir}/${asset_name}"
+  if [ -n "${local_package}" ]; then
+    cp "${local_package}" "${archive_path}"
+    cp "$(dirname "${local_package}")/checksums.txt" "${checksums_path}"
+    return
+  fi
+
+  download_base="${release_base_url}/download/v${version}"
+  printf 'Downloading Talos TUI %s for %s-%s...\n' "${version}" "${platform}" "${arch}"
+  if [ -n "${release_url_override}" ]; then
+    download_file "${download_base}/checksums.txt" "${checksums_path}"
+    download_file "${download_base}/${asset_name}" "${archive_path}"
+  elif ! try_download_file "${download_base}/checksums.txt" "${checksums_path}" \
+    || ! try_download_file "${download_base}/${asset_name}" "${archive_path}"; then
+    rm -f "${checksums_path}" "${archive_path}"
+    printf 'Talos release v%s is not available; checking the archived release.\n' "${version}" >&2
+    release_base_url="${LEGACY_RELEASE_BASE_URL}"
+    download_base="${release_base_url}/download/v${version}"
+    download_file "${download_base}/checksums.txt" "${checksums_path}"
+    download_file "${download_base}/${asset_name}" "${archive_path}"
+  fi
+}
+
+verify_release_checksum() {
+  expected_checksum="$(awk -v target="${asset_name}" '
+    {
+      path = $2
+      sub(/^\.\//, "", path)
+      if (path == target) {
+        print tolower($1)
+        exit
+      }
+    }
+  ' "${checksums_path}")"
+  [ -n "${expected_checksum}" ] || die "checksum entry not found for ${asset_name}"
+  actual_checksum="$(sha256_file "${archive_path}" | tr '[:upper:]' '[:lower:]')"
+  [ "${actual_checksum}" = "${expected_checksum}" ] \
+    || die "checksum mismatch for ${asset_name}"
 }
 
 validate_bundle() {
@@ -212,6 +259,12 @@ acquire_install_lock() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --package)
+      [ "$#" -ge 2 ] || die "--package requires a value"
+      [ -n "$2" ] || die "--package requires a value"
+      local_package="$2"
+      shift 2
+      ;;
     --version)
       [ "$#" -ge 2 ] || die "--version requires a value"
       requested_version="$2"
@@ -225,9 +278,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-for command_name in curl tar mktemp awk tr find sort cmp cat grep mkdir rmdir rm mv ln chmod readlink dirname uname; do
+for command_name in tar mktemp awk tr find sort cmp cat grep mkdir rmdir rm mv ln chmod readlink dirname uname; do
   require_command "${command_name}"
 done
+if [ -n "${local_package}" ]; then
+  require_command cp
+else
+  require_command curl
+fi
 
 [ -n "${HOME:-}" ] || die "HOME must be set"
 release_base_url="${release_base_url%/}"
@@ -254,7 +312,26 @@ else
   atomic_mv_mode="no-follow"
 fi
 
-if [ -z "${requested_version}" ]; then
+if [ -n "${local_package}" ]; then
+  case "${local_package}" in
+    /*) ;;
+    *) local_package="./${local_package}" ;;
+  esac
+  [ -f "${local_package}" ] || die "local package not found: ${local_package}"
+  [ -f "$(dirname "${local_package}")/checksums.txt" ] \
+    || die "checksums.txt is required beside the local package"
+  package_name="${local_package##*/}"
+  case "${package_name}" in
+    Talos-TUI-*-${platform}-${arch}.tar.gz) ;;
+    *) die "local package must be a Talos TUI archive for ${platform}-${arch}: ${package_name}" ;;
+  esac
+  package_version="${package_name#Talos-TUI-}"
+  package_version="${package_version%-"${platform}"-"${arch}".tar.gz}"
+  if [ -n "${requested_version}" ] && [ "${requested_version#v}" != "${package_version}" ]; then
+    die "requested version does not match local package version: ${package_version}"
+  fi
+  requested_version="${package_version}"
+elif [ -z "${requested_version}" ]; then
   if [ -n "${release_url_override}" ]; then
     requested_version="$(resolve_latest_version)" \
       || die "could not resolve the latest version from ${release_base_url}"
@@ -287,7 +364,6 @@ command_path="${bin_dir}/talos"
 version_name="${version}-${platform}-${arch}"
 version_dir="${install_root}/versions/${version_name}"
 asset_name="Talos-TUI-${version}-${platform}-${arch}.tar.gz"
-  download_base="${release_base_url}/download/v${version}"
 
 acquire_install_lock
 if [ -e "${command_path}" ] || [ -L "${command_path}" ]; then
@@ -301,43 +377,19 @@ fi
 
 temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/talos-install.XXXXXX")"
 mkdir -p "${install_root}/versions"
+if [ -n "${local_package}" ] || [ ! -d "${version_dir}" ]; then
+  prepare_release_files
+  verify_release_checksum
+fi
 already_installed=0
 if [ -d "${version_dir}" ]; then
   validate_installed_bundle "${version_dir}"
+  if [ -n "${local_package}" ]; then
+    [ "${actual_checksum}" = "${installed_checksum}" ] \
+      || die "local package differs from installed release: ${version_name}"
+  fi
   already_installed=1
 else
-  checksums_path="${temp_dir}/checksums.txt"
-  archive_path="${temp_dir}/${asset_name}"
-
-  printf 'Downloading Talos TUI %s for %s-%s...\n' "${version}" "${platform}" "${arch}"
-  if [ -n "${release_url_override}" ]; then
-    download_file "${download_base}/checksums.txt" "${checksums_path}"
-    download_file "${download_base}/${asset_name}" "${archive_path}"
-  elif ! try_download_file "${download_base}/checksums.txt" "${checksums_path}" \
-    || ! try_download_file "${download_base}/${asset_name}" "${archive_path}"; then
-    rm -f "${checksums_path}" "${archive_path}"
-    printf 'Talos release v%s is not available; checking the archived release.\n' "${version}" >&2
-    release_base_url="${LEGACY_RELEASE_BASE_URL}"
-    download_base="${release_base_url}/download/v${version}"
-    download_file "${download_base}/checksums.txt" "${checksums_path}"
-    download_file "${download_base}/${asset_name}" "${archive_path}"
-  fi
-
-  expected_checksum="$(awk -v target="${asset_name}" '
-    {
-      path = $2
-      sub(/^\.\//, "", path)
-      if (path == target) {
-        print tolower($1)
-        exit
-      }
-    }
-  ' "${checksums_path}")"
-  [ -n "${expected_checksum}" ] || die "checksum entry not found for ${asset_name}"
-  actual_checksum="$(sha256_file "${archive_path}" | tr '[:upper:]' '[:lower:]')"
-  [ "${actual_checksum}" = "${expected_checksum}" ] \
-    || die "checksum mismatch for ${asset_name}"
-
   validate_archive_members "${archive_path}"
   staging_dir="${install_root}/versions/.${version_name}.installing.$$"
   mkdir "${staging_dir}"
