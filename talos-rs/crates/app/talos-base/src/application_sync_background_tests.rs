@@ -6,6 +6,11 @@ use talos_config::{Config, TalosPaths};
 async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
     use serde_json::{json, Value};
+    #[derive(Clone)]
+    struct CloudFixture {
+        requests: tokio::sync::mpsc::UnboundedSender<String>,
+        server_failure: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
     let home = tempfile::tempdir().unwrap();
     let log_file = home.path().join("lifecycle.log");
     let logging = talos_logging::init_with_config(talos_logging::LoggingConfig {
@@ -39,16 +44,22 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     )
     .unwrap();
     let app = Router::new().route("/v1/auth/introspect", post(
-        |State(requests): State<tokio::sync::mpsc::UnboundedSender<String>>, Json(request): Json<Value>| async move {
-            requests.send(request["token"].as_str().unwrap().into()).unwrap();
+        |State(fixture): State<CloudFixture>, Json(request): Json<Value>| async move {
+            fixture.requests.send(request["token"].as_str().unwrap().into()).unwrap();
             if request["token"] == "transient-credential" {
                 return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            if request["token"] == "recovering-credential" && fixture.server_failure.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
             Json(json!({"active": request["token"] != "rejected-credential",
                 "user":{"user_id":"idle-account","email":"test@example.invalid","username":"test","role":if request["token"] == "pending-enrollment" {"admin"} else {"user"},"type":"free","status":"active"},
                 "capabilities":{"is_admin":request["token"] == "pending-enrollment","role":if request["token"] == "pending-enrollment" {"admin"} else {"user"},"scopes":[]},
                 "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null})).into_response()
-        })).with_state(requests);
+        })).with_state(CloudFixture {
+            requests,
+            server_failure: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        });
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -78,6 +89,32 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         "repeated status/restoration calls must reuse Auth's verified context"
     );
     let refreshed = Actor::regular(&actor.user_id).with_access_token("new-credential");
+    // Initial admission has no existing Auth refresh task to recover an outage.
+    // The same credential must recover without another resume or lifecycle event.
+    let recovering = Actor::regular(&actor.user_id).with_access_token("recovering-credential");
+    runtime.service.resume_account_sync(&recovering);
+    for _ in 0..2 {
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(7), observed.recv())
+                .await
+                .expect("temporary Cloud500 must retry after five seconds")
+                .unwrap(),
+            "recovering-credential"
+        );
+    }
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime
+            .sync_host
+            .failures
+            .read()
+            .unwrap()
+            .contains_key(&actor.user_id)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the same credential must complete initialization after Cloud recovers");
     runtime.service.resume_account_sync(&refreshed);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
@@ -206,11 +243,11 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     assert!(log.contains("Sync account initialized; waiting for lifecycle changes"));
     assert_eq!(
         log.matches("Cloud authorization refresh started").count(),
-        3
+        4
     );
     assert_eq!(
         log.matches("Cloud authorization refresh stopped").count(),
-        3
+        4
     );
     assert!(log.contains("sync_account_initialization_failed"));
     assert_eq!(
@@ -225,6 +262,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
             && !log.contains("rejected-credential")
             && !log.contains("pending-enrollment")
             && !log.contains("transient-credential")
+            && !log.contains("recovering-credential")
     );
 }
 

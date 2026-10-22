@@ -97,6 +97,10 @@ expired credentials or invalid configuration waits for credential/account change
 or successful explicit Worker recovery. Temporary service, timeout and rate
 failures retry initialization every five seconds. The supervisor never repeats
 healthy transport checks or replaces SDK reconnect ownership.
+Cloud Auth classifies a remote HTTP500 as temporary service unavailability,
+like502--504, so first admission can recover with the same credential even before
+an Auth refresh task exists. Other internal errors remain terminal; the host does
+not inspect Cloud response text or manage a separate authentication retry loop.
 The Sync server's independent shared-authorization fix is owned by talos-sync;
 updating the product alone cannot change a previously released service image.
 Full selected-session History and running-Turn Live remain the existing local

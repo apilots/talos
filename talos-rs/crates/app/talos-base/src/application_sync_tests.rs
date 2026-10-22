@@ -863,12 +863,22 @@ async fn shared_session_continues_on_the_same_worker_and_active_commands_return_
         worker_state(&a, "delete-session").await.handoff_ready
     })
     .await;
-    wait_for("deletable Session imported", async || {
+    let deletion_cursor = a
+        .session_store
+        .get_history_cursor("delete-session")
+        .await
+        .unwrap();
+    wait_for("completed deletable Session imported", async || {
         b.session_store
             .get_session_record("delete-session")
             .await
             .unwrap()
             .is_some()
+            && b.session_store
+                .get_history_cursor("delete-session")
+                .await
+                .unwrap()
+                == deletion_cursor
     })
     .await;
     assert!(b

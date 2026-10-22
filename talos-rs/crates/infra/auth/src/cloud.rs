@@ -555,7 +555,7 @@ pub(crate) fn map_cloud_error(error: CloudSdkError) -> TalosError {
                     ErrorCode::UsageLimitExceeded,
                     "The authentication service request limit was reached.",
                 ),
-                502..=504 => (
+                500 | 502..=504 => (
                     ErrorCode::ServiceUnavailable,
                     "The authentication service is temporarily unavailable.",
                 ),

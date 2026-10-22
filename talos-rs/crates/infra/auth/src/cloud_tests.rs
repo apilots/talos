@@ -6,7 +6,8 @@ fn cloud_failures_do_not_turn_server_errors_into_logout_or_expose_remote_bodies(
         (401, talos_error::ErrorCode::Unauthenticated),
         (403, talos_error::ErrorCode::PermissionDenied),
         (429, talos_error::ErrorCode::UsageLimitExceeded),
-        (500, talos_error::ErrorCode::InternalError),
+        (500, talos_error::ErrorCode::ServiceUnavailable),
+        (501, talos_error::ErrorCode::InternalError),
         (503, talos_error::ErrorCode::ServiceUnavailable),
     ] {
         let error = map_cloud_error(CloudSdkError::Api {
