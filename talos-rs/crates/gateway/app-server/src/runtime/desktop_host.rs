@@ -93,19 +93,16 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
             break;
         }
     }
-    loop {
-        tokio::select! {
-            _ = stop.cancelled() => { local_tasks.shutdown().await; break; }
-            result = local_tasks.join_next() => match result {
-                Some(result) => report_read_task(result),
-                None => break,
-            }
-        }
-    }
     if let Some(host) = &host {
         host.close();
     }
+    // EOF must release the serve loop and pending host callbacks before joining
+    // local work. A stalled request may otherwise keep its own shutdown blocked.
     drop(line_tx);
+    local_tasks.abort_all();
+    while let Some(result) = local_tasks.join_next().await {
+        report_read_task(result);
+    }
     drop(reader_tx);
 }
 
@@ -184,9 +181,11 @@ pub(super) fn complete_host_error(host: &crate::DesktopHostBridge, response: Jso
 
 fn report_read_task(result: Result<(), tokio::task::JoinError>) {
     if let Err(error) = result {
-        report_error(&TalosError::internal_with_source(
-            "The local query task stopped unexpectedly.",
-            error,
-        ));
+        if !error.is_cancelled() {
+            report_error(&TalosError::internal_with_source(
+                "The local query task stopped unexpectedly.",
+                error,
+            ));
+        }
     }
 }

@@ -277,3 +277,45 @@ async fn local_live_subscription_and_unsubscription_progress_during_remote_wait(
     client_write.shutdown().await.unwrap();
     runtime.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn stdin_eof_cancels_stalled_local_requests_before_draining_the_application() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = Arc::new(MockApp {
+        blocked_deletion: Some((entered.clone(), release.clone())),
+        ..Default::default()
+    });
+    let (client, server) = duplex(128 * 1024);
+    let (client_read, mut client_write) = split(client);
+    let (server_read, server_write) = split(server);
+    let mut runtime = tokio::spawn(run_jsonl(
+        server_read,
+        server_write,
+        app.clone(),
+        Arc::new(ExistingTokenValidator),
+        AppServerConfig::default(),
+    ));
+    let mut output = BufReader::new(client_read).lines();
+    client_write
+        .write_all(initialize_request("unused").as_bytes())
+        .await
+        .unwrap();
+    read_output_line(&mut output).await;
+    client_write.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"session/delete\",\"params\":{\"sessionId\":\"stalled\"}}\n").await.unwrap();
+    entered.notified().await;
+    client_write.shutdown().await.unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(1), &mut runtime).await;
+    if result.is_err() {
+        // Release the fixture even on the regression path, without hiding the failure.
+        release.notify_waiters();
+        runtime.await.unwrap().unwrap();
+        panic!("EOF must cancel local requests without waiting for remote release");
+    }
+    result.unwrap().unwrap().unwrap();
+    assert!(
+        app.dispatched.lock().unwrap().is_empty(),
+        "the stalled request must be cancelled"
+    );
+    assert_eq!(*app.drained.lock().unwrap(), 1);
+}

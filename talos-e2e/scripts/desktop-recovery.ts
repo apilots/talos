@@ -111,7 +111,9 @@ try {
   await controller.connect();
   const options = { actorCredentials: { credential: { type: "existing_session_token" as const, token } } };
   const params = { sessionId: randomUUID(), turnId: null, sinceEventId: null, replayLimit: 50, closeWhenIdle: false, closeOnTerminal: false };
-  await controller.invoke("sync/status", null, options);
+  // Status is a local snapshot. Execution starts after background enrollment
+  // establishes this account's Computer ownership, independently of polling.
+  const computerId = await waitForOwnedComputer(controller, options);
   const turn = { sessionId: params.sessionId, input: { content: [{ type: "text", text: "before restart" }] }, modelSelection: null, userPermissionMode: "fullAccess", projectId: null, currentDirectory: null, clientRequestId: randomUUID() };
   await controller.invoke("turn/start", turn, options);
   await waitFor(async () => (await controller.invoke<AppProtocol.SessionHistoryResponse>("session/history", { sessionId: params.sessionId, limit: 50, cursor: null }, options)).data.length === 1);
@@ -120,6 +122,7 @@ try {
   await waitFor(async () => events.some((event) => event.event.type === "agent" && event.event.data.payload.type === "turnCompleted"));
   const cursor = events.at(-1)!.eventId;
   const identity = await controller.invoke<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerIdentity", null);
+  assert.equal(identity.nodeId, computerId);
   const beforeIds = events.map((event) => event.eventId);
   assert(bridges[0]!.client.transport.terminate("SIGTERM"));
   const deadline = Date.now() + 30000;
@@ -128,6 +131,7 @@ try {
   }
   await controller.invoke("user/current", {}, options);
   assert.deepEqual(await controller.invoke("desktop/workerIdentity", null), identity);
+  assert.equal(await waitForOwnedComputer(controller, options), computerId);
   await waitFor(async () => {
     const response = await fetch(`http://127.0.0.1:${httpPort}/v1/computers/${identity.nodeId}`, { headers: { Authorization: `Bearer ${token}` } });
     return (await response.json()).data?.available === true;
@@ -169,6 +173,19 @@ async function freePort(): Promise<number> {
   assert(address && typeof address !== "string");
   await new Promise<void>((resolve) => socket.close(() => resolve()));
   return address.port;
+}
+async function waitForOwnedComputer(
+  controller: DesktopAppServerController,
+  options: { actorCredentials: AppProtocol.ActorCredentials },
+): Promise<string> {
+  let computerId: string | null = null;
+  await waitFor(async () => {
+    const status = await controller.invoke<AppProtocol.SyncStatusResponse>("sync/status", null, options);
+    computerId = status.localComputerId;
+    return computerId !== null && computerId !== "embedded";
+  });
+  assert(computerId);
+  return computerId;
 }
 async function waitFor(probe: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 30000;

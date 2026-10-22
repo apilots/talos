@@ -155,6 +155,8 @@ deletions independently of serialized Worker commands, with separate bounded que
 and deletion capacity and the original per-request authentication. Subscriptions
 retain one connection-owned task registry, remove completed streams automatically,
 and abort remaining tasks on unsubscribe, connection drop or shutdown.
+Closing stdin also cancels connection-owned local requests before application
+drain, so a stalled request cannot keep its own shutdown boundary open.
 Session deletion rejects locally observed active parent/child Turns, including
 synced activity, and bounds Worker
 connection setup, verification/cleanup and admission-lock acquisition to two seconds.
