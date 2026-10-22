@@ -13,7 +13,7 @@ pub struct LoggingConfig {
     pub timezone: Option<String>,
     /// Exact tracing target thresholds, overriding `level` for those targets.
     pub target_levels: BTreeMap<String, LogLevel>,
-    /// None disables rotation; limits include the current file and retained archives.
+    /// Daily framework rotation. None keeps the configured file unbounded.
     pub rotation: Option<LogRotation>,
 }
 
@@ -61,17 +61,12 @@ impl From<LogLevel> for tracing::level_filters::LevelFilter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogRotation {
-    /// A single oversized record remains intact and can exceed this soft limit.
-    pub max_bytes: u64,
-    /// Total retained files, including the active file. Must be at least two.
+    /// Maximum daily files managed by tracing-appender. Must be positive.
     pub max_files: usize,
 }
 
 impl Default for LogRotation {
     fn default() -> Self {
-        Self {
-            max_bytes: 20 * 1024 * 1024,
-            max_files: 5,
-        }
+        Self { max_files: 5 }
     }
 }

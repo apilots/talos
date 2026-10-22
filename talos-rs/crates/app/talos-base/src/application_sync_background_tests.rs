@@ -16,6 +16,7 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     let logging = talos_logging::init_with_config(talos_logging::LoggingConfig {
         file: Some(log_file.to_string_lossy().into()),
         stdout: false,
+        rotation: None, // Keep diagnostic-only fixtures on their explicit single-file sink.
         ..Default::default()
     })
     .unwrap();

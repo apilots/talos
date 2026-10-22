@@ -22,19 +22,20 @@ only loro_internal::oplog::change_store::block_encode below WARN. Explicit targe
 configuration enables codec diagnostics. Product Business WARN/Internal ERROR,
 typed sources and captured stacks retain their existing reporting contract.
 
-Rotation defaults to 20 MiB and five total log files, including the active file.
-A single oversized record stays whole and may exceed the soft limit. All three
-maintained conf YAML templates declare these defaults. Set rotation: null for the
-existing unbounded policy. Use tail -F to follow pathname changes.
+Daily rotation and retention use the existing tracing-appender RollingFileAppender,
+configured through its native Rotation::DAILY and max_log_files builder options.
+The default is five daily files in UTC, named talos.log.daily.YYYY-MM-DD. The
+separate daily prefix keeps framework retention away from the previous talos.log
+and other log families. No legacy log bytes are moved, overwritten or removed.
 
-Size rotation runs on the existing lossless tracing_appender worker. Cooperating
-current-version processes lock talos.log.lock, reopen the active pathname while
-locked and write complete event buffers. Numeric archives retain chronological
-order. Rotation archives the old file before accepting the new record, then prunes
-the oldest archives. Opening a writer also applies retention. Process exit releases
-OS locks and descriptors. The small lock file stays in place to coordinate writers;
-it is not a retained log. No extra thread, manager, timer or dependency is added.
-Older uncoordinated binaries should be stopped before enabling shared-file rotation.
+All three maintained conf YAML templates declare rotation.max_files. Set
+rotation: null for the existing single unbounded output file. Daily rotation does
+not impose a byte-size limit; the earlier custom 20 MiB policy and its hand-written
+rotation/file-lock implementation are removed. Framework rotation writes whole
+formatted records through the existing lossless NonBlocking worker and WorkerGuard.
+No additional thread, manager, filesystem lock, archive numbering or dependency is
+introduced. Framework scheduling/retention is covered by its upstream tests;
+Talos verifies configuration, retention integration, restart append and queued flush.
 
 ## ACK persistence
 

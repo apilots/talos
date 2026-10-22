@@ -519,10 +519,10 @@ logging:
   # Exact dependency target thresholds; set this entry to info for codec diagnostics.
   target_levels:
     loro_internal::oplog::change_store::block_encode: warn
-  # Total files include talos.log. A single oversized record remains intact.
-  # Set rotation: null to disable. Follow rotations with tail -F.
+  # Framework daily rotation (UTC); retains at most five daily log files.
+  # Files: logs/talos.log.daily.YYYY-MM-DD. Legacy talos.log is untouched.
+  # Set rotation: null for a single unbounded logs/talos.log.
   rotation:
-    max_bytes: 20971520
     max_files: 5
 
 storage:

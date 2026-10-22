@@ -7,9 +7,13 @@ build_server_binary
 prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
 recovery_home="$(make_e2e_temp_dir desktop-recovery)"
 cleanup_recovery() {
-  if [[ -f "${recovery_home}/logs/talos.log" ]]; then
-    cp "${recovery_home}/logs/talos.log" "${SCENARIO_REPORT_DIR}/app-server.log"
-  fi
+  local log_file
+  : > "${SCENARIO_REPORT_DIR}/app-server.log"
+  for log_file in "${recovery_home}/logs/talos.log" "${recovery_home}"/logs/talos.log.daily.*; do
+    if [[ -f "${log_file}" ]]; then
+      cat "${log_file}" >> "${SCENARIO_REPORT_DIR}/app-server.log"
+    fi
+  done
   rm -rf "${recovery_home}"
 }
 trap cleanup_recovery EXIT

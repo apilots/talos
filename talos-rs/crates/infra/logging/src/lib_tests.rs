@@ -31,7 +31,7 @@ fn codec_noise_is_precise_and_explicitly_enableable() {
         });
         drop(dispatch);
         drop(guard);
-        let text = fs::read_to_string(&path).unwrap();
+        let text = fs::read_to_string(daily_path(&path)).unwrap();
         assert_eq!(text.contains("codec-info"), name == "diagnostic");
         for expected in [
             "codec-warning",
@@ -47,25 +47,14 @@ fn codec_noise_is_precise_and_explicitly_enableable() {
 
 #[test]
 fn rotation_limits_and_maintained_templates_use_the_same_config() {
-    for limits in [
-        LogRotation {
-            max_bytes: 0,
-            max_files: 5,
-        },
-        LogRotation {
-            max_bytes: 100,
-            max_files: 1,
-        },
-    ] {
-        let config = LoggingConfig {
-            rotation: Some(limits),
-            ..Default::default()
-        };
-        assert_eq!(
-            build_dispatch(&config).unwrap_err().error_code(),
-            talos_error::ErrorCode::InvalidRequest
-        );
-    }
+    let config = LoggingConfig {
+        rotation: Some(LogRotation { max_files: 0 }),
+        ..Default::default()
+    };
+    assert_eq!(
+        build_dispatch(&config).unwrap_err().error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
     for filename in ["talos.yaml", "talos-dev.yaml", "talos-prod.yaml"] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../conf")
@@ -112,7 +101,7 @@ fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
     });
     drop(dispatch);
     drop(guard);
-    let content = fs::read_to_string(log_path).unwrap();
+    let content = fs::read_to_string(daily_path(&log_path)).unwrap();
     assert_eq!(content.matches("application failure").count(), 2);
     for expected in [
         "Business",
@@ -311,7 +300,7 @@ fn test_build_dispatch_writes_text_logs_to_file() {
     drop(dispatch);
     drop(guard);
 
-    let content = fs::read_to_string(&log_path).expect("log file should exist");
+    let content = fs::read_to_string(daily_path(&log_path)).expect("daily log file should exist");
     assert!(content.contains("file sink is active"));
     assert!(!content.contains("private-"));
 }
@@ -334,7 +323,7 @@ fn test_build_dispatch_writes_json_logs_to_file() {
     drop(dispatch);
     drop(guard);
 
-    let content = fs::read_to_string(&log_path).expect("log file should exist");
+    let content = fs::read_to_string(daily_path(&log_path)).expect("daily log file should exist");
     assert!(content.starts_with('{'));
     assert!(content.contains("\"fields\":{\"message\":\"json sink is active\"}"));
 }
@@ -356,4 +345,62 @@ fn test_build_dispatch_creates_parent_directory_for_file_logs() {
     drop(guard);
 
     assert!(parent.exists(), "log parent directory should be created");
+}
+
+fn daily_path(path: &Path) -> PathBuf {
+    path.with_file_name(format!(
+        "{}.daily.{}",
+        path.file_name().unwrap().to_str().unwrap(),
+        chrono::Utc::now().format("%Y-%m-%d")
+    ))
+}
+
+#[test]
+fn framework_daily_retention_restart_and_shutdown_flush_preserve_legacy_logs() {
+    use std::io::Write;
+    let path = temp_log_path("talos.log");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "legacy log must stay untouched").unwrap();
+    for date in ["2000-01-01", "2000-01-02", "2000-01-03", "2000-01-04"] {
+        fs::write(
+            path.with_file_name(format!("talos.log.daily.{date}")),
+            "old archive",
+        )
+        .unwrap();
+    }
+    let limits = LogRotation { max_files: 3 };
+    for name in ["first", "restart"] {
+        let (mut writer, guard) =
+            create_file_writer(path.to_str().unwrap(), Some(&limits)).unwrap();
+        for sequence in 0..40 {
+            writer
+                .write_all(format!("{name}-{sequence:03}\n").as_bytes())
+                .unwrap();
+        }
+        drop(writer);
+        drop(guard);
+    }
+    let expected: String = ["first", "restart"]
+        .into_iter()
+        .flat_map(|name| (0..40).map(move |sequence| format!("{name}-{sequence:03}\n")))
+        .collect();
+    assert_eq!(fs::read_to_string(daily_path(&path)).unwrap(), expected);
+    let daily_files = fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .file_name()
+                .to_str()
+                .unwrap()
+                .starts_with("talos.log.daily.")
+        })
+        .count();
+    assert!(daily_files <= limits.max_files);
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "legacy log must stay untouched"
+    );
+    fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }

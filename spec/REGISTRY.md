@@ -7,9 +7,11 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | Type | Next ID |
 | --- | ---: |
 | `feat` | 048 |
-| `fix` | 008 |
+| `fix` | 009 |
 | `refactor` | 045 |
 | `docs` | 001 |
+
+Fix-008 is reserved by the independent [MCP exit cleanup PR](https://github.com/apilots/talos/pull/56).
 
 ## Active Specs
 

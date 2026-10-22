@@ -12,7 +12,6 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 mod error_report;
 pub use error_report::report_error;
 mod config;
-mod rotation;
 pub use config::{LogLevel, LogRotation, LoggingConfig};
 
 /// Custom timer that formats timestamps in a specific IANA timezone.
@@ -192,8 +191,15 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
             .parse()
             .expect("valid diagnostic directive"),
     );
-    if let Some(rotation) = &config.rotation {
-        rotation::validate(rotation)?;
+    if config
+        .rotation
+        .as_ref()
+        .is_some_and(|rotation| rotation.max_files == 0)
+    {
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            "logging.rotation.max_files must be positive.",
+        ));
     }
     let (writer, guard) = build_writer(config)?;
     let enable_ansi = config.stdout && config.file.is_none() && config.format != "json";
@@ -297,16 +303,6 @@ fn create_file_writer(
         })?;
     }
 
-    if let Some(rotation) = rotation {
-        let writer =
-            rotation::RotatingFile::open(file_path, rotation.clone()).map_err(|error| {
-                TalosError::internal_with_source(
-                    "The rotating log file could not be opened.",
-                    error,
-                )
-            })?;
-        return Ok(file_writer_builder().finish(writer));
-    }
     let directory = file_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = file_path.file_name().ok_or_else(|| {
         TalosError::new(
@@ -314,7 +310,21 @@ fn create_file_writer(
             format!("invalid logging.file path: {}", path),
         )
     })?;
-    let appender = tracing_appender::rolling::never(directory, file_name);
+    let appender = match rotation {
+        Some(rotation) => tracing_appender::rolling::RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            // A separate framework prefix keeps retention away from legacy logs.
+            .filename_prefix(format!("{}.daily", file_name.to_string_lossy()))
+            .max_log_files(rotation.max_files)
+            .build(directory)
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "The daily log appender could not be opened.",
+                    error,
+                )
+            })?,
+        None => tracing_appender::rolling::never(directory, file_name),
+    };
     Ok(file_writer_builder().finish(appender))
 }
 

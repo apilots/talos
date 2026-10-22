@@ -12,6 +12,7 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
         file: Some(log_file.to_string_lossy().into_owned()),
         stdout: false,
         format: "json".into(),
+        rotation: None, // This fixture verifies diagnostic contents in one file.
         ..Default::default()
     })
     .unwrap();

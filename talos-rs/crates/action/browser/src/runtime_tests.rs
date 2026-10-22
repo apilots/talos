@@ -502,6 +502,7 @@ async fn ipc_reports_original_source_once_and_shutdown_waits_for_private_socket_
     let guard = talos_logging::init_with_config(talos_logging::LoggingConfig {
         file: Some(log.to_string_lossy().into()),
         stdout: false,
+        rotation: None, // Keep diagnostic-only fixtures on their explicit single-file sink.
         ..Default::default()
     })
     .unwrap();
