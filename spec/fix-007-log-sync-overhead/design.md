@@ -6,7 +6,7 @@ Status: implemented
 
 Loro emits nine INFO diagnostics for each encoded block. Pure upload ACK handling
 also reloads a document and exports the same full snapshot, although only its
-acknowledged version changes. The log file has no size retention. These are
+acknowledged version changes. The log file has no retention policy. These are
 separate from genuine Sync and Worker connectivity errors.
 
 Reproduce the ACK overhead by exporting a pending resource and acknowledging the
@@ -29,9 +29,7 @@ separate daily prefix keeps framework retention away from the previous talos.log
 and other log families. No legacy log bytes are moved, overwritten or removed.
 
 All three maintained conf YAML templates declare rotation.max_files. Set
-rotation: null for the existing single unbounded output file. Daily rotation does
-not impose a byte-size limit; the earlier custom 20 MiB policy and its hand-written
-rotation/file-lock implementation are removed. Framework rotation writes whole
+rotation: null for the existing single unbounded output file. Daily rotation bounds retained file count rather than byte size. Framework rotation writes whole
 formatted records through the existing lossless NonBlocking worker and WorkerGuard.
 No additional thread, manager, filesystem lock, archive numbering or dependency is
 introduced. Framework scheduling/retention is covered by its upstream tests;
@@ -68,7 +66,7 @@ or real-profile configuration change belongs to this work.
 ## Verification strategy and limits
 
 Use the owning regression suites for explicit diagnostic opt-in, retained error
-reports, rotation/restart/independent writers, queue drain, startup/template decoding
+reports, rotation/restart, queue drain, startup/template decoding
 and invalid limits. Extend the existing lost-ACK/restart scenario to reject snapshot
 writes, inject cleanup failure and retain newer pending facts. Reuse existing real
 Desktop stdio recovery and local multi-runtime Sync acceptance for offline metadata,
