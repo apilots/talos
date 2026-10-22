@@ -30,6 +30,8 @@ TOKEN = 'browser-contract-alice'
 USER = {'user_id': 'browser-alice', 'email': 'alice@example.test', 'username': 'alice',
         'role': 'user', 'type': 'free', 'status': 'active', 'email_verified': True,
         'set_password_required': False, 'disabled': False, 'created_at_ms': 1, 'updated_at_ms': 1}
+ACCOUNTS = {TOKEN: USER, 'browser-contract-bob': {
+    **USER, 'user_id': 'browser-bob', 'username': 'bob', 'email': 'bob@example.test'}}
 MODEL = {'id': 'browser-fixture', 'name': 'Browser fixture', 'context_window': 131072,
          'reasoning': False, 'reasoning_effort': 'medium', 'speed': 'standard', 'input': ['text', 'image'],
          'cost': {'input': 0.0, 'output': 0.0, 'cache_read': 0.0, 'cache_write': 0.0}}
@@ -131,7 +133,8 @@ class Fixture(BaseHTTPRequestHandler):
         if self.path == '/v1/auth/config':
             return self.reply({'registration_enabled': True})
         if self.path == '/v1/me':
-            return self.reply(USER)
+            user = ACCOUNTS.get(self.headers.get('Authorization', '').removeprefix('Bearer '))
+            return self.reply(user if user else {'error': 'unauthenticated'}, 200 if user else 401)
         if self.path.startswith('/device'):
             return self.reply({'status':'approved','account':'secretless browser acceptance'})
         self.reply({'error': 'not_found'}, 404)
@@ -151,11 +154,9 @@ class Fixture(BaseHTTPRequestHandler):
         if self.path == '/v1/auth/logout':
             return self.reply({'success':True})
         if self.path == '/v1/auth/introspect':
-            active = request.get('token') in (TOKEN,'browser-contract-bob')
-            user=dict(USER)
-            if request.get('token')=='browser-contract-bob':user.update(user_id='browser-bob',username='bob',email='bob@example.test')
-            return self.reply({'active': active, 'user': user if active else None, 'capabilities': None,
-                'entitlement': {'can_use': True, 'plan': 'free', 'reason': None} if active else None, 'expires_at_ms': None})
+            user = ACCOUNTS.get(request.get('token'))
+            return self.reply({'active': user is not None, 'user': user, 'capabilities': None,
+                'entitlement': {'can_use': True, 'plan': 'free', 'reason': None} if user else None, 'expires_at_ms': None})
         if self.path != '/v1/chat/completions':
             return self.reply({'error': 'not_found'}, 404)
         names = [t['function']['name'] for t in request.get('tools', [])]
@@ -346,6 +347,10 @@ def run():
         url = f'http://127.0.0.1:{http_port}'
         print('SERVER_PORT', http_port, 'AGENT_PORT', rpc_port, flush=True)
         wait(lambda: http(url + '/health'), 'Server startup')
+        # Restore both real account contexts once before business/ownership checks.
+        for token, user in ACCOUNTS.items():
+            restored = data(http(url + '/v1/user', token=token))
+            require(restored['user']['user_id'] == user['user_id'], 'Account restoration identity mismatch')
         created = data(http(url + '/v1/computers', {'displayName': 'Browser acceptance', 'credentialExpiresAt': int(time.time()) + 3600}))
         node = created['node']['nodeId']
         worker = config(RUN / 'worker-fixture', http_port, mock.server_port)
