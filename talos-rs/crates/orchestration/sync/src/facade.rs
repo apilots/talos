@@ -247,7 +247,7 @@ impl TalosSync {
                 "Synchronization requires a signed-in account.",
             ));
         }
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_read_transaction().await?;
         let rows = tx
             .query(
                 "SELECT hub_id FROM sync_bindings WHERE account_id = ? AND source_user_id = ?",

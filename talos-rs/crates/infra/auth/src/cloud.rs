@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use schemars::JsonSchema;
@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use talos_cloud_sdk::talos_cloud_types::{
     AuthResponseDto, CurrentUserDto, DeviceClientKindDto, DeviceLoginCancelRequestDto,
     DeviceLoginPollRequestDto, DeviceLoginPollResponseDto, DeviceLoginStartRequestDto,
-    IntrospectionRequestDto, IntrospectionResponseDto, LogoutResponseDto, UserRoleDto,
-    UserStatusDto, UserTypeDto,
+    IntrospectionResponseDto, LogoutResponseDto, UserRoleDto, UserStatusDto, UserTypeDto,
 };
 use talos_cloud_sdk::{CloudSdkError, TalosCloudClient};
 use talos_error::{TalosError, TalosResult};
@@ -19,15 +18,17 @@ use crate::{
     RequestIdentity, UserDto, UserRole, UserService, UserType,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CloudAuthService {
     client: TalosCloudClient,
+    contexts: std::sync::Arc<crate::context::AuthContexts>,
 }
 
 impl CloudAuthService {
     pub fn new(api_base_url: impl Into<String>) -> Self {
         Self {
             client: TalosCloudClient::new(api_base_url),
+            contexts: Default::default(),
         }
     }
 
@@ -94,15 +95,17 @@ pub enum CloudLoginStatusResponse {
     Expired,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct PendingCloudLogin {
     device_code: String,
     persistence: CloudLoginPersistence,
     expires_at_ms: i64,
+    interval_ms: u64,
+    approved: tokio::sync::Mutex<Option<AuthResponse>>,
 }
 
 enum PendingLookup {
-    Active(PendingCloudLogin),
+    Active(Arc<PendingCloudLogin>),
     Expired,
     Missing,
 }
@@ -111,7 +114,7 @@ pub struct CloudLoginService {
     client: TalosCloudClient,
     cloud_api_base_url: String,
     session_cache: CloudSessionCacheManager,
-    pending: Mutex<HashMap<String, PendingCloudLogin>>,
+    pending: Mutex<HashMap<String, Arc<PendingCloudLogin>>>,
 }
 
 impl CloudLoginService {
@@ -146,11 +149,13 @@ impl CloudLoginService {
             .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?
             .insert(
                 response.session_id.clone(),
-                PendingCloudLogin {
+                Arc::new(PendingCloudLogin {
                     device_code: response.device_code,
                     persistence,
                     expires_at_ms: response.expires_at_ms,
-                },
+                    interval_ms: response.interval_ms,
+                    approved: Default::default(),
+                }),
             );
         Ok(CloudLoginStartResponse {
             login_id: response.session_id,
@@ -161,69 +166,132 @@ impl CloudLoginService {
         })
     }
 
+    /// Admit through the existing Auth owner before consuming a one-time approval.
     pub async fn status(
         &self,
         request: CloudLoginStatusRequest,
+        auth_service: &dyn AuthService,
     ) -> TalosResult<CloudLoginStatusResponse> {
         let pending = match self.lookup_pending(&request.login_id)? {
             PendingLookup::Active(pending) => pending,
             PendingLookup::Expired => return Ok(CloudLoginStatusResponse::Expired),
-            PendingLookup::Missing => {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::Unauthenticated,
-                    "cloud login session not found",
-                ));
+            PendingLookup::Missing => return Err(login_not_found()),
+        };
+        // Serialize only this login; retain the consumed Cloud result across
+        // request cancellation or a temporary failure of account admission.
+        let mut approved = pending.approved.lock().await;
+        match self.lookup_pending(&request.login_id)? {
+            PendingLookup::Active(current) if Arc::ptr_eq(&current, &pending) => {}
+            PendingLookup::Expired => return Ok(CloudLoginStatusResponse::Expired),
+            PendingLookup::Active(_) | PendingLookup::Missing => return Err(login_not_found()),
+        }
+        let auth_response = if let Some(auth) = approved.as_ref() {
+            auth.clone()
+        } else {
+            let response = self
+                .client
+                .device_poll(DeviceLoginPollRequestDto {
+                    session_id: request.login_id.clone(),
+                    device_code: pending.device_code.clone(),
+                })
+                .await
+                .map_err(map_cloud_error)?;
+            match response {
+                DeviceLoginPollResponseDto::Pending { interval_ms } => {
+                    return Ok(CloudLoginStatusResponse::Pending { interval_ms });
+                }
+                DeviceLoginPollResponseDto::Approved { auth } => {
+                    let auth = map_auth_response(auth);
+                    *approved = Some(auth.clone());
+                    auth
+                }
+                DeviceLoginPollResponseDto::Denied => {
+                    self.remove_pending(&request.login_id)?;
+                    return Ok(CloudLoginStatusResponse::Denied);
+                }
+                DeviceLoginPollResponseDto::Expired => {
+                    self.remove_pending(&request.login_id)?;
+                    return Ok(CloudLoginStatusResponse::Expired);
+                }
             }
         };
-        let response = self
-            .client
-            .device_poll(DeviceLoginPollRequestDto {
-                session_id: request.login_id.clone(),
-                device_code: pending.device_code,
-            })
-            .await
-            .map_err(map_cloud_error)?;
-        match response {
-            DeviceLoginPollResponseDto::Pending { interval_ms } => {
-                Ok(CloudLoginStatusResponse::Pending { interval_ms })
-            }
-            DeviceLoginPollResponseDto::Approved { auth } => {
-                self.pending
-                    .lock()
-                    .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?
-                    .remove(&request.login_id);
-                let auth_response = map_auth_response(auth);
-                let user = auth_response.user.clone();
-                if should_store_cloud_session(pending.persistence) {
-                    let entry = CloudSessionCacheEntry::from_auth_response(
-                        self.cloud_api_base_url.clone(),
-                        &auth_response,
-                        CloudSessionCache::now_ms(),
-                    );
-                    self.session_cache
-                        .store_verified_session(&entry)
-                        .map_err(|err| {
-                            TalosError::internal_with_source(
-                                "store cloud login session; technical details were withheld.",
-                                err,
-                            )
-                        })?;
-                }
-                Ok(CloudLoginStatusResponse::Authenticated {
-                    user,
-                    access_token: auth_response.access_token,
-                    token_type: auth_response.token_type,
-                })
-            }
-            DeviceLoginPollResponseDto::Denied => {
-                self.remove_pending(&request.login_id)?;
-                Ok(CloudLoginStatusResponse::Denied)
-            }
-            DeviceLoginPollResponseDto::Expired => {
-                self.remove_pending(&request.login_id)?;
-                Ok(CloudLoginStatusResponse::Expired)
-            }
+        match self.lookup_pending(&request.login_id)? {
+            PendingLookup::Active(current) if Arc::ptr_eq(&current, &pending) => {}
+            PendingLookup::Expired => return Ok(CloudLoginStatusResponse::Expired),
+            PendingLookup::Active(_) | PendingLookup::Missing => return Err(login_not_found()),
         }
+        let token = auth_response.access_token.clone();
+        let admitted = auth_service.verify_access_token(&token).await;
+        let was_admitted = admitted.is_ok();
+        let result = (|| {
+            // No network await under the store lock. Cancellation, expiry and
+            // successful cache commit are ordered by this existing owner.
+            let mut logins = self
+                .pending
+                .lock()
+                .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?;
+            if !logins
+                .get(&request.login_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &pending))
+            {
+                return Err(login_not_found());
+            }
+            if pending.expires_at_ms <= CloudSessionCache::now_ms() {
+                logins.remove(&request.login_id);
+                return Ok(CloudLoginStatusResponse::Expired);
+            }
+            let identity = match admitted {
+                Ok(identity) => identity,
+                Err(error)
+                    if matches!(
+                        error.error_code(),
+                        talos_error::ErrorCode::ServiceUnavailable
+                            | talos_error::ErrorCode::Timeout
+                            | talos_error::ErrorCode::InternalError
+                            | talos_error::ErrorCode::UsageLimitExceeded
+                    ) =>
+                {
+                    talos_logging::report_error(&error);
+                    return Ok(CloudLoginStatusResponse::Pending {
+                        interval_ms: pending.interval_ms,
+                    });
+                }
+                Err(error) => {
+                    logins.remove(&request.login_id);
+                    return Err(error);
+                }
+            };
+            if identity.auth_disabled || identity.user_id != auth_response.user.user_id {
+                logins.remove(&request.login_id);
+                return Err(TalosError::authorization_denied());
+            }
+            if pending.persistence == CloudLoginPersistence::LocalCache {
+                let entry = CloudSessionCacheEntry::from_auth_response(
+                    self.cloud_api_base_url.clone(),
+                    &auth_response,
+                    CloudSessionCache::now_ms(),
+                );
+                self.session_cache
+                    .store_verified_session(&entry)
+                    .map_err(|err| {
+                        TalosError::internal_with_source(
+                            "store cloud login session; technical details were withheld.",
+                            err,
+                        )
+                    })?;
+            }
+            logins.remove(&request.login_id);
+            Ok(CloudLoginStatusResponse::Authenticated {
+                user: auth_response.user,
+                access_token: token.clone(),
+                token_type: auth_response.token_type,
+            })
+        })();
+        if was_admitted && !matches!(&result, Ok(CloudLoginStatusResponse::Authenticated { .. })) {
+            // The token was never delivered; do not leave an orphan refresh job.
+            auth_service.invalidate_access_token(&token);
+        }
+        result
     }
 
     pub async fn cancel(&self, request: CloudLoginCancelRequest) -> TalosResult<()> {
@@ -232,24 +300,19 @@ impl CloudLoginService {
         self.client
             .device_cancel(DeviceLoginCancelRequestDto {
                 session_id: request.login_id,
-                device_code: pending.device_code,
+                device_code: pending.device_code.clone(),
             })
             .await
             .map_err(map_cloud_error)?;
         Ok(())
     }
 
-    fn remove_pending(&self, login_id: &str) -> TalosResult<PendingCloudLogin> {
+    fn remove_pending(&self, login_id: &str) -> TalosResult<Arc<PendingCloudLogin>> {
         self.pending
             .lock()
             .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?
             .remove(login_id)
-            .ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::Unauthenticated,
-                    "cloud login session not found",
-                )
-            })
+            .ok_or_else(login_not_found)
     }
 
     fn lookup_pending(&self, login_id: &str) -> TalosResult<PendingLookup> {
@@ -281,20 +344,39 @@ impl CloudLoginService {
     }
 }
 
-fn cleanup_expired_pending_locked(pending: &mut HashMap<String, PendingCloudLogin>, now_ms: i64) {
+fn cleanup_expired_pending_locked(
+    pending: &mut HashMap<String, Arc<PendingCloudLogin>>,
+    now_ms: i64,
+) {
     pending.retain(|_, login| login.expires_at_ms > now_ms);
 }
 
-fn should_store_cloud_session(persistence: CloudLoginPersistence) -> bool {
-    matches!(persistence, CloudLoginPersistence::LocalCache)
+fn login_not_found() -> TalosError {
+    TalosError::new(
+        talos_error::ErrorCode::Unauthenticated,
+        "cloud login session not found",
+    )
 }
 
 #[async_trait]
 impl AuthService for CloudAuthService {
+    async fn shutdown(&self) {
+        self.contexts.shutdown().await;
+    }
+
+    fn local_identity(&self, token: &str) -> TalosResult<RequestIdentity> {
+        self.contexts.identity(token)
+    }
+
+    fn invalidate_access_token(&self, token: &str) {
+        self.contexts.invalidate(token);
+    }
+
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()> {
         let Some(token) = bearer_from_actor(actor) else {
             return Ok(());
         };
+        self.invalidate_access_token(&token);
         let response = self
             .with_token(&token)
             .logout()
@@ -304,14 +386,7 @@ impl AuthService for CloudAuthService {
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
-        let response = self
-            .client
-            .introspect(IntrospectionRequestDto {
-                token: token.to_string(),
-            })
-            .await
-            .map_err(map_cloud_error)?;
-        map_identity(response, token)
+        self.contexts.verify(&self.client, token).await
     }
 }
 
@@ -345,11 +420,15 @@ fn bearer_from_actor(actor: &RequestIdentity) -> Option<String> {
     actor.access_token.clone()
 }
 
-fn map_identity(
+pub(crate) fn map_identity(
     response: IntrospectionResponseDto,
     raw_token: &str,
 ) -> TalosResult<RequestIdentity> {
-    if !response.active {
+    if !response.active
+        || response
+            .expires_at_ms
+            .is_some_and(|expiry| expiry <= CloudSessionCache::now_ms())
+    {
         return Err(TalosError::new(
             talos_error::ErrorCode::Unauthenticated,
             "cloud token is inactive".to_string(),
@@ -427,6 +506,10 @@ fn map_user_type(value: UserTypeDto) -> UserType {
 #[path = "cloud_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "cloud_login_tests.rs"]
+mod login_tests;
+
 fn expect_success(response: LogoutResponseDto) -> TalosResult<()> {
     if response.success {
         Ok(())
@@ -438,7 +521,7 @@ fn expect_success(response: LogoutResponseDto) -> TalosResult<()> {
     }
 }
 
-fn map_cloud_error(error: CloudSdkError) -> TalosError {
+pub(crate) fn map_cloud_error(error: CloudSdkError) -> TalosError {
     match error {
         CloudSdkError::Transport(err) => TalosError::from_source(
             talos_error::ErrorCode::ServiceUnavailable,
@@ -472,7 +555,7 @@ fn map_cloud_error(error: CloudSdkError) -> TalosError {
                     ErrorCode::UsageLimitExceeded,
                     "The authentication service request limit was reached.",
                 ),
-                502..=504 => (
+                500 | 502..=504 => (
                     ErrorCode::ServiceUnavailable,
                     "The authentication service is temporarily unavailable.",
                 ),

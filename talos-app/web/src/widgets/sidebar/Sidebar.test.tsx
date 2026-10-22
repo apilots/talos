@@ -158,6 +158,12 @@ describe("Sidebar", () => {
     expect(props.onSelectThread).toHaveBeenCalledWith("chat-1");
   });
 
+  it("shows pending deletion feedback while keeping the delete action disabled", () => {
+    renderSidebar({ sessionActionPending: true, projectGroups: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Delete Compare JSON-GRPC and WebSocket" }));
+    expect(screen.getByRole("button", { name: "Deleting…" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("deletes the selected session after confirmation without selecting it again", async () => {
     const { props } = renderSidebar({
       currentPath: "/sessions/chat-1",

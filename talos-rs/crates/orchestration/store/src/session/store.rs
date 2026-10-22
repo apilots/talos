@@ -161,7 +161,7 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<talos_types::SessionInfo>> {
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_read_transaction().await?;
         let Some(adapter) = self
             .sync
             .resource(
@@ -186,7 +186,7 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<talos_types::SessionHistoryCursor>> {
-        let mut tx = self.storage.begin_transaction().await?;
+        let mut tx = self.storage.begin_read_transaction().await?;
         let rows = tx
             .query(
                 "SELECT history_generation FROM sessions WHERE session_key = ?",

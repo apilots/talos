@@ -3,7 +3,9 @@ use talos_auth::{CloudSessionCacheEntry, UserDto, UserRole, UserService, UserTyp
 use talos_error::{TalosError, TalosResult};
 
 #[derive(Default)]
-struct FakeAuthService;
+struct FakeAuthService {
+    remote_calls: std::sync::atomic::AtomicUsize,
+}
 
 #[async_trait]
 impl AuthService for FakeAuthService {
@@ -12,6 +14,12 @@ impl AuthService for FakeAuthService {
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+        self.remote_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.local_identity(token)
+    }
+
+    fn local_identity(&self, token: &str) -> TalosResult<RequestIdentity> {
         if token == "reject" {
             return Err(TalosError::new(
                 talos_error::ErrorCode::Unauthenticated,
@@ -48,7 +56,7 @@ impl UserService for FakeAuthService {
 }
 
 #[tokio::test]
-async fn validates_existing_token_and_touches_stale_cache() {
+async fn verified_local_token_touches_stale_cache_without_remote_admission() {
     let now_ms = CloudSessionCache::now_ms();
     let old_last_used = now_ms - 2_000;
     let dir = tempfile::tempdir().expect("tempdir should be created");
@@ -56,24 +64,29 @@ async fn validates_existing_token_and_touches_stale_cache() {
     cache
         .store(&test_entry("token", old_last_used))
         .expect("cache should store");
-    let auth_service = Arc::new(FakeAuthService);
+    let auth_service = Arc::new(FakeAuthService::default());
     let account = AccountService::new(
         auth_service.clone(),
         auth_service.clone(),
         "http://127.0.0.1:8080",
     );
-    let validator = AuthServiceCredentialValidator::new(auth_service, account)
+    let validator = AuthServiceCredentialValidator::new(auth_service.clone(), account)
         .with_cloud_session_cache(cache.clone())
         .with_cloud_session_touch_interval_ms(1_000);
 
     let actor = validator
-        .validate(&ActorCredentials {
+        .validate_local(&ActorCredentials {
             credential: ActorCredential::ExistingSessionToken {
                 token: "token".to_string(),
             },
         })
-        .await
         .expect("token should validate");
+    assert_eq!(
+        auth_service
+            .remote_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
 
     assert_eq!(actor.access_token.as_deref(), Some("token"));
     assert!(
@@ -94,7 +107,7 @@ async fn rejected_existing_token_clears_cache() {
     cache
         .store(&test_entry("reject", now_ms))
         .expect("cache should store");
-    let auth_service = Arc::new(FakeAuthService);
+    let auth_service = Arc::new(FakeAuthService::default());
     let account = AccountService::new(
         auth_service.clone(),
         auth_service.clone(),

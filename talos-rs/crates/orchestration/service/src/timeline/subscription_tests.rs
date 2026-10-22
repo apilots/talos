@@ -372,3 +372,29 @@ async fn idle_subscription_closes_without_fabricating_a_terminal_event() {
             if closed.reason == TimelineSubscriptionCloseReason::Completed
     ));
 }
+
+#[tokio::test]
+async fn dropping_an_idle_subscription_releases_its_producer_without_another_event() {
+    let (_store, events, subscriptions) = fixture().await;
+    let subscription = subscriptions
+        .subscribe(TimelineSubscribeCommand {
+            session_id: "idle-session".into(),
+            turn_id: None,
+            after_event_id: None,
+            replay_limit: 50,
+            close_when_idle: false,
+            close_on_terminal: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(events.active_tx.receiver_count(), 1);
+    drop(subscription);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while events.active_tx.receiver_count() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("unsubscribing must release an idle producer without publishing an event");
+    assert_eq!(Arc::strong_count(&events), 2);
+}

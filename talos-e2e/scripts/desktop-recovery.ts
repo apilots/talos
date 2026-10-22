@@ -6,6 +6,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { AppProtocol, TalosApiError } from "../../talos-app/ts-sdk/packages/core/src/index";
 import { createDesktopMainAppServerBridge, type DesktopMainAppServerBridge } from "../../talos-app/ts-sdk/packages/app-server/src/desktop-main";
 import { DesktopAppServerController } from "../../talos-app/desktop/src/app-server-controller";
@@ -14,6 +15,8 @@ const home = process.env.TALOS_HOME!;
 const user = { user_id: "recovery-owner", username: "recovery", email: "recovery@example.invalid", role: "user", type: "free", disabled: false, created_at: 1, updated_at: 1 };
 const token = randomUUID();
 let introspections = 0;
+let cloudAvailable = true;
+let accountReads = 0;
 let completions = 0;
 const events: AppProtocol.TimelineEvent[] = [];
 const auth = createServer(async (request, response) => {
@@ -34,6 +37,8 @@ const auth = createServer(async (request, response) => {
     return;
   }
   if (request.url === "/v1/me") {
+    accountReads += 1;
+    if (!cloudAvailable) { response.writeHead(503).end(); return; }
     if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ...user, status: "active", email_verified: true, set_password_required: false, created_at_ms: 1, updated_at_ms: 1 }));
@@ -41,6 +46,7 @@ const auth = createServer(async (request, response) => {
   }
   if (request.url !== "/v1/auth/introspect") { response.writeHead(404).end(); return; }
   introspections += 1;
+  if (!cloudAvailable) { response.writeHead(503).end(); return; }
   response.setHeader("content-type", "application/json");
   response.end(JSON.stringify({ active: JSON.parse(body).token === token,
     user: { ...user, status: "active" }, capabilities: { is_admin: false, role: "user", scopes: ["sessions:read", "sessions:write"] },
@@ -110,8 +116,11 @@ try {
   controllerToClose = controller;
   await controller.connect();
   const options = { actorCredentials: { credential: { type: "existing_session_token" as const, token } } };
+  await controller.invoke("user/current", {}, options);
   const params = { sessionId: randomUUID(), turnId: null, sinceEventId: null, replayLimit: 50, closeWhenIdle: false, closeOnTerminal: false };
-  await controller.invoke("sync/status", null, options);
+  // Status is a local snapshot. Execution starts after background enrollment
+  // establishes this account's Computer ownership, independently of polling.
+  const computerId = await waitForOwnedComputer(controller, options);
   const turn = { sessionId: params.sessionId, input: { content: [{ type: "text", text: "before restart" }] }, modelSelection: null, userPermissionMode: "fullAccess", projectId: null, currentDirectory: null, clientRequestId: randomUUID() };
   await controller.invoke("turn/start", turn, options);
   await waitFor(async () => (await controller.invoke<AppProtocol.SessionHistoryResponse>("session/history", { sessionId: params.sessionId, limit: 50, cursor: null }, options)).data.length === 1);
@@ -120,6 +129,7 @@ try {
   await waitFor(async () => events.some((event) => event.event.type === "agent" && event.event.data.payload.type === "turnCompleted"));
   const cursor = events.at(-1)!.eventId;
   const identity = await controller.invoke<AppProtocol.DesktopWorkerIdentityResponse>("desktop/workerIdentity", null);
+  assert.equal(identity.nodeId, computerId);
   const beforeIds = events.map((event) => event.eventId);
   assert(bridges[0]!.client.transport.terminate("SIGTERM"));
   const deadline = Date.now() + 30000;
@@ -128,6 +138,7 @@ try {
   }
   await controller.invoke("user/current", {}, options);
   assert.deepEqual(await controller.invoke("desktop/workerIdentity", null), identity);
+  assert.equal(await waitForOwnedComputer(controller, options), computerId);
   await waitFor(async () => {
     const response = await fetch(`http://127.0.0.1:${httpPort}/v1/computers/${identity.nodeId}`, { headers: { Authorization: `Bearer ${token}` } });
     return (await response.json()).data?.available === true;
@@ -148,6 +159,44 @@ try {
   assert.equal(removed.unsubscribed, true);
   assert.notEqual(removed.subscriptionId, subscribed.subscriptionId);
   assert.deepEqual(requests.filter((request) => request.method === "event/subscribe").map((request) => request.authorized), [false, true, true]);
+  // Both gateways retain authorization locally. Cloud failure must not add
+  // introspection, delay metadata/History/status, or prevent local idle deletion.
+  const httpOrigin = `http://127.0.0.1:${httpPort}`;
+  const headers = { Authorization: `Bearer ${token}` };
+  assert((await fetch(`${httpOrigin}/v1/user`, { headers })).ok);
+  const beforeOffline = { introspections, accountReads };
+  cloudAvailable = false;
+  const started = performance.now();
+  const writer = new DatabaseSync(path.join(home, "data", "talos.db"));
+  writer.exec("BEGIN IMMEDIATE");
+  let readDeadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const reads = Promise.all([
+      controller.invoke<AppProtocol.SessionHistoryResponse>("session/history", { sessionId: params.sessionId, limit: null, cursor: null }, options),
+      controller.invoke("session/get", { sessionId: params.sessionId }, options),
+      controller.invoke("session/list", { nodeId: null, limit: null, offset: null, projectId: null }, options),
+      controller.invoke("sync/status", null, options),
+      fetch(`${httpOrigin}/v1/sync/status`, { headers }),
+      controller.invoke("session/active_turn", { sessionId: params.sessionId }, options),
+    ]);
+    const localReads = await Promise.race([reads, new Promise<never>((_resolve, reject) => {
+      readDeadline = setTimeout(() => reject(new Error("Local Desktop reads waited for the Sync writer.")), 2000);
+    })]);
+    assert.equal(localReads[0].data.length, 2);
+    assert(localReads[4].ok);
+    assert(performance.now() - started < 2000, "offline local Desktop/Web reads stalled");
+    const offlineLive = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", { ...params, sinceEventId: events.at(-1)!.eventId }, options);
+    await controller.invoke("event/unsubscribe", { subscriptionId: offlineLive.subscriptionId }, options);
+    console.log(`CASE desktop_sync_writer_local_reads PASS ${(performance.now() - started).toFixed(1)}ms`);
+  } finally {
+    clearTimeout(readDeadline);
+    writer.exec("ROLLBACK");
+    writer.close();
+  }
+  await controller.invoke("session/delete", { sessionId: params.sessionId }, options);
+  assert.deepEqual({ introspections, accountReads }, beforeOffline, "local reads/Live/deletion must not call Cloud");
+  cloudAvailable = true;
+  console.log(`CASE desktop_cloud_offline_local_reads_and_idle_delete PASS ${(performance.now() - started).toFixed(1)}ms`);
   assert(introspections > 0);
   console.log("CASE desktop_authenticated_backend_restart PASS");
 } finally {
@@ -169,6 +218,19 @@ async function freePort(): Promise<number> {
   assert(address && typeof address !== "string");
   await new Promise<void>((resolve) => socket.close(() => resolve()));
   return address.port;
+}
+async function waitForOwnedComputer(
+  controller: DesktopAppServerController,
+  options: { actorCredentials: AppProtocol.ActorCredentials },
+): Promise<string> {
+  let computerId: string | null = null;
+  await waitFor(async () => {
+    const status = await controller.invoke<AppProtocol.SyncStatusResponse>("sync/status", null, options);
+    computerId = status.localComputerId;
+    return computerId !== null && computerId !== "embedded";
+  });
+  assert(computerId);
+  return computerId;
 }
 async function waitFor(probe: () => Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 30000;

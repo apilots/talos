@@ -52,14 +52,14 @@ impl TalosService {
                 .as_ref()
                 .is_none_or(|node_id| node_id == &project.execution_node_id)
             {
-                result.push(self.project_info_with_status(actor, project).await?);
+                result.push(self.project_metadata_for_client(actor, project).await?);
             }
         }
         Ok(result)
     }
     pub async fn get_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<ProjectInfo> {
         let project = self.access.get_project(actor, project_id).await?;
-        self.project_info_with_status(actor, project).await
+        self.project_metadata_for_client(actor, project).await
     }
     pub async fn create_project(
         &self,
@@ -71,7 +71,7 @@ impl TalosService {
                 .await?,
         );
         let project = self.access.create_project(actor, request).await?;
-        self.project_info_with_status(actor, project).await
+        self.project_metadata_for_client(actor, project).await
     }
     pub async fn patch_project(
         &self,
@@ -80,46 +80,18 @@ impl TalosService {
         patch: ProjectPatch,
     ) -> ServiceResult<ProjectInfo> {
         let project = self.access.patch_project(actor, project_id, patch).await?;
-        self.project_info_with_status(actor, project).await
+        self.project_metadata_for_client(actor, project).await
     }
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<()> {
         self.access.get_project(actor, project_id).await?;
         self.files.ensure_project_has_no_files(project_id).await?;
         self.access.delete_project(actor, project_id).await
     }
-    async fn project_info_with_status(
+    async fn project_metadata_for_client(
         &self,
         actor: &Actor,
-        mut project: talos_store::project::ProjectRecord,
+        project: talos_store::project::ProjectRecord,
     ) -> ServiceResult<ProjectInfo> {
-        let status = async {
-            self.worker_environment(actor, Some(&project.execution_node_id))
-                .await?
-                .project_status(
-                    actor.worker_environment_context(),
-                    project.directory.clone(),
-                )
-                .await
-        }
-        .await;
-        project.status = match status {
-            Ok(status) => status,
-            Err(error)
-                if matches!(
-                    error.error_code(),
-                    talos_error::ErrorCode::ServiceUnavailable
-                        | talos_error::ErrorCode::Timeout
-                        | talos_error::ErrorCode::ResourceExpired
-                        | talos_error::ErrorCode::ResourceNotFound
-                ) =>
-            {
-                ProjectStatus {
-                    state: ProjectStatusState::NodeUnavailable,
-                    reason: Some(ProjectUnavailableReason::NodeUnavailable),
-                }
-            }
-            Err(error) => return Err(error),
-        };
         self.project_for_client(actor, project_info_from_record(project))
             .await
     }

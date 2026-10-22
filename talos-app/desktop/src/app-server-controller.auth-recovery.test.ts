@@ -56,14 +56,18 @@ describe("authenticated Desktop restart recovery", () => {
     });
     try {
       await controller.connect();
-      const first = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", subscribe("first"), credentials("old-token"));
-      await controller.invoke("event/subscribe", subscribe("second"), credentials("old-token"));
+      const [first] = await Promise.all([
+        controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", subscribe("first"), credentials("old-token")),
+        controller.invoke("event/subscribe", subscribe("second"), credentials("old-token")),
+      ]);
       const removed = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", subscribe("removed"), credentials("old-token"));
+      expect(initial.requests.mock.calls.filter(([method]) => method === "user/current")).toHaveLength(1);
       await controller.invoke("event/unsubscribe", { subscriptionId: removed.subscriptionId }, credentials("old-token"));
       initial.bridge.emitEvent(event("first", "event-7"));
       initial.bridge.emitEvent(event("second", "event-9"));
       initial.bridge.emitExit();
       await vi.advanceTimersByTimeAsync(10);
+      expect(replacement.requests.mock.calls.filter(([method]) => method === "user/current")).toEqual([["user/current", {}, credentials("current-token")]]);
       const replays = replacement.requests.mock.calls.filter(([method]) => method === "event/subscribe");
       expect(replays).toEqual([
         ["event/subscribe", { ...subscribe("first"), sinceEventId: "event-7" }, credentials("current-token")],
@@ -181,7 +185,7 @@ describe("authenticated Desktop restart recovery", () => {
     } finally { release(); await controller.close(); vi.useRealTimers(); }
   });
 
-  it("clears logout immediately while replay is blocked instead of delivering old-account events", async () => {
+  it.each(["auth/session/read", "user/current", "event/subscribe"] as const)("clears logout immediately while replay waits for %s", async (heldMethod) => {
     vi.useFakeTimers();
     const initial = authenticatedBridge();
     const replacement = authenticatedBridge();
@@ -189,7 +193,7 @@ describe("authenticated Desktop restart recovery", () => {
     const entered = deferred<void>();
     const invoke = replacement.requests.getMockImplementation()!;
     replacement.requests.mockImplementation(async <T>(method: AppProtocol.ClientMethod, params: unknown, options?: { actorCredentials?: AppProtocol.ActorCredentials | null }): Promise<T> => {
-      if (method === "event/subscribe") { entered.resolve(); await replay.promise; }
+      if (method === heldMethod) { entered.resolve(); await replay.promise; }
       return invoke(method, params, options) as Promise<T>;
     });
     const events = vi.fn();
@@ -211,6 +215,9 @@ describe("authenticated Desktop restart recovery", () => {
       expect(replacement.requests.mock.calls.some(([method]) => method === "auth/session/clear")).toBe(true);
       replay.resolve();
       await logout;
+      await vi.advanceTimersByTimeAsync(0);
+      if (heldMethod !== "event/subscribe") expect(replacement.requests.mock.calls.some(([method]) => method === "event/subscribe")).toBe(false);
+      if (heldMethod === "auth/session/read") expect(replacement.requests.mock.calls.some(([method]) => method === "user/current")).toBe(false);
       replacement.bridge.emitEvent(event("private", "after-logout-response"));
       expect(events).not.toHaveBeenCalled();
     } finally { replay.resolve(); await logout; await controller.close(); vi.useRealTimers(); }
@@ -277,7 +284,7 @@ describe("authenticated Desktop restart recovery", () => {
       read.resolve(snapshot);
       await stale;
       const bindings = initial.requests.mock.calls.filter(([method]) => method === "sync/status");
-      expect(bindings.map(([, , options]) => options?.actorCredentials?.credential.token)).toEqual(["current-token", "bob-token"]);
+      expect(bindings).toEqual([]);
     } finally { read.resolve(snapshot); await stale; await controller.close(); }
   });
 

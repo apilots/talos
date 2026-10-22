@@ -14,6 +14,9 @@ use talos_error::{TalosError, TalosResult};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tracing::{debug, info};
 
+#[path = "sqlite_read_transaction.rs"]
+mod read_transaction;
+
 const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// SQLite Storage implementation
@@ -295,6 +298,14 @@ fn sqlite_row(row: sqlx::sqlite::SqliteRow) -> Row {
 
 #[async_trait]
 impl Storage for SqliteStorage {
+    async fn begin_read_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
+        let transaction =
+            self.pool.begin().await.map_err(|error| {
+                crate::database_error("begin the database read snapshot", error)
+            })?;
+        Ok(Box::new(transaction))
+    }
+
     async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
         let write_guard = self.write_gate.clone().lock_owned().await;
         let transaction = SqliteWriteTransaction::begin(&self.pool).await?;

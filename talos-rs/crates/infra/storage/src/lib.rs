@@ -66,6 +66,11 @@ impl Row {
 /// Storage trait - Database abstraction layer
 #[async_trait]
 pub trait Storage: Send + Sync {
+    /// Begin a consistent local read snapshot without acquiring the database
+    /// writer. Callers must not mutate or upgrade this snapshot to a write.
+    /// Dropping it releases its connection through the database driver's rollback.
+    async fn begin_read_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>>;
+
     /// Begin one database transaction pinned to a single connection.
     async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>>;
 
@@ -94,7 +99,7 @@ pub trait Storage: Send + Sync {
     async fn table_exists(&self, table: &str) -> TalosResult<bool>;
 }
 
-/// Minimal transactional database boundary used by Store-owned atomic writes.
+/// Minimal transactional database boundary for Store-owned consistent reads and writes.
 ///
 /// Business Store modules own SQL and transaction ordering. This interface
 /// only guarantees that all calls use one transaction and that completion is

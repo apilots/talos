@@ -19,7 +19,7 @@ use talos_agent_api::{
     AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
     AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
     AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted, AgentMessageStatus,
-    AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
+    AgentRunMetrics, AgentTurnCompleted, AgentTurnRef, AgentTurnStarted,
 };
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
@@ -46,6 +46,10 @@ enum TestAgentExecutionMode {
     },
     StartTimeout,
     StartFailed,
+    WorkerStateBlocked,
+    WorkerStateUnavailable,
+    WorkerStateActive,
+    WorkerClearBlocked,
 }
 
 #[path = "first_turn_rollback_tests.rs"]
@@ -372,6 +376,28 @@ impl AgentCoordinator for TestAgentCoordinator {
 
 #[async_trait]
 impl AgentCoordinator for TestExecutionCoordinator {
+    async fn read_session_execution_state(
+        &self,
+        session: AgentSessionContext,
+    ) -> TalosResult<Option<agent_protocol::SessionExecutionState>> {
+        match self.execution.mode {
+            TestAgentExecutionMode::WorkerStateBlocked => std::future::pending().await,
+            TestAgentExecutionMode::WorkerStateUnavailable => Err(TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "injected Worker transport failure",
+            )),
+            TestAgentExecutionMode::WorkerStateActive => {
+                Ok(Some(agent_protocol::SessionExecutionState {
+                    history_cursor: Default::default(),
+                    active_turn: Some(AgentTurnRef::new(session.session_id, "remote-running")),
+                    coordinator_id: Some("remote-peer".into()),
+                    handoff_ready: false,
+                }))
+            }
+            _ => self.delegate.read_session_execution_state(session).await,
+        }
+    }
+
     async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
         self.delegate.resolve_agent(params).await
     }
@@ -402,7 +428,11 @@ impl AgentCoordinator for TestExecutionCoordinator {
             TestAgentExecutionMode::StartFailed => {
                 return Err(TalosError::internal("injected Agent start failure"));
             }
-            TestAgentExecutionMode::Accepted => None,
+            TestAgentExecutionMode::Accepted
+            | TestAgentExecutionMode::WorkerStateBlocked
+            | TestAgentExecutionMode::WorkerStateUnavailable
+            | TestAgentExecutionMode::WorkerStateActive
+            | TestAgentExecutionMode::WorkerClearBlocked => None,
             TestAgentExecutionMode::AdmissionBlocked { reached, release } => {
                 Some((reached.clone(), release.clone()))
             }
@@ -471,6 +501,12 @@ impl AgentCoordinator for TestExecutionCoordinator {
         params: AgentSessionContext,
         expected_history_cursor: talos_types::SessionHistoryCursor,
     ) -> TalosResult<()> {
+        if matches!(
+            self.execution.mode,
+            TestAgentExecutionMode::WorkerClearBlocked
+        ) {
+            return std::future::pending().await;
+        }
         self.delegate
             .clear_session(params, expected_history_cursor)
             .await
@@ -982,3 +1018,6 @@ async fn assert_session_creation_rolled_back(
         assert!(matches!(reservation, IdempotencyReservation::Reserved(_)));
     }
 }
+
+#[path = "session_deletion_tests.rs"]
+mod session_deletion_tests;

@@ -8,22 +8,26 @@ import type { ModelSelection, SessionInfo } from "@talos/sdk-browser";
 
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
-import { chatKeys, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
+import { chatKeys, useDeleteProjectMutation, useDeleteSessionMutation, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
 
 const apiMocks = vi.hoisted(() => ({
   compactSession: vi.fn(),
+  deleteSession: vi.fn(),
+  deleteProject: vi.fn(),
   updateSessionModel: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
   compactSession: apiMocks.compactSession,
+  deleteSession: apiMocks.deleteSession,
+  deleteProject: apiMocks.deleteProject,
   updateSessionModel: apiMocks.updateSessionModel,
 }));
 
 vi.mock("@/shared/store/app-store", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ connection: { authToken: "token", userId: "user-1" } }),
+    selector({ connection: { authToken: "token", userId: "user-1" }, selectedComputers: {} }),
 }));
 
 function createQueryHarness() {
@@ -180,5 +184,59 @@ describe("useSessionActions", () => {
     await act(async () => result.current.compact.mutateAsync());
 
     expect(queryClient.getQueryData<SessionInfo>(sessionKey)).toEqual(compactedSession);
+  });
+});
+
+
+describe("metadata deletion completion", () => {
+  afterEach(() => {
+    cleanup();
+    apiMocks.deleteSession.mockReset();
+    apiMocks.deleteProject.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  it("removes a deleted session from caches without waiting for list reconciliation", async () => {
+    apiMocks.deleteSession.mockResolvedValue(undefined);
+    const { queryClient, wrapper } = createQueryHarness();
+    const scope = useAppStore((state) => connectionScope(state.connection));
+    const sessionKey = chatKeys.session(scope, "deleted");
+    const listKey = chatKeys.sessions(JSON.stringify([scope, "computer"]));
+    queryClient.setQueryData(listKey, [{ id: "deleted" }, { id: "retained" }]);
+    queryClient.setQueryData(sessionKey, { id: "deleted" });
+    let finishRefresh!: () => void;
+    vi.spyOn(queryClient, "invalidateQueries").mockReturnValue(new Promise<void>((resolve) => { finishRefresh = resolve; }));
+    const { result } = renderHook(() => useDeleteSessionMutation(), { wrapper });
+    await act(() => result.current.mutateAsync("deleted"));
+    expect(queryClient.getQueryData(listKey)).toEqual([{ id: "retained" }]);
+    expect(queryClient.getQueryData(sessionKey)).toBeUndefined();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    finishRefresh();
+  });
+
+  it("removes a deleted project without waiting for a refresh of retained directory metadata", async () => {
+    apiMocks.deleteProject.mockResolvedValue(undefined);
+    const { queryClient, wrapper } = createQueryHarness();
+    const scope = useAppStore((state) => connectionScope(state.connection));
+    const listKey = chatKeys.projects(JSON.stringify([scope, undefined]));
+    queryClient.setQueryData(listKey, [{ id: "deleted" }, { id: "retained" }]);
+    let finishRefresh!: () => void;
+    vi.spyOn(queryClient, "invalidateQueries").mockReturnValue(new Promise<void>((resolve) => { finishRefresh = resolve; }));
+    const { result } = renderHook(() => useDeleteProjectMutation(), { wrapper });
+    await act(() => result.current.mutateAsync("deleted"));
+    expect(queryClient.getQueryData(listKey)).toEqual([{ id: "retained" }]);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    finishRefresh();
+  });
+
+  it("preserves cached metadata when the backend rejects active or unverified deletion", async () => {
+    apiMocks.deleteSession.mockRejectedValue(new Error("unverified"));
+    const { queryClient, wrapper } = createQueryHarness();
+    const listKey = chatKeys.sessions("connection");
+    const previous = [{ id: "retained" }];
+    queryClient.setQueryData(listKey, previous);
+    const { result } = renderHook(() => useDeleteSessionMutation(), { wrapper });
+    await act(async () => { await expect(result.current.mutateAsync("retained")).rejects.toThrow("unverified"); });
+    expect(queryClient.getQueryData(listKey)).toEqual(previous);
   });
 });

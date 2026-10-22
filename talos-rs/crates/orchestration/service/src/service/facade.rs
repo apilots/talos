@@ -55,6 +55,8 @@ mod message_queue;
 mod plugins;
 #[path = "project_fs.rs"]
 mod project_fs;
+#[path = "session_deletion.rs"]
+mod session_deletion;
 
 #[derive(Clone)]
 pub struct TalosService {
@@ -565,22 +567,6 @@ impl TalosService {
             .await;
         self.ensure_session_write_allowed(session_id).await?;
         self.access.close_session(session).await
-    }
-
-    pub async fn delete_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<bool> {
-        let session = self.access.load_session(actor, session_id).await?;
-        let _execution_guard = self
-            .execution_gate
-            .for_node(&session.execution_node_id)
-            .write_owned()
-            .await;
-        self.ensure_session_write_allowed(session_id).await?;
-        self.subagents.ensure_tree_inactive(session_id).await?;
-        let deleted = self.access.delete_session(session).await?;
-        if deleted {
-            self.message_queue.clear_session(session_id)?;
-        }
-        Ok(deleted)
     }
 
     async fn ensure_session_write_allowed(&self, session_id: &str) -> ServiceResult<()> {

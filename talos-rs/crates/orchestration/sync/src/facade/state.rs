@@ -27,15 +27,14 @@ impl TalosSync {
     /// An account without a saved choice follows authenticated login by default.
     /// Deployment policy is enforced by the management host before starting transport.
     pub async fn enabled(&self, account_id: &str) -> TalosResult<bool> {
-        let mut tx = self.storage.begin_transaction().await?;
-        let rows = tx
+        let rows = self
+            .storage
             .query(
                 "SELECT enabled FROM sync_account_preferences WHERE account_id = ?",
                 &[account_id],
             )
             .await?;
         let enabled = rows.first().and_then(|row| row.get_i64("enabled"));
-        tx.commit().await?;
         match enabled {
             None if rows.is_empty() => Ok(true),
             Some(0) => Ok(false),

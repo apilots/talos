@@ -3,6 +3,69 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 
 #[tokio::test]
+async fn read_snapshot_keeps_its_cut_and_releases_a_dropped_connection() {
+    let home = tempfile::tempdir().unwrap();
+    let storage = SqliteStorage::new_with_max_connections(
+        home.path().join("snapshot.db").to_str().unwrap(),
+        2,
+    )
+    .await
+    .unwrap();
+    storage
+        .execute("CREATE TABLE snapshot_value (value INTEGER NOT NULL)", &[])
+        .await
+        .unwrap();
+    storage
+        .execute("INSERT INTO snapshot_value VALUES (1)", &[])
+        .await
+        .unwrap();
+    let mut writer = storage.begin_transaction().await.unwrap();
+    writer
+        .execute("UPDATE snapshot_value SET value = 2", &[])
+        .await
+        .unwrap();
+    let mut reader = tokio::time::timeout(Duration::from_secs(1), storage.begin_read_transaction())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reader
+            .query("SELECT value FROM snapshot_value", &[])
+            .await
+            .unwrap()[0]
+            .get_i64("value"),
+        Some(1)
+    );
+    writer.commit().await.unwrap();
+    assert_eq!(
+        reader
+            .query("SELECT value FROM snapshot_value", &[])
+            .await
+            .unwrap()[0]
+            .get_i64("value"),
+        Some(1)
+    );
+    assert_eq!(
+        reader
+            .execute("UPDATE snapshot_value SET value = 3", &[])
+            .await
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
+    drop(reader);
+    let _connection = storage.pool.acquire().await.unwrap();
+    let rows = tokio::time::timeout(
+        Duration::from_secs(1),
+        storage.query("SELECT value FROM snapshot_value", &[]),
+    )
+    .await
+    .expect("dropping a read snapshot must release the other pooled connection")
+    .unwrap();
+    assert_eq!(rows[0].get_i64("value"), Some(2));
+}
+
+#[tokio::test]
 async fn nullable_values_remain_absent_in_pool_and_transaction_reads() {
     let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
         .await

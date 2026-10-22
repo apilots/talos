@@ -22,8 +22,8 @@ function hostBridge(savedLogin: boolean, authEnabled = true): FakeBridge {
   return bridge;
 }
 
-describe("Desktop host enrollment", () => {
-  it("enrolls after login and resumes the saved identity after app-server restarts", async () => {
+describe("Desktop account lifecycle", () => {
+  it("leaves enrollment to the native lifecycle after login and restart", async () => {
     vi.useFakeTimers();
     const initial = hostBridge(false);
     const restored = hostBridge(true);
@@ -32,12 +32,11 @@ describe("Desktop host enrollment", () => {
       await controller.connect();
       expect(initial.requests.map((request) => request.method)).toEqual(["auth/session/read"]);
       await controller.invoke("auth/login/status", { login_id: "login-1" });
-      expect(initial.requests.at(-1)).toEqual({ method: "sync/status", params: null });
-      expect(initial.invoke).toHaveBeenLastCalledWith("sync/status", null, { actorCredentials: { credential: { type: "existing_session_token", token: "USER_ACCESS_TOKEN" } } });
+      expect(initial.requests.at(-1)?.method).toBe("auth/login/status");
+      expect(initial.requests.some((request) => request.method === "sync/status")).toBe(false);
       initial.emitExit();
       await vi.advanceTimersByTimeAsync(300);
-      expect(restored.requests.map((request) => request.method)).toEqual(["auth/session/read", "sync/status"]);
-      expect(restored.invoke).toHaveBeenLastCalledWith("sync/status", null, { actorCredentials: { credential: { type: "existing_session_token", token: "USER_ACCESS_TOKEN" } } });
+      expect(restored.requests.map((request) => request.method)).toEqual(["auth/session/read"]);
       expect(restored.requests.some((request) => request.method === "computer/create")).toBe(false);
     } finally {
       await controller.close();
@@ -54,7 +53,7 @@ describe("Desktop host enrollment", () => {
     } finally { await controller.close(); }
   });
 
-  it("surfaces failed cloud enrollment without switching to a local host or discarding login", async () => {
+  it("keeps snapshot query errors separate from login and native enrollment", async () => {
     const bridge = hostBridge(true);
     const factory = vi.fn().mockReturnValue(bridge);
     const invoke = bridge.invoke.bind(bridge);
@@ -69,7 +68,8 @@ describe("Desktop host enrollment", () => {
     const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: factory, onRuntimeState: states });
     try {
       await controller.connect();
-      expect(states.mock.calls.at(-1)).toEqual([{ kind: "error", message: "Worker registration failed. Recover or reconnect this computer to retry.", error: { code: "internalError", message: "Worker registration failed; technical details are available in the desktop log.", localization: null } }]);
+      await expect(controller.invoke("sync/status", null)).rejects.toThrow("Enrollment unavailable");
+      expect(states.mock.calls.at(-1)?.[0].kind).toBe("ready");
       const login = await controller.invoke<AppProtocol.CloudLoginStatusResponse>("auth/login/status", { login_id: "login-1" });
       expect(login.status).toBe("authenticated");
       expect(factory).toHaveBeenCalledOnce();
@@ -94,4 +94,44 @@ it("delivers an asynchronous Worker rejection without losing the authenticated h
     bridge.emitNotification({ jsonrpc: "2.0", method: "desktop/worker/failed", params: error });
     expect(states.mock.calls).toHaveLength(count);
   } finally { await controller.close(); }
+});
+
+it("serves local requests without using a pending status query for enrollment", async () => {
+  const bridge = hostBridge(true);
+  const invoke = bridge.invoke.bind(bridge);
+  let release!: () => void;
+  const registration = new Promise<void>((resolve) => { release = resolve; });
+  vi.spyOn(bridge, "invoke").mockImplementation(<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> => {
+    if (method === "sync/status") {
+      bridge.requests.push({ method, params });
+      return registration.then(() => ({ localComputerId: "stable-uuid" }) as T);
+    }
+    return invoke<T>(method, params);
+  });
+  const states = vi.fn();
+  const controller = new DesktopAppServerController({ desktopHost: true, bridgeFactory: () => bridge, onRuntimeState: states });
+  try {
+    let connected = false;
+    const connection = controller.connect().then(() => { connected = true; });
+    await vi.waitFor(() => expect(connected).toBe(true));
+    await connection;
+    let restored = false;
+    const cache = controller.invoke("auth/session/read", {}).then(() => { restored = true; });
+    await vi.waitFor(() => expect(restored).toBe(true));
+    await cache;
+    const status = controller.invoke("sync/status", null);
+    await controller.invoke("session/history", { sessionId: "retained", cursor: null, limit: null });
+    expect(bridge.requests.filter((request) => request.method === "sync/status")).toHaveLength(1);
+    expect(bridge.requests.at(-1)?.method).toBe("session/history");
+    await controller.close();
+    const count = states.mock.calls.length;
+    release();
+    await status;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(states.mock.calls).toHaveLength(count);
+  } finally {
+    release();
+    await controller.close();
+  }
 });

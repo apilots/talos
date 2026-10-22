@@ -26,6 +26,10 @@ impl CountingStorage {
 
 #[async_trait]
 impl Storage for CountingStorage {
+    async fn begin_read_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
+        self.inner.begin_read_transaction().await
+    }
+
     async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
         self.inner.begin_transaction().await
     }

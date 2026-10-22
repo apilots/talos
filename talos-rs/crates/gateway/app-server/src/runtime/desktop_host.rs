@@ -26,7 +26,9 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
     reader_tx: mpsc::Sender<OutgoingMessage>,
     line_tx: mpsc::Sender<IncomingFrame>,
     stop: CancellationToken,
+    local_requests: Arc<super::local_requests::LocalRequests>,
 ) {
+    let mut local_tasks = tokio::task::JoinSet::new();
     let queued_bytes = Arc::new(Semaphore::new(68 * 1024 * 1024));
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
@@ -35,7 +37,16 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
         if matches!(result, Ok(BoundedLineRead::Eof)) {
             break;
         }
+        while let Some(result) = local_tasks.try_join_next() {
+            report_read_task(result);
+        }
         if matches!(result, Ok(BoundedLineRead::Line)) {
+            if local_requests
+                .dispatch(&line, &reader_tx, &mut local_tasks)
+                .await
+            {
+                continue;
+            }
             if let (Some(host), Ok(text)) = (&host, std::str::from_utf8(&line)) {
                 if let Ok(message) = parse_message_line(text) {
                     match message {
@@ -53,7 +64,7 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
             }
         }
         let terminal = !matches!(result, Ok(BoundedLineRead::Line));
-        let permit = if host.is_some() {
+        let permit = {
             match u32::try_from(line.len())
                 .ok()
                 .and_then(|size| queued_bytes.clone().try_acquire_many_owned(size).ok())
@@ -64,11 +75,9 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
                     continue;
                 }
             }
-        } else {
-            None
         };
         let packet = (result, std::mem::take(&mut line), permit);
-        if host.is_some() && !terminal {
+        if !terminal {
             match line_tx.try_send(packet) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full((_, frame, _))) => {
@@ -87,7 +96,13 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
     if let Some(host) = &host {
         host.close();
     }
+    // EOF must release the serve loop and pending host callbacks before joining
+    // local work. A stalled request may otherwise keep its own shutdown blocked.
     drop(line_tx);
+    local_tasks.abort_all();
+    while let Some(result) = local_tasks.join_next().await {
+        report_read_task(result);
+    }
     drop(reader_tx);
 }
 
@@ -161,5 +176,16 @@ pub(super) fn complete_host_error(host: &crate::DesktopHostBridge, response: Jso
                 "Desktop browser operation failed. Check its connection and current page.",
             )),
         );
+    }
+}
+
+fn report_read_task(result: Result<(), tokio::task::JoinError>) {
+    if let Err(error) = result {
+        if !error.is_cancelled() {
+            report_error(&TalosError::internal_with_source(
+                "The local query task stopped unexpectedly.",
+                error,
+            ));
+        }
     }
 }

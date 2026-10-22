@@ -54,3 +54,64 @@ Workspace正文在Worker；旧附件只经源FileService读取/改删，源离�
 [接入接口](contracts.md)、[管理DB与流程](flows-and-storage.md)、[统一Worker RPC](worker-coordination.md)、[跨控制面/NAT/回调](rpc-routing.md)、[持久数据覆盖](persistence-inventory.md)。
 
 真实联合验收由Talos的19_computer_sync八个场景负责：多节点/OS注册、同Computer续跑、首次关闭/重启/账号隔离、无云本机、资源交互、云故障、NAT及owner配置。独立Sync测试只证明协议/存储，不冒充产品E2E。实际范围为arm64 Mac与Linux Docker；不发布生产。
+
+
+## Local authorization and remote revalidation
+
+The existing CloudAuthService owns verified in-memory authorization contexts and
+one refresh task per credential, using its existing pooled Cloud SDK client.
+AuthService.local_identity is synchronous, side-effect free, and has no network
+fallback. Desktop ordinary methods, HTTP data APIs and the Sync SDK credential
+callback consume this capability. Desktop retains the verified subscription owner
+per credential/backend and shares in-flight account restoration; session changes
+reuse it, while backend replacement explicitly restores Auth before replay.
+Account restoration (`user/current`, HTTP
+`/v1/user`), successful device login and cached-login startup explicitly admit the
+credential. Unknown credentials fail immediately. Account ownership checks still
+belong to the business Service.
+
+Device login keeps the one-time Cloud approval in the existing login owner until
+account admission and optional local-cache persistence succeed. Concurrent status
+requests serialize per login; retryable admission failures return Pending with
+the original polling interval without consuming another Cloud grant. No token is
+delivered or persisted before verification. Cancelled/expired logins and failed
+commits invalidate any admitted but undelivered token, preventing an orphan Auth
+refresh task. This uses the same AuthService and adds no background task.
+
+Auth refresh runs every 60 seconds with stable +/-10% credential jitter, with a
+5-second remote timeout. A verified context lasts at most 120 seconds and never
+past token expiry. Known rejection invalidates it immediately; transient errors
+never extend its deadline. Failed refresh retries within 15 seconds, capped to
+leave the remaining verification window's request budget; no retry burst or
+query-triggered remote fallback is introduced. Logout/cache removal invalidates the current generation
+before remote completion. Shutdown cancels and joins all Auth tasks through its
+owned tracker; last-owner drop cancels maintenance.
+Persisted cloud-session JSON remains only a login candidate and cannot authorize
+local requests. This repair does not introduce a durable 15-day offline grant.
+
+Transport keepalive/reconnect remain owned by the SDK and registered Worker.
+Sync lifecycle reconciliation consumes existing handles and Auth contexts, rather
+than running another auth timer or introspection inside a credential callback.
+Initialization rejected by authentication/permissions, uncertain enrollment,
+expired credentials or invalid configuration waits for credential/account changes
+or successful explicit Worker recovery. Temporary service, timeout and rate
+failures retry initialization every five seconds. The supervisor never repeats
+healthy transport checks or replaces SDK reconnect ownership.
+Cloud Auth classifies a remote HTTP500 as temporary service unavailability,
+like502--504, so first admission can recover with the same credential even before
+an Auth refresh task exists. Other internal errors remain terminal; the host does
+not inspect Cloud response text or manage a separate authentication retry loop.
+The Sync server's independent shared-authorization fix is owned by talos-sync;
+updating the product alone cannot change a previously released service image.
+Full selected-session History and running-Turn Live remain the existing local
+Store/subscription model. Deletion retains known-active and bounded unconfirmed
+remote-execution guards.
+
+Local display reads also remain independent of Sync's database writer. Shared
+Session metadata, History cursors, active-Turn display and account associations
+use consistent deferred WAL read snapshots through the existing Storage owner;
+they never acquire its write gate or begin an immediate write transaction.
+Single-query Sync preferences use the existing pooled read. Write/capture/import
+transactions retain their original serialization and atomicity. A read snapshot
+cannot be upgraded through the transaction write API, and SQLx owns rollback on
+drop/cancellation. This does not change History loading or Sync ownership.

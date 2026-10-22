@@ -32,11 +32,13 @@ mod application_automation;
 mod application_runtime;
 mod application_storage;
 mod application_sync;
+mod application_sync_background;
 mod application_sync_computers;
 mod application_sync_deletion;
 mod application_sync_files;
 mod application_sync_management;
 mod application_sync_metrics;
+mod application_sync_observer;
 #[cfg(all(test, feature = "e2e"))]
 #[path = "application_sync_tests.rs"]
 mod application_sync_tests;
@@ -67,8 +69,8 @@ pub struct TalosServerOptions {
 }
 
 pub struct TalosServerRuntime {
-    _sync_host: Arc<application_sync::ApplicationSyncHost>,
-    sync_stores: Arc<application_sync::ApplicationSyncStores>,
+    auth_service: Arc<dyn AuthService>,
+    sync_host: Arc<application_sync::ApplicationSyncHost>,
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
     node_rpc_server: Option<agent_node_rpc::NodeRpcServer>,
@@ -97,7 +99,6 @@ pub struct EmbeddedAppServer {
 pub struct TalosApplicationRuntime {
     pub(crate) sync_host: Arc<application_sync::ApplicationSyncHost>,
     pub(crate) sync: Arc<talos_sync::TalosSync>,
-    pub(crate) sync_stores: Arc<application_sync::ApplicationSyncStores>,
     pub(crate) worker: talos_worker::TalosWorker,
     pub(crate) worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     pub(crate) resource_rpc: Arc<local_resource_rpc::LocalResourceRpc>,
@@ -457,8 +458,8 @@ impl TalosServerRuntime {
 
     pub async fn run(self) -> TalosResult<()> {
         let TalosServerRuntime {
-            _sync_host,
-            sync_stores,
+            auth_service,
+            sync_host,
             http_server,
             channel_server,
             node_rpc_server,
@@ -513,6 +514,7 @@ impl TalosServerRuntime {
             None => Ok(()),
         };
         shutdown_token.cancel();
+        sync_host.shutdown_refreshes().await;
         let registration = match worker_registration.lock().await.take() {
             Some(registration) => registration.shutdown().await,
             None => Ok(()),
@@ -532,9 +534,10 @@ impl TalosServerRuntime {
         .await;
         let result = application_automation::combine(result, registration);
         let result = application_automation::combine(result, browser.shutdown().await);
-        let result = application_automation::combine(result, sync_stores.shutdown().await);
+        let result = application_automation::combine(result, sync_host.shutdown().await);
         let result = application_automation::combine(result, shutdown_result);
         let result = application_automation::combine(result, worker_rpc.shutdown().await);
+        auth_service.shutdown().await;
         application_automation::combine(result, resource_rpc.shutdown().await)
     }
 }
@@ -628,8 +631,8 @@ async fn start_server_after_startup(
     };
 
     Ok(TalosServerRuntime {
-        _sync_host: runtime.sync_host,
-        sync_stores: runtime.sync_stores,
+        auth_service: runtime.auth_service,
+        sync_host: runtime.sync_host,
         coordinator: runtime.coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
         shutdown_token: CancellationToken::new(),
@@ -725,6 +728,7 @@ async fn run_json_rpc_stdio_after_startup(
         )
     });
     let result = application_automation::finish(result, &automation, &plugins).await;
+    runtime.sync_host.shutdown_refreshes().await;
     let registration = match runtime.worker_registration.lock().await.take() {
         Some(registration) => registration.shutdown().await,
         None => Ok(()),
@@ -733,6 +737,7 @@ async fn run_json_rpc_stdio_after_startup(
     let result = application_automation::combine(result, runtime.worker.browser().shutdown().await);
     let result = application_automation::combine(result, worker_rpc.shutdown().await);
     let result = application_automation::combine(result, runtime.shutdown_sync().await);
+    runtime.auth_service.shutdown().await;
     application_automation::combine(result, runtime.resource_rpc.shutdown().await)
 }
 

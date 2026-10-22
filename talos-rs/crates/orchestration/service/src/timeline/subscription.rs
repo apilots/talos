@@ -217,6 +217,7 @@ fn spawn_subscription_stream(
 
         loop {
             tokio::select! {
+            _ = tx.closed() => return,
             change = active_changes.recv() => {
                 match change {
                     Ok(change) if change.session_id == session_id => {

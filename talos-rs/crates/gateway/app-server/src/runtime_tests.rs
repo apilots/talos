@@ -22,6 +22,8 @@ use crate::auth::ActorCredentialValidator;
 #[derive(Default)]
 struct MockApp {
     desktop_host: Option<Arc<talos_browser::NativeBrowser>>,
+    blocked_remote: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
+    blocked_deletion: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
     dispatched: Mutex<Vec<String>>,
     dispatched_actors: Mutex<Vec<String>>,
     dispatched_auth_disabled: Mutex<Vec<bool>>,
@@ -41,6 +43,15 @@ impl AppServerApplication for MockApp {
         actor: &Actor,
         request: talos_app_protocol::requests::ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
+        let blocked = match request.method {
+            ClientMethod::ModelList | ClientMethod::UserCurrent => self.blocked_remote.as_ref(),
+            ClientMethod::SessionDelete => self.blocked_deletion.as_ref(),
+            _ => None,
+        };
+        if let Some((entered, release)) = blocked {
+            entered.notify_one();
+            release.notified().await;
+        }
         self.dispatched
             .lock()
             .expect("dispatch lock")
@@ -181,6 +192,10 @@ struct RejectingValidator;
 
 #[async_trait]
 impl ActorCredentialValidator for RejectingValidator {
+    fn validate_local(&self, _credentials: &ActorCredentials) -> ApplicationResult<Actor> {
+        Err(ApiError::new(ErrorCode::Unauthenticated))
+    }
+
     async fn validate(&self, _credentials: &ActorCredentials) -> ApplicationResult<Actor> {
         Err(ApiError::new(ErrorCode::Unauthenticated))
     }
@@ -191,6 +206,9 @@ struct ExistingTokenValidator;
 #[async_trait]
 impl ActorCredentialValidator for ExistingTokenValidator {
     async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
+        self.validate_local(credentials)
+    }
+    fn validate_local(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
         match &credentials.credential {
             talos_app_protocol::requests::ActorCredential::ExistingSessionToken { token }
                 if token == "user-token" =>
@@ -1260,3 +1278,6 @@ fn desktop_host_initialize_request() -> String {
     request["params"]["client_info"]["kind"] = json!("desktop");
     format!("{request}\n{}", initialized_notification())
 }
+
+#[path = "runtime/local_requests_tests.rs"]
+mod local_requests_tests;

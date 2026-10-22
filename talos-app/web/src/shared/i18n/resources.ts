@@ -59,6 +59,7 @@ export const resources = {
       signedIn: "Signed in",
       logout: "Sign out",
       deleteSessionTitle: "Delete “{{title}}”?",
+      deletingSession: "Deleting…",
       deleteSessionDescription: "This permanently deletes the chat and its saved history.",
     },
     chat: {
@@ -559,6 +560,7 @@ export const resources = {
       signedIn: "已登录",
       logout: "退出",
       deleteSessionTitle: "删除“{{title}}”？",
+      deletingSession: "正在删除…",
       deleteSessionDescription: "此操作会永久删除该会话及其已保存的历史记录。",
     },
     chat: {
