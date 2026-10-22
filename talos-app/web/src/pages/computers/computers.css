@@ -402,11 +402,19 @@
 }
 .cmp-registration-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 8px;
   margin-top: 24px;
   padding-top: 18px;
   border-top: 1px solid rgb(var(--color-border));
+}
+.cmp-registration-actions > button {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
 }
 .cmp-inspector {
   padding: 20px;
