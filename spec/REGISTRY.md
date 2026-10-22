@@ -11,12 +11,11 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | `refactor` | 045 |
 | `docs` | 001 |
 
-Fix-008 is reserved by the independent [MCP exit cleanup PR](https://github.com/apilots/talos/pull/56).
-
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| fix-008 | [MCP exit cleanup on Darwin](fix-008-mcp-exit-cleanup/design.md) | implemented |
 | fix-007 | [Log noise and Sync ACK overhead](fix-007-log-sync-overhead/design.md) | implemented |
 | feat-047 | [Built-in browser MCP and Docker Worker desktop](feat-047-browser-computer-desktop/design.md) | active |
 | feat-046 | [Computer registration deletion](feat-046-computer-registration-deletion/design.md) | implemented |
