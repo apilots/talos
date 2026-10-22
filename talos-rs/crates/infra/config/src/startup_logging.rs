@@ -3,28 +3,43 @@ use crate::{default_timezone, env::RuntimeEnv, loader, TalosPaths};
 use talos_error::TalosResult;
 use talos_logging::LoggingConfig;
 
+/// Resolved early settings and their source, without creating a logging owner.
+pub struct StartupLoggingConfig {
+    pub logging: LoggingConfig,
+    pub timezone: String,
+    pub warning: Option<String>,
+    pub source_path: std::path::PathBuf,
+}
+
 /// Read only startup logging settings before upgrades and strict config loading.
 /// Root timezone and logging strings use the same dotenv/process environment
 /// resolver as the full Config loader. This function never initializes a sink,
 /// mutates the environment, runs upgrades or contacts remote services.
 /// Missing or malformed YAML retains startup defaults and a deferred warning;
 /// full configuration validation remains the normal loader's responsibility.
-pub fn load_startup_logging(
-    paths: &TalosPaths,
-) -> TalosResult<(LoggingConfig, String, Option<String>)> {
+pub fn load_startup_logging(paths: &TalosPaths) -> TalosResult<StartupLoggingConfig> {
+    let source_path =
+        loader::explicit_config_path(None).unwrap_or_else(|| paths.config_file.clone());
     let runtime_env = RuntimeEnv::load(&paths.env_file)?;
-    Ok(startup_logging_config(paths, &runtime_env))
+    let (logging, timezone, warning) = startup_logging_config(paths, &source_path, &runtime_env);
+    Ok(StartupLoggingConfig {
+        logging,
+        timezone,
+        warning,
+        source_path,
+    })
 }
 
 fn startup_logging_config(
     paths: &TalosPaths,
+    config_file: &std::path::Path,
     runtime_env: &RuntimeEnv,
 ) -> (LoggingConfig, String, Option<String>) {
     let config = LoggingConfig {
         file: Some(paths.log_file.to_string_lossy().to_string()),
         ..LoggingConfig::default()
     };
-    let raw = match std::fs::read_to_string(&paths.config_file) {
+    let raw = match std::fs::read_to_string(config_file) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return (config, default_timezone(), None);
@@ -35,7 +50,7 @@ fn startup_logging_config(
                 default_timezone(),
                 Some(format!(
                     "failed to read logging config {}: {error}",
-                    paths.config_file.display()
+                    config_file.display()
                 )),
             )
         }
@@ -48,7 +63,7 @@ fn startup_logging_config(
                 default_timezone(),
                 Some(format!(
                     "failed to parse logging config yaml {}: {error}",
-                    paths.config_file.display()
+                    config_file.display()
                 )),
             )
         }
@@ -74,7 +89,7 @@ fn startup_logging_config(
             timezone,
             Some(format!(
                 "failed to decode logging config {}: {error}",
-                paths.config_file.display()
+                config_file.display()
             )),
         ),
     }

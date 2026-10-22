@@ -62,7 +62,7 @@ try {
   const configPath = process.env.TALOS_CONFIG!;
   const config = JSON.parse(await readFile(configPath, "utf8"));
   config.timezone = "${TALOS_DESKTOP_RECOVERY_TIMEZONE}";
-  process.env.TALOS_DESKTOP_RECOVERY_TIMEZONE = "Asia/Shanghai";
+  process.env.TALOS_DESKTOP_RECOVERY_TIMEZONE = "America/New_York";
   config.gateway.auth = true;
   config.cloud.api_base_url = api;
   config.sync.enabled = false;
@@ -86,7 +86,7 @@ try {
   const serverConfig = structuredClone(config);
   serverConfig.gateway.port = httpPort;
   serverConfig.agent_node = { control_plane: { bind_address: `127.0.0.1:${rpcPort}`, tls_certificate_file: cert, tls_private_key_file: key, trusted_node_ca_file: cert } };
-  const serverPath = path.join(serverHome, "conf/talos.yaml");
+  const serverPath = path.join(serverHome, "selected-config.yaml");
   await writeFile(serverPath, JSON.stringify(serverConfig));
   const server = spawn(process.env.TALOS_SERVER_BIN!, [], { env: { ...process.env, TALOS_HOME: serverHome, TALOS_CONFIG: serverPath, TALOS_DESKTOP_HOSTNAME: undefined }, stdio: ["ignore", "ignore", "inherit"] });
   serverToClose = server;
@@ -117,6 +117,19 @@ try {
   });
   controllerToClose = controller;
   await controller.connect();
+  // Desktop enrollment intentionally owns its managed config path. The Server
+  // also verifies startup settings selected through a different TALOS_CONFIG.
+  for (const logHome of [home, serverHome]) {
+    let startupTimestamp = "";
+    await waitFor(async () => {
+      startupTimestamp = (await readFile(path.join(logHome, "logs/talos.log"), "utf8")).split(/\s+/)[0] ?? "";
+      return startupTimestamp.length > 0;
+    });
+    const expectedOffset = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" })
+      .formatToParts(new Date(startupTimestamp)).find((part) => part.type === "timeZoneName")!.value.replace("GMT", "");
+    assert(startupTimestamp.endsWith(expectedOffset), `Startup log did not use the configured root timezone: ${startupTimestamp}`);
+  }
+  console.log("CASE desktop_and_selected_server_config_timezone PASS");
   const options = { actorCredentials: { credential: { type: "existing_session_token" as const, token } } };
   await controller.invoke("user/current", {}, options);
   const params = { sessionId: randomUUID(), turnId: null, sinceEventId: null, replayLimit: 50, closeWhenIdle: false, closeOnTerminal: false };

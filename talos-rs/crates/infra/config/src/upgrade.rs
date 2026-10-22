@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use talos_error::{TalosError, TalosResult};
 use talos_fs::{FileSystem, WriteOptions};
 
-use crate::env::EnvSecretStore;
+use crate::env::{EnvSecretStore, RuntimeEnv};
 use crate::loader::default_config_resource_path;
 use crate::{validate, Config, TalosPaths};
 
@@ -148,15 +148,16 @@ pub(crate) fn upgrade_default_config_from_template(
         });
     }
 
+    let runtime_env = RuntimeEnv::load(&paths.env_file)?;
     let original = read_yaml_file(&paths.config_file)?;
     let template = read_yaml_file(template_path)?;
-    validate_config_value(&template).map_err(|err| {
+    validate_config_value(&template, &runtime_env).map_err(|err| {
         err.context(format!(
             "validate default config template {}",
             template_path.display()
         ))
     })?;
-    let validation_template = build_validation_template(&template, &original);
+    let validation_template = build_validation_template(&template, &original, &runtime_env);
 
     let mut normalize_report = NormalizeReport::default();
     let normalized = normalize_value(
@@ -165,6 +166,7 @@ pub(crate) fn upgrade_default_config_from_template(
         &validation_template,
         &mut Vec::new(),
         &mut normalize_report,
+        &runtime_env,
     );
 
     // An invalid registration must be repaired explicitly. Defaulting it to
@@ -179,7 +181,7 @@ pub(crate) fn upgrade_default_config_from_template(
         ));
     }
 
-    validate_config_value(&normalized).map_err(|err| {
+    validate_config_value(&normalized, &runtime_env).map_err(|err| {
         err.context(format!(
             "validate normalized config {}",
             paths.config_file.display()
@@ -234,7 +236,11 @@ fn read_yaml_file(path: &Path) -> TalosResult<YamlValue> {
     })
 }
 
-fn build_validation_template(template: &YamlValue, original: &YamlValue) -> YamlValue {
+fn build_validation_template(
+    template: &YamlValue,
+    original: &YamlValue,
+    runtime_env: &RuntimeEnv,
+) -> YamlValue {
     let mut validation_template = template.clone();
     // Direct runners depend on their TLS listener (or the central ingress),
     // and a central ingress depends on gateway authentication. Validate these
@@ -247,7 +253,7 @@ fn build_validation_template(template: &YamlValue, original: &YamlValue) -> Yaml
             if let Some(auth) = get_path(original, &["gateway", "auth"]) {
                 let _ = set_path(&mut candidate, &auth_path, auth.clone());
             }
-            if validate_config_value(&candidate).is_ok() {
+            if validate_config_value(&candidate, runtime_env).is_ok() {
                 validation_template = candidate;
             }
         }
@@ -273,13 +279,13 @@ fn build_validation_template(template: &YamlValue, original: &YamlValue) -> Yaml
                     original_default.clone(),
                 )
                 .is_ok()
-                    && validate_config_value(&candidate_with_default).is_ok()
+                    && validate_config_value(&candidate_with_default, runtime_env).is_ok()
                 {
                     validation_template = candidate_with_default;
                     return validation_template;
                 }
             }
-            if validate_config_value(&candidate).is_ok() {
+            if validate_config_value(&candidate, runtime_env).is_ok() {
                 validation_template = candidate;
             }
         }
@@ -304,17 +310,23 @@ fn normalize_value(
     root_template: &YamlValue,
     path: &mut Vec<String>,
     report: &mut NormalizeReport,
+    runtime_env: &RuntimeEnv,
 ) -> YamlValue {
-    if is_dynamic_map_path(path) && validates_at_path(root_template, path, original) {
+    if is_dynamic_map_path(path) && validates_at_path(root_template, path, original, runtime_env) {
         return original.clone();
     }
 
     match (template, original) {
-        (YamlValue::Mapping(template_map), YamlValue::Mapping(original_map)) => {
-            normalize_mapping(template_map, original_map, root_template, path, report)
-        }
+        (YamlValue::Mapping(template_map), YamlValue::Mapping(original_map)) => normalize_mapping(
+            template_map,
+            original_map,
+            root_template,
+            path,
+            report,
+            runtime_env,
+        ),
         _ => {
-            if validates_at_path(root_template, path, original) {
+            if validates_at_path(root_template, path, original, runtime_env) {
                 original.clone()
             } else {
                 report.defaulted_paths.push(format_path(path));
@@ -330,6 +342,7 @@ fn normalize_mapping(
     root_template: &YamlValue,
     path: &mut Vec<String>,
     report: &mut NormalizeReport,
+    runtime_env: &RuntimeEnv,
 ) -> YamlValue {
     let mut normalized = Mapping::new();
     for (key, template_value) in template_map {
@@ -339,8 +352,14 @@ fn normalize_mapping(
         };
         path.push(key_name.to_string());
         if let Some(original_value) = original_map.get(key) {
-            let value =
-                normalize_value(template_value, original_value, root_template, path, report);
+            let value = normalize_value(
+                template_value,
+                original_value,
+                root_template,
+                path,
+                report,
+                runtime_env,
+            );
             normalized.insert(key.clone(), value);
         } else {
             report.added_paths.push(format_path(path));
@@ -363,12 +382,17 @@ fn normalize_mapping(
     YamlValue::Mapping(normalized)
 }
 
-fn validates_at_path(root_template: &YamlValue, path: &[String], value: &YamlValue) -> bool {
+fn validates_at_path(
+    root_template: &YamlValue,
+    path: &[String],
+    value: &YamlValue,
+    runtime_env: &RuntimeEnv,
+) -> bool {
     let mut candidate = root_template.clone();
     if set_path(&mut candidate, path, value.clone()).is_err() {
         return false;
     }
-    validate_config_value(&candidate).is_ok()
+    validate_config_value(&candidate, runtime_env).is_ok()
 }
 
 fn set_path(root: &mut YamlValue, path: &[String], value: YamlValue) -> TalosResult<()> {
@@ -410,7 +434,7 @@ fn set_path(root: &mut YamlValue, path: &[String], value: YamlValue) -> TalosRes
     Ok(())
 }
 
-fn validate_config_value(value: &YamlValue) -> TalosResult<()> {
+fn validate_config_value(value: &YamlValue, runtime_env: &RuntimeEnv) -> TalosResult<()> {
     let raw_value = serde_json::to_value(value).map_err(|err| {
         TalosError::internal_with_source(
             "convert config yaml; technical details were withheld.",
@@ -425,7 +449,7 @@ fn validate_config_value(value: &YamlValue) -> TalosResult<()> {
             err,
         )
     })?;
-    config.validate_runtime()
+    crate::loader::resolve_env_placeholders(config, runtime_env)?.validate_runtime()
 }
 
 fn write_backup(config_path: &Path) -> TalosResult<PathBuf> {
@@ -489,6 +513,7 @@ fn write_backup(config_path: &Path) -> TalosResult<PathBuf> {
 
 fn is_dynamic_map_path(path: &[String]) -> bool {
     path == ["storage", "files", "backends"].as_slice()
+        || path == ["logging", "target_levels"].as_slice()
 }
 
 fn format_path(path: &[String]) -> String {

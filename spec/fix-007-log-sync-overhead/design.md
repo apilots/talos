@@ -33,11 +33,16 @@ The single root timezone config drives log timestamps and the calendar boundary.
 LoggingConfig has no separate timezone setting or override. Config owns partial
 startup settings and reuses RuntimeEnv plus the normal placeholder resolver for
 both root timezone and logging strings, including dotenv/process precedence.
+Startup settings reuse the loader's TALOS_CONFIG source selection and report that
+actual source path, instead of assuming the default managed profile is selected.
 The logging crate only consumes resolved settings; Base owns its single startup
 sink initialization. Server/Desktop/Worker composition passes the same root
 timezone. An invalid resolved timezone fails explicitly.
 The existing configuration upgrader removes the obsolete logging.timezone key
 through template normalization, with the original file retained in its backup.
+Upgrade validation uses the same resolved RuntimeEnv while retaining original
+placeholders in saved YAML. The existing dynamic-map normalization boundary
+preserves valid target_levels entries and explicit empty maps.
 No runtime process changes the system timezone or global TZ environment variable.
 
 All three maintained conf YAML templates declare rotation.max_bytes (20 MiB) and

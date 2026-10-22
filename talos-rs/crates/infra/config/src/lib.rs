@@ -33,7 +33,7 @@ pub mod domains;
 pub mod env;
 pub mod loader;
 mod startup_logging;
-pub use startup_logging::load_startup_logging;
+pub use startup_logging::{load_startup_logging, StartupLoggingConfig};
 pub mod paths;
 pub mod store;
 pub mod upgrade;
