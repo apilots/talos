@@ -105,9 +105,6 @@ impl SessionStore for MockSessionStore {
         record.conf = params.conf;
         record.current_directory = params.current_directory;
         record.last_activity = params.last_activity;
-        if params.reset_context_usage {
-            record.usage.context = None;
-        }
         Ok(Some(record))
     }
 
