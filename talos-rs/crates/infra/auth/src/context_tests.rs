@@ -7,12 +7,13 @@ struct Issuer {
     calls: Arc<AtomicUsize>,
     blocked: Arc<AtomicBool>,
     revoked: Arc<AtomicBool>,
+    fail_next: Arc<AtomicBool>,
     entered: Arc<tokio::sync::Notify>,
     resume: Arc<tokio::sync::Notify>,
 }
 
 async fn issuer() -> (Arc<AuthContexts>, TalosCloudClient, Issuer, JoinHandle<()>) {
-    use axum::{extract::State, routing::post, Json, Router};
+    use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
     let issuer = Issuer::default();
     let app = Router::new().route("/v1/auth/introspect", post(|State(issuer): State<Issuer>| async move {
         issuer.calls.fetch_add(1, Ordering::SeqCst);
@@ -21,10 +22,11 @@ async fn issuer() -> (Arc<AuthContexts>, TalosCloudClient, Issuer, JoinHandle<()
             issuer.entered.notify_one();
             resumed.await;
         }
+        if issuer.fail_next.swap(false, Ordering::SeqCst) { return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response(); }
         Json(serde_json::json!({"active": !issuer.revoked.load(Ordering::SeqCst),
             "user":{"user_id":"account-a","username":"test","email":"test@example.invalid","role":"user","type":"free","status":"active"},
             "capabilities":{"is_admin":false,"role":"user","scopes":[]},
-            "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null}))
+            "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null})).into_response()
     })).with_state(issuer.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let client = TalosCloudClient::new(format!("http://{}", listener.local_addr().unwrap()));
@@ -172,5 +174,48 @@ async fn shutdown_joins_held_refresh_and_prevents_restart() {
     assert_eq!(issuer.calls.load(Ordering::SeqCst), 2);
     issuer.blocked.store(false, Ordering::SeqCst);
     issuer.resume.notify_waiters();
+    server.abort();
+}
+
+#[tokio::test]
+async fn transient_refresh_retries_before_the_original_verified_window_expires() {
+    let (service, client, issuer, server) = issuer().await;
+    let token = "test-token-a";
+    assert!(fingerprint(token)[0] > 127);
+    service.verify(&client, token).await.unwrap();
+    let context = service
+        .sessions
+        .lock()
+        .unwrap()
+        .get(&fingerprint(token))
+        .unwrap()
+        .clone();
+    let original = context.state.borrow().as_ref().unwrap().verified_at;
+    let mut changes = context.state.subscribe();
+    issuer.fail_next.store(true, Ordering::SeqCst);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(70)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(3), changes.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(issuer.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        context.state.borrow().as_ref().unwrap().verified_at,
+        original
+    );
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(40)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(3), changes.changed())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(issuer.calls.load(Ordering::SeqCst), 3);
+    assert!(Instant::now() < original + VALIDITY);
+    assert!(context.state.borrow().as_ref().unwrap().verified_at > original);
+    assert!(service.identity(token).is_ok());
+    service.shutdown().await;
     server.abort();
 }

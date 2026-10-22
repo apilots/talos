@@ -73,7 +73,9 @@ belong to the business Service.
 Auth refresh runs every 60 seconds with stable +/-10% credential jitter, with a
 5-second remote timeout. A verified context lasts at most 120 seconds and never
 past token expiry. Known rejection invalidates it immediately; transient errors
-never extend its deadline. Logout/cache removal invalidates the current generation
+never extend its deadline. Failed refresh retries within 15 seconds, capped to
+leave the remaining verification window's request budget; no retry burst or
+query-triggered remote fallback is introduced. Logout/cache removal invalidates the current generation
 before remote completion. Shutdown cancels and joins all Auth tasks through its
 owned tracker; last-owner drop cancels maintenance.
 Persisted cloud-session JSON remains only a login candidate and cannot authorize

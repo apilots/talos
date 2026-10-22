@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "multi_node"))
-from fixture import Cluster, http, wait_for
+from fixture import Cluster, data, http, require, wait_for
 
 USERS = {name: {'user_id': 'e2e-' + name, 'email': name + '@example.test', 'username': name,
     'role': 'user', 'type': 'free', 'status': 'active', 'email_verified': True,
@@ -55,6 +55,11 @@ class ContractAuthCluster(Cluster):
             'bind_address': f'127.0.0.1:{self.rpc_port}', 'tls_certificate_file': str(self.cert),
             'tls_private_key_file': str(self.key), 'trusted_node_ca_file': str(self.cert)}})
         self.start_server()
+        # Match the product login/bootstrap boundary. Tokens alone are not a
+        # verified local context, and data APIs must never introspect on demand.
+        for login in self.users.values():
+            restored = data(http(self.url + '/v1/user', token=login['access_token']))
+            require(restored['user']['user_id'] == login['user']['user_id'], 'Auth restoration changed account')
 
 
 if __name__ == '__main__':

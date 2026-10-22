@@ -216,7 +216,23 @@ impl AuthContexts {
                                         let _ = state.send_replace(Err(error));
                                         return;
                                     }
-                                    // Transient failure never extends the last verified deadline.
+                                    // Retry while the old proof can still be used. A full
+                                    // positive-jitter interval can otherwise miss its deadline.
+                                    let deadline = state
+                                        .borrow()
+                                        .as_ref()
+                                        .ok()
+                                        .map(|verified| verified.verified_at + VALIDITY);
+                                    if let Some(deadline) =
+                                        deadline.filter(|deadline| *deadline > Instant::now())
+                                    {
+                                        refresh.reset_at(retry_before_deadline(
+                                            deadline,
+                                            REQUEST_TIMEOUT,
+                                        ));
+                                    }
+                                    // Publish attempt completion without extending the proof.
+                                    state.send_modify(|_| {});
                                 }
                             }
                         }
@@ -286,6 +302,16 @@ async fn verify_remote(client: &TalosCloudClient, token: &str) -> TalosResult<Ve
         verified_at: Instant::now(),
         expires_at_ms,
     })
+}
+
+fn retry_before_deadline(deadline: Instant, request_timeout: Duration) -> Instant {
+    let now = Instant::now();
+    let latest_start = deadline.checked_sub(request_timeout).unwrap_or(deadline);
+    if latest_start <= now {
+        deadline
+    } else {
+        (now + Duration::from_secs(15)).min(latest_start)
+    }
 }
 
 fn fingerprint(token: &str) -> Fingerprint {

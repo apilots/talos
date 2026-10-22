@@ -28,6 +28,20 @@ impl AuthServiceCredentialValidator {
         }
     }
 
+    fn verified_token_actor(
+        &self,
+        token: &str,
+        identity: &RequestIdentity,
+    ) -> ApplicationResult<Actor> {
+        self.account
+            .record_verified_access_token_use(token, CloudSessionCache::now_ms())
+            .map_err(|error| {
+                talos_logging::report_error(&error);
+                error.to_api_error()
+            })?;
+        Ok(actor_from_identity(identity))
+    }
+
     pub fn with_cloud_session_cache(self, cache: CloudSessionCache) -> Self {
         self.account
             .set_cloud_session_cache(cache)
@@ -47,10 +61,11 @@ impl AuthServiceCredentialValidator {
 impl ActorCredentialValidator for AuthServiceCredentialValidator {
     fn validate_local(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
         let ActorCredential::ExistingSessionToken { token } = &credentials.credential;
-        self.auth_service
+        let identity = self
+            .auth_service
             .local_identity(token)
-            .map(|identity| actor_from_identity(&identity))
-            .map_err(|error| error.to_api_error())
+            .map_err(|error| error.to_api_error())?;
+        self.verified_token_actor(token, &identity)
     }
 
     async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
@@ -75,14 +90,7 @@ impl ActorCredentialValidator for AuthServiceCredentialValidator {
                         return Err(error.to_api_error());
                     }
                 };
-                if let Err(error) = self
-                    .account
-                    .record_verified_access_token_use(token, CloudSessionCache::now_ms())
-                {
-                    talos_logging::report_error(&error);
-                    return Err(error.to_api_error());
-                }
-                Ok(actor_from_identity(&identity))
+                self.verified_token_actor(token, &identity)
             }
         }
     }
