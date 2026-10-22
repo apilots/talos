@@ -90,7 +90,6 @@ pub struct PatchSessionParams {
     pub session_id: String,
     pub conf: SessionConf,
     pub current_directory: Option<PathBuf>,
-    pub reset_context_usage: bool,
     pub last_activity: u64,
 }
 

@@ -53,7 +53,8 @@ log_case_json "get_session" "{\"session_id\":\"${session_id}\"}" "${detail_json}
 detail_data_json="$(api_data_json "${detail_json}")"
 detail_id="$(json_get "${detail_data_json}" "session.id")"
 detail_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${detail_data_json}")"
-if [[ "${detail_id}" != "${session_id}" ]] || ! json_equal "${detail_selection}" "${default_selection}"; then
+detail_context="$(json_get "${detail_data_json}" "session.usage.context")"
+if [[ "${detail_id}" != "${session_id}" || -z "${detail_context}" ]] || ! json_equal "${detail_selection}" "${default_selection}"; then
   echo "CASE get_session FAIL expected_id=${session_id} actual_id=${detail_id} expected_selection=${default_selection} actual_selection=${detail_selection}"
   exit 1
 fi
@@ -66,7 +67,8 @@ log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":
 patch_data_json="$(api_data_json "${patch_json}")"
 patch_session_id="$(json_get "${patch_data_json}" "session.id")"
 patch_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${patch_data_json}")"
-if [[ "${patch_session_id}" != "${session_id}" ]] || ! json_equal "${patch_selection}" "${secondary_selection}"; then
+patch_context="$(json_get "${patch_data_json}" "session.usage.context")"
+if [[ "${patch_session_id}" != "${session_id}" ]] || ! json_equal "${patch_selection}" "${secondary_selection}" || ! json_equal "${patch_context}" "${detail_context}"; then
   echo "CASE patch_session_model FAIL expected_selection=${secondary_selection} actual_selection=${patch_selection} response=${patch_json}"
   exit 1
 fi

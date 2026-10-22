@@ -152,9 +152,6 @@ impl SessionStore for RecordingSessionStore {
         stored.conf = params.conf;
         stored.current_directory = params.current_directory;
         stored.last_activity = params.last_activity;
-        if params.reset_context_usage {
-            stored.usage.context = None;
-        }
         Ok(Some(stored.clone()))
     }
 
@@ -831,7 +828,7 @@ async fn reset_clears_the_complete_session_history_summary() {
 }
 
 #[tokio::test]
-async fn model_selection_change_clears_context_but_preserves_token_totals() {
+async fn model_selection_change_preserves_usage() {
     let mut config = config_with_model("anthropic", "model-a");
     config.llm.anthropic.models.push(provider_model("model-b"));
     let store = Arc::new(RecordingSessionStore::default());
@@ -869,8 +866,7 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
         .unwrap();
 
     let record = store.records.lock().unwrap()[0].clone();
-    assert_eq!(record.usage.tokens.total_tokens, 40);
-    assert_eq!(record.usage.context, None);
+    assert_eq!(record.usage, session.usage);
 }
 
 #[tokio::test]

@@ -347,7 +347,6 @@ async fn session_patch_updates_only_settings_owned_columns() {
             session_id: "session-1".to_string(),
             conf: conf.clone(),
             current_directory: Some(PathBuf::from("/tmp/updated")),
-            reset_context_usage: true,
             last_activity: 42,
         })
         .await
@@ -364,7 +363,7 @@ async fn session_patch_updates_only_settings_owned_columns() {
     assert_eq!(loaded.message_count, 0);
     assert_eq!(loaded.memory_processed_until_event_seq, terminal_event_seq);
     assert_eq!(loaded.latest_turn_seq, 0);
-    assert_eq!(loaded.usage.context, None);
+    assert_eq!(loaded.usage.context, Some(measured_context));
     assert_eq!(loaded.user_id, "user-1");
     assert_eq!(loaded.conf, conf);
     assert_eq!(loaded.agent_id, "agent-a");

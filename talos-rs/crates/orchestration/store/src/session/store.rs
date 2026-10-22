@@ -574,31 +574,17 @@ impl SessionStore for DatabaseSessionStore {
             .as_ref()
             .map(|path| path.display().to_string());
         let last_activity = params.last_activity.to_string();
-        let affected = if params.reset_context_usage {
-            transaction
-                .execute(
-                    "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ?, usage_json = json_set(usage_json, '$.context', NULL) WHERE session_key = ?",
-                    &[
-                        conf_json.as_str(),
-                        current_directory.as_deref().unwrap_or_default(),
-                        last_activity.as_str(),
-                        params.session_id.as_str(),
-                    ],
-                )
-                .await?
-        } else {
-            transaction
-                .execute(
-                    "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ? WHERE session_key = ?",
-                    &[
-                        conf_json.as_str(),
-                        current_directory.as_deref().unwrap_or_default(),
-                        last_activity.as_str(),
-                        params.session_id.as_str(),
-                    ],
-                )
-                .await?
-        };
+        let affected = transaction
+            .execute(
+                "UPDATE sessions SET conf_json = ?, current_directory = NULLIF(?, ''), last_activity = ? WHERE session_key = ?",
+                &[
+                    conf_json.as_str(),
+                    current_directory.as_deref().unwrap_or_default(),
+                    last_activity.as_str(),
+                    params.session_id.as_str(),
+                ],
+            )
+            .await?;
         if affected == 0 {
             transaction.rollback().await?;
             return Ok(None);

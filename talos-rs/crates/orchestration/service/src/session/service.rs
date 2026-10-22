@@ -569,8 +569,6 @@ impl SessionService {
         mut record: SessionRecord,
         patch: SessionPatch,
     ) -> TalosResult<Option<SessionRecord>> {
-        let previous_selection =
-            SessionConfigOverridePolicy::extract_model_selection(&record.conf)?;
         if let Some(conf) = patch.conf.as_ref() {
             SessionConfigOverridePolicy::validate_conf(conf)?;
         }
@@ -581,7 +579,6 @@ impl SessionService {
             self.model_info_for_selection(&record.execution_node_id, &record.user_id, selection)
                 .await?;
         }
-        let reset_context_usage = next_selection != previous_selection;
         if let Some(current_directory_patch) = &patch.current_directory {
             match current_directory_patch {
                 OptionalCurrentDirectoryPatch::Set { path } => {
@@ -601,7 +598,6 @@ impl SessionService {
                 session_id: record.id,
                 conf: record.conf,
                 current_directory: record.current_directory,
-                reset_context_usage,
                 last_activity,
             })
             .await
