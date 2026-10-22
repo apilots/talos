@@ -66,7 +66,7 @@ fn upgrade_removes_retired_config_without_changing_worker_identity() {
         let mut current = old.clone();
         remove_path_for_test(&mut current, &["mode"]);
         remove_path_for_test(&mut current, &["desktop"]);
-        validate_config_value(&current).unwrap();
+        validate_config_value(&current, &RuntimeEnv::default()).unwrap();
         write_existing(&paths, &old);
         std::fs::write(&credential, "existing-registration-credential").unwrap();
 
@@ -146,6 +146,7 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
                 "false",
             ),
             (vec!["logging", "timezone"], "UTC"),
+            (vec!["logging", "target_levels"], "{talos_sync::runner: info, loro_internal::oplog::change_store::block_encode: debug}"),
             (vec!["llm", "ollama", "api_key"], "fixture-provider-key"),
             (
                 vec!["channels", "discord", "token"],
@@ -163,6 +164,12 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
 
         let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
         assert!(report.changed, "{profile}");
+        assert!(
+            report
+                .removed_paths
+                .contains(&"logging.timezone".to_string()),
+            "{profile}"
+        );
         assert_eq!(
             read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
             saved
@@ -315,7 +322,8 @@ fn upgrade_removes_legacy_keys_and_defaults_invalid_values() {
         get_path_for_test(&normalized, &["llm", "model"]),
         Some(&YamlValue::String("user-model".to_string()))
     );
-    validate_config_value(&normalized).expect("normalized config should strict-load");
+    validate_config_value(&normalized, &RuntimeEnv::default())
+        .expect("normalized config should strict-load");
 }
 
 #[test]
@@ -343,7 +351,8 @@ fn upgrade_adds_missing_current_defaults() {
     assert!(get_path_for_test(&normalized, &["memory"]).is_some());
     assert!(get_path_for_test(&normalized, &["automation"]).is_some());
     assert!(get_path_for_test(&normalized, &["workspaces"]).is_some());
-    validate_config_value(&normalized).expect("normalized config should strict-load");
+    validate_config_value(&normalized, &RuntimeEnv::default())
+        .expect("normalized config should strict-load");
 }
 
 #[test]
@@ -389,7 +398,8 @@ trusted_node_ca_file: /tmp/node-ca.crt
         ),
         Some(&YamlValue::String("127.0.0.1:18800".to_string()))
     );
-    validate_config_value(&normalized).expect("normalized config should strict-load");
+    validate_config_value(&normalized, &RuntimeEnv::default())
+        .expect("normalized config should strict-load");
 }
 
 #[test]
@@ -493,7 +503,8 @@ region: us-east-1
         .removed_paths
         .iter()
         .any(|path| path == "storage.files.backends.s3"));
-    validate_config_value(&normalized).expect("normalized config should strict-load");
+    validate_config_value(&normalized, &RuntimeEnv::default())
+        .expect("normalized config should strict-load");
 }
 
 #[test]
@@ -540,7 +551,8 @@ minio:
         .defaulted_paths
         .iter()
         .any(|path| path == "storage.files.default"));
-    validate_config_value(&normalized).expect("normalized config should strict-load");
+    validate_config_value(&normalized, &RuntimeEnv::default())
+        .expect("normalized config should strict-load");
 }
 
 #[test]
@@ -569,7 +581,8 @@ fn upgrade_defaults_runtime_invalid_values() {
         get_path_for_test(&normalized, &["storage", "files", "default"]),
         Some(&YamlValue::String("local".to_string()))
     );
-    validate_config_value(&normalized).expect("normalized config should strict-load");
+    validate_config_value(&normalized, &RuntimeEnv::default())
+        .expect("normalized config should strict-load");
 }
 
 #[test]

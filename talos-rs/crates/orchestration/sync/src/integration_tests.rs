@@ -292,7 +292,54 @@ async fn lost_ack_restart_reuses_identity_and_does_not_duplicate_facts() {
         .import(&[batch.update, retry.update.clone()])
         .unwrap();
     assert_eq!(receiver.changes().unwrap().len(), 1);
+    // A pure ACK must not rewrite an unchanged document blob/version. Enforce
+    // that persistence boundary in SQLite rather than mocking the encoder.
+    fixture.storage.execute("CREATE TRIGGER ack_preserves_document BEFORE UPDATE OF snapshot_blob, version_vector, generation ON sync_documents BEGIN SELECT RAISE(ABORT, 'ACK rewrote the document'); END", &[]).await.unwrap();
+    capture(
+        &fixture,
+        resource.clone(),
+        vec![SyncChange::Metadata {
+            before: Some(Box::new(SyncResourceSnapshot::Computer(node("Laptop")))),
+            after: Box::new(SyncResourceSnapshot::Computer(node("Renamed laptop"))),
+        }],
+    )
+    .await;
+    let ack_before = fixture.storage.query("SELECT hex(acknowledged_vector) AS vector, acknowledged_generation FROM sync_documents", &[]).await.unwrap();
+    fixture.storage.execute("CREATE TRIGGER ack_cleanup_failure BEFORE DELETE ON sync_outbox BEGIN SELECT RAISE(ABORT, 'controlled ACK cleanup failure'); END", &[]).await.unwrap();
+    assert!(restarted.acknowledge(&retry).await.is_err());
+    assert_eq!(fixture.storage.query("SELECT hex(acknowledged_vector) AS vector, acknowledged_generation FROM sync_documents", &[]).await.unwrap()[0].values, ack_before[0].values);
+    assert_eq!(
+        fixture
+            .storage
+            .query("SELECT COUNT(*) AS count FROM sync_outbox", &[])
+            .await
+            .unwrap()[0]
+            .get_i64("count"),
+        Some(2)
+    );
+    fixture
+        .storage
+        .execute("DROP TRIGGER ack_cleanup_failure", &[])
+        .await
+        .unwrap();
     restarted.acknowledge(&retry).await.unwrap();
+    restarted.acknowledge(&retry).await.unwrap();
+    fixture
+        .storage
+        .execute("DROP TRIGGER ack_preserves_document", &[])
+        .await
+        .unwrap();
+    let next = restarted
+        .export_pending(&fixture.binding, resource.clone(), 32)
+        .await
+        .unwrap()
+        .expect("later unacknowledged facts must survive an older ACK");
+    assert!(next.through_sequence > retry.through_sequence);
+    receiver.import(std::slice::from_ref(&next.update)).unwrap();
+    assert!(serde_json::to_string(&receiver.changes().unwrap())
+        .unwrap()
+        .contains("Renamed laptop"));
+    restarted.acknowledge(&next).await.unwrap();
     assert!(restarted
         .export_pending(&fixture.binding, resource, 32)
         .await

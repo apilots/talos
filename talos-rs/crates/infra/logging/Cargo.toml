@@ -12,17 +12,20 @@ repository.workspace = true
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 tracing-appender = "0.2"
+rolling-file = "0.2"
 
 # Error handling
 talos-error = { path = "../error" }
 
 # Config
 serde = { workspace = true }
-serde_yaml = "0.9"
 
 # Timezone-aware log timestamps
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = "0.9"
 
 [lints]
 workspace = true

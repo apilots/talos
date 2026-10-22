@@ -61,6 +61,8 @@ try {
   const api = `http://127.0.0.1:${address.port}`;
   const configPath = process.env.TALOS_CONFIG!;
   const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.timezone = "${TALOS_DESKTOP_RECOVERY_TIMEZONE}";
+  process.env.TALOS_DESKTOP_RECOVERY_TIMEZONE = "America/New_York";
   config.gateway.auth = true;
   config.cloud.api_base_url = api;
   config.sync.enabled = false;
@@ -84,7 +86,7 @@ try {
   const serverConfig = structuredClone(config);
   serverConfig.gateway.port = httpPort;
   serverConfig.agent_node = { control_plane: { bind_address: `127.0.0.1:${rpcPort}`, tls_certificate_file: cert, tls_private_key_file: key, trusted_node_ca_file: cert } };
-  const serverPath = path.join(serverHome, "conf/talos.yaml");
+  const serverPath = path.join(serverHome, "selected-config.yaml");
   await writeFile(serverPath, JSON.stringify(serverConfig));
   const server = spawn(process.env.TALOS_SERVER_BIN!, [], { env: { ...process.env, TALOS_HOME: serverHome, TALOS_CONFIG: serverPath, TALOS_DESKTOP_HOSTNAME: undefined }, stdio: ["ignore", "ignore", "inherit"] });
   serverToClose = server;
@@ -115,6 +117,19 @@ try {
   });
   controllerToClose = controller;
   await controller.connect();
+  // Desktop enrollment intentionally owns its managed config path. The Server
+  // also verifies startup settings selected through a different TALOS_CONFIG.
+  for (const logHome of [home, serverHome]) {
+    let startupTimestamp = "";
+    await waitFor(async () => {
+      startupTimestamp = (await readFile(path.join(logHome, "logs/talos.log"), "utf8")).split(/\s+/)[0] ?? "";
+      return startupTimestamp.length > 0;
+    });
+    const expectedOffset = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" })
+      .formatToParts(new Date(startupTimestamp)).find((part) => part.type === "timeZoneName")!.value.replace("GMT", "");
+    assert(startupTimestamp.endsWith(expectedOffset), `Startup log did not use the configured root timezone: ${startupTimestamp}`);
+  }
+  console.log("CASE desktop_and_selected_server_config_timezone PASS");
   const options = { actorCredentials: { credential: { type: "existing_session_token" as const, token } } };
   await controller.invoke("user/current", {}, options);
   const params = { sessionId: randomUUID(), turnId: null, sinceEventId: null, replayLimit: 50, closeWhenIdle: false, closeOnTerminal: false };
@@ -166,9 +181,17 @@ try {
   assert((await fetch(`${httpOrigin}/v1/user`, { headers })).ok);
   const beforeOffline = { introspections, accountReads };
   cloudAvailable = false;
-  const started = performance.now();
   const writer = new DatabaseSync(path.join(home, "data", "talos.db"));
-  writer.exec("BEGIN IMMEDIATE");
+  // Post-Turn effects may still own a short write transaction. Acquire the
+  // fixture lock before timing reads, yielding so the HTTP fixture can settle.
+  await waitFor(async () => {
+    try { writer.exec("BEGIN IMMEDIATE"); return true; }
+    catch (error) {
+      if (error instanceof Error && "errcode" in error && error.errcode === 5) return false;
+      throw error;
+    }
+  }, 2000).catch((error: unknown) => { writer.close(); throw error; });
+  const started = performance.now();
   let readDeadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const reads = Promise.all([
@@ -232,8 +255,8 @@ async function waitForOwnedComputer(
   assert(computerId);
   return computerId;
 }
-async function waitFor(probe: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 30000;
+async function waitFor(probe: () => Promise<boolean>, timeoutMs = 30000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { if (await probe()) return; await new Promise((resolve) => setTimeout(resolve, 20)); }
   throw new Error("Desktop recovery scenario timed out.");
 }

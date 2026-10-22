@@ -17,12 +17,26 @@ use crate::{
 
 use super::{operations, RunnerChannels};
 
+#[derive(Debug)]
+pub(super) enum ConnectionPhase {
+    Bootstrap,
+    Connect,
+    CatchUp,
+    Subscribe,
+    ReceiveFeed,
+    Download,
+    Upload,
+    LocalStatus,
+    Shutdown,
+}
+
 pub(super) async fn connected<A: SyncDataAdapter>(
     sync: &Arc<TalosSync>,
     adapter: &A,
     params: &SyncStartParams,
     stop: &CancellationToken,
     channels: &mut RunnerChannels,
+    phase: &mut ConnectionPhase,
 ) -> TalosResult<()> {
     tokio::select! { _ = stop.cancelled() => return Ok(()), result = bootstrap(sync, adapter, &params.binding) => result? }
     let mut options = talos_sync_sdk::SyncOptions::new(
@@ -31,6 +45,7 @@ pub(super) async fn connected<A: SyncDataAdapter>(
         sync.peer_id().into(),
     );
     options.trusted_ca_pem = params.trusted_ca_pem.clone();
+    *phase = ConnectionPhase::Connect;
     let client = tokio::select! {
         _ = stop.cancelled() => return Ok(()),
         client = SyncClient::connect(options, params.credentials.clone()) => client.map_err(sync_error)?,
@@ -47,9 +62,12 @@ pub(super) async fn connected<A: SyncDataAdapter>(
         tokio::select! {
             _ = presence => Ok(()),
             _ = stop.cancelled() => Ok(()),
-            result = session(sync, adapter, &params.binding, &client, channels) => result,
+            result = session(sync, adapter, &params.binding, &client, channels, phase) => result,
         }
     };
+    if result.is_ok() {
+        *phase = ConnectionPhase::Shutdown;
+    }
     let shutdown = client.shutdown().await.map_err(sync_error);
     result.and(shutdown)
 }
@@ -119,15 +137,20 @@ async fn session<A: SyncDataAdapter>(
     binding: &SyncBinding,
     client: &SyncClient,
     channels: &mut RunnerChannels,
+    phase: &mut ConnectionPhase,
 ) -> TalosResult<()> {
+    *phase = ConnectionPhase::CatchUp;
     let cursor = match sync.download_cursor(binding).await? {
         Some(cursor) => cursor,
         None => catch_up(sync, adapter, binding, client, &channels.changes).await?,
     };
+    *phase = ConnectionPhase::Subscribe;
     let subscription = match client.events(Some(cursor)).await {
         Ok(subscription) => subscription,
         Err(error) if error.code == talos_sync_types::SyncErrorCode::EventCursorExpired => {
+            *phase = ConnectionPhase::CatchUp;
             let cursor = catch_up(sync, adapter, binding, client, &channels.changes).await?;
+            *phase = ConnectionPhase::Subscribe;
             client.events(Some(cursor)).await.map_err(sync_error)?
         }
         Err(error) => return Err(sync_error(error)),
@@ -142,12 +165,15 @@ async fn session<A: SyncDataAdapter>(
     });
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     loop {
+        *phase = ConnectionPhase::LocalStatus;
         if !sync.enabled(&binding.scope.account_id).await? {
             return Ok(());
         }
+        *phase = ConnectionPhase::ReceiveFeed;
         tokio::select! {
             batch = subscription.receive() => {
                 let Some(batch) = batch.map_err(sync_error)? else { return Err(TalosError::new(ErrorCode::ServiceUnavailable, "Synchronization feed disconnected.")) };
+                *phase = ConnectionPhase::Download;
                 for entry in batch.entries {
                     let (document, _) = download(sync, adapter, binding, client, &entry.resource, &channels.changes).await?;
                     document.close().await.map_err(sync_error)?;
@@ -161,12 +187,17 @@ async fn session<A: SyncDataAdapter>(
                 let Some(command) = command else { return Ok(()) };
                 operations::execute(sync, adapter, binding, client, channels, command).await;
             }
-            _ = interval.tick() => upload_pending(sync, adapter, binding, client, channels).await?,
+            _ = interval.tick() => {
+                *phase = ConnectionPhase::Upload;
+                upload_pending(sync, adapter, binding, client, channels).await?;
+            },
             wakeup = channels.wake.recv() => {
                 if wakeup.is_none() { return Ok(()) }
+                *phase = ConnectionPhase::Upload;
                 upload_pending(sync, adapter, binding, client, channels).await?;
             }
         }
+        *phase = ConnectionPhase::LocalStatus;
         let rows = sync
             .storage
             .query(

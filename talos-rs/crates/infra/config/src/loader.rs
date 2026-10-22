@@ -104,7 +104,7 @@ pub(crate) fn load_config_at(config_path: PathBuf, paths: TalosPaths) -> TalosRe
     Ok(config)
 }
 
-fn explicit_config_path(path: Option<&str>) -> Option<PathBuf> {
+pub(super) fn explicit_config_path(path: Option<&str>) -> Option<PathBuf> {
     path.map(PathBuf::from)
         .or_else(|| std::env::var_os(TALOS_CONFIG_ENV).map(PathBuf::from))
 }

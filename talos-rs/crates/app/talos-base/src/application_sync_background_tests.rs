@@ -13,11 +13,15 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     }
     let home = tempfile::tempdir().unwrap();
     let log_file = home.path().join("lifecycle.log");
-    let logging = talos_logging::init_with_config(talos_logging::LoggingConfig {
-        file: Some(log_file.to_string_lossy().into()),
-        stdout: false,
-        ..Default::default()
-    })
+    let logging = talos_logging::init_with_config(
+        talos_logging::LoggingConfig {
+            file: Some(log_file.to_string_lossy().into()),
+            stdout: false,
+            rotation: None, // Keep diagnostic-only fixtures on their explicit single-file sink.
+            ..Default::default()
+        },
+        "UTC",
+    )
     .unwrap();
     let (requests, mut observed) = tokio::sync::mpsc::unbounded_channel();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -250,6 +254,10 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
         4
     );
     assert!(log.contains("sync_account_initialization_failed"));
+    assert!(log.contains("phase=VerifyAccount"));
+    assert!(log.contains("phase=ReconcileWorkerAndBinding"));
+    assert!(log.contains("wake_reason=TemporaryFailureRetry"));
+    assert!(log.contains("elapsed_ms="));
     assert_eq!(
         log.matches("code=Conflict").count(),
         1,

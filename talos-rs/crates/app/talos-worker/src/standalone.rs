@@ -57,11 +57,7 @@ impl KernelMemoryProgressStore for RemoteMemoryProgress {
 }
 
 fn init_logging(config: &Config) -> TalosResult<talos_logging::LogGuard> {
-    let mut logging = config.logging.clone();
-    if logging.timezone.is_none() {
-        logging.timezone = Some(config.timezone.clone());
-    }
-    talos_logging::init_with_config(logging)
+    talos_logging::init_with_config(config.logging.clone(), &config.timezone)
 }
 
 async fn shutdown_signal() {

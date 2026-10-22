@@ -412,35 +412,23 @@ impl TalosSync {
     /// Called only for the hub's durable upload ACK of this exact exported cut.
     pub async fn acknowledge(&self, batch: &SyncExportBatch) -> TalosResult<()> {
         let mut tx = self.storage.begin_transaction().await?;
-        let rows = tx.query("SELECT exported_version_json FROM sync_outbox WHERE seq = ? AND hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ?", &[&batch.through_sequence.to_string(), &batch.scope.hub_id, &batch.scope.account_id, batch.resource.kind().as_str(), batch.resource.id()]).await?;
-        let Some(row) = rows.first() else {
+        let Some(record) = store::acknowledgement(&mut *tx, batch).await? else {
             tx.commit().await?;
             return Ok(());
         };
-        if !talos_sync_sdk::version_includes(
-            &batch.version,
-            &store::json::<SyncVersion>(row, "exported_version_json")?,
-        )
-        .map_err(sync_error)?
+        if !talos_sync_sdk::version_includes(&batch.version, &record.exported)
+            .map_err(sync_error)?
+            || !talos_sync_sdk::version_includes(&record.current, &batch.version)
+                .map_err(sync_error)?
         {
             return Err(TalosError::new(
                 ErrorCode::Conflict,
                 "Synchronization acknowledgement does not match the exported cut.",
             ));
         }
-        let (document, acknowledged) = self
-            .load_document(&mut *tx, &batch.scope, &batch.resource)
-            .await?;
-        let acknowledged =
-            talos_sync_sdk::version_union(&acknowledged, &batch.version).map_err(sync_error)?;
-        store::save_document(
-            &mut *tx,
-            &batch.scope,
-            &document.summary().map_err(sync_error)?,
-            &document.snapshot().map_err(sync_error)?,
-            &acknowledged,
-        )
-        .await?;
+        let acknowledged = talos_sync_sdk::version_union(&record.acknowledged, &batch.version)
+            .map_err(sync_error)?;
+        store::save_acknowledgement(&mut *tx, &batch.scope, &batch.resource, &acknowledged).await?;
         for row in store::outbox(&mut *tx, &batch.scope, &batch.resource, 1024).await? {
             if row.seq <= batch.through_sequence {
                 if let Some(version) = &row.exported_version {

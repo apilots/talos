@@ -3,6 +3,80 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn codec_noise_is_precise_and_explicitly_enableable() {
+    for (name, level) in [("quiet", LogLevel::Warn), ("diagnostic", LogLevel::Info)] {
+        let path = temp_log_path(name);
+        let mut config = LoggingConfig {
+            file: Some(path.to_string_lossy().into()),
+            stdout: false,
+            ..Default::default()
+        };
+        config.target_levels.insert(
+            "loro_internal::oplog::change_store::block_encode".into(),
+            level,
+        );
+        // Target overrides cannot silence a product handling-owner report.
+        config
+            .target_levels
+            .insert("talos::diagnostic".into(), LogLevel::Off);
+        let (dispatch, guard) = build_dispatch(&config, "UTC").unwrap();
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(target: "loro_internal::oplog::change_store::block_encode", "codec-info");
+            tracing::warn!(target: "loro_internal::oplog::change_store::block_encode", "codec-warning");
+            tracing::info!(target: "talos_sync::runner", "transport-started");
+            report_error(&talos_error::TalosError::new(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                "protected-turn",
+            ));
+        });
+        drop(dispatch);
+        drop(guard);
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text.contains("codec-info"), name == "diagnostic");
+        for expected in [
+            "codec-warning",
+            "transport-started",
+            "protected-turn",
+            "backtrace",
+        ] {
+            assert!(text.contains(expected));
+        }
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn rotation_limits_and_maintained_templates_use_the_same_config() {
+    let config = LoggingConfig {
+        rotation: Some(LogRotation {
+            max_files: 0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert_eq!(
+        build_dispatch(&config, "UTC").unwrap_err().error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
+    for filename in ["talos.yaml", "talos-dev.yaml", "talos-prod.yaml"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../conf")
+            .join(filename);
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        let actual: LoggingConfig = serde_yaml::from_value(value["logging"].clone()).unwrap();
+        assert_eq!(
+            serde_yaml::to_value(actual).unwrap(),
+            serde_yaml::to_value(LoggingConfig::default()).unwrap()
+        );
+    }
+    let disabled: LoggingConfig =
+        serde_yaml::from_str("rotation: null\ntarget_levels: {}\n").unwrap();
+    assert!(disabled.rotation.is_none());
+    assert!(disabled.target_levels.is_empty());
+}
+
+#[test]
 fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
     let log_path = temp_log_path("failures.log");
     let config = LoggingConfig {
@@ -22,7 +96,7 @@ fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
             std::io::Error::other("storage unavailable"),
         ),
     ];
-    let (dispatch, guard) = build_dispatch(&config).unwrap();
+    let (dispatch, guard) = build_dispatch(&config, "UTC").unwrap();
     tracing::dispatcher::with_default(&dispatch, || {
         for error in &errors {
             report_error(error);
@@ -30,7 +104,7 @@ fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
     });
     drop(dispatch);
     drop(guard);
-    let content = fs::read_to_string(log_path).unwrap();
+    let content = fs::read_to_string(&log_path).unwrap();
     assert_eq!(content.matches("application failure").count(), 2);
     for expected in [
         "Business",
@@ -129,7 +203,7 @@ fn saturated_file_queue_preserves_every_write_and_flushes_on_shutdown() {
     );
 }
 
-fn temp_log_path(name: &str) -> PathBuf {
+pub(super) fn temp_log_path(name: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after epoch")
@@ -137,59 +211,6 @@ fn temp_log_path(name: &str) -> PathBuf {
     std::env::temp_dir()
         .join(format!("talos-logging-{}-{}", std::process::id(), unique))
         .join(name)
-}
-
-#[test]
-fn startup_logging_config_uses_raw_logging_node_with_stable_file() {
-    let log_path = temp_log_path("startup/talos.log");
-    let config_path = log_path
-        .parent()
-        .expect("log parent should exist")
-        .join("talos.yaml");
-    fs::create_dir_all(config_path.parent().expect("config parent should exist"))
-        .expect("config parent should be created");
-    fs::write(
-        &config_path,
-        "logging:\n  level: debug\n  format: json\n  stdout: true\n",
-    )
-    .expect("config should be written");
-
-    let (config, warning) = startup_logging_config(&StartupLoggingOptions {
-        config_file: config_path,
-        log_file: log_path.clone(),
-        stdout: false,
-    });
-
-    assert_eq!(warning, None);
-    assert_eq!(config.level, "debug");
-    assert_eq!(config.format, "json");
-    assert_eq!(config.file, Some(log_path.to_string_lossy().to_string()));
-    assert!(!config.stdout);
-}
-
-#[test]
-fn startup_logging_config_falls_back_when_yaml_is_malformed() {
-    let log_path = temp_log_path("startup-fallback/talos.log");
-    let config_path = log_path
-        .parent()
-        .expect("log parent should exist")
-        .join("talos.yaml");
-    fs::create_dir_all(config_path.parent().expect("config parent should exist"))
-        .expect("config parent should be created");
-    fs::write(&config_path, "logging: [").expect("config should be written");
-
-    let (config, warning) = startup_logging_config(&StartupLoggingOptions {
-        config_file: config_path,
-        log_file: log_path.clone(),
-        stdout: false,
-    });
-
-    assert!(warning
-        .expect("malformed yaml should produce warning")
-        .contains("failed to parse logging config yaml"));
-    assert_eq!(config.level, "info");
-    assert_eq!(config.file, Some(log_path.to_string_lossy().to_string()));
-    assert!(!config.stdout);
 }
 
 #[test]
@@ -202,7 +223,7 @@ fn test_build_dispatch_rejects_empty_outputs() {
         ..Default::default()
     };
 
-    let err = build_dispatch(&config).expect_err("empty logging outputs should fail");
+    let err = build_dispatch(&config, "UTC").expect_err("empty logging outputs should fail");
     let message = err.to_string();
     assert!(message.contains("at least one output"));
 }
@@ -218,7 +239,8 @@ fn test_build_dispatch_writes_text_logs_to_file() {
         ..Default::default()
     };
 
-    let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
+    let (dispatch, guard) =
+        build_dispatch(&config, "Asia/Shanghai").expect("dispatch should build");
     tracing::dispatcher::with_default(&dispatch, || {
         tracing::info!("file sink is active");
         let span = tracing::trace_span!(target: "rmcp::transport::auth", "grant");
@@ -229,8 +251,15 @@ fn test_build_dispatch_writes_text_logs_to_file() {
     drop(dispatch);
     drop(guard);
 
-    let content = fs::read_to_string(&log_path).expect("log file should exist");
+    let content = fs::read_to_string(&log_path).expect("daily log file should exist");
     assert!(content.contains("file sink is active"));
+    let timestamp = content
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse::<chrono::DateTime<chrono::FixedOffset>>()
+        .unwrap();
+    assert_eq!(timestamp.offset().local_minus_utc(), 8 * 3600);
     assert!(!content.contains("private-"));
 }
 
@@ -245,14 +274,14 @@ fn test_build_dispatch_writes_json_logs_to_file() {
         ..Default::default()
     };
 
-    let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
+    let (dispatch, guard) = build_dispatch(&config, "UTC").expect("dispatch should build");
     tracing::dispatcher::with_default(&dispatch, || {
         tracing::info!(target: "talos::test", "json sink is active");
     });
     drop(dispatch);
     drop(guard);
 
-    let content = fs::read_to_string(&log_path).expect("log file should exist");
+    let content = fs::read_to_string(&log_path).expect("daily log file should exist");
     assert!(content.starts_with('{'));
     assert!(content.contains("\"fields\":{\"message\":\"json sink is active\"}"));
 }
@@ -270,8 +299,37 @@ fn test_build_dispatch_creates_parent_directory_for_file_logs() {
     };
 
     assert!(!parent.exists(), "test precondition failed");
-    let (_dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
+    let (_dispatch, guard) = build_dispatch(&config, "UTC").expect("dispatch should build");
     drop(guard);
 
     assert!(parent.exists(), "log parent directory should be created");
+}
+
+#[test]
+fn invalid_timezone_and_zero_size_fail_explicitly() {
+    assert_eq!(
+        build_dispatch(&LoggingConfig::default(), "Mars/Olympus")
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
+    for rotation in [
+        LogRotation {
+            max_bytes: 0,
+            ..Default::default()
+        },
+        LogRotation {
+            max_files: 1,
+            ..Default::default()
+        },
+    ] {
+        let config = LoggingConfig {
+            rotation: Some(rotation),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_dispatch(&config, "UTC").unwrap_err().error_code(),
+            talos_error::ErrorCode::InvalidRequest
+        );
+    }
 }

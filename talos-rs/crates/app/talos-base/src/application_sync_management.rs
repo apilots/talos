@@ -9,6 +9,16 @@ use talos_service::{Actor, ManagementSync};
 use talos_sync::{ComputerAlias, SyncBindParams};
 use talos_types::{SyncConnectionState, SyncEnableRequest, SyncStatusResponse};
 
+#[derive(Debug)]
+pub(crate) enum RefreshPhase {
+    AwaitLifecycle,
+    VerifyAccount,
+    LocalSettings,
+    RestoreSync,
+    ReconcileWorkerAndBinding,
+    ObserveWorker,
+}
+
 impl ApplicationSyncHost {
     pub(crate) async fn verified_actor(&self, actor: &Actor) -> TalosResult<RequestIdentity> {
         let token = actor.access_token.as_deref().ok_or_else(|| {
@@ -434,8 +444,14 @@ impl ApplicationSyncHost {
     }
 
     /// Called only by owned maintenance or an explicit mutation lifecycle.
-    pub(crate) async fn refresh_account(&self, actor: &Actor) -> TalosResult<()> {
+    pub(crate) async fn refresh_account(
+        &self,
+        actor: &Actor,
+        phase: &mut RefreshPhase,
+    ) -> TalosResult<()> {
+        *phase = RefreshPhase::VerifyAccount;
         let verified = self.verified_actor(actor).await?;
+        *phase = RefreshPhase::LocalSettings;
         if YamlConfigStore::new(self.config.source_path())
             .load_sync()?
             .enabled
@@ -454,11 +470,13 @@ impl ApplicationSyncHost {
                 self.service.remove_sync_handle(&account_id);
             }
             self.sync_stores.shutdown_handles().await?;
+            *phase = RefreshPhase::ReconcileWorkerAndBinding;
             let (_, enrollment_error) = self.attach_signed_in(&verified).await?;
             return enrollment_error.map_or(Ok(()), Err);
         }
         // Restore document transport from its durable binding before any Worker
         // registration RPC. An unavailable G must not delay an existing H handle.
+        *phase = RefreshPhase::RestoreSync;
         if self.sync.enabled(&verified.user_id).await? {
             if let Some(binding) = self.sync.account_binding(&verified).await? {
                 self.start_account_sync(
@@ -473,6 +491,7 @@ impl ApplicationSyncHost {
                 .await?;
             }
         }
+        *phase = RefreshPhase::ReconcileWorkerAndBinding;
         self.bind_signed_in(&verified).await?.map_or(Ok(()), Err)
     }
 

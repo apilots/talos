@@ -263,11 +263,15 @@ async fn capture_runtime_logs<T>(operation: impl std::future::Future<Output = T>
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("runtime.log");
     // Nextest runs each test in its own process, matching the production logger lifetime.
-    let guard = talos_logging::init_with_config(talos_logging::LoggingConfig {
-        file: Some(path.to_string_lossy().into_owned()),
-        stdout: false,
-        ..Default::default()
-    })
+    let guard = talos_logging::init_with_config(
+        talos_logging::LoggingConfig {
+            file: Some(path.to_string_lossy().into_owned()),
+            stdout: false,
+            rotation: None, // Keep diagnostic-only fixtures on their explicit single-file sink.
+            ..Default::default()
+        },
+        "UTC",
+    )
     .unwrap();
     let result = operation.await;
     drop(guard);

@@ -546,11 +546,8 @@ pub fn init_logging(
     config: &Config,
     options: Option<&TalosServerOptions>,
 ) -> TalosResult<LogGuard> {
-    let mut config = apply_runtime_options(config.clone(), options);
-    if config.logging.timezone.is_none() {
-        config.logging.timezone = Some(config.timezone.clone());
-    }
-    talos_logging::init_with_config(config.logging)
+    let config = apply_runtime_options(config.clone(), options);
+    talos_logging::init_with_config(config.logging, &config.timezone)
 }
 
 async fn start_server_after_startup(

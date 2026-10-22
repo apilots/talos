@@ -89,6 +89,9 @@ jobs:
         run: |
           just test -p talos-sync -p talos-app-protocol -p talos-sdk -p talos-mcp
 
+      - name: Verify log rotation and root timezone configuration
+        run: just test -p talos-logging -p talos-config
+
   mcp-native-cleanup:
     needs: change-scope
     if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
