@@ -48,6 +48,14 @@ impl Drop for RefreshTasks {
     }
 }
 
+struct RefreshLifetime(String);
+
+impl Drop for RefreshLifetime {
+    fn drop(&mut self) {
+        tracing::info!(account_id = %self.0, "Sync account maintenance stopped");
+    }
+}
+
 impl ApplicationSyncHost {
     /// Startup/login resumes one account supervisor. Later authentication updates
     /// credentials without replacing its Sync handle; queries never call this.
@@ -68,38 +76,39 @@ impl ApplicationSyncHost {
         }
         if let Some(refresh) = background.tasks.get(&actor.user_id) {
             if !refresh.task.is_finished() {
-                refresh.actor.send_replace(actor.clone());
+                refresh.actor.send_if_modified(|current| {
+                    if current == actor {
+                        return false;
+                    }
+                    *current = actor.clone();
+                    true
+                });
                 return;
             }
         }
         let host = self.self_weak.clone();
         let account_id = actor.user_id.clone();
         let (actor, updates) = tokio::sync::watch::channel(actor.clone());
-        let task = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            loop {
-                interval.tick().await;
-                let Some(host) = host.upgrade() else { break };
-                let actor = updates.borrow().clone();
-                let _guard = host.lifecycle.lock().await;
-                if let Err(error) = host.refresh_account(&actor).await {
-                    talos_logging::report_error(&error);
-                    host.failures
-                        .write()
-                        .expect("sync failures lock")
-                        .insert(actor.user_id.clone(), error.to_api_error());
-                } else {
-                    host.failures
-                        .write()
-                        .expect("sync failures lock")
-                        .remove(&actor.user_id);
-                }
-            }
-        });
+        let failures = self.worker_failures.subscribe();
+        tracing::info!(%account_id, "Sync account maintenance started");
+        let lifetime = RefreshLifetime(account_id.clone());
+        let task = tokio::spawn(maintain_account(host, updates, failures, lifetime));
         background
             .tasks
             .insert(account_id, RefreshTask { task, actor });
+    }
+
+    /// Durable Computer imports wake registration reconciliation, never a read API.
+    pub(crate) fn notify_refresh(&self, account_id: &str) {
+        if let Some(refresh) = self
+            .background
+            .lock()
+            .expect("Sync refresh tasks lock")
+            .tasks
+            .get(account_id)
+        {
+            refresh.actor.send_modify(|_| {});
+        }
     }
 
     pub(crate) async fn pause_refresh(&self, account_id: &str) -> RefreshPause<'_> {
@@ -161,6 +170,85 @@ impl ApplicationSyncHost {
         };
         for task in tasks.into_values() {
             stop(task.task).await;
+        }
+    }
+}
+
+async fn maintain_account(
+    host: std::sync::Weak<ApplicationSyncHost>,
+    mut updates: tokio::sync::watch::Receiver<Actor>,
+    mut failures: tokio::sync::watch::Receiver<Option<talos_error::ApiError>>,
+    _lifetime: RefreshLifetime,
+) {
+    loop {
+        let Some(owner) = host.upgrade() else { break };
+        let actor = updates.borrow_and_update().clone();
+        failures.borrow_and_update();
+        let result = {
+            let _guard = owner.lifecycle.lock().await;
+            async {
+                owner.refresh_account(&actor).await?;
+                let local = talos_config::YamlConfigStore::new(owner.config.source_path())
+                    .load_agent_node()?
+                    .runner;
+                Ok::<_, talos_error::TalosError>(match local {
+                    Some(local) => owner
+                        .sync_stores
+                        .connections
+                        .lock()
+                        .await
+                        .get(&local.node_id)
+                        .filter(|(account, _)| account == &actor.user_id)
+                        .and_then(|(_, connection)| connection.upgrade()),
+                    None => None,
+                })
+            }
+            .await
+        };
+        let failed = result.is_err();
+        let connection = match result {
+            Err(error) => {
+                let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, retry_after_seconds = 5);
+                let _entered = span.enter();
+                talos_logging::report_error(&error);
+                owner
+                    .failures
+                    .write()
+                    .expect("sync failures lock")
+                    .insert(actor.user_id.clone(), error.to_api_error());
+                None
+            }
+            Ok(connection) => {
+                owner
+                    .failures
+                    .write()
+                    .expect("sync failures lock")
+                    .remove(&actor.user_id);
+                tracing::info!(account_id = %actor.user_id, "Sync account initialized; waiting for lifecycle changes");
+                connection
+            }
+        };
+        // The Hub runner owns H reconnect. Only this host's separate G connection
+        // needs a lifecycle wake when its stream ends.
+        drop(owner);
+        if failed {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {},
+                changed = updates.changed() => if changed.is_err() { break },
+            }
+            continue;
+        }
+        tokio::select! {
+            changed = updates.changed() => if changed.is_err() { break },
+            // Explicit credential recovery clears the registration error;
+            // it wakes reconciliation just like a terminal failure.
+            changed = failures.changed() => if changed.is_err() { break },
+            _ = async {
+                match &connection {
+                    Some(connection) => connection.ended().await,
+                    None => std::future::pending().await,
+                }
+            } => {},
         }
     }
 }

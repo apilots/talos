@@ -73,6 +73,14 @@ pub struct SyncHandle {
     task: Mutex<Option<JoinHandle<TalosResult<()>>>>,
 }
 
+struct RunnerLifetime(String);
+
+impl Drop for RunnerLifetime {
+    fn drop(&mut self) {
+        tracing::info!(account_id = %self.0, "Sync transport runner stopped");
+    }
+}
+
 impl SyncHandle {
     /// Refresh only ephemeral observations after the host verifies local ownership.
     /// This never changes durable capture aliases or grants execution authority.
@@ -211,15 +219,20 @@ async fn run<A: SyncDataAdapter>(
     stop: CancellationToken,
     mut channels: RunnerChannels,
 ) -> TalosResult<()> {
+    let _lifetime = RunnerLifetime(params.binding.scope.account_id.clone());
+    tracing::info!(account_id = %params.binding.scope.account_id, "Sync transport runner started");
     loop {
         let enabled = match sync.enabled(&params.binding.scope.account_id).await {
             Ok(enabled) => enabled,
             Err(error) => {
+                talos_logging::report_error(&error);
                 channels.status.send_modify(|value| {
                     value.connection = SyncConnectionState::Disabled;
                     value.last_error = Some(error.to_api_error());
                 });
-                return Err(error);
+                // The runner owns this terminal failure and retains it in status.
+                // A later shutdown only joins the already handled task.
+                return Ok(());
             }
         };
         if !enabled {
@@ -233,6 +246,9 @@ async fn run<A: SyncDataAdapter>(
             break;
         }
         if let Err(error) = result {
+            let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id);
+            let _entered = span.enter();
+            talos_logging::report_error(&error);
             channels.status.send_modify(|value| {
                 value.connection = SyncConnectionState::Disconnected;
                 value.last_error = Some(error.to_api_error());

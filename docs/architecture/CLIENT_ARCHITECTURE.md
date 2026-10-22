@@ -168,9 +168,18 @@ or authenticated account restoration. That supervisor verifies credentials,
 registers/reconnects the Worker and starts or reuses the account's existing
 `SyncHandle`. A saved document binding restores H before Worker registration RPC,
 so Gateway outages cannot delay that account's synchronization transport.
-Periodic maintenance and the SDK's reconnect lifecycle need no UI polling.
+After successful initialization the supervisor waits for credential changes,
+local Computer imports, Worker registration state changes or the local
+management connection ending. Repeated restoration of unchanged credentials is
+coalesced without another initialization. Only failed initialization/recovery
+retries after five seconds; healthy accounts do not poll Auth or Gateway.
+The SyncHandle owns Hub reconnection, while the registered Worker owns its lease
+renewal and transport recovery. Neither lifecycle needs UI polling.
 Later authentication refreshes its credentials without creating another
 supervisor or replacing the handle. Desktop does not use status queries to enroll.
+Account maintenance, Sync transport and import observer tasks record their start
+and stop through Talos logging; handled execution failures use the existing
+single-owner diagnostic report, without logging credentials.
 
 `sync/status` returns a local account-scoped snapshot of configuration, connection
 observations, pending changes, errors and Computer identity. It neither starts

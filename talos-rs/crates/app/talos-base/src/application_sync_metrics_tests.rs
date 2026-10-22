@@ -102,6 +102,45 @@ pub(super) async fn verify_late_enrollment(
         handle.status().connection,
         talos_sync::SyncConnectionState::Connected
     );
+    wait_for("late-enrolled management connection ready", async || {
+        runtime
+            .sync_host
+            .sync_stores
+            .connections
+            .lock()
+            .await
+            .get(&local)
+            .and_then(|(_, connection)| connection.upgrade())
+            .is_some_and(|connection| !connection.is_closed())
+    })
+    .await;
+    let connection = runtime.sync_host.sync_stores.connections.lock().await[&local]
+        .1
+        .upgrade()
+        .expect("enrolled management connection");
+    connection.close();
+    wait_for(
+        "management connection recovers from stream closure",
+        async || {
+            runtime
+                .sync_host
+                .sync_stores
+                .connections
+                .lock()
+                .await
+                .get(&local)
+                .and_then(|(_, connection)| connection.upgrade())
+                .is_some_and(|current| !current.is_closed() && !Arc::ptr_eq(&connection, &current))
+        },
+    )
+    .await;
+    assert!(
+        Arc::ptr_eq(
+            &handle,
+            &runtime.sync_host.sync_stores.handles.lock().await[ACCOUNT]
+        ),
+        "G stream recovery must reuse H's existing handle"
+    );
     close(runtime).await;
 }
 

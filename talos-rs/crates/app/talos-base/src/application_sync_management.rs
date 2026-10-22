@@ -199,7 +199,8 @@ impl ApplicationSyncHost {
     async fn attach_signed_in(
         &self,
         actor: &RequestIdentity,
-    ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
+    ) -> TalosResult<(talos_sync_sdk::CredentialCallback, Option<TalosError>)> {
+        let mut enrollment_error = None;
         let store = YamlConfigStore::new(self.config.source_path());
         self.refresh_removed_registration(actor).await?;
         let previous = self
@@ -257,9 +258,9 @@ impl ApplicationSyncHost {
                     // Another administrator may have claimed during the initial check.
                     // Only the current owner can report this host's enrollment failure.
                     if self.can_enroll_local_worker(actor).await? {
-                        talos_logging::report_error(&error);
                         self.worker_failures
                             .send_replace(Some(error.to_api_error()));
+                        enrollment_error = Some(error);
                     }
                 }
             }
@@ -269,11 +270,16 @@ impl ApplicationSyncHost {
             && self
                 .owns_local_computer(&Actor::regular(&actor.user_id))
                 .await?;
-        if let Some(runner) = store.load_agent_node()?.runner.filter(|_| owns_local) {
+        if let Some(runner) = store
+            .load_agent_node()?
+            .runner
+            .filter(|_| owns_local && enrollment_error.is_none())
+        {
             match self.connect_computer(actor, &runner.node_id).await {
                 Err(error) => {
                     self.worker_failures
                         .send_replace(Some(error.to_api_error()));
+                    enrollment_error = Some(error);
                 }
                 Ok(()) => {
                     self.worker_failures
@@ -284,11 +290,33 @@ impl ApplicationSyncHost {
 
         self.install_account_access(actor, credentials.clone())
             .await?;
-        Ok(credentials)
+        Ok((credentials, enrollment_error))
     }
 
-    async fn bind_signed_in(&self, actor: &RequestIdentity) -> TalosResult<()> {
-        let credentials = self.attach_signed_in(actor).await?;
+    async fn bind_signed_in(&self, actor: &RequestIdentity) -> TalosResult<Option<TalosError>> {
+        let (credentials, enrollment_error) = self.attach_signed_in(actor).await?;
+        // H initialization must still proceed when G enrollment fails. The owner
+        // retries the incomplete lifecycle without duplicating H reconnect.
+        match (
+            self.bind_document_sync(actor, credentials).await,
+            enrollment_error,
+        ) {
+            (Err(error), Some(enrollment_error)) => {
+                // Preserve an otherwise-lost independent G failure; the caller
+                // reports the primary document initialization failure once.
+                talos_logging::report_error(&enrollment_error);
+                Err(error)
+            }
+            (Err(error), None) => Err(error),
+            (Ok(()), enrollment_error) => Ok(enrollment_error),
+        }
+    }
+
+    async fn bind_document_sync(
+        &self,
+        actor: &RequestIdentity,
+        credentials: talos_sync_sdk::CredentialCallback,
+    ) -> TalosResult<()> {
         if !self.sync.enabled(&actor.user_id).await? {
             return Ok(());
         }
@@ -441,8 +469,8 @@ impl ApplicationSyncHost {
                 self.service.remove_sync_handle(&account_id);
             }
             self.sync_stores.shutdown_handles().await?;
-            self.attach_signed_in(&verified).await?;
-            return Ok(());
+            let (_, enrollment_error) = self.attach_signed_in(&verified).await?;
+            return enrollment_error.map_or(Ok(()), Err);
         }
         // Restore document transport from its durable binding before any Worker
         // registration RPC. An unavailable G must not delay an existing H handle.
@@ -460,7 +488,7 @@ impl ApplicationSyncHost {
                 .await?;
             }
         }
-        self.bind_signed_in(&verified).await
+        self.bind_signed_in(&verified).await?.map_or(Ok(()), Err)
     }
 
     async fn read_status(&self, actor: &Actor) -> TalosResult<SyncStatusResponse> {
@@ -596,7 +624,11 @@ impl ManagementSync for ApplicationSyncHost {
                     self.service.claim_local_history(&verified.user_id).await?;
                 }
                 self.sync.set_enabled(&verified.user_id, true).await?;
-                self.bind_signed_in(&verified).await?;
+                if let Some(error) = self.bind_signed_in(&verified).await? {
+                    // H enable succeeded. G's independently retained failure is
+                    // handled here and retried by the resumed account owner.
+                    talos_logging::report_error(&error);
+                }
                 self.failures
                     .write()
                     .expect("sync failures lock")
