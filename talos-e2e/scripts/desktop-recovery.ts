@@ -61,6 +61,8 @@ try {
   const api = `http://127.0.0.1:${address.port}`;
   const configPath = process.env.TALOS_CONFIG!;
   const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.timezone = "${TALOS_DESKTOP_RECOVERY_TIMEZONE}";
+  process.env.TALOS_DESKTOP_RECOVERY_TIMEZONE = "Asia/Shanghai";
   config.gateway.auth = true;
   config.cloud.api_base_url = api;
   config.sync.enabled = false;

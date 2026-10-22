@@ -30,9 +30,12 @@ IANA database and compares calendar dates. It does not implement file writing,
 archive renaming/deletion, process locks, timer tasks or a parallel log manager.
 
 The single root timezone config drives log timestamps and the calendar boundary.
-LoggingConfig has no separate timezone setting or override. Startup logging reads
-the root value before loading the complete application, and Server/Desktop/Worker
-composition passes that same root value. An invalid timezone fails explicitly.
+LoggingConfig has no separate timezone setting or override. Config owns partial
+startup settings and reuses RuntimeEnv plus the normal placeholder resolver for
+both root timezone and logging strings, including dotenv/process precedence.
+The logging crate only consumes resolved settings; Base owns its single startup
+sink initialization. Server/Desktop/Worker composition passes the same root
+timezone. An invalid resolved timezone fails explicitly.
 The existing configuration upgrader removes the obsolete logging.timezone key
 through template normalization, with the original file retained in its backup.
 No runtime process changes the system timezone or global TZ environment variable.
@@ -51,7 +54,8 @@ must use separate configured files because the library does not coordinate them.
 Formatted records pass through the established lossless NonBlocking worker and
 WorkerGuard. No additional logging thread or cleanup task is introduced. Talos
 verifies configured midnight, DST repeated hours, size rotation, retention,
-restart append, queued flush and configuration/template upgrades.
+restart append, queued flush, configuration/template upgrades and environment-backed
+root timezone startup through the existing actual Desktop recovery scenario.
 
 ## ACK persistence
 

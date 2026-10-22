@@ -19,11 +19,13 @@ talos-error = { path = "../error" }
 
 # Config
 serde = { workspace = true }
-serde_yaml = "0.9"
 
 # Timezone-aware log timestamps
 chrono = { workspace = true }
 chrono-tz = { workspace = true }
+
+[dev-dependencies]
+serde_yaml = "0.9"
 
 [lints]
 workspace = true

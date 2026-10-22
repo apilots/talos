@@ -1,6 +1,6 @@
 use talos_config::{Config, TalosPaths};
 use talos_error::TalosResult;
-use talos_logging::{LogGuard, StartupLoggingOptions};
+use talos_logging::LogGuard;
 use talos_upgrade::{BeforeConfigLoadReport, RuntimeResourcesReport};
 use tracing::info;
 
@@ -18,15 +18,20 @@ pub fn prepare_startup(options: Option<&TalosServerOptions>) -> TalosResult<LogG
     let stdout = options
         .and_then(|options| options.logging_stdout)
         .unwrap_or(true);
-    let log_guard = talos_logging::init_startup_once(StartupLoggingOptions {
-        config_file: paths.config_file.clone(),
-        log_file: paths.log_file.clone(),
-        stdout,
-    })
-    .inspect_err(|error| {
+    let startup: TalosResult<_> = (|| {
+        let (mut logging, timezone, warning) = talos_config::load_startup_logging(&paths)?;
+        logging.stdout = stdout;
+        let guard = talos_logging::init_with_config(logging, &timezone)?;
+        Ok((guard, warning))
+    })();
+    let (log_guard, warning) = startup.inspect_err(|error| {
         // No logging sink exists yet; stderr is the startup diagnostic boundary.
         eprintln!("startup logging failed: {error:#?}");
     })?;
+    if let Some(warning) = warning {
+        tracing::warn!("{warning}");
+    }
+    info!(config_file = %paths.config_file.display(), log_file = %paths.log_file.display(), "startup logging initialized");
     let report = prepare_before_config_load().inspect_err(talos_logging::report_error)?;
     info!(report = ?report, "pre-config resource preparation completed");
     Ok(log_guard)
