@@ -87,4 +87,31 @@ jobs:
 
       - name: Verify Sync SDK and client boundaries
         run: |
-          just test -p talos-sync -p talos-app-protocol -p talos-sdk
+          just test -p talos-sync -p talos-app-protocol -p talos-sdk -p talos-mcp
+
+  mcp-native-cleanup:
+    needs: change-scope
+    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
+    name: MCP native macOS cleanup
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Talos
+        uses: actions/checkout@v6
+      - name: Load shared toolchain versions
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
+      - name: Install just and scoped test runner
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-nextest
+      - name: Verify MCP exit, cancellation and process-group reclamation
+        run: just test -p talos-mcp

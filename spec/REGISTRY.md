@@ -7,7 +7,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | Type | Next ID |
 | --- | ---: |
 | `feat` | 048 |
-| `fix` | 007 |
+| `fix` | 009 |
 | `refactor` | 045 |
 | `docs` | 001 |
 
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| fix-008 | [MCP exit cleanup on Darwin](fix-008-mcp-exit-cleanup/design.md) | implemented |
 | feat-047 | [Built-in browser MCP and Docker Worker desktop](feat-047-browser-computer-desktop/design.md) | active |
 | feat-046 | [Computer registration deletion](feat-046-computer-registration-deletion/design.md) | implemented |
 | feat-045 | [Computer topology](feat-045-computer-topology/design.md) | implemented — [review and acceptance evidence](https://github.com/apilots/talos/pull/28) |
