@@ -92,9 +92,11 @@ local requests. This repair does not introduce a durable 15-day offline grant.
 Transport keepalive/reconnect remain owned by the SDK and registered Worker.
 Sync lifecycle reconciliation consumes existing handles and Auth contexts, rather
 than running another auth timer or introspection inside a credential callback.
-Initialization rejected by authentication/permissions waits for credential/account
-state changes; the five-second retry is reserved for recoverable initialization
-failures, never known rejection.
+Initialization rejected by authentication/permissions, uncertain enrollment,
+expired credentials or invalid configuration waits for credential/account changes
+or successful explicit Worker recovery. Temporary service, timeout and rate
+failures retry initialization every five seconds. The supervisor never repeats
+healthy transport checks or replaces SDK reconnect ownership.
 The Sync server's independent shared-authorization fix is owned by talos-sync;
 updating the product alone cannot change a previously released service image.
 Full selected-session History and running-Turn Live remain the existing local

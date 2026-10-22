@@ -206,13 +206,15 @@ async fn maintain_account(
             .await
         };
         let failed = result.is_err();
-        let rejected = result.as_ref().is_err_and(|error| {
+        let retryable = result.as_ref().is_err_and(|error| {
             matches!(
                 error.error_code(),
-                talos_error::ErrorCode::Unauthenticated | talos_error::ErrorCode::PermissionDenied
+                talos_error::ErrorCode::ServiceUnavailable
+                    | talos_error::ErrorCode::Timeout
+                    | talos_error::ErrorCode::UsageLimitExceeded
             )
         });
-        let retry_after_seconds = (!rejected).then_some(5_u64);
+        let retry_after_seconds = retryable.then_some(5_u64);
         let connection = match result {
             Err(error) => {
                 let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, retry_after_seconds);
@@ -240,8 +242,20 @@ async fn maintain_account(
         drop(owner);
         if failed {
             tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if !rejected => {},
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if retryable => {},
                 changed = updates.changed() => if changed.is_err() { break },
+                // Ignore our own failure publication. Only successful explicit
+                // Worker recovery clears it and can unblock terminal enrollment.
+                recovered = async {
+                    loop {
+                        failures.changed().await?;
+                        if failures.borrow_and_update().is_none() {
+                            return Ok::<_, tokio::sync::watch::error::RecvError>(());
+                        }
+                    }
+                } => {
+                    if recovered.is_err() { break }
+                },
             }
             continue;
         }

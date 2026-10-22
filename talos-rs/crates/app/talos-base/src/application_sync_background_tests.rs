@@ -4,7 +4,7 @@ use talos_config::{Config, TalosPaths};
 
 #[tokio::test]
 async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
-    use axum::{extract::State, routing::post, Json, Router};
+    use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
     use serde_json::{json, Value};
     let home = tempfile::tempdir().unwrap();
     let log_file = home.path().join("lifecycle.log");
@@ -41,10 +41,13 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     let app = Router::new().route("/v1/auth/introspect", post(
         |State(requests): State<tokio::sync::mpsc::UnboundedSender<String>>, Json(request): Json<Value>| async move {
             requests.send(request["token"].as_str().unwrap().into()).unwrap();
+            if request["token"] == "transient-credential" {
+                return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
             Json(json!({"active": request["token"] != "rejected-credential",
-                "user":{"user_id":"idle-account","email":"test@example.invalid","username":"test","role":"user","type":"free","status":"active"},
-                "capabilities":{"is_admin":false,"role":"user","scopes":[]},
-                "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null}))
+                "user":{"user_id":"idle-account","email":"test@example.invalid","username":"test","role":if request["token"] == "pending-enrollment" {"admin"} else {"user"},"type":"free","status":"active"},
+                "capabilities":{"is_admin":request["token"] == "pending-enrollment","role":if request["token"] == "pending-enrollment" {"admin"} else {"user"},"scopes":[]},
+                "entitlement":{"can_use":true,"plan":"free","reason":null},"expires_at_ms":null})).into_response()
         })).with_state(requests);
     let server = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -97,6 +100,61 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     );
     assert!(tokio::time::timeout(Duration::from_secs(6), observed.recv()).await.is_err(),
         "known authentication/permission rejection must await changed credentials or account state, without polling");
+    let store = talos_config::YamlConfigStore::new(runtime.config.source_path());
+    store.begin_node_enrollment(None).unwrap();
+    let pending = Actor::regular(&actor.user_id)
+        .with_role(talos_auth::UserRole::Admin)
+        .with_access_token("pending-enrollment");
+    runtime.service.resume_account_sync(&pending);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), observed.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "pending-enrollment"
+    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if runtime
+                .sync_host
+                .failures
+                .read()
+                .unwrap()
+                .get(&actor.user_id)
+                .is_some_and(|error| error.code == talos_error::ErrorCode::Conflict)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("uncertain enrollment must surface its recovery error");
+    // A durable recovery barrier cannot be repaired by polling the remote service.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    assert!(store.node_enrollment_pending().unwrap());
+    store.cancel_node_creation().unwrap();
+    // Recovery publishes a cleared Worker failure through the existing watch.
+    // The unavailable test Gateway proves reconciliation resumed immediately.
+    runtime.sync_host.worker_failures.send_replace(None);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if runtime
+                .sync_host
+                .failures
+                .read()
+                .unwrap()
+                .get(&actor.user_id)
+                .is_some_and(|error| error.code == talos_error::ErrorCode::ServiceUnavailable)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("explicit recovery must wake terminal initialization without polling");
+    store.cancel_node_creation().unwrap();
     runtime.service.resume_account_sync(&refreshed);
     assert!(
         tokio::time::timeout(Duration::from_millis(200), observed.recv())
@@ -104,6 +162,36 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
             .is_err(),
         "restoration and lifecycle events reuse an existing verified context"
     );
+    let transient = Actor::regular(&actor.user_id).with_access_token("transient-credential");
+    runtime.service.resume_account_sync(&transient);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), observed.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "transient-credential"
+    );
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(7), observed.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "transient-credential"
+    );
+    runtime.service.resume_account_sync(&refreshed);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime
+            .sync_host
+            .failures
+            .read()
+            .unwrap()
+            .contains_key(&actor.user_id)
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("changed credentials must resume the original supervisor promptly");
     runtime.shutdown_sync().await.unwrap();
     runtime.worker_rpc.shutdown().await.unwrap();
     runtime.resource_rpc.shutdown().await.unwrap();
@@ -118,18 +206,25 @@ async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     assert!(log.contains("Sync account initialized; waiting for lifecycle changes"));
     assert_eq!(
         log.matches("Cloud authorization refresh started").count(),
-        2
+        3
     );
     assert_eq!(
         log.matches("Cloud authorization refresh stopped").count(),
-        2
+        3
     );
     assert!(log.contains("sync_account_initialization_failed"));
+    assert_eq!(
+        log.matches("code=Conflict").count(),
+        1,
+        "uncertain enrollment must wait for recovery rather than retry every five seconds"
+    );
     assert!(log.contains("application failure"));
     assert!(
         !log.contains("initial-credential")
             && !log.contains("new-credential")
             && !log.contains("rejected-credential")
+            && !log.contains("pending-enrollment")
+            && !log.contains("transient-credential")
     );
 }
 
