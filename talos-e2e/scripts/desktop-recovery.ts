@@ -6,6 +6,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { AppProtocol, TalosApiError } from "../../talos-app/ts-sdk/packages/core/src/index";
 import { createDesktopMainAppServerBridge, type DesktopMainAppServerBridge } from "../../talos-app/ts-sdk/packages/app-server/src/desktop-main";
 import { DesktopAppServerController } from "../../talos-app/desktop/src/app-server-controller";
@@ -166,18 +167,32 @@ try {
   const beforeOffline = { introspections, accountReads };
   cloudAvailable = false;
   const started = performance.now();
-  const localReads = await Promise.all([
-    controller.invoke<AppProtocol.SessionHistoryResponse>("session/history", { sessionId: params.sessionId, limit: null, cursor: null }, options),
-    controller.invoke("session/get", { sessionId: params.sessionId }, options),
-    controller.invoke("session/list", { nodeId: null, limit: null, offset: null, projectId: null }, options),
-    controller.invoke("sync/status", null, options),
-    fetch(`${httpOrigin}/v1/sync/status`, { headers }),
-  ]);
-  assert.equal(localReads[0].data.length, 2);
-  assert(localReads[4].ok);
-  assert(performance.now() - started < 2000, "offline local Desktop/Web reads stalled");
-  const offlineLive = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", { ...params, sinceEventId: events.at(-1)!.eventId }, options);
-  await controller.invoke("event/unsubscribe", { subscriptionId: offlineLive.subscriptionId }, options);
+  const writer = new DatabaseSync(path.join(home, "data", "talos.db"));
+  writer.exec("BEGIN IMMEDIATE");
+  let readDeadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const reads = Promise.all([
+      controller.invoke<AppProtocol.SessionHistoryResponse>("session/history", { sessionId: params.sessionId, limit: null, cursor: null }, options),
+      controller.invoke("session/get", { sessionId: params.sessionId }, options),
+      controller.invoke("session/list", { nodeId: null, limit: null, offset: null, projectId: null }, options),
+      controller.invoke("sync/status", null, options),
+      fetch(`${httpOrigin}/v1/sync/status`, { headers }),
+      controller.invoke("session/active_turn", { sessionId: params.sessionId }, options),
+    ]);
+    const localReads = await Promise.race([reads, new Promise<never>((_resolve, reject) => {
+      readDeadline = setTimeout(() => reject(new Error("Local Desktop reads waited for the Sync writer.")), 2000);
+    })]);
+    assert.equal(localReads[0].data.length, 2);
+    assert(localReads[4].ok);
+    assert(performance.now() - started < 2000, "offline local Desktop/Web reads stalled");
+    const offlineLive = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", { ...params, sinceEventId: events.at(-1)!.eventId }, options);
+    await controller.invoke("event/unsubscribe", { subscriptionId: offlineLive.subscriptionId }, options);
+    console.log(`CASE desktop_sync_writer_local_reads PASS ${(performance.now() - started).toFixed(1)}ms`);
+  } finally {
+    clearTimeout(readDeadline);
+    writer.exec("ROLLBACK");
+    writer.close();
+  }
   await controller.invoke("session/delete", { sessionId: params.sessionId }, options);
   assert.deepEqual({ introspections, accountReads }, beforeOffline, "local reads/Live/deletion must not call Cloud");
   cloudAvailable = true;
