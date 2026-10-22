@@ -5,7 +5,7 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let app = Arc::new(MockApp {
-        blocked_model: Some((entered.clone(), release.clone())),
+        blocked_remote: Some((entered.clone(), release.clone())),
         ..Default::default()
     });
     let (client, server) = duplex(128 * 1024);
@@ -28,14 +28,13 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
         .unwrap();
     read_output_line(&mut output).await;
     let credentials = json!({"credential":{"type":"existing_session_token","token":"user-token"}});
-    let remote = json!({"jsonrpc":"2.0","id":10,"method":"model/list","params":{"nodeId":"remote"},"actor_credentials":credentials});
+    let remote = json!({"jsonrpc":"2.0","id":10,"method":"user/current","params":{},"actor_credentials":credentials});
     client_write
         .write_all(format!("{remote}\n").as_bytes())
         .await
         .unwrap();
     entered.notified().await;
     for (index, (method, params)) in [
-        ("user/current", json!({})),
         ("sync/status", json!(null)),
         ("session/list", json!({})),
         ("session/get", json!({"sessionId":"s1"})),
@@ -98,7 +97,7 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
     .await
     .unwrap();
     assert_eq!(result_error(&denied)["code"], "unauthenticated");
-    let expected_actors = ["user-1"; 10]
+    let expected_actors = ["user-1"; 9]
         .into_iter()
         .chain(["anonymous"; 2])
         .collect::<Vec<_>>();
@@ -188,7 +187,7 @@ async fn local_live_subscription_and_unsubscription_progress_during_remote_wait(
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let app = Arc::new(MockApp {
-        blocked_model: Some((entered.clone(), release.clone())),
+        blocked_remote: Some((entered.clone(), release.clone())),
         ..Default::default()
     });
     let (live_tx, _live_rx) = broadcast::channel(16);
@@ -318,4 +317,39 @@ async fn stdin_eof_cancels_stalled_local_requests_before_draining_the_applicatio
         "the stalled request must be cancelled"
     );
     assert_eq!(*app.drained.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn local_session_request_never_calls_remote_admission() {
+    struct HeldAdmission;
+    #[async_trait]
+    impl ActorCredentialValidator for HeldAdmission {
+        async fn validate(&self, _credentials: &ActorCredentials) -> ApplicationResult<Actor> {
+            std::future::pending().await
+        }
+        fn validate_local(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
+            ExistingTokenValidator.validate_local(credentials)
+        }
+    }
+    let app = Arc::new(MockApp::default());
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        run_with_app_validator_and_config(
+            format!(
+                "{}{}",
+                initialize_request("secret"),
+                session_read_request_with_actor_token("user-token")
+            ),
+            app.clone(),
+            Arc::new(HeldAdmission),
+            AppServerConfig {
+                auth_enabled: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .await
+    .expect("local stdio requests must not await remote admission");
+    assert_eq!(result_data(&parse_output(&output)[1])["ok"], true);
+    assert_eq!(*app.dispatched_actors.lock().unwrap(), ["user-1"]);
 }

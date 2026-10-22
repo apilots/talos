@@ -176,7 +176,11 @@ does not claim a live remote desktop connection.
 app-server processes with controlled loopback Auth/model HTTP fixtures. It checks
 actual credential enforcement, SIGTERM replacement, exact delivered/history event
 parity, unchanged Computer/Session, a subsequent controlled turn and the original
-unsubscribe handle. It needs no private source or provider credentials. Native
+unsubscribe handle. It also verifies Cloud-offline local metadata, complete History,
+status, Live subscriptions and idle deletion without additional Cloud requests.
+This gated scenario replaces the former opt-in real-model Desktop stdio restart
+test; renderer/SDK forwarding remains covered by the controller unit suite.
+It needs no private source or provider credentials. Native
 packaged Desktop plus Server/Web continuation remains a local acceptance using
 real Auth and Sync; controlled fixtures do not replace that product verification.
 The larger `19_computer_sync` topology also remains local acceptance.

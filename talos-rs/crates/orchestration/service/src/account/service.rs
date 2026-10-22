@@ -96,6 +96,7 @@ impl AccountService {
     }
 
     pub fn clear_rejected_access_token(&self, token: &str, now_ms: i64) -> TalosResult<()> {
+        self.auth_service.invalidate_access_token(token);
         self.cloud_session_cache()?
             .clear_rejected_token(token, now_ms)
     }
@@ -138,7 +139,11 @@ impl AccountService {
         &self,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        self.cloud_login()?.status(request).await
+        let status = self.cloud_login()?.status(request).await?;
+        if let CloudLoginStatusResponse::Authenticated { access_token, .. } = &status {
+            self.auth_service.verify_access_token(access_token).await?;
+        }
+        Ok(status)
     }
 
     pub async fn cancel_cloud_login(&self, request: CloudLoginCancelRequest) -> TalosResult<()> {
@@ -162,7 +167,12 @@ impl AccountService {
     }
 
     pub fn clear_auth_session(&self, _request: AuthSessionClearRequest) -> TalosResult<()> {
-        self.cloud_session_cache()?.clear()
+        let cache = self.cloud_session_cache()?;
+        if let Some(entry) = cache.read_candidate(CloudSessionCache::now_ms())? {
+            self.auth_service
+                .invalidate_access_token(&entry.access_token);
+        }
+        cache.clear()
     }
 
     fn cloud_login(&self) -> TalosResult<Arc<CloudLoginService>> {

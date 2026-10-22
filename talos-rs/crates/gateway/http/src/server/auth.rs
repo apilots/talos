@@ -55,7 +55,14 @@ pub(super) async fn auth_middleware(
         }
     };
 
-    let auth_result = match state.auth_service.verify_access_token(&token).await {
+    // Account restoration is an explicit authentication operation. Data APIs
+    // consume local context and cannot silently wait on Cloud.
+    let result = if path == "/v1/user" {
+        state.auth_service.verify_access_token(&token).await
+    } else {
+        state.auth_service.local_identity(&token)
+    };
+    let auth_result = match result {
         Ok(identity) => identity,
         Err(error) => {
             return Ok(ApiError::from_talos_error(error).into_response());

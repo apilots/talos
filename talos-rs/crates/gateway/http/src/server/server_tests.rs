@@ -555,6 +555,10 @@ impl AuthService for FakeAuthService {
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+        self.local_identity(token)
+    }
+
+    fn local_identity(&self, token: &str) -> TalosResult<RequestIdentity> {
         if token == "reject" {
             return Err(TalosError::new(
                 talos_error::ErrorCode::Unauthenticated,

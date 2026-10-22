@@ -87,7 +87,6 @@ impl LocalRequests {
                 | ClientMethod::EventUnsubscribe
                 | ClientMethod::DesktopWorkerIdentity
                 | ClientMethod::AuthSessionRead
-                | ClientMethod::UserCurrent
                 | ClientMethod::SessionList
                 | ClientMethod::SessionGet
                 | ClientMethod::SessionHistory

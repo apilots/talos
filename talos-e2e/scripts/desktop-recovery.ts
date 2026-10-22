@@ -14,6 +14,8 @@ const home = process.env.TALOS_HOME!;
 const user = { user_id: "recovery-owner", username: "recovery", email: "recovery@example.invalid", role: "user", type: "free", disabled: false, created_at: 1, updated_at: 1 };
 const token = randomUUID();
 let introspections = 0;
+let cloudAvailable = true;
+let accountReads = 0;
 let completions = 0;
 const events: AppProtocol.TimelineEvent[] = [];
 const auth = createServer(async (request, response) => {
@@ -34,6 +36,8 @@ const auth = createServer(async (request, response) => {
     return;
   }
   if (request.url === "/v1/me") {
+    accountReads += 1;
+    if (!cloudAvailable) { response.writeHead(503).end(); return; }
     if (request.headers.authorization !== `Bearer ${token}`) { response.writeHead(401).end(); return; }
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ...user, status: "active", email_verified: true, set_password_required: false, created_at_ms: 1, updated_at_ms: 1 }));
@@ -41,6 +45,7 @@ const auth = createServer(async (request, response) => {
   }
   if (request.url !== "/v1/auth/introspect") { response.writeHead(404).end(); return; }
   introspections += 1;
+  if (!cloudAvailable) { response.writeHead(503).end(); return; }
   response.setHeader("content-type", "application/json");
   response.end(JSON.stringify({ active: JSON.parse(body).token === token,
     user: { ...user, status: "active" }, capabilities: { is_admin: false, role: "user", scopes: ["sessions:read", "sessions:write"] },
@@ -110,6 +115,7 @@ try {
   controllerToClose = controller;
   await controller.connect();
   const options = { actorCredentials: { credential: { type: "existing_session_token" as const, token } } };
+  await controller.invoke("user/current", {}, options);
   const params = { sessionId: randomUUID(), turnId: null, sinceEventId: null, replayLimit: 50, closeWhenIdle: false, closeOnTerminal: false };
   // Status is a local snapshot. Execution starts after background enrollment
   // establishes this account's Computer ownership, independently of polling.
@@ -152,6 +158,30 @@ try {
   assert.equal(removed.unsubscribed, true);
   assert.notEqual(removed.subscriptionId, subscribed.subscriptionId);
   assert.deepEqual(requests.filter((request) => request.method === "event/subscribe").map((request) => request.authorized), [false, true, true]);
+  // Both gateways retain authorization locally. Cloud failure must not add
+  // introspection, delay metadata/History/status, or prevent local idle deletion.
+  const httpOrigin = `http://127.0.0.1:${httpPort}`;
+  const headers = { Authorization: `Bearer ${token}` };
+  assert((await fetch(`${httpOrigin}/v1/user`, { headers })).ok);
+  const beforeOffline = { introspections, accountReads };
+  cloudAvailable = false;
+  const started = performance.now();
+  const localReads = await Promise.all([
+    controller.invoke<AppProtocol.SessionHistoryResponse>("session/history", { sessionId: params.sessionId, limit: null, cursor: null }, options),
+    controller.invoke("session/get", { sessionId: params.sessionId }, options),
+    controller.invoke("session/list", { nodeId: null, limit: null, offset: null, projectId: null }, options),
+    controller.invoke("sync/status", null, options),
+    fetch(`${httpOrigin}/v1/sync/status`, { headers }),
+  ]);
+  assert.equal(localReads[0].data.length, 2);
+  assert(localReads[4].ok);
+  assert(performance.now() - started < 2000, "offline local Desktop/Web reads stalled");
+  const offlineLive = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", { ...params, sinceEventId: events.at(-1)!.eventId }, options);
+  await controller.invoke("event/unsubscribe", { subscriptionId: offlineLive.subscriptionId }, options);
+  await controller.invoke("session/delete", { sessionId: params.sessionId }, options);
+  assert.deepEqual({ introspections, accountReads }, beforeOffline, "local reads/Live/deletion must not call Cloud");
+  cloudAvailable = true;
+  console.log(`CASE desktop_cloud_offline_local_reads_and_idle_delete PASS ${(performance.now() - started).toFixed(1)}ms`);
   assert(introspections > 0);
   console.log("CASE desktop_authenticated_backend_restart PASS");
 } finally {

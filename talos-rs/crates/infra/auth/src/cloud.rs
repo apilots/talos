@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use talos_cloud_sdk::talos_cloud_types::{
     AuthResponseDto, CurrentUserDto, DeviceClientKindDto, DeviceLoginCancelRequestDto,
     DeviceLoginPollRequestDto, DeviceLoginPollResponseDto, DeviceLoginStartRequestDto,
-    IntrospectionRequestDto, IntrospectionResponseDto, LogoutResponseDto, UserRoleDto,
-    UserStatusDto, UserTypeDto,
+    IntrospectionResponseDto, LogoutResponseDto, UserRoleDto, UserStatusDto, UserTypeDto,
 };
 use talos_cloud_sdk::{CloudSdkError, TalosCloudClient};
 use talos_error::{TalosError, TalosResult};
@@ -19,15 +18,17 @@ use crate::{
     RequestIdentity, UserDto, UserRole, UserService, UserType,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CloudAuthService {
     client: TalosCloudClient,
+    contexts: std::sync::Arc<crate::context::AuthContexts>,
 }
 
 impl CloudAuthService {
     pub fn new(api_base_url: impl Into<String>) -> Self {
         Self {
             client: TalosCloudClient::new(api_base_url),
+            contexts: Default::default(),
         }
     }
 
@@ -194,7 +195,7 @@ impl CloudLoginService {
                     .remove(&request.login_id);
                 let auth_response = map_auth_response(auth);
                 let user = auth_response.user.clone();
-                if should_store_cloud_session(pending.persistence) {
+                if pending.persistence == CloudLoginPersistence::LocalCache {
                     let entry = CloudSessionCacheEntry::from_auth_response(
                         self.cloud_api_base_url.clone(),
                         &auth_response,
@@ -285,16 +286,25 @@ fn cleanup_expired_pending_locked(pending: &mut HashMap<String, PendingCloudLogi
     pending.retain(|_, login| login.expires_at_ms > now_ms);
 }
 
-fn should_store_cloud_session(persistence: CloudLoginPersistence) -> bool {
-    matches!(persistence, CloudLoginPersistence::LocalCache)
-}
-
 #[async_trait]
 impl AuthService for CloudAuthService {
+    async fn shutdown(&self) {
+        self.contexts.shutdown().await;
+    }
+
+    fn local_identity(&self, token: &str) -> TalosResult<RequestIdentity> {
+        self.contexts.identity(token)
+    }
+
+    fn invalidate_access_token(&self, token: &str) {
+        self.contexts.invalidate(token);
+    }
+
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()> {
         let Some(token) = bearer_from_actor(actor) else {
             return Ok(());
         };
+        self.invalidate_access_token(&token);
         let response = self
             .with_token(&token)
             .logout()
@@ -304,14 +314,7 @@ impl AuthService for CloudAuthService {
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
-        let response = self
-            .client
-            .introspect(IntrospectionRequestDto {
-                token: token.to_string(),
-            })
-            .await
-            .map_err(map_cloud_error)?;
-        map_identity(response, token)
+        self.contexts.verify(&self.client, token).await
     }
 }
 
@@ -345,11 +348,15 @@ fn bearer_from_actor(actor: &RequestIdentity) -> Option<String> {
     actor.access_token.clone()
 }
 
-fn map_identity(
+pub(crate) fn map_identity(
     response: IntrospectionResponseDto,
     raw_token: &str,
 ) -> TalosResult<RequestIdentity> {
-    if !response.active {
+    if !response.active
+        || response
+            .expires_at_ms
+            .is_some_and(|expiry| expiry <= CloudSessionCache::now_ms())
+    {
         return Err(TalosError::new(
             talos_error::ErrorCode::Unauthenticated,
             "cloud token is inactive".to_string(),
@@ -438,7 +445,7 @@ fn expect_success(response: LogoutResponseDto) -> TalosResult<()> {
     }
 }
 
-fn map_cloud_error(error: CloudSdkError) -> TalosError {
+pub(crate) fn map_cloud_error(error: CloudSdkError) -> TalosError {
     match error {
         CloudSdkError::Transport(err) => TalosError::from_source(
             talos_error::ErrorCode::ServiceUnavailable,

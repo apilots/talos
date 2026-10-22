@@ -83,11 +83,3 @@ fn lookup_pending_cleans_other_expired_logins() {
     assert!(pending.contains_key("active"));
     assert!(!pending.contains_key("expired"));
 }
-
-#[test]
-fn local_persistence_stores_cloud_session_cache() {
-    assert!(!should_store_cloud_session(CloudLoginPersistence::None));
-    assert!(should_store_cloud_session(
-        CloudLoginPersistence::LocalCache
-    ));
-}

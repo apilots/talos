@@ -54,3 +54,39 @@ Workspace正文在Worker；旧附件只经源FileService读取/改删，源离�
 [接入接口](contracts.md)、[管理DB与流程](flows-and-storage.md)、[统一Worker RPC](worker-coordination.md)、[跨控制面/NAT/回调](rpc-routing.md)、[持久数据覆盖](persistence-inventory.md)。
 
 真实联合验收由Talos的19_computer_sync八个场景负责：多节点/OS注册、同Computer续跑、首次关闭/重启/账号隔离、无云本机、资源交互、云故障、NAT及owner配置。独立Sync测试只证明协议/存储，不冒充产品E2E。实际范围为arm64 Mac与Linux Docker；不发布生产。
+
+
+## Local authorization and remote revalidation
+
+The existing CloudAuthService owns verified in-memory authorization contexts and
+one refresh task per credential, using its existing pooled Cloud SDK client.
+AuthService.local_identity is synchronous, side-effect free, and has no network
+fallback. Desktop ordinary methods, HTTP data APIs and the Sync SDK credential
+callback consume this capability. Desktop retains the verified subscription owner
+per credential/backend and shares in-flight account restoration; session changes
+reuse it, while backend replacement explicitly restores Auth before replay.
+Account restoration (`user/current`, HTTP
+`/v1/user`), successful device login and cached-login startup explicitly admit the
+credential. Unknown credentials fail immediately. Account ownership checks still
+belong to the business Service.
+
+Auth refresh runs every 60 seconds with stable +/-10% credential jitter, with a
+5-second remote timeout. A verified context lasts at most 120 seconds and never
+past token expiry. Known rejection invalidates it immediately; transient errors
+never extend its deadline. Logout/cache removal invalidates the current generation
+before remote completion. Shutdown cancels and joins all Auth tasks through its
+owned tracker; last-owner drop cancels maintenance.
+Persisted cloud-session JSON remains only a login candidate and cannot authorize
+local requests. This repair does not introduce a durable 15-day offline grant.
+
+Transport keepalive/reconnect remain owned by the SDK and registered Worker.
+Sync lifecycle reconciliation consumes existing handles and Auth contexts, rather
+than running another auth timer or introspection inside a credential callback.
+Initialization rejected by authentication/permissions waits for credential/account
+state changes; the five-second retry is reserved for recoverable initialization
+failures, never known rejection.
+The Sync server's independent shared-authorization fix is owned by talos-sync;
+updating the product alone cannot change a previously released service image.
+Full selected-session History and running-Turn Live remain the existing local
+Store/subscription model. Deletion retains known-active and bounded unconfirmed
+remote-execution guards.

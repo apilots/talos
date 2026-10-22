@@ -38,29 +38,14 @@ impl ApplicationSyncHost {
         *token.write().expect("management token lock") =
             actor.access_token.clone().expect("verified token");
         let account_id = actor.user_id.clone();
-        let account = self.service.account.clone();
         let auth = self.auth_service.clone();
         Arc::new(move || {
             let account_id = account_id.clone();
             let token = token.clone();
-            let account = account.clone();
             let auth = auth.clone();
             Box::pin(async move {
-                let candidate = account
-                    .read_auth_session(&Actor::regular(&account_id), Default::default())
-                    .map_err(|error| {
-                        talos_logging::report_error(&error);
-                        talos_sync_types::SyncError::new(
-                            talos_sync_types::SyncErrorCode::InternalError,
-                        )
-                    })?
-                    .session
-                    .filter(|session| session.user.user_id == account_id);
-                let token = candidate.map_or_else(
-                    || token.read().expect("management token lock").clone(),
-                    |session| session.access_token,
-                );
-                let verified = auth.verify_access_token(&token).await.map_err(|error| {
+                let token = token.read().expect("management token lock").clone();
+                let verified = auth.local_identity(&token).map_err(|error| {
                     talos_logging::report_error(&error);
                     let code = match error.error_code() {
                         ErrorCode::Unauthenticated => {

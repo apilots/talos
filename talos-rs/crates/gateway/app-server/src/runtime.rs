@@ -610,7 +610,11 @@ async fn resolve_request_actor(
 
     let credentials =
         request_actor_credentials.ok_or_else(|| ApiError::new(ErrorCode::Unauthenticated))?;
-    validator.validate(&credentials).await
+    if method == ClientMethod::UserCurrent {
+        validator.validate(&credentials).await
+    } else {
+        validator.validate_local(&credentials)
+    }
 }
 
 async fn forward_subscription(

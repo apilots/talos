@@ -236,6 +236,12 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
             .unwrap();
         assert_eq!(own_models["status"], "success");
         for token in [TOKEN, OTHER_ADMIN_TOKEN] {
+            // Restore identity explicitly before exercising local data authorization.
+            sync_host
+                .auth_service
+                .verify_access_token(token)
+                .await
+                .unwrap();
             let status: Value = client
                 .get(format!("{url}/v1/sync/status"))
                 .bearer_auth(token)

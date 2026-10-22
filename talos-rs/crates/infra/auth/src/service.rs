@@ -5,7 +5,22 @@ use crate::{RequestIdentity, UserDto, UserType};
 
 #[async_trait]
 pub trait AuthService: Send + Sync {
+    /// Cancel and join Auth-owned maintenance during application shutdown.
+    async fn shutdown(&self) {}
+
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()>;
+    /// Read an already verified context without network fallback or side effects.
+    fn local_identity(&self, _token: &str) -> TalosResult<RequestIdentity> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::Unauthenticated,
+            "No verified local authentication context.",
+        ))
+    }
+
+    /// Invalidate before logout/cache removal; pending verification cannot restore it.
+    fn invalidate_access_token(&self, _token: &str) {}
+
+    /// Explicit account admission; reuses an existing context or verifies remotely.
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity>;
 }
 

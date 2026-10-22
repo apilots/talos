@@ -56,6 +56,8 @@ export class DesktopAppServerController {
   private reconnecting?: Promise<void>;
   private closed = false;
   private subscriptionEpoch = 0;
+  private subscriptionAccount?: { token: string; userId: string };
+  private subscriptionAccountRequest?: { token: string; response: Promise<string> };
   private readonly subscriptions = new Map<string, SubscriptionReplayState>();
   private readonly sessionsBySubscriptionId = new Map<string, string>();
 
@@ -95,7 +97,7 @@ export class DesktopAppServerController {
     // Sign-out waits only for the handshake, never for an in-flight replay.
     if (clearingAuth) await bridge.connect();
     const userId = method === "event/subscribe" && this.initializeResponse?.server_info.auth_enabled
-      ? (await bridge.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, options)).user.user_id
+      ? await this.readSubscriptionAccount(bridge, options)
       : null;
 
     const effectiveParams = method === "event/unsubscribe"
@@ -116,6 +118,10 @@ export class DesktopAppServerController {
       throw error;
     }
     const current = !this.closed && this.bridge === bridge && epoch === this.subscriptionEpoch;
+    if (method === "user/current" && current) {
+      const token = options?.actorCredentials?.credential.token;
+      if (token) this.subscriptionAccount = { token, userId: (result as AppProtocol.UserCurrentResponse).user.user_id };
+    }
     if (clearingAuth && current) this.clearSubscriptions();
     if (method === "auth/login/status" && current) {
       const login = result as AppProtocol.CloudLoginStatusResponse;
@@ -236,6 +242,8 @@ export class DesktopAppServerController {
   private handleExit(status: { code: number | null; signal: NodeJS.Signals | null }): void {
     this.bridge = undefined;
     this.initializeResponse = undefined;
+    this.subscriptionAccount = undefined;
+    this.subscriptionAccountRequest = undefined;
     if (this.closed) {
       return;
     }
@@ -267,17 +275,24 @@ export class DesktopAppServerController {
   }
 
   private async replaySubscriptions(bridge: AppServerBridge): Promise<void> {
+    const epoch = this.subscriptionEpoch;
     const subscriptions = [...this.subscriptions.values()];
     if (!subscriptions.length) return;
     const session = this.initializeResponse?.server_info.auth_enabled
       ? (await bridge.invoke<AppProtocol.AuthSessionReadResponse>("auth/session/read", {})).session
       : null;
+    if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
+    if (subscriptions.some((subscription) => subscription.userId !== (session?.user.user_id ?? null))) {
+      throw new TalosApiError({ code: AppProtocol.ErrorCode.Unauthenticated, message: "Sign in with the subscription's account to reconnect.", localization: null });
+    }
+    if (session) {
+      const userId = await this.readSubscriptionAccount(bridge, { actorCredentials: { credential: { type: "existing_session_token", token: session.access_token } } });
+      if (this.closed || this.bridge !== bridge || this.subscriptionEpoch !== epoch) return;
+      if (userId !== session.user.user_id) throw new TalosApiError({ code: AppProtocol.ErrorCode.Unauthenticated, message: "Sign in with the subscription's account to reconnect.", localization: null });
+    }
     for (const subscription of subscriptions) {
       if (subscription.subscriptionId === null) continue;
       if (this.closed || this.bridge !== bridge || this.subscriptions.get(subscription.sessionId) !== subscription) return;
-      if (subscription.userId !== (session?.user.user_id ?? null)) {
-        throw new TalosApiError({ code: AppProtocol.ErrorCode.Unauthenticated, message: "Sign in with the subscription's account to reconnect.", localization: null });
-      }
       const response = await bridge.invoke<AppProtocol.SubscribeTimelineResponse>(
         "event/subscribe",
         {
@@ -295,6 +310,27 @@ export class DesktopAppServerController {
       subscription.subscriptionId = response.subscriptionId;
       this.sessionsBySubscriptionId.set(response.subscriptionId, subscription.sessionId);
     }
+  }
+
+  private async readSubscriptionAccount(
+    bridge: AppServerBridge,
+    options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
+  ): Promise<string> {
+    const token = options?.actorCredentials?.credential.token;
+    if (token && this.subscriptionAccount?.token === token) return this.subscriptionAccount.userId;
+    if (token && this.subscriptionAccountRequest?.token === token) return this.subscriptionAccountRequest.response;
+    const epoch = this.subscriptionEpoch;
+    const response = (async () => {
+      const result = await bridge.invoke<AppProtocol.UserCurrentResponse>("user/current", {}, options);
+      if (token && !this.closed && this.bridge === bridge && this.subscriptionEpoch === epoch) {
+        this.subscriptionAccount = { token, userId: result.user.user_id };
+      }
+      return result.user.user_id;
+    })();
+    const pending = token ? { token, response } : undefined;
+    this.subscriptionAccountRequest = pending;
+    try { return await response; }
+    finally { if (this.subscriptionAccountRequest === pending) this.subscriptionAccountRequest = undefined; }
   }
 
   private beginSubscription(
@@ -329,6 +365,8 @@ export class DesktopAppServerController {
   }
 
   private clearSubscriptions(): void {
+    this.subscriptionAccount = undefined;
+    this.subscriptionAccountRequest = undefined;
     this.subscriptionEpoch += 1;
     const subscriptions = [...this.subscriptions.values()];
     this.subscriptions.clear();

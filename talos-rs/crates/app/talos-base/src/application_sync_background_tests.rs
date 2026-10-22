@@ -3,7 +3,7 @@ use std::{path::Path, time::Duration};
 use talos_config::{Config, TalosPaths};
 
 #[tokio::test]
-async fn healthy_account_waits_for_events_without_auth_polling() {
+async fn account_maintenance_reuses_auth_context_and_records_owned_lifetime() {
     use axum::{extract::State, routing::post, Json, Router};
     use serde_json::{json, Value};
     let home = tempfile::tempdir().unwrap();
@@ -68,8 +68,12 @@ async fn healthy_account_waits_for_events_without_auth_polling() {
         runtime.service.resume_account_sync(&actor);
         runtime.service.sync_status(&actor).await.unwrap();
     }
-    assert!(tokio::time::timeout(Duration::from_secs(6), observed.recv()).await.is_err(),
-        "healthy idle accounts and repeated status/restoration calls must not introspect every five seconds");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), observed.recv())
+            .await
+            .is_err(),
+        "repeated status/restoration calls must reuse Auth's verified context"
+    );
     let refreshed = Actor::regular(&actor.user_id).with_access_token("new-credential");
     runtime.service.resume_account_sync(&refreshed);
     assert_eq!(
@@ -79,53 +83,47 @@ async fn healthy_account_waits_for_events_without_auth_polling() {
             .unwrap(),
         "new-credential"
     );
-    // A durable Computer event still reconciles the account after idle waiting.
+    // Lifecycle events reuse Auth's verified context instead of revalidating Cloud.
     runtime.sync_host.notify_refresh(&actor.user_id);
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(2), observed.recv())
-            .await
-            .unwrap()
-            .unwrap(),
-        "new-credential"
-    );
-    let rejected = Actor::regular(&actor.user_id).with_access_token("rejected-credential");
     runtime.sync_host.worker_failures.send_replace(None);
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(2), observed.recv())
-            .await
-            .unwrap()
-            .unwrap(),
-        "new-credential"
-    );
+    let rejected = Actor::regular(&actor.user_id).with_access_token("rejected-credential");
     runtime.service.resume_account_sync(&rejected);
-    for _ in 0..2 {
-        assert_eq!(
-            tokio::time::timeout(Duration::from_secs(7), observed.recv())
-                .await
-                .unwrap()
-                .unwrap(),
-            "rejected-credential"
-        );
-    }
-    runtime.service.resume_account_sync(&refreshed);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), observed.recv())
             .await
             .unwrap()
             .unwrap(),
-        "new-credential"
+        "rejected-credential"
+    );
+    assert!(tokio::time::timeout(Duration::from_secs(6), observed.recv()).await.is_err(),
+        "known authentication/permission rejection must await changed credentials or account state, without polling");
+    runtime.service.resume_account_sync(&refreshed);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), observed.recv())
+            .await
+            .is_err(),
+        "restoration and lifecycle events reuse an existing verified context"
     );
     runtime.shutdown_sync().await.unwrap();
     runtime.worker_rpc.shutdown().await.unwrap();
     runtime.resource_rpc.shutdown().await.unwrap();
     runtime.automation.shutdown().await.unwrap();
     runtime.worker.shutdown().await.unwrap();
+    runtime.auth_service.shutdown().await;
     server.abort();
     drop(logging);
     let log = std::fs::read_to_string(log_file).unwrap();
     assert_eq!(log.matches("Sync account maintenance started").count(), 1);
     assert_eq!(log.matches("Sync account maintenance stopped").count(), 1);
     assert!(log.contains("Sync account initialized; waiting for lifecycle changes"));
+    assert_eq!(
+        log.matches("Cloud authorization refresh started").count(),
+        2
+    );
+    assert_eq!(
+        log.matches("Cloud authorization refresh stopped").count(),
+        2
+    );
     assert!(log.contains("sync_account_initialization_failed"));
     assert!(log.contains("application failure"));
     assert!(

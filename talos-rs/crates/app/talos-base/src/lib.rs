@@ -69,6 +69,7 @@ pub struct TalosServerOptions {
 }
 
 pub struct TalosServerRuntime {
+    auth_service: Arc<dyn AuthService>,
     sync_host: Arc<application_sync::ApplicationSyncHost>,
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
@@ -457,6 +458,7 @@ impl TalosServerRuntime {
 
     pub async fn run(self) -> TalosResult<()> {
         let TalosServerRuntime {
+            auth_service,
             sync_host,
             http_server,
             channel_server,
@@ -535,6 +537,7 @@ impl TalosServerRuntime {
         let result = application_automation::combine(result, sync_host.shutdown().await);
         let result = application_automation::combine(result, shutdown_result);
         let result = application_automation::combine(result, worker_rpc.shutdown().await);
+        auth_service.shutdown().await;
         application_automation::combine(result, resource_rpc.shutdown().await)
     }
 }
@@ -628,6 +631,7 @@ async fn start_server_after_startup(
     };
 
     Ok(TalosServerRuntime {
+        auth_service: runtime.auth_service,
         sync_host: runtime.sync_host,
         coordinator: runtime.coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
@@ -733,6 +737,7 @@ async fn run_json_rpc_stdio_after_startup(
     let result = application_automation::combine(result, runtime.worker.browser().shutdown().await);
     let result = application_automation::combine(result, worker_rpc.shutdown().await);
     let result = application_automation::combine(result, runtime.shutdown_sync().await);
+    runtime.auth_service.shutdown().await;
     application_automation::combine(result, runtime.resource_rpc.shutdown().await)
 }
 

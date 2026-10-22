@@ -9,6 +9,8 @@ use crate::application::ApplicationResult;
 
 #[async_trait]
 pub trait ActorCredentialValidator: Send + Sync {
+    fn validate_local(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor>;
+
     async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor>;
 }
 
@@ -43,17 +45,31 @@ impl AuthServiceCredentialValidator {
 
 #[async_trait]
 impl ActorCredentialValidator for AuthServiceCredentialValidator {
+    fn validate_local(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
+        let ActorCredential::ExistingSessionToken { token } = &credentials.credential;
+        self.auth_service
+            .local_identity(token)
+            .map(|identity| actor_from_identity(&identity))
+            .map_err(|error| error.to_api_error())
+    }
+
     async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
         match &credentials.credential {
             ActorCredential::ExistingSessionToken { token } => {
                 let identity = match self.auth_service.verify_access_token(token).await {
                     Ok(identity) => identity,
                     Err(error) => {
-                        if let Err(cleanup_error) = self
-                            .account
-                            .clear_rejected_access_token(token, CloudSessionCache::now_ms())
-                        {
-                            talos_logging::report_error(&cleanup_error);
+                        if matches!(
+                            error.error_code(),
+                            talos_error::ErrorCode::Unauthenticated
+                                | talos_error::ErrorCode::PermissionDenied
+                        ) {
+                            if let Err(cleanup_error) = self
+                                .account
+                                .clear_rejected_access_token(token, CloudSessionCache::now_ms())
+                            {
+                                talos_logging::report_error(&cleanup_error);
+                            }
                         }
                         talos_logging::report_error(&error);
                         return Err(error.to_api_error());

@@ -206,9 +206,16 @@ async fn maintain_account(
             .await
         };
         let failed = result.is_err();
+        let rejected = result.as_ref().is_err_and(|error| {
+            matches!(
+                error.error_code(),
+                talos_error::ErrorCode::Unauthenticated | talos_error::ErrorCode::PermissionDenied
+            )
+        });
+        let retry_after_seconds = (!rejected).then_some(5_u64);
         let connection = match result {
             Err(error) => {
-                let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, retry_after_seconds = 5);
+                let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, retry_after_seconds);
                 let _entered = span.enter();
                 talos_logging::report_error(&error);
                 owner
@@ -233,7 +240,7 @@ async fn maintain_account(
         drop(owner);
         if failed {
             tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {},
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if !rejected => {},
                 changed = updates.changed() => if changed.is_err() { break },
             }
             continue;
