@@ -19,7 +19,7 @@ fn codec_noise_is_precise_and_explicitly_enableable() {
         config
             .target_levels
             .insert("talos::diagnostic".into(), LogLevel::Off);
-        let (dispatch, guard) = build_dispatch(&config).unwrap();
+        let (dispatch, guard) = build_dispatch(&config, "UTC").unwrap();
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::info!(target: "loro_internal::oplog::change_store::block_encode", "codec-info");
             tracing::warn!(target: "loro_internal::oplog::change_store::block_encode", "codec-warning");
@@ -31,7 +31,7 @@ fn codec_noise_is_precise_and_explicitly_enableable() {
         });
         drop(dispatch);
         drop(guard);
-        let text = fs::read_to_string(daily_path(&path)).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
         assert_eq!(text.contains("codec-info"), name == "diagnostic");
         for expected in [
             "codec-warning",
@@ -48,11 +48,14 @@ fn codec_noise_is_precise_and_explicitly_enableable() {
 #[test]
 fn rotation_limits_and_maintained_templates_use_the_same_config() {
     let config = LoggingConfig {
-        rotation: Some(LogRotation { max_files: 0 }),
+        rotation: Some(LogRotation {
+            max_files: 0,
+            ..Default::default()
+        }),
         ..Default::default()
     };
     assert_eq!(
-        build_dispatch(&config).unwrap_err().error_code(),
+        build_dispatch(&config, "UTC").unwrap_err().error_code(),
         talos_error::ErrorCode::InvalidRequest
     );
     for filename in ["talos.yaml", "talos-dev.yaml", "talos-prod.yaml"] {
@@ -93,7 +96,7 @@ fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
             std::io::Error::other("storage unavailable"),
         ),
     ];
-    let (dispatch, guard) = build_dispatch(&config).unwrap();
+    let (dispatch, guard) = build_dispatch(&config, "UTC").unwrap();
     tracing::dispatcher::with_default(&dispatch, || {
         for error in &errors {
             report_error(error);
@@ -101,7 +104,7 @@ fn business_and_internal_reports_survive_verbosity_filter_and_flush() {
     });
     drop(dispatch);
     drop(guard);
-    let content = fs::read_to_string(daily_path(&log_path)).unwrap();
+    let content = fs::read_to_string(&log_path).unwrap();
     assert_eq!(content.matches("application failure").count(), 2);
     for expected in [
         "Business",
@@ -225,13 +228,14 @@ fn startup_logging_config_uses_raw_logging_node_with_stable_file() {
     )
     .expect("config should be written");
 
-    let (config, warning) = startup_logging_config(&StartupLoggingOptions {
+    let (config, timezone, warning) = startup_logging_config(&StartupLoggingOptions {
         config_file: config_path,
         log_file: log_path.clone(),
         stdout: false,
     });
 
     assert_eq!(warning, None);
+    assert_eq!(timezone, "UTC");
     assert_eq!(config.level, "debug");
     assert_eq!(config.format, "json");
     assert_eq!(config.file, Some(log_path.to_string_lossy().to_string()));
@@ -249,12 +253,13 @@ fn startup_logging_config_falls_back_when_yaml_is_malformed() {
         .expect("config parent should be created");
     fs::write(&config_path, "logging: [").expect("config should be written");
 
-    let (config, warning) = startup_logging_config(&StartupLoggingOptions {
+    let (config, timezone, warning) = startup_logging_config(&StartupLoggingOptions {
         config_file: config_path,
         log_file: log_path.clone(),
         stdout: false,
     });
 
+    assert_eq!(timezone, "UTC");
     assert!(warning
         .expect("malformed yaml should produce warning")
         .contains("failed to parse logging config yaml"));
@@ -273,7 +278,7 @@ fn test_build_dispatch_rejects_empty_outputs() {
         ..Default::default()
     };
 
-    let err = build_dispatch(&config).expect_err("empty logging outputs should fail");
+    let err = build_dispatch(&config, "UTC").expect_err("empty logging outputs should fail");
     let message = err.to_string();
     assert!(message.contains("at least one output"));
 }
@@ -289,7 +294,8 @@ fn test_build_dispatch_writes_text_logs_to_file() {
         ..Default::default()
     };
 
-    let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
+    let (dispatch, guard) =
+        build_dispatch(&config, "Asia/Shanghai").expect("dispatch should build");
     tracing::dispatcher::with_default(&dispatch, || {
         tracing::info!("file sink is active");
         let span = tracing::trace_span!(target: "rmcp::transport::auth", "grant");
@@ -300,8 +306,15 @@ fn test_build_dispatch_writes_text_logs_to_file() {
     drop(dispatch);
     drop(guard);
 
-    let content = fs::read_to_string(daily_path(&log_path)).expect("daily log file should exist");
+    let content = fs::read_to_string(&log_path).expect("daily log file should exist");
     assert!(content.contains("file sink is active"));
+    let timestamp = content
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse::<chrono::DateTime<chrono::FixedOffset>>()
+        .unwrap();
+    assert_eq!(timestamp.offset().local_minus_utc(), 8 * 3600);
     assert!(!content.contains("private-"));
 }
 
@@ -316,14 +329,14 @@ fn test_build_dispatch_writes_json_logs_to_file() {
         ..Default::default()
     };
 
-    let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
+    let (dispatch, guard) = build_dispatch(&config, "UTC").expect("dispatch should build");
     tracing::dispatcher::with_default(&dispatch, || {
         tracing::info!(target: "talos::test", "json sink is active");
     });
     drop(dispatch);
     drop(guard);
 
-    let content = fs::read_to_string(daily_path(&log_path)).expect("daily log file should exist");
+    let content = fs::read_to_string(&log_path).expect("daily log file should exist");
     assert!(content.starts_with('{'));
     assert!(content.contains("\"fields\":{\"message\":\"json sink is active\"}"));
 }
@@ -341,66 +354,59 @@ fn test_build_dispatch_creates_parent_directory_for_file_logs() {
     };
 
     assert!(!parent.exists(), "test precondition failed");
-    let (_dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
+    let (_dispatch, guard) = build_dispatch(&config, "UTC").expect("dispatch should build");
     drop(guard);
 
     assert!(parent.exists(), "log parent directory should be created");
 }
 
-fn daily_path(path: &Path) -> PathBuf {
-    path.with_file_name(format!(
-        "{}.daily.{}",
-        path.file_name().unwrap().to_str().unwrap(),
-        chrono::Utc::now().format("%Y-%m-%d")
-    ))
+#[test]
+fn startup_logging_uses_only_the_root_timezone() {
+    let log_path = temp_log_path("timezone/talos.log");
+    let config_path = log_path.parent().unwrap().join("talos.yaml");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    for node in [
+        "logging: { timezone: America/New_York }",
+        "logging: { level: debug }",
+        "",
+    ] {
+        fs::write(&config_path, format!("timezone: Asia/Shanghai\n{node}\n")).unwrap();
+        let (_, timezone, warning) = startup_logging_config(&StartupLoggingOptions {
+            config_file: config_path.clone(),
+            log_file: log_path.clone(),
+            stdout: false,
+        });
+        assert!(warning.is_none());
+        assert_eq!(timezone, "Asia/Shanghai");
+    }
+    fs::remove_dir_all(log_path.parent().unwrap()).unwrap();
 }
 
 #[test]
-fn framework_daily_retention_restart_and_shutdown_flush_preserve_legacy_logs() {
-    use std::io::Write;
-    let path = temp_log_path("talos.log");
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(&path, "legacy log must stay untouched").unwrap();
-    for date in ["2000-01-01", "2000-01-02", "2000-01-03", "2000-01-04"] {
-        fs::write(
-            path.with_file_name(format!("talos.log.daily.{date}")),
-            "old archive",
-        )
-        .unwrap();
-    }
-    let limits = LogRotation { max_files: 3 };
-    for name in ["first", "restart"] {
-        let (mut writer, guard) =
-            create_file_writer(path.to_str().unwrap(), Some(&limits)).unwrap();
-        for sequence in 0..40 {
-            writer
-                .write_all(format!("{name}-{sequence:03}\n").as_bytes())
-                .unwrap();
-        }
-        drop(writer);
-        drop(guard);
-    }
-    let expected: String = ["first", "restart"]
-        .into_iter()
-        .flat_map(|name| (0..40).map(move |sequence| format!("{name}-{sequence:03}\n")))
-        .collect();
-    assert_eq!(fs::read_to_string(daily_path(&path)).unwrap(), expected);
-    let daily_files = fs::read_dir(path.parent().unwrap())
-        .unwrap()
-        .filter(|entry| {
-            entry
-                .as_ref()
-                .unwrap()
-                .file_name()
-                .to_str()
-                .unwrap()
-                .starts_with("talos.log.daily.")
-        })
-        .count();
-    assert!(daily_files <= limits.max_files);
+fn invalid_timezone_and_zero_size_fail_explicitly() {
     assert_eq!(
-        fs::read_to_string(&path).unwrap(),
-        "legacy log must stay untouched"
+        build_dispatch(&LoggingConfig::default(), "Mars/Olympus")
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::InvalidRequest
     );
-    fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    for rotation in [
+        LogRotation {
+            max_bytes: 0,
+            ..Default::default()
+        },
+        LogRotation {
+            max_files: 1,
+            ..Default::default()
+        },
+    ] {
+        let config = LoggingConfig {
+            rotation: Some(rotation),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_dispatch(&config, "UTC").unwrap_err().error_code(),
+            talos_error::ErrorCode::InvalidRequest
+        );
+    }
 }

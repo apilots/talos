@@ -163,6 +163,12 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
 
         let report = upgrade_default_config_from_template(&paths, &template_path).unwrap();
         assert!(report.changed, "{profile}");
+        assert!(
+            report
+                .removed_paths
+                .contains(&"logging.timezone".to_string()),
+            "{profile}"
+        );
         assert_eq!(
             read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
             saved

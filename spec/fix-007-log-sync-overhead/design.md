@@ -22,18 +22,36 @@ only loro_internal::oplog::change_store::block_encode below WARN. Explicit targe
 configuration enables codec diagnostics. Product Business WARN/Internal ERROR,
 typed sources and captured stacks retain their existing reporting contract.
 
-Daily rotation and retention use the existing tracing-appender RollingFileAppender,
-configured through its native Rotation::DAILY and max_log_files builder options.
-The default is five daily files in UTC, named talos.log.daily.YYYY-MM-DD. The
-separate daily prefix keeps framework retention away from the previous talos.log
-and other log families. No legacy log bytes are moved, overwritten or removed.
+Calendar-day OR size rotation uses the existing rolling-file crate through its
+public RollingCondition boundary. Its built-in size condition, size accounting,
+file switching, numbered archives and retention remain library-owned. The small
+calendar adapter converts each supplied timestamp through the existing chrono-tz
+IANA database and compares calendar dates. It does not implement file writing,
+archive renaming/deletion, process locks, timer tasks or a parallel log manager.
 
-All three maintained conf YAML templates declare rotation.max_files. Set
-rotation: null for the existing single unbounded output file. Daily rotation bounds retained file count rather than byte size. Framework rotation writes whole
-formatted records through the existing lossless NonBlocking worker and WorkerGuard.
-No additional thread, manager, filesystem lock, archive numbering or dependency is
-introduced. Framework scheduling/retention is covered by its upstream tests;
-Talos verifies configuration, retention integration, restart append and queued flush.
+The single root timezone config drives log timestamps and the calendar boundary.
+LoggingConfig has no separate timezone setting or override. Startup logging reads
+the root value before loading the complete application, and Server/Desktop/Worker
+composition passes that same root value. An invalid timezone fails explicitly.
+The existing configuration upgrader removes the obsolete logging.timezone key
+through template normalization, with the original file retained in its backup.
+No runtime process changes the system timezone or global TZ environment variable.
+
+All three maintained conf YAML templates declare rotation.max_bytes (20 MiB) and
+rotation.max_files (five total files: active talos.log and talos.log.1 through .4).
+Set rotation: null for a single unbounded file. Rotation occurs before the next
+record after the soft size threshold, or on the next write in a different local
+calendar day; no midnight polling is needed. Complete records are never split.
+An existing active file is opened in append mode; its modification time seeds the
+calendar condition across restart. Retention follows the library's numbered file
+family, rather than a custom directory-scanning or migration algorithm. Log files
+are intended to have one active appender owner; concurrent independent processes
+must use separate configured files because the library does not coordinate them.
+
+Formatted records pass through the established lossless NonBlocking worker and
+WorkerGuard. No additional logging thread or cleanup task is introduced. Talos
+verifies configured midnight, DST repeated hours, size rotation, retention,
+restart append, queued flush and configuration/template upgrades.
 
 ## ACK persistence
 

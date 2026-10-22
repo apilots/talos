@@ -8,13 +8,16 @@ async fn oauth_browser_grant_refresh_disconnect_and_reauthorize_use_the_installe
     let mut config = Config::default();
     let workspace = isolate_runtime_workspace(&mut config, "mcp-oauth");
     let log_file = workspace.join("oauth-diagnostics.jsonl");
-    let log_guard = talos_logging::init_with_config(talos_logging::LoggingConfig {
-        file: Some(log_file.to_string_lossy().into_owned()),
-        stdout: false,
-        format: "json".into(),
-        rotation: None, // This fixture verifies diagnostic contents in one file.
-        ..Default::default()
-    })
+    let log_guard = talos_logging::init_with_config(
+        talos_logging::LoggingConfig {
+            file: Some(log_file.to_string_lossy().into_owned()),
+            stdout: false,
+            format: "json".into(),
+            rotation: None, // This fixture verifies diagnostic contents in one file.
+            ..Default::default()
+        },
+        "UTC",
+    )
     .unwrap();
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".into();

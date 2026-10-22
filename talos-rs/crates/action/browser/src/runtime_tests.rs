@@ -499,12 +499,15 @@ async fn account_logout_revokes_late_read_calls_until_explicit_resume() {
 async fn ipc_reports_original_source_once_and_shutdown_waits_for_private_socket_cleanup() {
     let home = tempfile::tempdir().unwrap();
     let log = home.path().join("diagnostic.log");
-    let guard = talos_logging::init_with_config(talos_logging::LoggingConfig {
-        file: Some(log.to_string_lossy().into()),
-        stdout: false,
-        rotation: None, // Keep diagnostic-only fixtures on their explicit single-file sink.
-        ..Default::default()
-    })
+    let guard = talos_logging::init_with_config(
+        talos_logging::LoggingConfig {
+            file: Some(log.to_string_lossy().into()),
+            stdout: false,
+            rotation: None, // Keep diagnostic-only fixtures on their explicit single-file sink.
+            ..Default::default()
+        },
+        "UTC",
+    )
     .unwrap();
     let runtime = runtime(home.path());
     let backend = Backend::new();

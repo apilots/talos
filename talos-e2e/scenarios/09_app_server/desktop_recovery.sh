@@ -9,7 +9,7 @@ recovery_home="$(make_e2e_temp_dir desktop-recovery)"
 cleanup_recovery() {
   local log_file
   : > "${SCENARIO_REPORT_DIR}/app-server.log"
-  for log_file in "${recovery_home}/logs/talos.log" "${recovery_home}"/logs/talos.log.daily.*; do
+  for log_file in "${recovery_home}"/logs/talos.log*; do
     if [[ -f "${log_file}" ]]; then
       cat "${log_file}" >> "${SCENARIO_REPORT_DIR}/app-server.log"
     fi

@@ -9,11 +9,9 @@ pub struct LoggingConfig {
     pub format: String,
     pub file: Option<String>,
     pub stdout: bool,
-    /// IANA timestamp timezone. None uses UTC.
-    pub timezone: Option<String>,
     /// Exact tracing target thresholds, overriding `level` for those targets.
     pub target_levels: BTreeMap<String, LogLevel>,
-    /// Daily framework rotation. None keeps the configured file unbounded.
+    /// Calendar-day or size rotation. None keeps the configured file unbounded.
     pub rotation: Option<LogRotation>,
 }
 
@@ -24,7 +22,6 @@ impl Default for LoggingConfig {
             format: "text".into(),
             file: None,
             stdout: true,
-            timezone: None,
             target_levels: BTreeMap::from([(
                 "loro_internal::oplog::change_store::block_encode".into(),
                 LogLevel::Warn,
@@ -61,12 +58,17 @@ impl From<LogLevel> for tracing::level_filters::LevelFilter {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LogRotation {
-    /// Maximum daily files managed by tracing-appender. Must be positive.
+    /// Soft byte threshold; complete records may exceed it. Must be positive.
+    pub max_bytes: u64,
+    /// Total files, including the active file. Must be at least two.
     pub max_files: usize,
 }
 
 impl Default for LogRotation {
     fn default() -> Self {
-        Self { max_files: 5 }
+        Self {
+            max_bytes: 20 * 1024 * 1024,
+            max_files: 5,
+        }
     }
 }

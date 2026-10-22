@@ -88,3 +88,6 @@ jobs:
       - name: Verify Sync SDK and client boundaries
         run: |
           just test -p talos-sync -p talos-app-protocol -p talos-sdk
+
+      - name: Verify log rotation and root timezone configuration
+        run: just test -p talos-logging -p talos-config

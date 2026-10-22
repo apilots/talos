@@ -12,6 +12,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 mod error_report;
 pub use error_report::report_error;
 mod config;
+mod rotation_condition;
 pub use config::{LogLevel, LogRotation, LoggingConfig};
 
 /// Custom timer that formats timestamps in a specific IANA timezone.
@@ -40,13 +41,13 @@ pub struct StartupLoggingOptions {
 
 /// 初始化日志系统
 pub fn init() -> TalosResult<LogGuard> {
-    init_with_config(LoggingConfig::default())
+    init_with_config(LoggingConfig::default(), "UTC")
 }
 
 /// Initialize logging once from the raw `logging` YAML node and stable startup defaults.
 pub fn init_startup_once(options: StartupLoggingOptions) -> TalosResult<LogGuard> {
-    let (config, warning) = startup_logging_config(&options);
-    let guard = init_with_config(config)?;
+    let (config, timezone, warning) = startup_logging_config(&options);
+    let guard = init_with_config(config, &timezone)?;
     if let Some(warning) = warning {
         tracing::warn!("{warning}");
     }
@@ -58,12 +59,14 @@ pub fn init_startup_once(options: StartupLoggingOptions) -> TalosResult<LogGuard
     Ok(guard)
 }
 
-/// 使用配置初始化
-pub fn init_with_config(config: LoggingConfig) -> TalosResult<LogGuard> {
+/// Initialize one logging owner with the application root timezone.
+/// Timestamp formatting and calendar rotation share this timezone; file writing
+/// and retention remain in the established appender/WorkerGuard lifecycle.
+pub fn init_with_config(config: LoggingConfig, timezone: &str) -> TalosResult<LogGuard> {
     use talos_error::TalosError;
     let configured_file = config.file.clone();
     let level = config.level.clone();
-    let (dispatch, guard) = build_dispatch(&config)?;
+    let (dispatch, guard) = build_dispatch(&config, timezone)?;
     tracing::dispatcher::set_global_default(dispatch).map_err(|e| {
         TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
@@ -81,10 +84,12 @@ pub fn init_with_config(config: LoggingConfig) -> TalosResult<LogGuard> {
 
 /// 使用默认配置初始化（保留旧接口名以兼容调用方）
 pub fn init_from_env() -> TalosResult<LogGuard> {
-    init_with_config(LoggingConfig::default())
+    init_with_config(LoggingConfig::default(), "UTC")
 }
 
-fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Option<String>) {
+fn startup_logging_config(
+    options: &StartupLoggingOptions,
+) -> (LoggingConfig, String, Option<String>) {
     let config = LoggingConfig {
         file: Some(options.log_file.to_string_lossy().to_string()),
         stdout: options.stdout,
@@ -93,10 +98,13 @@ fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Op
 
     let raw = match std::fs::read_to_string(&options.config_file) {
         Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (config, None),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return (config, "UTC".into(), None)
+        }
         Err(err) => {
             return (
                 config,
+                "UTC".into(),
                 Some(format!(
                     "failed to read logging config {}: {err}",
                     options.config_file.display()
@@ -110,6 +118,7 @@ fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Op
         Err(err) => {
             return (
                 config,
+                "UTC".into(),
                 Some(format!(
                     "failed to parse logging config yaml {}: {err}",
                     options.config_file.display()
@@ -117,11 +126,16 @@ fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Op
             )
         }
     };
+    let timezone = root
+        .get("timezone")
+        .and_then(serde_yaml::Value::as_str)
+        .unwrap_or("UTC")
+        .to_owned();
     let Some(logging) = root
         .as_mapping()
         .and_then(|mapping| mapping.get(serde_yaml::Value::String("logging".to_string())))
     else {
-        return (config, None);
+        return (config, timezone, None);
     };
 
     match serde_yaml::from_value::<LoggingConfig>(logging.clone()) {
@@ -130,10 +144,11 @@ fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Op
                 parsed.file = Some(options.log_file.to_string_lossy().to_string());
             }
             parsed.stdout = options.stdout;
-            (parsed, None)
+            (parsed, timezone, None)
         }
         Err(err) => (
             config,
+            timezone,
             Some(format!(
                 "failed to decode logging config {}: {err}",
                 options.config_file.display()
@@ -142,7 +157,7 @@ fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Op
     }
 }
 
-fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
+fn build_dispatch(config: &LoggingConfig, timezone: &str) -> TalosResult<(Dispatch, LogGuard)> {
     use talos_error::TalosError;
 
     if !config.stdout && config.file.is_none() {
@@ -153,11 +168,14 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
         ));
     }
 
-    let tz: Option<Tz> = config
-        .timezone
-        .as_deref()
-        .filter(|s| !s.is_empty() && *s != "UTC")
-        .and_then(|s| s.parse::<Tz>().ok());
+    let timezone: Tz = timezone.trim().parse().map_err(|error| {
+        TalosError::from_source(
+            talos_error::ErrorCode::InvalidRequest,
+            "The configured timezone is invalid.",
+            error,
+        )
+    })?;
+    let tz = (timezone != chrono_tz::UTC).then_some(timezone);
 
     let mut filter = EnvFilter::try_new(&config.level).map_err(|e| {
         TalosError::new(
@@ -194,14 +212,14 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
     if config
         .rotation
         .as_ref()
-        .is_some_and(|rotation| rotation.max_files == 0)
+        .is_some_and(|rotation| rotation.max_files < 2 || rotation.max_bytes == 0)
     {
         return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
-            "logging.rotation.max_files must be positive.",
+            "logging.rotation requires positive max_bytes and max_files >= 2.",
         ));
     }
-    let (writer, guard) = build_writer(config)?;
+    let (writer, guard) = build_writer(config, timezone)?;
     let enable_ansi = config.stdout && config.file.is_none() && config.format != "json";
 
     let dispatch = if let Some(tz) = tz {
@@ -261,10 +279,11 @@ fn private_dependency_events(metadata: &tracing::Metadata<'_>) -> bool {
     target != "rmcp::transport::auth" && !target.starts_with("rmcp::transport::auth::")
 }
 
-fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)> {
+fn build_writer(config: &LoggingConfig, timezone: Tz) -> TalosResult<(BoxMakeWriter, LogGuard)> {
     match (config.stdout, config.file.as_deref()) {
         (true, Some(path)) => {
-            let (file_writer, file_guard) = create_file_writer(path, config.rotation.as_ref())?;
+            let (file_writer, file_guard) =
+                create_file_writer(path, config.rotation.as_ref(), timezone)?;
             Ok((
                 BoxMakeWriter::new(std::io::stdout.and(file_writer)),
                 LogGuard {
@@ -274,7 +293,8 @@ fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)
         }
         (true, None) => Ok((BoxMakeWriter::new(std::io::stdout), LogGuard::default())),
         (false, Some(path)) => {
-            let (file_writer, file_guard) = create_file_writer(path, config.rotation.as_ref())?;
+            let (file_writer, file_guard) =
+                create_file_writer(path, config.rotation.as_ref(), timezone)?;
             Ok((
                 BoxMakeWriter::new(file_writer),
                 LogGuard {
@@ -289,6 +309,7 @@ fn build_writer(config: &LoggingConfig) -> TalosResult<(BoxMakeWriter, LogGuard)
 fn create_file_writer(
     path: &str,
     rotation: Option<&LogRotation>,
+    timezone: Tz,
 ) -> TalosResult<(NonBlocking, WorkerGuard)> {
     use talos_error::TalosError;
 
@@ -310,21 +331,17 @@ fn create_file_writer(
             format!("invalid logging.file path: {}", path),
         )
     })?;
-    let appender = match rotation {
-        Some(rotation) => tracing_appender::rolling::RollingFileAppender::builder()
-            .rotation(tracing_appender::rolling::Rotation::DAILY)
-            // A separate framework prefix keeps retention away from legacy logs.
-            .filename_prefix(format!("{}.daily", file_name.to_string_lossy()))
-            .max_log_files(rotation.max_files)
-            .build(directory)
-            .map_err(|error| {
+    if let Some(rotation) = rotation {
+        let appender =
+            rotation_condition::open(&file_path, rotation, timezone).map_err(|error| {
                 TalosError::internal_with_source(
-                    "The daily log appender could not be opened.",
+                    "The rotating log appender could not be opened.",
                     error,
                 )
-            })?,
-        None => tracing_appender::rolling::never(directory, file_name),
-    };
+            })?;
+        return Ok(file_writer_builder().finish(appender));
+    }
+    let appender = tracing_appender::rolling::never(directory, file_name);
     Ok(file_writer_builder().finish(appender))
 }
 

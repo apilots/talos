@@ -12,6 +12,7 @@ repository.workspace = true
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
 tracing-appender = "0.2"
+rolling-file = "0.2"
 
 # Error handling
 talos-error = { path = "../error" }
