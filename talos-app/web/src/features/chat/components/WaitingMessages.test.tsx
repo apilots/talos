@@ -118,14 +118,14 @@ describe("WaitingMessages", () => {
     ).toBe(false);
     expect(
       screen.getByTitle("First waiting message · 1 attachment").closest(".group")?.className,
-    ).not.toContain("hover:bg-muted/5");
+    ).not.toContain("hover:bg-hover");
 
     first.resolve();
     await waitFor(() => expect((steerButtons[0] as HTMLButtonElement).disabled).toBe(false));
     expect((steerButtons[1] as HTMLButtonElement).disabled).toBe(true);
     expect(
       screen.getByTitle("First waiting message · 1 attachment").closest(".group")?.className,
-    ).toContain("hover:bg-muted/5");
+    ).toContain("hover:bg-hover");
 
     second.resolve();
     await waitFor(() => expect((steerButtons[1] as HTMLButtonElement).disabled).toBe(false));

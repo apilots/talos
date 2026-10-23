@@ -1,3 +1,5 @@
+import { documentOverlayClasses } from "@/shared/ui/overlayStyles";
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEnvironmentKey } from "@/features/computers";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -57,10 +59,10 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
   const selectedDocument = documents.find((document) => document.path === selectedPath) ?? documents[0];
 
   return (
-    <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-black/30 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
+    <div className={documentOverlayClasses.frame}>
       <button
         aria-label={t("dialog.closePluginBackdrop")}
-        className="absolute inset-0 cursor-default"
+        className={documentOverlayClasses.backdrop}
         onClick={onClose}
         type="button"
       />
@@ -82,7 +84,7 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
           </div>
           <button
             aria-label={t("dialog.closePlugin")}
-            className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-card hover:text-ink"
+            className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-hover hover:text-ink"
             onClick={onClose}
             type="button"
           >
@@ -107,8 +109,8 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
                     <button
                       className={
                         document.path === selectedDocument.path
-                          ? "rounded-full bg-ink px-3 py-1.5 text-xs font-medium text-background"
-                          : "rounded-full border border-border/80 px-3 py-1.5 text-xs font-medium text-muted transition hover:border-brand/35 hover:text-ink"
+                          ? `rounded-full px-3 py-1.5 text-xs font-medium ${selectionClasses.selected}`
+                          : `rounded-full border border-border/80 px-3 py-1.5 text-xs font-medium transition hover:border-selectedBorder ${selectionClasses.idle}`
                       }
                       key={document.path}
                       onClick={() => setSelectedPath(document.path)}

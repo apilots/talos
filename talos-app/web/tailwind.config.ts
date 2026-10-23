@@ -6,11 +6,17 @@ export default {
   theme: {
     extend: {
       colors: {
+        overlay: "rgb(var(--color-overlay) / var(--overlay-opacity))",
         background: "rgb(var(--color-background) / <alpha-value>)",
         sidebar: "rgb(var(--color-sidebar) / <alpha-value>)",
         card: "rgb(var(--color-card) / <alpha-value>)",
         border: "rgb(var(--color-border) / <alpha-value>)",
+        divider: "rgb(var(--color-divider) / <alpha-value>)",
+        headerBorder: "rgb(var(--color-header-border) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",
+        hover: "rgb(var(--color-hover) / <alpha-value>)",
+        selectedBorder: "rgb(var(--color-selected-border) / <alpha-value>)",
+        actionHover: "rgb(var(--color-action-hover) / <alpha-value>)",
         selected: "rgb(var(--color-selected) / <alpha-value>)",
         ink: "rgb(var(--color-ink) / <alpha-value>)",
         muted: "rgb(var(--color-muted) / <alpha-value>)",

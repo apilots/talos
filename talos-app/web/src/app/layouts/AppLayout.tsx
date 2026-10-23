@@ -58,7 +58,7 @@ export function AppLayout() {
   const navigation = <AppNavigation sidebarVisible={sidebarVisible} sidebarAvailable={sidebarAvailable} sidebarToggleRef={sidebarToggle} onToggleSidebar={() => wide ? setSidebarOpen(!sidebarOpen) : setSidebarDrawerOpen(open => !open)} />;
   const context = <AppSessionContext />;
   const sidebarExpanded = wide && sidebarVisible;
-  const mainHeader = <AppTopBar className="h-full border-b-0">{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
+  const mainHeader = <AppTopBar className="h-full border-b-0 px-6 sm:px-6">{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
   const modalHeader = <AppTopBar>{navigation}{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
   const sidebarRegion = (wide && sidebarAvailable) || sidebarModal ? <AppSidebar modal={sidebarModal} visible={sidebarVisible} width={wide ? sizes.sidebar : Math.min(sidebarWidth, viewport.width - 56)} resizing={resizing} toggleRef={sidebarToggle} onClose={() => wide ? setSidebarOpen(false) : setSidebarDrawerOpen(false)} topBar={sidebarModal ? modalHeader : undefined}><SidebarContainer computer={computer} computerEntry={<SidebarComputerEntry />} /></AppSidebar> : null;
   return <div className="flex h-screen overflow-hidden bg-surface text-ink">

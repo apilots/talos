@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,7 +45,7 @@ export function SidebarProjectRenameDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]">
+    <div className={`fixed inset-0 z-[1000] flex items-center justify-center px-4 ${overlayClasses.tint}`}>
       <div className="absolute inset-0" onClick={onClose} role="presentation" />
       <form
         className="relative z-10 w-[min(560px,calc(100vw-32px))] rounded-[var(--radius-panel)] border border-border bg-card p-6 shadow-panel"
@@ -66,10 +67,10 @@ export function SidebarProjectRenameDialog({
           </div>
         ) : null}
         <div className="mt-6 flex justify-end gap-3">
-          <Button className="min-w-24 border-border/80 bg-background text-ink hover:bg-card" onClick={onClose} type="button" variant="secondary">
+          <Button className="min-w-24" onClick={onClose} type="button" variant="secondary">
             Cancel
           </Button>
-          <Button className="min-w-24 bg-ink text-background hover:bg-ink/88" disabled={!canSave || saving} type="submit">
+          <Button className="min-w-24" disabled={!canSave || saving} type="submit">
             Save
           </Button>
         </div>
@@ -97,7 +98,7 @@ function DialogHeader({
       </div>
       <button
         aria-label="Close"
-        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-background hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         onClick={onClose}
         type="button"
       >

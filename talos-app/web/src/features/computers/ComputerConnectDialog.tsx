@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -24,7 +25,7 @@ export function ComputerConnectDialog({ onClose }: { onClose: () => void }) {
         if (event.target !== event.currentTarget) return;
         const bounds = event.currentTarget.getBoundingClientRect();
         if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
-      }} className="m-auto w-[min(420px,calc(100vw-40px))] rounded-[var(--radius-panel)] border border-border bg-card p-6 text-ink shadow-panel backdrop:bg-black/15">
+      }} className={`m-auto w-[min(420px,calc(100vw-40px))] rounded-[var(--radius-panel)] border border-border bg-card p-6 text-ink shadow-panel ${overlayClasses.native}`}>
       <div className="mb-5 flex items-center justify-between gap-3">
         <h2 id="computer-connect-title" className="text-lg font-medium">{t("computers:add")}</h2>
         <Button variant="ghost" className="p-1.5" aria-label={t("common:close")} onClick={onClose}><X size={16} aria-hidden="true" /></Button>

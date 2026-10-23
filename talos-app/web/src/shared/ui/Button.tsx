@@ -1,3 +1,4 @@
+import { actionClasses } from "./controlStyles";
 import type { ButtonHTMLAttributes, PropsWithChildren, Ref } from "react";
 
 import { cn } from "@/shared/lib/cn";
@@ -9,14 +10,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   ref?: Ref<HTMLButtonElement>;
 }
 
-const variantClasses: Record<ButtonVariant, string> = {
-  primary:
-    "bg-brand text-background hover:bg-brand/90 disabled:bg-brandDim disabled:text-muted",
-  secondary:
-    "border border-border bg-card/80 text-ink hover:border-brand/40 hover:bg-surface disabled:text-muted",
-  ghost: "text-muted hover:bg-surface/80 hover:text-ink",
-  danger: "bg-danger/15 text-danger hover:bg-danger/25",
-};
+const variantClasses: Record<ButtonVariant, string> = actionClasses;
 
 export function Button({
   children,
@@ -27,7 +21,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] px-3.5 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center gap-2 rounded-[var(--radius-control)] px-3.5 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed",
         variantClasses[variant],
         className,
       )}

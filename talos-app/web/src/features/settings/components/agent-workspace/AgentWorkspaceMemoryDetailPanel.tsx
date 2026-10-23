@@ -27,7 +27,7 @@ export function MemorySearchDetail({ memory }: { memory: MemoryPageState }) {
       </p>
       <div className="mt-5 space-y-3">
         {memory.isLoadingMemory ? (
-          <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+          <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/[0.38] px-3.5 py-4 text-sm text-muted">
             {t("common:loading")}
           </div>
         ) : null}
@@ -58,13 +58,13 @@ export function MemorySearchDetail({ memory }: { memory: MemoryPageState }) {
           </div>
         ) : null}
         {memory.searchResults.length === 0 && !busy ? (
-          <div className="rounded-[var(--radius-control)] border border-dashed border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+          <div className="rounded-[var(--radius-control)] border border-dashed border-border/65 bg-background/[0.38] px-3.5 py-4 text-sm text-muted">
             {t("memory:nothingMatched")}
           </div>
         ) : (
           memory.searchResults.map((result) => (
             <button
-              className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-background/74"
+              className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-hover"
               key={result.memoryId}
               onClick={() => memory.selectMemory(result.memoryId)}
               type="button"
@@ -115,7 +115,7 @@ export function MemoryDailyDetail({
       </div>
       {editorMode === "edit" && canEdit ? (
         <Textarea
-          className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-surface/72 font-mono text-sm leading-6 shadow-none"
+          className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-surface/[0.72] font-mono text-sm leading-6 shadow-none"
           onChange={(event) => memory.setEditorContent(event.target.value)}
           value={memory.editorContent}
         />

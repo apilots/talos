@@ -48,7 +48,7 @@ export function McpServerFormHeader({
       {plugin ? (
         <div className="flex items-center gap-2">
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-control)] border border-border/80 px-4 text-sm font-medium text-ink transition hover:bg-card/75 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-control)] border border-border/80 px-4 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             disabled={busy}
             onClick={() => (pluginEnabled(plugin) ? onDisable?.(plugin) : onEnable?.(plugin))}
             type="button"

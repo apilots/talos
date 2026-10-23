@@ -13,7 +13,7 @@ export function OverviewCard({
   detail: string;
 }) {
   return (
-    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/82 p-4">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-4">
       <div className="text-[10px] uppercase tracking-[0.18em] text-muted">{title}</div>
       <div className="mt-2 text-[1.65rem] font-display tracking-[-0.04em] text-ink">{value}</div>
       <p className="mt-1.5 text-sm leading-6 text-muted">{detail}</p>
@@ -79,7 +79,7 @@ export function ToggleRow({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-medium text-ink">{label}</div>
-        <div className={value ? "text-brand" : "text-muted"}>{value ? t("toggleOn") : t("toggleOff")}</div>
+        <div className={value ? "font-semibold text-ink" : "text-muted"}>{value ? t("toggleOn") : t("toggleOff")}</div>
       </div>
       <p className="mt-2 text-xs leading-6 text-muted">{description}</p>
     </button>

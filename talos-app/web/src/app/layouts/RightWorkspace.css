@@ -10,6 +10,16 @@
   transform: translateX(0);
 }
 
+#talos-right-workspace > header::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: -1px;
+  width: 1px;
+  background: rgb(var(--color-header-border));
+  pointer-events: none;
+}
+
 #talos-right-workspace[data-presentation="split"] {
   width: var(--workspace-width);
 }

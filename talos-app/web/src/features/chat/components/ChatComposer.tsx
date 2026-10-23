@@ -137,7 +137,7 @@ export function ChatComposer({
           status={commandStatus}
         />
       ) : null}
-      <Panel className="overflow-visible rounded-[1.25rem] border-border bg-card p-0 shadow-panel">
+      <Panel className="overflow-visible rounded-[22px] border-border bg-card p-0 shadow-none">
         {messageQueue ? <WaitingMessages controller={messageQueue} /> : null}
         {showProjectSelector && compact ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">

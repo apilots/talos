@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { Brain } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,7 +34,7 @@ export function SettingsPersonalizationSection() {
               aria-pressed={mode === personalizationMode}
               className={[
                 "flex min-w-0 flex-1 items-center justify-center rounded-[calc(var(--radius-control)-0.2rem)] px-3 py-2 text-sm font-medium transition",
-                mode === personalizationMode ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
+                mode === personalizationMode ? selectionClasses.selected : selectionClasses.idle,
               ].join(" ")}
               key={personalizationMode}
               onClick={() => setMode(personalizationMode)}

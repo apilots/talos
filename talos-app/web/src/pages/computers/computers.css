@@ -28,7 +28,7 @@
 }
 .cmp-page-heading h1 > span,
 .cmp-sync-text {
-  color: #8375bd;
+  color: rgb(var(--color-info));
 }
 .cmp-page-heading p,
 .cmp-muted {
@@ -136,8 +136,8 @@
 }
 .cmp-segments button[aria-pressed="true"] {
   color: rgb(var(--color-ink));
-  background: rgb(var(--color-card));
-  box-shadow: 0 1px 4px #0000000a;
+  background: rgb(var(--color-selected));
+  box-shadow: none;
 }
 .cmp-content {
   display: grid;
@@ -181,15 +181,15 @@
 }
 .cmp-flow-buttons button[aria-pressed="true"] {
   color: rgb(var(--color-ink));
-  background: rgb(var(--color-surface));
-  border-color: rgb(var(--color-border));
+  background: rgb(var(--color-selected));
+  border-color: rgb(var(--color-selected-border));
 }
 .cmp-flow-key {
   width: 13px;
-  border-top: 1px solid #a6a8af;
+  border-top: 1px solid rgb(var(--color-muted));
 }
 .cmp-flow-key.is-sync {
-  border-top: 1px dashed #9383be;
+  border-top: 1px dashed rgb(var(--color-info));
 }
 .cmp-canvas-scroll {
   overflow: auto;
@@ -231,21 +231,21 @@
   stroke-width: 1.3;
 }
 .cmp-execution-wire {
-  stroke: #b4b6be;
+  stroke: rgb(var(--color-muted));
 }
 .cmp-arrow-execution {
-  fill: #b4b6be;
+  fill: rgb(var(--color-muted));
 }
 .cmp-execution-wire.is-offline {
   stroke-dasharray: 3 5;
   opacity: 0.55;
 }
 .cmp-sync-wire {
-  stroke: #9383be;
+  stroke: rgb(var(--color-info));
   stroke-dasharray: 4 6;
 }
 .cmp-arrow-sync {
-  fill: #9383be;
+  fill: rgb(var(--color-info));
 }
 .cmp-sync-wire.is-syncing {
   animation: cmp-flow 2s linear infinite;
@@ -262,7 +262,7 @@
   border-radius: 10px;
   background: rgb(var(--color-card));
   text-align: left;
-  box-shadow: 0 2px 8px #00000003;
+  box-shadow: none;
 }
 .cmp-service {
   left: 4%;
@@ -309,8 +309,8 @@
   color: rgb(var(--color-muted));
 }
 .cmp-node-icon.is-sync {
-  color: #8375bd;
-  background: #8375bd0d;
+  color: rgb(var(--color-info));
+  background: rgb(var(--color-info) / 0.08);
 }
 .cmp-service footer,
 .cmp-device footer {
@@ -340,7 +340,7 @@
   color: rgb(var(--color-muted));
 }
 .cmp-service-relation > svg {
-  color: #9383be;
+  color: rgb(var(--color-info));
   flex-shrink: 0;
 }
 .cmp-device {
@@ -349,11 +349,11 @@
 }
 .cmp-device.is-selected,
 .cmp-service.is-selected {
-  border-color: #9383be;
-  box-shadow: 0 0 0 2px #8375bd10;
+  border-color: rgb(var(--color-selected-border));
+  box-shadow: none;
 }
-.cmp-device:hover,
-.cmp-service:hover {
+.cmp-device:not(.is-selected):hover,
+.cmp-service:not(.is-selected):hover {
   border-color: rgb(var(--color-muted) / 0.6);
 }
 .cmp-device.is-dimmed {
@@ -506,7 +506,7 @@
   border-top: 1px solid rgb(var(--color-border));
 }
 .cmp-table tr.is-selected {
-  background: #8375bd06;
+  background: rgb(var(--color-selected));
 }
 .cmp-name-button {
   display: block;
@@ -645,4 +645,10 @@
 .cmp-sync-status.is-conflict,
 .cmp-sync-status.is-error { color: rgb(var(--color-danger)); }
 .cmp-sync-status.is-idle,
-.cmp-sync-status.is-syncing { color: #9383be; }
+.cmp-sync-status.is-syncing { color: rgb(var(--color-info)); }
+
+.cmp-segments button:not([aria-pressed="true"]):hover,
+.cmp-flow-buttons button:not([aria-pressed="true"]):hover {
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-hover));
+}

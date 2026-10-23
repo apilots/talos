@@ -13,11 +13,11 @@ export function DailyActivityChart({ ariaLabel, series }: ChartProps) {
             aria-hidden="true"
             className={cn(
               "size-2.5 rounded-[0.18rem]",
-              level === 0 && "bg-[#f3f4f6]",
-              level === 1 && "bg-[#d8ebff]",
-              level === 2 && "bg-[#afd8ff]",
-              level === 3 && "bg-[#6db6ff]",
-              level >= 4 && "bg-[#1f8fff]",
+              level === 0 && "bg-hover",
+              level === 1 && "bg-info/20",
+              level === 2 && "bg-info/40",
+              level === 3 && "bg-info/65",
+              level >= 4 && "bg-info",
             )}
             key={point.date}
             title={`${point.date}: ${formatTokens(point.value)}`}

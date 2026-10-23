@@ -69,7 +69,7 @@ export function ComposerContextUsageTooltip({
       </span>
 
       <span
-        className="pointer-events-none absolute bottom-[calc(100%+8px)] right-0 z-50 w-[248px] translate-y-1 rounded-xl border border-border/70 bg-card p-3 text-left opacity-0 shadow-[0_14px_36px_rgba(0,0,0,0.14)] transition duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
+        className="pointer-events-none absolute bottom-[calc(100%+8px)] right-0 z-50 w-[248px] translate-y-1 rounded-xl border border-border/70 bg-card p-3 text-left opacity-0 shadow-panel transition duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100"
         id={tooltipId}
         role="tooltip"
       >

@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEffect, useState } from "react";
 import { Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -31,7 +32,7 @@ export function AgentWorkspaceInstructionsPanel({
 
   return (
     <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)]">
-      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/28 p-2.5 shadow-none backdrop-blur-none">
+      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/[0.28] p-2.5 shadow-none backdrop-blur-none">
         <div className="mb-2 px-2 pt-2 text-[11px] uppercase tracking-[0.22em] text-muted/80">
           {t("workspaceDocs:documents")}
         </div>
@@ -41,8 +42,8 @@ export function AgentWorkspaceInstructionsPanel({
               className={[
                 "w-full rounded-[var(--radius-control)] border px-3.5 py-3 text-left transition",
                 workspaceDocs.selectedDocKind === kind
-                  ? "border-border/80 bg-surface/80 text-ink shadow-sm"
-                  : "border-transparent text-muted hover:border-border/60 hover:bg-surface/50",
+                  ? `${selectionClasses.selected} ${selectionClasses.border}`
+                  : `border-transparent ${selectionClasses.idle}`,
               ].join(" ")}
               key={kind}
               onClick={() => workspaceDocs.setSelectedDocKind(kind)}
@@ -85,7 +86,7 @@ export function AgentWorkspaceInstructionsPanel({
             </div>
           ) : null}
         </div>
-        <div className="mt-4 rounded-[var(--radius-control)] border border-border/70 bg-background/52 px-3 py-2 text-xs text-muted">
+        <div className="mt-4 rounded-[var(--radius-control)] border border-border/70 bg-background/[0.52] px-3 py-2 text-xs text-muted">
           {workspaceDocs.selectedDetail.path}
         </div>
         {workspaceDocs.loadError ? (
@@ -95,7 +96,7 @@ export function AgentWorkspaceInstructionsPanel({
         ) : null}
         {editorMode === "edit" && canEdit ? (
           <Textarea
-            className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-surface/72 font-mono text-sm leading-6 shadow-none"
+            className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-surface/[0.72] font-mono text-sm leading-6 shadow-none"
             onChange={(event) => workspaceDocs.setDocDraft(event.target.value)}
             value={workspaceDocs.docDraft}
           />

@@ -57,7 +57,7 @@ export function ComposerAttachments({
       />
       <button
         aria-label={t("addAttachment")}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted outline-none transition hover:bg-muted/12 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/25 disabled:cursor-not-allowed disabled:opacity-45"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted outline-none transition hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/25 disabled:cursor-not-allowed disabled:opacity-45"
         disabled={attachmentsDisabled}
         onClick={() => setMenu((current) => current === "closed" ? "actions" : "closed")}
         title={supportedKinds.length === 0 ? t("attachmentsUnsupported") : t("addAttachment")}
@@ -71,7 +71,7 @@ export function ComposerAttachments({
           {menu === "actions" ? (
             <>
               <button
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-ink hover:bg-background/60"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-ink hover:bg-hover"
                 onClick={() => inputRef.current?.click()}
                 type="button"
               >
@@ -79,7 +79,7 @@ export function ComposerAttachments({
                 {t("uploadAttachment")}
               </button>
               <button
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-ink hover:bg-background/60"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-ink hover:bg-hover"
                 onClick={() => {
                   setMenu("files");
                   void onLoadAvailable().catch(() => undefined);
@@ -99,7 +99,7 @@ export function ComposerAttachments({
               ) : null}
               {availableFiles.map((file) => (
                 <button
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-ink hover:bg-background/60"
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-ink hover:bg-hover"
                   key={file.fileId}
                   onClick={() => {
                     onSelect(file);
@@ -113,7 +113,7 @@ export function ComposerAttachments({
               ))}
               {hasMoreAvailable ? (
                 <button
-                  className="w-full rounded-lg px-3 py-2 text-center text-xs text-muted hover:bg-background/60 hover:text-ink disabled:opacity-50"
+                  className="w-full rounded-lg px-3 py-2 text-center text-xs text-muted hover:bg-hover hover:text-ink disabled:opacity-50"
                   disabled={isLoadingMore}
                   onClick={() => void onLoadMoreAvailable().catch(() => undefined)}
                   type="button"

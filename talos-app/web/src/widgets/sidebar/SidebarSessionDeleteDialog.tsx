@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useState } from "react";
 import { createPortal } from "react-dom";
@@ -33,7 +34,7 @@ export function SidebarSessionDeleteDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]">
+    <div className={`fixed inset-0 z-[1000] flex items-center justify-center px-4 ${overlayClasses.tint}`}>
       <div className="absolute inset-0" onClick={onClose} role="presentation" />
       <div className="relative z-10 w-[min(520px,calc(100vw-32px))] rounded-[var(--radius-panel)] border border-border bg-card p-6 shadow-panel">
         <div className="flex items-start justify-between gap-4">
@@ -47,7 +48,7 @@ export function SidebarSessionDeleteDialog({
           </div>
           <button
             aria-label={t("common:close")}
-            className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-background hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             onClick={onClose}
             type="button"
           >
@@ -64,7 +65,7 @@ export function SidebarSessionDeleteDialog({
             {t("common:cancel")}
           </Button>
           <Button
-            className="min-w-24 bg-danger/12 text-danger hover:bg-danger/20"
+            className="min-w-24 bg-danger/[0.12] text-danger hover:bg-danger/20"
             disabled={deleting}
             onClick={() => void submitDelete()}
             type="button"

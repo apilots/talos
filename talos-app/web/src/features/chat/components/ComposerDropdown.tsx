@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { Fragment, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { Check, ChevronDown } from "lucide-react";
@@ -58,7 +59,7 @@ export function ComposerDropdown({
   return (
     <div className={cn("relative", className)} ref={ref}>
       <button
-        className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium text-ink/70 outline-none transition hover:bg-muted/15 focus:outline-none"
+        className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium text-ink/70 outline-none transition hover:bg-hover focus:outline-none"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         ref={triggerRef}
@@ -88,7 +89,8 @@ export function ComposerDropdown({
                 aria-disabled={item.disabled}
                 className={cn(
                   "flex w-full items-start gap-2 px-3 py-2 text-left text-[13px] text-ink transition focus:outline-none",
-                  item.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-muted/10",
+                  item.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-hover",
+                  item.value === value && selectionClasses.selected,
                 )}
                 disabled={item.disabled}
                 onClick={() => {

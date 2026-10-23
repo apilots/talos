@@ -54,7 +54,7 @@ export function CopyableBlock({
         >
           <button
             aria-label={copied ? copiedLabel : copyLabel}
-            className="flex size-7 items-center justify-center rounded-md text-muted/75 transition-colors hover:bg-surface hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand/25"
+            className="flex size-7 items-center justify-center rounded-md text-muted/75 transition-colors hover:bg-hover hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand/25"
             onClick={() => void copyBlock()}
             title={copied ? copiedLabel : copyLabel}
             type="button"
@@ -63,7 +63,7 @@ export function CopyableBlock({
           </button>
           <button
             aria-label={helpfulLabel}
-            className="flex size-7 items-center justify-center rounded-md text-muted/75 transition-colors hover:bg-surface hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand/25"
+            className="flex size-7 items-center justify-center rounded-md text-muted/75 transition-colors hover:bg-hover hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand/25"
             data-placeholder-action="true"
             title={helpfulLabel}
             type="button"
@@ -72,7 +72,7 @@ export function CopyableBlock({
           </button>
           <button
             aria-label={notHelpfulLabel}
-            className="flex size-7 items-center justify-center rounded-md text-muted/75 transition-colors hover:bg-surface hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand/25"
+            className="flex size-7 items-center justify-center rounded-md text-muted/75 transition-colors hover:bg-hover hover:text-ink focus:outline-none focus:ring-2 focus:ring-brand/25"
             data-placeholder-action="true"
             title={notHelpfulLabel}
             type="button"

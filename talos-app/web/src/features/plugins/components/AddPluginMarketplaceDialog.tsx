@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -42,8 +43,8 @@ export function AddPluginMarketplaceDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/25 px-6 backdrop-blur-[2px]">
-      <div className="w-full max-w-[760px] rounded-[1.6rem] border border-border/80 bg-card p-7 shadow-[0_30px_80px_rgba(31,28,24,0.22)]">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center px-6 ${overlayClasses.tint}`}>
+      <div className="w-full max-w-[760px] rounded-[var(--radius-panel)] border border-border/80 bg-card p-7 shadow-panel">
         <div className="flex items-start justify-between gap-6">
           <div>
             <h2 className="text-[28px] font-semibold tracking-tight text-ink">
@@ -57,7 +58,7 @@ export function AddPluginMarketplaceDialog({
             </p>
           </div>
           <button
-            className="flex size-9 items-center justify-center rounded-[0.7rem] bg-muted/10 text-muted transition hover:bg-muted/20 hover:text-ink"
+            className="flex size-9 items-center justify-center rounded-[0.7rem] bg-muted/10 text-muted transition hover:bg-hover hover:text-ink"
             onClick={onClose}
             type="button"
           >
@@ -96,7 +97,7 @@ export function AddPluginMarketplaceDialog({
 
         <div className="mt-9 flex justify-end gap-3">
           <button
-            className="rounded-[0.8rem] border border-border bg-card px-6 py-3 text-[17px] text-ink transition hover:bg-background"
+            className="rounded-[0.8rem] border border-border bg-card px-6 py-3 text-[17px] text-ink transition hover:bg-hover"
             onClick={onClose}
             type="button"
           >

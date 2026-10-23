@@ -129,7 +129,7 @@ export function AuthPage() {
         <div className="text-center">
           <img
             alt="Talos"
-            className="mx-auto size-14 rounded-[15px] shadow-[0_8px_22px_rgba(27,24,19,0.08)]"
+            className="mx-auto size-14 rounded-[15px] shadow-panel"
             src={logoSrc}
           />
           <h1 className="mt-5 text-[22px] font-semibold leading-7 text-ink">
@@ -144,7 +144,7 @@ export function AuthPage() {
 
         <form className="mt-7 grid gap-3" onSubmit={handleLogin}>
           <Button
-            className="h-10 w-full rounded-[10px] border border-border bg-card text-[13px] font-medium text-ink shadow-[0_1px_0_rgba(27,24,19,0.04)] hover:border-muted/40 hover:bg-surface disabled:bg-surface"
+            className="h-10 w-full rounded-[10px] border border-border bg-card text-[13px] font-medium text-ink shadow-none hover:border-selectedBorder hover:bg-hover disabled:bg-brandDim"
             disabled={isCompleting || isLoadingConfig}
             type="submit"
             variant="secondary"

@@ -82,7 +82,7 @@ export function SettingsProviderModels({ config, capabilities, keyConfigured, cu
   return (
     <>
       <div className="mb-5 space-y-3">
-        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
+        <div className="flex items-center gap-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/40 px-4 py-3">
           <span className="w-24 text-sm text-muted">{t("modelsPanel.protocol")}</span>
           {protocols.length > 1 ? (
             <select
@@ -114,7 +114,7 @@ export function SettingsProviderModels({ config, capabilities, keyConfigured, cu
         />
 
         {/* Base URL */}
-        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
+        <div className="flex items-center gap-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/40 px-4 py-3">
           <span className="w-24 shrink-0 text-sm text-muted">{t("modelsPanel.baseUrl")}</span>
           <Input
             value={config.base_url ?? ""}
@@ -135,7 +135,7 @@ export function SettingsProviderModels({ config, capabilities, keyConfigured, cu
       </div>
 
       {config.models.length === 0 ? (
-        <div className="rounded-[1.2rem] border border-dashed border-border/80 px-4 py-8 text-center text-sm text-muted">
+        <div className="rounded-[var(--radius-panel)] border border-dashed border-border/80 px-4 py-8 text-center text-sm text-muted">
           {t("modelsPanel.noModels")}
         </div>
       ) : (
@@ -148,7 +148,7 @@ export function SettingsProviderModels({ config, capabilities, keyConfigured, cu
             <div className="text-right">{t("modelsPanel.colActions")}</div>
           </div>
           {config.models.map((model, idx) => (
-            <div key={model.id} className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.4fr)_80px_60px_80px] items-center gap-3 rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-3">
+            <div key={model.id} className="grid grid-cols-[minmax(0,1.8fr)_minmax(0,1.4fr)_80px_60px_80px] items-center gap-3 rounded-[var(--radius-panel)] border border-border/80 bg-background/45 px-4 py-3">
               <div className="min-w-0 truncate font-mono text-sm font-medium text-ink">{model.id}</div>
               <div className="truncate text-sm text-muted">{model.name || "—"}</div>
               <div className="text-sm text-muted">{fmtContext(model.context_window)}</div>
@@ -161,7 +161,7 @@ export function SettingsProviderModels({ config, capabilities, keyConfigured, cu
               </div>
               <div className="flex justify-end">
                 <div className="inline-flex items-center gap-0.5 rounded-[999px] border border-border/75 bg-surface/70 p-1">
-                  <button aria-label={t("modelsPanel.editModelTitle")} className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-background hover:text-ink" onClick={(event) => { event.currentTarget.focus(); openEditModal(idx); }} type="button">
+                  <button aria-label={t("modelsPanel.editModelTitle")} className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-hover hover:text-ink" onClick={(event) => { event.currentTarget.focus(); openEditModal(idx); }} type="button">
                     <Pencil size={13} />
                   </button>
                   <button aria-label={t("modelsPanel.deleteModel")} className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-danger/10 hover:text-danger" onClick={(event) => { event.currentTarget.focus(); setModelToDelete(model.id); }} type="button">

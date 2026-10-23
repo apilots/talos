@@ -64,7 +64,7 @@ export function ProjectDirectoryBrowser({
       <div className="min-h-[220px] flex-1 overflow-y-auto rounded-xl border border-border/45 bg-card p-1">
         {snapshot?.parent ? (
           <button
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-muted transition hover:bg-muted/10 hover:text-ink"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-muted transition hover:bg-hover hover:text-ink"
             onClick={() => onLoadDirectory(snapshot.parent)}
             type="button"
           >
@@ -77,7 +77,7 @@ export function ProjectDirectoryBrowser({
         ) : snapshot && snapshot.entries.length > 0 ? (
           snapshot.entries.map((entry) => (
             <button
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition hover:bg-muted/10"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition hover:bg-hover"
               key={entry.path}
               onClick={() => onEnterDirectory(entry)}
               title={entry.is_symlink ? t("chat:symlinkNotSupported") : entry.path}

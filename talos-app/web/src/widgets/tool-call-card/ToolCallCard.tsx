@@ -51,7 +51,7 @@ export const ToolCallCard = {
         data-tool-surface="card"
       >
         <Panel
-          className="overflow-hidden rounded-[1.25rem] border-border/65 bg-card/76 shadow-[0_10px_24px_rgba(95,84,64,0.035)]"
+          className="overflow-hidden rounded-[var(--radius-panel)] border-border/65 bg-card shadow-none"
         >
           {children}
         </Panel>
@@ -81,7 +81,7 @@ export const ToolCallCard = {
         className={cn(
           "flex w-full items-center justify-between gap-3 text-left",
           compact
-            ? "group/tool rounded-[0.7rem] px-1 py-1.5 transition-colors hover:bg-surface/55 focus:outline-none focus:ring-2 focus:ring-brand/20"
+            ? "group/tool rounded-[0.7rem] px-1 py-1.5 transition-colors hover:bg-hover focus:outline-none focus:ring-2 focus:ring-brand/20"
             : "px-4 py-3",
         )}
         onClick={onToggle}
@@ -89,7 +89,7 @@ export const ToolCallCard = {
       >
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {!compact ? (
-            <span className="shrink-0 rounded-[0.85rem] border border-brand/14 bg-brand/5 p-2 text-brand/85">
+            <span className="shrink-0 rounded-[0.85rem] border border-brand/[0.14] bg-brand/5 p-2 text-brand/85">
               <Wrench size={13} />
             </span>
           ) : null}
@@ -145,7 +145,7 @@ export const ToolCallCard = {
       <div
         className={cn(
           "space-y-3 text-sm text-muted",
-          compact ? "px-1 pb-2 pt-1.5" : "border-t border-border/80 bg-background/26 px-4 py-3",
+          compact ? "px-1 pb-2 pt-1.5" : "border-t border-border/80 bg-background/[0.26] px-4 py-3",
         )}
         data-tool-body-surface={compact ? "plain" : "panel"}
       >
@@ -162,7 +162,7 @@ export const ToolCallCard = {
   }) {
     return (
       <Section title={title}>
-        <pre className="overflow-x-auto rounded-[0.95rem] border border-border/75 bg-surface/88 p-3 font-mono text-[12px] leading-5 text-ink">
+        <pre className="overflow-x-auto rounded-[0.95rem] border border-border/75 bg-surface/[0.88] p-3 font-mono text-[12px] leading-5 text-ink">
           {content}
         </pre>
       </Section>
@@ -177,7 +177,7 @@ export const ToolCallCard = {
   }) {
     return (
       <Section title={title}>
-        <div className="space-y-1.5 rounded-[0.95rem] border border-border/75 bg-surface/88 p-3 font-mono text-[12px] leading-5">
+        <div className="space-y-1.5 rounded-[0.95rem] border border-border/75 bg-surface/[0.88] p-3 font-mono text-[12px] leading-5">
           {entries.map((entry, index) => (
             <div key={`${entry.kind}-${index}`}>
               <span className="mr-2 text-brand">{entry.kind}</span>
@@ -198,7 +198,7 @@ export const ToolCallCard = {
         <summary
           className={cn(
             "cursor-pointer text-[11px] uppercase tracking-[0.12em] text-muted",
-            compact ? "rounded-md px-1 py-2 hover:bg-surface/55" : "px-3 py-2",
+            compact ? "rounded-md px-1 py-2 hover:bg-hover" : "px-3 py-2",
           )}
         >
           {title}

@@ -8,7 +8,7 @@ export function layoutWidths(available: number, sidebarOpen: boolean, workspaceV
   const sidebarMax = Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, available - MAIN_MIN_WIDTH - (workspaceVisible ? WORKSPACE_WIDTH.min : 0)));
   const sidebar = clamp(sidebarPreference, SIDEBAR_WIDTH.min, sidebarMax);
   const workspaceMax = Math.max(WORKSPACE_WIDTH.min, Math.min(WORKSPACE_WIDTH.max, available - MAIN_MIN_WIDTH - (sidebarOpen ? sidebar : 0)));
-  const workspace = workspaceVisible ? clamp(workspacePreference ?? available * 0.52, WORKSPACE_WIDTH.min, workspaceMax) : 0;
+  const workspace = workspaceVisible ? clamp(workspacePreference ?? WORKSPACE_WIDTH.initial, WORKSPACE_WIDTH.min, workspaceMax) : 0;
   return {
     sidebar, workspace,
     sidebarMax: Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, available - workspace - MAIN_MIN_WIDTH)),

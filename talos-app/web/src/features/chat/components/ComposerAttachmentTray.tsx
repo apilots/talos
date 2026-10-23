@@ -157,7 +157,7 @@ export function ComposerAttachmentTray({
                 ) : (
                   <button
                     aria-label={t("removeAttachment", { filename })}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-surface hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-hover hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
                     disabled={disabled}
                     onClick={() => onRemove(item.id)}
                     type="button"

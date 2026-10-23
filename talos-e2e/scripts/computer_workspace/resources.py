@@ -30,10 +30,96 @@ class PreviewPage(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def seed(context, token):
+def seed(context, token, theme='light'):
     # Normal persisted locale/auth admission; resource state is created only by UI.
     context.add_init_script('if (window === window.top) sessionStorage.setItem("talos-web-auth-token", ' + json.dumps(token) + ');')
-    context.add_init_script('if (window === window.top && !localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui", JSON.stringify({state:{locale:"en",uiTheme:"light"},version:0}));')
+    preferences = json.dumps({'state': {'locale': 'en', 'uiTheme': theme}, 'version': 0})
+    context.add_init_script('if (window === window.top && !localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui", JSON.stringify(' + preferences + '));')
+
+
+def theme_geometry(browser, url, token):
+    """Check actual styled boundaries and tab controls in both persisted themes."""
+    observations = []
+    for theme in ('light', 'dark'):
+        context = browser.new_context(viewport={'width': 1560, 'height': 1000}, locale='en-US')
+        try:
+            seed(context, token, theme)
+            page = context.new_page()
+            page.goto(url + '/files')
+            expect(page.get_by_role('button', name='Upload', exact=True)).to_be_visible()
+            page.get_by_role('button', name='New workspace tab', exact=True).click()
+            workspace = page.get_by_role('dialog', name='Right workspace', exact=True)
+            workspace.get_by_role('button', name='New webpage tab', exact=True).click()
+            expect(workspace.get_by_role('tab')).to_have_count(2)
+            settle_workspace(workspace)
+            business = page.get_by_role('region', name='Business area', exact=True)
+            header = business.locator('header[aria-label="Application navigation"]')
+            geometry = business.get_by_role('main').evaluate('''main => {
+              const body = main.parentElement;
+              const header = document.querySelector('header[aria-label="Application navigation"]');
+              const sidebar = body.firstElementChild;
+              const style = node => getComputedStyle(node);
+              const card = style(document.documentElement).getPropertyValue('--color-card').trim().split(' ').filter(Boolean).join(', ');
+              return {theme:document.documentElement.dataset.theme,
+                canvas:style(main).backgroundColor, shell:style(header).backgroundColor,
+                inputColor:style(main.querySelector('input:not([type=file])')).backgroundColor,
+                panelColor:style(main.querySelector('.files-page-content').firstElementChild).backgroundColor,
+                cardColor:'rgb(' + card + ')',
+                selectedToken:style(document.documentElement).getPropertyValue('--color-selected').trim().split(' ').filter(Boolean).join(', '),
+                selectedTab:style(document.querySelector('#talos-right-workspace [role=tab][aria-selected=true]').parentElement).backgroundColor,
+                outerRadius:style(body).borderTopLeftRadius, innerRadius:style(main).borderTopLeftRadius,
+                sidebarRadius:style(sidebar).borderTopRightRadius,
+                splitDelta:main.getBoundingClientRect().left-header.getBoundingClientRect().left,
+                headerPadding:style(header).paddingLeft,
+                workspaceWidth:document.querySelector('#talos-right-workspace').getBoundingClientRect().width};
+            }''')
+            require(geometry['theme'] == theme, 'Persisted theme was not applied')
+            require(geometry['workspaceWidth'] == 480, 'Workspace opening default compressed the main canvas')
+            require(geometry['selectedTab'] == 'rgb(' + geometry['selectedToken'] + ')', 'Resource selection diverged from shared state colors')
+            require(geometry['canvas'] != geometry['shell'], 'Theme flattened canvas and shell')
+            require(geometry['inputColor'] == geometry['cardColor'], 'Input fell back to native browser colors')
+            require(geometry['panelColor'] not in ('transparent', 'rgba(0, 0, 0, 0)'), 'Panel color utility did not produce a background')
+            require(geometry['outerRadius'] == '12px' and geometry['innerRadius'] == '0px' and geometry['sidebarRadius'] == '0px', 'Outer and internal corners lost their roles')
+            require(abs(geometry['splitDelta']) <= 1, 'Sidebar header and body boundaries diverged')
+            require(geometry['headerPadding'] == '24px', 'Main title lost its inset')
+            new_tab = workspace.get_by_role('button', name='New webpage tab', exact=True)
+            expand = workspace.get_by_role('button', name='Expand workspace', exact=True)
+            require(new_tab.bounding_box()['x'] < expand.bounding_box()['x'], 'Workspace changed its tab/control order')
+            expect(header).to_be_visible()
+            page.screenshot(path=str(REPORT / ('workspace-theme-' + theme + '.png')), full_page=True)
+            handle = workspace.get_by_role('separator', name='Resize workspace', exact=True)
+            box = handle.bounding_box()
+            page.mouse.move(box['x'] + box['width'] / 2, box['y'] + 100)
+            page.mouse.down()
+            page.mouse.move(box['x'] + box['width'] / 2 - 96, box['y'] + 100, steps=6)
+            page.mouse.up()
+            settle_workspace(workspace)
+            resized = workspace.bounding_box()['width']
+            require(abs(resized - 576) <= 1, 'Workspace drag no longer adjusts the compact opening width')
+            workspace.get_by_role('button', name='Hide workspace (2 open windows)', exact=True).click()
+            page.get_by_role('button', name='Show workspace (2 open windows)', exact=True).click()
+            settle_workspace(workspace)
+            require(abs(workspace.bounding_box()['width'] - resized) <= 1, 'Reopening replaced the explicit drag width with the default')
+            workspace.get_by_role('button', name='Expand workspace', exact=True).click()
+            require(workspace.evaluate('node => getComputedStyle(node, "::backdrop").backgroundColor') == 'rgba(0, 0, 0, 0)', 'Expanded workspace tinted the Computer rail')
+            page.keyboard.press('Escape')
+            expect(workspace).not_to_be_visible()
+            page.get_by_role('button', name='Show workspace (2 open windows)', exact=True).click()
+            page.set_viewport_size({'width': 820, 'height': 900})
+            page.wait_for_function('document.querySelector("#talos-right-workspace")?.matches(":modal")')
+            require(workspace.evaluate('node => getComputedStyle(node, "::backdrop").backgroundColor') == 'rgba(0, 0, 0, 0)', 'Narrow workspace tinted the Computer rail')
+            page.keyboard.press('Escape')
+            page.set_viewport_size({'width': 1560, 'height': 1000})
+            geometry['resizedWidthRetained'] = resized
+            geometry['expandedAndNarrowBackdrop'] = 'transparent'
+            observations.append(geometry)
+            page.get_by_role('button', name='alice', exact=True).click()
+            page.get_by_role('button', name='Log out', exact=True).click()
+            expect(page.get_by_role('heading', name='Signed out of Talos', exact=True)).to_be_visible()
+            page.screenshot(path=str(REPORT / ('auth-theme-' + theme + '.png')), full_page=True)
+        finally:
+            context.close()
+    (REPORT / 'workspace-theme-geometry.json').write_text(json.dumps(observations, indent=2) + '\n')
 
 
 def sidebar_focus(page, prefix):
@@ -277,6 +363,7 @@ def run(cluster):
             expect(page.locator('#talos-right-workspace')).to_have_count(0)
             require(not first.evaluate('(frame) => frame.isConnected'), 'Account scope change retained a private preview frame')
             require(not errors, 'Unexpected product runtime errors: ' + repr(errors))
+            theme_geometry(browser, url, cluster.users['alice']['access_token'])
             browser.close()
     finally:
         preview.shutdown()

@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, Search } from "lucide-react";
@@ -60,7 +61,7 @@ export function MemoryPage() {
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1180px] flex-col px-8 py-8">
-          <Panel className="mb-6 rounded-[var(--radius-panel)] border-border/75 bg-card/88 p-4">
+          <Panel className="mb-6 rounded-[var(--radius-panel)] border-border/75 bg-card/[0.88] p-4">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
               <div>
                 <label className="block text-[11px] uppercase tracking-[0.22em] text-muted/80">
@@ -72,7 +73,7 @@ export function MemoryPage() {
                     size={14}
                   />
                   <Input
-                    className="h-12 rounded-[var(--radius-control)] border-border/65 bg-background/82 pl-10"
+                    className="h-12 rounded-[var(--radius-control)] border-border/65 bg-card pl-10"
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder={t("memory:searchPlaceholder")}
                     value={query}
@@ -91,7 +92,7 @@ export function MemoryPage() {
 
           <div className="grid gap-6 xl:grid-cols-[348px_minmax(0,1fr)]">
             <div className="space-y-4">
-              <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-card/78 p-2.5">
+              <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-card/[0.78] p-2.5">
                 <div className="mb-2 flex items-center justify-between px-2 pt-2 text-[11px] uppercase tracking-[0.22em] text-muted/80">
                   {showingSearch ? t("memory:matchingFiles") : t("memory:recentFiles")}
                   <span className="rounded-[var(--radius-control)] border border-border/65 bg-background/65 px-2 py-0.5 text-[10px] tracking-[0.16em]">
@@ -109,8 +110,8 @@ export function MemoryPage() {
                         className={[
                           "w-full rounded-[var(--radius-control)] border px-3.5 py-3 text-left transition",
                           selectedDate === date
-                            ? "border-border/80 bg-background/88 text-ink shadow-[0_10px_24px_rgba(95,84,64,0.045)]"
-                            : "border-transparent text-muted hover:border-border/60 hover:bg-background/55",
+                            ? `shadow-none ${selectionClasses.selected} ${selectionClasses.border}`
+                            : `border-transparent hover:border-border/60 ${selectionClasses.idle}`,
                         ].join(" ")}
                         key={date}
                         onClick={() => selectDate(date)}
@@ -147,7 +148,7 @@ export function MemoryPage() {
 
                   <div className="mt-5 space-y-3">
                     {isLoadingMemory ? (
-                      <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+                      <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/[0.38] px-3.5 py-4 text-sm text-muted">
                         {t("common:loading")}
                       </div>
                     ) : null}
@@ -180,13 +181,13 @@ export function MemoryPage() {
                       </div>
                     ) : null}
                     {searchResults.length === 0 && !searchBusy ? (
-                      <div className="rounded-[var(--radius-control)] border border-dashed border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+                      <div className="rounded-[var(--radius-control)] border border-dashed border-border/65 bg-background/[0.38] px-3.5 py-4 text-sm text-muted">
                         {t("memory:nothingMatched")}
                       </div>
                     ) : (
                       searchResults.map((result) => (
                         <button
-                          className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-background/74"
+                          className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-hover"
                           key={result.memoryId}
                           onClick={() => selectMemory(result.memoryId)}
                           type="button"
@@ -221,11 +222,11 @@ export function MemoryPage() {
                     </div>
                     {canEdit ? (
                       <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-border/70 bg-background/48 p-1">
+                        <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-border/70 bg-background/[0.48] p-1">
                           <button
                             className={[
                               "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-                              viewMode === "preview" ? "bg-card text-ink shadow-panel" : "text-muted hover:text-ink",
+                              viewMode === "preview" ? selectionClasses.selected : selectionClasses.idle,
                             ].join(" ")}
                             onClick={() => setViewMode("preview")}
                             type="button"
@@ -235,7 +236,7 @@ export function MemoryPage() {
                           <button
                             className={[
                               "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-                              viewMode === "edit" ? "bg-card text-ink shadow-panel" : "text-muted hover:text-ink",
+                              viewMode === "edit" ? selectionClasses.selected : selectionClasses.idle,
                             ].join(" ")}
                             onClick={() => setViewMode("edit")}
                             type="button"
@@ -255,12 +256,12 @@ export function MemoryPage() {
 
                   {viewMode === "edit" && canEdit ? (
                     <Textarea
-                      className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.32),rgba(255,255,255,0.16))] font-mono text-sm leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                      className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border bg-card font-mono text-sm leading-6 shadow-none"
                       onChange={(event) => setEditorContent(event.target.value)}
                       value={editorContent}
                     />
                   ) : (
-                    <div className="mt-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/36 p-5">
+                    <div className="mt-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/[0.36] p-5">
                       {selectedDetail.content.trim() ? (
                         <MarkdownRenderer className="markdown-body prose prose-sm max-w-none" text={selectedDetail.content} />
                       ) : (

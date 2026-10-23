@@ -183,7 +183,7 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
     </header>
     {remote ? <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface/25 p-4 sm:p-5">
       <div className="my-auto w-full shrink-0 self-center" style={expanded ? { maxWidth: "min(1440px, calc((100dvh - 312px) * 1.6))" } : undefined}>
-        <div className="relative aspect-[16/10] w-full overflow-hidden rounded-xl border border-border/70 bg-surface shadow-[0_8px_28px_-16px_rgb(0_0_0_/_0.22)]">
+        <div className="relative aspect-[16/10] w-full overflow-hidden rounded-xl border border-border/70 bg-surface shadow-none">
           <div ref={screen} role="group" tabIndex={connected ? 0 : -1}
             onFocus={(event) => { if (event.target === event.currentTarget && ownController) client.current?.focus(); }}
             onKeyDownCapture={(event) => {

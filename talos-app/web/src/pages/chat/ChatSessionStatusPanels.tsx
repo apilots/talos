@@ -25,7 +25,7 @@ export function ChatSessionErrorPanel({
   title: string;
 }) {
   return (
-    <Panel className="rounded-[1.5rem] border-danger/30 bg-danger/5 p-4">
+    <Panel className="rounded-[var(--radius-panel)] border-danger/30 bg-danger/5 p-4">
       <div className="text-sm font-medium text-danger">{title}</div>
       {detail ? <div className="mt-1 text-xs leading-5 text-muted">{detail}</div> : null}
     </Panel>

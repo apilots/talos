@@ -5,46 +5,57 @@
 @tailwind utilities;
 
 :root {
-  --color-background: 18 18 18;
-  --color-sidebar: 24 24 24;
-  --color-card: 30 30 30;
-  --color-border: 48 48 48;
-  --color-surface: 38 38 38;
-  --color-selected: 38 38 38;
-  --color-ink: 242 242 242;
-  --color-muted: 156 156 156;
-  --color-brand: 224 224 224;
-  --color-brand-dim: 38 38 38;
+  --color-background: 24 26 29;
+  --color-overlay: 0 0 0;
+  --overlay-opacity: 0.24;
+  --color-sidebar: 39 42 46;
+  --color-card: 32 35 40;
+  --color-border: 61 67 75;
+  --color-divider: 52 58 66;
+  --color-header-border: 67 73 82;
+  --color-surface: 39 42 46;
+  --color-hover: 47 50 55;
+  --color-selected: 54 58 64;
+  --color-selected-border: 85 90 98;
+  --color-action-hover: 210 216 225;
+  --color-ink: 233 236 240;
+  --color-muted: 192 200 210;
+  --color-brand: 233 236 240;
+  --color-brand-dim: 53 60 70;
   --color-warning: 224 161 59;
   --color-danger: 227 93 93;
   --color-success: 94 234 212;
   --color-info: 125 211 252;
-  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(48, 48, 48, 0.9);
-  --radius-panel: 1.18rem;
-  --radius-control: 0.84rem;
+  --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.2);
+  --radius-panel: 0.75rem;
+  --radius-control: 0.625rem;
   color: rgb(var(--color-ink));
   background: rgb(var(--color-background));
   font-family: "IBM Plex Sans", -apple-system, sans-serif;
 }
 
 :root[data-theme="light"] {
+  --overlay-opacity: 0.14;
   --color-background: 255 255 255;
   --color-sidebar: 250 250 250;
   --color-card: 255 255 255;
-  --color-border: 230 230 230;
-  --color-surface: 248 248 248;
-  --color-selected: 236 236 236;
-  --color-ink: 32 32 32;
-  --color-muted: 119 119 119;
-  --color-brand: 48 48 48;
-  --color-brand-dim: 242 242 242;
+  --color-border: 233 236 239;
+  --color-divider: 234 237 240;
+  --color-header-border: 225 228 232;
+  --color-surface: 250 250 250;
+  --color-hover: 244 245 246;
+  --color-selected: 236 238 240;
+  --color-selected-border: 201 205 210;
+  --color-action-hover: 61 67 75;
+  --color-ink: 40 44 50;
+  --color-muted: 95 103 114;
+  --color-brand: 40 44 50;
+  --color-brand-dim: 233 236 239;
   --color-warning: 171 126 56;
   --color-danger: 179 79 79;
   --color-success: 44 127 109;
   --color-info: 63 118 168;
-  --shadow-panel:
-    0 12px 30px rgba(32, 32, 32, 0.055),
-    0 0 0 1px rgba(230, 230, 230, 0.85);
+  --shadow-panel: 0 8px 24px rgba(40, 44, 50, 0.055);
 }
 
 * {
@@ -79,6 +90,11 @@ select {
   font: inherit;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: rgb(var(--color-brand));
+}
+
 #root {
   min-height: 100vh;
 }
@@ -89,7 +105,12 @@ select {
 }
 
 @layer components {
-  .sidebar-interactive-row:hover,
+  .sidebar-interactive-row:hover {
+    background-color: rgb(var(--color-hover));
+  }
+
+  .sidebar-interactive-row[aria-current="page"]:hover,
+  .sidebar-interactive-row[data-selected="true"]:hover,
   .sidebar-interactive-row[aria-current="page"],
   .sidebar-interactive-row[data-selected="true"] {
     background-color: rgb(var(--color-selected));

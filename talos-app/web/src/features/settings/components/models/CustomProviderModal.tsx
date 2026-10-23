@@ -60,7 +60,7 @@ export function CustomProviderModal({ initial, onSave, onClose }: {
             <Button disabled={!name.trim() || !baseUrl.trim()} type="submit">{t("modelsPanel.save")}</Button>
           </div>
         </form>
-        <DialogClose asChild><button aria-label={t("common:close")} className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-full text-muted outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-brand/20" type="button"><X aria-hidden size={18} /></button></DialogClose>
+        <DialogClose asChild><button aria-label={t("common:close")} className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-full text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/20" type="button"><X aria-hidden size={18} /></button></DialogClose>
       </DialogContent>
     </Dialog>
   );

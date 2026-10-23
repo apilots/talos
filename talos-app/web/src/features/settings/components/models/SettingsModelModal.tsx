@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import type { ModelSpeed, ReasoningEffort } from "@talos/sdk-browser";
 import { Brain, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -84,7 +85,7 @@ export function SettingsModelModal({
           <div className="col-span-2">
             <div className="mb-2 text-sm font-medium text-ink">{t("modelsPanel.caps")}</div>
             <div className="flex flex-wrap gap-2">
-              <label className={["flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition select-none", form.reasoning ? "border-ink bg-ink text-background" : "border-border/60 bg-background/40 text-muted hover:border-ink/40 hover:text-ink"].join(" ")}>
+              <label className={["flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition select-none", form.reasoning ? `${selectionClasses.selected} ${selectionClasses.border}` : `border-border/60 bg-background/40 hover:border-selectedBorder ${selectionClasses.idle}`].join(" ")}>
                 <input
                   checked={form.reasoning}
                   className="hidden"
@@ -98,7 +99,7 @@ export function SettingsModelModal({
                 const checked = form.input.includes(kind);
                 const KindIcon = INPUT_KIND_ICONS[kind];
                 return (
-                  <label key={kind} className={["flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition select-none", checked ? "border-ink bg-ink text-background" : "border-border/60 bg-background/40 text-muted hover:border-ink/40 hover:text-ink"].join(" ")}>
+                  <label key={kind} className={["flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition select-none", checked ? `${selectionClasses.selected} ${selectionClasses.border}` : `border-border/60 bg-background/40 hover:border-selectedBorder ${selectionClasses.idle}`].join(" ")}>
                     <input
                       checked={checked}
                       className="hidden"
@@ -122,7 +123,7 @@ export function SettingsModelModal({
           {allowReasoningReplay && <ReasoningReplaySelect value={form.reasoning_replay} onChange={(reasoning_replay) => onChange({ ...form, reasoning_replay })} />}
         </RequestParametersEditor>
         {error ? (
-          <div className="mt-4 rounded-[1rem] border border-danger/20 bg-danger/8 px-4 py-3 text-sm text-danger" role="alert">
+          <div className="mt-4 rounded-[1rem] border border-danger/20 bg-danger/[0.08] px-4 py-3 text-sm text-danger" role="alert">
             {error}
           </div>
         ) : null}
@@ -132,7 +133,7 @@ export function SettingsModelModal({
             {saving ? t("modelsPanel.saving") : t("modelsPanel.save")}
           </Button>
         </div>
-        <DialogClose asChild><button aria-label={t("common:close")} className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-full text-muted outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-brand/20" type="button"><X aria-hidden size={18} /></button></DialogClose>
+        <DialogClose asChild><button aria-label={t("common:close")} className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-full text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/20" type="button"><X aria-hidden size={18} /></button></DialogClose>
       </DialogContent>
     </Dialog>
   );

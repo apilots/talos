@@ -116,7 +116,7 @@ export function SettingsLlmConfigEditor() {
 
   if (error) {
     return (
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
         <div className="text-sm text-danger">{userVisibleErrorMessage(error, "Request failed.")}</div>
       </Panel>
     );
@@ -124,7 +124,7 @@ export function SettingsLlmConfigEditor() {
 
   if (isLoading || !draft || !serverRead) {
     return (
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
         <div className="text-sm text-muted">{t("modelsPanel.loading")}</div>
       </Panel>
     );
@@ -137,7 +137,7 @@ export function SettingsLlmConfigEditor() {
   const activeProviderCapabilities = customProvider ? { default_protocol: customProvider.protocol ?? "chat", protocols: CUSTOM_PROTOCOLS } : serverRead.provider_capabilities[activeProvider];
   if (!activeProviderCapabilities || !selectedConfig) {
     return (
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
         <div className="text-sm text-danger">
           {t("modelsPanel.providerCapabilitiesMissing", { provider: activeProvider })}
         </div>
@@ -146,7 +146,7 @@ export function SettingsLlmConfigEditor() {
   }
 
   return (
-    <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
       {/* Title */}
       <div className="mb-5">
         <div className="text-sm font-medium text-ink">{t("modelsPanel.title")}</div>

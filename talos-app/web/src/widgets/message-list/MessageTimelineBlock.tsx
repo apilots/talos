@@ -357,7 +357,7 @@ function TimelineTextContent({
   }
   return (
     <p
-      className={`min-w-0 whitespace-pre-wrap break-words text-sm leading-6 ${role === "thinking" ? "text-muted" : "text-ink/82"}`}
+      className={`min-w-0 whitespace-pre-wrap break-words text-sm leading-6 ${role === "thinking" ? "text-muted" : "text-ink/[0.82]"}`}
       data-timeline-text="true"
     >
       {text}

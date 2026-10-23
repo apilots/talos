@@ -31,7 +31,7 @@ export function SettingsServerConnectionPanel({
   const hasChanges = draft.authToken !== connection.authToken;
 
   return (
-    <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/88 p-6">
+    <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/[0.88] p-6">
       <SectionHeader
         icon={<ServerCog size={18} />}
         subtitle={t("settings:serverDetail")}

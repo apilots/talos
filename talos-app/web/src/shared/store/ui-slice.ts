@@ -5,7 +5,7 @@ import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type WorkspaceWindow 
 export type UiTheme = "dark" | "light";
 export type Locale = "en" | "zh-CN";
 export const SIDEBAR_WIDTH = { initial: 296, min: 224, max: 480 } as const;
-export const WORKSPACE_WIDTH = { min: 360, max: 1040 } as const;
+export const WORKSPACE_WIDTH = { initial: 480, min: 360, max: 1040 } as const;
 export type ResizingPane = "sidebar" | "workspace" | null;
 
 export interface UiSlice {

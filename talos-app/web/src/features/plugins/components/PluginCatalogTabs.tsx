@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -40,8 +41,8 @@ function TabButton({
       className={cn(
         "inline-flex h-9 items-center rounded-[0.55rem] border px-3 text-sm transition-colors",
         active
-          ? "border-ink bg-ink text-background shadow-sm"
-          : "border-transparent text-muted hover:border-border/80 hover:text-ink",
+          ? `${selectionClasses.selected} ${selectionClasses.border}`
+          : `border-transparent ${selectionClasses.idle}`,
       )}
       onClick={onClick}
       type="button"
