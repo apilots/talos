@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildToolResultModel } from "./ToolResultRenderer";
 
 describe("buildToolResultModel", () => {
+  it("renders the saved Bash log reference and capture completeness on replay", () => {
+    const model = buildToolResultModel({ contentItems: [{
+      type: "bash_output", session_id: null, status: "failed", exit_code: 7,
+      stdout: "FINAL ERROR\n", stderr: "", truncated: true, elapsed_ms: 100,
+      outputLog: { path: "/workspace/user/tool-output/s/t/c/output.log", relativePath: "tool-output/s/t/c/output.log",
+        totalBytes: 5000000, storedBytes: 5000000, totalLines: 300000, captureStatus: "complete", expiresAt: 1900000000 },
+    }], progress: [], status: "error" });
+    const html = renderToStaticMarkup(model.body);
+    expect(html).toContain("FINAL ERROR");
+    expect(html).toContain("/workspace/user/tool-output/s/t/c/output.log");
+    expect(html).toContain("5000000 / 5000000 bytes saved");
+    expect(html).toContain("complete");
+  });
+
+  it("renders byte continuation without inventing total line counts", () => {
+    const model = buildToolResultModel({ contentItems: [{ type: "file_read", path: "/logs/output.log",
+      offset: 0, limit: 0, total_lines: null, nextByteOffset: 4096, content: "fragment", truncated: true }],
+      progress: [], status: "done" });
+    const html = renderToStaticMarkup(model.body);
+    expect(html).toContain("byte range");
+    expect(html).toContain("byte_offset=4096");
+    expect(html).not.toContain("NaN");
+  });
   it("preserves error status for text result items", () => {
     const model = buildToolResultModel({
       contentItems: [{ type: "text", text: "permission denied" }],
@@ -25,6 +49,7 @@ describe("buildToolResultModel", () => {
         stderr: "",
         truncated: false,
         elapsed_ms: 240,
+        outputLog: null,
       }],
       progress: [],
       status: "done",

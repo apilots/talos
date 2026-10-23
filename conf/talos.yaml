@@ -90,9 +90,14 @@ agent:
         default_list_limit: 200
         default_read_limit: 200
         default_search_limit: 200
-      local_exec:
+      bash:
         default_timeout_ms: 60000
         max_output_bytes: 65536
+        output_log:
+          max_file_bytes: 67108864
+          max_workspace_bytes: 5368709120  # 5 GiB per user Workspace
+          retention_days: 7
+          cleanup_interval_secs: 3600  # Worker-owned hourly maintenance
       mcp_runtime:
         enable_resource_tools: true
         enable_tools: true

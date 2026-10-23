@@ -11,6 +11,30 @@ use crate::{
     ToolSandboxDecision, ToolSandboxEnvironment, ToolSandboxOperationKind, ToolSandboxRequest,
 };
 
+#[tokio::test]
+async fn streaming_read_is_authorized_and_the_descriptor_cannot_write() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    let path = workspace.path().join("input.log");
+    std::fs::write(&path, b"safe").unwrap();
+    let handle = file_system_handle(
+        &workspace,
+        UserPermissionMode::AskForApproval,
+        FileSystemPermissionLevel::ReadOnly,
+        Vec::new(),
+    );
+    assert!(handle.open_read(outside.path()).await.is_err());
+    let mut file = handle.open_read(&path).await.unwrap();
+    let mut bytes = [0; 4];
+    file.read_exact(&mut bytes).await.unwrap();
+    assert_eq!(&bytes, b"safe");
+    // Tokio can buffer a failed write, so flush is part of the assertion.
+    let write = file.write_all(b"unsafe").await;
+    assert!(write.is_err() || file.flush().await.is_err());
+    assert_eq!(std::fs::read(path).unwrap(), b"safe");
+}
+
 fn file_system_handle(
     workspace: &TempDir,
     mode: UserPermissionMode,

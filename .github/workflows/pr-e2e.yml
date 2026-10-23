@@ -82,6 +82,9 @@ jobs:
       - name: Test E2E discovery, lifecycle and binary reuse
         run: python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
 
+      - name: Test Bash output persistence and bounded log retrieval
+        run: just e2e-case 06_tools/output_logs
+
       - name: Test isolated current-checkout Docker contexts
         run: python3 -m unittest discover -s talos-e2e/scripts/computer_sync -p '*_test.py' -v
 

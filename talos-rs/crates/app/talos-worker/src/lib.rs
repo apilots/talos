@@ -6,6 +6,7 @@
 mod config;
 mod harness;
 mod mcp;
+mod output_logs;
 mod provider;
 mod registration;
 mod resource_binding;

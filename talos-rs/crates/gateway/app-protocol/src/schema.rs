@@ -547,6 +547,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::ToolArguments>());
     output.push_str(&export::<talos_types::talos::DynamicToolArguments>());
     output.push_str(&export::<talos_types::talos::ToolExecutionResult>());
+    output.push_str(&export::<talos_types::talos::BashOutputCaptureStatus>());
+    output.push_str(&export::<talos_types::talos::BashOutputLog>());
     output.push_str(&export::<talos_types::talos::TalosContentItem>());
     output.push_str(&export::<talos_types::talos::TalosToolTaskStatus>());
     output.push_str(&export::<talos_types::talos::TalosToolFileDiff>());

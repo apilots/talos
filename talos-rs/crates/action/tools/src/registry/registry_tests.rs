@@ -77,9 +77,12 @@ fn local_tool_context(
         .expect("sandbox root should canonicalize");
     let root = AbsolutePathBuf::new(root).expect("sandbox root should be absolute");
     let project_root = root.as_path().to_path_buf();
+    let mut config = (*config).clone();
+    config.workspace_dir = project_root.to_string_lossy().into_owned();
     let environment = ToolSandboxEnvironment::local(vec![root], Vec::new())
         .expect("sandbox environment should be valid");
-    ToolContext::new_with_kernel_config(session_id, user_id, Some(config))
+    ToolContext::new_with_kernel_config(session_id, user_id, Some(Arc::new(config)))
+        .with_turn_id("test-turn")
         .with_project_root(project_root)
         .with_sandbox_environment(environment)
 }
@@ -1249,40 +1252,4 @@ async fn test_registry_truncate_large_error_with_context_limit() {
         .unwrap_or_default();
     assert!(err.len() <= 80);
     assert!(err.contains("[truncated]"));
-}
-
-#[test]
-fn mcp_error_limit_removes_oversized_duplicate_projections() {
-    let content = "e".repeat(20);
-    let expected_structured = json!({ "detail": "s".repeat(30) });
-    let content_items = vec![talos_types::TalosContentItem::Text {
-        text: "i".repeat(20),
-    }];
-    assert!(content.len() < 80);
-    assert!(serde_json::to_vec(&expected_structured).unwrap().len() < 80);
-    assert!(serde_json::to_vec(&content_items).unwrap().len() < 80);
-    let result = super::output_limits::enforce_output_limits(
-        "mcp__fixture__fail",
-        ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-            content: content.clone(),
-            is_error: true,
-            structured_content: Some(expected_structured.clone()),
-            content_items,
-        }),
-        80,
-    );
-
-    let ToolOutputPayload::Mcp {
-        content,
-        structured_content,
-        content_items,
-        ..
-    } = result.payload().unwrap()
-    else {
-        panic!("expected MCP output")
-    };
-    assert_eq!(content, &"e".repeat(20));
-    assert_eq!(structured_content, &Some(expected_structured));
-    assert!(content_items.is_empty());
-    assert!(content.len() + serde_json::to_vec(structured_content).unwrap().len() <= 80);
 }

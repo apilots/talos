@@ -332,7 +332,10 @@ pub enum TalosContentItem {
         path: String,
         offset: usize,
         limit: usize,
-        total_lines: usize,
+        total_lines: Option<usize>,
+        #[serde(default, rename = "nextByteOffset")]
+        #[ts(rename = "nextByteOffset", type = "number | null")]
+        next_byte_offset: Option<u64>,
         content: String,
         truncated: bool,
     },
@@ -363,6 +366,9 @@ pub enum TalosContentItem {
         #[serde(default)]
         #[ts(type = "number | null")]
         elapsed_ms: Option<u64>,
+        #[serde(default, rename = "outputLog")]
+        #[ts(rename = "outputLog")]
+        output_log: Option<BashOutputLog>,
     },
     WebReference {
         url: String,
@@ -408,6 +414,37 @@ pub enum TalosContentItem {
         #[ts(type = "number | null")]
         elapsed_ms: Option<u64>,
     },
+}
+
+/// A bounded reference to output on the Session's executing Computer.
+/// Paths are relative to the already user-scoped Workspace and resolved there;
+/// the absolute path lets existing Read/Grep work independently of project CWD.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct BashOutputLog {
+    pub path: String,
+    pub relative_path: String,
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+    #[ts(type = "number")]
+    pub stored_bytes: u64,
+    #[ts(type = "number")]
+    pub total_lines: u64,
+    pub capture_status: BashOutputCaptureStatus,
+    #[ts(type = "number")]
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum BashOutputCaptureStatus {
+    Capturing,
+    Complete,
+    QuotaLimited,
+    Interrupted,
+    WriteFailed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

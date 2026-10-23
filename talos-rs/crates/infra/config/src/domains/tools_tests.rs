@@ -4,6 +4,24 @@ use super::{
 };
 
 #[test]
+fn bash_log_partial_config_preserves_defaults_and_rejects_invalid_quotas() {
+    let mut config: super::BashOutputLogConfig =
+        serde_json::from_value(serde_json::json!({"retention_days": 2})).unwrap();
+    assert_eq!(config.max_file_bytes, 64 * 1024 * 1024);
+    assert_eq!(config.max_workspace_bytes, 5 * 1024 * 1024 * 1024);
+    assert_eq!(config.cleanup_interval_secs, 3600);
+    assert!(config.validate().is_ok());
+    config.max_workspace_bytes = config.max_file_bytes;
+    assert!(config
+        .validate()
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::InvalidRequest));
+    config.max_workspace_bytes = 1024 * 1024 * 1024;
+    config.retention_days = 0;
+    assert!(config.validate().is_err());
+}
+
+#[test]
 fn collaboration_tools_are_enabled_by_default() {
     let config = ToolsRuntimeConfig::default();
     assert!(config.enable_collaboration_tools);
@@ -156,4 +174,41 @@ fn web_search_provider_config_deserializes_from_snake_case() {
         config.web_search.tavily.base_url.as_deref(),
         Some("https://tavily.example")
     );
+}
+
+#[test]
+fn bash_config_rejects_old_name_and_zero_cleanup_interval() {
+    assert!(
+        serde_json::from_value::<ToolsRuntimeConfig>(serde_json::json!({"local_exec": {}}))
+            .is_err()
+    );
+    let mut config = super::BashOutputLogConfig {
+        cleanup_interval_secs: 0,
+        ..super::BashOutputLogConfig::default()
+    };
+    assert!(config.validate().is_err());
+    config.cleanup_interval_secs = u64::MAX;
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn maintained_yaml_templates_publish_identical_bash_log_defaults() {
+    for name in [
+        "conf/talos.yaml",
+        "conf/talos-dev.yaml",
+        "conf/talos-prod.yaml",
+        "deploy/docker/talos-server/talos.yaml.example",
+        "deploy/docker/talos-worker/talos.yaml.example",
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../..")
+            .join(name);
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let tools = &value["agent"]["kernel"]["tools"];
+        assert!(tools.get("local_exec").is_none());
+        let config: super::BashOutputLogConfig =
+            serde_yaml::from_value(tools["bash"]["output_log"].clone()).unwrap();
+        assert_eq!(config, super::BashOutputLogConfig::default());
+    }
 }

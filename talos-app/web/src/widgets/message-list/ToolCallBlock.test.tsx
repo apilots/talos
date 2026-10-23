@@ -92,6 +92,7 @@ describe("ToolCallBlock", () => {
           stderr: "",
           truncated: false,
           elapsed_ms: 240,
+          outputLog: null,
         }]}
         progress={[]}
         status="done"

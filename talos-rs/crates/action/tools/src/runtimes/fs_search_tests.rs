@@ -1,6 +1,59 @@
 use super::*;
 
 #[tokio::test]
+async fn grep_pages_are_byte_bounded_and_counts_and_path_modes_omit_content() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("verbose.log");
+    std::fs::write(&path, format!("needle{}\n", "x".repeat(10_000)).repeat(100)).unwrap();
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::new("grep-pages", "user").with_project_root(root.path()),
+    );
+    let mut request: GrepFilesRequest = serde_json::from_value(
+        serde_json::json!({"path":path,"pattern":"needle","output_mode":"content","limit":100}),
+    )
+    .unwrap();
+    let first = run(&request, &context).await.unwrap();
+    assert_eq!(first.total_matches, 100);
+    assert!(first.more_available);
+    assert!(!first.matches.is_empty());
+    assert!(serde_json::to_vec(&first.matches).unwrap().len() <= 8192);
+    assert!(first.matches[0].text.contains("[truncated]"));
+    request.offset = first.matches.len();
+    let second = run(&request, &context).await.unwrap();
+    assert_eq!(second.matches[0].line as usize, first.matches.len() + 1);
+    request.output_mode = GrepOutputMode::Count;
+    let count = run(&request, &context).await.unwrap();
+    assert_eq!(count.total_matches, 100);
+    assert!(count.matches.is_empty());
+    assert!(!count.more_available);
+    request.output_mode = GrepOutputMode::FilesWithMatches;
+    request.offset = 0;
+    let files = run(&request, &context).await.unwrap();
+    assert_eq!(files.total_matches, 1);
+    assert_eq!(files.matches.len(), 1);
+    assert!(files.matches[0].text.is_empty());
+    assert!(files.matches[0].before.is_empty());
+    assert!(files.matches[0].after.is_empty());
+}
+
+#[tokio::test]
+async fn giant_rg_frames_fail_explicitly_instead_of_entering_context() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("giant.log");
+    std::fs::write(&path, format!("needle{}", "x".repeat(1024 * 1024))).unwrap();
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::new("giant-grep", "user").with_project_root(root.path()),
+    );
+    let request: GrepFilesRequest = serde_json::from_value(
+        serde_json::json!({"path":path,"pattern":"needle","output_mode":"content"}),
+    )
+    .unwrap();
+    let error = run(&request, &context).await.unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::UsageLimitExceeded));
+    assert!(error.to_api_error().message.contains("byte_offset"));
+}
+
+#[tokio::test]
 async fn grep_uses_rg_and_returns_search_matches() {
     let dir = tempfile::tempdir().expect("temp dir should create");
     let file = dir.path().join("demo.rs");

@@ -1,4 +1,57 @@
 use super::*;
+use serde_json::json;
+
+#[test]
+fn model_results_bound_success_and_failure_without_raw_structured_duplicates() {
+    for success in [true, false] {
+        let path = "/workspace/user/tool-output/session/turn/call/output.log";
+        let output = ToolExecutionOutput {
+            call_id: "large-call".into(),
+            tool_name: "Bash".into(),
+            arguments: json!({}),
+            is_error: !success,
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
+                content: "raw".repeat(1_000_000),
+                success,
+                structured_content: Some(
+                    json!({"output": "raw-structured-secret".repeat(100_000)}),
+                ),
+                content_items: vec![TalosContentItem::BashOutput {
+                    session_id: None,
+                    status: if success {
+                        talos_types::TalosToolTaskStatus::Completed
+                    } else {
+                        talos_types::TalosToolTaskStatus::Failed
+                    },
+                    exit_code: Some(if success { 0 } else { 7 }),
+                    stdout: "中文\n\"".repeat(100_000),
+                    stderr: String::new(),
+                    truncated: true,
+                    elapsed_ms: Some(1),
+                    output_log: Some(talos_types::BashOutputLog {
+                        path: path.into(),
+                        relative_path: "tool-output/session/turn/call/output.log".into(),
+                        total_bytes: 1_000_000,
+                        stored_bytes: 1_000_000,
+                        total_lines: 100_000,
+                        capture_status: talos_types::BashOutputCaptureStatus::Complete,
+                        expires_at: 1_900_000_000,
+                    }),
+                }],
+            }),
+        };
+        let batch = collect_bounded_tool_batch(vec![output], &[], 2048).unwrap();
+        let message = &batch.tool_messages[0];
+        assert!(message.content.len() <= 2048);
+        let value = serde_json::from_str::<Value>(&message.content).unwrap();
+        let result = if success { &value } else { &value["result"] };
+        assert_eq!(result["outputLog"]["path"], path);
+        assert_eq!(result["outputLog"]["captureStatus"], "complete");
+        assert_eq!(result["exit_code"], if success { 0 } else { 7 });
+        assert!(!message.content.contains("raw-structured-secret"));
+        assert_eq!(batch.error_count, usize::from(!success));
+    }
+}
 
 #[test]
 fn reduce_tool_execution_output_uses_canonical_failure_envelope() {

@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolsRuntimeConfig {
     #[serde(default)]
     pub sandbox_policy: ToolSandboxPolicy,
     #[serde(default)]
-    pub local_exec: LocalExecToolConfig,
+    pub bash: BashToolConfig,
     #[serde(default)]
     pub file: FileToolConfig,
     #[serde(default)]
@@ -30,7 +31,7 @@ impl Default for ToolsRuntimeConfig {
     fn default() -> Self {
         Self {
             sandbox_policy: ToolSandboxPolicy::default(),
-            local_exec: LocalExecToolConfig::default(),
+            bash: BashToolConfig::default(),
             file: FileToolConfig::default(),
             web_search: WebSearchToolConfig::default(),
             mcp_runtime: McpToolConfig::default(),
@@ -193,18 +194,62 @@ pub struct ToolSandboxPlatformConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalExecToolConfig {
+pub struct BashToolConfig {
     #[serde(default = "default_kernel_tool_result_max_bytes")]
     pub max_output_bytes: usize,
     #[serde(default = "default_tools_exec_timeout_ms")]
     pub default_timeout_ms: u64,
+    #[serde(default)]
+    pub output_log: BashOutputLogConfig,
 }
 
-impl Default for LocalExecToolConfig {
+/// Finite node-local log retention for one already user-scoped Workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BashOutputLogConfig {
+    pub max_file_bytes: u64,
+    pub max_workspace_bytes: u64,
+    pub retention_days: u32,
+    pub cleanup_interval_secs: u64,
+}
+
+impl BashOutputLogConfig {
+    pub fn validate(&self) -> talos_error::TalosResult<()> {
+        if self.max_file_bytes == 0
+            || self.retention_days == 0
+            || self.cleanup_interval_secs == 0
+            || std::time::Instant::now()
+                .checked_add(std::time::Duration::from_secs(self.cleanup_interval_secs))
+                .is_none()
+            || self
+                .max_file_bytes
+                .checked_add(4096)
+                .is_none_or(|reservation| self.max_workspace_bytes < reservation)
+        {
+            return Err(talos_error::TalosError::new(talos_error::ErrorCode::InvalidRequest,
+                "Bash log limits must be positive and the Workspace budget must cover a log and its metadata."));
+        }
+        Ok(())
+    }
+}
+
+impl Default for BashOutputLogConfig {
+    fn default() -> Self {
+        Self {
+            max_file_bytes: 64 * 1024 * 1024,
+            max_workspace_bytes: 5 * 1024 * 1024 * 1024,
+            retention_days: 7,
+            cleanup_interval_secs: 3600,
+        }
+    }
+}
+
+impl Default for BashToolConfig {
     fn default() -> Self {
         Self {
             max_output_bytes: default_kernel_tool_result_max_bytes(),
             default_timeout_ms: default_tools_exec_timeout_ms(),
+            output_log: BashOutputLogConfig::default(),
         }
     }
 }

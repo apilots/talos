@@ -81,9 +81,9 @@ pub use domains::storage::{
 };
 pub use domains::sync::SyncConfig;
 pub use domains::tools::{
-    AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
-    LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
-    ToolSandboxNetworkConfig, ToolSandboxPlatformConfig, ToolSandboxPolicy,
+    AgentKernelMcpConfig, BashOutputLogConfig, BashToolConfig, DynamicToolConfig,
+    DynamicToolTimeoutBehavior, FileToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig,
+    ToolSandboxModeConfig, ToolSandboxNetworkConfig, ToolSandboxPlatformConfig, ToolSandboxPolicy,
     ToolUserPermissionModeConfig, ToolsRuntimeConfig, WebSearchProviderConfig,
     WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };

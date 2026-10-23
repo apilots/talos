@@ -1664,6 +1664,59 @@
       ],
       "type": "object"
     },
+    "BashOutputCaptureStatus": {
+      "enum": [
+        "capturing",
+        "complete",
+        "quotaLimited",
+        "interrupted",
+        "writeFailed"
+      ],
+      "type": "string"
+    },
+    "BashOutputLog": {
+      "description": "A bounded reference to output on the Session's executing Computer. Paths are relative to the already user-scoped Workspace and resolved there; the absolute path lets existing Read/Grep work independently of project CWD.",
+      "properties": {
+        "captureStatus": {
+          "$ref": "#/definitions/BashOutputCaptureStatus"
+        },
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "relativePath": {
+          "type": "string"
+        },
+        "storedBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "totalBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "totalLines": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "captureStatus",
+        "expiresAt",
+        "path",
+        "relativePath",
+        "storedBytes",
+        "totalBytes",
+        "totalLines"
+      ],
+      "type": "object"
+    },
     "BrowserAction": {
       "description": "Internal closed action, parsed before acquiring any browser authority.",
       "oneOf": [
@@ -11153,6 +11206,15 @@
               "minimum": 0.0,
               "type": "integer"
             },
+            "nextByteOffset": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "offset": {
               "format": "uint",
               "minimum": 0.0,
@@ -11164,7 +11226,10 @@
             "total_lines": {
               "format": "uint",
               "minimum": 0.0,
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "truncated": {
               "type": "boolean"
@@ -11181,7 +11246,6 @@
             "limit",
             "offset",
             "path",
-            "total_lines",
             "truncated",
             "type"
           ],
@@ -11283,6 +11347,17 @@
                 "integer",
                 "null"
               ]
+            },
+            "outputLog": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/BashOutputLog"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "session_id": {
               "default": null,

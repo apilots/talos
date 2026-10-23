@@ -23,6 +23,13 @@
     ]
   },
   "cases": {
+    "12_output_logs.sh": {
+      "commands": ["docker", "openssl", "python3"],
+      "python_modules": ["yaml"],
+      "checks": ["docker", "worker_image"],
+      "env": ["TALOS_E2E_WORKER_IMAGE"],
+      "binaries": ["server"]
+    },
     "01_registration.sh": {
       "commands": [
         "cargo",

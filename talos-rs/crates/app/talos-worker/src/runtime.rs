@@ -49,6 +49,7 @@ pub struct TalosWorker {
     browser: Arc<talos_browser::BrowserRuntime>,
     mcp_credentials: McpCredentialStore,
     config_service: talos_service::ConfigService,
+    output_logs: Arc<crate::output_logs::OutputLogMaintenance>,
 }
 
 impl TalosWorker {
@@ -172,6 +173,7 @@ impl TalosWorker {
             }
             let provider = match definition.provider {
                 AgentProviderConfig::Kernel { kernel } => {
+                    crate::output_logs::validate_policy(&config, &kernel)?;
                     KernelAgentProvider::new(KernelAgentProviderParams {
                         agent_id: definition.id.clone(),
                         name: definition.name,
@@ -214,6 +216,7 @@ impl TalosWorker {
             ));
         }
 
+        let output_logs_changed = Arc::new(tokio::sync::Notify::new());
         let config_service = crate::config::service(
             active_config.clone(),
             provider_router.clone(),
@@ -221,10 +224,16 @@ impl TalosWorker {
             mcp.clone(),
             mcp_credentials.clone(),
             providers,
+            output_logs_changed.clone(),
         );
         let plugin_manager = plugin_manager.with_config_service(config_service.clone());
         let system_info = talos_system_info::collect().await?;
+        let output_logs = crate::output_logs::OutputLogMaintenance::start(
+            active_config.clone(),
+            output_logs_changed,
+        );
         Ok(Self {
+            output_logs,
             system_info,
             resource_bindings,
             harnesses,
@@ -315,7 +324,11 @@ impl TalosWorker {
     }
 
     pub async fn shutdown(&self) -> TalosResult<()> {
-        let mut result = Ok(());
+        let mut result = self
+            .output_logs
+            .shutdown()
+            .await
+            .inspect_err(talos_logging::report_error);
         for (_, harness) in &self.harnesses {
             let stopped = harness
                 .shutdown(std::time::Duration::from_secs(5))

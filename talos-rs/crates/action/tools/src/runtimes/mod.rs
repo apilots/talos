@@ -110,18 +110,6 @@ pub(crate) fn map_sandbox_error(error: TalosSandboxError) -> TalosError {
     public.with_source(error)
 }
 
-pub(crate) fn truncate_prefix(text: &str, max_bytes: usize) -> (String, usize, bool) {
-    if text.len() <= max_bytes {
-        return (text.to_string(), text.len(), false);
-    }
-
-    let mut cutoff = max_bytes;
-    while cutoff > 0 && !text.is_char_boundary(cutoff) {
-        cutoff -= 1;
-    }
-    (text[..cutoff].to_string(), cutoff, true)
-}
-
 #[cfg(test)]
 #[path = "runtimes_tests.rs"]
 mod tests;

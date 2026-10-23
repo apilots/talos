@@ -83,7 +83,10 @@ fn context(
     mode: ToolUserPermissionModeConfig,
     network: ToolSandboxNetworkConfig,
 ) -> ToolContext {
-    let mut config = AgentKernelConfig::default();
+    let mut config = AgentKernelConfig {
+        workspace_dir: root.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
     config.tools.sandbox_policy.user_permission_mode = mode;
     config.tools.sandbox_policy.network = network;
     let root = root
@@ -103,6 +106,7 @@ fn context(
     .expect("sandbox environment should be valid")
     .with_readable_roots(vec![readable_root]);
     ToolContext::new_with_kernel_config("sandbox-e2e", "sandbox-e2e", Some(Arc::new(config)))
+        .with_turn_id("sandbox-e2e-turn")
         .with_project_root(root)
         .with_sandbox_environment(environment)
 }
@@ -119,6 +123,109 @@ async fn dispatch(
         .execute_invocation_with_context(invocation, context)
         .await
         .map_err(ToolDispatchFailure::into_error)
+}
+
+#[tokio::test]
+#[ignore = "run through the output_logs E2E case"]
+async fn bash_output_logs() {
+    let workspace = tempfile::tempdir().unwrap();
+    let (sandbox, _) = sandbox();
+    let tools = registry(sandbox);
+    let ctx = || {
+        context(
+            workspace.path(),
+            ToolUserPermissionModeConfig::FullAccess,
+            ToolSandboxNetworkConfig::Enabled,
+        )
+    };
+    let result = dispatch(&tools, ctx(), "capture", "Bash", json!({
+        "command": "python3 -c \"import sys; sys.stdout.write('START\\n' + 'log entry\\n' * 300000 + 'FINAL ERROR\\n'); sys.exit(7)\""
+    })).await.unwrap();
+    assert!(result.is_error());
+    let envelope = result.envelope();
+    let TalosContentItem::BashOutput {
+        output_log: Some(log),
+        stdout,
+        truncated,
+        ..
+    } = &envelope.content_items[0]
+    else {
+        panic!("persisted Bash output")
+    };
+    assert!(*truncated);
+    assert!(stdout.contains("FINAL ERROR"));
+    assert!(log.stored_bytes > 2 * 1024 * 1024);
+    assert_eq!(
+        log.capture_status,
+        talos_types::talos::BashOutputCaptureStatus::Complete
+    );
+    assert!(serde_json::to_vec(&envelope.content_items).unwrap().len() < 10_000);
+
+    let found = dispatch(
+        &tools,
+        ctx(),
+        "search",
+        "Grep",
+        json!({
+            "path": log.path, "pattern": "FINAL ERROR", "output_mode": "content", "limit": 1
+        }),
+    )
+    .await
+    .unwrap();
+    let found = found.envelope();
+    let TalosContentItem::SearchResults { matches, .. } = &found.content_items[0] else {
+        panic!("search page")
+    };
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].line, 300002);
+    let read = dispatch(
+        &tools,
+        ctx(),
+        "read-lines",
+        "Read",
+        json!({"path":log.path,"offset":matches[0].line,"limit":1}),
+    )
+    .await
+    .unwrap();
+    let read = read.envelope();
+    assert!(
+        matches!(&read.content_items[0], TalosContentItem::FileRead { content, .. } if content == "FINAL ERROR")
+    );
+
+    // A new registry has no in-memory command state, but the reference still works.
+    let (new_sandbox, _) = self::sandbox();
+    let fresh = registry(new_sandbox);
+    let first = dispatch(
+        &fresh,
+        ctx(),
+        "read-bytes",
+        "Read",
+        json!({"path":log.path,"byte_offset":0,"max_bytes":512}),
+    )
+    .await
+    .unwrap();
+    let first = first.envelope();
+    let TalosContentItem::FileRead {
+        content,
+        next_byte_offset: Some(next),
+        ..
+    } = &first.content_items[0]
+    else {
+        panic!("byte cursor")
+    };
+    assert!(content.starts_with("START\n"));
+    assert_eq!(*next, 512);
+    let next_page = dispatch(
+        &fresh,
+        ctx(),
+        "continue",
+        "Read",
+        json!({"path":log.path,"byte_offset":next,"max_bytes":512}),
+    )
+    .await
+    .unwrap();
+    assert!(!next_page.is_error());
+    assert!(std::path::Path::new(&log.path).is_file());
 }
 
 async fn dispatch_allow_once(

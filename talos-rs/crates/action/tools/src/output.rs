@@ -739,7 +739,7 @@ impl ToolResultEnvelope {
     }
 }
 
-fn structured_error_from_value(value: &Value) -> Option<ToolResultError> {
+pub(crate) fn structured_error_from_value(value: &Value) -> Option<ToolResultError> {
     let message = value
         .get("error")
         .or_else(|| value.get("message"))?

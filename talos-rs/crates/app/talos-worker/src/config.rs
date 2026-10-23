@@ -16,6 +16,7 @@ pub(crate) fn service(
     mcp: Arc<talos_mcp::TalosMcpRuntime>,
     credentials: McpCredentialStore,
     providers: Vec<(String, talos_agent_provider_kernel::KernelAgentProvider)>,
+    output_logs_changed: Arc<tokio::sync::Notify>,
 ) -> ConfigService {
     let initial = active.read().expect("Worker config lock poisoned").clone();
     let store: Arc<dyn ConfigStore> = Arc::new(YamlConfigStore::with_env_path(
@@ -88,9 +89,10 @@ pub(crate) fn service(
                     .1
                     .clone();
                 let talos_config::AgentProviderConfig::Kernel { kernel } = definition.provider;
-                (provider, kernel)
+                crate::output_logs::validate_policy(&candidate, &kernel)?;
+                Ok((provider, kernel))
             })
-            .collect::<Vec<_>>();
+            .collect::<talos_error::TalosResult<Vec<_>>>()?;
         crate::create_llm_provider(&candidate)?;
         let update = crate::prepare_mcp(
             &mcp,
@@ -101,6 +103,7 @@ pub(crate) fn service(
         let config = active.clone();
         let router = router.clone();
         let plugins = plugins.clone();
+        let output_logs_changed = output_logs_changed.clone();
         Ok(ConfigReloadPlan::new(move || {
             *config.write().expect("Worker config lock poisoned") = candidate;
             router.reload();
@@ -109,6 +112,7 @@ pub(crate) fn service(
             }
             update.publish();
             plugins.recover_credentials();
+            output_logs_changed.notify_one();
         }))
     });
     ConfigService::new(store, gate, hook)

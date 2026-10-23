@@ -125,6 +125,54 @@ pub(super) fn enforce_output_limits(
         }
     }
 
+    match payload {
+        ToolOutputPayload::Function {
+            structured_content,
+            content_items,
+            ..
+        }
+        | ToolOutputPayload::Mcp {
+            structured_content,
+            content_items,
+            ..
+        } => {
+            crate::output_budget::limit_content_items(content_items, max_output_bytes);
+            if structured_content
+                .as_ref()
+                .is_some_and(|value| serialized_size(value) > max_output_bytes)
+            {
+                // The canonical content is authoritative. Do not retain an
+                // unbounded duplicate projection for failures or program callers.
+                let error = structured_content
+                    .as_ref()
+                    .and_then(crate::output::structured_error_from_value);
+                *structured_content = error.and_then(|error| {
+                    let mut projection = serde_json::json!({
+                        "error": error.message,
+                        "error_kind": error.error_kind,
+                        "retryable": error.retryable,
+                        "suggested_action": error.suggested_action,
+                        "gate_source": error.gate_source,
+                    });
+                    let mut limited =
+                        crate::output_budget::bounded_json(projection.clone(), max_output_bytes);
+                    if !serde_json::from_str::<Value>(&limited)
+                        .is_ok_and(|value| value.get("error").is_some())
+                    {
+                        // Optional recovery prose must not crowd out the actual
+                        // error and its rejection/retry classification.
+                        let object = projection.as_object_mut().expect("error projection object");
+                        object.remove("suggested_action");
+                        object.remove("gate_source");
+                        limited = crate::output_budget::bounded_json(projection, max_output_bytes);
+                    }
+                    serde_json::from_str(&limited).ok()
+                });
+            }
+        }
+        ToolOutputPayload::Resource { .. } => {}
+    }
+
     if content_truncated || error_truncated || mcp_projections_removed {
         warn!(
             tool_name,
@@ -144,3 +192,7 @@ pub(super) fn enforce_output_limits(
 fn serialized_size(value: &impl serde::Serialize) -> usize {
     serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len())
 }
+
+#[cfg(test)]
+#[path = "output_limits_tests.rs"]
+mod tests;

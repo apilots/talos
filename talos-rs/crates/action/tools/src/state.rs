@@ -44,9 +44,13 @@ impl ReadFileStateEntry {
 pub struct ReadFileStateStore {
     seq: std::sync::atomic::AtomicU64,
     entries: DashMap<PathBuf, ReadFileStateEntry>,
+    last_ranges: DashMap<PathBuf, (usize, usize)>,
 }
 
 impl ReadFileStateStore {
+    pub fn record_read_range(&self, path: PathBuf, offset: usize, limit: usize) -> bool {
+        self.last_ranges.insert(path, (offset, limit)) == Some((offset, limit))
+    }
     pub fn record_content(&self, path: PathBuf, content: &str) -> ReadFileStateEntry {
         self.record_content_with_source(path, content, ReadFileStateSource::Read)
     }

@@ -13,6 +13,7 @@ const MAX_LIMIT: usize = 2_000;
 const MAX_LINE_LENGTH: usize = 500;
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const TAB_WIDTH: usize = 4;
+mod stream;
 
 fn default_offset() -> usize {
     1
@@ -34,6 +35,10 @@ pub struct ReadFileRequest {
     pub limit: usize,
     #[serde(default)]
     pub pages: Option<String>,
+    #[serde(default)]
+    pub byte_offset: Option<u64>,
+    #[serde(default)]
+    pub max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +46,8 @@ pub struct ReadFileResult {
     pub path: String,
     pub offset: usize,
     pub limit: usize,
-    pub total_lines: usize,
+    pub total_lines: Option<usize>,
+    pub next_byte_offset: Option<u64>,
     pub content: String,
     pub truncated: bool,
     pub unchanged: bool,
@@ -87,11 +93,25 @@ pub async fn run(request: &ReadFileRequest, context: &ToolContext) -> TalosResul
         ));
     }
 
+    let path = resolve_requested_path(request, context)?;
+    let size = context
+        .sandbox_file_system()?
+        .metadata(&path)
+        .await
+        .map_err(map_sandbox_error)?
+        .len;
+    if size > MAX_FILE_BYTES || request.byte_offset.is_some() || request.max_bytes.is_some() {
+        return stream::run(request, &path, context).await;
+    }
     let (path, content) = read_text_file(request, context).await?;
     let limit = request.limit.min(MAX_LIMIT);
     let lines = content.lines().count();
     let truncated = request.offset.saturating_sub(1) + limit < lines;
-    let unchanged = is_unchanged_read(&path, &content, context);
+    let same_range =
+        context
+            .read_file_state()
+            .record_read_range(path.clone(), request.offset, limit);
+    let unchanged = same_range && is_unchanged_read(&path, &content, context);
     let selected_content = if unchanged {
         format!("File unchanged since last read: {}", path.display())
     } else {
@@ -104,7 +124,8 @@ pub async fn run(request: &ReadFileRequest, context: &ToolContext) -> TalosResul
         path: path.display().to_string(),
         offset: request.offset.saturating_sub(1),
         limit,
-        total_lines: lines,
+        total_lines: Some(lines),
+        next_byte_offset: None,
         content: selected_content,
         truncated,
         unchanged,

@@ -128,7 +128,7 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
                     "agent",
                     "kernel",
                     "tools",
-                    "local_exec",
+                    "bash",
                     "default_timeout_ms",
                 ],
                 "90000",
