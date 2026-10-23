@@ -72,16 +72,19 @@ impl Tool for GrepTool {
                 "context": {
                     "type": "integer",
                     "minimum": 0,
+                    "maximum": 20,
                     "description": "Number of before and after context lines to include."
                 },
                 "before_context": {
                     "type": "integer",
                     "minimum": 0,
+                    "maximum": 20,
                     "description": "Number of context lines before each match."
                 },
                 "after_context": {
                     "type": "integer",
                     "minimum": 0,
+                    "maximum": 20,
                     "description": "Number of context lines after each match."
                 },
                 "multiline": {

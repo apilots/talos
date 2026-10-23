@@ -7,6 +7,7 @@ pub mod invocation;
 pub mod mcp;
 pub mod orchestrator;
 pub mod output;
+pub mod output_budget;
 pub mod registry;
 pub mod router;
 pub mod runtimes;

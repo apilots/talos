@@ -72,3 +72,24 @@ identity. Approval uses the actual Cloud Auth API. An isolated main-process CDP
 observer replaces only Electron's OS browser opener to avoid opening a user's
 browser; native auth RPCs and persistence are unchanged. Chrome uses its isolated
 profile and actual device-approval tab. Pending enrollment and saved-credential recovery remain covered by the existing registration and host tests.
+
+`12_output_logs` is local Docker topology acceptance for Bash spill files. It uses
+the existing secretless Auth/model protocol fixture, a real native Server and a
+real outbound Worker. No paid model or Cloud account is needed. The case verifies
+Worker-only user Workspace ownership, bounded model replies, Grep/Read, replacement
+of the container with its named volume retained, SIGKILL capture recovery, and
+Worker startup/periodic cleanup after persisted deletion-intent/expiry fault injection. It preserves
+an unrelated file and checks that a retained reference remains readable. These
+observations do not claim physical power-loss or multi-machine coverage. The fixture overrides only the cleanup interval to one second; product defaults remain one hour. It checks idle cleanup without Bash, failure diagnostics and graceful task start/stop logs. The
+smaller native `06_tools/output_logs` remains the hosted PR regression.
+
+Build the standard Worker image from the current checkout before running this
+case; the image is supplied and is never overwritten or removed by the runner:
+
+```bash
+python3 talos-e2e/scripts/computer_sync/image_context.py . .tmp/output-logs-image/talos
+docker build -f build/worker/Dockerfile -t talos-worker:output-logs-local .tmp/output-logs-image
+TALOS_E2E_WORKER_IMAGE=talos-worker:output-logs-local just e2e-case 18_computer_workspace/12_output_logs
+```
+
+The output-log case also seeds more than 4096 owned logs across active and offline user Workspaces while the Worker is stopped. A 3600-second interval requires one startup round to reclaim every expired fixture, preserve unexpired/unknown data, isolate malformed ownership, and recover quota after a later container replacement. Existing references are read again through the real Server/Worker route. Generic guard-task start/run/stop logs are required. The ordinary native output-log case covers retention, TTL removal and the missing-reference result in the gated Bash/Grep/Read flow.

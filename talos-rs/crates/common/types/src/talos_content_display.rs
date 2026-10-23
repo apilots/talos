@@ -36,6 +36,7 @@ impl TalosContentItem {
                 stderr,
                 exit_code,
                 status,
+                output_log,
                 ..
             } => {
                 let mut parts = Vec::new();
@@ -47,6 +48,10 @@ impl TalosContentItem {
                 }
                 if parts.is_empty() {
                     parts.push(format!("bash: {:?} exit_code={exit_code:?}", status));
+                }
+                if let Some(log) = output_log {
+                    parts.push(format!("Full output: {} ({} of {} bytes saved, {:?}; expires at {}). Use Grep or Read with offset/limit.",
+                        log.path, log.stored_bytes, log.total_bytes, log.capture_status, log.expires_at));
                 }
                 parts.join("\n")
             }

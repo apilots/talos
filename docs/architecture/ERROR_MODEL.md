@@ -138,6 +138,7 @@ Use `talos_logging::report_error` once at the handling boundary:
 | Background Turn / recovery | Service completion |
 | Request-owned compaction | Request adapter |
 | Failure converted to tool result | Agent kernel execution |
+| Bash capture failure retained alongside command status/output | Bash runtime last-reader capture finalization |
 | Failed MCP startup retained as status | MCP runtime |
 | Process startup / automation / tasks | Existing process or task owner |
 
@@ -180,3 +181,10 @@ preserves event IDs, deleted-event cursor high-water, indexes and Session cleanu
 Malformed legacy notice content aborts the transaction without marking the version.
 
 Before release, stop writers and create an access-controlled consistent SQLite backup (backup API or VACUUM INTO a new file). Verify it opens; retain matching old binaries/configuration. Rollback stops writers and restores that backup with the old binaries. This restores the backup's recovery point and loses subsequent writes; export any required newer data before rollback. Reverting binaries alone or reverse-rewriting JSON is unsafe. Tests cover repeat application, atomic rejection, and file-backed backup restoration with the old ledger.
+
+Worker output-log maintenance owns reporting of its periodic discovery, quota
+reconstruction and cleanup errors. It reports each failure once with Workspace
+scope/phase and continues independent scopes and later rounds; successful
+start/run/stop summaries contain counts and durations, never command bodies.
+Bash admission does not perform maintenance. Its quota-accounting failures keep
+the existing pre-execution/last-reader error ownership described above.

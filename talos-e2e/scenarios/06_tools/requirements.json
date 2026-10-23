@@ -17,6 +17,12 @@
     ]
   },
   "cases": {
+    "output_logs.sh": {
+      "commands": ["cargo", "protoc", "just", "cargo-nextest", "python3", "rg"],
+      "python_modules": [],
+      "binaries": ["sandbox"],
+      "checks": []
+    },
     "cli_bash.sh": {
       "binaries": [
         "cli"

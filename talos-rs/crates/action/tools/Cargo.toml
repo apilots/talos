@@ -18,6 +18,8 @@ tracing.workspace = true
 tokio.workspace = true
 talos-error = { workspace = true }
 talos-config = { workspace = true }
+talos-fs = { workspace = true }
+talos-logging = { workspace = true }
 talos-types = { workspace = true }
 talos-mcp = { workspace = true }
 talos-tools-policy = { workspace = true }

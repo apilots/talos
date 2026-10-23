@@ -21,7 +21,7 @@ impl Tool for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file from the local filesystem.\n\nUsage:\n- The file_path parameter may be absolute or workspace-relative.\n- By default, read from the beginning of the file; use offset and limit when you only need a specific section.\n- Results are returned with numbered lines starting at 1.\n- This tool reads files only, not directories. If you need path expansion or directory shape, use Glob first.\n- This tool can read images, PDFs, and Jupyter notebooks when supported.\n- Re-reading an unchanged file with the same arguments is low value; only do it when you need different line ranges or changed state."
+        "Read a file from the local filesystem.\n\nUsage:\n- The file_path parameter may be absolute or workspace-relative.\n- By default, read from the beginning of the file; use offset and limit when you only need a specific section.\n- Line offsets start at 1. Large files support bounded line ranges; use byte_offset/max_bytes for long single lines or the returned nextByteOffset cursor. Byte ranges cannot be combined with line offset/limit.\n- This tool reads files only, not directories. If you need path expansion or directory shape, use Glob first.\n- This tool can read images, PDFs, and Jupyter notebooks when supported.\n- Re-reading an unchanged file with the same arguments is low value; only do it when you need different line ranges or changed state."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -47,6 +47,8 @@ impl Tool for ReadTool {
                     "minimum": 1,
                     "description": "Maximum number of lines to return. Omit to use the default read limit."
                 },
+                "byte_offset": { "type": "integer", "minimum": 0, "description": "Raw byte position; exclusive with line offset/limit." },
+                "max_bytes": { "type": "integer", "minimum": 4, "description": "Maximum bytes of text to return; exclusive with line offset/limit." },
                 "pages": {
                     "type": "string",
                     "description": "Optional page selector reserved for PDF-oriented reads."
@@ -109,6 +111,7 @@ impl Tool for ReadTool {
                 offset: result.offset,
                 limit: result.limit,
                 total_lines: result.total_lines,
+                next_byte_offset: result.next_byte_offset,
                 content: result.content,
                 truncated: result.truncated,
             }],
@@ -117,6 +120,14 @@ impl Tool for ReadTool {
 }
 
 fn parse_read_request(input: &Value) -> TalosResult<ReadFileRequest> {
+    if (input.get("byte_offset").is_some() || input.get("max_bytes").is_some())
+        && (input.get("offset").is_some() || input.get("limit").is_some())
+    {
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            "Byte ranges and line ranges cannot be combined.",
+        ));
+    }
     let request: ReadFileRequest = serde_json::from_value(input.clone()).map_err(|err| {
         TalosError::new(
             talos_error::ErrorCode::InvalidRequest,

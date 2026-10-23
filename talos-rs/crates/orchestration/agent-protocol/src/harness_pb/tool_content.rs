@@ -24,13 +24,15 @@ pub fn encode_tool_content(value: TalosContentItem) -> TalosResult<pb::ToolConte
                 offset,
                 limit,
                 total_lines,
+                next_byte_offset,
                 content,
                 truncated,
             } => Content::FileRead(pb::FileRead {
                 path,
                 offset: offset as u64,
                 limit: limit as u64,
-                total_lines: total_lines as u64,
+                total_lines: total_lines.map(|value| value as u64),
+                next_byte_offset,
                 content,
                 truncated,
             }),
@@ -62,6 +64,7 @@ pub fn encode_tool_content(value: TalosContentItem) -> TalosResult<pb::ToolConte
                 stderr,
                 truncated,
                 elapsed_ms,
+                output_log,
             } => Content::BashOutput(pb::BashOutput {
                 session_id,
                 status: encode_task_status(status),
@@ -70,6 +73,7 @@ pub fn encode_tool_content(value: TalosContentItem) -> TalosResult<pb::ToolConte
                 stderr,
                 truncated,
                 elapsed_ms,
+                output_log: output_log.map(encode_output_log),
             }),
             TalosContentItem::WebReference {
                 url,
@@ -142,7 +146,12 @@ pub fn decode_tool_content(value: pb::ToolContent) -> TalosResult<TalosContentIt
             path: value.path,
             offset: usize::try_from(value.offset).map_err(|_| invalid())?,
             limit: usize::try_from(value.limit).map_err(|_| invalid())?,
-            total_lines: usize::try_from(value.total_lines).map_err(|_| invalid())?,
+            total_lines: value
+                .total_lines
+                .map(usize::try_from)
+                .transpose()
+                .map_err(|_| invalid())?,
+            next_byte_offset: value.next_byte_offset,
             content: value.content,
             truncated: value.truncated,
         }),
@@ -174,6 +183,7 @@ pub fn decode_tool_content(value: pb::ToolContent) -> TalosResult<TalosContentIt
             stderr: value.stderr,
             truncated: value.truncated,
             elapsed_ms: value.elapsed_ms,
+            output_log: value.output_log.map(decode_output_log).transpose()?,
         }),
         Content::WebReference(value) => Ok(TalosContentItem::WebReference {
             url: value.url,
@@ -313,4 +323,44 @@ fn decode_task_status(value: i32) -> TalosResult<TalosToolTaskStatus> {
         Ok(pb::TaskStatus::Cancelled) => Ok(TalosToolTaskStatus::Cancelled),
         _ => Err(invalid()),
     }
+}
+
+fn encode_output_log(log: talos_types::talos::BashOutputLog) -> pb::BashOutputLog {
+    use talos_types::talos::BashOutputCaptureStatus as S;
+    pb::BashOutputLog {
+        path: log.path,
+        relative_path: log.relative_path,
+        total_bytes: log.total_bytes,
+        stored_bytes: log.stored_bytes,
+        total_lines: log.total_lines,
+        expires_at: log.expires_at,
+        capture_status: match log.capture_status {
+            S::Capturing => 1,
+            S::Complete => 2,
+            S::QuotaLimited => 3,
+            S::Interrupted => 4,
+            S::WriteFailed => 5,
+        },
+    }
+}
+
+fn decode_output_log(log: pb::BashOutputLog) -> TalosResult<talos_types::talos::BashOutputLog> {
+    use talos_types::talos::BashOutputCaptureStatus as S;
+    let capture_status = match log.capture_status {
+        1 => S::Capturing,
+        2 => S::Complete,
+        3 => S::QuotaLimited,
+        4 => S::Interrupted,
+        5 => S::WriteFailed,
+        _ => return Err(invalid()),
+    };
+    Ok(talos_types::talos::BashOutputLog {
+        path: log.path,
+        relative_path: log.relative_path,
+        total_bytes: log.total_bytes,
+        stored_bytes: log.stored_bytes,
+        total_lines: log.total_lines,
+        capture_status,
+        expires_at: log.expires_at,
+    })
 }

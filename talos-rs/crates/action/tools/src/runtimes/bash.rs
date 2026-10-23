@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -14,11 +14,21 @@ use tokio::task::JoinHandle;
 
 use crate::runtimes::{
     map_sandbox_error, process_environment, resolve_base_dir, resolve_executable, resolve_path,
-    truncate_prefix,
 };
 use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
 use talos_tools_sandbox::{
     RunningToolProcess, SandboxStdin, ToolProcessCommand, ToolProcessTerminationTarget,
+};
+
+mod lifecycle;
+use lifecycle::{join_session_tasks, InvocationGuard};
+
+mod output;
+mod output_log;
+use output::OutputCapture;
+pub use output_log::{
+    maintain_bash_output_workspace, BashOutputMaintenance, OutputLogMaintenanceStats,
+    OutputLogMaintenanceStep,
 };
 
 const DEFAULT_BASH_YIELD_TIME_MS: u64 = 10_000;
@@ -62,7 +72,7 @@ pub struct BashCommandRequest {
     #[serde(default)]
     pub timeout_ms: Option<u64>,
     #[serde(default)]
-    pub max_output_tokens: Option<usize>,
+    pub max_output_bytes: Option<usize>,
     #[serde(default)]
     pub sandbox_permissions: SandboxPermissions,
     #[serde(default)]
@@ -110,6 +120,8 @@ pub struct BashSessionResponse {
     pub exit_code: Option<i32>,
     pub truncated: bool,
     pub elapsed_ms: u64,
+    pub output_log: Option<talos_types::talos::BashOutputLog>,
+    pub capture_error: Option<talos_error::ApiError>,
     #[serde(default)]
     pub output_offset: usize,
     #[serde(default)]
@@ -122,24 +134,22 @@ pub struct BashSessionResponse {
 
 struct BashSession {
     session_id: i64,
-    max_output_bytes: usize,
     termination_target: Option<ToolProcessTerminationTarget>,
     state: Mutex<BashSessionState>,
+    output: Mutex<OutputCapture>,
     notify: Notify,
     started_at: Instant,
     command_kind: BashCommandKind,
     risk: BashCommandRisk,
     progress_emitter: Option<ToolProgressEmitter>,
     cancellation: Option<crate::InvocationCancellation>,
+    reader_stop: tokio_util::sync::CancellationToken,
+    readers_remaining: AtomicUsize,
+    abandoned: AtomicBool,
     tasks: Mutex<Option<BashSessionTasks>>,
 }
 
-#[derive(Default)]
 struct BashSessionState {
-    stdout: String,
-    stderr: String,
-    output: String,
-    delivered_bytes: usize,
     exit_code: Option<i32>,
     termination: Option<BashTermination>,
 }
@@ -180,6 +190,7 @@ impl BashSessionManager {
         &self,
         request: &BashCommandRequest,
         context: &ToolContext,
+        policy: crate::spec::ToolResultPolicy,
     ) -> TalosResult<BashSessionResponse> {
         if request.cmd.trim().is_empty() {
             return Err(TalosError::new(
@@ -195,6 +206,7 @@ impl BashSessionManager {
             .map(|path| resolve_path(&base_dir, path))
             .unwrap_or(base_dir);
 
+        let capture = OutputCapture::new(context, policy).await?;
         let command = build_command(request, &workdir)?;
         let mut child = context
             .sandbox_permit()?
@@ -210,19 +222,23 @@ impl BashSessionManager {
 
         let session = Arc::new(BashSession {
             session_id,
-            max_output_bytes: context
-                .kernel_config()
-                .map(|config| config.tools.local_exec.max_output_bytes)
-                .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
-                .max(DEFAULT_MAX_OUTPUT_BYTES),
             termination_target,
-            state: Mutex::new(BashSessionState::default()),
+            state: Mutex::new(BashSessionState {
+                exit_code: None,
+                termination: None,
+            }),
+            output: Mutex::new(capture),
             notify: Notify::new(),
             started_at: Instant::now(),
             command_kind,
             risk,
             progress_emitter: context.progress_emitter(),
             cancellation: context.cancellation(),
+            reader_stop: tokio_util::sync::CancellationToken::new(),
+            readers_remaining: AtomicUsize::new(
+                usize::from(stdout.is_some()) + usize::from(stderr.is_some()),
+            ),
+            abandoned: AtomicBool::new(false),
             tasks: Mutex::new(None),
         });
         self.sessions.insert(session_id, session.clone());
@@ -246,27 +262,29 @@ impl BashSessionManager {
         let timeout = request
             .timeout_ms
             .map(|timeout_ms| spawn_timeout(session.clone(), timeout_ms));
+        let mut invocation = InvocationGuard::new(
+            self,
+            session.clone(),
+            waiter.abort_handle(),
+            timeout.as_ref().map(JoinHandle::abort_handle),
+        );
         session.tasks.lock().await.replace(BashSessionTasks {
             readers,
             waiter,
             timeout,
         });
 
-        self.collect_output(
-            session_id,
-            request.yield_time_ms,
-            None,
-            request.max_output_tokens,
-        )
-        .await
+        let response = self
+            .collect_output(session_id, request.yield_time_ms)
+            .await?;
+        invocation.disarm();
+        Ok(response)
     }
 
     async fn collect_output(
         &self,
         session_id: i64,
         yield_time_ms: u64,
-        offset: Option<usize>,
-        max_output_tokens: Option<usize>,
     ) -> TalosResult<BashSessionResponse> {
         let session = self
             .sessions
@@ -323,15 +341,15 @@ impl BashSessionManager {
             join_session_tasks(&session).await;
         }
 
-        let mut state = session.state.lock().await;
-        let start = offset
-            .unwrap_or(state.delivered_bytes)
-            .min(state.output.len());
-        let pending = &state.output[start..];
-        let max_bytes = max_output_tokens.unwrap_or(session.max_output_bytes);
-        let (chunk, consumed_bytes, truncated) = truncate_prefix(pending, max_bytes);
-        state.delivered_bytes = state.delivered_bytes.max(start + consumed_bytes);
-
+        let capture = session.output.lock().await;
+        let (chunk, stdout, stderr) = capture.snapshot();
+        let truncated = capture.truncated;
+        let next_offset = capture.total_bytes as usize;
+        let start = next_offset.saturating_sub(chunk.len());
+        let output_log = capture.log.clone();
+        let capture_error = capture.error.as_ref().map(TalosError::to_api_error);
+        drop(capture);
+        let state = session.state.lock().await;
         let status = match state.termination {
             Some(BashTermination::TimedOut) => BashRunStatus::TimedOut,
             Some(BashTermination::Cancelled) => BashRunStatus::Cancelled,
@@ -339,10 +357,7 @@ impl BashSessionManager {
             None => BashRunStatus::Running,
         };
         let exit_code = state.exit_code;
-        let stdout = state.stdout.clone();
-        let stderr = state.stderr.clone();
         let keep_session = status == BashRunStatus::Running;
-        let next_offset = state.delivered_bytes;
         drop(state);
 
         if !keep_session {
@@ -357,6 +372,8 @@ impl BashSessionManager {
             },
             status,
             output: chunk,
+            output_log,
+            capture_error,
             stdout,
             stderr,
             exit_code,
@@ -374,8 +391,31 @@ pub async fn run_bash_command(
     request: &BashCommandRequest,
     context: &ToolContext,
 ) -> TalosResult<BashSessionResponse> {
+    let max_inline_bytes = request.max_output_bytes.unwrap_or_else(|| {
+        context
+            .kernel_config()
+            .map(|config| config.tools.bash.max_output_bytes)
+            .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
+    });
+    run_bash_command_with_policy(
+        request,
+        context,
+        crate::spec::ToolResultPolicy {
+            max_inline_bytes,
+            persist_large_output: false,
+            preview_lines: usize::MAX,
+        },
+    )
+    .await
+}
+
+pub(crate) async fn run_bash_command_with_policy(
+    request: &BashCommandRequest,
+    context: &ToolContext,
+    policy: crate::spec::ToolResultPolicy,
+) -> TalosResult<BashSessionResponse> {
     BashSessionManager::global()
-        .open_session(request, context)
+        .open_session(request, context, policy)
         .await
 }
 
@@ -421,34 +461,79 @@ where
     tokio::spawn(async move {
         let mut reader = reader;
         let mut buffer = vec![0_u8; 4096];
+        let mut utf8_pending = Vec::new();
         loop {
-            match reader.read(&mut buffer).await {
+            let read = tokio::select! {
+                biased;
+                () = session.reader_stop.cancelled() => break,
+                read = reader.read(&mut buffer) => read,
+            };
+            match read {
                 Ok(0) => break,
                 Ok(bytes_read) => {
-                    let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
-                    let mut state = session.state.lock().await;
-                    match stream_kind {
-                        OutputStreamKind::Stdout => state.stdout.push_str(&chunk),
-                        OutputStreamKind::Stderr => state.stderr.push_str(&chunk),
+                    let mut capture = session.output.lock().await;
+                    capture.append(&buffer[..bytes_read], stream_kind).await;
+                    let remaining = capture
+                        .policy_limit()
+                        .saturating_sub(capture.progress_bytes);
+                    let decoded = output::decode_progress(&mut utf8_pending, &buffer[..bytes_read]);
+                    let text_budget = remaining.saturating_sub(128);
+                    let text = crate::output_budget::truncate_text(&decoded, text_budget);
+                    capture.progress_bytes += text.len();
+                    let omission = if decoded.len() > text_budget && !capture.progress_omitted {
+                        capture.progress_omitted = true;
+                        let status = crate::output_budget::truncate_text(
+                            "Output preview limit reached; see the final result for saved output.",
+                            remaining.saturating_sub(text.len()),
+                        );
+                        capture.progress_bytes += status.len();
+                        Some(status)
+                    } else {
+                        None
+                    };
+                    drop(capture);
+                    if !text.is_empty() {
+                        if let Some(emitter) = &session.progress_emitter {
+                            emitter.emit(crate::ToolProgressEvent {
+                                kind: match stream_kind {
+                                    OutputStreamKind::Stdout => ToolProgressKind::Stdout,
+                                    OutputStreamKind::Stderr => ToolProgressKind::Stderr,
+                                },
+                                text,
+                            });
+                        }
                     }
-                    state.output.push_str(&chunk);
-                    drop(state);
-                    if let Some(emitter) = &session.progress_emitter {
-                        emitter.emit(crate::ToolProgressEvent {
-                            kind: match stream_kind {
-                                OutputStreamKind::Stdout => ToolProgressKind::Stdout,
-                                OutputStreamKind::Stderr => ToolProgressKind::Stderr,
-                            },
-                            text: chunk,
-                        });
+                    if let (Some(text), Some(emitter)) = (omission, &session.progress_emitter) {
+                        if !text.is_empty() {
+                            emitter.emit(crate::ToolProgressEvent {
+                                kind: ToolProgressKind::Status,
+                                text,
+                            });
+                        }
                     }
                     session.notify.notify_waiters();
                 }
-                Err(_) => {
+                Err(error) => {
+                    let mut capture = session.output.lock().await;
+                    capture.interrupted = true;
+                    capture.record_error(TalosError::internal_with_source(
+                        "Bash output pipe read failed.",
+                        error,
+                    ));
                     session.notify.notify_waiters();
                     break;
                 }
             }
+        }
+        if session.readers_remaining.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let mut capture = session.output.lock().await;
+            capture.interrupted |=
+                session.abandoned.load(Ordering::Acquire) || session.reader_stop.is_cancelled();
+            capture.finish().await;
+            if let Some(error) = &capture.error {
+                talos_logging::report_error(error);
+            }
+            session.notify.notify_waiters();
         }
     })
 }
@@ -522,30 +607,6 @@ async fn claim_termination(
     state.termination = Some(termination);
     state.exit_code = Some(exit_code);
     true
-}
-
-async fn join_session_tasks(session: &BashSession) {
-    let Some(tasks) = session.tasks.lock().await.take() else {
-        return;
-    };
-    if let Some(timeout) = tasks.timeout {
-        timeout.abort();
-        let _ = timeout.await;
-    }
-    join_or_abort(tasks.waiter).await;
-    for reader in tasks.readers {
-        join_or_abort(reader).await;
-    }
-}
-
-async fn join_or_abort(mut task: JoinHandle<()>) {
-    if tokio::time::timeout(Duration::from_millis(TASK_JOIN_GRACE_MS), &mut task)
-        .await
-        .is_err()
-    {
-        task.abort();
-        let _ = task.await;
-    }
 }
 
 #[cfg(unix)]

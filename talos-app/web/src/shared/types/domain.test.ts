@@ -96,6 +96,7 @@ describe("domain helpers", () => {
         stderr: "",
         truncated: false,
         elapsed_ms: null,
+        outputLog: null,
       },
     ]);
 

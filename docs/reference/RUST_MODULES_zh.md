@@ -2,12 +2,12 @@
 
 [English](RUST_MODULES.md)
 
-当前 58 个 workspace member 及其职责以 [RUST_MODULES.md](RUST_MODULES.md) 和
+当前 59 个 workspace member 及其职责以 [RUST_MODULES.md](RUST_MODULES.md) 和
 `talos-rs/Cargo.toml` 为准。
 
 | 区域 | 数量 | Packages |
 | --- | ---: | --- |
-| Common | 11 | `talos-llm-provider`、Provider 实现、`talos-fs`、`talos-knowledge-format`、`talos-prompt`、`talos-types` |
+| Common | 12 | `talos-llm-provider`、Provider 实现、`talos-fs`、`talos-guard-task`、`talos-knowledge-format`、`talos-prompt`、`talos-types` |
 | Infrastructure | 7 | `talos-error`、`talos-config`、`talos-logging`、`talos-storage`、`talos-auth`、`talos-automation`、`talos-system-info` |
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
@@ -22,6 +22,7 @@
 
 - `crates/common/llm/`：Provider contract 以及 Anthropic、Bailian、DeepSeek、
   Ollama、OpenAI 和 OpenRouter 实现。
+- `crates/common/guard-task/`：通用周期任务定义、监督、取消、共享安全 join 与日志；具体业务由所属层实现。
 - `crates/common/fs/`：有界且安全的文件系统操作。
 - `crates/common/prompt/`：Prompt 和动态 Context 构建。
 - `crates/common/types/`：共享领域与 API 对象。

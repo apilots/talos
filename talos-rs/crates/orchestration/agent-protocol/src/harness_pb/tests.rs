@@ -15,6 +15,54 @@ use super::*;
 use crate::AgentRunSettlement;
 
 #[test]
+fn bash_log_and_file_byte_cursor_survive_protobuf() {
+    use talos_types::talos::{BashOutputCaptureStatus as S, BashOutputLog};
+    for capture_status in [
+        S::Capturing,
+        S::Complete,
+        S::Interrupted,
+        S::QuotaLimited,
+        S::WriteFailed,
+    ] {
+        let item = TalosContentItem::BashOutput {
+            session_id: None,
+            status: talos_types::TalosToolTaskStatus::Failed,
+            exit_code: Some(7),
+            stdout: "tail".into(),
+            stderr: String::new(),
+            truncated: true,
+            elapsed_ms: Some(10),
+            output_log: Some(BashOutputLog {
+                path: "/workspace/user/tool-output/log".into(),
+                relative_path: "tool-output/log".into(),
+                total_bytes: 5000000,
+                stored_bytes: 1024,
+                total_lines: 20,
+                capture_status,
+                expires_at: 1900000000,
+            }),
+        };
+        assert_eq!(
+            decode_tool_content(encode_tool_content(item.clone()).unwrap()).unwrap(),
+            item
+        );
+    }
+    let item = TalosContentItem::FileRead {
+        path: "output.log".into(),
+        offset: 0,
+        limit: 0,
+        total_lines: None,
+        next_byte_offset: Some(4096),
+        content: "fragment".into(),
+        truncated: true,
+    };
+    assert_eq!(
+        decode_tool_content(encode_tool_content(item.clone()).unwrap()).unwrap(),
+        item
+    );
+}
+
+#[test]
 fn rich_message_and_event_survive_typed_protobuf_projection() {
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let child = SubagentRef {

@@ -241,6 +241,24 @@ pub(crate) fn collect_general_turn_tool_batch_for_calls(
     outputs: Vec<ToolExecutionOutput>,
     calls: &[FunctionCall],
 ) -> TalosResult<GeneralTurnToolBatch> {
+    collect_bounded_tool_batch(
+        outputs,
+        calls,
+        talos_tools::output_budget::MAX_MODEL_TOOL_BYTES,
+    )
+}
+
+fn collect_bounded_tool_batch(
+    outputs: Vec<ToolExecutionOutput>,
+    calls: &[FunctionCall],
+    max_output_bytes: usize,
+) -> TalosResult<GeneralTurnToolBatch> {
+    if max_output_bytes < 64 {
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            "Tool result budget cannot fit the minimum model result.",
+        ));
+    }
     let completed_call_ids = outputs
         .iter()
         .map(|output| output.call_id.as_str())
@@ -315,7 +333,7 @@ pub(crate) fn collect_general_turn_tool_batch_for_calls(
         let mut message = ChatMessage::tool(
             output.call_id,
             output.tool_name.clone(),
-            build_model_tool_result_text(&reduced),
+            build_model_tool_result_text(&reduced, max_output_bytes),
         );
         message.image_file_ids = reduced
             .content_items
@@ -363,11 +381,22 @@ fn model_payload_from_envelope(envelope: &ToolResultEnvelope) -> Value {
     })
 }
 
-fn build_model_tool_result_text(reduced: &ReducedToolExecutionOutput) -> String {
+fn build_model_tool_result_text(
+    reduced: &ReducedToolExecutionOutput,
+    max_output_bytes: usize,
+) -> String {
+    let mut value = model_payload_from_envelope(&reduced.envelope);
     if reduced.is_error {
-        return reduced.payload.to_string();
+        value = serde_json::json!({
+            "ok": false,
+            "error": reduced.envelope.error,
+            "result": value,
+        });
     }
-    model_payload_from_envelope(&reduced.envelope).to_string()
+    talos_tools::output_budget::bounded_json(
+        value,
+        max_output_bytes.min(talos_tools::output_budget::MAX_MODEL_TOOL_BYTES),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -421,7 +450,11 @@ pub async fn execute_general_turn_tool_batch(
         emit_tool_result_stream_event(stream_tx, output).await;
     }
 
-    collect_general_turn_tool_batch_for_calls(outputs, tool_calls)
+    collect_bounded_tool_batch(
+        outputs,
+        tool_calls,
+        execution_context.kernel_config.tool_result_max_bytes,
+    )
 }
 
 pub fn apply_general_turn_tool_batch(

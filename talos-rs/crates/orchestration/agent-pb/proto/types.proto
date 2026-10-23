@@ -350,7 +350,7 @@ message ToolContent {
     ArtifactRef artifact_ref = 10; McpResourceRef mcp_resource_ref = 11; ToolContentProgress progress = 12;
   }
 }
-message FileRead { string path = 1; uint64 offset = 2; uint64 limit = 3; uint64 total_lines = 4; string content = 5; bool truncated = 6; }
+message FileRead { string path = 1; uint64 offset = 2; uint64 limit = 3; optional uint64 total_lines = 4; string content = 5; bool truncated = 6; optional uint64 next_byte_offset = 7; }
 message Diff { repeated FileDiff files = 1; }
 message FileDiff { string path = 1; optional string old_path = 2; repeated DiffHunk hunks = 3; bool truncated = 4; }
 message DiffHunk {
@@ -366,6 +366,11 @@ message SearchResults {
 message BashOutput {
   optional int64 session_id = 1; TaskStatus status = 2; optional int32 exit_code = 3;
   string stdout = 4; string stderr = 5; bool truncated = 6; optional uint64 elapsed_ms = 7;
+  optional BashOutputLog output_log = 8;
+}
+message BashOutputLog {
+  string path = 1; string relative_path = 2; uint64 total_bytes = 3;
+  uint64 stored_bytes = 4; uint64 total_lines = 5; BashOutputCaptureStatus capture_status = 6; int64 expires_at = 7;
 }
 message WebReference {
   string url = 1; optional string title = 2; optional string citation_id = 3;
@@ -426,3 +431,12 @@ message SessionHistoryCursor {
 message BrowserCapabilityUnavailable { BrowserCapabilityOperation operation = 1; BrowserCapabilityReason reason = 2; }
 enum BrowserCapabilityOperation { BROWSER_CAPABILITY_OPERATION_UNSPECIFIED = 0; BROWSER_CAPABILITY_OPERATION_REMOTE_DESKTOP = 1; BROWSER_CAPABILITY_OPERATION_TAKE_CONTROL = 2; BROWSER_CAPABILITY_OPERATION_RELEASE_CONTROL = 3; BROWSER_CAPABILITY_OPERATION_OPEN_LOCAL = 4; }
 enum BrowserCapabilityReason { BROWSER_CAPABILITY_REASON_UNSPECIFIED = 0; BROWSER_CAPABILITY_REASON_NATIVE_HOST = 1; BROWSER_CAPABILITY_REASON_NOT_BUNDLED = 2; BROWSER_CAPABILITY_REASON_HOST_POLICY = 3; BROWSER_CAPABILITY_REASON_UNSUPPORTED_VERSION = 4; BROWSER_CAPABILITY_REASON_CLIENT_MISMATCH = 5; }
+
+enum BashOutputCaptureStatus {
+  BASH_OUTPUT_CAPTURE_STATUS_UNSPECIFIED = 0;
+  BASH_OUTPUT_CAPTURE_STATUS_CAPTURING = 1;
+  BASH_OUTPUT_CAPTURE_STATUS_COMPLETE = 2;
+  BASH_OUTPUT_CAPTURE_STATUS_QUOTA_LIMITED = 3;
+  BASH_OUTPUT_CAPTURE_STATUS_INTERRUPTED = 4;
+  BASH_OUTPUT_CAPTURE_STATUS_WRITE_FAILED = 5;
+}

@@ -195,6 +195,16 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.context_compaction_max_bytes must be > 0".to_string(),
         ));
     }
+    let logs = &config.agent.kernel.tools.bash.output_log;
+    logs.validate()?;
+    if config.agent.kernel.tools.bash.max_output_bytes < 256
+        || config.agent.kernel.tool_result_max_bytes < 256
+    {
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            "Tool result and local execution output limits must be at least 256 bytes.",
+        ));
+    }
     if config.memory.file_list_default_limit == 0 {
         return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,

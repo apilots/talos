@@ -210,7 +210,12 @@ function buildTaskModel(
     .map((entry) => entry.message)
     .join("");
   const exitCode = lastDefined(taskItems.map((item) => item.exit_code));
-  const output = [stdout, stderr].filter(Boolean).join(stderr && stdout ? "\n\n" : "") || liveOutput;
+  const logLines = taskItems.flatMap((item) => item.outputLog ? [
+    `Full output: ${item.outputLog.path}`,
+    `${item.outputLog.storedBytes} / ${item.outputLog.totalBytes} bytes saved · ${item.outputLog.captureStatus} · expires ${new Date(item.outputLog.expiresAt * 1000).toLocaleString()}`,
+  ] : []);
+  const commandOutput = [stdout, stderr].filter(Boolean).join(stderr && stdout ? "\n\n" : "") || liveOutput;
+  const output = [commandOutput, ...logLines].filter(Boolean).join("\n\n");
   const firstLine = firstNonEmptyLine(output);
   const exitSuffix = exitCode !== undefined && exitCode !== null ? ` · exit ${exitCode}` : "";
   const summary = `${toolResultStateLabel(status)}${exitSuffix}`;
@@ -276,7 +281,10 @@ function buildFileModel(items: TalosContentItem[], status: ChatToolStatus): Tool
   let count = 0;
   for (const item of fileItems) {
     const start = item.offset + 1;
-    lines.push(`${item.path}:${start}-${Math.min(item.offset + item.limit, item.total_lines)}`);
+    lines.push(item.limit === 0 ? `${item.path} · byte range` : `${item.path}:${start}-${Math.min(item.offset + item.limit, item.total_lines ?? Number.MAX_SAFE_INTEGER)}`);
+    if (item.nextByteOffset !== null && item.nextByteOffset !== undefined) {
+      lines.push(`Continue with byte_offset=${item.nextByteOffset}`);
+    }
     for (const [index, line] of item.content.split("\n").entries()) {
       count += 1;
       lines.push(`${String(start + index).padStart(4, " ")} ${line}`);
@@ -299,6 +307,10 @@ function buildExploredModel(items: TalosContentItem[], status: ChatToolStatus): 
   let count = 0;
   for (const item of items) {
     if (item.type === "search_results") {
+      if (item.matches.length === 0 && item.total_matches !== null) {
+        count += item.total_matches;
+        lines.push(`${item.total_matches} match(es)${item.partial ? " (partial)" : ""}`);
+      }
       count += item.matches.length;
       for (const match of item.matches) {
         lines.push(`${match.path}:${match.line} ${match.text}`);

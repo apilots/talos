@@ -110,6 +110,7 @@ fn project_bash(
     let mut exit_code = None;
     let mut elapsed_ms = None;
     let mut truncated = false;
+    let mut log_lines = Vec::new();
     for item in content {
         if let TalosContentItem::BashOutput {
             status: item_status,
@@ -118,6 +119,7 @@ fn project_bash(
             stderr: item_stderr,
             truncated: item_truncated,
             elapsed_ms: item_elapsed_ms,
+            output_log,
             ..
         } = item
         {
@@ -127,6 +129,12 @@ fn project_bash(
             exit_code = *item_exit_code;
             elapsed_ms = *item_elapsed_ms;
             truncated |= *item_truncated;
+            if let Some(log) = output_log {
+                log_lines.push(format!(
+                    "Full output: {} ({} / {} bytes, {:?})",
+                    log.path, log.stored_bytes, log.total_bytes, log.capture_status
+                ));
+            }
         }
     }
     status.map(|status| {
@@ -143,7 +151,10 @@ fn project_bash(
             title: completed_title(tool_title(name, call_id, arguments), is_error),
             summary,
             preview_lines,
-            output_lines: combined_output_lines(&stdout, &stderr),
+            output_lines: combined_output_lines(&stdout, &stderr)
+                .into_iter()
+                .chain(log_lines)
+                .collect(),
             force_show_output: false,
             ..ToolRenderData::default()
         }
@@ -169,13 +180,23 @@ fn project_file_read(
                 offset,
                 limit,
                 total_lines,
+                next_byte_offset,
                 content,
                 truncated: item_truncated,
             } => {
                 has_file_read = true;
                 let start = offset.saturating_add(1);
-                let end = offset.saturating_add(*limit).min(*total_lines);
-                detail_lines.push(format!("{path}:{start}-{end}"));
+                let end = offset
+                    .saturating_add(*limit)
+                    .min(total_lines.unwrap_or(usize::MAX));
+                detail_lines.push(if *limit == 0 {
+                    format!("{path} · byte range")
+                } else {
+                    format!("{path}:{start}-{end}")
+                });
+                if let Some(next) = next_byte_offset {
+                    detail_lines.push(format!("Continue with byte_offset={next}"));
+                }
                 total += content.lines().count();
                 truncated |= *item_truncated;
                 output_lines.extend(
@@ -634,6 +655,7 @@ mod tests {
                 stderr: String::new(),
                 truncated: false,
                 elapsed_ms: Some(12),
+                output_log: None,
             }],
         );
 
@@ -662,7 +684,8 @@ mod tests {
                 path: "/tmp/demo.rs".to_string(),
                 offset: 10,
                 limit: 2,
-                total_lines: 20,
+                total_lines: Some(20),
+                next_byte_offset: None,
                 content: "fn main() {}\n".to_string(),
                 truncated: false,
             }],
@@ -745,7 +768,8 @@ mod tests {
                     path: "/tmp/demo.rs".to_string(),
                     offset: 0,
                     limit: 1,
-                    total_lines: 1,
+                    total_lines: Some(1),
+                    next_byte_offset: None,
                     content: "old();".to_string(),
                     truncated: false,
                 },

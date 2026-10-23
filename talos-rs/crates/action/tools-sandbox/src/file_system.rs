@@ -82,6 +82,12 @@ impl ToolFileSystemHandle {
         self.audited(self.file_system.read(path, &self.context))
     }
 
+    /// Opens a read-only descriptor after the same authorization and audit as
+    /// read(). Callers may stream or seek without re-opening an unchecked path.
+    pub fn open_read<'a>(&'a self, path: &'a Path) -> ToolExecutionFuture<'a, fs::File> {
+        self.audited(self.file_system.open_read(path, &self.context))
+    }
+
     pub fn read_to_string<'a>(&'a self, path: &'a Path) -> ToolExecutionFuture<'a, String> {
         self.audited(self.file_system.read_to_string(path, &self.context))
     }
@@ -138,6 +144,11 @@ impl ToolFileSystemHandle {
 }
 
 pub(crate) trait ToolFileSystem: Send + Sync {
+    fn open_read<'a>(
+        &'a self,
+        path: &'a Path,
+        context: &'a ToolSandboxContext,
+    ) -> ToolExecutionFuture<'a, fs::File>;
     fn metadata<'a>(
         &'a self,
         path: &'a Path,
@@ -198,6 +209,16 @@ pub(crate) trait ToolFileSystem: Send + Sync {
 struct DirectToolFileSystem;
 
 impl ToolFileSystem for DirectToolFileSystem {
+    fn open_read<'a>(
+        &'a self,
+        path: &'a Path,
+        context: &'a ToolSandboxContext,
+    ) -> ToolExecutionFuture<'a, fs::File> {
+        Box::pin(async move {
+            require_direct_access(context)?;
+            fs::File::open(path).await.map_err(file_system_error)
+        })
+    }
     fn metadata<'a>(
         &'a self,
         path: &'a Path,
@@ -303,6 +324,16 @@ impl ToolFileSystem for DirectToolFileSystem {
 struct AuthorizingToolFileSystem;
 
 impl ToolFileSystem for AuthorizingToolFileSystem {
+    fn open_read<'a>(
+        &'a self,
+        path: &'a Path,
+        context: &'a ToolSandboxContext,
+    ) -> ToolExecutionFuture<'a, fs::File> {
+        Box::pin(async move {
+            let path = authorize_read(path, context)?;
+            fs::File::open(path).await.map_err(file_system_error)
+        })
+    }
     fn metadata<'a>(
         &'a self,
         path: &'a Path,

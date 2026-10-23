@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
@@ -11,6 +10,8 @@ use tokio::io::AsyncReadExt;
 use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
 use crate::runtimes::{map_sandbox_error, process_environment, resolve_executable};
 use crate::ToolContext;
+
+mod page;
 
 const DEFAULT_LIMIT: usize = 100;
 const MAX_LIMIT: usize = 2_000;
@@ -84,6 +85,15 @@ pub async fn run(
     context: &ToolContext,
 ) -> TalosResult<GrepFilesResponse> {
     let pattern = request.pattern.trim();
+    if request.context > 20
+        || request.before_context.is_some_and(|lines| lines > 20)
+        || request.after_context.is_some_and(|lines| lines > 20)
+    {
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            "Search context cannot exceed 20 lines on either side.",
+        ));
+    }
     if pattern.is_empty() {
         return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
@@ -119,16 +129,11 @@ pub async fn run(
         .max(request.before_context.unwrap_or(0))
         .max(request.after_context.unwrap_or(0));
     let rg_output = run_rg(request, pattern, &search_path, context_lines, context).await?;
-    let all_matches = parse_rg_json(&rg_output.stdout)?;
-    let total_matches = all_matches.len();
+    let total_matches = rg_output.page.total;
     let offset = request.offset.min(total_matches);
-    let selected = all_matches
-        .iter()
-        .skip(offset)
-        .take(limit)
-        .cloned()
-        .collect::<Vec<_>>();
-    let more_available = offset + selected.len() < total_matches;
+    let selected = rg_output.page.matches;
+    let more_available =
+        request.output_mode != GrepOutputMode::Count && offset + selected.len() < total_matches;
     let content = render_grep_content(request.output_mode.clone(), &selected, total_matches);
 
     Ok(GrepFilesResponse {
@@ -144,7 +149,7 @@ pub async fn run(
 }
 
 struct RgOutput {
-    stdout: String,
+    page: page::SearchPage,
     timed_out: bool,
 }
 
@@ -166,7 +171,7 @@ async fn run_rg(
     ];
 
     if context_lines > 0 {
-        args.extend(["-C".to_string(), context_lines.to_string()]);
+        args.extend(["-C".to_string(), context_lines.min(20).to_string()]);
     }
     if request.multiline {
         args.push("--multiline".to_string());
@@ -190,6 +195,7 @@ async fn run_rg(
         "--glob".to_string(),
         "!.env.*".to_string(),
     ]);
+    args.push("--".to_string());
     args.push(pattern.to_string());
     args.push(search_path.to_string_lossy().into_owned());
     let cwd = if search_path.is_dir() {
@@ -218,7 +224,7 @@ async fn run_rg(
         .spawn(command)
         .await
         .map_err(map_sandbox_error)?;
-    let mut stdout = child.take_stdout().ok_or_else(|| {
+    let stdout = child.take_stdout().ok_or_else(|| {
         TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "failed to capture rg stdout".to_string(),
@@ -231,117 +237,61 @@ async fn run_rg(
         )
     })?;
 
-    let stdout_task = tokio::spawn(async move {
-        let mut output = String::new();
-        let _ = stdout.read_to_string(&mut output).await;
-        output
-    });
+    let budget = context
+        .kernel_config()
+        .map(|config| config.tool_result_max_bytes)
+        .unwrap_or(10_000)
+        .min(crate::output_budget::MAX_MODEL_TOOL_BYTES)
+        .saturating_sub(1024)
+        .min(8192);
+    let query = request.clone();
+    let stopped = tokio_util::sync::CancellationToken::new();
+    let parser_stop = stopped.clone();
+    let stdout_task =
+        tokio::spawn(async move { page::collect(stdout, query, budget, parser_stop).await });
     let stderr_task = tokio::spawn(async move {
-        let mut output = String::new();
-        let _ = stderr.read_to_string(&mut output).await;
-        output
-    });
-
-    let timeout = Duration::from_millis(request.timeout_ms.max(1));
-    let timed_out = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(status) => {
-            let status = status.map_err(|err| {
-                TalosError::new(
-                    talos_error::ErrorCode::ToolExecutionFailed,
-                    format!("failed to wait for rg: {err}"),
+        let mut preview = Vec::new();
+        let mut buffer = [0; 4096];
+        loop {
+            let read = stderr.read(&mut buffer).await.map_err(|error| {
+                TalosError::internal_with_source(
+                    "Read search diagnostics; technical details were withheld.",
+                    error,
                 )
             })?;
-            if !status.success() && status.code() != Some(1) {
-                let stderr = stderr_task.await.unwrap_or_default();
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::ToolExecutionFailed,
-                    format!("rg failed with status {status}: {}", stderr.trim()),
-                ));
+            if read == 0 {
+                break;
             }
-            false
+            let keep = read.min(4096_usize.saturating_sub(preview.len()));
+            preview.extend_from_slice(&buffer[..keep]);
         }
-        Err(_) => {
-            let _ = child.kill().await;
-            true
-        }
-    };
-
-    let stdout = stdout_task.await.unwrap_or_default();
+        Ok::<_, TalosError>(preview)
+    });
+    let deadline = Duration::from_millis(request.timeout_ms.max(1));
+    let status = tokio::time::timeout(deadline, child.wait()).await;
+    let timed_out = status.is_err();
     if timed_out {
-        let _ = stderr_task.await;
+        stopped.cancel();
+        child.kill().await.map_err(map_sandbox_error)?;
     }
-    Ok(RgOutput { stdout, timed_out })
-}
-
-fn parse_rg_json(stdout: &str) -> TalosResult<Vec<TalosToolSearchMatch>> {
-    let mut matches: Vec<TalosToolSearchMatch> = Vec::new();
-    let mut pending_before = Vec::new();
-    let mut last_match_index: Option<usize> = None;
-
-    for raw_line in stdout.lines() {
-        let event: Value = serde_json::from_str(raw_line).map_err(|err| {
-            TalosError::new(
+    let page = stdout_task
+        .await
+        .map_err(|error| TalosError::internal_with_source("Search reader task failed.", error))?;
+    let stderr = stderr_task.await.map_err(|error| {
+        TalosError::internal_with_source("Search diagnostic task failed.", error)
+    })??;
+    let page = page?;
+    if let Ok(status) = status {
+        let status = status.map_err(map_sandbox_error)?;
+        if !status.success() && status.code() != Some(1) {
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
-                format!("invalid rg json output: {err}"),
+                "Search command failed.",
             )
-        })?;
-        let Some(event_type) = event.get("type").and_then(Value::as_str) else {
-            continue;
-        };
-        let data = event.get("data").unwrap_or(&Value::Null);
-        match event_type {
-            "context" => {
-                let context_line = line_text(data);
-                if let Some(index) = last_match_index {
-                    matches[index].after.push(context_line);
-                } else {
-                    pending_before.push(context_line);
-                }
-            }
-            "match" => {
-                let path = data
-                    .get("path")
-                    .and_then(|path| path.get("text"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let line = data
-                    .get("line_number")
-                    .and_then(Value::as_u64)
-                    .and_then(|value| u32::try_from(value).ok())
-                    .unwrap_or(0);
-                let column = data
-                    .get("submatches")
-                    .and_then(Value::as_array)
-                    .and_then(|items| items.first())
-                    .and_then(|item| item.get("start"))
-                    .and_then(Value::as_u64)
-                    .and_then(|value| u32::try_from(value + 1).ok());
-                matches.push(TalosToolSearchMatch {
-                    path,
-                    line,
-                    column,
-                    text: line_text(data),
-                    before: std::mem::take(&mut pending_before),
-                    after: Vec::new(),
-                });
-                last_match_index = Some(matches.len() - 1);
-            }
-            "begin" | "end" | "summary" => {}
-            _ => {}
+            .context(String::from_utf8_lossy(&stderr)));
         }
     }
-
-    Ok(matches)
-}
-
-fn line_text(data: &Value) -> String {
-    data.get("lines")
-        .and_then(|lines| lines.get("text"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim_end_matches(['\r', '\n'])
-        .to_string()
+    Ok(RgOutput { page, timed_out })
 }
 
 fn render_grep_content(

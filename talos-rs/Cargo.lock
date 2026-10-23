@@ -6567,6 +6567,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "talos-guard-task"
+version = "0.1.13-SNAPSHOT"
+dependencies = [
+ "talos-error",
+ "talos-logging",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "talos-knowledge-format"
 version = "0.1.13-SNAPSHOT"
 dependencies = [
@@ -7074,7 +7085,9 @@ dependencies = [
  "talos-browser",
  "talos-config",
  "talos-error",
+ "talos-fs",
  "talos-llm-provider",
+ "talos-logging",
  "talos-mcp",
  "talos-memory",
  "talos-tools-policy",
@@ -7213,6 +7226,7 @@ dependencies = [
  "talos-browser",
  "talos-config",
  "talos-error",
+ "talos-guard-task",
  "talos-llm-anthropic",
  "talos-llm-bailian",
  "talos-llm-deepseek",

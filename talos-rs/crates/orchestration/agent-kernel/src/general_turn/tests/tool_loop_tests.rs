@@ -467,11 +467,17 @@ impl LlmProvider for WorkingContextBudgetProvider {
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
-                tool_calls: Some(vec![FunctionCall::new(
-                    "call-large-output",
-                    "LargeOutput",
-                    json!({}),
-                )]),
+                tool_calls: Some(
+                    (0..3)
+                        .map(|index| {
+                            FunctionCall::new(
+                                format!("call-large-output-{index}"),
+                                "LargeOutput",
+                                json!({}),
+                            )
+                        })
+                        .collect(),
+                ),
             }),
             _ => panic!("working context budget should fail before another provider request"),
         }
@@ -556,7 +562,8 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
     config.compaction.tool_output_keep_last = 1;
     configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream_for_session("working-context-budget", None);
-    // The initial prompt fits, but the retained 13 KB tool result must exceed the window.
+    // The initial prompt fits. Several individually bounded tool results still
+    // exceed the window while their latest complete exchange must be retained.
     ctx.selected_model_info.model.context_window = 2_048;
 
     let error = run_general_turn(
