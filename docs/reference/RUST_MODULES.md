@@ -2,13 +2,13 @@
 
 [Chinese](RUST_MODULES_zh.md)
 
-The Talos Rust workspace currently contains 58 members. `talos-rs/Cargo.toml`
+The Talos Rust workspace currently contains 59 members. `talos-rs/Cargo.toml`
 is the authoritative membership source; this document explains ownership rather
 than replacing the manifest.
 
 | Area | Count | Packages |
 | --- | ---: | --- |
-| Common | 11 | `talos-llm-provider`, provider implementations, `talos-fs`, `talos-knowledge-format`, `talos-prompt`, `talos-types` |
+| Common | 12 | `talos-llm-provider`, provider implementations, `talos-fs`, `talos-guard-task`, `talos-knowledge-format`, `talos-prompt`, `talos-types` |
 | Infrastructure | 7 | `talos-error`, `talos-config`, `talos-logging`, `talos-storage`, `talos-auth`, `talos-automation`, `talos-system-info` |
 | Perception | 1 | `talos-channel` |
 | Cognition | 1 | `talos-memory` |
@@ -23,6 +23,7 @@ than replacing the manifest.
 
 - `crates/common/llm/`: provider contract plus Anthropic, Bailian, DeepSeek,
   Ollama, OpenAI, and OpenRouter implementations.
+- `crates/common/guard-task/`: supervised periodic tasks with shared lifecycle, cancellation, safe joins and uniform logs; business work stays in its owning layer.
 - `crates/common/fs/`: bounded and safe filesystem operations.
 - `crates/common/knowledge-format/`: shared structured knowledge document format.
 - `crates/common/prompt/`: prompt and dynamic context construction.

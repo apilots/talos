@@ -216,9 +216,9 @@ walk(root)
             base.require(state['State']['ExitCode'] == 0, 'Worker did not stop cleanly')
         logs = self.docker('logs', self.name)
         (REPORT / f'output-logs-worker-{self.generation}.log').write_text(logs)
-        base.require('output log maintenance started' in logs and 'output log maintenance run completed' in logs, 'Worker task lifecycle/run logs missing')
+        base.require('guard task started' in logs and 'bash_output_cleanup' in logs and 'output log maintenance run completed' in logs, 'Worker task lifecycle/run logs missing')
         if not crash:
-            base.require('output log maintenance stopped' in logs, 'Graceful shutdown did not join/log maintenance task')
+            base.require('guard task stopped' in logs, 'Graceful shutdown did not join/log maintenance task')
         self.docker('rm', self.name)
         return state['Id']
 
@@ -353,6 +353,84 @@ walk(root)
         base.require('reason=\"periodic\"' in logs or 'reason=periodic' in logs, 'Periodic execution log missing')
         self.stop_worker()
         self.proof('maintenance_task_lifecycle_logs', gracefulStopsVerified=True)
+        self.full_round_acceptance(path)
+        (REPORT / 'output-logs-model-replies.json').write_text(json.dumps(MODEL_REPLIES, indent=2))
+
+    def full_round_acceptance(self, retained_path):
+        """Seed a finite >4096-entry volume while stopped; hourly interval means
+        all cleanup must finish in the startup round, without a second tick."""
+        summary = json.loads(self.volume_python(r"""
+from pathlib import Path
+import json, os, sys
+workspace = Path(sys.argv[1]); prefix = workspace.parent
+conf = Path('/home/talos/.talos/conf/talos.yaml')
+# Keep this fixture dependency-free inside the Worker image.
+text = conf.read_text(); text = text.replace('cleanup_interval_secs: 1\n', 'cleanup_interval_secs: 3600\n'); conf.write_text(text)
+assert 'cleanup_interval_secs: 3600' in text
+expected = 0
+for user, count in [(workspace.name, 4208), ('offline-output-user', 2)]:
+    ws = prefix/user; root = ws/'tool-output'; turn = root/'full-round'/'turn'
+    turn.mkdir(parents=True, exist_ok=True)
+    for index in range(count):
+        directory = turn/str(index); directory.mkdir()
+        path = directory/'output.log'; path.write_text('retained output')
+        expired = index % 37 == 0
+        expected += int(expired)
+        record = dict(version=1, reservation_bytes=4096+15, cleanup='retained', log=dict(
+            path=str(path), relativePath=str(path.relative_to(ws)), totalBytes=15, storedBytes=15,
+            totalLines=1, captureStatus='complete', expiresAt=1 if expired else 9223372036854775807))
+        (directory/'metadata.json').write_text(json.dumps(record))
+    if user == workspace.name:
+        broken = turn/'broken'; broken.mkdir(); (broken/'metadata.json').write_text('invalid metadata')
+        foreign = turn/'unknown'; foreign.mkdir(); (foreign/'unrelated.txt').write_text('preserve')
+        ledger = root/'quota.json'; old = json.loads(ledger.read_text())
+        charged = sum(json.loads(p.read_text())['reservation_bytes'] for p in root.glob('*/*/*/metadata.json') if p.parent.name != 'broken')
+        # Broken ownership remains charged conservatively until repaired.
+        ledger.write_text(json.dumps(dict(version=2, used_bytes=charged+4096, revision=old['revision']+1)))
+    for path in [ws, *ws.rglob('*')]:
+        os.chown(path, 10001, 10001); os.chmod(path, 0o700 if path.is_dir() else 0o600)
+print(json.dumps(dict(seedLogs=4210, expectedExpired=expected, intervalSeconds=3600)))
+""", PREFIX))
+        before = len(MODEL_REPLIES)
+        self.start_worker()
+        logs = base.wait(lambda: (value if 'reason="startup"' in value and 'output log maintenance run completed' in value else None)
+                         if (value := self.docker('logs', self.name)) else None, 'Complete startup round beyond 4096 entries', seconds=120)
+        counts = json.loads(self.volume_python("""
+from pathlib import Path
+import json, sys
+ws = Path(sys.argv[1]); result = dict(expired=0, retained=0, ledgers={})
+for user in [ws.name, 'offline-output-user']:
+    root = ws.parent/user/'tool-output'
+    for p in root.glob('full-round/turn/*/metadata.json'):
+        if p.parent.name == 'broken': continue
+        record = json.loads(p.read_text()); result['expired' if record['log']['expiresAt'] == 1 else 'retained'] += 1
+    result['ledgers'][user] = json.loads((root/'quota.json').read_text())
+assert (ws/'tool-output/full-round/turn/broken/metadata.json').read_text() == 'invalid metadata'
+assert (ws/'tool-output/full-round/turn/unknown/unrelated.txt').read_text() == 'preserve'
+print(json.dumps(result))
+""", PREFIX))
+        base.require(counts['expired'] == 0 and counts['retained'] == summary['seedLogs']-summary['expectedExpired'], 'Startup sweep skipped expired logs or evicted unexpired logs: '+str(counts))
+        base.require(len(MODEL_REPLIES) == before, 'Full sweep required a model/tool invocation')
+        base.require('failed_workspaces=1' in logs, 'Corrupt metadata was not isolated and reported')
+        base.require('accounting reconciliation deferred' in logs, 'Corrupt accounting audit was not deferred')
+        self.proof('full_startup_round_crosses_4096_and_rotates_users', **summary, **counts)
+        # Restart with repaired ownership, forcing complete ledger recovery.
+        self.stop_worker()
+        self.volume_python("from pathlib import Path; import sys; root=Path(sys.argv[1])/'tool-output'; (root/'full-round/turn/broken/metadata.json').unlink(); (root/'quota.json').unlink()", PREFIX)
+        self.start_worker()
+        base.wait(lambda: 'output log maintenance run completed' in self.docker('logs', self.name), 'Recovery startup round')
+        recovered = json.loads(self.volume_python("""
+from pathlib import Path
+import json, sys
+root=Path(sys.argv[1])/'tool-output'; ledger=json.loads((root/'quota.json').read_text())
+charged=sum(json.loads(p.read_text())['reservation_bytes'] for p in root.glob('*/*/*/metadata.json'))
+assert ledger['version']==2 and ledger['used_bytes']==charged, (ledger,charged)
+print(json.dumps(dict(ledger=ledger, metadataCharge=charged)))
+""", PREFIX))
+        self.turn('Read', {'path': retained_path, 'byte_offset': 0, 'max_bytes': 64})
+        base.require('row-' in json.dumps(MODEL_REPLIES[-1]['replies']), 'Old large output reference unreadable after full sweep/restart')
+        self.proof('full_round_restart_recovers_ledger_and_old_reference', **recovered)
+        self.stop_worker()
 
     def close(self):
         diagnostic = subprocess.run(['docker', 'logs', self.name], capture_output=True, text=True)

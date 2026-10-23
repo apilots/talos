@@ -22,6 +22,7 @@ talos-agent-provider-kernel = { workspace = true }
 talos-config = { workspace = true }
 talos-upgrade = { workspace = true }
 talos-error = { workspace = true }
+talos-guard-task.workspace = true
 talos-llm-anthropic = { workspace = true }
 talos-llm-bailian = { workspace = true }
 talos-llm-deepseek = { workspace = true }

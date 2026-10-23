@@ -10,6 +10,7 @@ members = [
     "crates/common/llm/ollama",
     "crates/common/llm/openai",
     "crates/common/fs",
+    "crates/common/guard-task",
     "crates/common/knowledge-format",
     "crates/common/prompt",
     "crates/common/types",
@@ -153,6 +154,7 @@ talos-cloud-sdk = "=0.1.3"
 # Internal crates
 talos-error = { path = "crates/infra/error" }
 talos-fs = { path = "crates/common/fs" }
+talos-guard-task = { path = "crates/common/guard-task" }
 talos-browser = { path = "crates/action/browser" }
 talos-knowledge-format = { path = "crates/common/knowledge-format" }
 talos-types = { path = "crates/common/types" }

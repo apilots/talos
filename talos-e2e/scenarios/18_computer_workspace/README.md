@@ -91,3 +91,5 @@ python3 talos-e2e/scripts/computer_sync/image_context.py . .tmp/output-logs-imag
 docker build -f build/worker/Dockerfile -t talos-worker:output-logs-local .tmp/output-logs-image
 TALOS_E2E_WORKER_IMAGE=talos-worker:output-logs-local just e2e-case 18_computer_workspace/12_output_logs
 ```
+
+The output-log case also seeds more than 4096 owned logs across active and offline user Workspaces while the Worker is stopped. A 3600-second interval requires one startup round to reclaim every expired fixture, preserve unexpired/unknown data, isolate malformed ownership, and recover quota after a later container replacement. Existing references are read again through the real Server/Worker route. Generic guard-task start/run/stop logs are required. The ordinary native output-log case covers retention, TTL removal and the missing-reference result in the gated Bash/Grep/Read flow.

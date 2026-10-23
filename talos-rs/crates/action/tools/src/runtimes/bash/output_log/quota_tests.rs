@@ -161,3 +161,39 @@ fn nonregular_metadata_is_rejected_before_opening_a_fifo() {
         .unwrap_err()
         .is_code(ErrorCode::PermissionDenied));
 }
+
+#[tokio::test]
+async fn unknown_size_reconcile_then_delete_preserves_another_logs_charge() {
+    let workspace = tempfile::tempdir().unwrap();
+    let mut log = writer(workspace.path()).await.unwrap();
+    log.append(b"saved output").await.unwrap();
+    log.file.flush().await.unwrap();
+    let directory = log.directory.clone();
+    let mut error = None;
+    log.confirm_stored_size(
+        Err(std::io::Error::other("injected fstat failure")),
+        &mut error,
+    );
+    log.record.log.capture_status = CaptureStatus::WriteFailed;
+    assert!(log.commit(error).error.is_some());
+    let other = writer(workspace.path()).await.unwrap();
+    let other_directory = other.directory.clone();
+    assert!(other.finish(0, 0, false).await.error.is_none());
+    let root = workspace.path().join("tool-output");
+    // Old ledger data is recovered from the same charge recorded in metadata.
+    fs::write(root.join("quota.json"), b"{\"version\":1,\"used_bytes\":1}").unwrap();
+    LogWriter::maintain_workspace(workspace.path().into(), settings())
+        .await
+        .unwrap();
+    assert_eq!(quota::load(&root).unwrap(), 12 + 2 * METADATA_RESERVE);
+    let mut record = load_record(&directory).unwrap();
+    assert_eq!(record.reservation_bytes, 12 + METADATA_RESERVE);
+    record.log.expires_at = 0;
+    save_record(&directory, &record).unwrap();
+    LogWriter::maintain_workspace(workspace.path().into(), settings())
+        .await
+        .unwrap();
+    assert!(!directory.exists());
+    assert!(other_directory.exists());
+    assert_eq!(quota::load(&root).unwrap(), METADATA_RESERVE);
+}

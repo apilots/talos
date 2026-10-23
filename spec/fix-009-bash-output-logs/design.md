@@ -61,7 +61,7 @@ Read/Grep -> same Computer + same sandbox -> referenced log -> bounded result
 ```
 
 - `talos-config` 拥有默认值、校验和用户 Workspace 根目录解析；工具层直接消费 `EffectiveWorkspace.root` 及其已注入的有效配置，不重复拼接 user_id，不散传不相关标量。
-- `talos-tools` 的现有 Bash runtime 拥有 collector、writer、预览、文件记录与清理。可拆成 `runtimes/bash/output.rs` 等具体模块；不新增通用 manager/store trait。
+- `talos-tools` 的现有 Bash runtime 拥有 collector、writer、预览、文件记录及单 Workspace 的文件维护能力。周期调度、跨 Workspace 发现与轮转归 Worker；不由 Bash 调用触发。可拆成 `runtimes/bash/output.rs` 等具体模块；不新增通用 manager/store trait。
 - Registry 拥有规范结果的统一限制。Kernel 拥有模型投影及最终消息预算；两个边界共用限制契约和元信息，不各写一套摘要算法。
 - 原有进程、reader、waiter、timeout、取消任务继续由 BashSession 管理；writer 完成是本次工具返回的必要条件，不引入脱离任务组的后台写线程。InvocationGuard 在调用方 future 被强制 abort 时移除运行时 BashSession、终止所属进程、取消 timeout/waiter 和后续读取；现有 reader 继续完成已经接收的写入，并由最后一个 reader 提交 interrupted 记录后释放日志锁。
 - 协调层与 UI 只接收有界预览/引用，不搬运整份日志；日志不是产品 Timeline 正文，也不写进 transcript/summary JSONL。
@@ -191,16 +191,18 @@ Progress 内容与最终预览分别有界，不能把每个滚动快照重复�
 | Session clear/delete | 第一版不立即删日志；沿同一 TTL/配额回收，避免 preflight clear 成功但业务删除失败时丢日志 |
 | 文件已淘汰/移除 | Read 返回既有 PathNotFound 等 typed 错误；不自动重跑原命令，不修改已提交 Timeline |
 
-维护由共享 `TalosWorker` 的执行运行时持有：独立、Docker 和嵌入式 Worker 各启动一个清理循环，启动立即执行首轮，之后默认每小时执行。任务与 Session、Turn、Bash 调用和注册连接无关；离线或无人调用 Bash 也会检查本机已配置 Workspace 下已有的用户日志。控制面不扫描或删除远程 Computer 的文件。任务只处理已授权前缀，不跟随用户目录或日志符号链接，不创建从未产生过日志的用户目录。各 Workspace/配置前缀失败独立上报并继续其他范围；单个循环不重叠，结束本轮后等待下一周期，配置成功发布时唤醒并读取新快照。停止时取消调度、等待已开始的小批次安全结束；Worker clone 共享同一任务及幂等 join。任务异常退出立即通过统一错误 owner 报告，并由同一监督任务按 1 秒起、最高 60 秒的指数退避重启；连续健康运行 60 秒后重置退避。停止会取消退避等待，不创建重叠循环。
+维护由共享 `TalosWorker` 的执行运行时持有，使用 common `talos-guard-task`（`crates/common/guard-task`）。独立、Docker 和嵌入式 Worker 注册一个 `bash_output_cleanup`，启动立即执行完整首轮，之后默认每小时一轮。任务与 Session、Turn、Bash 调用和注册连接无关；离线或无人调用 Bash 也检查本机全部已配置前缀下已有日志的用户 Workspace。控制面不扫描远程 Computer 的文件。发现过程不跟随符号链接、不创建从未产生过日志的用户目录；配置移除或改变根目录后，旧扫描范围不再执行下一批。单个范围失败隔离上报，健康范围继续。
 
-普通 Bash 不触发扫描、回收或崩溃恢复。首次落盘只取得 `workspace.lock` 并读取常量大小的 `quota.json`，持久化最大文件正文加 4,096 bytes 的预留后才创建日志。新建日志根可直接初始化空账本；已存在但账本缺失的目录只能由后台重建，落盘准入最多有界等待初始化并在未就绪时明确失败，不能隐式扫描或绕过配额。metadata 与账本收尾更新在同一 Workspace 锁内；失败可保守多计，不得少计。日志创建失败时，仅在确认尚未写入正文、已安全移除已知初始化文件后，才回滚本次预留；发现未知文件或清理失败则报告错误并保留预留。收尾无法确认实际文件大小时保留完整预留，由后续成功的后台扫描校准，不能按零字节释放。后台根据已验证的记录、实际正文大小及活跃预留校准账本。5 GiB 是每用户 Workspace 的硬预留上限，不是软回收水位；配额不足不会在 Bash 内联触发清理，也不自动重跑已执行命令。所有 Agent 使用执行节点统一的日志生命周期策略，显式 Agent 覆盖不能提高共享目录配额。该账本约束内置日志 writer 的协作分配；拥有同一文件系统完整写权限的用户仍能手工改写日志或账本，不能把它当成抵御宿主文件所有者篡改的安全边界，也不限制其他 Bash 文件写入。
+common 导出 `GuardTasks`、`GuardTaskSpec`、`GuardTask`、`GuardTaskContext`、`GuardTaskHandle`，只依赖 Tokio/cancellation 与统一错误和日志。task 定义唯一名称、周期、run_on_start 和一轮 `run(context)`；业务自行观察取消并完成安全批次。框架负责唯一注册、周期、手动唤醒、取消与共享幂等 join、异常监督及统一日志，不依赖 Worker/Config/Workspace/Bash/quota。每个任务串行运行，周期不堆积补跑；运行期间配置唤醒合并为随后一轮。panic 由框架报告并以 1 秒至 60 秒指数退避重新执行，正常业务错误报告后保持周期；停止取消等待/退避并等待当前安全操作完成，不强制 abort 正在提交的磁盘操作。Worker 在构造成功后注册，在释放工具资源前 shutdown；clone 共享同一 owner。
+普通 Bash 不触发扫描、回收或崩溃恢复。首次落盘只取得 `workspace.lock` 并读取常量大小的 `quota.json`，持久化最大文件正文加 4,096 bytes 的预留后才创建日志。新建日志根可直接初始化空账本；已存在但账本缺失的目录只能由后台重建，落盘准入最多有界等待初始化并在未就绪时明确失败，不能隐式扫描或绕过配额。metadata 与账本收尾更新在同一 Workspace 锁内；失败可保守多计，不得少计。日志创建失败时，仅在确认尚未写入正文、已安全移除已知初始化文件后，才回滚本次预留；发现未知文件或清理失败则报告错误并保留预留。收尾无法确认实际文件大小时保留完整预留，由后续成功的后台扫描校准，不能按零字节释放。后台先在锁内明确调整单份终态 metadata 的占额，再增量更新总账；只读校准累计已验证 metadata 的 reservation_bytes，与后续删除扣减使用完全相同的计费单位。大小无法确认时保留完整预留，不能只缩小总账。5 GiB 是每用户 Workspace 的硬预留上限，不是软回收水位；配额不足不会在 Bash 内联触发清理，也不自动重跑已执行命令。所有 Agent 使用执行节点统一的日志生命周期策略，显式 Agent 覆盖不能提高共享目录配额。该账本约束内置日志 writer 的协作分配；拥有同一文件系统完整写权限的用户仍能手工改写日志或账本，不能把它当成抵御宿主文件所有者篡改的安全边界，也不限制其他 Bash 文件写入。
 
-后台根目录维护锁最多等待 2 秒；一次最多检查 4,096 个目录项，超限时先回收扫描到的过期记录，再最多淘汰 128 份已确认归属的最旧终态日志，返回 ServiceUnavailable，下次周期继续推进。未完成全量扫描时不按部分占用重建账本。完整扫描后，配额不足时可提前淘汰最旧终态日志，为一份最大日志留出余量；活动预留不被淘汰。这也意味着目录数量和配额压力可能早于 TTL 淘汰日志。
+每小时一轮是完整遍历，4096 只是批次上限。Worker 以 FIFO 等待队列和最多 8 个活动 Workspace 的窗口限制目录句柄；每个 Workspace 保留内存 `ReadDir`/DFS 游标，扫描、清理小批后轮转。每批最多 4096 目录项、128 份日志或 250ms，等待队列最多 128 个 Workspace。发现也分批计入全局预算。全局 30 秒预算用尽时让出约 1 秒，保留游标继续同一轮，不等下一小时、不并发重叠。后台对 Workspace 锁只 try-lock；忙时轮转并短暂让出，不占用前台的 2 秒等待。预算是协作式，不能中断阻塞内核 I/O/fsync。重启或 panic 可丢弃内存游标，从新一轮重新遍历；无需 SQLite、持久任务队列或索引。有限静态树中的错误/活动/未知条目不会阻止尾部健康日志被访问；扫描数量超限本身不得淘汰未过期日志。实际配额压力才允许按当前遍历顺序淘汰已确认归属的终态日志，以容纳一份最大文件预留；不承诺全局按年龄排序。
 
-清理先检查目录只含预期文件，再原子保存私有 cleanup=deleting 意图，然后依次删除正文、capture lock、metadata 和空目录。中断后的 deleting 记录在下次后台维护继续完成，不重新等 TTL。末次 unlink 后遗留的空目录仅用 rmdir 回收，不递归删除未知文件。对未知目录先读取一个目录项确认是否为空；非空目录直接跳过，避免只读外来目录上的 rmdir 权限错误阻断已确认归属日志的维护。读取记录前先尝试 capture lock，避免把刚完成提交的 writer 按旧记录误判为崩溃。
+清理在 Workspace 锁内先验证预期文件和 metadata，再尝试 capture 锁，避免误判活跃 writer。先保存 `cleanup=deleting` 意图，再删除正文、capture lock、最后 metadata，确认完成后才扣除已知占额；中断后的 deleting 记录下轮继续。日志文件分批回收，但保留空调用目录直到 TTL/计费遍历结束，避免 APFS 等文件系统在保留迭代器时删除子目录而跳过后续条目。之后独立分批 `rmdir` 空目录；仅在确实移除空目录时再做一遍空目录收尾，直到无进展。该收尾不再处理 TTL/覆盖账本，不递归删除未知数据。
 
-任务以 `talos::output_logs` 记录 INFO 启动、每轮开始/结束和停止；包含触发原因、间隔、TTL、配额、扫描/删除/恢复/活动跳过/失败计数、回收字节与耗时，不记录输出正文。Workspace 错误保留范围与阶段，通过统一 TalosError owner 输出 WARN/ERROR；失败不会终止后续周期。
+`quota.json` 保存 `{version: 2, used_bytes, revision}`，仍是唯一实时账本。reserve、finalize、恢复、删除及目录裁剪在同一 Workspace 锁内更新/使 revision 失效；即使使用量 ABA 回到原值也不能发布过期校准。缺失、损坏或旧格式账本不准入新 spill，后台先以独立只读完整遍历尝试恢复，再进行 TTL 清理；正常有效账本直接进入分批清理。清理后再独立只读完整校准；仅在所有记录可信且起止 revision 相同时发布总额。任何不完整扫描不得覆盖 used_bytes。并发写入或读失败只延后校准，不重置 TTL 游标；持续活跃时允许保守多计。删除成功但扣账前崩溃会多计；metadata 已移除，不能重复扣减其他日志的占额，完整可信校准可恢复。
 
+通用 `talos::guard_task` 记录 INFO 启动、轮次开始/结束及停止，包含 task_name、interval、trigger、成功/取消与耗时；监督异常包含退避日志。Worker 的 `talos::output_logs` 记录业务轮次、预算让出、计费延后及扫描/删除/恢复/活动/失败计数、批次、Workspace 数、回收字节与耗时，DEBUG 记录每批进展，不记录正文。记录/Workspace 错误由 Worker 携带范围上下文报告，公共 runner 负责未处理的整轮错误和 panic；同一错误只有一个报告 owner。
 跨进程并发使用同一用户 Workspace 根目录时，内存 Mutex 不够：该目录内的日志配额/淘汰和每个活跃 capture 使用文件锁。为新 writer 预留该文件最大正文加 4,096 bytes metadata 开销；实际 pretty JSON 每份不超过 2,048 bytes，以容纳原子替换时同时存在的新旧记录。结束后改计实际保存大小，防止多个命令各自通过配额检查后共同超限。终态 blocking metadata 任务拥有完整 writer 和 capture lock，即使等待者取消，也要在提交结束后才释放锁。清理只依据已验证身份 metadata、捕获状态和锁，不因目录看起来像旧文件就递归删除。
 
 立即随 Session 删除日志涉及 clear/delete 意图区分、业务提交后的执行节点清理及离线恢复；明确列为后续扩展，不在本次工具修复中引入跨节点删除协议。对要求立即擦除的部署，TTL 回收不等于删除时擦除承诺。
@@ -255,7 +257,8 @@ Progress 内容与最终预览分别有界，不能把每个滚动快照重复�
 | `tools-sandbox` | 如现有 filesystem handle 不支持，补授权后的 streaming/range 能力，不扩大原授权 |
 | `talos-agent-kernel` | 成功/失败共享模型投影、最终限额、progress 累计限额、批量上下文回归 |
 | common types / agent-pb / agent-protocol / SDK / Web / TUI | Bash 引用、FileRead 游标/未知总行数的同源对象及 live/replay 消费 |
-| existing Worker/Provider composition | 只在需要的生命周期入口调用 tools 的具体维护能力；不扩张 summary store |
+| `talos-guard-task` (common) | 周期任务定义、注册、监督、取消、安全 join 与通用日志 |
+| Worker composition | 实现日志清理业务、发现与轮转、注册/配置唤醒/关闭；不扩张 summary store |
 
 可部署切片按“统一入口保护 -> Bash 真实落盘及日志读取 -> Grep 生产端有界化”拆分。Bash 的引用发布必须与可读取能力一起交付；不能把只返回无法读取路径的版本标为闭环完成。执行阶段和状态由仓库根目录的任务专属 IMPLEMENTATION_PLAN.md 维护，不覆盖仓库根目录另一任务的计划。
 
@@ -268,16 +271,19 @@ Progress 内容与最终预览分别有界，不能把每个滚动快照重复�
 - 存储：独占路径、并发 call/进程、重启恢复、写/flush 故障、64 MiB 限额、workspace 配额预留与淘汰；活动文件不被 GC；TTL 后仍可返回可理解的缺失错误；clear/delete preflight 失败不提前丢日志。
 - Read：超过 2 MiB 日志按 line/byte 续读；不同范围不误报 unchanged；单行超过预算仍可完整逐段定位；UTF-8 边界；截断/增长/删除时 cursor 语义明确。
 - Grep：超长匹配/context、精确 count、路径模式不泄漏正文、partial、分页推进、没有非必要全量正文缓冲。
+- 后台任务：不同周期、启动首轮、重复名称、配置唤醒、串行执行、长轮跳过过期 tick、panic 退避、共享/取消中的 shutdown。
+- 全量清理：超过 4096 项且混合活动、未过期、未知及损坏条目，尾部过期日志同轮回收；多 Workspace 轮转、全局让出续扫、空目录裁剪不影响 TTL/计费遍历。
+- 配额：部分校准不发布，revision ABA/并发 reserve/finalize/delete 延后校准；未知大小预留经校准后删除不误扣其他日志；删除与扣账崩溃间隙保守多计并恢复。
 - 集成：从实际 Bash/Read/Grep 经 Registry、Kernel 到捕获到的 Provider 请求断言大小与结构；验证失败 envelope 不带回原始日志；多工具批次以及 compact/恢复后引用仍可定位；不调用真实付费模型做单元测试。
 - 跨边界：更新类型生成物，Web/TUI live/replay 展示状态及引用；现有 06_tools 下补 Bash 大输出 -> Grep 定位 -> Read 续读的代表性 gated E2E。真实远程 Computer 的路径归属与持久卷重启验收单列，未运行不能称通过。
 
-执行时采用项目命令：`just test -p talos-tools`、`just test -p talos-tools-sandbox`（若改动）、`just test -p talos-agent-kernel`、`just test -p talos-agent-provider-kernel`（若改动）、`just test -p talos-config`；对应 scoped check/clippy、`just fmt-check` 和 `pnpm --dir talos-app check:repo`。前端/schema 改动另跑受影响生成与类型检查，E2E 使用现有 runner 的精确 case selector，不跑无关全量集。
+执行时采用项目命令：`just test -p talos-guard-task`、`just test -p talos-worker`、`just test -p talos-tools`、`just test -p talos-tools-sandbox`（若改动）、`just test -p talos-agent-kernel`、`just test -p talos-agent-provider-kernel`（若改动）、`just test -p talos-config`；对应 scoped check/clippy、`just fmt-check` 和 `pnpm --dir talos-app check:repo`。前端/schema 改动另跑受影响生成与类型检查，E2E 使用现有 runner 的精确 case selector，不跑无关全量集。
 
 ## 11. 已知限制与后续扩展
 
 - 默认值为 7 天、64 MiB/文件、5 GiB/用户 Workspace、每小时后台维护；用户可通过同一 output_log 配置调整有限配额。
 - 日志是有限保留的执行节点文件，不是永久审计档案。配额淘汰可能早于 TTL，结果必须说明这一点。
 - 第一版无 Session 删除即刻擦除、跨 Computer 日志迁移、Sync 文件复制、浏览器下载。上述需求需要已有 Service/Worker 授权路径中的独立协议设计。
-- 冷启动无需扫描所有用户目录；首次使用一个已授权的用户 Workspace 根目录才维护其日志。空闲用户 Workspace 的物理文件可能晚于 TTL 被删除。
+- 启动及每小时扫描全部已配置且已有日志的用户 Workspace；大轮次跨批次和调度预算继续，实际删除可能晚于 TTL。变化中的目录项可留待下一轮；不承诺文件系统一致快照或反复崩溃下的持久进度。
 - 普通 line offset 从文件头扫描可能有 I/O 成本，长日志后续页优先使用 byte cursor。本期不引入持久化行索引。
 - 不把上下文总量、磁盘错误、命令退出码和输出完整性混成一个 truncated 标志；每项必须能单独验证。

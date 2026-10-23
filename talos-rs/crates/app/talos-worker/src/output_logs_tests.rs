@@ -1,8 +1,24 @@
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use talos_guard_task::{GuardTaskHandle, GuardTaskSpec, GuardTasks};
 
-fn config(root: &Path) -> Config {
+fn start(config: Arc<RwLock<Config>>) -> (Arc<GuardTasks>, GuardTaskHandle) {
+    let tasks = Arc::new(GuardTasks::default());
+    let handle = tasks
+        .register(
+            GuardTaskSpec {
+                name: "bash_output_cleanup",
+                interval: Duration::from_secs(1),
+                run_on_start: true,
+            },
+            OutputLogMaintenance::new(config),
+        )
+        .unwrap();
+    (tasks, handle)
+}
+
+pub(super) fn config(root: &Path) -> Config {
     let mut config = Config::default()
         .with_workspace_definition(talos_config::WorkspaceDefinition::new("default", root));
     config
@@ -15,7 +31,13 @@ fn config(root: &Path) -> Config {
     config
 }
 
-fn fixture(config: &Config, user: &str, name: &str, status: &str, expired: bool) -> PathBuf {
+pub(super) fn fixture(
+    config: &Config,
+    user: &str,
+    name: &str,
+    status: &str,
+    expired: bool,
+) -> PathBuf {
     let workspace = config.resolve_workspace("default", user).unwrap();
     let relative = format!("tool-output/session/turn/{name}/output.log");
     let path = workspace.root.join(&relative);
@@ -45,7 +67,7 @@ async fn startup_recovers_offline_user_logs_without_bash() {
     let config = config(root.path());
     let expired = fixture(&config, "offline-user", "expired", "complete", true);
     let interrupted = fixture(&config, "other-user", "orphan", "capturing", false);
-    let task = OutputLogMaintenance::start(Arc::new(RwLock::new(config)), Arc::new(Notify::new()));
+    let (task, _) = start(Arc::new(RwLock::new(config)));
     wait_until(|| {
         !expired.exists()
             && fs::read_to_string(interrupted.with_file_name("metadata.json"))
@@ -73,7 +95,7 @@ async fn periodic_expiry_runs_while_no_tool_is_executing_and_shutdown_is_shared(
         .unwrap()
         .root
         .join("tool-output/quota.json");
-    let task = OutputLogMaintenance::start(Arc::new(RwLock::new(config)), Arc::new(Notify::new()));
+    let (task, _) = start(Arc::new(RwLock::new(config)));
     wait_until(|| quota.exists()).await;
     let metadata = log.with_file_name("metadata.json");
     let mut value: serde_json::Value =
@@ -97,7 +119,7 @@ async fn broken_workspace_does_not_stop_another_user_cleanup_or_next_round() {
     let metadata = broken.with_file_name("metadata.json");
     let saved = fs::read(&metadata).unwrap();
     fs::write(&metadata, b"invalid metadata").unwrap();
-    let task = OutputLogMaintenance::start(Arc::new(RwLock::new(config)), Arc::new(Notify::new()));
+    let (task, _) = start(Arc::new(RwLock::new(config)));
     wait_until(|| !valid.exists()).await;
     assert!(broken.exists());
     fs::write(metadata, saved).unwrap();
@@ -123,8 +145,8 @@ async fn config_publication_wakes_the_single_task_and_changes_its_policy() {
         .root
         .join("tool-output/quota.json");
     let active = Arc::new(RwLock::new(config));
-    let changed = Arc::new(Notify::new());
-    let task = OutputLogMaintenance::start(active.clone(), changed.clone());
+    let (task, changed) = start(active.clone());
+    changed.set_interval(Duration::from_secs(3600)).unwrap();
     wait_until(|| quota.exists()).await;
     let expired = fixture(
         &active.read().unwrap(),
@@ -142,7 +164,8 @@ async fn config_publication_wakes_the_single_task_and_changes_its_policy() {
         .bash
         .output_log
         .cleanup_interval_secs = 1;
-    changed.notify_one();
+    changed.set_interval(Duration::from_secs(1)).unwrap();
+    changed.wake();
     wait_until(|| !expired.exists()).await;
     task.shutdown().await.unwrap();
     assert!(retained.exists());
@@ -157,7 +180,10 @@ fn discovery_skips_symlinked_users_and_workspaces_without_logs() {
     fs::create_dir(root.path().join("unused")).unwrap();
     std::os::unix::fs::symlink(outside.path(), root.path().join("linked-user")).unwrap();
     fixture(&config, "alice", "retained", "complete", false);
-    let roots = discover(&config, &CancellationToken::new()).workspaces;
+    let mut discovery = discovery::Discovery::new();
+    let (roots, errors, complete) = discovery.step(&config, || false, Duration::from_secs(1), 128);
+    assert!(errors.is_empty());
+    assert!(complete);
     assert_eq!(roots.len(), 1);
     assert_eq!(roots[0].user_id, "alice");
 }
@@ -177,7 +203,7 @@ async fn invalid_workspace_prefix_does_not_block_another_configured_root() {
             invalid_root,
         ));
     let expired = fixture(&config, "alice", "expired", "complete", true);
-    let task = OutputLogMaintenance::start(Arc::new(RwLock::new(config)), Arc::new(Notify::new()));
+    let (task, _) = start(Arc::new(RwLock::new(config)));
     wait_until(|| !expired.exists()).await;
     task.shutdown().await.unwrap();
 }
@@ -232,7 +258,7 @@ async fn unexpected_loop_panic_recovers_after_configuration_is_repaired() {
     });
     let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _subscriber = tracing::subscriber::set_default(RestartObserved(observed.clone()));
-    let task = OutputLogMaintenance::start(active.clone(), Arc::new(Notify::new()));
+    let (task, _) = start(active.clone());
     let restarted = tokio::time::timeout(Duration::from_secs(5), async {
         while !observed.load(std::sync::atomic::Ordering::SeqCst) {
             tokio::task::yield_now().await;
@@ -262,7 +288,7 @@ async fn shutdown_cancels_a_panicked_loop_during_restart_backoff() {
     });
     let observed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _subscriber = tracing::subscriber::set_default(RestartObserved(observed.clone()));
-    let task = OutputLogMaintenance::start(active, Arc::new(Notify::new()));
+    let (task, _) = start(active);
     wait_until(|| observed.load(std::sync::atomic::Ordering::SeqCst)).await;
     tokio::time::timeout(Duration::from_millis(500), task.shutdown())
         .await

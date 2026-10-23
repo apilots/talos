@@ -1,10 +1,11 @@
 //! Constant-size cross-process admission; only maintenance reconstructs usage.
 use super::*;
 
-#[derive(Serialize, Deserialize)]
-struct Quota {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct Snapshot {
     version: u8,
-    used_bytes: u64,
+    pub used_bytes: u64,
+    revision: u64,
 }
 
 pub(super) fn admission_lock(root: &Path, fresh: bool) -> TalosResult<FileLock> {
@@ -28,6 +29,10 @@ pub(super) fn admission_lock(root: &Path, fresh: bool) -> TalosResult<FileLock> 
 }
 
 pub(super) fn load(root: &Path) -> TalosResult<u64> {
+    Ok(snapshot(root)?.used_bytes)
+}
+
+pub(super) fn snapshot(root: &Path) -> TalosResult<Snapshot> {
     let path = root.join("quota.json");
     let metadata = fs::symlink_metadata(&path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -52,16 +57,16 @@ pub(super) fn load(root: &Path) -> TalosResult<u64> {
         .take(METADATA_RESERVE + 1)
         .read_to_end(&mut bytes)
         .map_err(io_error)?;
-    let value: Quota = serde_json::from_slice(&bytes).map_err(|error| {
+    let value: Snapshot = serde_json::from_slice(&bytes).map_err(|error| {
         TalosError::internal_with_source("Bash output accounting is invalid.", error)
     })?;
-    if value.version != 1 {
+    if value.version != 2 {
         return Err(TalosError::new(
-            ErrorCode::InvalidRequest,
-            "Bash output accounting version is unsupported.",
+            ErrorCode::ServiceUnavailable,
+            "Bash output accounting requires Worker recovery.",
         ));
     }
-    Ok(value.used_bytes)
+    Ok(value)
 }
 
 pub(super) fn save(root: &Path, used_bytes: u64) -> TalosResult<()> {
@@ -74,11 +79,16 @@ pub(super) fn save(root: &Path, used_bytes: u64) -> TalosResult<()> {
             "Bash output accounting cannot replace a non-regular file.",
         ));
     }
+    let revision = snapshot(root)
+        .map_or(0, |value| value.revision)
+        .checked_add(1)
+        .ok_or_else(|| TalosError::internal("Bash output accounting revision overflowed."))?;
     talos_fs::std_fs().write_json_pretty_with(
         &root.join("quota.json"),
-        &Quota {
-            version: 1,
+        &Snapshot {
+            version: 2,
             used_bytes,
+            revision,
         },
         WriteOptions::default().with_permissions(FilePermissions::unix(0o600)),
     )

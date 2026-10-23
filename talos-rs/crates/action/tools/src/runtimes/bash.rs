@@ -26,7 +26,10 @@ use lifecycle::{join_session_tasks, InvocationGuard};
 mod output;
 mod output_log;
 use output::OutputCapture;
-pub use output_log::{maintain_bash_output_workspace, OutputLogMaintenanceStats};
+pub use output_log::{
+    maintain_bash_output_workspace, BashOutputMaintenance, OutputLogMaintenanceStats,
+    OutputLogMaintenanceStep,
+};
 
 const DEFAULT_BASH_YIELD_TIME_MS: u64 = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024;

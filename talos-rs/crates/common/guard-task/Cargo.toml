@@ -1,0 +1,20 @@
+[package]
+name = "talos-guard-task"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Supervised process-local periodic tasks"
+
+[dependencies]
+talos-error.workspace = true
+talos-logging.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

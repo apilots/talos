@@ -49,7 +49,7 @@ pub struct TalosWorker {
     browser: Arc<talos_browser::BrowserRuntime>,
     mcp_credentials: McpCredentialStore,
     config_service: talos_service::ConfigService,
-    output_logs: Arc<crate::output_logs::OutputLogMaintenance>,
+    background_tasks: Arc<talos_guard_task::GuardTasks>,
 }
 
 impl TalosWorker {
@@ -216,7 +216,24 @@ impl TalosWorker {
             ));
         }
 
-        let output_logs_changed = Arc::new(tokio::sync::Notify::new());
+        let system_info = talos_system_info::collect().await?;
+        let background_tasks = Arc::new(talos_guard_task::GuardTasks::default());
+        let output_logs_changed = background_tasks.register(
+            talos_guard_task::GuardTaskSpec {
+                name: "bash_output_cleanup",
+                interval: std::time::Duration::from_secs(
+                    config
+                        .agent
+                        .kernel
+                        .tools
+                        .bash
+                        .output_log
+                        .cleanup_interval_secs,
+                ),
+                run_on_start: true,
+            },
+            crate::output_logs::OutputLogMaintenance::new(active_config.clone()),
+        )?;
         let config_service = crate::config::service(
             active_config.clone(),
             provider_router.clone(),
@@ -227,13 +244,8 @@ impl TalosWorker {
             output_logs_changed.clone(),
         );
         let plugin_manager = plugin_manager.with_config_service(config_service.clone());
-        let system_info = talos_system_info::collect().await?;
-        let output_logs = crate::output_logs::OutputLogMaintenance::start(
-            active_config.clone(),
-            output_logs_changed,
-        );
         Ok(Self {
-            output_logs,
+            background_tasks,
             system_info,
             resource_bindings,
             harnesses,
@@ -325,7 +337,7 @@ impl TalosWorker {
 
     pub async fn shutdown(&self) -> TalosResult<()> {
         let mut result = self
-            .output_logs
+            .background_tasks
             .shutdown()
             .await
             .inspect_err(talos_logging::report_error);

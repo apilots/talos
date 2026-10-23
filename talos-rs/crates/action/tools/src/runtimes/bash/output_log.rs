@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 const METADATA_RESERVE: u64 = 4096;
 const MAX_LOG_DIRECTORIES: usize = 4096;
 
-/// Summary of one bounded maintenance pass on a user-scoped execution Workspace.
+/// Summary of maintenance batches or one complete round on a user-scoped execution Workspace.
 #[derive(Debug, Default)]
 pub struct OutputLogMaintenanceStats {
     pub scanned_entries: usize,
@@ -22,6 +22,16 @@ pub struct OutputLogMaintenanceStats {
     pub reclaimed_bytes: u64,
     pub recovered_logs: usize,
     pub active_logs: usize,
+}
+
+impl OutputLogMaintenanceStats {
+    pub fn merge(&mut self, other: &Self) {
+        self.scanned_entries += other.scanned_entries;
+        self.deleted_logs += other.deleted_logs;
+        self.reclaimed_bytes += other.reclaimed_bytes;
+        self.recovered_logs += other.recovered_logs;
+        self.active_logs += other.active_logs;
+    }
 }
 
 /// Run only from the execution host lifecycle, never from a Bash invocation.
@@ -37,7 +47,9 @@ pub async fn maintain_bash_output_workspace(
 mod creation;
 mod maintenance;
 mod quota;
-use maintenance::maintain;
+mod scan;
+mod walk;
+pub use scan::{BashOutputMaintenance, OutputLogMaintenanceStep};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Record {
@@ -201,16 +213,30 @@ impl LogWriter {
         workspace: PathBuf,
         config: BashOutputLogConfig,
     ) -> TalosResult<OutputLogMaintenanceStats> {
-        tokio::task::spawn_blocking(move || {
-            let root = workspace.join("tool-output");
-            private_directory(&root)?;
-            let _lock = workspace_lock(&root)?;
-            maintain(&root, &config, 0)
-        })
-        .await
-        .map_err(|error| {
-            TalosError::internal_with_source("Bash log maintenance task failed.", error)
-        })?
+        let mut scan = BashOutputMaintenance::new(workspace);
+        let mut stats = OutputLogMaintenanceStats::default();
+        let mut first_error = None;
+        loop {
+            let (next, step) = scan
+                .advance(config.clone(), std::time::Duration::from_millis(250))
+                .await?;
+            scan = next;
+            if step.stats.scanned_entries == 0 && !step.complete && step.errors.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            stats.merge(&step.stats);
+            for error in step.errors {
+                retain_failure(&mut first_error, error);
+            }
+            if step.complete {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        Ok(stats)
     }
 
     pub async fn open(
@@ -389,6 +415,7 @@ impl LogWriter {
             .expect("log has Session/Turn/call directories");
         let result = (|| {
             let _lock = workspace_lock(root)?;
+            quota::save(root, quota::load(root)?)?;
             save_record(&self.directory, &self.record)?;
             quota::release(root, self.reserved_bytes, self.record.reservation_bytes)
         })();

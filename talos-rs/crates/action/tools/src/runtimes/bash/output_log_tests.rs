@@ -321,7 +321,7 @@ async fn metadata_budget_includes_pretty_json_and_atomic_replacement() {
 }
 
 #[tokio::test]
-async fn saturated_scan_reclaims_terminal_logs_before_ttl_and_makes_retry_progress() {
+async fn full_round_crosses_batch_limits_without_evicting_unexpired_logs() {
     let workspace = tempfile::tempdir().unwrap();
     let config = BashOutputLogConfig {
         max_workspace_bytes: 64 * 1024 * 1024,
@@ -332,7 +332,7 @@ async fn saturated_scan_reclaims_terminal_logs_before_ttl_and_makes_retry_progre
     finish(log, 0, 0, false).await.unwrap();
     let mut record = load_record(&directory).unwrap();
     let turn = directory.parent().unwrap();
-    for index in 0..MAX_LOG_DIRECTORIES {
+    for index in 0..MAX_LOG_DIRECTORIES + 8 {
         let extra = turn.join(format!("fixture-{index}"));
         fs::create_dir(&extra).unwrap();
         let path = extra.join("output.log");
@@ -342,18 +342,34 @@ async fn saturated_scan_reclaims_terminal_logs_before_ttl_and_makes_retry_progre
             .unwrap()
             .to_string_lossy()
             .into_owned();
+        record.log.expires_at = if index % 2 == 0 { 0 } else { i64::MAX };
         fs::write(
             extra.join("metadata.json"),
             serde_json::to_vec(&record).unwrap(),
         )
         .unwrap();
     }
-    let result = LogWriter::maintain_workspace(workspace.path().into(), config.clone()).await;
-    assert!(matches!(result, Err(error) if error.is_code(ErrorCode::ServiceUnavailable)));
-    LogWriter::maintain_workspace(workspace.path().into(), config)
+    quota::save(
+        &workspace.path().join("tool-output"),
+        (MAX_LOG_DIRECTORIES as u64 + 9) * METADATA_RESERVE,
+    )
+    .unwrap();
+    let stats = LogWriter::maintain_workspace(workspace.path().into(), config)
         .await
         .unwrap();
-    assert!(fs::read_dir(turn).unwrap().count() < MAX_LOG_DIRECTORIES);
+    assert!(stats.scanned_entries > MAX_LOG_DIRECTORIES);
+    assert_eq!(stats.deleted_logs as usize, (MAX_LOG_DIRECTORIES + 8) / 2);
+    assert!(directory.exists());
+    for index in 0..MAX_LOG_DIRECTORIES + 8 {
+        assert_eq!(
+            turn.join(format!("fixture-{index}")).exists(),
+            index % 2 != 0
+        );
+    }
+    assert_eq!(
+        quota::load(&workspace.path().join("tool-output")).unwrap(),
+        (1 + (MAX_LOG_DIRECTORIES + 8) as u64 / 2) * METADATA_RESERVE
+    );
 }
 
 #[cfg(unix)]

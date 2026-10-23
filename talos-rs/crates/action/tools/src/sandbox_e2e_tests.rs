@@ -226,6 +226,33 @@ async fn bash_output_logs() {
     .unwrap();
     assert!(!next_page.is_error());
     assert!(std::path::Path::new(&log.path).is_file());
+    // Exercise the same bounded maintenance cursor used by the Worker, then
+    // verify that retention preserves the reference and TTL makes it unavailable.
+    let policy = talos_config::BashOutputLogConfig::default();
+    crate::runtimes::bash::maintain_bash_output_workspace(workspace.path().into(), policy.clone())
+        .await
+        .unwrap();
+    assert!(std::path::Path::new(&log.path).is_file());
+    let metadata = std::path::Path::new(&log.path).with_file_name("metadata.json");
+    let mut record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&metadata).unwrap()).unwrap();
+    record["log"]["expiresAt"] = json!(1);
+    std::fs::write(&metadata, serde_json::to_vec(&record).unwrap()).unwrap();
+    let stats =
+        crate::runtimes::bash::maintain_bash_output_workspace(workspace.path().into(), policy)
+            .await
+            .unwrap();
+    assert_eq!(stats.deleted_logs, 1);
+    assert!(!std::path::Path::new(&log.path).exists());
+    let missing = dispatch(
+        &fresh,
+        ctx(),
+        "expired-reference",
+        "Read",
+        json!({"path": log.path, "byte_offset": 0, "max_bytes": 64}),
+    )
+    .await;
+    assert!(missing.is_err() || missing.is_ok_and(|outcome| outcome.is_error()));
 }
 
 async fn dispatch_allow_once(
