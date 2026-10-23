@@ -151,7 +151,6 @@ export function ChatHomePage() {
           projects={projects}
           selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}
           reasoningLevel={selectedReasoningLevel}
-          reasoningEnabled={selectedModelInfo?.reasoning ?? false}
           supportedAttachmentKinds={supportedAttachmentKinds(selectedModelInfo)}
           showProjectSelector
         />

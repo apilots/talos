@@ -14,15 +14,17 @@ type SettingsProviderTabsProps<TKey extends string> = {
   providers: Array<SettingsProviderTabOption<TKey>>;
   activeProvider: TKey;
   onChange: (provider: TKey) => void;
+  trailing?: ReactNode;
 };
 
 export function SettingsProviderTabs<TKey extends string>({
   providers,
   activeProvider,
   onChange,
+  trailing,
 }: SettingsProviderTabsProps<TKey>) {
   return (
-    <div className="mb-5 flex gap-1 rounded-[1rem] border border-border/70 bg-background/40 p-1">
+    <div className="mb-5 flex flex-wrap gap-1 rounded-[1rem] border border-border/70 bg-background/40 p-1">
       {providers.map(({ key, label }) => {
         const isActive = activeProvider === key;
         return (
@@ -39,6 +41,7 @@ export function SettingsProviderTabs<TKey extends string>({
           </button>
         );
       })}
+      {trailing}
     </div>
   );
 }

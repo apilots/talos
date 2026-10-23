@@ -190,7 +190,6 @@ export function useChatSessionComposer({
     permissionMode: permissionMode.value,
     permissionModeDisabled: permissionMode.disabled,
     projects: projectsView.projects,
-    reasoningEnabled: currentModelInfo?.reasoning ?? false,
     reasoningLevel: currentReasoningLevel,
     selectedModel: currentModel,
     sessionTotalTokens: session?.usage?.tokens.total_tokens,

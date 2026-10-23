@@ -1,12 +1,10 @@
-import { useTranslation } from "react-i18next";
 import type { SessionInfo } from "@talos/sdk-browser";
 import type { Ref } from "react";
 
-import type { DropdownItem } from "./ComposerDropdown";
-import type { ComposerModelOption } from "./ComposerModelSelect";
+import type { ComposerModelOption } from "../model-selection";
 import type { ReasoningLevel } from "./ChatComposer.types";
 import { ComposerContextUsageIndicator } from "./ComposerContextUsageIndicator";
-import { ComposerProviderModelDropdowns } from "./ComposerProviderModelDropdowns";
+import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSubmitButton } from "./ComposerSubmitButton";
 
 interface ComposerRunControlsProps {
@@ -23,7 +21,6 @@ interface ComposerRunControlsProps {
   onModelPickerOpenChange?: (open: boolean) => void;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   onSend: () => Promise<void>;
-  reasoningItems: DropdownItem[];
   reasoningLevel: ReasoningLevel;
   selectedModel?: string;
   sessionTotalTokens?: number;
@@ -43,28 +40,21 @@ export function ComposerRunControls({
   onModelPickerOpenChange,
   onReasoningLevelChange,
   onSend,
-  reasoningItems,
   reasoningLevel,
   selectedModel,
   sessionTotalTokens,
 }: ComposerRunControlsProps) {
-  const { t } = useTranslation(["chat"]);
-
   return (
     <div className="ml-auto flex min-w-0 max-w-full flex-[1_1_14rem] items-center justify-end gap-1">
       {!compact ? (
-        <ComposerProviderModelDropdowns
+        <ComposerModelPicker
           disabled={Boolean(disabled || isBusy)}
-          effortLabel={t("chat:reasoningLabel")}
-          modelLabel={t("chat:modelLabel")}
           models={models}
-          onChange={onModelChange}
-          onEffortChange={(value) => onReasoningLevelChange?.(value as ReasoningLevel)}
+          onModelChange={onModelChange}
+          onReasoningLevelChange={onReasoningLevelChange}
           onOpenChange={onModelPickerOpenChange}
           modelTriggerRef={modelTriggerRef}
-          providerLabel={t("chat:providerLabel")}
-          reasoningItems={reasoningItems}
-          selectedEffort={reasoningLevel}
+          reasoningLevel={reasoningLevel}
           selectedModel={selectedModel}
         />
       ) : null}

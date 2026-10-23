@@ -62,6 +62,7 @@ describe("ChatComposer suggestions", () => {
     scrollIntoViewMock.mockReset();
     Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("filters and executes available slash commands", () => {
@@ -138,13 +139,14 @@ describe("ChatComposer suggestions", () => {
   });
 
   it("opens the model picker without dispatching a session command", () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
     const onCommand = vi.fn();
     renderControlledComposer({ initialDraft: "/m", onCommand });
 
     fireEvent.keyDown(getComposerInput(), { key: "Enter" });
 
     expect(onCommand).not.toHaveBeenCalled();
-    expect(screen.getByText("Provider")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Model and reasoning settings" })).toBeInTheDocument();
     expect(getComposerValue()).toBe("");
   });
 

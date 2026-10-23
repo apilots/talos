@@ -1,8 +1,11 @@
+import { parseRequestParameters, type RequestParameterRow } from "./requestParameters";
+
 import type {
   ModelInputKind,
   ModelSpeed,
   ProviderModelConfig,
   ReasoningEffort,
+  ReasoningReplay,
 } from "@talos/sdk-browser";
 import type React from "react";
 import { File, Image, Mic, Type, Video } from "lucide-react";
@@ -27,9 +30,13 @@ export interface ModelFormState {
   reasoning_effort: ReasoningEffort;
   speed: ModelSpeed;
   input: ModelInputKind[];
+  request_parameters: RequestParameterRow[];
+  reasoning_replay: ReasoningReplay;
 }
 
 export const emptyModelForm: ModelFormState = {
+  request_parameters: [],
+  reasoning_replay: "protocol_default",
   id: "",
   name: "",
   context_window: "200000",
@@ -41,6 +48,8 @@ export const emptyModelForm: ModelFormState = {
 
 export function modelToForm(model: ProviderModelConfig): ModelFormState {
   return {
+    reasoning_replay: model.reasoning_replay ?? "protocol_default",
+    request_parameters: Object.entries(model.request_parameters ?? {}).map(([key, value]) => ({ key, value: JSON.stringify(value) })),
     id: model.id,
     name: model.name,
     context_window: String(model.context_window),
@@ -56,6 +65,7 @@ export function formToModel(
   existing?: ProviderModelConfig,
 ): ProviderModelConfig {
   const base: ProviderModelConfig = existing ?? {
+    request_parameters: {},
     id: form.id,
     name: form.name,
     context_window: 0,
@@ -68,6 +78,8 @@ export function formToModel(
 
   return {
     ...base,
+    request_parameters: parseRequestParameters(form.request_parameters).value,
+    reasoning_replay: form.reasoning_replay,
     id: form.id.trim(),
     name: form.name.trim(),
     context_window: parseInt(form.context_window, 10) || 0,

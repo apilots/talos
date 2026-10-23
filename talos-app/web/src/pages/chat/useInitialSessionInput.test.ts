@@ -2,6 +2,7 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ModelInfo } from "@talos/sdk-browser";
 
 import {
   hasInitialSessionInput,
@@ -53,5 +54,19 @@ describe("useInitialSessionInput", () => {
     });
     expect(hasInitialSessionInput(locationState)).toBe(true);
     expect(navigate).toHaveBeenCalledWith("/sessions/sess-1", { replace: true, state: null });
+  });
+
+  it("waits for catalog capabilities and carries the qualified model plus Off from navigation into the first turn", async () => {
+    const models = [{ provider: "llm-gateway", id: "model", name: "Local", reasoning: true, reasoning_effort: "high", selection_capabilities: { reasoning: "toggle", fast: true, default_fast: false, default_reasoning_effort: null } }] as ModelInfo[];
+    const sendText = vi.fn(() => new Promise<void>(() => undefined));
+    const navigate = vi.fn();
+    const { rerender } = renderHook(({ catalog }: { catalog?: ModelInfo[] }) => useInitialSessionInput({
+      onPendingSessionChange: vi.fn(), locationPathname: "/sessions/sess-1", locationState: { initialPrompt: "hello", initialModel: { provider: "llm-gateway", id: "model" }, initialReasoningLevel: "none" },
+      models: catalog, navigate, projects: [], sendText, sessionId: "sess-1", setDraft: vi.fn(),
+    }), { initialProps: { catalog: undefined as ModelInfo[] | undefined } });
+    expect(sendText).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    rerender({ catalog: models });
+    await waitFor(() => expect(sendText).toHaveBeenCalledExactlyOnceWith("hello", expect.objectContaining({ modelSelection: { modelRef: { provider: "llm-gateway", id: "model" }, reasoningEffort: null } })));
   });
 });
