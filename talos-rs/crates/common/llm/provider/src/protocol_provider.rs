@@ -128,8 +128,16 @@ impl ProtocolProvider {
         let effort = request.reasoning_effort;
         let options = self.models.get(&request.model);
         let reasoning = options.is_some_and(|model| model.reasoning);
-        let explicit_thinking =
-            has_boolean_thinking_control(&parameters) || parameters.contains_key("thinking");
+        // Only recognized binary extensions replace effort controls. An opaque
+        // thinking object must not apply Messages semantics to other protocols.
+        let explicit_thinking = has_boolean_thinking_control(&parameters)
+            || matches!(
+                parameters
+                    .get("thinking")
+                    .and_then(|thinking| thinking.get("type"))
+                    .and_then(Value::as_str),
+                Some("enabled" | "disabled")
+            );
         let (endpoint, body) = match self.protocol {
             LlmProtocol::Chat => {
                 let replay = match options.map(|model| model.replay).unwrap_or_default() {
@@ -178,16 +186,19 @@ impl ProtocolProvider {
                     request,
                     stream.then_some(true),
                     messages::MessagesRequestOptions {
-                        thinking: (reasoning && !explicit_thinking).then(|| {
-                            messages::MessagesThinkingConfig {
-                                r#type: if effort.is_some() {
-                                    "adaptive"
-                                } else {
-                                    "disabled"
-                                }
-                                .to_owned(),
-                                budget_tokens: None,
+                        // Messages owns the adaptive mode. Preserve an explicit
+                        // thinking object while generating effort independently.
+                        thinking: (reasoning
+                            && !explicit_thinking
+                            && !parameters.contains_key("thinking"))
+                        .then(|| messages::MessagesThinkingConfig {
+                            r#type: if effort.is_some() {
+                                "adaptive"
+                            } else {
+                                "disabled"
                             }
+                            .to_owned(),
+                            budget_tokens: None,
                         }),
                         output_config: if !reasoning || explicit_thinking {
                             None

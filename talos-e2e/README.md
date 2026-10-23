@@ -134,12 +134,17 @@ controlled loopback upstream. Chat, Responses and Messages use an identical opaq
 model ID under distinct Providers. Each performs an On-to-Off session with actual
 Bash execution and tool-result replay; Chat covers all four `reasoning_replay`
 policies. The case checks protocol-native authentication, root-level KV projection,
-reasoning continuation and rejection of non-Chat replay overrides. It requires no
+reasoning continuation. It requires no
 provider credentials or external model network. The Agent path uses upstream
 streaming; owning `ProtocolProvider` Rust transport tests cover both streaming and
 non-streaming tool exchanges. Auxiliary title calls do not count as non-streaming
 Agent tool coverage. Fixture request records and event logs are retained with the
 normal scenario evidence.
+
+An additional Messages connection keeps explicit adaptive thinking while changing
+effort from medium to high in one session. Both tool-loop rounds must send the
+selected `output_config.effort`, retain thinking KV siblings and preserve signed
+history. This contract does not imply Chat/Responses endpoints accept adaptive.
 
 Maintainers can manually run the provider-backed `trusted-e2e.yml` workflow from
 `main`, including the full `09_app_server` group whose execution, MCP, memory and

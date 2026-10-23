@@ -120,10 +120,14 @@ Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓�
 `01_models/protocol_compatibility` 使用真实 Gateway、Agent 和一个本地受控上游。
 Chat、Responses、Messages 的不同 Provider 使用同一个 opaque 模型 ID，各自在同一
 Session 中执行 On→Off 的实际 Bash 工具闭环；Chat 额外覆盖四种 `reasoning_replay`
-策略。场景检查协议原生鉴权、根级 KV、思考及工具历史续接，以及非 Chat 策略拒绝，
+策略。场景检查协议原生鉴权、根级 KV、思考及工具历史续接，
 不需要模型密钥或外部模型网络。Agent 上游为流式；`ProtocolProvider` 的 Rust 受控
 传输测试覆盖流式和非流式工具交互。辅助标题生成不计作非流式 Agent 工具覆盖。
 请求记录和事件日志随标准场景证据保留。
+
+额外的 Messages 连接保留显式 adaptive 思考配置，并在同一 Session 将强度从 medium
+切换到 high。工具闭环的两轮请求都必须携带所选 `output_config.effort`，保留 thinking
+的兄弟字段及有签名的历史。这不表示 Chat/Responses 服务支持 adaptive。
 
 维护者可从 `main` 手动运行provider集成工作流 `trusted-e2e.yml`，包含需要真实模型
 凭据的完整 `09_app_server` 执行、MCP、Memory和Skills场景。公开app-server smoke

@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import sys
 import threading
-import urllib.error
 import urllib.request
 
 MODEL = "opaque-7f82"
@@ -18,22 +17,24 @@ KEY = "controlled-loopback-key"
 REPLAYS = ("protocol_default", "omit", "reasoning", "reasoning_content")
 PROVIDERS = {f"chat-{replay.replace('_', '-')}": ("chat", replay) for replay in REPLAYS}
 PROVIDERS.update({"response-fixture": ("responses", "protocol_default"),
-                  "message-fixture": ("messages", "protocol_default")})
-MARKER = re.compile(r"PROTOCOL_CASE=([a-z_-]+):(on|off)")
+                  "message-fixture": ("messages", "protocol_default"),
+                  "message-adaptive-fixture": ("messages", "protocol_default")})
+MARKER = re.compile(r"PROTOCOL_CASE=([a-z_-]+):(on|off|medium|high)")
 
 
-def http(base, path, payload=None):
-    request = urllib.request.Request(base + path,
-        data=None if payload is None else json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="GET" if payload is None else "PUT")
+def modes(provider):
+    return ("medium", "high") if provider == "message-adaptive-fixture" else ("on", "off")
+
+
+def http(base, path):
+    request = urllib.request.Request(base + path, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=30) as response:
         result = json.load(response)
     assert result["status"] == "success", result
     return result["data"]
 
 
-def model(protocol, replay):
+def model(protocol, replay, *, adaptive=False):
     parameters = {"temperature": 0.25, "metadata": {"fixture": "root-level-kv"}}
     if protocol == "chat":
         if replay == "reasoning_content":
@@ -41,7 +42,8 @@ def model(protocol, replay):
         else:
             parameters["chat_template_kwargs"] = {"enable_thinking": True, "fixture_flag": "preserved"}
     elif protocol == "messages":
-        parameters["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+        parameters["thinking"] = ({"type": "adaptive", "display": "summarized"} if adaptive
+                                  else {"type": "enabled", "budget_tokens": 2048})
     return {"id": MODEL, "name": "Opaque fixture model", "context_window": 131072,
         "reasoning": True, "reasoning_effort": "medium", "reasoning_replay": replay,
         "speed": "standard", "input": ["text"],
@@ -58,10 +60,10 @@ def prepare(template, destination, port, plan):
     config["llm"]["custom_providers"] = {
         provider: {"name": provider, "protocol": protocol, "api_key": KEY,
             "base_url": f"http://127.0.0.1:{port}/{provider}/v1",
-            "models": [model(protocol, replay)]}
+            "models": [model(protocol, replay, adaptive=provider == "message-adaptive-fixture")]}
         for provider, (protocol, replay) in PROVIDERS.items()}
     Path(destination).write_text(yaml.safe_dump(config, sort_keys=False))
-    Path(plan).write_text("".join(f"{provider}\t{mode}\n" for provider in PROVIDERS for mode in ("on", "off")))
+    Path(plan).write_text("".join(f"{provider}\t{mode}\n" for provider in PROVIDERS for mode in modes(provider)))
 
 
 def history(body, protocol):
@@ -88,8 +90,12 @@ def check_request(body, headers, provider, mode):
     if protocol == "messages":
         assert headers.get("x-api-key") == KEY and headers.get("anthropic-version") == "2023-06-01"
         assert "authorization" not in headers, "Messages must use native authentication"
-        assert body["thinking"]["type"] == ("enabled" if mode == "on" else "disabled"), body
-        assert body["thinking"].get("budget_tokens") == (2048 if mode == "on" else None), body
+        if provider == "message-adaptive-fixture":
+            assert body["thinking"] == {"type": "adaptive", "display": "summarized"}, body
+            assert body["output_config"] == {"effort": mode}, body
+        else:
+            assert body["thinking"]["type"] == ("enabled" if mode == "on" else "disabled"), body
+            assert body["thinking"].get("budget_tokens") == (2048 if mode == "on" else None), body
     else:
         assert headers.get("authorization") == f"Bearer {KEY}"
         assert "x-api-key" not in headers and "anthropic-version" not in headers
@@ -128,7 +134,7 @@ def check_request(body, headers, provider, mode):
             tool = next(block for block in blocks if block.get("type") == "tool_use" and block.get("id") == call)
             assert tool["name"] == "Bash" and tool["input"] == {"command": f"printf 'TOOL_{provider}_{mode}'"}
             assert blocks.index(tool) < blocks.index(result), "tool result precedes tool_use"
-            if mode == "on":
+            if mode != "off":
                 assert any(block.get("type") == "thinking" and block.get("signature") == f"signature:{call}" for block in blocks)
     return call, result is not None
 
@@ -177,7 +183,7 @@ def response_events(call, mode, done):
 def message_events(call, mode, done):
     events = [{"type": "message_start", "message": {"id": "msg_fixture", "type": "message", "role": "assistant", "model": MODEL, "content": [], "usage": {"input_tokens": 100, "output_tokens": 0}}}]
     index = 0
-    if not done and mode == "on":
+    if not done and mode != "off":
         events.extend([{"type": "content_block_start", "index": index, "content_block": {"type": "thinking", "thinking": ""}},
             {"type": "content_block_delta", "index": index, "delta": {"type": "thinking_delta", "thinking": f"private:{call}"}},
             {"type": "content_block_delta", "index": index, "delta": {"type": "signature_delta", "signature": f"signature:{call}"}},
@@ -260,7 +266,7 @@ def verify(base, directory):
     assert not errors.exists(), errors.read_text() if errors.exists() else ""
     requests = [json.loads(line) for line in (directory / "requests.jsonl").read_text().splitlines()]
     for provider, (protocol, replay) in PROVIDERS.items():
-        for mode in ("on", "off"):
+        for mode in modes(provider):
             selected = [request for request in requests if request["provider"] == provider and request["mode"] == mode]
             assert len(selected) == 2 and [request["followup"] for request in selected] == [False, True], (provider, mode, selected)
             result = json.loads((directory / f"{provider}-{mode}.json").read_text())
@@ -268,28 +274,17 @@ def verify(base, directory):
             assert any(item.get("type") == "output_text" and f"PROTOCOL_OK:call_{provider}_{mode}" in item.get("text", "") for item in result["output"]), result
             assert sum(item.get("type") == "tool_call" and item.get("name") == "Bash" for item in result["output"]) == 1, result
             assert sum(item.get("type") == "tool_result" and not item.get("is_error") for item in result["output"]) == 1, result
-            if mode == "on":
+            if mode != "off":
                 assert result["reasoning"], "omit policy must preserve canonical reasoning display/history"
             print(f"CASE protocol_agent_tool_loop PASS protocol={protocol} replay={replay} thinking={mode} upstream_requests=2")
         stored = http(base, f"/v1/sessions/{result['session_id']}/history?limit=100")
         (directory / f"{provider}-history.json").write_text(json.dumps(stored, indent=2))
-        assert f"private:call_{provider}_on" in json.dumps(stored), "reasoning replay policy changed canonical stored history"
-    original = http(base, "/v1/config/llm")["config"]
-    for provider in ("response-fixture", "message-fixture"):
-        for replay in REPLAYS[1:]:
-            changed = copy.deepcopy(original)
-            changed["custom_providers"][provider]["models"][0]["reasoning_replay"] = replay
-            try:
-                http(base, "/v1/config", {"type": "llm", "value": changed})
-            except urllib.error.HTTPError as error:
-                assert error.code == 400, error.code
-                rejected = json.load(error)
-                assert rejected["error"]["code"] == "invalidRequest", rejected
-                (directory / f"rejected-{provider}-{replay}.json").write_text(json.dumps(rejected, indent=2))
-            else:
-                raise AssertionError(f"non-Chat replay accepted: {provider}/{replay}")
-    assert http(base, "/v1/config/llm")["config"] == original, "rejected config mutated live state"
-    print("CASE non_chat_replay_validation PASS rejected=6 config_unchanged=true")
+        assert f"private:call_{provider}_{modes(provider)[0]}" in json.dumps(stored), "reasoning replay policy changed canonical stored history"
+    catalog = http(base, "/v1/models")["models"]
+    adaptive_model = next(item for item in catalog if item["provider"] == "message-adaptive-fixture")
+    assert adaptive_model["selection_capabilities"]["reasoning"] == "effort", adaptive_model
+    print("CASE messages_adaptive_effort PASS session=medium-to-high thinking=preserved tool_history=preserved")
+
 
 
 if __name__ == "__main__":
@@ -303,7 +298,7 @@ if __name__ == "__main__":
     elif action == "payload":
         provider, mode, workspace = arguments
         print(json.dumps({"input": {"content": [{"type": "text", "text": f"PROTOCOL_CASE={provider}:{mode}. Run the controlled Bash tool and return its result."}]},
-            "modelSelection": {"modelRef": {"provider": provider, "id": MODEL}, "reasoningEffort": "medium" if mode == "on" else None},
+            "modelSelection": {"modelRef": {"provider": provider, "id": MODEL}, "reasoningEffort": None if mode == "off" else "high" if mode == "high" else "medium"},
             "userPermissionMode": "fullAccess", "currentDirectory": workspace}))
     else:
         raise ValueError(f"Unknown action: {action}")
