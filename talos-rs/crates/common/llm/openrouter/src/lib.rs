@@ -160,7 +160,9 @@ impl OpenRouterProvider {
                 },
             )?;
         let mut headers = header::HeaderMap::new();
-        headers.insert(header::AUTHORIZATION, authorization);
+        if !self.config.api_key.is_empty() {
+            headers.insert(header::AUTHORIZATION, authorization);
+        }
         headers.insert(
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
@@ -178,6 +180,7 @@ impl OpenRouterProvider {
         stream: bool,
     ) -> TalosResult<(&'static str, Value)> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let (endpoint, body) = match self.config.protocol {
             OpenRouterProtocol::Chat => (
                 "chat/completions",
@@ -204,6 +207,7 @@ impl OpenRouterProvider {
                 error,
             )
         })?;
+        let body = talos_llm_provider::serialize_with_parameters(body, &request_parameters)?;
         Ok((endpoint, body))
     }
 

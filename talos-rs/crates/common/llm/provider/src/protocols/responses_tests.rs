@@ -187,3 +187,63 @@ fn responses_chat_response_does_not_duplicate_output_text() {
 
     assert_eq!(mapped.content, "hello");
 }
+
+#[tokio::test]
+async fn reasoning_and_text_output_indices_do_not_create_gaps_in_tool_ordinals() {
+    let events = [
+        serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs-0"}}),
+        serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs-0","encrypted_content":"opaque"}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc-1","call_id":"call-1","name":"echo","arguments":""}}),
+        serde_json::json!({"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"n\":1}"}),
+        serde_json::json!({"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc-1"}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":2,"item":{"type":"message","id":"msg-2"}}),
+        serde_json::json!({"type":"response.output_item.done","output_index":2,"item":{"type":"message","id":"msg-2"}}),
+        serde_json::json!({"type":"response.output_item.added","output_index":3,"item":{"type":"function_call","id":"fc-3","call_id":"call-3","name":"echo","arguments":""}}),
+        serde_json::json!({"type":"response.function_call_arguments.delta","output_index":3,"delta":"{\"n\":3}"}),
+        serde_json::json!({"type":"response.output_item.done","output_index":3,"item":{"type":"function_call","id":"fc-3"}}),
+        serde_json::json!({"type":"response.completed","response":{"status":"completed"}}),
+    ];
+    let sse = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect::<String>();
+    for options in [
+        ResponsesModelBlocks::openai(),
+        ResponsesModelBlocks::openrouter(),
+    ] {
+        let prefix = options.item_prefix.clone();
+        let response = reqwest::Response::from(http::Response::new(sse.clone()));
+        let mut stream = model_blocks(response, options);
+        let mut calls = Vec::new();
+        let mut arguments = Vec::new();
+        while let Some(event) = stream.next().await {
+            match event.unwrap() {
+                ModelBlockStreamEvent::BlockStarted(block)
+                    if block.kind == ModelBlockKind::ToolCall =>
+                {
+                    let tool = block.tool_call.unwrap();
+                    calls.push((tool.index, tool.call_id.unwrap(), block.model_item_id));
+                }
+                ModelBlockStreamEvent::BlockDelta {
+                    model_item_id,
+                    delta: ModelBlockDelta::ToolArguments { delta },
+                } => arguments.push((model_item_id, delta)),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            calls,
+            vec![
+                (0, "call-1".into(), format!("{prefix}-response-1-tool")),
+                (1, "call-3".into(), format!("{prefix}-response-3-tool"))
+            ]
+        );
+        assert_eq!(
+            arguments,
+            vec![
+                (format!("{prefix}-response-1-tool"), "{\"n\":1}".into()),
+                (format!("{prefix}-response-3-tool"), "{\"n\":3}".into())
+            ]
+        );
+    }
+}

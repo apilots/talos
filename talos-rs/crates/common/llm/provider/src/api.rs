@@ -224,6 +224,8 @@ pub trait LlmProviderRouter: Send + Sync {
 /// Chat request.
 #[derive(Debug, Clone)]
 pub struct ChatRequest {
+    /// Explicit model request-body extensions supplied by the composition root.
+    pub request_parameters: std::collections::BTreeMap<String, Value>,
     pub messages: Vec<ChatMessage>,
     pub model: String,
     pub temperature: Option<f32>,
@@ -244,6 +246,7 @@ impl ChatRequest {
 
     pub fn new_user(message: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
+            request_parameters: Default::default(),
             messages: vec![ChatMessage::user(message)],
             model: model.into(),
             temperature: None,
@@ -866,6 +869,7 @@ impl ChatRequestBuilder {
 
     pub fn build(self) -> ChatRequest {
         ChatRequest {
+            request_parameters: Default::default(),
             messages: self.messages.unwrap_or_default(),
             model: self.model.expect("model is required"),
             temperature: self.temperature,

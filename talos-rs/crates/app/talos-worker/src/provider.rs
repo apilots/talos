@@ -26,6 +26,40 @@ pub fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>>
         }));
     }
 
+    let selected = config
+        .provider_config(&config.llm.provider)
+        .ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::ProviderUnavailable,
+                "Model provider is unavailable",
+            )
+        })?;
+    let inner = if let Some(custom) = config.llm.custom_providers.get(&config.llm.provider) {
+        let protocol = custom.config.protocol.ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Custom provider protocol is required",
+            )
+        })?;
+        Arc::new(talos_llm_provider::ProtocolProvider::new(
+            &config.llm.provider,
+            protocol,
+            &custom.config,
+            &config.llm.model,
+        )?) as Arc<dyn LlmProvider>
+    } else {
+        create_adapter(config)?
+    };
+    Ok(Arc::new(
+        crate::configured_provider::ConfiguredProvider::new(
+            config.llm.provider.clone(),
+            inner,
+            selected,
+        ),
+    ))
+}
+
+fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
     match config.llm.provider.as_str() {
         "anthropic" => {
             let api_key = config.llm.anthropic.api_key.clone().ok_or_else(|| {

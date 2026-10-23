@@ -111,21 +111,25 @@ impl AnthropicProvider {
 
         match self.endpoint_kind() {
             AnthropicEndpointKind::Official => {
-                headers.insert(
-                    "x-api-key",
-                    header::HeaderValue::from_str(&self.config.api_key).unwrap(),
-                );
+                if !self.config.api_key.is_empty() {
+                    headers.insert(
+                        "x-api-key",
+                        header::HeaderValue::from_str(&self.config.api_key).unwrap(),
+                    );
+                }
                 headers.insert(
                     "anthropic-version",
                     header::HeaderValue::from_static("2023-06-01"),
                 );
             }
             AnthropicEndpointKind::Compatible => {
-                headers.insert(
-                    header::AUTHORIZATION,
-                    header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key))
-                        .unwrap(),
-                );
+                if !self.config.api_key.is_empty() {
+                    headers.insert(
+                        header::AUTHORIZATION,
+                        header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key))
+                            .unwrap(),
+                    );
+                }
             }
         }
 
@@ -169,6 +173,7 @@ impl AnthropicProvider {
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let anthropic_req = Self::build_request(request, None)?;
         let url = format!("{}/messages", self.config.base_url);
         let headers = self.build_headers();
@@ -180,7 +185,10 @@ impl AnthropicProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&anthropic_req)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &anthropic_req,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {
@@ -211,6 +219,7 @@ impl AnthropicProvider {
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let anthropic_req = Self::build_request(request, Some(true))?;
 
         let url = format!("{}/messages", self.config.base_url);
@@ -220,7 +229,10 @@ impl AnthropicProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&anthropic_req)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &anthropic_req,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {

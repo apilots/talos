@@ -14,3 +14,11 @@ pub use router::*;
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
+
+mod request_parameters;
+pub use request_parameters::{
+    apply_thinking_selection, has_boolean_thinking_control, serialize_with_parameters,
+};
+
+mod protocol_provider;
+pub use protocol_provider::ProtocolProvider;
