@@ -1,0 +1,15 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "binaries": [
+      "server"
+    ]
+  }
+}

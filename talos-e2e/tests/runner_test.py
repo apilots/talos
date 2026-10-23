@@ -293,6 +293,22 @@ has_real_llm_key() { return 1; }
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.preflight(E2E / "scenarios", ["15_tui_install/01_native_install.sh"]), 0)
 
+    def test_model_group_keeps_secretless_cases_and_server_build_ownership(self):
+        root = E2E / "scenarios"
+        cases = runner.select(root, group="01_models")
+        self.assertEqual(cases, ["01_models/custom_providers.sh", "01_models/health_and_models.sh",
+                                "01_models/protocol_compatibility.sh"])
+        for case in cases:
+            with self.subTest(case=case):
+                self.assertEqual(runner.select(root, case=case.removesuffix(".sh")), [case])
+                requirements = runner.requirements(root, case)
+                self.assertEqual(requirements["binaries"], ["server"])
+                self.assertEqual(requirements["python_modules"], ["yaml"])
+                self.assertEqual(set(requirements["commands"]), {"cargo", "protoc", "curl"})
+                self.assertFalse(requirements.get("checks"))
+                self.assertFalse(requirements.get("env"))
+        self.assertIn("model", runner.requirements(root, "03_messages_http_sse.sh")["checks"])
+
     def test_real_catalog_has_valid_dependencies_and_build_ownership(self):
         catalog = runner.discover(E2E / "scenarios")
         self.assertTrue(catalog)

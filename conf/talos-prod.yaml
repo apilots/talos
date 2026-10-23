@@ -234,6 +234,28 @@ channels:
 llm:
   provider: "deepseek"
   model: "deepseek-v4-flash"
+  # Optional custom Provider example. Comments only; this endpoint is not usable.
+  # Keep llm.provider, llm.model and agent.inner_model unchanged until configured.
+  # custom_providers:
+  #   example-connection:
+  #     name: Example Connection
+  #     protocol: chat
+  #     base_url: https://llm.example.invalid/v1
+  #     api_key: ${TALOS_LLM_CUSTOM_EXAMPLE_CONNECTION_API_KEY}
+  #     models:
+  #       - id: example-model
+  #         name: Example Model
+  #         context_window: 131072
+  #         reasoning: true
+  #         reasoning_effort: medium
+  #         speed: standard
+  #         input: [text]
+  #         # Chat-only outgoing reasoning projection; this is not request KV.
+  #         reasoning_replay: protocol_default
+  #         # Use only extension fields accepted by your endpoint.
+  #         request_parameters:
+  #           chat_template_kwargs:
+  #             enable_thinking: true
   anthropic:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://api.anthropic.com/v1"

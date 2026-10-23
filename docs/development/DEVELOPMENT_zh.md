@@ -73,7 +73,7 @@ IPC、controller owner 另保留 `20/05` 与 Docker 镜像。SDK、依赖、配�
 ## 端到端测试
 
 ```bash
-just e2e-case 01_health_and_models
+just e2e-group 01_models
 just e2e-group 09_app_server
 ```
 

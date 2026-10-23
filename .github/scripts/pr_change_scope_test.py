@@ -103,6 +103,13 @@ class ChangeScopeTests(unittest.TestCase):
                                       'computer-registration', 'files', 'sandbox'})
         self.assertTrue(e2e_plan([])[0])
 
+    def test_provider_changes_keep_secretless_custom_catalog_coverage(self):
+        _, matrix = e2e_plan(['talos-rs/crates/infra/config/src/domains/network.rs'])
+        catalog = next(item for item in matrix['include'] if item['name'] == 'health-and-model-catalog')
+        self.assertEqual(catalog['targets'], 'group:01_models')
+        trusted = (ROOT / '.github/workflows/trusted-e2e.yml').read_text()
+        self.assertIn('group:01_models', trusted)
+
     def test_desktop_sources_select_native_acceptance_without_generic_or_docker_work(self):
         sources = ['browser-host.ts', 'browser-host.cancellation.test.ts', 'browser-input.ts',
                    'browser-website.ts', 'main.ts']
