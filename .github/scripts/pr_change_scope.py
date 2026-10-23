@@ -35,7 +35,7 @@ CI_INPUTS = {
     "tui-install": (".github/workflows/talos-tui-install.yml",),
 }
 E2E_SCENARIOS = [
-    {"name": "health-and-model-catalog", "runner": "ubuntu-24.04", "targets": "case:01_health_and_models"},
+    {"name": "health-and-model-catalog", "runner": "ubuntu-24.04", "targets": "group:01_models"},
     {"name": "app-server", "runner": "ubuntu-24.04", "targets": "case:09_app_server/smoke_e2e\ncase:09_app_server/desktop_recovery"},
     {"name": "computer-registration", "runner": "ubuntu-24.04", "targets": "case:09_app_server/computer_deletion"},
     {"name": "files", "runner": "ubuntu-24.04", "targets": "group:12_files"},

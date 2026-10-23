@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
-import type { DropdownItem } from "./ComposerDropdown";
+import { reasoningLevelForEffort } from "../model-selection";
 import { ComposerAttachmentTray } from "./ComposerAttachmentTray";
 import { ComposerAttachments } from "./ComposerAttachments";
-import { ComposerModelSelect } from "./ComposerModelSelect";
+import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerRunControls } from "./ComposerRunControls";
 import { ComposerPermissionModeSelect } from "./ComposerPermissionModeSelect";
 import { ComposerProjectContext } from "./ComposerProjectContext";
@@ -49,9 +49,8 @@ export function ChatComposer({
   activeProjectId,
   onProjectChange,
   onCreateProject,
-  reasoningLevel = "medium",
+  reasoningLevel: configuredReasoningLevel,
   onReasoningLevelChange,
-  reasoningEnabled = true,
   showProjectSelector = true,
   compact = false,
   initialAttachments = EMPTY_ATTACHMENTS,
@@ -59,6 +58,8 @@ export function ChatComposer({
   messageQueue,
 }: Composer.ChatComposerProps) {
   const { t } = useTranslation(["chat", "common", "settings"]);
+  const selectionCapabilities = models.find((model) => model.id === selectedModel)?.selectionCapabilities;
+  const reasoningLevel = configuredReasoningLevel ?? reasoningLevelForEffort(selectionCapabilities?.default_reasoning_effort ?? null);
   const commandRunning = commandResponse?.kind === "compact" && commandResponse.state === "running";
   const isBusy = Boolean(isStreaming || isCancelling || commandRunning);
   const [cursorIndex, setCursorIndex] = useState(() => draft.length);
@@ -125,15 +126,6 @@ export function ChatComposer({
     await attachmentDraft.submit(draft, onSend);
   };
 
-  const reasoningItems: DropdownItem[] = reasoningEnabled
-    ? [
-        { value: "light", label: t("chat:reasoningLight") },
-        { value: "medium", label: t("chat:reasoningMedium") },
-        { value: "high", label: t("chat:reasoningHigh") },
-        { value: "extra_high", label: t("chat:reasoningExtraHigh") },
-      ]
-    : [{ value: "none", label: t("chat:reasoningNone") }];
-
   return (
     <div className="relative">
       {!composerSuggestions.open && !modelPickerOpen ? (
@@ -149,12 +141,14 @@ export function ChatComposer({
         {messageQueue ? <WaitingMessages controller={messageQueue} /> : null}
         {showProjectSelector && compact ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
-            <ComposerModelSelect
+            <ComposerModelPicker
               disabled={Boolean(disabled || isBusy)}
-              modelLabel={t("chat:modelLabel")}
+              modelTriggerRef={modelTriggerRef}
               models={models}
-              onChange={onModelChange}
-              providerLabel={t("chat:providerLabel")}
+              onModelChange={onModelChange}
+              onOpenChange={setModelPickerOpen}
+              onReasoningLevelChange={onReasoningLevelChange}
+              reasoningLevel={reasoningLevel}
               selectedModel={selectedModel}
             />
             <select
@@ -264,7 +258,6 @@ export function ChatComposer({
             onModelPickerOpenChange={setModelPickerOpen}
             onReasoningLevelChange={onReasoningLevelChange}
             onSend={handleSend}
-            reasoningItems={reasoningItems}
             reasoningLevel={reasoningLevel}
             selectedModel={selectedModel}
             sessionTotalTokens={sessionTotalTokens}

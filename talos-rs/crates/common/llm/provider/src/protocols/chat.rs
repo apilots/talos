@@ -24,79 +24,6 @@ use reasoning::{reasoning_fields, response_reasoning};
 pub use tool_definitions::tools;
 pub use types::*;
 
-#[derive(Debug, Clone)]
-pub struct ChatCompletionModelBlocks {
-    pub provider_name: String,
-    pub item_prefix: String,
-    pub reasoning_keys: &'static [&'static str],
-    pub segment_after_boundary: bool,
-    pub ignore_empty_text: bool,
-    pub ignore_reasoning_after_assistant: bool,
-    pub reasoning_details: bool,
-}
-
-impl ChatCompletionModelBlocks {
-    pub fn openai() -> Self {
-        Self {
-            provider_name: "OpenAI".to_string(),
-            item_prefix: "openai".to_string(),
-            reasoning_keys: &["reasoning"],
-            segment_after_boundary: false,
-            ignore_empty_text: false,
-            ignore_reasoning_after_assistant: false,
-            reasoning_details: false,
-        }
-    }
-
-    pub fn bailian() -> Self {
-        Self {
-            provider_name: "Bailian".to_string(),
-            item_prefix: "bailian".to_string(),
-            reasoning_keys: &["reasoning_content", "thinking", "reasoning"],
-            segment_after_boundary: true,
-            ignore_empty_text: true,
-            ignore_reasoning_after_assistant: true,
-            reasoning_details: false,
-        }
-    }
-
-    pub fn deepseek() -> Self {
-        Self {
-            provider_name: "DeepSeek".to_string(),
-            item_prefix: "deepseek".to_string(),
-            reasoning_keys: &["reasoning_content"],
-            segment_after_boundary: false,
-            ignore_empty_text: true,
-            ignore_reasoning_after_assistant: false,
-            reasoning_details: false,
-        }
-    }
-
-    pub fn openrouter() -> Self {
-        Self {
-            provider_name: "OpenRouter".to_string(),
-            item_prefix: "openrouter".to_string(),
-            reasoning_keys: &[],
-            segment_after_boundary: false,
-            ignore_empty_text: true,
-            ignore_reasoning_after_assistant: false,
-            reasoning_details: true,
-        }
-    }
-
-    pub fn ollama() -> Self {
-        Self {
-            provider_name: "Ollama".to_string(),
-            item_prefix: "ollama".to_string(),
-            reasoning_keys: &["thinking", "reasoning"],
-            segment_after_boundary: false,
-            ignore_empty_text: true,
-            ignore_reasoning_after_assistant: false,
-            reasoning_details: false,
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 struct ModelBlockState {
     reasoning_started: HashMap<usize, bool>,
@@ -115,6 +42,32 @@ struct ModelToolAcc {
     name: Option<String>,
     arguments: String,
     emitted_arguments_len: usize,
+}
+
+/// Normalize leading plain instructions for compatible Chat templates without changing history boundaries.
+pub fn merge_initial_system_messages(encoded: &mut ChatCompletionRequest) {
+    // Compatible Chat templates commonly accept only one initial system message.
+    // Merge only leading plain instructions; preserve every history boundary.
+    let count = encoded
+        .messages
+        .iter()
+        .take_while(|message| {
+            message.role == "system"
+                && message.name.is_none()
+                && matches!(message.content, Some(ChatCompletionMessageContent::Text(_)))
+        })
+        .count();
+    if count > 1 {
+        let additional = encoded.messages.drain(1..count).collect::<Vec<_>>();
+        if let Some(ChatCompletionMessageContent::Text(first)) = &mut encoded.messages[0].content {
+            for message in additional {
+                if let Some(ChatCompletionMessageContent::Text(text)) = message.content {
+                    first.push_str("\n\n");
+                    first.push_str(&text);
+                }
+            }
+        }
+    }
 }
 
 pub fn request(
@@ -337,6 +290,16 @@ fn reasoning_detail_display(detail: &ChatCompletionReasoningDetail) -> Option<St
             (!summary.is_empty()).then(|| summary.clone())
         }
         ChatCompletionReasoningDetail::Encrypted { .. } => None,
+    }
+}
+
+fn plain_reasoning_detail(text: String) -> ChatCompletionReasoningDetail {
+    ChatCompletionReasoningDetail::Text {
+        text,
+        signature: None,
+        id: None,
+        format: None,
+        index: None,
     }
 }
 
@@ -628,16 +591,27 @@ pub fn model_blocks(
                         let choice_index = choice_index(choice);
                         let delta_object = choice.and_then(|c| c.get("delta"));
 
-                        if options.reasoning_details {
-                            if let Some(details) = delta_object
-                                .and_then(|delta| delta.get("reasoning_details"))
-                                .and_then(Value::as_array)
+                        let details = (options.reasoning_format
+                            != ChatReasoningStreamFormat::TextAliases)
+                            .then(|| delta_object.and_then(|delta| delta.get("reasoning_details")))
+                            .flatten()
+                            .and_then(Value::as_array)
+                            .filter(|details| !details.is_empty());
+                        if let Some(details) = details {
+                            // Auto may discover structured continuation after a plain
+                            // prelude. Retain that text before the structured blocks.
+                            if options.reasoning_format == ChatReasoningStreamFormat::Auto
+                                && state.reasoning_details.is_empty()
+                                && !state.reasoning_text.is_empty()
                             {
-                                for raw_detail in details {
-                                    let detail = match serde_json::from_value::<
-                                        ChatCompletionReasoningDetail,
-                                    >(
-                                        raw_detail.clone()
+                                state
+                                    .reasoning_details
+                                    .push(plain_reasoning_detail(state.reasoning_text.clone()));
+                            }
+                            for raw_detail in details {
+                                let detail =
+                                    match serde_json::from_value::<ChatCompletionReasoningDetail>(
+                                        raw_detail.clone(),
                                     ) {
                                         Ok(detail) => detail,
                                         Err(error) => {
@@ -653,46 +627,50 @@ pub fn model_blocks(
                                             return;
                                         }
                                     };
-                                    let display_delta = reasoning_detail_display(&detail);
-                                    if let Err(error) = accumulate_reasoning_detail(
-                                        &mut state.reasoning_details,
-                                        detail,
-                                    ) {
-                                        let _ = tx.send(Err(error)).await;
-                                        return;
-                                    }
-                                    if let Some(display_delta) = display_delta {
-                                        state.reasoning_text.push_str(&display_delta);
-                                        if !ensure_reasoning_model_block(
+                                let display_delta = reasoning_detail_display(&detail);
+                                if let Err(error) = accumulate_reasoning_detail(
+                                    &mut state.reasoning_details,
+                                    detail,
+                                ) {
+                                    let _ = tx.send(Err(error)).await;
+                                    return;
+                                }
+                                if let Some(display_delta) = display_delta {
+                                    state.reasoning_text.push_str(&display_delta);
+                                    if !ensure_reasoning_model_block(
+                                        &tx,
+                                        &mut state,
+                                        choice_index,
+                                        &options,
+                                    )
+                                    .await
+                                        || !send_model_block_event(
                                             &tx,
-                                            &mut state,
-                                            choice_index,
-                                            &options,
+                                            ModelBlockStreamEvent::BlockDelta {
+                                                model_item_id: current_reasoning_model_item_id(
+                                                    &state,
+                                                    choice_index,
+                                                    &options,
+                                                ),
+                                                delta: ModelBlockDelta::ReasoningText {
+                                                    delta: display_delta,
+                                                },
+                                            },
                                         )
                                         .await
-                                            || !send_model_block_event(
-                                                &tx,
-                                                ModelBlockStreamEvent::BlockDelta {
-                                                    model_item_id: current_reasoning_model_item_id(
-                                                        &state,
-                                                        choice_index,
-                                                        &options,
-                                                    ),
-                                                    delta: ModelBlockDelta::ReasoningText {
-                                                        delta: display_delta,
-                                                    },
-                                                },
-                                            )
-                                            .await
-                                        {
-                                            return;
-                                        }
+                                    {
+                                        return;
                                     }
                                 }
                             }
                         }
 
-                        if !options.reasoning_details {
+                        let read_aliases = match options.reasoning_format {
+                            ChatReasoningStreamFormat::TextAliases => true,
+                            ChatReasoningStreamFormat::StructuredDetails => false,
+                            ChatReasoningStreamFormat::Auto => details.is_none(),
+                        };
+                        if read_aliases {
                             if let Some(reasoning_delta) = delta_object
                                 .and_then(|delta| reasoning_delta(delta, options.reasoning_keys))
                             {
@@ -701,6 +679,13 @@ pub fn model_blocks(
                                     && (!options.ignore_reasoning_after_assistant
                                         || !has_seen_assistant_text(&state, choice_index));
                                 if should_emit {
+                                    if options.reasoning_format == ChatReasoningStreamFormat::Auto
+                                        && !state.reasoning_details.is_empty()
+                                    {
+                                        state
+                                            .reasoning_details
+                                            .push(plain_reasoning_detail(reasoning_delta.clone()));
+                                    }
                                     state.reasoning_text.push_str(&reasoning_delta);
                                     if !ensure_reasoning_model_block(
                                         &tx,

@@ -186,3 +186,67 @@ fn usage_includes_messages_cache_read_and_creation_tokens() {
     assert_eq!(usage.cache_creation_input_tokens, Some(20));
     assert_eq!(usage.cache_read_input_tokens, Some(30));
 }
+
+#[tokio::test]
+async fn thinking_and_text_content_indices_do_not_create_gaps_in_tool_ordinals() {
+    let events = [
+        serde_json::json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"thought","signature":"signature"}}),
+        serde_json::json!({"type":"content_block_stop","index":0}),
+        serde_json::json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-1","name":"echo","input":{}}}),
+        serde_json::json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"n\":1}"}}),
+        serde_json::json!({"type":"content_block_stop","index":1}),
+        serde_json::json!({"type":"content_block_start","index":2,"content_block":{"type":"text","text":"commentary"}}),
+        serde_json::json!({"type":"content_block_stop","index":2}),
+        serde_json::json!({"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"call-3","name":"echo","input":{}}}),
+        serde_json::json!({"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\"n\":3}"}}),
+        serde_json::json!({"type":"content_block_stop","index":3}),
+        serde_json::json!({"type":"message_stop"}),
+    ];
+    let sse = events
+        .iter()
+        .map(|event| format!("data: {event}\n\n"))
+        .collect::<String>();
+    let response = reqwest::Response::from(http::Response::new(sse));
+    let mut stream = model_blocks(response, "fixture", "fixture");
+    let mut calls = Vec::new();
+    let mut arguments = Vec::new();
+    let mut reasoning = None;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            ModelBlockStreamEvent::BlockStarted(block)
+                if block.kind == ModelBlockKind::ToolCall =>
+            {
+                let tool = block.tool_call.unwrap();
+                calls.push((tool.index, tool.call_id.unwrap(), block.model_item_id));
+            }
+            ModelBlockStreamEvent::BlockDelta {
+                model_item_id,
+                delta: ModelBlockDelta::ToolArguments { delta },
+            } => arguments.push((model_item_id, delta)),
+            ModelBlockStreamEvent::ReasoningCompleted { output } => reasoning = output.continuation,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        calls,
+        vec![
+            (0, "call-1".into(), "fixture-block-1-tool".into()),
+            (1, "call-3".into(), "fixture-block-3-tool".into())
+        ]
+    );
+    assert_eq!(
+        arguments,
+        vec![
+            ("fixture-block-1-tool".into(), "{\"n\":1}".into()),
+            ("fixture-block-3-tool".into(), "{\"n\":3}".into())
+        ]
+    );
+    let Some(ReasoningContinuation::Blocks(blocks)) = reasoning else {
+        panic!("thinking continuation must remain structured");
+    };
+    let ReasoningBlock::Text(block) = &blocks[0] else {
+        panic!("expected signed thinking");
+    };
+    assert_eq!(block.provider_index, Some(0));
+    assert_eq!(block.signature.as_deref(), Some("signature"));
+}

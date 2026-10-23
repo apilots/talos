@@ -3,7 +3,7 @@ use super::environment_pb::invalid;
 use crate::harness_pb::{decode_model, encode_model};
 use agent_pb as pb;
 use talos_config::{
-    LlmConfig, LlmProtocol, ProviderConfig, WebSearchProviderConfig,
+    CustomProviderConfig, LlmConfig, LlmProtocol, ProviderConfig, WebSearchProviderConfig,
     WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 use talos_error::TalosResult;
@@ -52,6 +52,20 @@ fn encode_llm(value: LlmConfig) -> pb::LlmConfig {
     pb::LlmConfig {
         provider: value.provider,
         model: value.model,
+        custom_providers: value
+            .custom_providers
+            .into_iter()
+            .map(|(id, entry)| {
+                let config = encode_provider(&id, entry.config);
+                (
+                    id,
+                    pb::CustomProviderConfig {
+                        name: entry.name,
+                        config: Some(config),
+                    },
+                )
+            })
+            .collect(),
         anthropic: Some(encode_provider("anthropic", value.anthropic)),
         openai: Some(encode_provider("openai", value.openai)),
         bailian: Some(encode_provider("bailian", value.bailian)),
@@ -62,6 +76,19 @@ fn encode_llm(value: LlmConfig) -> pb::LlmConfig {
 }
 fn decode_llm(value: pb::LlmConfig) -> TalosResult<LlmConfig> {
     Ok(LlmConfig {
+        custom_providers: value
+            .custom_providers
+            .into_iter()
+            .map(|(id, entry)| {
+                Ok((
+                    id,
+                    CustomProviderConfig {
+                        name: entry.name,
+                        config: decode_provider(entry.config)?,
+                    },
+                ))
+            })
+            .collect::<TalosResult<_>>()?,
         provider: value.provider,
         model: value.model,
         anthropic: decode_provider(value.anthropic)?,
@@ -296,3 +323,7 @@ pub fn decode_reload_config_result(value: pb::ConfigReloaded) -> TalosResult<Con
         success: value.success,
     })
 }
+
+#[cfg(test)]
+#[path = "environment_config_pb_tests.rs"]
+mod tests;

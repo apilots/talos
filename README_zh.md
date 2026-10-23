@@ -106,7 +106,7 @@ cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos
 just fmt-check
 just check -p talos-service
 just test -p talos-service
-just e2e-case 01_health_and_models
+just e2e-group 01_models
 ```
 
 日常开发优先运行 package 范围内的检查。完整流程参见

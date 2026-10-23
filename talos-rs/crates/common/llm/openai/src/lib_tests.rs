@@ -536,3 +536,86 @@ fn test_convert_tools() {
     assert_eq!(converted.len(), 1);
     assert_eq!(converted[0].function.name, "read");
 }
+
+#[test]
+fn configured_boolean_thinking_omits_effort_but_preserves_tool_reasoning_replay() {
+    let mut request = ChatRequest::new_user("Continue", "model");
+    request.reasoning_effort = Some(ReasoningEffort::High);
+    request.request_parameters.insert(
+        "chat_template_kwargs".to_owned(),
+        serde_json::json!({"enable_thinking":true}),
+    );
+    let mut message = ChatMessage::assistant_with_tool_calls(
+        "",
+        vec![talos_llm_provider::FunctionCall::new(
+            "call-1",
+            "echo",
+            serde_json::json!({"text":"hello"}),
+        )],
+    );
+    message.reasoning_continuation =
+        Some(ReasoningContinuation::Text("Call echo first".to_owned()));
+    request.messages.push(message);
+    request
+        .messages
+        .push(ChatMessage::tool("call-1", "echo", "hello"));
+    let parameters = request.request_parameters.clone();
+    let body = talos_llm_provider::serialize_with_parameters(
+        OpenAIProvider::build_request(request, false).unwrap(),
+        &parameters,
+    )
+    .unwrap();
+    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(
+        body["chat_template_kwargs"],
+        serde_json::json!({"enable_thinking":true})
+    );
+    assert_eq!(body["messages"][1]["reasoning"], "Call echo first");
+    assert_eq!(body["messages"][2]["tool_call_id"], "call-1");
+}
+
+#[tokio::test]
+async fn openai_compatible_stream_retains_reasoning_content_continuation() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Think first\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n"
+    );
+    let base_url = spawn_sse_server(body.to_owned()).await;
+    let provider = OpenAIProvider::new(OpenAIConfig::new("").with_base_url(base_url));
+    let events = collect_model_events(
+        provider
+            .stream_model_blocks(ChatRequest::new_user("Hi", "model"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(events.iter().any(|event| matches!(event, ModelBlockStreamEvent::ReasoningCompleted { output } if output.continuation == Some(ReasoningContinuation::Text("Think first".into())))));
+}
+
+#[test]
+fn compatible_chat_merges_initial_system_instructions_without_reordering_history() {
+    let request = ChatRequest::builder()
+        .model("model")
+        .messages(vec![
+            ChatMessage::system("First policy"),
+            ChatMessage::system("Second policy"),
+            ChatMessage::user("Question"),
+            ChatMessage::assistant("Answer"),
+            ChatMessage::system("Later boundary"),
+            ChatMessage::user("Follow up"),
+        ])
+        .build();
+    let encoded =
+        serde_json::to_value(OpenAIProvider::build_request(request, true).unwrap()).unwrap();
+    assert_eq!(
+        encoded["messages"],
+        serde_json::json!([
+            {"role":"system","content":"First policy\n\nSecond policy"},
+            {"role":"user","content":"Question"},
+            {"role":"assistant","content":"Answer"},
+            {"role":"system","content":"Later boundary"},
+            {"role":"user","content":"Follow up"},
+        ])
+    );
+}

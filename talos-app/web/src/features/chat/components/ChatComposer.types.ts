@@ -12,6 +12,7 @@ import type {
 } from "@/shared/types/ui";
 import type { ComposerSessionCommandId } from "./composer-input/composer-suggestions";
 import type { ComposerAttachmentKind } from "./useComposerAttachments";
+import type { ComposerModelOption } from "../model-selection";
 import type {
   ComposerCommandResponseState,
   ComposerStatusSnapshot,
@@ -48,7 +49,7 @@ export interface ChatComposerProps {
   isCancelling?: boolean;
   contextUsage?: import("@talos/sdk-browser").SessionInfo["usage"]["context"];
   sessionTotalTokens?: number;
-  models: Array<{ id: string; name: string; provider: string }>;
+  models: ComposerModelOption[];
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   projects: ProjectView[];
@@ -57,7 +58,6 @@ export interface ChatComposerProps {
   onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
   reasoningLevel?: ReasoningLevel;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
-  reasoningEnabled?: boolean;
   showProjectSelector?: boolean;
   compact?: boolean;
   initialAttachments?: FileInfo[];

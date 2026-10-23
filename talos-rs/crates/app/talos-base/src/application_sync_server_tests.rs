@@ -66,6 +66,8 @@ async fn administrator_claims_direct_server_worker_without_reassigning_it() {
     config.gateway.port = port().port();
     config.cloud.api_base_url = api;
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: config.llm.model.clone(),
         name: "Controlled fixture".into(),
         context_window: 32768,

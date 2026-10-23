@@ -265,6 +265,8 @@ pub struct ChatCompletionRequestOptions {
 pub enum ChatReasoningContinuationFormat {
     #[default]
     None,
+    /// Deliberately omit outgoing reasoning while retaining canonical history.
+    Omit,
     Reasoning,
     ReasoningContent,
     ReasoningDetails,
@@ -331,4 +333,85 @@ pub struct ChatCompletionCacheCreation {
     pub cache_creation_input_tokens: Option<u32>,
     #[serde(default)]
     pub ephemeral_5m_input_tokens: Option<u32>,
+}
+
+/// Accepted incoming reasoning representation at this existing protocol boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatReasoningStreamFormat {
+    TextAliases,
+    StructuredDetails,
+    Auto,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatCompletionModelBlocks {
+    pub provider_name: String,
+    pub item_prefix: String,
+    pub reasoning_keys: &'static [&'static str],
+    pub segment_after_boundary: bool,
+    pub ignore_empty_text: bool,
+    pub ignore_reasoning_after_assistant: bool,
+    pub reasoning_format: ChatReasoningStreamFormat,
+}
+
+impl ChatCompletionModelBlocks {
+    pub fn openai() -> Self {
+        Self {
+            provider_name: "OpenAI".to_string(),
+            item_prefix: "openai".to_string(),
+            reasoning_keys: &["reasoning", "reasoning_content"],
+            segment_after_boundary: false,
+            ignore_empty_text: false,
+            ignore_reasoning_after_assistant: false,
+            reasoning_format: ChatReasoningStreamFormat::TextAliases,
+        }
+    }
+
+    pub fn bailian() -> Self {
+        Self {
+            provider_name: "Bailian".to_string(),
+            item_prefix: "bailian".to_string(),
+            reasoning_keys: &["reasoning_content", "thinking", "reasoning"],
+            segment_after_boundary: true,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: true,
+            reasoning_format: ChatReasoningStreamFormat::TextAliases,
+        }
+    }
+
+    pub fn deepseek() -> Self {
+        Self {
+            provider_name: "DeepSeek".to_string(),
+            item_prefix: "deepseek".to_string(),
+            reasoning_keys: &["reasoning_content"],
+            segment_after_boundary: false,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: false,
+            reasoning_format: ChatReasoningStreamFormat::TextAliases,
+        }
+    }
+
+    pub fn openrouter() -> Self {
+        Self {
+            provider_name: "OpenRouter".to_string(),
+            item_prefix: "openrouter".to_string(),
+            reasoning_keys: &[],
+            segment_after_boundary: false,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: false,
+            reasoning_format: ChatReasoningStreamFormat::StructuredDetails,
+        }
+    }
+
+    pub fn ollama() -> Self {
+        Self {
+            provider_name: "Ollama".to_string(),
+            item_prefix: "ollama".to_string(),
+            reasoning_keys: &["thinking", "reasoning"],
+            segment_after_boundary: false,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: false,
+            reasoning_format: ChatReasoningStreamFormat::TextAliases,
+        }
+    }
 }

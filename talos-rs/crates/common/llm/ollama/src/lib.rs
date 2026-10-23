@@ -69,7 +69,7 @@ impl OllamaProvider {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
-        if let Some(api_key) = self.config.api_key.as_deref() {
+        if let Some(api_key) = self.config.api_key.as_deref().filter(|key| !key.is_empty()) {
             let authorization = header::HeaderValue::from_str(&format!("Bearer {api_key}"))
                 .map_err(|error| {
                     TalosError::new(
@@ -107,12 +107,16 @@ impl OllamaProvider {
 
     async fn send(&self, request: ChatRequest, stream: bool) -> TalosResult<Response> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let body = Self::build_request(request, stream)?;
         let response = self
             .client
             .post(self.endpoint_url())
             .headers(self.build_headers()?)
-            .json(&body)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &body,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|error| {

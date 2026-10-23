@@ -2,9 +2,14 @@ import type { ModelSpeed, ReasoningEffort } from "@talos/sdk-browser";
 import { Brain, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { ReasoningReplaySelect } from "./ReasoningReplaySelect";
+import { RequestParametersEditor } from "./RequestParametersEditor";
+
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
-import { Panel } from "@/shared/ui/Panel";
+import { Dialog, DialogClose, DialogContent, DialogTitle, DialogDescription } from "@/shared/ui/Dialog";
+import { Select } from "@/shared/ui/Select";
+import { useSettingsDialogFocus } from "./useSettingsDialogFocus";
 import {
   INPUT_KIND_ICONS,
   INPUT_KINDS,
@@ -17,6 +22,7 @@ interface SettingsModelModalProps {
   mode: "add" | "edit";
   form: ModelFormState;
   saving: boolean;
+  allowReasoningReplay?: boolean;
   error: string;
   onChange: (form: ModelFormState) => void;
   onSave: () => void;
@@ -27,6 +33,7 @@ export function SettingsModelModal({
   mode,
   form,
   saving,
+  allowReasoningReplay = false,
   error,
   onChange,
   onSave,
@@ -34,28 +41,13 @@ export function SettingsModelModal({
 }: SettingsModelModalProps) {
   const { t } = useTranslation("settings");
   const isAdd = mode === "add";
+  const returnFocus = useSettingsDialogFocus();
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 px-6 py-10 backdrop-blur-[2px]">
-      <div className="absolute inset-0" onClick={onClose} />
-      <Panel className="relative z-10 w-full max-w-[520px] rounded-[var(--radius-panel)] border-border bg-card p-6 shadow-panel">
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <div className="text-lg font-semibold text-ink">
-              {isAdd ? t("modelsPanel.addModelTitle") : t("modelsPanel.editModelTitle")}
-            </div>
-            <div className="mt-1 text-sm text-muted">
-              {isAdd ? t("modelsPanel.addModelDetail") : t("modelsPanel.editModelDetail")}
-            </div>
-          </div>
-          <button
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-muted transition hover:bg-surface hover:text-ink"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={18} />
-          </button>
-        </div>
+    <Dialog onOpenChange={(open) => { if (!open) onClose(); }} open>
+      <DialogContent onCloseAutoFocus={returnFocus}>
+        <DialogTitle className="pr-9 text-lg font-semibold">{isAdd ? t("modelsPanel.addModelTitle") : t("modelsPanel.editModelTitle")}</DialogTitle>
+        <DialogDescription className="mt-1 text-sm text-muted">{isAdd ? t("modelsPanel.addModelDetail") : t("modelsPanel.editModelDetail")}</DialogDescription>
         <div className="mt-5 grid grid-cols-2 gap-4">
           <div className="col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.modelId")}</label>
@@ -83,34 +75,11 @@ export function SettingsModelModal({
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.reasoningEffort")}</label>
-            <select
-              className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm text-ink disabled:opacity-50"
-              disabled={!form.reasoning}
-              onChange={(event) =>
-                onChange({ ...form, reasoning_effort: event.target.value as ReasoningEffort })
-              }
-              value={form.reasoning_effort}
-            >
-              {REASONING_EFFORTS.map((effort) => (
-                <option key={effort} value={effort}>
-                  {t(`modelsPanel.reasoningEffort_${effort}`)}
-                </option>
-              ))}
-            </select>
+            <Select aria-label={t("modelsPanel.reasoningEffort")} disabled={!form.reasoning} onValueChange={(value) => onChange({ ...form, reasoning_effort: value as ReasoningEffort })} options={REASONING_EFFORTS.map((value) => ({ value, label: t(`modelsPanel.reasoningEffort_${value}`) }))} value={form.reasoning_effort} />
           </div>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.speed")}</label>
-            <select
-              className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm text-ink"
-              onChange={(event) => onChange({ ...form, speed: event.target.value as ModelSpeed })}
-              value={form.speed}
-            >
-              {MODEL_SPEEDS.map((speed) => (
-                <option key={speed} value={speed}>
-                  {t(`modelsPanel.speed_${speed}`)}
-                </option>
-              ))}
-            </select>
+            <Select aria-label={t("modelsPanel.speed")} onValueChange={(value) => onChange({ ...form, speed: value as ModelSpeed })} options={MODEL_SPEEDS.map((value) => ({ value, label: t(`modelsPanel.speed_${value}`) }))} value={form.speed} />
           </div>
           <div className="col-span-2">
             <div className="mb-2 text-sm font-medium text-ink">{t("modelsPanel.caps")}</div>
@@ -149,20 +118,22 @@ export function SettingsModelModal({
             </div>
           </div>
         </div>
+        <RequestParametersEditor rows={form.request_parameters} onChange={(request_parameters) => onChange({ ...form, request_parameters })}>
+          {allowReasoningReplay && <ReasoningReplaySelect value={form.reasoning_replay} onChange={(reasoning_replay) => onChange({ ...form, reasoning_replay })} />}
+        </RequestParametersEditor>
         {error ? (
-          <div className="mt-4 rounded-[1rem] border border-danger/20 bg-danger/8 px-4 py-3 text-sm text-danger">
+          <div className="mt-4 rounded-[1rem] border border-danger/20 bg-danger/8 px-4 py-3 text-sm text-danger" role="alert">
             {error}
           </div>
         ) : null}
         <div className="mt-6 flex justify-end gap-3">
-          <Button onClick={onClose} type="button" variant="ghost">
-            {t("modelsPanel.cancel")}
-          </Button>
+          <DialogClose asChild><Button type="button" variant="ghost">{t("modelsPanel.cancel")}</Button></DialogClose>
           <Button disabled={saving || !form.id.trim()} onClick={onSave} type="button">
             {saving ? t("modelsPanel.saving") : t("modelsPanel.save")}
           </Button>
         </div>
-      </Panel>
-    </div>
+        <DialogClose asChild><button aria-label={t("common:close")} className="absolute right-5 top-5 flex size-8 items-center justify-center rounded-full text-muted outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-brand/20" type="button"><X aria-hidden size={18} /></button></DialogClose>
+      </DialogContent>
+    </Dialog>
   );
 }

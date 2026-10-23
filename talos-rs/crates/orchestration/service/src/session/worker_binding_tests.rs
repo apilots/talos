@@ -22,6 +22,8 @@ async fn session_uses_worker_catalog_and_saved_workspace_after_default_changes()
     };
     worker.llm.model = "worker-model".into();
     worker.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: "worker-model".into(),
         name: "Worker model".into(),
         context_window: 32_768,

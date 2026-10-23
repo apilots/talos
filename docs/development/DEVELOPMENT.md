@@ -173,7 +173,7 @@ the selected template. Derived paths and private registration state stay outside
 ## End-to-end tests
 
 ```bash
-just e2e-case 01_health_and_models
+just e2e-group 01_models
 just e2e-group 09_app_server
 ```
 

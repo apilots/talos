@@ -84,6 +84,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     use talos_error::TalosError;
 
     crate::parse_timezone(&config.timezone)?;
+    config.llm.validate_providers()?;
     config.sync.validate()?;
     config.workspaces.validate(&config.talos_paths())?;
 

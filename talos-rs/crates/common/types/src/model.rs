@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub use talos_config::{
-    LlmConfig, LlmProtocol, ModelCostConfig, ModelInputKind, ModelRef, ModelSpeed, ProviderConfig,
-    ProviderModelConfig, ReasoningEffort,
+    is_managed_request_parameter, CustomProviderConfig, LlmConfig, LlmProtocol, ModelCostConfig,
+    ModelInputKind, ModelRef, ModelSelectionCapabilities, ModelSpeed, ProviderConfig,
+    ProviderModelConfig, ReasoningControl, ReasoningEffort, ReasoningReplay,
 };
 
 pub type TalosConfig = talos_config::Config;
@@ -46,9 +47,10 @@ impl ModelSelection {
 
     /// Creates the explicit default selection declared by configured model metadata.
     pub fn from_model(model_ref: ModelRef, model: &ProviderModelConfig) -> Self {
+        let capabilities = model.selection_capabilities();
         Self {
             model_ref,
-            reasoning_effort: model.reasoning.then_some(model.reasoning_effort),
+            reasoning_effort: capabilities.default_reasoning_effort,
         }
     }
 
@@ -85,6 +87,13 @@ impl ModelSelection {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ModelInfo {
     pub provider: String,
+    /// Display label only; routing continues to use provider.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub provider_name: Option<String>,
+    /// Configuration-derived controls for clients; never a second capability store.
+    #[serde(default)]
+    pub selection_capabilities: ModelSelectionCapabilities,
     #[serde(flatten)]
     pub model: ProviderModelConfig,
 }
@@ -93,6 +102,8 @@ impl ModelInfo {
     pub fn from_provider_model(provider: impl Into<String>, model: ProviderModelConfig) -> Self {
         Self {
             provider: provider.into(),
+            provider_name: None,
+            selection_capabilities: model.selection_capabilities(),
             model,
         }
     }
@@ -100,24 +111,24 @@ impl ModelInfo {
 
 /// Builds the configured model catalog in stable provider and configuration order.
 pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
-    [
-        ("anthropic", &llm.anthropic),
-        ("openai", &llm.openai),
-        ("bailian", &llm.bailian),
-        ("deepseek", &llm.deepseek),
-        ("ollama", &llm.ollama),
-        ("openrouter", &llm.openrouter),
-    ]
-    .into_iter()
-    .flat_map(|(provider, config)| {
-        config
-            .models
-            .iter()
-            .filter(|model| !model.id.trim().is_empty())
-            .cloned()
-            .map(move |model| ModelInfo::from_provider_model(provider, model))
-    })
-    .collect()
+    llm.providers()
+        .into_iter()
+        .flat_map(|(provider, config)| {
+            config
+                .models
+                .iter()
+                .filter(|model| !model.id.trim().is_empty())
+                .cloned()
+                .map(move |model| {
+                    let mut info = ModelInfo::from_provider_model(provider, model);
+                    info.provider_name = llm
+                        .custom_providers
+                        .get(provider)
+                        .map(|entry| entry.name.clone());
+                    info
+                })
+        })
+        .collect()
 }
 
 /// Resolves the configured default model into a complete persisted selection.

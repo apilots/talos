@@ -69,10 +69,12 @@ impl BailianProvider {
 
     pub(crate) fn build_headers(&self) -> header::HeaderMap {
         let mut headers = header::HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key)).unwrap(),
-        );
+        if !self.config.api_key.is_empty() {
+            headers.insert(
+                header::AUTHORIZATION,
+                header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key)).unwrap(),
+            );
+        }
         headers.insert(
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
@@ -118,6 +120,7 @@ impl BailianProvider {
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let bailian_req = Self::build_request(request, false)?;
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers();
@@ -126,7 +129,10 @@ impl BailianProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&bailian_req)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &bailian_req,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {
@@ -156,6 +162,7 @@ impl BailianProvider {
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let bailian_req = Self::build_request(request, true)?;
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers();
@@ -164,7 +171,10 @@ impl BailianProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&bailian_req)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &bailian_req,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {

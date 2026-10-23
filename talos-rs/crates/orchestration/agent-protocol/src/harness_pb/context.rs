@@ -196,6 +196,18 @@ pub fn encode_model(value: ModelInfo) -> pb::ModelInfo {
     let model = value.model;
     pb::ModelInfo {
         provider: value.provider,
+        provider_name: value.provider_name,
+        reasoning_replay: match model.reasoning_replay {
+            talos_types::ReasoningReplay::ProtocolDefault => 0,
+            talos_types::ReasoningReplay::Omit => 1,
+            talos_types::ReasoningReplay::Reasoning => 2,
+            talos_types::ReasoningReplay::ReasoningContent => 3,
+        },
+        request_parameters_json: model
+            .request_parameters
+            .into_iter()
+            .map(|(key, value)| (key, value.to_string()))
+            .collect(),
         id: model.id,
         name: model.name,
         context_window: model.context_window,
@@ -226,9 +238,22 @@ pub fn decode_model(value: Option<pb::ModelInfo>) -> TalosResult<ModelInfo> {
         _ => return Err(invalid()),
     };
     let cost = value.cost.ok_or_else(invalid)?;
-    Ok(ModelInfo::from_provider_model(
+    let provider_name = value.provider_name;
+    let mut info = ModelInfo::from_provider_model(
         value.provider,
         ProviderModelConfig {
+            reasoning_replay: match value.reasoning_replay {
+                0 => talos_types::ReasoningReplay::ProtocolDefault,
+                1 => talos_types::ReasoningReplay::Omit,
+                2 => talos_types::ReasoningReplay::Reasoning,
+                3 => talos_types::ReasoningReplay::ReasoningContent,
+                _ => return Err(invalid()),
+            },
+            request_parameters: value
+                .request_parameters_json
+                .into_iter()
+                .map(|(key, value)| Ok((key, serde_json::from_str(&value).map_err(|_| invalid())?)))
+                .collect::<TalosResult<_>>()?,
             id: value.id,
             name: value.name,
             context_window: value.context_window,
@@ -247,7 +272,9 @@ pub fn decode_model(value: Option<pb::ModelInfo>) -> TalosResult<ModelInfo> {
                 cache_write: cost.cache_write,
             },
         },
-    ))
+    );
+    info.provider_name = provider_name;
+    Ok(info)
 }
 
 fn encode_reasoning(value: ReasoningEffort) -> i32 {
@@ -335,6 +362,8 @@ mod tests {
             model: ModelInfo::from_provider_model(
                 "openai",
                 ProviderModelConfig {
+                    reasoning_replay: Default::default(),
+                    request_parameters: Default::default(),
                     id: "model-1".into(),
                     name: "Model".into(),
                     context_window: 128_000,

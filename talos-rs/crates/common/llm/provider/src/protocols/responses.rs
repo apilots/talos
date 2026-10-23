@@ -6,7 +6,7 @@ use crate::{
     ReasoningTextBlock, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
 };
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
@@ -14,115 +14,9 @@ use tokio::sync::mpsc;
 
 mod attachments;
 mod reasoning;
+mod types;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ResponsesRequest {
-    pub model: String,
-    pub input: Vec<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ResponsesTool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<ResponsesToolChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parallel_tool_calls: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<ResponsesReasoning>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub include: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stream: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ResponsesTool {
-    #[serde(rename = "type")]
-    pub tool_type: String,
-    pub name: String,
-    pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-pub enum ResponsesToolChoice {
-    Simple(String),
-    Named { r#type: String, name: String },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ResponsesReasoning {
-    pub effort: String,
-}
-
-/// Provider-owned options applied by the shared Responses protocol encoder.
-#[derive(Debug, Clone, Default)]
-pub struct ResponsesRequestOptions {
-    pub reasoning: Option<ResponsesReasoning>,
-    pub include: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResponsesResponse {
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub status: Option<String>,
-    #[serde(default)]
-    pub output_text: Option<String>,
-    #[serde(default)]
-    pub output: Vec<Value>,
-    #[serde(default)]
-    pub usage: Option<ResponsesUsage>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResponsesUsage {
-    #[serde(default)]
-    pub input_tokens: u32,
-    #[serde(default)]
-    pub output_tokens: u32,
-    #[serde(default)]
-    pub total_tokens: u32,
-    #[serde(default)]
-    pub input_tokens_details: Option<ResponsesInputTokensDetails>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ResponsesInputTokensDetails {
-    #[serde(default)]
-    pub cached_tokens: Option<u32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ResponsesModelBlocks {
-    pub provider_name: String,
-    pub item_prefix: String,
-}
-
-impl ResponsesModelBlocks {
-    pub fn openai() -> Self {
-        Self {
-            provider_name: "OpenAI".to_string(),
-            item_prefix: "openai".to_string(),
-        }
-    }
-
-    pub fn openrouter() -> Self {
-        Self {
-            provider_name: "OpenRouter".to_string(),
-            item_prefix: "openrouter".to_string(),
-        }
-    }
-}
+pub use types::*;
 
 #[derive(Debug, Clone)]
 enum ActiveResponsesBlock {
@@ -417,6 +311,7 @@ pub fn model_blocks(
         let mut stream = response.bytes_stream();
         let mut decoder = SseLineDecoder::new();
         let mut active_blocks: HashMap<String, ActiveResponsesBlock> = HashMap::new();
+        let mut next_tool_index = 0;
         let mut reasoning_output = ReasoningOutput::default();
         let mut final_usage: Option<Usage> = None;
         let mut final_finish_reason: Option<String> = None;
@@ -485,6 +380,7 @@ pub fn model_blocks(
                                 if !start_output_item(
                                     &tx,
                                     &mut active_blocks,
+                                    &mut next_tool_index,
                                     &event,
                                     &options.item_prefix,
                                 )
@@ -522,6 +418,7 @@ pub fn model_blocks(
                                 if !send_tool_delta(
                                     &tx,
                                     &mut active_blocks,
+                                    &mut next_tool_index,
                                     &event,
                                     &options.item_prefix,
                                 )
@@ -737,6 +634,7 @@ async fn send_model_block_event(
 async fn start_output_item(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
     active_blocks: &mut HashMap<String, ActiveResponsesBlock>,
+    next_tool_index: &mut usize,
     event: &Value,
     item_prefix: &str,
 ) -> bool {
@@ -746,7 +644,9 @@ async fn start_output_item(
     match item_type {
         "reasoning" => ensure_reasoning_block(tx, active_blocks, event, item_prefix).await,
         "message" => ensure_text_block(tx, active_blocks, event, item_prefix).await,
-        "function_call" => ensure_tool_block(tx, active_blocks, event, item_prefix).await,
+        "function_call" => {
+            ensure_tool_block(tx, active_blocks, next_tool_index, event, item_prefix).await
+        }
         _ => {
             let _ = index;
             true
@@ -816,10 +716,11 @@ async fn send_reasoning_delta(
 async fn send_tool_delta(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
     active_blocks: &mut HashMap<String, ActiveResponsesBlock>,
+    next_tool_index: &mut usize,
     event: &Value,
     item_prefix: &str,
 ) -> bool {
-    if !ensure_tool_block(tx, active_blocks, event, item_prefix).await {
+    if !ensure_tool_block(tx, active_blocks, next_tool_index, event, item_prefix).await {
         return false;
     }
     let index = output_index(event);
@@ -911,6 +812,7 @@ async fn ensure_text_block(
 async fn ensure_tool_block(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
     active_blocks: &mut HashMap<String, ActiveResponsesBlock>,
+    next_tool_index: &mut usize,
     event: &Value,
     item_prefix: &str,
 ) -> bool {
@@ -919,6 +821,10 @@ async fn ensure_tool_block(
     if active_blocks.contains_key(&key) {
         return true;
     }
+    // Wire output indices include reasoning and text items; the kernel expects
+    // a separate contiguous ordinal for tools only. Keep wire identity below.
+    let tool_index = *next_tool_index;
+    *next_tool_index += 1;
     let item = event.get("item").unwrap_or(&Value::Null);
     let model_item_id = block_model_item_id(item_prefix, "tool", index);
     active_blocks.insert(
@@ -935,7 +841,7 @@ async fn ensure_tool_block(
             kind: ModelBlockKind::ToolCall,
             output_phase: ModelOutputPhase::Unknown,
             tool_call: Some(ModelToolCallStart {
-                index,
+                index: tool_index,
                 call_id: item
                     .get("call_id")
                     .or_else(|| item.get("id"))

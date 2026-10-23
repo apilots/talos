@@ -170,10 +170,14 @@ impl DeepSeekProvider {
         })?;
         match self.config.protocol {
             DeepSeekProtocol::Chat => {
-                headers.insert(header::AUTHORIZATION, key);
+                if !self.config.api_key.is_empty() {
+                    headers.insert(header::AUTHORIZATION, key);
+                }
             }
             DeepSeekProtocol::Messages => {
-                headers.insert("x-api-key", key);
+                if !self.config.api_key.is_empty() {
+                    headers.insert("x-api-key", key);
+                }
                 headers.insert(
                     "anthropic-version",
                     header::HeaderValue::from_static("2023-06-01"),
@@ -217,6 +221,7 @@ impl DeepSeekProvider {
         // TODO(PR #50): Recheck empty reasoning_content on future Flash revisions.
         // Preserve upstream emptiness in both transports; never synthesize reasoning
         // or retry a successful response merely to obtain a thinking block.
+        let request_parameters = request.request_parameters.clone();
         let (endpoint, body) = match self.config.protocol {
             DeepSeekProtocol::Chat => (
                 "chat/completions",
@@ -236,6 +241,7 @@ impl DeepSeekProvider {
                 error,
             )
         })?;
+        let body = talos_llm_provider::serialize_with_parameters(body, &request_parameters)?;
         Ok((endpoint, body))
     }
 

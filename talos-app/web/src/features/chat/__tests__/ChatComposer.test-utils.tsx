@@ -56,7 +56,7 @@ function defaultComposerProps(): React.ComponentProps<typeof ChatComposer> {
     activeProjectId: UNBOUND_PROJECT_ID,
     draft: "",
     isStreaming: false,
-    models: [{ id: "mock:model-1", name: "Model 1", provider: "mock" }],
+    models: [{ id: "mock:model-1", name: "Model 1", provider: "mock", reasoningEffort: "medium", selectionCapabilities: { reasoning: "effort", fast: false, default_fast: false, default_reasoning_effort: "medium" } }],
     onCancel: vi.fn(),
     onDraftChange: vi.fn(),
     onModelChange: vi.fn(),

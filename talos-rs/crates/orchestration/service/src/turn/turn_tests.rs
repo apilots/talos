@@ -884,6 +884,8 @@ fn test_config() -> TalosConfig {
     let mut config = TalosConfig::default();
     config.llm.model = "test-model".to_string();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: "test-model".to_string(),
         name: "Test model".to_string(),
         context_window: 32_768,

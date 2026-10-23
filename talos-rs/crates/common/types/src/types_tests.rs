@@ -200,6 +200,8 @@ fn model_info(provider: &str, id: &str, name: &str, reasoning: bool) -> ModelInf
     ModelInfo::from_provider_model(
         provider,
         ProviderModelConfig {
+            reasoning_replay: Default::default(),
+            request_parameters: Default::default(),
             id: id.to_string(),
             name: name.to_string(),
             context_window: 1_000_000,
@@ -216,6 +218,8 @@ fn model_info(provider: &str, id: &str, name: &str, reasoning: bool) -> ModelInf
 fn test_model_catalog_preserves_provider_order_and_duplicate_ids() {
     let mut llm = LlmConfig::default();
     let shared_model = ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: "shared-model".to_string(),
         name: "Shared Model".to_string(),
         context_window: 128_000,
@@ -245,6 +249,10 @@ fn test_model_info_serializes_canonical_model_fields_flat() {
         serde_json::to_value(model).unwrap(),
         serde_json::json!({
             "provider": "openai",
+            "provider_name": null,
+            "selection_capabilities": {"reasoning":"effort","fast":false,"default_fast":false,"default_reasoning_effort":"medium"},
+            "request_parameters": {},
+            "reasoning_replay": "protocol_default",
             "id": "gpt-5.5",
             "name": "GPT-5.5",
             "context_window": 1_000_000,
@@ -467,6 +475,27 @@ fn test_model_selection_serializes_as_single_wire_object() {
 }
 
 #[test]
+fn model_selection_uses_configured_binary_reasoning_default() {
+    for (enabled, expected) in [(false, None), (true, Some(ReasoningEffort::Medium))] {
+        let mut configured = model_info("custom", "same-model", "Configured", true).model;
+        configured.request_parameters =
+            serde_json::from_value(serde_json::json!({"enable_thinking":enabled})).unwrap();
+        let selection = ModelSelection::from_model(
+            ModelRef {
+                provider: "custom".into(),
+                id: "same-model".into(),
+            },
+            &configured,
+        );
+        assert_eq!(selection.reasoning_effort, expected);
+        assert_eq!(
+            configured.selection_capabilities().default_reasoning_effort,
+            expected
+        );
+    }
+}
+
+#[test]
 fn test_session_title_policy_normalizes_generated_title() {
     let title =
         session_title_or_fallback("\"Plan Service Migration.\"".to_string(), "fallback text");
@@ -571,4 +600,25 @@ fn test_memory_file_detail_roundtrip() {
     let decoded: MemoryFileDetail = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded, detail);
+}
+
+#[test]
+fn custom_catalog_keeps_same_upstream_ids_and_display_names_distinct() {
+    let llm: LlmConfig = serde_json::from_value(serde_json::json!({
+        "provider":"llm-gateway", "model":"model", "custom_providers": {
+            "llm-gateway": {"name":"LLM Gateway","protocol":"chat","base_url":"http://localhost:8000/v1","models":[{"id":"model"}]},
+            "local-inference": {"name":"Local Inference","protocol":"chat","base_url":"http://localhost:8001/v1","models":[{"id":"model"}]}
+        }
+    })).unwrap();
+    let models = resolve_model_catalog(&llm);
+    assert_eq!(
+        models
+            .iter()
+            .map(|m| (&*m.provider, m.provider_name.as_deref(), &*m.model.id))
+            .collect::<Vec<_>>(),
+        vec![
+            ("llm-gateway", Some("LLM Gateway"), "model"),
+            ("local-inference", Some("Local Inference"), "model")
+        ]
+    );
 }

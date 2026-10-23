@@ -242,6 +242,8 @@ impl SessionStore for RecordingSessionStore {
 
 fn provider_model(id: &str) -> talos_config::ProviderModelConfig {
     talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: id.to_string(),
         name: id.to_string(),
         context_window: 32_768,

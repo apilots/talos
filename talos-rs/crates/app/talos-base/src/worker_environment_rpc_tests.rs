@@ -29,6 +29,8 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
         definitions: vec![talos_config::WorkspaceDefinition::new("pc", "worker-files")],
     };
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: config.llm.model.clone(),
         name: "Worker model".into(),
         context_window: 32_768,

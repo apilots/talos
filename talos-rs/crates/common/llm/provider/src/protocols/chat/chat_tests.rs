@@ -260,3 +260,96 @@ fn stream_reasoning_details_merge_by_provider_index() {
         ]
     );
 }
+
+#[test]
+fn text_replay_refuses_nonempty_signatures_but_explicit_omit_remains_outbound_only() {
+    for signature in [None, Some(""), Some("signature-evidence")] {
+        let message = ChatMessage::assistant("answer").with_reasoning_continuation(
+            ReasoningContinuation::Blocks(vec![ReasoningBlock::Text(ReasoningTextBlock {
+                provider_item_id: Some("rs-1".into()),
+                provider_index: Some(0),
+                text: "thought".into(),
+                signature: signature.map(str::to_owned),
+                format: None,
+            })]),
+        );
+        for format in [
+            ChatReasoningContinuationFormat::Reasoning,
+            ChatReasoningContinuationFormat::ReasoningContent,
+            ChatReasoningContinuationFormat::Omit,
+            ChatReasoningContinuationFormat::ReasoningDetails,
+        ] {
+            let request = ChatRequest::builder()
+                .model("opaque-model")
+                .messages(vec![message.clone()])
+                .build();
+            let encoded = request.clone();
+            let result = super::request(
+                encoded,
+                false,
+                ChatCompletionRequestOptions {
+                    reasoning_continuation: format,
+                    ..Default::default()
+                },
+            );
+            if signature.is_some_and(|value| !value.is_empty())
+                && matches!(
+                    format,
+                    ChatReasoningContinuationFormat::Reasoning
+                        | ChatReasoningContinuationFormat::ReasoningContent
+                )
+            {
+                let error = result.unwrap_err();
+                assert_eq!(error.error_code(), ErrorCode::InvalidRequest);
+                assert!(!error.to_string().contains("signature-evidence"));
+            } else {
+                let body = serde_json::to_value(result.unwrap()).unwrap();
+                assert_eq!(body["messages"][0]["content"], "answer");
+                if format == ChatReasoningContinuationFormat::Omit {
+                    assert!(body["messages"][0].get("reasoning").is_none());
+                    assert!(body["messages"][0].get("reasoning_details").is_none());
+                }
+                if format == ChatReasoningContinuationFormat::ReasoningDetails {
+                    assert_eq!(
+                        body["messages"][0]["reasoning_details"][0]["signature"],
+                        signature
+                            .map(serde_json::Value::from)
+                            .unwrap_or(serde_json::Value::Null)
+                    );
+                }
+            }
+            assert_eq!(request.messages, vec![message.clone()]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn native_stream_modes_preserve_their_existing_reasoning_representations() {
+    let sse = format!(
+        "data: {}\n\ndata: [DONE]\n\n",
+        serde_json::json!({"choices":[{"delta":{"reasoning":"plain","reasoning_details":[{"type":"reasoning.encrypted","data":"opaque","id":"rs-1","index":0}]},"finish_reason":"stop"}]})
+    );
+    for (options, structured) in [
+        (ChatCompletionModelBlocks::openai(), false),
+        (ChatCompletionModelBlocks::openrouter(), true),
+    ] {
+        let response = reqwest::Response::from(http::Response::new(sse.clone()));
+        let mut stream = model_blocks(response, options);
+        let mut continuation = None;
+        while let Some(event) = stream.next().await {
+            if let ModelBlockStreamEvent::ReasoningCompleted { output } = event.unwrap() {
+                continuation = output.continuation;
+            }
+        }
+        if structured {
+            assert!(
+                matches!(continuation,Some(ReasoningContinuation::Blocks(blocks)) if matches!(&blocks[0],ReasoningBlock::Encrypted(block) if block.data=="opaque"))
+            );
+        } else {
+            assert_eq!(
+                continuation,
+                Some(ReasoningContinuation::Text("plain".into()))
+            );
+        }
+    }
+}

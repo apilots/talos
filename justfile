@@ -91,7 +91,7 @@ gen-app-protocol:
 gen-logo-assets:
     ../scripts/generate-logo-assets.sh
 
-# Run E2E scenarios. Pass runner args such as `--case 01_health_and_models`.
+# Run E2E scenarios. Pass runner args such as `--group 01_models` or `--case 01_models/health_and_models`.
 e2e *args:
     ../talos-e2e/run_e2e.sh "$@"
 

@@ -5401,6 +5401,54 @@
       ],
       "type": "object"
     },
+    "CustomProviderConfig": {
+      "description": "Provider config",
+      "properties": {
+        "api_key": {
+          "default": null,
+          "description": "API key",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_url": {
+          "default": null,
+          "description": "Base URL for custom endpoint",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "default": [],
+          "description": "Provider-specific model metadata",
+          "items": {
+            "$ref": "#/definitions/ProviderModelConfig"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LlmProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Wire protocol used for this provider."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "DeleteComputerRequest": {
       "description": "Remove an owned registration, retaining history and Workspace files.",
       "properties": {
@@ -6423,6 +6471,14 @@
             "protocol": null
           },
           "description": "Bailian config"
+        },
+        "custom_providers": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CustomProviderConfig"
+          },
+          "default": {},
+          "description": "Independently named connections using explicit wire protocols.",
+          "type": "object"
         },
         "deepseek": {
           "allOf": [
@@ -8910,6 +8966,21 @@
           ],
           "default": "medium"
         },
+        "reasoning_replay": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningReplay"
+            }
+          ],
+          "default": "protocol_default",
+          "description": "Only custom Chat providers may override the protocol's reasoning replay."
+        },
+        "request_parameters": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Optional JSON request-body extensions; never credentials or runtime history.",
+          "type": "object"
+        },
         "speed": {
           "allOf": [
             {
@@ -9030,6 +9101,16 @@
         "medium",
         "high",
         "xhigh"
+      ],
+      "type": "string"
+    },
+    "ReasoningReplay": {
+      "description": "Explicit outbound assistant reasoning representation for custom Chat endpoints.",
+      "enum": [
+        "protocol_default",
+        "omit",
+        "reasoning",
+        "reasoning_content"
       ],
       "type": "string"
     },

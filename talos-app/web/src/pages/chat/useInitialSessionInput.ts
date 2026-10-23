@@ -58,6 +58,7 @@ export function useInitialSessionInput({
     if (!hasInitialSessionInput(locationState) || handledRef.current) {
       return;
     }
+    if (locationState?.initialModel && !models) return;
     handledRef.current = true;
 
     const initialPrompt = locationState?.initialPrompt?.trim() ?? "";

@@ -102,10 +102,12 @@ impl OpenAIProvider {
 
     fn build_headers(&self) -> header::HeaderMap {
         let mut headers = header::HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key)).unwrap(),
-        );
+        if !self.config.api_key.is_empty() {
+            headers.insert(
+                header::AUTHORIZATION,
+                header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key)).unwrap(),
+            );
+        }
         headers.insert(
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
@@ -117,7 +119,13 @@ impl OpenAIProvider {
 
     fn request_options(request: &ChatRequest) -> chat_protocol::ChatCompletionRequestOptions {
         chat_protocol::ChatCompletionRequestOptions {
-            reasoning_effort: Self::effective_reasoning_effort(request.reasoning_effort),
+            reasoning_effort: if talos_llm_provider::has_boolean_thinking_control(
+                &request.request_parameters,
+            ) {
+                None
+            } else {
+                Self::effective_reasoning_effort(request.reasoning_effort)
+            },
             reasoning_continuation: chat_protocol::ChatReasoningContinuationFormat::Reasoning,
             ..Default::default()
         }
@@ -128,7 +136,9 @@ impl OpenAIProvider {
         stream: bool,
     ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
         let options = Self::request_options(&request);
-        chat_protocol::request(request, stream, options)
+        let mut encoded = chat_protocol::request(request, stream, options)?;
+        chat_protocol::merge_initial_system_messages(&mut encoded);
+        Ok(encoded)
     }
 
     fn responses_request(
@@ -176,6 +186,7 @@ impl OpenAIProvider {
     }
 
     async fn send_chat_completion(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        let request_parameters = request.request_parameters.clone();
         let openai_req = Self::build_request(request, false)?;
 
         let url = self.endpoint_url("chat/completions");
@@ -188,7 +199,10 @@ impl OpenAIProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&openai_req)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &openai_req,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {
@@ -215,6 +229,7 @@ impl OpenAIProvider {
     }
 
     async fn send_responses(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        let request_parameters = request.request_parameters.clone();
         let openai_req = Self::responses_request(request, None)?;
 
         let url = self.endpoint_url("responses");
@@ -227,7 +242,10 @@ impl OpenAIProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&openai_req)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &openai_req,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {
@@ -255,6 +273,7 @@ impl OpenAIProvider {
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
         self.validate_request_attachments(&request)?;
+        let request_parameters = request.request_parameters.clone();
         let (url, body) = match self.config.protocol {
             OpenAIProtocol::Chat => (
                 self.endpoint_url("chat/completions"),
@@ -283,7 +302,10 @@ impl OpenAIProvider {
             .client
             .post(&url)
             .headers(headers)
-            .json(&body)
+            .json(&talos_llm_provider::serialize_with_parameters(
+                &body,
+                &request_parameters,
+            )?)
             .send()
             .await
             .map_err(|e| {

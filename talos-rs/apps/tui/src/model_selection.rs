@@ -10,16 +10,19 @@ pub(crate) fn selection_for_key(
     reasoning_effort: Option<ReasoningEffort>,
 ) -> Option<ModelSelection> {
     let model = models.iter().find(|model| model_key(model) == key)?;
-    Some(ModelSelection {
-        model_ref: talos_sdk::ModelRef {
+    let mut selection = ModelSelection::from_model(
+        talos_sdk::ModelRef {
             provider: model.provider.clone(),
             id: model.model.id.clone(),
         },
-        reasoning_effort: model
-            .model
-            .reasoning
-            .then_some(reasoning_effort.unwrap_or(model.model.reasoning_effort)),
-    })
+        &model.model,
+    );
+    if model.selection_capabilities.reasoning != talos_sdk::ReasoningControl::None
+        && reasoning_effort.is_some()
+    {
+        selection.reasoning_effort = reasoning_effort;
+    }
+    Some(selection)
 }
 
 #[cfg(test)]

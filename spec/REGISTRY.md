@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 048 |
+| `feat` | 049 |
 | `fix` | 010 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-048 | [Custom provider connections and model selection](feat-048-custom-llm-providers/design.md) | implemented |
 | fix-009 | [Bounded tool results and Bash output logs](fix-009-bash-output-logs/design.md) | active |
 | fix-008 | [MCP exit cleanup on Darwin](fix-008-mcp-exit-cleanup/design.md) | implemented |
 | fix-007 | [Log noise and Sync ACK overhead](fix-007-log-sync-overhead/design.md) | implemented |

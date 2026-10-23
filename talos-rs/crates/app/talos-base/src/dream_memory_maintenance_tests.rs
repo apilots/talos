@@ -122,6 +122,8 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
     config.llm.model = "default-maintenance-model".to_string();
     config.llm.anthropic.models = vec![
         talos_config::ProviderModelConfig {
+            reasoning_replay: Default::default(),
+            request_parameters: Default::default(),
             id: config.llm.model.clone(),
             name: "Default maintenance model".to_string(),
             context_window: 32_768,
@@ -132,6 +134,8 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             cost: Default::default(),
         },
         talos_config::ProviderModelConfig {
+            reasoning_replay: Default::default(),
+            request_parameters: Default::default(),
             id: "inner-maintenance-model".to_string(),
             name: "Inner maintenance model".to_string(),
             context_window: 32_768,

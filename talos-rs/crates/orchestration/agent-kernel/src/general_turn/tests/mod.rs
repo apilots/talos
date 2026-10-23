@@ -1132,6 +1132,8 @@ fn build_ctx_with_stream_for_session(
         selected_model_info: talos_types::ModelInfo::from_provider_model(
             "p1",
             talos_types::ProviderModelConfig {
+                reasoning_replay: Default::default(),
+                request_parameters: Default::default(),
                 id: "m1".to_string(),
                 name: "m1".to_string(),
                 context_window: 0,

@@ -608,3 +608,32 @@ fn malformed_yaml_does_not_overwrite_existing_config() {
         .count();
     assert_eq!(backups, 0);
 }
+
+#[test]
+fn upgrade_preserves_custom_providers_when_legacy_template_omits_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = TalosPaths::from_home(dir.path().join("home"));
+    let mut template = template_yaml();
+    remove_path_for_test(&mut template, &["llm", "custom_providers"]);
+    let template_path = dir.path().join("template.yaml");
+    std::fs::write(&template_path, serde_yaml::to_string(&template).unwrap()).unwrap();
+    let custom: YamlValue = serde_yaml::from_str("llm-gateway:\n  name: LLM Gateway\n  protocol: chat\n  base_url: http://localhost:8000/v1\n  models:\n    - id: model\n      request_parameters:\n        chat_template_kwargs: {enable_thinking: true}\n").unwrap();
+    let mut saved = template.clone();
+    set_path_for_test(&mut saved, &["llm", "custom_providers"], custom.clone());
+    set_path_for_test(
+        &mut saved,
+        &["agent", "inner_model"],
+        serde_yaml::from_str("provider: llm-gateway\nid: model\n").unwrap(),
+    );
+    write_existing(&paths, &saved);
+    upgrade_default_config_from_template(&paths, &template_path).unwrap();
+    let upgraded = read_yaml_file(&paths.config_file).unwrap();
+    assert_eq!(
+        get_path_for_test(&upgraded, &["agent", "inner_model"]),
+        get_path_for_test(&saved, &["agent", "inner_model"])
+    );
+    assert_eq!(
+        get_path_for_test(&upgraded, &["llm", "custom_providers"]),
+        Some(&custom)
+    );
+}

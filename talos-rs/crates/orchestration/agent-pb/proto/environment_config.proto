@@ -8,8 +8,12 @@ message ProviderConfig {
   optional string api_key = 1; optional string base_url = 2; optional LlmProtocol protocol = 3;
   repeated ModelInfo models = 4;
 }
+message CustomProviderConfig {
+  string name = 1; ProviderConfig config = 3;
+}
 message LlmConfig {
   string provider = 1; string model = 2;
+  map<string, CustomProviderConfig> custom_providers = 9;
   ProviderConfig anthropic = 3; ProviderConfig openai = 4; ProviderConfig bailian = 5;
   ProviderConfig deepseek = 6; ProviderConfig ollama = 7; ProviderConfig openrouter = 8;
 }

@@ -85,11 +85,12 @@ pub enum ConfigResponse {
 
 impl From<talos_config::LlmConfigRead> for ConfigResponse {
     fn from(value: talos_config::LlmConfigRead) -> Self {
+        let provider_capabilities = value.config.protocol_capabilities();
         Self::Llm {
             config: Box::new(value.config),
             model_readiness: value.model_readiness,
             provider_keys: value.provider_keys,
-            provider_capabilities: talos_config::provider_protocol_capabilities(),
+            provider_capabilities,
         }
     }
 }

@@ -19,6 +19,7 @@ pub(super) fn reasoning_fields(
     };
 
     match (format, continuation) {
+        (ChatReasoningContinuationFormat::Omit, _) => Ok((None, None, None)),
         (ChatReasoningContinuationFormat::None, _) => Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "Chat protocol received reasoning continuation without a replay format".to_string(),
@@ -67,7 +68,19 @@ fn text_reasoning_continuation(continuation: ReasoningContinuation) -> TalosResu
             let mut text = String::new();
             for block in blocks {
                 match block {
-                    ReasoningBlock::Text(block) => text.push_str(&block.text),
+                    ReasoningBlock::Text(block) => {
+                        if block
+                            .signature
+                            .as_deref()
+                            .is_some_and(|signature| !signature.is_empty())
+                        {
+                            return Err(TalosError::new(
+                                ErrorCode::InvalidRequest,
+                                "Chat text reasoning field cannot replay signed reasoning blocks",
+                            ));
+                        }
+                        text.push_str(&block.text);
+                    }
                     ReasoningBlock::Summary(_) | ReasoningBlock::Encrypted(_) => {
                         return Err(TalosError::new(
                             ErrorCode::InvalidRequest,

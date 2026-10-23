@@ -110,6 +110,8 @@ struct TestAuthService;
 fn configured_test_config() -> TalosConfig {
     let mut config = TalosConfig::default();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: config.llm.model.clone(),
         name: "Default test model".to_string(),
         context_window: 32_768,
@@ -129,6 +131,8 @@ fn configured_test_config_with_turn_model() -> TalosConfig {
         .anthropic
         .models
         .push(talos_config::ProviderModelConfig {
+            reasoning_replay: Default::default(),
+            request_parameters: Default::default(),
             id: "turn-model".to_string(),
             name: "Turn Model".to_string(),
             context_window: 128_000,

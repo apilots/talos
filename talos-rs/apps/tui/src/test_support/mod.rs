@@ -121,6 +121,9 @@ impl GatewayClient for MockGatewayClient {
             state.list_models_failures_remaining -= 1;
             return Err(TalosError::internal("mock list_models failure"));
         }
+        for model in &mut state.models {
+            model.selection_capabilities = model.model.selection_capabilities();
+        }
         let default_model = state
             .models
             .iter()
@@ -131,16 +134,13 @@ impl GatewayClient for MockGatewayClient {
             .expect("mock default model should exist");
         Ok(talos_sdk::ModelListResponse {
             models: state.models.clone(),
-            default_model_selection: talos_sdk::ModelSelection {
-                model_ref: talos_sdk::ModelRef {
+            default_model_selection: talos_sdk::ModelSelection::from_model(
+                talos_sdk::ModelRef {
                     provider: default_model.provider.clone(),
                     id: default_model.model.id.clone(),
                 },
-                reasoning_effort: default_model
-                    .model
-                    .reasoning
-                    .then_some(default_model.model.reasoning_effort),
-            },
+                &default_model.model,
+            ),
         })
     }
 

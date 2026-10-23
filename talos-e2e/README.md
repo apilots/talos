@@ -27,7 +27,8 @@ From the repository root:
 just e2e --list                     # Review the complete discovered scope
 just e2e --check                    # Check prerequisites; no builds or cases
 just e2e                            # Run all discovered scenarios
-just e2e-case 01_health_and_models
+just e2e-group 01_models
+just e2e-case 01_models/health_and_models
 just e2e-group 09_app_server
 just e2e-group 14_sandbox
 ```
@@ -99,7 +100,8 @@ Python3.9+ is required for discovery. `--help` requires only Bash.
 
 | Groups | Scope |
 | --- | --- |
-| `01`-`03` | Server health, models, Session lifecycle, HTTP, and SSE |
+| `01_models` | Secretless server health, model catalog, custom Provider persistence and protocol tool loops |
+| Root `02`-`03` cases | Session lifecycle, HTTP, and SSE |
 | `05`-`08` | CLI, tools, memory, and embedded TUI |
 | `09` | App Server protocol, Skills, MCP, and Memory integration |
 | `11`-`13` | Cloud auth, files, and durable user interaction |
@@ -115,8 +117,8 @@ Groups `04` and `10` are not assigned; use the scenario directory rather than as
 that group numbers are contiguous. Frontend unit tests belong to the frontend
 quality workflow and are not repeated as an E2E scenario.
 
-The approval-gated GitHub PR quality gate runs the secretless scenarios
-`01_health_and_models`, `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `20_browser_workspace/01_resource_tabs`, `12_files`, and
+The approval-gated GitHub PR quality gate runs the secretless `01_models` group
+(health/catalog, custom Provider configuration and controlled protocol tool loops), `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `20_browser_workspace/01_resource_tabs`, `12_files`, and
 `14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
 `talos-agent` and `talos-service` package tests. These cover public Cloud SDK
 adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
@@ -126,6 +128,23 @@ receive repository secrets and does not check out private repositories.
 
 The existing contract job also runs `talos-llm-deepseek` transport regressions
 against controlled loopback responses; those tests require no provider credentials.
+
+`01_models/protocol_compatibility` runs the real Gateway and Agent against one
+controlled loopback upstream. Chat, Responses and Messages use an identical opaque
+model ID under distinct Providers. Each performs an On-to-Off session with actual
+Bash execution and tool-result replay; Chat covers all four `reasoning_replay`
+policies. The case checks protocol-native authentication, root-level KV projection,
+reasoning continuation. It requires no
+provider credentials or external model network. The Agent path uses upstream
+streaming; owning `ProtocolProvider` Rust transport tests cover both streaming and
+non-streaming tool exchanges. Auxiliary title calls do not count as non-streaming
+Agent tool coverage. Fixture request records and event logs are retained with the
+normal scenario evidence.
+
+An additional Messages connection keeps explicit adaptive thinking while changing
+effort from medium to high in one session. Both tool-loop rounds must send the
+selected `output_config.effort`, retain thinking KV siblings and preserve signed
+history. This contract does not imply Chat/Responses endpoints accept adaptive.
 
 Maintainers can manually run the provider-backed `trusted-e2e.yml` workflow from
 `main`, including the full `09_app_server` group whose execution, MCP, memory and
