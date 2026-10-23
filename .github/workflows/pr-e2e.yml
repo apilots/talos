@@ -76,8 +76,8 @@ jobs:
         with:
           tool: just,cargo-nextest
 
-      - name: Test Cloud, Desktop, TUI, SQLite and Provider boundaries
-        run: just test -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui -p talos-llm-deepseek
+      - name: Test Worker lifecycle, Cloud, Desktop, TUI, SQLite and Provider boundaries
+        run: just test -p talos-guard-task -p talos-worker -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui -p talos-llm-deepseek
 
       - name: Test E2E discovery, lifecycle and binary reuse
         run: python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
