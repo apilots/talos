@@ -39,6 +39,7 @@ For unfamiliar ownership, consult the relevant entry in [Rust modules](docs/refe
 
 ## Validation and completion
 
+- At self-review handoff, save a concise, self-contained visual HTML report under the repository-root ignored `output/` directory. Combine short text with diagrams or screenshots to explain findings, fixes, verification, and remaining limits; link the report and its evidence in the handoff. Do not commit generated review reports.
 - Keep actual self-test, review and acceptance records in the repository-root ignored `output/` directory, including result tables, verification-only Markdown, logs, screenshots and issue observations. Use `.tmp/` for disposable scratch files. Do not commit these records under specs or deployment documentation, including concise copies of the same results.
 - Tracked specs and documentation own designs, contracts, reusable verification procedures and deployment/acceptance checklists. Summarize actual commands, results, limitations and blockers in PR evidence; link to PRs rather than ignored local reports when a durable reference is needed. Keep task plans and progress in the ignored task-owned `IMPLEMENTATION_PLAN.md` as required by the development guide.
 - Use [scoped validation commands](docs/development/DEVELOPMENT.md#scoped-validation) from the repository root. Rust tests run through `just test -p <package>` (cargo-nextest), not bare `cargo test`. The repository check is `pnpm --dir talos-app check:repo`.
