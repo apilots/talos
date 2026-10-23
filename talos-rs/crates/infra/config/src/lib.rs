@@ -53,18 +53,22 @@ pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
+pub use domains::custom_provider::{
+    custom_provider_key_env, is_managed_request_parameter, CustomProviderConfig,
+};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
 };
 pub use domains::memory::MemoryConfig;
+pub use domains::model_selection::{ModelSelectionCapabilities, ReasoningControl};
 pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
     llm_provider_supports_protocol, provider_protocol_capabilities, ChannelConfig, ChannelsConfig,
     DmPolicy, DmScope, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCostConfig,
     ModelInputKind, ModelRef, ModelSpeed, ProviderConfig, ProviderModelConfig,
-    ProviderProtocolCapabilities, ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig,
-    TelegramGroupConfig, TelegramMode, TelegramTopicConfig,
+    ProviderProtocolCapabilities, ReasoningEffort, ReasoningReplay, TelegramAccountConfig,
+    TelegramChannelsConfig, TelegramGroupConfig, TelegramMode, TelegramTopicConfig,
 };
 pub use domains::plugins::{
     PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,
@@ -297,27 +301,11 @@ impl Config {
     }
 
     pub fn current_provider_config(&self) -> Option<&ProviderConfig> {
-        match self.llm.provider.trim().to_ascii_lowercase().as_str() {
-            "anthropic" => Some(&self.llm.anthropic),
-            "openai" => Some(&self.llm.openai),
-            "bailian" => Some(&self.llm.bailian),
-            "deepseek" => Some(&self.llm.deepseek),
-            "ollama" => Some(&self.llm.ollama),
-            "openrouter" => Some(&self.llm.openrouter),
-            _ => None,
-        }
+        self.provider_config(&self.llm.provider)
     }
 
     pub fn provider_config(&self, provider: &str) -> Option<&ProviderConfig> {
-        match provider.trim().to_ascii_lowercase().as_str() {
-            "anthropic" => Some(&self.llm.anthropic),
-            "openai" => Some(&self.llm.openai),
-            "bailian" => Some(&self.llm.bailian),
-            "deepseek" => Some(&self.llm.deepseek),
-            "ollama" => Some(&self.llm.ollama),
-            "openrouter" => Some(&self.llm.openrouter),
-            _ => None,
-        }
+        provider_config_for_llm(&self.llm, provider)
     }
 
     /// Load configuration.
@@ -387,7 +375,9 @@ pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
     };
 
     if let Some(protocol) = provider.protocol {
-        if !llm_provider_supports_protocol(&provider_name, protocol) {
+        if !llm.custom_providers.contains_key(&provider_name)
+            && !llm_provider_supports_protocol(&provider_name, protocol)
+        {
             issues.push(format!(
                 "llm.{}.protocol '{}' is not supported",
                 provider_name, protocol
@@ -395,7 +385,7 @@ pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
         }
     }
 
-    if provider_name != "ollama" {
+    if provider_name != "ollama" && !llm.custom_providers.contains_key(&provider_name) {
         match provider.api_key.as_ref() {
             Some(api_key)
                 if !api_key.trim().is_empty() && !validate::is_unresolved_placeholder(api_key) => {}
@@ -450,7 +440,10 @@ pub fn provider_config_for_llm<'a>(
         "deepseek" => Some(&llm.deepseek),
         "ollama" => Some(&llm.ollama),
         "openrouter" => Some(&llm.openrouter),
-        _ => None,
+        _ => llm
+            .custom_providers
+            .get(provider)
+            .map(|entry| &entry.config),
     }
 }
 

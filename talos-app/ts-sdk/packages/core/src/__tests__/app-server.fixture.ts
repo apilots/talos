@@ -49,6 +49,7 @@ const emptyRecoverySnapshot = {
 };
 
 export const testLlmConfig = {
+  custom_providers: {},
   provider: "anthropic",
   model: "MiniMax-M2.5",
   anthropic: emptyProvider,

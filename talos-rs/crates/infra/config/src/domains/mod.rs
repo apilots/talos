@@ -6,6 +6,7 @@ pub mod fs;
 pub mod kernel;
 pub mod mcp_auth;
 pub mod memory;
+pub mod model_selection;
 pub mod network;
 pub mod plugins;
 pub mod prompt;
@@ -13,3 +14,5 @@ pub mod skills;
 pub mod storage;
 pub mod sync;
 pub mod tools;
+
+pub mod custom_provider;

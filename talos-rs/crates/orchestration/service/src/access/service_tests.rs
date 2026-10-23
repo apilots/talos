@@ -41,6 +41,8 @@ fn recording_session_service(
     let mut config = TalosConfig::default();
     config.llm.model = "default".to_string();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: config.llm.model.clone(),
         name: "Default test model".to_string(),
         context_window: 32_768,
@@ -66,6 +68,8 @@ fn recording_access_service(
     let mut config = TalosConfig::default();
     config.llm.model = "default".into();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: "default".into(),
         name: "Default test model".into(),
         context_window: 32_768,

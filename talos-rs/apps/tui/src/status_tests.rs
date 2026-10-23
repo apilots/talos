@@ -72,6 +72,8 @@ fn test_status_snapshot_renders_card_from_real_state() {
     app.available_model_info[0].provider = "bailian".to_string();
     app.available_model_info[0].model.reasoning = true;
     app.available_model_info[0].model.reasoning_effort = ReasoningEffort::High;
+    app.available_model_info[0].selection_capabilities =
+        app.available_model_info[0].model.selection_capabilities();
     app.current_model = "qwen-plus".to_string();
     app.current_model_provider = "bailian".to_string();
     app.reasoning_effort_override = Some(ReasoningEffort::High);
@@ -120,4 +122,21 @@ fn test_status_snapshot_rejects_missing_model_metadata() {
     assert!(err
         .to_string()
         .contains("status model metadata missing for qwen-plus"));
+}
+
+#[test]
+fn status_preserves_explicit_session_reasoning_off_over_model_default() {
+    let mut app = TuiApp::build(None);
+    set_test_model_info(&mut app, "qwen-plus", 200_000);
+    app.current_model = "qwen-plus".to_string();
+    app.available_model_info[0].model.reasoning = true;
+    app.available_model_info[0].model.reasoning_effort = ReasoningEffort::High;
+    app.available_model_info[0].selection_capabilities =
+        app.available_model_info[0].model.selection_capabilities();
+    app.reasoning_effort_override = Some(ReasoningEffort::High);
+    let session = session_info();
+    let snapshot = TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session()).unwrap();
+    let card = render_status_card(&snapshot);
+    assert!(card.contains("reasoning off"));
+    assert!(!card.contains("reasoning high"));
 }

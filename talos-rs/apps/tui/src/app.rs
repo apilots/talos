@@ -136,9 +136,9 @@ impl TuiApp {
         };
         Some(ModelSelection {
             model_ref,
-            reasoning_effort: self
-                .reasoning_effort_override
-                .filter(|_| model.model.reasoning),
+            reasoning_effort: self.reasoning_effort_override.filter(|_| {
+                model.selection_capabilities.reasoning != talos_sdk::ReasoningControl::None
+            }),
         })
     }
 
@@ -161,10 +161,9 @@ impl TuiApp {
     }
 
     pub(crate) fn set_reasoning_effort_override(&mut self, effort: Option<ReasoningEffort>) {
-        self.reasoning_effort_override = if self
-            .current_model_info()
-            .is_some_and(|model| model.model.reasoning)
-        {
+        self.reasoning_effort_override = if self.current_model_info().is_some_and(|model| {
+            model.selection_capabilities.reasoning != talos_sdk::ReasoningControl::None
+        }) {
             effort
         } else {
             None
@@ -175,22 +174,32 @@ impl TuiApp {
         let Some(model) = self.model_info_for_ref(model_ref) else {
             return format!("{}:{}", model_ref.provider, model_ref.id);
         };
-        if !model.model.reasoning {
-            return model_ref.id.clone();
-        }
-        let effort = if model.provider == self.current_model_provider
-            && model.model.id == self.current_model
-        {
+        let current =
+            model.provider == self.current_model_provider && model.model.id == self.current_model;
+        let effort = if current {
             self.reasoning_effort_override
-                .unwrap_or(model.model.reasoning_effort)
         } else {
-            model.model.reasoning_effort
+            model.selection_capabilities.default_reasoning_effort
         };
-        format!(
-            "{} {}",
-            model_ref.id,
-            ReasoningOption::status_label_for(effort)
-        )
+        let mut label = model.provider_name.as_ref().map_or_else(
+            || model.model.display_name().to_string(),
+            |provider| format!("{provider} / {}", model.model.display_name()),
+        );
+        match model.selection_capabilities.reasoning {
+            talos_sdk::ReasoningControl::None => {}
+            talos_sdk::ReasoningControl::Toggle => {
+                label.push_str(if effort.is_some() { " on" } else { " off" })
+            }
+            talos_sdk::ReasoningControl::Effort => {
+                label.push(' ');
+                label.push_str(
+                    effort
+                        .map(ReasoningOption::status_label_for)
+                        .unwrap_or("none"),
+                );
+            }
+        }
+        label
     }
 
     pub(crate) fn current_model_status_label(&self) -> String {

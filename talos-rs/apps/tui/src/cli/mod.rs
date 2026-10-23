@@ -92,16 +92,13 @@ async fn resolve_cli_model_selection(
         .ok_or_else(|| {
             format!("model '{model_key}' is not available in the current model catalog")
         })?;
-    Ok(ModelSelection {
-        model_ref: ModelRef {
+    Ok(ModelSelection::from_model(
+        ModelRef {
             provider: model.provider.clone(),
             id: model.model.id.clone(),
         },
-        reasoning_effort: model
-            .model
-            .reasoning
-            .then_some(model.model.reasoning_effort),
-    })
+        &model.model,
+    ))
 }
 
 async fn execute_models_command(

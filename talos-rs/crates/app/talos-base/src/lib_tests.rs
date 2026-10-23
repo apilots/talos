@@ -153,6 +153,8 @@ fn isolate_runtime_workspace(config: &mut Config, label: &str) -> PathBuf {
 
 fn provider_model(id: &str) -> ProviderModelConfig {
     ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: id.to_string(),
         name: id.to_string(),
         context_window: 32_768,

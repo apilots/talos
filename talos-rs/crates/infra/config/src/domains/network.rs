@@ -265,6 +265,9 @@ pub struct ModelRef {
 /// LLM configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct LlmConfig {
+    /// Independently named connections using explicit wire protocols.
+    #[serde(default)]
+    pub custom_providers: BTreeMap<String, super::custom_provider::CustomProviderConfig>,
     /// Default provider
     #[serde(default = "default_provider")]
     pub provider: String,
@@ -309,6 +312,7 @@ fn default_model() -> String {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
+            custom_providers: BTreeMap::new(),
             provider: default_provider(),
             model: default_model(),
             anthropic: ProviderConfig::default(),
@@ -435,9 +439,28 @@ pub struct ProviderConfig {
     pub models: Vec<ProviderModelConfig>,
 }
 
+/// Explicit outbound assistant reasoning representation for custom Chat endpoints.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningReplay {
+    #[default]
+    ProtocolDefault,
+    Omit,
+    Reasoning,
+    ReasoningContent,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderModelConfig {
+    /// Only custom Chat providers may override the protocol's reasoning replay.
+    #[serde(default)]
+    #[ts(as = "Option<ReasoningReplay>", optional)]
+    pub reasoning_replay: ReasoningReplay,
+    /// Optional JSON request-body extensions; never credentials or runtime history.
+    #[serde(default)]
+    #[ts(type = "Record<string, unknown>")]
+    pub request_parameters: BTreeMap<String, serde_json::Value>,
     pub id: String,
     #[serde(default)]
     pub name: String,

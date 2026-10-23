@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AgentRunMetrics, AuthSessionReadResponse, ContextUsage, ReasoningEffort, SessionInfo,
-    UserPermissionMode,
+    AgentRunMetrics, AuthSessionReadResponse, ContextUsage, ReasoningControl, ReasoningEffort,
+    SessionInfo, UserPermissionMode,
 };
 use talos_types::talos::TokenUsage;
 
@@ -36,8 +36,8 @@ struct StatusModel {
     id: String,
     provider: String,
     context_window: u32,
-    reasoning: bool,
-    reasoning_effort: ReasoningEffort,
+    reasoning_control: ReasoningControl,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,18 +114,10 @@ impl TuiStatusSnapshot {
                 id: model_info.model.id.clone(),
                 provider: model_info.provider.clone(),
                 context_window: model_info.model.context_window,
-                reasoning: model_info.model.reasoning,
-                reasoning_effort: session
-                    .and_then(|session| session.model_selection.reasoning_effort)
-                    .unwrap_or_else(|| {
-                        app.reasoning_effort_override
-                            .filter(|_| {
-                                model_info.model.reasoning
-                                    && model_info.provider == app.current_model_provider
-                                    && model_info.model.id == app.current_model
-                            })
-                            .unwrap_or(model_info.model.reasoning_effort)
-                    }),
+                reasoning_control: model_info.selection_capabilities.reasoning,
+                reasoning_effort: session.map_or(app.reasoning_effort_override, |session| {
+                    session.model_selection.reasoning_effort
+                }),
             },
             directory,
             account,
@@ -204,16 +196,13 @@ fn status_row(label: &str, value: &str) -> String {
 }
 
 fn format_model(model: &StatusModel) -> String {
-    let reasoning = if model.reasoning {
-        format!(
-            "reasoning {}",
-            format_reasoning_effort(model.reasoning_effort)
-        )
-    } else {
-        "reasoning off".to_string()
+    let reasoning = match (model.reasoning_control, model.reasoning_effort) {
+        (ReasoningControl::None, _) | (_, None) => "off",
+        (ReasoningControl::Toggle, Some(_)) => "on",
+        (ReasoningControl::Effort, Some(effort)) => format_reasoning_effort(effort),
     };
     format!(
-        "{} ({}, {reasoning}, summaries auto)",
+        "{} ({}, reasoning {reasoning}, summaries auto)",
         model.id, model.provider
     )
 }

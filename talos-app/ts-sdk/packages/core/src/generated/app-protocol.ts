@@ -437,7 +437,23 @@ nodeId?: string, };
 
 export type ModelListResponse = { models: Array<ModelInfo>, defaultModelSelection: ModelSelection, };
 
-export type ModelInfo = { provider: string, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
+export type ModelInfo = { provider: string,
+/**
+ * Display label only; routing continues to use provider.
+ */
+provider_name?: string | null,
+/**
+ * Configuration-derived controls for clients; never a second capability store.
+ */
+selection_capabilities: ModelSelectionCapabilities,
+/**
+ * Only custom Chat providers may override the protocol's reasoning replay.
+ */
+reasoning_replay?: ReasoningReplay,
+/**
+ * Optional JSON request-body extensions; never credentials or runtime history.
+ */
+request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type ModelRef = {
 /**
@@ -451,7 +467,17 @@ id: string, };
 
 export type ModelSelection = { modelRef: ModelRef, reasoningEffort: ReasoningEffort | null, };
 
+export type ModelSelectionCapabilities = { reasoning: ReasoningControl, fast: boolean, default_fast: boolean, default_reasoning_effort: ReasoningEffort | null, };
+
+export type ReasoningControl = "none" | "toggle" | "effort";
+
+export type ReasoningReplay = "protocol_default" | "omit" | "reasoning" | "reasoning_content";
+
 export type LlmConfig = {
+/**
+ * Independently named connections using explicit wire protocols.
+ */
+custom_providers: { [key in string]?: CustomProviderConfig },
 /**
  * Default provider
  */
@@ -485,6 +511,24 @@ ollama: ProviderConfig,
  */
 openrouter: ProviderConfig, };
 
+export type CustomProviderConfig = { name: string,
+/**
+ * API key
+ */
+api_key?: string,
+/**
+ * Base URL for custom endpoint
+ */
+base_url?: string,
+/**
+ * Wire protocol used for this provider.
+ */
+protocol?: LlmProtocol,
+/**
+ * Provider-specific model metadata
+ */
+models: Array<ProviderModelConfig>, };
+
 export type ProviderConfig = {
 /**
  * API key
@@ -503,7 +547,15 @@ protocol?: LlmProtocol,
  */
 models: Array<ProviderModelConfig>, };
 
-export type ProviderModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
+export type ProviderModelConfig = {
+/**
+ * Only custom Chat providers may override the protocol's reasoning replay.
+ */
+reasoning_replay?: ReasoningReplay,
+/**
+ * Optional JSON request-body extensions; never credentials or runtime history.
+ */
+request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 

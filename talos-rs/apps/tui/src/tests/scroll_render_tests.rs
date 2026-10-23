@@ -35,6 +35,8 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
     let mut app = create_embedded_app();
     set_test_model_info(&mut app, "kimi-k2.5", 32_768);
     app.available_model_info[0].model.reasoning = true;
+    app.available_model_info[0].selection_capabilities =
+        app.available_model_info[0].model.selection_capabilities();
     app.current_model = "kimi-k2.5".to_string();
     app.reasoning_effort_override = Some(talos_sdk::ReasoningEffort::High);
     app.session_usage = TokenUsage {

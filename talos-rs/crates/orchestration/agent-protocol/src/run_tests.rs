@@ -54,6 +54,8 @@ fn run_params() -> AgentRunParams {
             model: ModelInfo::from_provider_model(
                 "test".to_owned(),
                 ProviderModelConfig {
+                    reasoning_replay: Default::default(),
+                    request_parameters: Default::default(),
                     id: "model".to_owned(),
                     name: "Model".to_owned(),
                     context_window: 32_768,

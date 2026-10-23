@@ -7,7 +7,7 @@ use tracing::error;
 
 use crate::client::GatewayClient;
 use crate::input_history::InputHistoryNavigation;
-use crate::model_picker::{ModelPickerSelection, ModelPickerState};
+use crate::model_picker::ModelPickerState;
 use crate::permission_picker::PermissionPickerState;
 use crate::session_picker::SessionPickerState;
 use crate::types::{CommandUpdate, SessionCloseUpdate, SessionHistoryLoad, StatusLoad};
@@ -508,14 +508,14 @@ impl TuiApp {
             self.push_system_notice("No models loaded. Run /models first.");
             return;
         }
-        let picker = ModelPickerState::new(
-            &self.available_model_info,
-            &talos_sdk::ModelRef {
+        let current_selection = talos_sdk::ModelSelection::new(
+            talos_sdk::ModelRef {
                 provider: self.current_model_provider.clone(),
                 id: self.current_model.clone(),
             },
             self.reasoning_effort_override,
         );
+        let picker = ModelPickerState::new(&self.available_model_info, &current_selection);
         match picker {
             Ok(picker) => self.model_picker = Some(picker),
             Err(error) => self.push_system_notice(error.to_api_error().message.to_string()),
@@ -602,14 +602,9 @@ impl TuiApp {
         self.apply_model_picker_selection(selection);
     }
 
-    fn apply_model_picker_selection(&mut self, selection: ModelPickerSelection) {
-        let model_ref = selection.model_ref;
-        let reasoning_effort = selection.reasoning_effort;
+    fn apply_model_picker_selection(&mut self, model_selection: talos_sdk::ModelSelection) {
+        let model_ref = &model_selection.model_ref;
         let model_key = format!("{}:{}", model_ref.provider, model_ref.id);
-        let model_selection = talos_sdk::ModelSelection {
-            model_ref: model_ref.clone(),
-            reasoning_effort,
-        };
         if self.session_id.is_none() {
             self.set_current_model_selection(&model_selection);
             self.close_model_picker();

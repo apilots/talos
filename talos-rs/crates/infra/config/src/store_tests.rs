@@ -179,6 +179,8 @@ fn test_save_then_load_raw_roundtrip() {
     llm.provider = "bailian".to_string();
     llm.model = "qwen-max".to_string();
     llm.anthropic.models.push(ProviderModelConfig {
+        reasoning_replay: Default::default(),
+        request_parameters: Default::default(),
         id: "test-model".to_string(),
         name: "Test Model".to_string(),
         context_window: 32768,

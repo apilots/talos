@@ -258,6 +258,22 @@ fn build_validation_template(
             }
         }
     }
+    // Model references and their provider catalog must be validated together.
+    // Otherwise a valid custom inner model is defaulted against the old catalog.
+    if let Some(llm) = get_path(original, &["llm"]) {
+        let mut candidate = validation_template.clone();
+        let _ = set_path(&mut candidate, &["llm".to_string()], llm.clone());
+        if let Some(inner) = get_path(original, &["agent", "inner_model"]) {
+            let _ = set_path(
+                &mut candidate,
+                &["agent".to_string(), "inner_model".to_string()],
+                inner.clone(),
+            );
+        }
+        if validate_config_value(&candidate, runtime_env).is_ok() {
+            validation_template = candidate;
+        }
+    }
     let backends_path = ["storage", "files", "backends"];
     let default_path = ["storage", "files", "default"];
     if let Some(original_backends) = get_path(original, &backends_path) {
@@ -368,12 +384,19 @@ fn normalize_mapping(
         path.pop();
     }
 
-    for (key, _) in original_map {
+    for (key, original_value) in original_map {
         if template_map.contains_key(key) {
             continue;
         }
         if let Some(key_name) = key.as_str() {
             path.push(key_name.to_string());
+            if path == &["llm".to_string(), "custom_providers".to_string()]
+                && validates_at_path(root_template, path, original_value, runtime_env)
+            {
+                normalized.insert(key.clone(), original_value.clone());
+                path.pop();
+                continue;
+            }
             report.removed_paths.push(format_path(path));
             path.pop();
         }
@@ -512,7 +535,8 @@ fn write_backup(config_path: &Path) -> TalosResult<PathBuf> {
 }
 
 fn is_dynamic_map_path(path: &[String]) -> bool {
-    path == ["storage", "files", "backends"].as_slice()
+    path == ["llm", "custom_providers"].as_slice()
+        || path == ["storage", "files", "backends"].as_slice()
         || path == ["logging", "target_levels"].as_slice()
 }
 

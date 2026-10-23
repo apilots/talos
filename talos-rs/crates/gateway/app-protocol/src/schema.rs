@@ -260,7 +260,11 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ModelInfo>());
     output.push_str(&export::<talos_types::ModelRef>());
     output.push_str(&export::<talos_types::ModelSelection>());
+    output.push_str(&export::<talos_types::ModelSelectionCapabilities>());
+    output.push_str(&export::<talos_types::ReasoningControl>());
+    output.push_str(&export::<talos_types::ReasoningReplay>());
     output.push_str(&export::<talos_types::LlmConfig>());
+    output.push_str(&export::<talos_types::CustomProviderConfig>());
     output.push_str(&export::<talos_types::ProviderConfig>());
     output.push_str(&export::<talos_types::ProviderModelConfig>());
     output.push_str(&export::<talos_types::LlmProtocol>());

@@ -88,6 +88,8 @@ impl DesktopFixture {
         let mut config = Config::default().with_runtime_paths(paths);
         config.apply_derived_paths();
         config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+            reasoning_replay: Default::default(),
+            request_parameters: Default::default(),
             id: config.llm.model.clone(),
             name: config.llm.model.clone(),
             context_window: 32768,

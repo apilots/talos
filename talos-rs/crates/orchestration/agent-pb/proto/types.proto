@@ -247,10 +247,14 @@ message CompactionMetrics {
 }
 message ModelSelection { string provider = 1; string model_id = 2; optional ReasoningEffort reasoning_effort = 3; }
 message ModelCost { double input = 1; double output = 2; double cache_read = 3; double cache_write = 4; }
+enum ReasoningReplay { REASONING_REPLAY_PROTOCOL_DEFAULT = 0; REASONING_REPLAY_OMIT = 1; REASONING_REPLAY_REASONING = 2; REASONING_REPLAY_REASONING_CONTENT = 3; }
 message ModelInfo {
   string provider = 1; string id = 2; string name = 3; uint32 context_window = 4;
   bool reasoning = 5; ReasoningEffort reasoning_effort = 6; ModelSpeed speed = 7;
   repeated ModelInputKind input = 8; ModelCost cost = 9;
+  optional string provider_name = 10;
+  map<string, string> request_parameters_json = 11;
+  ReasoningReplay reasoning_replay = 12;
 }
 // Resolve the logical Workspace on the node; never forward a CP absolute root.
 message SessionContext {

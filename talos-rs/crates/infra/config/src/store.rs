@@ -10,6 +10,7 @@ use crate::{
     ProviderKeyStatus, RuntimeEnv, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 
+mod custom_provider;
 mod host;
 mod mcp;
 
@@ -132,6 +133,7 @@ impl ConfigStore for YamlConfigStore {
     }
 
     fn save_llm(&self, llm: &LlmConfig) -> TalosResult<LlmConfig> {
+        llm.validate_providers()?;
         let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
         let text = self.read_config_text()?;
         let mut root = parse_yaml_root(&text)?;
@@ -181,6 +183,8 @@ impl ConfigStore for YamlConfigStore {
             &mut safe_llm.openrouter,
             Some(&existing_llm.openrouter),
         )?;
+
+        custom_provider::persist(&mut env_values, &mut safe_llm, &existing_llm)?;
 
         let llm_value = serde_yaml::to_value(&safe_llm).map_err(|e| {
             TalosError::internal_with_source(
@@ -537,6 +541,7 @@ fn migrate_existing_web_search_plaintext_secret(
 }
 
 fn sanitize_llm_for_read(llm: &mut LlmConfig) {
+    custom_provider::sanitize(llm);
     sanitize_provider_for_read(&mut llm.anthropic);
     sanitize_provider_for_read(&mut llm.openai);
     sanitize_provider_for_read(&mut llm.bailian);
@@ -564,7 +569,9 @@ fn build_llm_config_read(mut raw: LlmConfig, runtime_env: &RuntimeEnv) -> LlmCon
         runtime_env,
     );
 
-    let provider_keys = provider_key_statuses(&raw, runtime_env);
+    custom_provider::resolve(&mut resolved, runtime_env);
+    let mut provider_keys = provider_key_statuses(&raw, runtime_env);
+    provider_keys.extend(custom_provider::statuses(&raw, runtime_env));
     sanitize_llm_for_read(&mut raw);
     apply_provider_api_key_displays(&mut raw, &provider_keys);
     LlmConfigRead {
@@ -650,6 +657,7 @@ fn apply_provider_api_key_displays(
     llm: &mut LlmConfig,
     provider_keys: &BTreeMap<String, ProviderKeyStatus>,
 ) {
+    custom_provider::display(llm, provider_keys);
     apply_provider_api_key_display(&mut llm.anthropic, provider_keys.get("anthropic"));
     apply_provider_api_key_display(&mut llm.openai, provider_keys.get("openai"));
     apply_provider_api_key_display(&mut llm.bailian, provider_keys.get("bailian"));
@@ -731,6 +739,7 @@ fn is_redacted_api_key(value: &str) -> bool {
 
 /// Resolves one LLM update into runtime credentials without persisting it.
 pub fn resolve_llm_update_for_runtime(current: &LlmConfig, update: &mut LlmConfig) {
+    custom_provider::preserve(current, update);
     preserve_provider_runtime_secret(&current.anthropic, &mut update.anthropic);
     preserve_provider_runtime_secret(&current.openai, &mut update.openai);
     preserve_provider_runtime_secret(&current.bailian, &mut update.bailian);
