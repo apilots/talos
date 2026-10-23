@@ -198,4 +198,3 @@ export function SettingsProviderModels({ config, capabilities, keyConfigured, cu
     </>
   );
 }
-
