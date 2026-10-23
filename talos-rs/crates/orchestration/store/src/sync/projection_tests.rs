@@ -292,7 +292,6 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
                 user_permission_mode: Some(UserPermissionMode::FullAccess),
             },
             current_directory: None,
-            reset_context_usage: false,
             last_activity: 500,
         })
         .await

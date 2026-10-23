@@ -50,6 +50,7 @@ For unfamiliar ownership, consult the relevant entry in [Rust modules](docs/refe
 
 ## E2E quality gates
 
+- Before opening or updating a PR for behavior changes, proactively run the relevant local E2E scenarios and CI-equivalent checks. Select scenarios by the affected behavior and CI job ownership; do not default to the full E2E suite. Report actual results and any unavailable prerequisites before publishing the PR update.
 - Agent capabilities and product behavior must have meaningful E2E coverage in the GitHub-hosted PR quality gate when they fit the supported runner environment.
 - Real multi-control-plane, multi-machine, synchronization, or other unusually resource-intensive topologies may use local acceptance. Mark those scenarios explicitly in the task plan and E2E documentation, and report their local result separately; never silently skip them or label them as passing CI checks.
 - Local-only topology acceptance does not replace focused gated coverage for the product behavior it exercises. Keep that behavior covered by a representative scenario that can run on GitHub-hosted runners.

@@ -500,6 +500,9 @@ async fn conflicting_continuation_claim_does_not_append_input_twice() {
 #[tokio::test]
 async fn terminal_settlement_removes_nonterminal_indexes() {
     let store = store().await;
+    let mut original = session_record();
+    original.usage.context = ContextUsage::new(7, 100, 80, 1);
+    store.insert_session_record(&original).await.unwrap();
     let admission = store
         .commit_initial_admission(initial_admission(admission()))
         .await
@@ -524,11 +527,21 @@ async fn terminal_settlement_removes_nonterminal_indexes() {
                 }),
             ),
             expected_event_seq: waiting.active_turn.last_event_seq,
-            completed_turn_metrics: None,
+            completed_turn_metrics: Some(AgentRunMetrics::default()),
         })
         .await
         .unwrap();
     let identity = AgentTurnRef::new("session-1", "turn-1");
+    assert_eq!(
+        store
+            .get_session_record("session-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .usage
+            .context,
+        original.usage.context,
+    );
 
     assert_eq!(
         (
@@ -566,14 +579,23 @@ async fn terminal_settlement_removes_nonterminal_indexes() {
 #[tokio::test]
 async fn terminal_settlement_and_compaction_usage_update_disjoint_session_state() {
     let store = store().await;
-    store
-        .insert_session_record(&session_record())
-        .await
-        .unwrap();
+    let mut original = session_record();
+    original.usage.context = ContextUsage::new(7, 100, 80, 1);
+    store.insert_session_record(&original).await.unwrap();
     let admission = store
         .commit_initial_admission(initial_admission(admission()))
         .await
         .unwrap();
+    assert_eq!(
+        store
+            .get_session_record("session-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .usage
+            .context,
+        original.usage.context,
+    );
     let metrics = AgentRunMetrics {
         usage: TokenUsage {
             input_tokens: 3,

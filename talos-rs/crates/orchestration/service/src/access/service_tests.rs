@@ -206,9 +206,6 @@ impl SessionStore for RecordingSessionStore {
         stored.conf = params.conf;
         stored.current_directory = params.current_directory;
         stored.last_activity = params.last_activity;
-        if params.reset_context_usage {
-            stored.usage.context = None;
-        }
         Ok(Some(stored.clone()))
     }
 
