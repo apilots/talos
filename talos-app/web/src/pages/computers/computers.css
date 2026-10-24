@@ -28,7 +28,7 @@
 }
 .cmp-page-heading h1 > span,
 .cmp-sync-text {
-  color: rgb(var(--color-info));
+  color: rgb(var(--color-sync));
 }
 .cmp-page-heading p,
 .cmp-muted {
@@ -189,7 +189,7 @@
   border-top: 1px solid rgb(var(--color-muted));
 }
 .cmp-flow-key.is-sync {
-  border-top: 1px dashed rgb(var(--color-info));
+  border-top: 1px dashed rgb(var(--color-sync-path));
 }
 .cmp-canvas-scroll {
   overflow: auto;
@@ -241,11 +241,11 @@
   opacity: 0.55;
 }
 .cmp-sync-wire {
-  stroke: rgb(var(--color-info));
+  stroke: rgb(var(--color-sync-path));
   stroke-dasharray: 4 6;
 }
 .cmp-arrow-sync {
-  fill: rgb(var(--color-info));
+  fill: rgb(var(--color-sync-path));
 }
 .cmp-sync-wire.is-syncing {
   animation: cmp-flow 2s linear infinite;
@@ -309,8 +309,8 @@
   color: rgb(var(--color-muted));
 }
 .cmp-node-icon.is-sync {
-  color: rgb(var(--color-info));
-  background: rgb(var(--color-info) / 0.08);
+  color: rgb(var(--color-sync));
+  background: rgb(var(--color-sync) / 0.05);
 }
 .cmp-service footer,
 .cmp-device footer {
@@ -340,7 +340,7 @@
   color: rgb(var(--color-muted));
 }
 .cmp-service-relation > svg {
-  color: rgb(var(--color-info));
+  color: rgb(var(--color-sync-path));
   flex-shrink: 0;
 }
 .cmp-device {
@@ -645,7 +645,7 @@
 .cmp-sync-status.is-conflict,
 .cmp-sync-status.is-error { color: rgb(var(--color-danger)); }
 .cmp-sync-status.is-idle,
-.cmp-sync-status.is-syncing { color: rgb(var(--color-info)); }
+.cmp-sync-status.is-syncing { color: rgb(var(--color-sync-path)); }
 
 .cmp-segments button:not([aria-pressed="true"]):hover,
 .cmp-flow-buttons button:not([aria-pressed="true"]):hover {

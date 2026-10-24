@@ -28,6 +28,8 @@
   --color-danger: 227 93 93;
   --color-success: 94 234 212;
   --color-info: 125 211 252;
+  --color-sync: 131 117 189;
+  --color-sync-path: 147 131 190;
   --color-accent: 59 130 246;
   --color-activity-empty: var(--color-surface);
   --color-activity-1: 216 235 255;
