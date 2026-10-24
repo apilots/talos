@@ -148,6 +148,14 @@ selected job to succeed. Reused jobs report the prior run/SHA in the job summary
 Changes to relevant base-tree inputs, compiler flags or workflow definitions
 invalidate reuse; comparing only the newest push is never sufficient.
 
+Check records use a fresh immutable storage slot for each run and attempt. A
+read-only, same-ref cache lookup resolves a complete key under the full input
+hash before exact restoration and origin validation. A later success can therefore
+replace rejected failed-origin evidence without modifying an old cache entry.
+Build archives retain one checksum-verified blob per input key. Source fingerprints
+track file kind and Git's executable bit, rather than runner-specific read/write
+permissions.
+
 Manually rerun maintainer/provider-backed E2E or release validation when their
 external/topology/packaging contracts apply; daily exact-input records do not
 replace those gates. See the selector and workflow regressions with
