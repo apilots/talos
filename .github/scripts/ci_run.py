@@ -42,7 +42,8 @@ def fingerprint(task: dict, root: Path = ROOT) -> str:
         if not file.exists() and not file.is_symlink():
             continue
         content = os.readlink(file).encode() if file.is_symlink() else file.read_bytes()
-        digest.update(json.dumps([path, file.lstat().st_mode & 0o777, len(content)]).encode())
+        # Git tracks file kind and the executable bit, not each runner's umask.
+        digest.update(json.dumps([path, file.is_symlink(), file.lstat().st_mode & 0o100, len(content)]).encode())
         digest.update(content)
     return digest.hexdigest()
 
