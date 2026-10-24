@@ -1,0 +1,105 @@
+name: Release · installation preflight
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source commit or branch to build and install without publishing.
+        type: string
+        required: true
+        default: main
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: release-installation-preflight-${{ inputs.source_ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    name: Resolve preflight source
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref }}
+      - name: Resolve immutable source and version
+        id: source
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import os, tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('talos-rs/Cargo.toml').read_text())['workspace']['package']['version']
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\n')
+          PY
+  native:
+    name: Preflight · ${{ matrix.platform }}-${{ matrix.arch }}
+    needs: source
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux, arch: amd64, runner: ubuntu-24.04}
+          - {platform: linux, arch: arm64, runner: ubuntu-24.04-arm}
+          - {platform: macos, arch: arm64, runner: macos-26}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Load shared toolchain
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+      - name: Install Protocol Buffer compiler
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install protobuf; else
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+      - name: Fetch the committed dependency graph
+        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
+      - name: Build the preflight TUI product once
+        env:
+          PROFILE: release
+          CARGO_NET_OFFLINE: "true"
+        run: ./build.sh tui
+      - name: Verify native installation of the preflight product
+        env:
+          TUI_INSTALL_PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
+          TUI_INSTALL_E2E_VERSION: ${{ needs.source.outputs.version }}
+          TUI_INSTALL_EXPECTED_PLATFORM: ${{ matrix.platform }}
+          TUI_INSTALL_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: just e2e-case 15_tui_install/01_native_install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talos-tui-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/products/release/tui/**
+          if-no-files-found: error
+      - name: Preserve native evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-install-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            talos-e2e/reports/e2e_report_*.md
+            talos-e2e/reports/15_tui_install/01_native_install/
+          if-no-files-found: warn
+  container:
+    name: Preflight · container installation
+    needs: [source, native]
+    uses: ./.github/workflows/release-install.yml
+    with:
+      source_ref: ${{ needs.source.outputs.sha }}
+      version: ${{ needs.source.outputs.version }}

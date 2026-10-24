@@ -70,12 +70,15 @@ they must not attach to a user's interactive browser or retained review Worker.
 
 ## CI and provider-backed acceptance
 
-The secretless PR Browser job uses the unified change selector. Desktop-only
-source/resource changes run cases 02/03/04; media, preload, IPC and controller
-owners also run 05 with the standard packaged Worker image. Lightweight Web
-preview/Markdown edits run case 01 without Docker; Web Browser owners and shared
-SDK/backend/build/scenario inputs run this complete group once, without duplicating
-01 in the generic matrix. Every selected target uses `run_e2e.sh`; missing
+The named WebUI and Desktop CI workflows use the unified change selector.
+Desktop-only source/resource changes run cases 02/03/04; media, preload, IPC and
+controller owners also run 05 with the standard packaged Worker image. Web
+changes run case 01 and the shared renderer's native integration case 02, plus
+the Computer deletion journey; Web remote-desktop owners also run 05. Shared
+SDK/runtime/build inputs expand to their affected consumers. Mixed changes take
+the union, with each selected case executed once. CI compiles the required Rust
+binaries together and supplies the current run's artifact to each case through
+`just e2e-case` or `just e2e-group`. Missing
 dependencies, unsupported runtime or incomplete fixture results fail explicitly.
 
 Cases 04/05 use a deterministic model endpoint to prove product integration and

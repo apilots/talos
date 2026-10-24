@@ -1,4 +1,4 @@
-name: change-policy
+name: CI · repository policy
 
 on:
   workflow_dispatch:
@@ -6,6 +6,10 @@ on:
   push:
     branches:
       - main
+
+concurrency:
+  group: talos-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -55,7 +59,9 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts -p 'check_changed_files_tests.py'
           python3 -m unittest discover -s .github/scripts -p '*_test.py'
-          python3 -m py_compile .github/scripts/pr_change_scope.py
+          python3 -m py_compile .github/scripts/ci_*.py .github/scripts/pr_change_scope.py
+          python3 scripts/check_error_contract_tests.py
+          python3 scripts/check_error_contract.py
           scripts/check-commit-message-tests.sh
           scripts/generate-release-notes-tests.sh
           bash scripts/check-release-version-tests.sh

@@ -43,6 +43,16 @@ class LifecycleTests(unittest.TestCase):
                 os.killpg(p.pid, signal.SIGKILL)
             p.wait()
 
+    def test_completed_detached_process_preserves_status_without_registration_race(self):
+        for status in (0, 7):
+            process = subprocess.Popen([sys.executable, '-c', f'raise SystemExit({status})'],
+                                       start_new_session=True)
+            self.children.append(process)
+            self.assertEqual(process.wait(), status)
+            self.assertIs(lifecycle.own_process(process), process)
+            self.assertEqual(process.wait(), status)
+        self.assertFalse((lifecycle.root() / 'resources.jsonl').exists())
+
     def test_cleanup_terminates_only_registered_groups_and_is_idempotent(self):
         for _ in range(2):
             self.children.append(subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(60)'], start_new_session=True))
@@ -227,6 +237,35 @@ python3 -c 'import os,socket;from pathlib import Path;p=Path(os.environ["TMUX_TM
         self.assertEqual(calls.read_text(), f'-S {socket} kill-server\n')
         self.assertFalse(private.exists())
         self.assertEqual(external.read_text(), 'untouched')
+
+    def test_exited_tmux_listener_is_idempotent_but_live_cleanup_failure_is_not(self):
+        binary = self.root / 'bin'
+        binary.mkdir()
+        command = binary / 'tmux'
+        command.write_text('#!/bin/sh\nexit 1\n')
+        command.chmod(0o755)
+        self.env['PATH'] = str(binary) + os.pathsep + self.env['PATH']
+        for live in (False, True):
+            with self.subTest(live=live):
+                # Use a real private AF_UNIX socket; stderr wording is irrelevant.
+                source = """import os,socket,subprocess,sys,time
+from pathlib import Path
+p=Path(os.environ['TMUX_TMPDIR'])/'tmux-test'
+p.mkdir()
+s=socket.socket(socket.AF_UNIX)
+s.bind(str(p/'default'))
+"""
+                if live:
+                    source += "s.listen(); (Path(os.environ['TMUX_TMPDIR'])/'listener-ready').touch(); time.sleep(30)\n"
+                script = self.root / 'listener.py'
+                script.write_text(source)
+                case = f'python3 "{script}"'
+                if live:
+                    case += ' &\nfor _ in $(seq 1 200); do [ ! -f "$TMUX_TMPDIR/listener-ready" ] || break; sleep 0.01; done\ntest -f "$TMUX_TMPDIR/listener-ready"'
+                code, log = self.run_case(case)
+                self.assertEqual(code == 0, not live, log)
+                if live:
+                    self.assertIn('Private tmux server cleanup failed', log)
 
     def test_short_socket_directory_refuses_another_runs_owner_marker(self):
         directory = lifecycle.socket_directory()

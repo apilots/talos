@@ -125,6 +125,40 @@ class AuxiliaryModelTest(unittest.TestCase):
                 self.assertEqual(clicks, ['submit', 'download'])
                 self.assertEqual(observed[-1][0], 'browser_download')
 
+    def test_download_waits_for_persisted_receipt_instead_of_page_link(self):
+        sequence = ['browser_navigate', 'browser_state', 'browser_fill', 'browser_state',
+                    'browser_click', 'browser_state', 'browser_screenshot', 'browser_state',
+                    'browser_upload', 'browser_upload', 'browser_state', 'browser_click', 'browser_download']
+        messages = [{'role': 'user', 'content': 'BROWSER_UPLOAD_FILE_ID=attached-file'}]
+        for index, name in enumerate(sequence):
+            messages.extend([
+                {'role': 'assistant', 'tool_calls': [{'id': str(index), 'type': 'function',
+                    'function': {'name': name, 'arguments': '{}'}}]},
+                {'role': 'tool', 'tool_call_id': str(index), 'content': json.dumps({
+                    'text': 'Hello Worker permission_rejection browser-upload.png',
+                    'elements': [{'attributes': {'href': '/report.csv'}}]})},
+            ])
+        catalog = [{'type': 'function', 'function': {'name': name}} for name in set(sequence)]
+        previous = list(fixture.calls)
+        self.addCleanup(lambda: fixture.calls.__setitem__(slice(None), previous))
+        status, body = self.request('', {}, messages=messages, tools=catalog)
+        self.assertEqual(status, 200)
+        message = body['choices'][0]['message']
+        call = message['tool_calls'][0]
+        self.assertEqual(call['function']['name'], 'browser_download')
+        messages.extend([message, {'role': 'tool', 'tool_call_id': call['id'],
+            'content': json.dumps({'files': [{'originalFilename': 'report.csv', 'fileId': 'persisted-file'}]})}])
+        status, body = self.request('', {}, messages=messages, tools=catalog)
+        self.assertEqual(status, 200)
+        self.assertEqual(body['choices'][0]['message']['content'], 'BROWSER_WORKER_ACCEPTANCE_OK')
+
+    def test_download_receipt_requires_file_identity(self):
+        for value in ({'href': '/report.csv'}, {'files': [{'originalFilename': 'report.csv'}]},
+                      'Download report.csv', {'files': []}):
+            self.assertFalse(fixture.has_download_receipt(value))
+        self.assertTrue(fixture.has_download_receipt([{'type': 'text', 'text': json.dumps({
+            'files': [{'originalFilename': 'report.csv', 'fileId': 'persisted-file'}]})}]))
+
 
 if __name__ == '__main__':
     unittest.main()

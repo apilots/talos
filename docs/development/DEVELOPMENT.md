@@ -86,25 +86,72 @@ Local iteration --> pre-commit --> pre-push --> PR / main CI --> source Release
 
 See [hook scripts](../../scripts/run-pre-push-checks.sh) and
 [Rust workflow](../../.github/workflows/talos-rust.yml) for exact commands.
-Shared Rust/Node/pnpm versions come from `.github/release-toolchain.env`. Rust
-caches are isolated by platform, architecture, profile, toolchain and the resolved
-Cargo graph. Cache hits never replace compilation or behavioral checks.
-Changes limited to `talos-app/web/src/**` and `talos-app/web/public/**` run
-frontend quality and Computer-registration acceptance against the real native
-service, plus lightweight resource acceptance or the Browser group according to
-its existing owner selection. Changes limited to `talos-app/desktop/src/**` and
-`talos-app/desktop/resources/**` run frontend quality and native Browser cases
-`20/02`, `20/03`, and `20/04` in the dedicated Browser job, without generic E2E,
-Rust contract tests, or a Worker image. Desktop media, preload, IPC, and controller
-owners also retain `20/05` and its packaged Docker Worker image.
+Shared Rust/Node/pnpm versions come from `.github/release-toolchain.env`.
+[`pr-e2e.yml`](../../.github/workflows/pr-e2e.yml) coordinates PR/main CI; named
+reusable workflows expose WebUI, Desktop, TUI, Server modules and lightweight
+installer contracts. `talos-webui.yml` and `talos-desktop.yml` share `ci-category.yml`
+while receiving distinct module plans. The existing five required context names remain fixed
+aggregate gates. Documentation and metadata changes skip heavy jobs while the
+policy and aggregate checks still report results.
+Module and aggregate job conditions use `!cancelled()` so failures still reach
+their gates while a new PR push can cancel obsolete work immediately. Cleanup
+and evidence-upload steps may still use `always()`.
+See [GitHub's cancellation behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation).
 
-SDK, dependency, configuration, build, backend, scenario, toolchain, and mixed
-Web/Desktop inputs retain the full route. The existing unified selector owns all
-these decisions. Its own routing definitions and regressions are checked by the
-always-on policy workflow; including those files does not widen an otherwise
-bounded product diff. Routing-only changes remain conservative. The fixed
-`talos-pr-e2e` gate requires selected checks to succeed, unselected jobs to skip,
-and valid scope outputs; an empty acceptance selection for product changes fails.
+The selector resolves Cargo and pnpm workspace ownership and reverse dependencies.
+Each changed owner contributes checks; mixed changes take their union, including
+both sides of renames and deleted paths. Server selects affected Rust packages
+under client, SDK, skills, MCP, tools, actions, runtime and binary ownership.
+Leaf action/SDK edits select representative owning scenarios; common runtime and
+wire changes expand across consumers. Generated wire owners also select frontend
+consumers. Unknown executable/build inputs remain conservative. Runtime Markdown
+resources are product inputs; documentation ownership is not inferred solely
+from a Markdown suffix.
+
+| Owner | Hosted checks |
+| --- | --- |
+| WebUI, including build configuration | Web package checks, Computer deletion and resource tabs; native Desktop resource acceptance for the shared renderer |
+| Desktop | Desktop package checks and native resource/browser/MCP cases; media, preload, IPC, controller and packaging inputs also select Docker Worker media |
+| TUI presentation | `just check/test -p talos-tui` and secretless `08_tui/controlled_chat`; no Server/Browser/installation suites |
+| Server/shared runtime | Affected packages and public model, app-server, file, sandbox and output-log acceptance; dependent clients expand as required |
+| Installation scripts, packaging contracts and release-install tooling | Lightweight shell/archive contracts; heavy native/container installation and architecture matrices run in release or manual preflight |
+| E2E scenarios/helpers | Owning scenarios and harness regressions; shared runner/fixtures retain broad representative coverage |
+
+PR gates retain Docker Worker browser/files/control/authentication journeys and
+OS-specific MCP/sandbox business acceptance when their owners change. Release
+packaging checks do not substitute for these scenarios. Heavy installation runs
+only before publication or through `release-preflight.yml`; container acceptance
+consumes the same run's TUI product, without a Rust toolchain or build volume.
+
+All selected Linux E2E binary requirements are compiled together once through
+`just build --locked`. A compressed, executable-preserving artifact from the
+current workflow run supplies each scenario. Ordinary product E2E uses debug
+binaries; native installation and publication retain release build verification.
+A missing supplied binary fails explicitly rather than compiling an unplanned
+replacement. Rust dependency caches restore before `cargo fetch --locked`.
+The binary artifact name is stable within a workflow run: a failed-job-only retry
+can consume its successful upstream build without inventing a new attempt's product.
+A full retry replaces that run's artifact. After artifact expiry, rerun the build.
+
+Dependency caches never count as test evidence. A separate exact-input success
+record may reuse a completed task within the same PR, runner image, architecture
+and UTC day. Its fingerprint includes task commands/selection, relevant merged-tree
+sources and transitive dependencies, manifests/locks, fixtures/resources,
+configuration and CI definitions. Repository-wide formatting/error/repository
+checks include their wider input sets. Build reuse also verifies the archive
+checksum. There are no prefix success restores: missing, invalid, failed or
+cancelled evidence reruns the task. Reuse additionally requires the originating
+workflow run's latest attempt to be completed and successful; API/access failures
+rerun checks. Manual dispatches and explicit rerun attempts always rerun tests.
+Current-head gates still require every
+selected job to succeed. Reused jobs report the prior run/SHA in the job summary.
+Changes to relevant base-tree inputs, compiler flags or workflow definitions
+invalidate reuse; comparing only the newest push is never sufficient.
+
+Manually rerun maintainer/provider-backed E2E or release validation when their
+external/topology/packaging contracts apply; daily exact-input records do not
+replace those gates. See the selector and workflow regressions with
+`python3 -m unittest discover -s .github/scripts -p '*_test.py'` (Python 3.11+).
 
 CI success does not substitute for unrun scoped tests, snapshots or real-path
 acceptance. Error changes require source/disclosure, transport/replay coverage

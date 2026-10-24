@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
-import {app} from 'electron';
+import {app,webContents} from 'electron';
 import {DesktopAppServerController} from '../../../talos-app/desktop/src/app-server-controller';
 import {handleDesktopServerRequest} from '../../../talos-app/desktop/src/desktop-server-requests';
 import {desktopBrowserHost} from '../../../talos-app/desktop/src/browser-host';
@@ -87,6 +87,17 @@ async function run(){console.log("NATIVE_MCP_START");await app.whenReady();conso
   writeFileSync(path.join(output,'native-mcp-events.json'),JSON.stringify(events,null,2));
   writeFileSync(path.join(output,'native-mcp-acceptance.json'),JSON.stringify({status:'passed',sessionId:managed.sessionId,resumedSession:prepared.sessionId,pauseResumeAndFreshObservation:true,selectedPreparedChromeAfterResume:true,ownedChromeSurvivesDisconnect:true,modes:{managed,connected:prepared}},null,2));
   console.log('NATIVE_MCP_ACCEPTANCE_PASS');
+ }catch(error){
+  // Preserve the actual page/input evidence before cleanup destroys its views.
+  // This reads only the synthetic fixture page and does not change tool behavior.
+  for(const page of webContents.getAllWebContents().filter(page=>page.getURL()==='http://127.0.0.1:18080/')){
+   try{
+    const state=await page.executeJavaScript(`({value:document.querySelector('input')?.value,text:document.body.innerText,active:document.activeElement?.tagName,events:window.fixtureInputs})`);
+    writeFileSync(path.join(output,'native-mcp-failure-'+page.id+'.json'),JSON.stringify({state,focused:page.isFocused()},null,2));
+    writeFileSync(path.join(output,'native-mcp-failure-'+page.id+'.png'),(await page.capturePage()).toPNG());
+   }catch(diagnosticError){console.error('Native MCP failure capture failed',diagnosticError);}
+  }
+  throw error;
  }finally{await controller.close();await desktopBrowserHost.reset();app.quit();}
 }
 void run().catch(error=>{console.error(error);app.exit(1);});

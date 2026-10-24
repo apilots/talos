@@ -81,9 +81,14 @@ main 整体合入。需要共享修复时 cherry-pick 对应提交。
 
 1. 将不可变 tag 解析为精确 SHA，校验正式版本、提交历史及注释。
 2. 核验该 SHA 的成功候选、run/attempt、Notes、锁文件和工具链，导入已验证结果，不重复跑源码套件。
-3. 使用已验证锁文件，各构建一次八个正式产品目标，核验构建未改变依赖图。上传前校验实际包；TUI 原生验收通过 `TUI_INSTALL_PRODUCT_DIR` 检查并安装同一份包，不为检查另打开发包。
-4. 各架构的 Server/Worker 镜像复用已验证 Linux Server 包内的程序、launcher 和 WebUI，`PRODUCT_STAGE=packaged` 选择正常发布输入；本地源码镜像仍默认使用 `source` 阶段。镜像上传前保留运行时依赖、版本、launcher 和许可探测。
-5. 所有产品及镜像门禁成功后发布多架构清单，验证最终安装器制品，创建 GitHub Release，正文使用精确 tag Notes。将 Cargo.lock 和 source-validation.json 作为带校验和的公开资产保存，manifest.validation 记录候选 run 和锁文件摘要；保留可选 R2 上传。
+3. 使用已验证锁文件，各构建一次七个正式产品目标，核验构建未改变依赖图。上传前校验实际包；TUI 原生验收通过 `TUI_INSTALL_PRODUCT_DIR` 检查并安装同一份包，不为检查另打开发包。
+4. `release-install.yml` 下载同次运行的 Linux AMD64 TUI 包，在 Ubuntu 容器中安装验收。容器不含 Rust 工具链、不创建编译卷；缺包或安装失败阻断镜像和 Release 发布。
+5. 各架构的 Server/Worker 镜像复用已验证 Linux Server 包内的程序、launcher 和 WebUI，`PRODUCT_STAGE=packaged` 选择正常发布输入；本地源码镜像仍默认使用 `source` 阶段。镜像上传前保留运行时依赖、版本、launcher 和许可探测。
+6. 所有产品及镜像门禁成功后发布多架构清单，验证最终安装器制品，创建 GitHub Release，正文使用精确 tag Notes。将 Cargo.lock 和 source-validation.json 作为带校验和的公开资产保存，manifest.validation 记录候选 run 和锁文件摘要；保留可选 R2 上传。
+
+PR/main 仅运行轻量安装 shell/归档契约；平台业务 E2E 仍由相关模块门禁执行。手动运行
+`release-preflight.yml` 并提供 `source_ref`，会解析为同一不可变 SHA，构建并安装三个原生
+TUI 目标，再复用本次 Linux AMD64 产品进行容器验收，全程不发布。
 
 所有 job 使用 GitHub-hosted runner 并设置超时；不提供跳过门禁、未验证结果回退或自动修标签。未完成发布可在同一源码标签上新建一次工作流运行：
 

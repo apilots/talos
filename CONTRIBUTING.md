@@ -59,14 +59,17 @@ from repository conventions.
   release workflow's optional R2 publishing credentials.
 
 Every pull request runs lightweight file-policy and change-scope checks.
-Resource-heavy Rust, frontend, installer, and E2E jobs run only when product
+Resource-heavy Rust, frontend, and business E2E jobs run only when product
 content or the owning build/workflow inputs change. PRs and main pushes use the
 same content-aware selector. Changes limited to the owned version fields and
 release Notes run actual version-metadata and policy checks; mixing a dependency,
 configuration or code change into those files still runs the affected product jobs.
 Documentation, specifications, issue forms, and
 pull request templates alone skip those jobs; product configuration such as
-`conf/**` still runs the applicable checks. Fixed required status checks remain
+`conf/**` still runs the applicable checks. Heavy installation and distribution
+architecture checks run only in release or
+manual installation preflight; related PR changes run lightweight installer contracts.
+Fixed required status checks remain
 successful for out-of-scope changes so documentation-only pull requests can merge.
 
 ## Review standard

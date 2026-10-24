@@ -1,0 +1,59 @@
+name: CI · shared product binaries
+on:
+  workflow_call:
+    inputs:
+      task:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    name: Build · shared debug binaries
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI_TASK: ${{ inputs.task }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: cache
+        uses: ./.github/actions/ci-cache
+        with:
+          task: ${{ inputs.task }}
+      - if: steps.cache.outputs.hit != 'true'
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
+      - uses: taiki-e/install-action@v2
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          tool: just
+      - name: Prepare build prerequisites after restoring Rust dependencies
+        if: steps.cache.outputs.hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler libssl-dev pkg-config
+          cargo fetch --locked --manifest-path talos-rs/Cargo.toml
+      - name: Compile selected binaries once through just
+        if: steps.cache.outputs.hit != 'true'
+        env:
+          CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
+          CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
+        run: python3 .github/scripts/ci_run.py run
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ci-binaries
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/binaries.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3

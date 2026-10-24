@@ -117,6 +117,22 @@ def find_elements(value):
                     pass
     return []
 
+def has_download_receipt(value):
+    """A link or page text is not evidence of a completed File API download."""
+    if isinstance(value, dict):
+        if any(isinstance(file, dict) and file.get('originalFilename') == 'report.csv'
+               and file.get('fileId') for file in value.get('files', [])):
+            return True
+        return any(has_download_receipt(child) for child in value.values())
+    if isinstance(value, list):
+        return any(has_download_receipt(child) for child in value)
+    if isinstance(value, str):
+        try:
+            return has_download_receipt(json.loads(value))
+        except ValueError:
+            return False
+    return False
+
 class Fixture(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *_):
@@ -178,6 +194,12 @@ class Fixture(BaseHTTPRequestHandler):
             sequence.insert(0, 'browser_tab')
         if file_match:
             sequence += ['browser_state','browser_upload','browser_upload','browser_state','browser_click','browser_download']
+            # Browser downloads complete asynchronously. Keep using the real MCP
+            # collection tool until it returns a persisted file, with a hard bound.
+            if step >= len(sequence) and not any(has_download_receipt(tool['content']) for tool in tools):
+                require(step < len(sequence) + 50, 'Completed browser download was not persisted')
+                sequence += ['browser_download'] * (step - len(sequence) + 1)
+                time.sleep(.05)
         if not any('browser_navigate' in n for n in names):
             name = next((n for n in names if n.lower() == 'toolsearch'), None)
             args = {'query': 'browser', 'limit': 10}
@@ -211,7 +233,7 @@ class Fixture(BaseHTTPRequestHandler):
             if 'BROWSER_VERIFY_COOKIE' in json.dumps(request['messages']):
                 require(any('acceptance=retained' in str(m['content']) for m in tools),'Profile cookie was not retained after replacement')
             if file_match:
-                require(any('report.csv' in str(m['content']) for m in tools),'Completed browser download was not persisted')
+                require(any(has_download_receipt(m['content']) for m in tools),'Completed browser download was not persisted')
                 (REPORT/'file-tool-model-replies.json').write_text(json.dumps(tools[sequence.index('browser_upload')-1:],indent=2))
                 require(any('permission_rejection' in str(m['content']) for m in tools),'Unauthorized attachment was not rejected')
                 require(any('browser-upload.png' in str(m['content']) for m in tools),'Authorized attachment did not reach the browser')
@@ -281,7 +303,8 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     require(len(calls) >= 7, 'Browser task skipped actions')
     results = [e['payload']['data']['block']['content']['data'] for e in events
         if e['payload']['type'] == 'messageBlockCompleted' and e['payload']['data']['block']['content']['type'] == 'toolResult']
-    require(len(results)==14,'A real browser tool was skipped')
+    require(len(results)>=14 and all(result['toolName'].endswith('browser_download') for result in results[14:]),
+            'A real browser tool was skipped or an unexpected action was repeated')
     require(sum(result['isError'] for result in results)==1,'Expected only the forged attachment rejection')
     from home import is_home_url
     opened = next(c['value'] for c in results[0]['content'] if c['type']=='json' and 'targetId' in c.get('value',{}))

@@ -1,0 +1,17 @@
+name: CI · TUI
+on:
+  workflow_call:
+    inputs:
+      plan:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  checks:
+    if: ${{ !cancelled() }}
+    name: TUI
+    uses: ./.github/workflows/ci-category.yml
+    with:
+      plan: ${{ inputs.plan }}

@@ -117,17 +117,32 @@ Groups `04` and `10` are not assigned; use the scenario directory rather than as
 that group numbers are contiguous. Frontend unit tests belong to the frontend
 quality workflow and are not repeated as an E2E scenario.
 
-The approval-gated GitHub PR quality gate runs the secretless `01_models` group
-(health/catalog, custom Provider configuration and controlled protocol tool loops), `09_app_server/smoke_e2e`, `09_app_server/desktop_recovery`, `09_app_server/computer_deletion`, `20_browser_workspace/01_resource_tabs`, `12_files`, and
-`14_sandbox`, along with `talos-auth`, `talos-base`, `talos-storage`,
-`talos-agent` and `talos-service` package tests. These cover public Cloud SDK
-adapters, Desktop enrollment, actual SQLite cancellation/connection reuse,
-Worker reservation barriers, and the imported-history/Shared-confirmation race. `15_tui_install` has
-its own four-platform native and Linux Docker gate. The PR workflow does not
-receive repository secrets and does not check out private repositories.
+The GitHub PR/main coordinator selects the union of affected module checks.
+Named WebUI, Desktop, TUI and Server (client/SDK/skills/MCP/tools/runtime) workflows
+share one change detector and current-run binary build. WebUI and Desktop wrappers
+share `ci-category.yml`, with module-specific quality and E2E plans.
+Server/shared-runtime acceptance retains `01_models`, public `09_app_server`
+smoke/recovery, Computer deletion, `12_files`, `14_sandbox`, `06_tools/output_logs`
+and relevant native Browser/Worker cases. Owning Rust package tests include the
+controlled DeepSeek transport regressions without provider credentials. Leaf
+modules select relevant packages and representative scenarios rather than every
+Server suite. See [CI ownership and reuse](../docs/development/DEVELOPMENT.md#validation-by-delivery-stage).
 
-The existing contract job also runs `talos-llm-deepseek` transport regressions
-against controlled loopback responses; those tests require no provider credentials.
+`08_tui/controlled_chat` is the secretless TUI gate. It reuses the controlled
+protocol upstream with the real terminal, Agent and Bash tool; verifies streamed
+completion and persisted tool/answer events; resizes the window and exits through
+`/quit`. Existing model-backed TUI/interaction groups remain available to
+maintainers. Run it with `just e2e-case 08_tui/controlled_chat`.
+
+`15_tui_install` runs in release and manual `release-preflight.yml` only. Native
+Linux AMD64/ARM64 and macOS ARM64 acceptance installs the product already built
+on that runner. Linux Docker acceptance requires `TUI_INSTALL_PRODUCT_DIR` pointing
+to that run's product directory; it never compiles a replacement. Container failure
+blocks image publication and the GitHub Release. PR/main select only lightweight
+installation contracts, while related Docker Worker and platform business E2E
+remain module gates. PR jobs receive no repository secrets and check out no private
+repositories. Successful exact-input task/build reuse is distinct from Cargo's
+dependency cache, with provenance reported in each reused job summary.
 
 `01_models/protocol_compatibility` runs the real Gateway and Agent against one
 controlled loopback upstream. Chat, Responses and Messages use an identical opaque
@@ -179,16 +194,15 @@ retained form state across switching/collapse, keyboard selection, native modal
 and Escape focus, close/account-scope destruction, and authenticated Markdown
 rendering with non-owner metadata/content rejection. It also checks the compact
 workspace opening width, retained drag width and transparent expanded/narrow
-backdrops. Web-only changes run this
-case alongside Computer registration without requiring a Docker Worker or model.
-Desktop-only source/resource changes select native cases `20/02`, `20/03`, and
-`20/04` through the standard runner in the dedicated Browser job. Media, preload,
-IPC, and controller changes also select Docker case `20/05` and its image build;
-other Desktop-only changes require neither Docker nor generic E2E/Rust contracts.
-Web Browser owners and shared SDK/backend/build/scenario inputs retain the complete
-numbered [group 20](scenarios/20_browser_workspace/README.md) once, without duplicating
-its resource case in the generic matrix. The unified selector and fixed aggregate
-gate own this routing; see [development validation](../docs/development/DEVELOPMENT.md#validation-by-delivery-stage).
+backdrops. Web-only changes select this case, Computer deletion, and the shared
+renderer's Desktop resource integration (`20/02`). Desktop-only source/resource
+changes select `20/02`, `20/03`, and `20/04`. Media, preload, IPC, controller and
+packaging inputs also select Docker case `20/05` with the current-run Worker image.
+Shared SDK/runtime/build inputs expand to affected consumers; mixed changes take
+the union and execute each selected case once. WebUI and Desktop use separate
+named wrappers over the common module workflow. See the numbered
+[group 20](scenarios/20_browser_workspace/README.md) and
+[development validation](../docs/development/DEVELOPMENT.md#validation-by-delivery-stage).
 Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
 does not claim a live remote desktop connection.

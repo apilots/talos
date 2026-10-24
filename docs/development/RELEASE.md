@@ -119,19 +119,29 @@ is pushed, or when a maintainer manually retries an existing tag:
 1. Resolve the immutable tag to a SHA and validate version/history and annotation.
 2. Verify the successful release-branch candidate for that exact SHA, run/attempt,
    Notes, lock and toolchain. Import its source evidence without repeating tests.
-3. Build each of the eight formal product targets once using the validated lock.
+3. Build each of the seven formal product targets once using the validated lock.
    Verify the build preserved that graph. Check the actual packages before upload;
    each TUI's native acceptance checks and installs that same built bundle through
    `TUI_INSTALL_PRODUCT_DIR`. No second development package is made for verification.
-4. Assemble Server/Worker runtime images from the validated Linux Server packages
+4. Download the same run's Linux AMD64 TUI product and run Ubuntu container
+   installation through `release-install.yml`. The container has no Rust toolchain
+   or build volume; missing products and failed installation block image publication
+   and release publication.
+5. Assemble Server/Worker runtime images from the validated Linux Server packages
    for each architecture, reusing their binaries, launcher and WebUI. The Docker
    `PRODUCT_STAGE=packaged` input selects this normal release path; the default
    `source` stage remains available to local source-image builds. Runtime dependency,
    version, launcher and license probes remain in the images before upload.
-5. Publish the multi-architecture manifests after all product and image gates pass;
+6. Publish the multi-architecture manifests after all product and image gates pass;
    validate final installer assets and create the GitHub Release with exact tag Notes.
    Preserve Cargo.lock and source-validation.json as checksummed public assets;
    manifest.validation records the candidate run and lock hash. Optional R2 remains.
+
+PR/main run lightweight installer shell/archive contracts only. Platform business
+E2E remains in affected module gates. For an unpublished installation preflight,
+dispatch `release-preflight.yml` with `source_ref`: it resolves one immutable SHA,
+builds and installs the three native TUI targets, then reuses its Linux AMD64
+product for container acceptance without publishing anything.
 
 All release jobs use GitHub-hosted runners with bounded durations. There is no
 skip-gate input, unvalidated-result fallback or automatic tag repair. To retry an
