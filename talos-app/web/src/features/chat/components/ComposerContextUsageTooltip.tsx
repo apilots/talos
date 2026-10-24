@@ -75,7 +75,7 @@ export function ComposerContextUsageTooltip({
       >
         <span className="mb-2.5 flex items-center justify-between gap-3">
           <span className="text-[12px] font-medium text-ink">{t("contextUsageTitle")}</span>
-          <span className="text-[12px] font-semibold tabular-nums text-accent">
+          <span className="text-[12px] font-semibold tabular-nums text-success">
             {percent === undefined ? "—" : `${percent}%`}
           </span>
         </span>
