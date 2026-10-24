@@ -299,85 +299,19 @@ new capability as complete until those paths and their tests are aligned.
 
 ### Web visual system
 
-The Web UI and Desktop renderer share the RGB theme tokens in
-`talos-app/web/src/app/styles/index.css`. Route pages, dialogs, charts and resource
-previews must consume these tokens rather than fixed light-theme colors.
-Use Tailwind-supported opacity steps, or explicit arbitrary alpha such as
-`bg-card/[0.82]`; unsupported slash values like `bg-card/82` silently omit CSS
-and can expose native form-control colors.
+Web and Desktop share theme tokens in `talos-app/web/src/app/styles/index.css`
+and their Tailwind mappings. Reuse `shared/ui/controlStyles.ts` for selection,
+actions and toggle states, and `shared/ui/overlayStyles.ts` for dialog scrims.
+Keep layout, handlers and accessibility ownership in the existing components.
 
-| Role | Light | Dark | Ownership |
-| --- | --- | --- | --- |
-| `background` | `#FFFFFF` | `#181A1D` | Route and resource canvases |
-| `surface`, `sidebar` | `#FAFAFA` | `#272A2E` | Continuous rail, top bars and navigation |
-| `card` | `#FFFFFF` | `#202328` | Inputs, cards and popovers |
-| `border` | `#E9ECEF` | `#3D434B` | Controls and contained panels |
-| `divider` | `#EAEDF0` | `#343A42` | Single shared-region boundaries |
-| `headerBorder` | `#E1E4E8` | `#434952` | Header splits aligned with body boundaries |
-| `hover` | Black at 2.5% | White at 3% | Neutral interactive hover over the owning surface |
-| `selected` | Black at 5% | White at 6% | Navigation/control selection blended over its owning surface |
-| `selectedBorder` | `#DADDE1` | `#474C53` | Bordered selection controls |
-| `accent` | `#3B82F6` | `#3B82F6` | Feature emphasis such as reasoning depth, Fast controls and context usage |
-| `actionHover` | `#3D434B` | `#D2D8E1` | Inverse primary-action hover |
-| `ink`, `muted` | `#282C32`, `#5F6772` | `#E9ECF0`, `#C0C8D2` | Main and supporting text |
+Selection and hover use shared neutral tints over their owning surfaces; retain
+selection on hover/focus. Feature emphasis uses `accent`, while semantic
+warning/danger/success/info roles remain separate. Ordinary dialog scrims cover
+the viewport; the right workspace keeps its transparent native backdrop.
+Preserve visible keyboard focus and explicit user-resized widths.
 
-`shared/ui/controlStyles.ts` owns presentation classes for selected/idle controls,
-primary/secondary/ghost/danger actions and on/off badges. Reuse these styles for
-custom-shaped controls and the existing `Button`, `Input`, `Panel` and editor
-primitives; page code must not duplicate colors or introduce new state owners.
-Use `selected` with `ink` for navigation and edit/preview segments. Its shared
-neutral tint keeps a comparable subtle contrast over white content, gray shell
-and dark panels: light selection is approximately #F2F2F2 over white and #EEEEEE
-over the shell; dark selection is approximately #2D3035 over cards and #34373B
-over the shell. Keep the global selected/hover opacity in Tailwind and direct CSS
-consumers; do not replace it with a page-local opaque approximation. Keep
-selection on hover and keyboard focus instead of replacing it with the lighter
-`hover` role. Plugin/document tabs, model-capability labels and file selections
-use the same presentation as navigation and editor segments. Native checkbox/
-radio indicators use the neutral `brand` accent; primary actions, enabled
-switches and semantic statuses retain their distinct roles. Primary
-actions and enabled badges use `brand` with `background`; disabled actions use
-`brandDim` with `muted` and retain their existing disabled conditions. Selection
-styles do not supply dimensions, handlers or accessibility roles. Shared Select
-and DropdownMenu primitives apply these state colors to highlighted/checked
-options. The composer model picker consumes the same theme tokens from its CSS
-module while retaining its existing layout and interaction owners. Preserve its
-original pure-blue reasoning/Fast emphasis through the shared `accent` token;
-do not substitute the muted semantic `info` color. Selected
-Computer topology cards use `selectedBorder` without a colored halo; retain
-semantic info colors for actual connection paths and statuses. Preserve
-visible keyboard focus indicators; shared selection controls use the neutral
-brand focus ring rather than a platform-blue outline. Preserve semantic
-warning/danger/success/info colors.
-
-Keep the existing layout, region widths, routes, scrolling and interaction owners.
-The business body owns its single 12px outer top-left corner; internal sidebar,
-main and resource junctions are square and have one dividing line. Header and body
-splits align, and the main header has 24px horizontal padding. The rail and top
-bars share a background without a separate rail border. Resource tabs, their
-controls and the inner webpage navigation retain their existing arrangement.
-The workspace opens at the shared 480px initial width, clamped to the existing
-viewport limits; explicit drag widths remain authoritative. Its native modal
-backdrop is transparent so expanding it does not tint the Computer rail. Native
-modal isolation, Escape behavior and focus restoration retain their existing owner.
-
-Use the shared 12px panel and 10px control radii; pills, compact icons and the 22px
-chat input retain their role-specific shapes. Ordinary panels have no elevation;
-owned dialogs and popovers may explicitly use the theme-aware `shadow-panel`.
-Document dialog frame alignment and scrim coverage are separate concerns.
-`shared/ui/overlayStyles.ts` preserves the existing document frame position
-while its backdrop covers the whole viewport through the global `overlay`
-color (14% black in light mode, 24% in dark mode) and shared 1px blur.
-Normal dialogs, including the shared Radix Dialog/AlertDialog primitives, reuse
-`overlayClasses.tint` or its native-dialog equivalent;
-media lightboxes retain their dedicated viewing backdrop. Do not crop a scrim
-using a sidebar-width guess. Workspace expansion
-remains transparent and uses its existing native modal lifecycle.
-
-Avoid translucent white gradients and fixed shadows on route surfaces. Keep
-semantic warning, danger, success and info colors; chart intensity may use their
-theme-aware alpha variants. External webpage iframe backgrounds belong to the
-rendered document and are not recolored by the application theme.
+Use supported Tailwind alpha values or arbitrary values such as `bg-card/[0.82]`;
+unsupported values like `bg-card/82` silently omit CSS.
 
 ### Workspace inspection
 
