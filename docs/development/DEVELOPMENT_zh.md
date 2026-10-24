@@ -63,6 +63,7 @@ CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`�
 Server 内部模块和轻量安装契约。`talos-webui.yml` 与 `talos-desktop.yml` 共享
 `ci-category.yml`，各自接收对应模块计划。既有五个必需检查名保留为汇总门禁；文档和纯版本
 变更跳过重型任务，policy 与汇总门禁仍正常回报。
+草稿 PR 的 push 同样执行检查；同一提交转为 ready 不重复运行业务 CI。
 模块和汇总 job 使用 `!cancelled()`，失败仍进入门禁，而新 push 可以取消过时执行。
 清理与证据上传 step 仍可使用 `always()`。
 

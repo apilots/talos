@@ -93,6 +93,8 @@ installer contracts. `talos-webui.yml` and `talos-desktop.yml` share `ci-categor
 while receiving distinct module plans. The existing five required context names remain fixed
 aggregate gates. Documentation and metadata changes skip heavy jobs while the
 policy and aggregate checks still report results.
+Draft PR pushes run the same checks; marking an unchanged head ready does not
+repeat business CI.
 Module and aggregate job conditions use `!cancelled()` so failures still reach
 their gates while a new PR push can cancel obsolete work immediately. Cleanup
 and evidence-upload steps may still use `always()`.
