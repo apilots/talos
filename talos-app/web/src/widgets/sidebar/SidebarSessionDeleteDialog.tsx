@@ -65,7 +65,8 @@ export function SidebarSessionDeleteDialog({
             {t("common:cancel")}
           </Button>
           <Button
-            className="min-w-24 bg-danger/[0.12] text-danger hover:bg-danger/20"
+            className="min-w-24"
+            variant="danger"
             disabled={deleting}
             onClick={() => void submitDelete()}
             type="button"

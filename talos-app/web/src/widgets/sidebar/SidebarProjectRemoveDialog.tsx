@@ -64,7 +64,7 @@ export function SidebarProjectRemoveDialog({
           <Button className="min-w-24" onClick={onClose} type="button" variant="ghost">
             Cancel
           </Button>
-          <Button className="min-w-28 bg-danger/[0.12] text-danger hover:bg-danger/20" disabled={removing} onClick={() => void submitRemove()} type="button">
+          <Button className="min-w-28" variant="danger" disabled={removing} onClick={() => void submitRemove()} type="button">
             Remove
           </Button>
         </div>

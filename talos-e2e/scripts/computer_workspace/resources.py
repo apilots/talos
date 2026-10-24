@@ -1,7 +1,10 @@
 """Hosted product workspace acceptance; real Server/File APIs and isolated system Chrome.
 
 Only Auth is an explicit contract fixture. Web previews use a deterministic local
-page; no models, Workers, external sites, frontend mocks or store injection are used.
+page; resource navigation uses no models, Workers, external sites, frontend mocks
+or store injection.
+An additional component visual fixture renders production destructive dialogs
+with compiled CSS and pending props; it never submits a destructive operation.
 Computer media lifecycle remains in Browser Worker acceptance and component tests.
 """
 import json
@@ -35,6 +38,60 @@ def seed(context, token, theme='light'):
     context.add_init_script('if (window === window.top) sessionStorage.setItem("talos-web-auth-token", ' + json.dumps(token) + ');')
     preferences = json.dumps({'state': {'locale': 'en', 'uiTheme': theme}, 'version': 0})
     context.add_init_script('if (window === window.top && !localStorage.getItem("talos-web-ui")) localStorage.setItem("talos-web-ui", JSON.stringify(' + preferences + '));')
+
+
+def destructive_action_theme(page, theme):
+    """Render the two production dialog callers with real compiled CSS, without deleting data."""
+    observations = []
+    for kind, title, label in (('project', 'Remove Theme review?', 'Remove'), ('session', 'Delete “Theme review”?', 'Delete')):
+        def render(pending):
+            page.evaluate('''async ({kind, pending}) => {
+                const {default: React} = await import('/node_modules/.vite/deps/react.js');
+                const {default: ReactDOM} = await import('/node_modules/.vite/deps/react-dom_client.js');
+                if (!window.themeDialogFixture) {
+                    const root = document.createElement('div');
+                    document.body.append(root);
+                    window.themeDialogFixture = {root:ReactDOM.createRoot(root)};
+                }
+                const fixture = window.themeDialogFixture;
+                const onClose = () => fixture.root.render(null);
+                const onDestructive = () => { throw new Error('Visual fixture must not submit destructive actions'); };
+                const Component = kind === 'project'
+                    ? (await import('/src/widgets/sidebar/SidebarProjectRemoveDialog.tsx')).SidebarProjectRemoveDialog
+                    : (await import('/src/widgets/sidebar/SidebarSessionDeleteDialog.tsx')).SidebarSessionDeleteDialog;
+                fixture.root.render(React.createElement(Component, kind === 'project'
+                    ? {projectName:'Theme review', removing:pending, onClose, onRemove:onDestructive}
+                    : {sessionTitle:'Theme review', deleting:pending, onClose, onDelete:onDestructive}));
+            }''', {'kind': kind, 'pending': pending})
+        render(False)
+        heading = page.get_by_role('heading', name=title, exact=True)
+        expect(heading).to_be_visible()
+        dialog = page.locator('div.relative.z-10').filter(has=heading)
+        button = dialog.get_by_role('button', name=label, exact=True)
+        def colors():
+            settle_workspace(button)
+            return button.evaluate('''node => {
+                const style = getComputedStyle(node);
+                const danger = getComputedStyle(document.documentElement).getPropertyValue('--color-danger').trim().split(' ').filter(Boolean).join(', ');
+                return {fill:style.backgroundColor, text:style.color, opacity:style.opacity, danger};
+            }''')
+        initial = colors()
+        require(initial['fill'] == 'rgba(' + initial['danger'] + ', 0.15)', 'Destructive action did not use the shared danger fill')
+        button.hover()
+        hovered = colors()
+        require(hovered['fill'] == 'rgba(' + hovered['danger'] + ', 0.25)', 'Primary hover specificity overrode the destructive role')
+        require(hovered['text'] == 'rgb(' + hovered['danger'] + ')', 'Destructive hover changed its danger text')
+        page.screenshot(path=str(REPORT / ('danger-' + kind + '-' + theme + '.png')), full_page=True)
+        render(True)
+        button = dialog.locator('button').last
+        expect(button).to_be_disabled()
+        pending = colors()
+        require(pending['fill'] == initial['fill'] and pending['opacity'] == '0.5', 'Disabled destructive action retained enabled hover styling')
+        dialog.get_by_role('button', name='Cancel', exact=True).click()
+        expect(heading).to_have_count(0)
+        observations.append({'kind': kind, 'initial': initial, 'hovered': hovered, 'pending': pending})
+    page.evaluate('window.themeDialogFixture.root.unmount(); delete window.themeDialogFixture;')
+    return observations
 
 
 def theme_geometry(browser, url, token):
@@ -112,6 +169,7 @@ def theme_geometry(browser, url, token):
             page.set_viewport_size({'width': 1560, 'height': 1000})
             geometry['resizedWidthRetained'] = resized
             geometry['expandedAndNarrowBackdrop'] = 'transparent'
+            geometry['destructiveAction'] = destructive_action_theme(page, theme)
             observations.append(geometry)
             page.get_by_role('button', name='alice', exact=True).click()
             page.get_by_role('button', name='Log out', exact=True).click()
