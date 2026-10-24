@@ -5,11 +5,13 @@ import datetime
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from ci_impact import ROOT, is_document
@@ -66,6 +68,34 @@ def emit(**values: str) -> None:
                 stream.write(f'{name}={value}\n')
     else:
         print(json.dumps(values))
+
+
+def cache_storage(task: dict, key: str) -> tuple[str, str]:
+    """Keep immutable build blobs; let each check run publish a fresh record."""
+    run, attempt = os.environ.get('GITHUB_RUN_ID', ''), os.environ.get('GITHUB_RUN_ATTEMPT', '')
+    if task['kind'] == 'build' or not run.isdigit() or not attempt.isdigit():
+        return key, ''
+    storage = f'{key}-run-{run}-{attempt}'
+    token, repository, ref = (os.environ.get(name) for name in ('GH_TOKEN', 'GITHUB_REPOSITORY', 'GITHUB_REF'))
+    if not token or not repository or not ref:
+        return storage, ''
+    query = urllib.parse.urlencode(dict(key=key + '-run-', ref=ref, per_page=100,
+                                       sort='created_at', direction='desc'))
+    request = urllib.request.Request(os.environ.get('GITHUB_API_URL', 'https://api.github.com') +
+        f'/repos/{repository}/actions/caches?{query}',
+        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            rows = json.load(response).get('actions_caches', [])
+        for row in rows:
+            name = row.get('key', '')
+            if row.get('ref') == ref and re.fullmatch(re.escape(key) + r'-run-\d+-\d+', name) and name != storage:
+                # Resolve one complete storage key, never a partial-input restore.
+                # Payload and successful origin are still checked after restoration.
+                return storage, name
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return storage, ''
 
 
 def cached(directory: Path, key: str, task: dict) -> bool:
@@ -188,7 +218,8 @@ def main() -> None:
     key = os.environ.get('CI_CACHE_KEY', key)
     directory = Path(os.environ.get('CI_CACHE_DIR', str(default_directory)))
     if action == 'key':
-        emit(key=key, path=str(directory))
+        storage, history = cache_storage(task, key)
+        emit(key=key, path=str(directory), storage_key=storage, restore_key=history)
     elif action == 'check':
         hit = reusable(directory, key, task)
         emit(hit=str(hit).lower())
