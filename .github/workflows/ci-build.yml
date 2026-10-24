@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     name: Build · shared debug binaries
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:

@@ -19,7 +19,7 @@ jobs:
       plan: ${{ inputs.plan }}
   mcp-native:
     name: MCP · native macOS process cleanup
-    if: inputs.mcp
+    if: ${{ !cancelled() && inputs.mcp }}
     runs-on: macos-26
     timeout-minutes: 20
     env:

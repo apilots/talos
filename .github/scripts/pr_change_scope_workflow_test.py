@@ -16,6 +16,22 @@ from ci_plan import BINARIES, plan
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_running_reusable_leaf_jobs_stop_on_workflow_cancellation(self):
+        import re
+        conditions = re.findall(r'^    if: \$\{\{ (.*?) \}\}',
+            (ROOT / '.github/workflows/ci-category.yml').read_text(), re.M)
+        self.assertEqual(len(conditions), 2)
+        for selected in (False, True):
+            inputs = SimpleNamespace(plan=json.dumps(dict(quality=[1] if selected else [],
+                scenarios=dict(include=[1] if selected else []))))
+            for cancelled in (False, True):
+                for condition in conditions:
+                    expression = re.sub(r'!(?!=)', 'not ', condition.replace('&&', ' and '))
+                    actual = eval(expression, {'__builtins__': {}, 'cancelled': lambda: cancelled,
+                        'fromJSON': lambda value: json.loads(value, object_hook=lambda obj: SimpleNamespace(**obj)),
+                        'toJSON': json.dumps}, {'inputs': inputs})
+                    self.assertEqual(actual, selected and not cancelled)
+
     def test_partial_retry_consumes_same_run_binary_without_rerunning_build(self):
         import re
         build = (ROOT / '.github/workflows/ci-build.yml').read_text()
