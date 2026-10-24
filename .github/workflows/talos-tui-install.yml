@@ -7,6 +7,7 @@ permissions:
   actions: read
 jobs:
   installer-tests:
+    if: ${{ !cancelled() }}
     name: Installer · shell and archive contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 5

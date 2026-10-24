@@ -16,6 +16,25 @@ from ci_plan import BINARIES, plan
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_cancellation_fences_every_pr_reusable_call_boundary(self):
+        import re
+        pending, seen = ['.github/workflows/pr-e2e.yml'], set()
+        while pending:
+            name = pending.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            source = (ROOT / name).read_text()
+            pending += [value[2:] for value in re.findall(r'uses: (\./\.github/workflows/[^\s]+)', source)]
+            jobs = re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)', source.split('\njobs:\n', 1)[1], re.M | re.S)
+            for job, body in jobs:
+                condition = re.search(r'^    if: \$\{\{ (.*?) \}\}', body, re.M)
+                self.assertIsNotNone(condition, (name, job))
+                expression = re.sub(r'!(?!=)', 'not ', condition.group(1).replace('&&', ' and ').replace('||', ' or '))
+                # Cancellation must short-circuit even a nested caller whose inputs succeeded.
+                self.assertFalse(eval(expression, {'__builtins__': {}, 'cancelled': lambda: True}), (name, job))
+        self.assertGreaterEqual(len(seen), 8)
+
     def test_running_reusable_leaf_jobs_stop_on_workflow_cancellation(self):
         import re
         conditions = re.findall(r'^    if: \$\{\{ (.*?) \}\}',

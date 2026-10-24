@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   scope:
+    if: ${{ !cancelled() }}
     name: Detect · module and dependency changes
     runs-on: ubuntu-24.04
     outputs:
@@ -38,7 +39,7 @@ jobs:
   build:
     name: Build · shared E2E binaries
     needs: scope
-    if: needs.scope.outputs.build == 'true'
+    if: ${{ !cancelled() && (needs.scope.outputs.build == 'true') }}
     uses: ./.github/workflows/ci-build.yml
     with:
       task: ${{ toJSON(fromJSON(needs.scope.outputs.plan).build) }}
@@ -74,12 +75,12 @@ jobs:
   installer:
     name: Installer · lightweight contracts
     needs: scope
-    if: needs.scope.outputs.installer == 'true'
+    if: ${{ !cancelled() && (needs.scope.outputs.installer == 'true') }}
     uses: ./.github/workflows/talos-tui-install.yml
   harness:
     name: E2E infrastructure · lifecycle and fixtures
     needs: scope
-    if: ${{ fromJSON(needs.scope.outputs.plan).harness }}
+    if: ${{ !cancelled() && (fromJSON(needs.scope.outputs.plan).harness) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:

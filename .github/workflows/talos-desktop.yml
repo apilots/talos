@@ -10,6 +10,7 @@ permissions:
   actions: read
 jobs:
   checks:
+    if: ${{ !cancelled() }}
     name: Desktop
     uses: ./.github/workflows/ci-category.yml
     with:

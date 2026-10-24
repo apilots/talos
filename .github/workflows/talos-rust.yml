@@ -13,6 +13,7 @@ permissions:
   actions: read
 jobs:
   checks:
+    if: ${{ !cancelled() }}
     name: Server · affected modules
     uses: ./.github/workflows/ci-category.yml
     with:
