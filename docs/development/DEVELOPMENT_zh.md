@@ -58,17 +58,52 @@ $TALOS_HOME/logs/talos.log
 Provider secret 保存在 `.env` 中，配置引用对应的 `TALOS_LLM_*_API_KEY` 环境变量。
 仓库默认配置位于 `conf/`，由 Runtime 复制或升级，不直接编辑用户 home 中的文件。
 
-CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`。Rust 缓存按
-平台、架构、构建模式、工具链及解析后的依赖图隔离，缓存命中不替代编译或行为检查。
-标签 pre-push 只核对元数据，发布脚本和发布 CI 仍要求精确源码候选证据。
+CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`。
+`pr-e2e.yml` 负责 PR/main 调度，命名复用工作流分别展示 WebUI、Desktop、TUI、
+Server 内部模块和轻量安装契约。`talos-webui.yml` 与 `talos-desktop.yml` 共享
+`ci-category.yml`，各自接收对应模块计划。既有五个必需检查名保留为汇总门禁；文档和纯版本
+变更跳过重型任务，policy 与汇总门禁仍正常回报。
+模块和汇总 job 使用 `!cancelled()`，失败仍进入门禁，而新 push 可以取消过时执行。
+清理与证据上传 step 仍可使用 `always()`。
 
-Web 源码/公共资源改动沿用统一 selector 的轻量资源或 Browser owner 分流。
-仅 Desktop `src/**`、`resources/**` 改动保留前端质量检查及 `20/02`、`20/03`、
-`20/04` 原生浏览器验收，跳过通用 E2E、Rust 契约测试及 Worker 镜像；媒体、preload、
-IPC、controller owner 另保留 `20/05` 与 Docker 镜像。SDK、依赖、配置、构建、后端、
-场景、工具链及 Web/Desktop 混合改动仍走完整检查。selector/workflow 本身由常驻 policy
-回归验证，与范围明确的产品改动一起提交时不扩大场景；单独修改分流定义仍走保守完整路线。
-固定门禁核对所选任务成功、未选任务跳过，并拒绝缺失或空的产品验收选择。
+检测器解析 Cargo/pnpm 包归属与反向依赖，每个 owner 独立选择检查，混合变更取并集；
+删除和重命名前后的路径都纳入判断。Server 内部按 client、SDK、skills、MCP、tools、
+actions、runtime 和 binary 选择受影响包及代表场景；公共运行时和协议变更沿消费者展开，
+生成的 wire owner 同时覆盖前端消费者。未知可执行/构建输入保守扩大，运行时 Markdown
+资源不能仅凭后缀当作文档跳过。
+
+| 归属 | 托管验证 |
+| --- | --- |
+| WebUI（含构建配置） | Web 包检查、Computer 删除和资源页；共享 renderer 保留 Desktop 原生资源验收 |
+| Desktop | Desktop 包及原生资源/Browser/MCP；媒体、preload、IPC、controller 和打包输入增加 Docker Worker 媒体验收 |
+| 仅 TUI 展示 | `just check/test -p talos-tui` 与无 secrets 的 `08_tui/controlled_chat`，不选择 Server/Browser/全平台安装 |
+| Server/共享运行时 | 受影响 Rust 包、公开模型/app-server/文件/沙箱/output-log 场景及相关消费者 |
+| 安装脚本、打包契约、release-install 工具 | 轻量 shell/归档契约；全平台安装、容器安装和跨架构矩阵只在 release 或手动预检运行 |
+| E2E 场景/helper | 拥有者场景与 harness 回归；共享 runner/fixture 保留宽范围代表场景 |
+
+Docker Worker 的浏览器、文件、鉴权、控制链路及平台 MCP/沙箱业务验收仍在相关模块
+PR 运行，发行打包检查不能替代这些场景。重型安装仅在发布前或 `release-preflight.yml`
+手动预检运行；容器直接消费同次运行的 TUI 包，不安装 Rust、不创建编译卷。
+
+所有 Linux E2E 所需二进制通过一次 `just build --locked` 编译，并以保留执行权限的压缩
+artifact 交给同一 workflow run 的场景。普通产品 E2E 使用 debug；安装与发布仍验证 release。
+显式提供的二进制缺失时直接失败，不临时重编。Cargo 依赖缓存先恢复，再执行 locked fetch。
+二进制 artifact 在同一 workflow run 内使用固定名称，单独重跑失败 job 时可复用已经成功的
+上游构建；完整重跑则覆盖该 run 的产物。产物过期后需重新运行构建。
+
+依赖缓存不是测试证据。独立成功记录只在同一 PR、runner 镜像、架构和 UTC 日期内，完整
+任务输入指纹匹配时复用。指纹包含任务命令/范围、当前合并树源码、传递依赖、manifest/锁、
+fixture/资源、配置及 CI 定义；全仓格式/错误/仓库检查使用更宽的输入集。构建复用还校验
+压缩包摘要。没有前缀成功匹配：证据缺失、无效、失败或取消均重跑；还须通过只读 API 确认
+来源 workflow 最新 attempt 已完成且成功，API 不可用也重跑。手动 dispatch 和显式 rerun
+始终重跑测试。当前 HEAD 门禁仍要求
+所有被选任务成功，并在 summary 标明被复用的原 run/SHA。相关 base 输入、编译标志或
+工作流变更会失效，不能只比较最后一次 push。外部模型、多机拓扑和发布验收仍按原入口执行。
+
+每次 run/attempt 为检查记录创建新的不可变存储项。只读缓存查询在同一 ref 内，按完整输入
+哈希解析出完整 key，再精确恢复并校验成功来源。后续成功记录因此可以替代被拒绝的失败来源
+证据，无需覆盖旧缓存。构建归档仍按输入 key 仅保留一份并校验摘要；源码指纹跟踪文件类型
+和 Git 的可执行位，不把 runner 默认读写权限差异当作代码变化。
 
 ## 端到端测试
 

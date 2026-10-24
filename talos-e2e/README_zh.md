@@ -109,13 +109,24 @@ python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
 当前 Group `04` 和 `10` 未分配；应以场景目录为准，不要假设 Group 编号连续。前端单元测试由前端质量工作流负责，
 不再作为 E2E 场景重复执行。
 
-GitHub PR 门禁须经维护者批准后才运行，只执行无需仓库 Secrets 的
-`01_models` 分组（health/catalog、自定义 Provider 配置与受控协议工具闭环）、`09_app_server/smoke_e2e`、`09_app_server/desktop_recovery`、`09_app_server/computer_deletion`、`12_files` 和
-`14_sandbox`，并运行 `talos-auth` 和 `talos-base` package 测试，覆盖公开 Cloud SDK
-适配层与 Desktop enrollment 边界。`15_tui_install` 由独立门禁覆盖四个平台原生安装和
-Linux Docker。PR 工作流不接收仓库 Secrets，也不 checkout 私有仓库。
+GitHub PR/main 调度器选择受影响模块检查的并集，以 WebUI、Desktop、TUI、Server
+（client/SDK/skills/MCP/tools/runtime）分类展示，安装单独运行轻量契约。共享一次变更检测和当前 run
+二进制编译。Server/公共运行时保留 `01_models`、公开 app-server smoke/recovery、
+Computer 删除、`12_files`、`14_sandbox`、`06_tools/output_logs` 及相关 Browser/Worker
+验收；Rust 包测试包含不依赖 Provider 凭据的受控 DeepSeek 传输回归。叶子模块选择相关
+包和代表场景，具体见[CI 归属与复用](../docs/development/DEVELOPMENT_zh.md)。
 
-既有 contract job 同时运行 `talos-llm-deepseek` 的受控 loopback 传输回归，无需真实 Provider 凭据。
+`08_tui/controlled_chat` 是无 secrets 的 TUI 门禁，复用受控协议上游，运行真实终端、
+Agent 和 Bash 工具，验证流式完成、工具/答案事件持久化、窗口缩放及 `/quit` 退出。
+使用 `just e2e-case 08_tui/controlled_chat` 运行；原有依赖真实模型的 TUI/交互分组继续
+保留在维护者入口。
+
+`15_tui_install` 只在 release 和手动 `release-preflight.yml` 运行。Linux AMD64/ARM64、
+macOS ARM64 原生验收复用本机已构建产品；Linux Docker 必须通过 `TUI_INSTALL_PRODUCT_DIR`
+提供同次运行的发行包，不重新编译，失败阻断镜像和 GitHub Release 发布。PR/main 仅选择
+轻量安装契约，相关 Docker Worker 和平台业务 E2E 仍按模块触发。PR 不接收仓库 Secrets，也不
+checkout 私有仓库。完整输入匹配的成功任务/构建复用独立于 Cargo 依赖缓存，复用来源写入
+各 job summary。
 
 `01_models/protocol_compatibility` 使用真实 Gateway、Agent 和一个本地受控上游。
 Chat、Responses、Messages 的不同 Provider 使用同一个 opaque 模型 ID，各自在同一
@@ -212,6 +223,11 @@ locked Cargo 流程构建。Linux 优先复用所选二进制旁的 sandbox laun
 
 ## 20 浏览器与资源工作区
 
-新增标准编号组 `20_browser_workspace`，按场景分为 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop MCP、Docker Worker 五个用例。每个用例验证独立的产品边界，不把单元测试重复包装成 E2E。执行 `just e2e-group 20_browser_workspace`；轻量资源改动仅选择 `20_browser_workspace/01_resource_tabs`，仅 Desktop 源码/资源改动选择 02、03、04；媒体、preload、IPC、controller owner 另保留 05 与 Docker 镜像，其余 Desktop-only 改动跳过无关通用场景及 Rust 契约。Web Browser owner、共享 SDK、后端、构建或场景改动仍运行完整组，不在普通矩阵重复资源场景。分流统一由现有 selector 决定，固定门禁验证所选任务。
+`20_browser_workspace` 包含 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop
+MCP、Docker Worker 五个用例，分别验证独立产品边界。完整运行使用 `just e2e-group 20_browser_workspace`。Web 改动选择 01、Computer 删除和共享 renderer 的 Desktop 资源
+验收 02；仅 Desktop 源码/资源改动选择 02、03、04；媒体、preload、IPC、controller 和
+打包输入增加 05 与同次运行的 Worker 镜像。共享 SDK/runtime/build 输入沿消费者展开，
+混合变更取并集，每个用例只执行一次。WebUI 与 Desktop 由不同命名入口共享基础 workflow，
+固定汇总门禁验证实际选中的任务。
 
 前置条件、断言、隔离清理、截图归档和真实模型验收边界见[组说明](scenarios/20_browser_workspace/README.md)。公共网页与本地 Markdown 同时覆盖 Web/Desktop；远程电脑 Tab 只由 Docker Worker 能力提供。受控模型链路验证不等同于真实模型自主浏览与产品分析。

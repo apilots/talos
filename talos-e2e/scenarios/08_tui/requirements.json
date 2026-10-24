@@ -14,5 +14,10 @@
     "checks": [
       "model"
     ]
+  },
+  "cases": {
+    "controlled_chat.sh": {
+      "checks": []
+    }
   }
 }

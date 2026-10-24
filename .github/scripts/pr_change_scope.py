@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import os
 from pathlib import Path
@@ -14,33 +13,9 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DOCUMENT_SUFFIXES = (".md", ".mdx", ".rst", ".adoc")
-E2E_ROUTING_INPUTS = (".github/workflows/pr-e2e.yml", ".github/scripts/pr_change_scope*.py")
-SCOPES = {
-    "rust": ("talos-rs/", "justfile"),
-    "frontend": ("talos-app/",),
-    "pr-e2e": ("conf/", "talos-app/", "talos-e2e/", "talos-rs/", "justfile"),
-    "tui-install": (
-        "conf/", "talos-rs/", "build/", "deploy/install/", "build.sh",
-        "talos-e2e/scripts/common.sh", "talos-e2e/scripts/tui_install.sh",
-        "talos-e2e/run_e2e.sh", "talos-e2e/scenarios/15_tui_install/",
-        "talos-e2e/tests/tui_install_target_test.sh",
-        "talos-e2e/docker/tui-install-ubuntu-24.04.Dockerfile",
-    ),
-}
-CI_INPUTS = {
-    "rust": ("scripts/check_error_contract*.py", ".github/workflows/talos-rust.yml"),
-    "frontend": ("scripts/check_error_contract.py", ".github/workflows/talos-frontend-app.yml"),
-    "pr-e2e": ("build.sh", "build/*", *E2E_ROUTING_INPUTS),
-    "tui-install": (".github/workflows/talos-tui-install.yml",),
-}
-E2E_SCENARIOS = [
-    {"name": "health-and-model-catalog", "runner": "ubuntu-24.04", "targets": "group:01_models"},
-    {"name": "app-server", "runner": "ubuntu-24.04", "targets": "case:09_app_server/smoke_e2e\ncase:09_app_server/desktop_recovery"},
-    {"name": "computer-registration", "runner": "ubuntu-24.04", "targets": "case:09_app_server/computer_deletion"},
-    {"name": "files", "runner": "ubuntu-24.04", "targets": "group:12_files"},
-    {"name": "sandbox", "runner": "ubuntu-24.04", "targets": "group:14_sandbox"},
-]
+SCOPES = ("rust", "frontend", "pr-e2e", "tui-install", "ci")
+from ci_impact import impact, is_document
+
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-SNAPSHOT)?"
 VERSION_PATTERNS = {
     "talos-rs/Cargo.toml": rf'(?m)(^\[workspace\.package\]\n(?:(?!\[)[^\n]*\n)*?version = ")({VERSION})(")',
@@ -52,97 +27,15 @@ VERSION_PATTERNS = {
 }
 
 
-def is_document(path: str) -> bool:
-    return path.lower().endswith(DOCUMENT_SUFFIXES)
-
-
-def scope_matches(scope: str, path: str, *, product_only: bool = False) -> bool:
-    if is_document(path):
-        return False
-    if any(path.startswith(p) if p.endswith("/") else path == p for p in SCOPES[scope]):
-        return True
-    return not product_only and (
-        path == ".github/release-toolchain.env"
-        or any(fnmatch.fnmatchcase(path, pattern) for pattern in CI_INPUTS[scope])
-    )
-
-
 def should_run(scope: str, paths: list[str], *, product_only: bool = False) -> bool:
-    return any(scope_matches(scope, path, product_only=product_only) for path in paths)
-
-
-def e2e_product_paths(paths: list[str]) -> list[str]:
-    inputs = [path for path in paths if scope_matches("pr-e2e", path)]
-    product = [path for path in inputs if not any(
-        fnmatch.fnmatchcase(path, pattern) for pattern in E2E_ROUTING_INPUTS
-    )]
-    # Always-on policy tests exercise routing/gate definitions. Their inclusion
-    # must not broaden a bounded product diff; routing-only edits stay conservative.
-    return product or inputs
-
-
-def frontend_e2e_scope(paths: list[str]) -> str | None:
-    paths = e2e_product_paths(paths)
-    for kind, prefixes in (
-        ("web", ("talos-app/web/src/", "talos-app/web/public/")),
-        ("desktop", ("talos-app/desktop/src/", "talos-app/desktop/resources/")),
-    ):
-        if paths and all(path.startswith(prefixes) for path in paths):
-            return kind
-    return None
-
-
-def e2e_plan(paths: list[str]) -> tuple[bool, dict]:
-    frontend = frontend_e2e_scope(paths)
-    if frontend == "desktop":
-        # The dedicated Browser job owns native resources/host/MCP acceptance.
-        return False, {"include": []}
-    web_only = frontend == "web"
-    scenarios = [s for s in E2E_SCENARIOS if s["name"] == "computer-registration"] if web_only else list(E2E_SCENARIOS)
-    # Heavy Browser owners run the complete numbered group in its dedicated job.
-    # Lightweight resource-only edits retain the real product scenario once.
-    if web_only and not browser_e2e_applies(paths):
-        scenarios = [*scenarios, {"name": "resource-workspace", "runner": "ubuntu-24.04",
-                                  "targets": "case:20_browser_workspace/01_resource_tabs"}]
-    return not web_only, {"include": scenarios}
-
-
-def browser_e2e_applies(paths: list[str]) -> bool:
-    """Keep Browser lifecycle coverage for its real owners without taxing unrelated Web edits."""
-    if not paths:
-        return True
-    paths = e2e_product_paths(paths)
-    web_owners = (
-        "talos-app/web/src/features/computers/", "talos-app/web/src/features/settings/",
-        "talos-app/web/src/app/", "talos-app/web/src/pages/chat/",
-        "talos-app/web/src/widgets/chat-context-bar/", "talos-app/web/src/shared/api/",
-        "talos-app/web/src/shared/store/", "talos-app/web/src/shared/ui/Button.",
-        "talos-app/web/src/shared/i18n/desktop", "talos-app/web/src/shared/i18n/computer",
-        "talos-app/web/src/shared/i18n/mcp", "talos-app/web/src/shared/i18n/apiError",
-    )
-    return any(not is_document(path) and (
-        not path.startswith(("talos-app/web/src/", "talos-app/web/public/"))
-        or path.startswith(web_owners)
-        or path == "talos-app/web/public/talos-logo.svg"
-    ) for path in paths)
-
-
-def browser_e2e_plan(paths: list[str]) -> tuple[list[str], bool]:
-    if not browser_e2e_applies(paths):
-        return [], False
-    if frontend_e2e_scope(paths) != "desktop":
-        return ["group:20_browser_workspace"], True
-    targets = [f"case:20_browser_workspace/{case}" for case in (
-        "02_desktop_resources", "03_desktop_browser", "04_desktop_mcp",
-    )]
-    media_owners = tuple(f"talos-app/desktop/src/{name}" for name in (
-        "desktop-media", "desktop-ipc", "desktop-server-requests", "ipc-guard",
-        "ipc.", "preload.", "app-server-controller",
-    ))
-    docker = any(path.startswith(media_owners) for path in e2e_product_paths(paths))
-    if docker:
-        targets.append("case:20_browser_workspace/05_docker_worker")
-    return targets, docker
+    if product_only:
+        paths = [p for p in paths if p.startswith(("talos-rs/", "talos-app/", "conf/")) or p == "justfile"]
+    selected = impact(paths)
+    return {"rust": bool(selected.rust), "frontend": bool(selected.frontend),
+            "pr-e2e": any(selected.targets.values()) or selected.harness,
+            "tui-install": selected.installer,
+            "ci": bool(selected.rust or selected.frontend or any(selected.targets.values())
+                       or selected.installer or selected.harness)}[scope]
 
 
 def version_files() -> set[str]:
@@ -223,23 +116,32 @@ def main() -> int:
         ).strip()
     elif not base and event == "push":
         base, head = os.environ["PUSH_BASE_SHA"], os.environ["PUSH_HEAD_SHA"]
-    paths = changed_paths(base, head) if base else []
-    relevant = should_run(args.scope, paths, product_only=args.product_only) if base else True
+        if base == "0" * 40:
+            base = subprocess.check_output(["git", "hash-object", "-w", "-t", "tree", "--stdin"],
+                                           input="", text=True).strip()
+    paths = changed_paths(base, head) if base else [".github/release-toolchain.env"]
+    relevant = should_run(args.scope, paths, product_only=args.product_only)
     if args.print_result:
         print(str(relevant).lower())
         return 0
+    values = {"run_workflow": str(relevant).lower()}
+    if args.scope == "ci":
+        from ci_plan import plan
+        selected = plan(paths)
+        values.update({"plan": json.dumps(selected, separators=(",", ":"))})
+        values.update({category: str(bool(task["quality"] or task["scenarios"]["include"])).lower()
+                       for category, task in selected["categories"].items()})
+        values.update(installer=str(selected["installer"]).lower(),
+                      build=str(bool(selected["build"]["binaries"])).lower())
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as stream:
+                stream.write("## Selected module checks\n\n```json\n" + json.dumps(selected, indent=2) + "\n```\n")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with open(output, "a", encoding="utf-8") as stream:
-            if args.scope == "pr-e2e":
-                native, matrix = e2e_plan(paths)
-                targets, docker = browser_e2e_plan(paths)
-                stream.write(f"run_browser={str(relevant and bool(targets)).lower()}\n")
-                stream.write(f"browser_targets={' '.join(targets)}\n")
-                stream.write(f"browser_docker={str(relevant and docker).lower()}\n")
-                stream.write(f"run_scenarios={str(relevant and bool(matrix['include'])).lower()}\n")
-                stream.write(f"run_contracts={str(relevant and native).lower()}\n")
-                stream.write(f"scenario_matrix={json.dumps(matrix, separators=(',', ':'))}\n")
-            stream.write(f"run_workflow={str(relevant).lower()}\n")
+            values["run_workflow"] = values.pop("run_workflow")
+            for key, value in values.items():
+                stream.write(f"{key}={value}\n")
     print(f"{args.scope}: {'run affected checks' if relevant else 'no product changes; metadata/policy checks apply'}")
     return 0
 

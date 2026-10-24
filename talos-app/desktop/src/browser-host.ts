@@ -175,6 +175,9 @@ export class DesktopBrowserHost {
         await send("Input.setIgnoreInputEvents",{ignore:false});
         await send("Emulation.setFocusEmulationEnabled",{enabled:true});
         await send("Page.bringToFront");
+        // The first document can be loaded before its input hit-test surface is
+        // presented. Let it paint before dispatching input, not only afterward.
+        await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
       };
       await send("Page.enable");
       if (action.kind==="navigate") {

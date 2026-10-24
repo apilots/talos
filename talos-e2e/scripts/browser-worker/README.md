@@ -33,6 +33,10 @@ retains the dedicated profile. Prepared user Chrome keeps its own UI.
 Use `--case 20_browser_workspace/04_desktop_mcp` with
 `TALOS_E2E_APP_SERVER_BIN` pointing to the current app-server. It executes a second real MCP task after revision-bound pause/resume
 and requires fresh successful observations.
+Download collection waits for a persisted File API receipt through bounded real
+MCP calls; a download link or filename in page text is not completion evidence.
+Failed native MCP tasks preserve the synthetic page's input events and pixels
+before closing their owned views.
 Use `--case 20_browser_workspace/05_docker_worker` with
 `TALOS_E2E_SERVER_BIN`, `TALOS_E2E_APP_SERVER_BIN`, and
 `TALOS_E2E_WORKER_IMAGE`; set `TALOS_E2E_NATIVE_MEDIA=1` to require the actual Desktop
@@ -79,6 +83,8 @@ Evidence uses the standard scenario report directory (`TALOS_SCENARIO_REPORT_DIR
 direct helper runs default to ignored `output/browser-worker/`; task-owned containers
 and volumes are removed in `finally`.
 
+The Desktop media viewer verifies its cached actor with `user/current` before
+calling local-only browser/media methods, matching the product authentication flow.
 The Desktop media fixture seeds a directory snapshot from the synthetic owning
 Gateway database. Coordinator attachment, private-CA G/H routing, NodeAuth media,
 Desktop IPC and noVNC rendering remain real. This represents the synced directory

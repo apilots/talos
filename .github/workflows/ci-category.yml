@@ -1,0 +1,177 @@
+name: CI · module quality and E2E
+on:
+  workflow_call:
+    inputs:
+      plan:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  quality:
+    name: Quality · ${{ matrix.name }}
+    if: ${{ !cancelled() && toJSON(fromJSON(inputs.plan).quality) != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.plan).quality }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore successful exact-input check
+        id: cache
+        uses: ./.github/actions/ci-cache
+        with:
+          task: ${{ toJSON(matrix) }}
+      - name: Load shared toolchains
+        if: steps.cache.outputs.hit != 'true'
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
+        with:
+          workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
+      - uses: taiki-e/install-action@v2
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          tool: just,cargo-nextest
+      - name: Prepare Rust test prerequisites
+        if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler bubblewrap ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          cargo fetch --locked --manifest-path talos-rs/Cargo.toml
+      - uses: pnpm/action-setup@v6
+        if: steps.cache.outputs.hit != 'true' && matrix.node
+        with:
+          version: ${{ env.RELEASE_PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        if: steps.cache.outputs.hit != 'true' && matrix.node
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: talos-app/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        if: steps.cache.outputs.hit != 'true' && matrix.node
+        run: pnpm --dir talos-app install --frozen-lockfile
+      - name: Check affected packages
+        if: steps.cache.outputs.hit != 'true'
+        env:
+          CI_TASK: ${{ toJSON(matrix) }}
+          CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
+          CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
+        run: python3 .github/scripts/ci_run.py run
+
+  scenarios:
+    name: E2E · ${{ matrix.name }}
+    if: ${{ !cancelled() && toJSON(fromJSON(inputs.plan).scenarios.include) != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(inputs.plan).scenarios }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore successful exact-input scenario
+        id: cache
+        uses: ./.github/actions/ci-cache
+        with:
+          task: ${{ toJSON(matrix) }}
+      - name: Load shared toolchains
+        if: steps.cache.outputs.hit != 'true'
+        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+      - name: Install selected scenario prerequisites
+        if: steps.cache.outputs.hit != 'true'
+        env:
+          CATEGORY: ${{ matrix.category }}
+        run: |
+          packages=(bubblewrap curl libssl-dev pkg-config protobuf-compiler ripgrep sqlite3 tmux xvfb openssl)
+          if [[ "$CATEGORY" == desktop ]]; then
+            packages+=(caddy libgtk-3-0 libgbm1 libnss3 libasound2t64)
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "${packages[@]}"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.cache.outputs.hit != 'true' && matrix.rust_tests
+        with:
+          toolchain: ${{ env.RELEASE_RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        if: steps.cache.outputs.hit != 'true' && matrix.rust_tests
+        with:
+          workspaces: talos-rs
+          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
+      - name: Fetch scoped Rust scenario dependencies
+        if: steps.cache.outputs.hit != 'true' && matrix.rust_tests
+        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
+      - uses: taiki-e/install-action@v2
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          tool: ${{ matrix.rust_tests && 'just,cargo-nextest' || 'just' }}
+      - uses: actions/setup-python@v6
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          python-version: '3.12'
+      - name: Install controlled fixture dependencies
+        if: steps.cache.outputs.hit != 'true'
+        run: python -m pip install --disable-pip-version-check grpcio protobuf playwright -r talos-e2e/scripts/browser-worker/requirements.txt
+      - uses: pnpm/action-setup@v6
+        if: steps.cache.outputs.hit != 'true' && matrix.node
+        with:
+          version: ${{ env.RELEASE_PNPM_VERSION }}
+      - uses: actions/setup-node@v6
+        if: steps.cache.outputs.hit != 'true' && matrix.node
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: talos-app/pnpm-lock.yaml
+      - name: Install application dependencies
+        if: steps.cache.outputs.hit != 'true' && matrix.node
+        env:
+          CATEGORY: ${{ matrix.category }}
+        run: |
+          pnpm --dir talos-app install --frozen-lockfile
+          if [[ "$CATEGORY" == desktop ]]; then node talos-app/desktop/node_modules/electron/install.js; fi
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        if: steps.cache.outputs.hit != 'true' && matrix.chrome
+      - uses: actions/download-artifact@v8
+        if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}
+        with:
+          name: ci-binaries
+          path: output/ci-binaries
+      - name: Unpack current-run product binaries
+        if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}
+        run: tar -xf output/ci-binaries/binaries.tar.gz -C output/ci-binaries
+      - name: Run selected product scenarios through just
+        if: steps.cache.outputs.hit != 'true'
+        env:
+          CI_TASK: ${{ toJSON(matrix) }}
+          CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
+          CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
+          TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ steps.chrome.outputs.chrome-path }}
+        run: python3 .github/scripts/ci_run.py run
+      - name: Show failed-scenario diagnostics
+        if: failure()
+        run: python3 talos-e2e/scripts/report_failures.py
+      - name: Preserve scenario evidence
+        if: ${{ always() && steps.cache.outputs.hit != 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.category }}-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: |
+            talos-e2e/reports/
+            output/browser-worker/
+          if-no-files-found: warn
+          retention-days: 7

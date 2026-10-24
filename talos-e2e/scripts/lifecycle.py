@@ -35,9 +35,15 @@ def register(kind, value, scope=None):
 
 def own_process(process):
     """Register only explicitly detached process groups; shell descendants inherit case ownership."""
-    if os.getpgid(process.pid) != process.pid:
-        raise ValueError('Only detached process groups may be registered')
-    register('process', process.pid)
+    try:
+        if os.getpgid(process.pid) != process.pid:
+            raise ValueError('Only detached process groups may be registered')
+        register('process', process.pid)
+    except (ProcessLookupError, subprocess.CalledProcessError):
+        # A short command can finish before its group/start time is observed.
+        # Its caller still owns wait/status; case cleanup adopts any descendants.
+        if process.poll() is None:
+            raise
     return process
 
 

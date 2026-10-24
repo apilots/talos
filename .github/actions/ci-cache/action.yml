@@ -1,0 +1,45 @@
+name: Exact-input CI reuse
+description: Restore only an exact successful task record; misses always execute the task.
+inputs:
+  task:
+    required: true
+    description: Executable task JSON from the current merge tree planner.
+outputs:
+  hit:
+    description: Validated successful exact-input record.
+    value: ${{ steps.record.outputs.hit }}
+  key:
+    description: Task, PR, environment and input key.
+    value: ${{ steps.key.outputs.key }}
+  path:
+    description: Record directory, also containing build artifacts for build tasks.
+    value: ${{ steps.key.outputs.path }}
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      env:
+        CI_TASK: ${{ inputs.task }}
+        CI_PR_NUMBER: ${{ github.event.pull_request.number || 'main' }}
+        GH_TOKEN: ${{ github.token }}
+      run: python3 .github/scripts/ci_run.py key
+    - uses: actions/cache@v5
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.storage_key }}
+    - name: Restore exact-input check history
+      if: steps.key.outputs.restore_key != ''
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.restore_key }}
+    - id: record
+      shell: bash
+      env:
+        CI_TASK: ${{ inputs.task }}
+        CI_CACHE_KEY: ${{ steps.key.outputs.key }}
+        CI_CACHE_DIR: ${{ steps.key.outputs.path }}
+        CI_FORCE_RECHECK: ${{ fromJSON(inputs.task).kind != 'build' && (github.event_name == 'workflow_dispatch' || github.run_attempt > 1) }}
+        GH_TOKEN: ${{ github.token }}
+      run: python3 .github/scripts/ci_run.py check

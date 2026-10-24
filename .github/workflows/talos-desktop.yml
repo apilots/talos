@@ -1,0 +1,17 @@
+name: CI · Desktop
+on:
+  workflow_call:
+    inputs:
+      plan:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  checks:
+    if: ${{ !cancelled() }}
+    name: Desktop
+    uses: ./.github/workflows/ci-category.yml
+    with:
+      plan: ${{ inputs.plan }}

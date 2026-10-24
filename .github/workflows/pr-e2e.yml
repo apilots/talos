@@ -1,344 +1,154 @@
-name: Talos PR E2E
-
+name: Talos CI · module gates
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-
+  push:
+    branches: [main]
 permissions:
   contents: read
-
+  actions: read
 concurrency:
-  group: talos-pr-e2e-${{ github.event.pull_request.number || github.ref }}
+  group: talos-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
 jobs:
-  change-scope:
-    name: Check product change scope
-    runs-on: ubuntu-latest
+  scope:
+    if: ${{ !cancelled() }}
+    name: Detect · module and dependency changes
+    runs-on: ubuntu-24.04
     outputs:
-      run_workflow: ${{ steps.scope.outputs.run_workflow }}
-      run_contracts: ${{ steps.scope.outputs.run_contracts }}
-      run_browser: ${{ steps.scope.outputs.run_browser }}
-      run_scenarios: ${{ steps.scope.outputs.run_scenarios }}
-      browser_targets: ${{ steps.scope.outputs.browser_targets }}
-      browser_docker: ${{ steps.scope.outputs.browser_docker }}
-      scenario_matrix: ${{ steps.scope.outputs.scenario_matrix }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Decide whether E2E checks apply
-        id: scope
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 .github/scripts/pr_change_scope.py pr-e2e
-
-  contract-tests:
-    needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_contracts == 'true') }}
-    name: Cloud adapter and Desktop enrollment tests
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - name: Check out Talos
-        uses: actions/checkout@v6
-
-      - name: Load shared toolchain versions
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RELEASE_RUST_VERSION }}
-
-      - name: Fetch locked CI dependencies
-        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
-
-      - name: Install contract test system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler ripgrep bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
-
-      - name: Cache Rust build output
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: talos-rs
-          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
-
-      - name: Install just and nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-nextest
-
-      - name: Test Worker lifecycle, Cloud, Desktop, TUI, SQLite and Provider boundaries
-        run: just test -p talos-guard-task -p talos-worker -p talos-auth -p talos-base -p talos-storage -p talos-agent -p talos-service -p talos-browser -p talos-app-server -p talos-plugin -p talos-tools -p talos-agent-kernel -p agent-protocol -p talos-tui -p talos-llm-deepseek
-
-      - name: Test E2E discovery, lifecycle and binary reuse
-        run: python3 -m unittest discover -s talos-e2e/tests -p '*_test.py' -v
-
-      - name: Test Bash output persistence and bounded log retrieval
-        run: just e2e-case 06_tools/output_logs
-
-      - name: Test isolated current-checkout Docker contexts
-        run: python3 -m unittest discover -s talos-e2e/scripts/computer_sync -p '*_test.py' -v
-
-  scenarios:
-    needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_scenarios == 'true') }}
-    name: E2E ${{ matrix.name }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix: ${{ fromJSON(needs.change-scope.outputs.scenario_matrix) }}
-
-    steps:
-      - name: Check out Talos
-        uses: actions/checkout@v6
-
-      - name: Install Linux system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bubblewrap build-essential curl libssl-dev pkg-config \
-            protobuf-compiler ripgrep sqlite3 tmux xvfb
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
-
-      - name: Load shared toolchain versions
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RELEASE_RUST_VERSION }}
-
-      - name: Fetch locked CI dependencies
-        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
-
-      - name: Cache Rust build output
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: talos-rs
-          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
-
-      - name: Install just and nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-nextest
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install Python scenario dependencies
-        run: python -m pip install --disable-pip-version-check grpcio protobuf pyyaml playwright
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.RELEASE_PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.RELEASE_NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: talos-app/pnpm-lock.yaml
-
-      - name: Install application dependencies
-        run: pnpm --dir talos-app install --frozen-lockfile
-
-      - name: Install Chrome for Linux MCP E2E
-        id: chrome
-        if: runner.os == 'Linux'
-        uses: browser-actions/setup-chrome@v1
-
-      - name: Run secretless PR scenarios
-        shell: bash
-        env:
-          E2E_TARGETS: ${{ matrix.targets }}
-          TALOS_PLAYWRIGHT_MCP_BROWSER: ${{ steps.chrome.outputs.chrome-path }}
-          TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
-        run: |
-          set -euo pipefail
-          scenario_result=0
-          while IFS= read -r target; do
-            [[ -n "${target}" ]] || continue
-            kind="${target%%:*}"
-            value="${target#*:}"
-            if [[ "${kind}" == "group" ]]; then
-              if [[ "${value}" == "14_sandbox" ]]; then docker info >/dev/null; fi
-              xvfb-run -a ./talos-e2e/run_e2e.sh --group "${value}" || scenario_result=1
-            else
-              xvfb-run -a ./talos-e2e/run_e2e.sh --case "${value}" || scenario_result=1
-            fi
-          done <<<"${E2E_TARGETS}"
-          exit "${scenario_result}"
-
-      - name: Show failed-scenario diagnostics
-        if: failure()
-        shell: bash
-        run: |
-          python3 talos-e2e/scripts/report_failures.py
-
-  gate:
-    if: ${{ always() }}
-    name: talos-pr-e2e
-    runs-on: ubuntu-latest
-    needs: [change-scope, contract-tests, scenarios, browser-worker]
-    steps:
-      - name: Require public PR contract tests and scenarios
-        env:
-          SCOPE_RESULT: ${{ needs.change-scope.result }}
-          RUN_WORKFLOW: ${{ needs.change-scope.outputs.run_workflow }}
-          RUN_CONTRACTS: ${{ needs.change-scope.outputs.run_contracts }}
-          RUN_BROWSER: ${{ needs.change-scope.outputs.run_browser }}
-          RUN_SCENARIOS: ${{ needs.change-scope.outputs.run_scenarios }}
-          CONTRACT_RESULT: ${{ needs.contract-tests.result }}
-          SCENARIO_RESULT: ${{ needs.scenarios.result }}
-          BROWSER_RESULT: ${{ needs.browser-worker.result }}
-        run: |
-          if [[ "${SCOPE_RESULT}" != "success" ]]; then
-            echo "Could not determine E2E change scope." >&2
-            exit 1
-          fi
-          case "${RUN_WORKFLOW}" in
-            false) echo "No E2E product inputs changed; E2E acceptance is not applicable."; exit 0 ;;
-            true) ;;
-            *) echo "Invalid E2E scope output." >&2; exit 1 ;;
-          esac
-          case "${RUN_CONTRACTS}" in
-            true) expected_contract=success ;;
-            false) expected_contract=skipped ;;
-            *) echo "Invalid E2E contract scope output." >&2; exit 1 ;;
-          esac
-          case "${RUN_BROWSER}" in
-            true) expected_browser=success ;;
-            false) expected_browser=skipped ;;
-            *) echo "Invalid Browser scope output." >&2; exit 1 ;;
-          esac
-          case "${RUN_SCENARIOS}" in
-            true) expected_scenarios=success ;;
-            false) expected_scenarios=skipped ;;
-            *) echo "Invalid E2E scenario scope output." >&2; exit 1 ;;
-          esac
-          if [[ "${RUN_CONTRACTS}" == "false" && "${RUN_SCENARIOS}" == "false" && "${RUN_BROWSER}" == "false" ]]; then
-            echo "Product E2E scope selected no acceptance checks." >&2; exit 1
-          fi
-          if [[ "${CONTRACT_RESULT}" != "${expected_contract}" || "${SCENARIO_RESULT}" != "${expected_scenarios}" || "${BROWSER_RESULT}" != "${expected_browser}" ]]; then
-            echo "Public PR validation failed: contract=${CONTRACT_RESULT}, scenarios=${SCENARIO_RESULT}, browser=${BROWSER_RESULT}." >&2
-            exit 1
-          fi
-          echo "Selected secretless PR checks passed."
-
-  browser-worker:
-    name: Browser Worker and Desktop media
-    needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_browser == 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    env:
-      BROWSER_TARGETS: ${{ needs.change-scope.outputs.browser_targets }}
-      BROWSER_DOCKER: ${{ needs.change-scope.outputs.browser_docker }}
-    defaults:
-      run:
-        working-directory: talos
+      plan: ${{ steps.scope.outputs.plan }}
+      build: ${{ steps.scope.outputs.build }}
+      webui: ${{ steps.scope.outputs.webui }}
+      desktop: ${{ steps.scope.outputs.desktop }}
+      tui: ${{ steps.scope.outputs.tui }}
+      server: ${{ steps.scope.outputs.server }}
+      installer: ${{ steps.scope.outputs.installer }}
     steps:
       - uses: actions/checkout@v6
         with:
-          path: talos
-      - name: Load shared toolchains
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RELEASE_RUST_VERSION }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: talos/talos-rs
-          shared-key: browser-e2e-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}
-      - name: Install Linux build and Electron dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends bubblewrap build-essential caddy curl libsqlite3-dev libssl-dev pkg-config protobuf-compiler openssl ripgrep sqlite3 xvfb libgtk-3-0 libgbm1 libnss3 libasound2t64
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-      - name: Install controlled scenario dependencies
-        run: python -m pip install --disable-pip-version-check -r talos-e2e/scripts/browser-worker/requirements.txt grpcio protobuf playwright
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ env.RELEASE_PNPM_VERSION }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.RELEASE_NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: talos/talos-app/pnpm-lock.yaml
-      - name: Verify Browser fixture workload contracts
-        run: PYTHONPATH=talos-e2e/scripts python -m unittest discover -s talos-e2e/scripts/browser-worker -p '*_test.py'
-      - name: Build the current product binaries
-        run: |
-          set -euo pipefail
-          packages=(-p talos-server -p talos-linux-sandbox -p app-server)
-          case "${BROWSER_DOCKER}" in
-            true) packages+=(-p talos-worker-bin) ;;
-            false) ;;
-            *) echo "Invalid Browser image scope output." >&2; exit 1 ;;
-          esac
-          cargo build --locked --release --manifest-path talos-rs/Cargo.toml "${packages[@]}"
-      - name: Assemble the standard packaged Worker image
-        if: env.BROWSER_DOCKER == 'true'
-        run: |
-          mkdir -p .release-product/bin
-          cp talos-rs/target/release/talos-worker talos-rs/target/release/talos-linux-sandbox-launcher .release-product/bin/
-          docker build --build-arg PRODUCT_STAGE=packaged -f build/worker/Dockerfile -t talos-worker:browser-e2e ..
-      - name: Install application dependencies
-        run: |
-          pnpm --dir talos-app install --frozen-lockfile
-          node talos-app/desktop/node_modules/electron/install.js
-      - name: Install isolated scenario Chrome
-        id: chrome
-        uses: browser-actions/setup-chrome@v1
-      - name: Run selected Browser workspace scenarios
+          fetch-depth: 0
+      - name: Select union of affected module checks
+        id: scope
         env:
-          TALOS_E2E_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
-          TALOS_E2E_WORKER_IMAGE: talos-worker:browser-e2e
-          TALOS_E2E_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/talos-server
-          TALOS_E2E_APP_SERVER_BIN: ${{ github.workspace }}/talos/talos-rs/target/release/app-server
-        run: |
-          set -euo pipefail
-          read -r -a targets <<<"${BROWSER_TARGETS}"
-          [[ "${#targets[@]}" -gt 0 ]] || { echo "Missing Browser targets." >&2; exit 1; }
-          result=0
-          for target in "${targets[@]}"; do
-            kind="${target%%:*}"
-            value="${target#*:}"
-            case "${kind}" in
-              case|group) ;;
-              *) echo "Invalid Browser target kind." >&2; exit 1 ;;
-            esac
-            xvfb-run -a ./talos-e2e/run_e2e.sh "--${kind}" "${value}" || result=1
-          done
-          exit "${result}"
-      - name: Print browser scenario failures
-        if: failure()
-        run: python3 talos-e2e/scripts/report_failures.py
-      - name: Upload browser acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@v7
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/pr_change_scope.py ci
+  build:
+    name: Build · shared E2E binaries
+    needs: scope
+    if: ${{ !cancelled() && (needs.scope.outputs.build == 'true') }}
+    uses: ./.github/workflows/ci-build.yml
+    with:
+      task: ${{ toJSON(fromJSON(needs.scope.outputs.plan).build) }}
+  webui:
+    name: WebUI
+    needs: [scope, build]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.webui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    uses: ./.github/workflows/talos-webui.yml
+    with:
+      plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.webui) }}
+  desktop:
+    name: Desktop
+    needs: [scope, build]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.desktop == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    uses: ./.github/workflows/talos-desktop.yml
+    with:
+      plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.desktop) }}
+  tui:
+    name: TUI
+    needs: [scope, build]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.tui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    uses: ./.github/workflows/talos-tui.yml
+    with:
+      plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.tui) }}
+  server:
+    name: Server · client / SDK / skills / MCP / tools / runtime
+    needs: [scope, build]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.server == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    uses: ./.github/workflows/talos-rust.yml
+    with:
+      plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.server) }}
+      mcp: ${{ fromJSON(needs.scope.outputs.plan).mcp }}
+  installer:
+    name: Installer · lightweight contracts
+    needs: scope
+    if: ${{ !cancelled() && (needs.scope.outputs.installer == 'true') }}
+    uses: ./.github/workflows/talos-tui-install.yml
+  harness:
+    name: E2E infrastructure · lifecycle and fixtures
+    needs: scope
+    if: ${{ !cancelled() && (fromJSON(needs.scope.outputs.plan).harness) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CI_TASK: '{"name":"e2e-harness","kind":"harness","rust":[],"frontend":[],"binaries":[]}'
+    steps:
+      - uses: actions/checkout@v6
+      - id: cache
+        uses: ./.github/actions/ci-cache
         with:
-          name: browser-worker-${{ runner.arch }}
-          path: |
-            talos/talos-e2e/reports/20_browser_workspace
-            talos/talos-e2e/reports/e2e_report_*
-            talos/output/browser-worker
-          if-no-files-found: warn
+          task: ${{ env.CI_TASK }}
+      - uses: actions/setup-python@v6
+        if: steps.cache.outputs.hit != 'true'
+        with:
+          python-version: '3.12'
+      - name: Install declared fixture dependencies
+        if: steps.cache.outputs.hit != 'true'
+        run: python -m pip install --disable-pip-version-check -r talos-e2e/scripts/browser-worker/requirements.txt
+      - name: Test runner and fixture contracts
+        if: steps.cache.outputs.hit != 'true'
+        env:
+          CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
+          CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
+        run: python3 .github/scripts/ci_run.py run
+  frontend-gate:
+    name: frontend-app-quality
+    if: ${{ !cancelled() }}
+    needs: [scope, webui, desktop]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected frontend check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_PLAN: ${{ needs.scope.outputs.plan }}
+        run: python3 .github/scripts/ci_gate.py frontend
+  rust-gate:
+    name: rust-format-and-check
+    if: ${{ !cancelled() }}
+    needs: [scope, server, tui]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected rust check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_PLAN: ${{ needs.scope.outputs.plan }}
+        run: python3 .github/scripts/ci_gate.py rust
+  e2e-gate:
+    name: talos-pr-e2e
+    if: ${{ !cancelled() }}
+    needs: [scope, build, webui, desktop, server, tui, harness]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected e2e check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_PLAN: ${{ needs.scope.outputs.plan }}
+        run: python3 .github/scripts/ci_gate.py e2e
+  installer-gate:
+    name: talos-tui-install-gate
+    if: ${{ !cancelled() }}
+    needs: [scope, installer]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require every selected installer check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+          CI_PLAN: ${{ needs.scope.outputs.plan }}
+        run: python3 .github/scripts/ci_gate.py installer

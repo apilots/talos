@@ -1,8 +1,10 @@
 """The before/after boundary used by every discovered scenario."""
+import errno
 import os
 from pathlib import Path
 import shutil
 import signal
+import socket as unix_socket
 import subprocess
 import sys
 
@@ -44,6 +46,19 @@ def run(script):
                 try:
                     subprocess.run(['tmux', '-S', str(socket), 'kill-server'], capture_output=True,
                                    check=True, timeout=10)
+                except subprocess.CalledProcessError as error:
+                    # tmux exits on /quit but may leave its UNIX socket behind.
+                    # Accept only a confirmed absent listener; a live server or an
+                    # inaccessible socket still makes cleanup fail.
+                    try:
+                        with unix_socket.socket(unix_socket.AF_UNIX) as probe:
+                            probe.settimeout(1)
+                            probe.connect(str(socket))
+                    except OSError as probe_error:
+                        if probe_error.errno not in (errno.ENOENT, errno.ECONNREFUSED):
+                            errors.append(f'Private tmux socket probe failed: {probe_error}')
+                    else:
+                        errors.append(f'Private tmux server cleanup failed: {error}')
                 except (OSError, subprocess.SubprocessError) as error:
                     errors.append(f'Private tmux server cleanup failed: {error}')
         try:
