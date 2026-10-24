@@ -597,9 +597,9 @@ mod tests {
             .with_round_duration_ms(12_300),
             crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
                 crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
-                vec![crate::render_runtime::common::style::StyledLine::plain(
-                    "done",
-                )],
+                crate::render_runtime::common::style::StyledLine::plain_lines(
+                    "done\n\n- follow-up",
+                ),
             ),
         ]);
 
@@ -610,14 +610,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(
-            lines,
-            vec![
-                "● persisted".to_string(),
-                String::new(),
-                "● done".to_string(),
-                String::new(),
-                "✻ Brewed for 12s".to_string(),
-            ]
+            lines.join("\n"),
+            "● persisted\n\n● done\n  \n  - follow-up\n\n✻ Brewed for 12s",
         );
     }
 

@@ -491,44 +491,14 @@ fn bullet_transcript_lines(
     bullet_style: Style,
     body_style: Style,
 ) -> Vec<RenderedChatLine> {
-    let mut rendered = Vec::new();
-    let mut first_content_line = true;
-    for (_, line) in lines {
-        let plain_text = line.plain_text();
-        for raw_line in plain_text.lines() {
-            let prefix = if first_content_line { "● " } else { "  " };
-            let prefix_style = if first_content_line {
-                bullet_style
-            } else {
-                Style::default()
-            };
-            first_content_line = false;
-            let prefix_width = text_display_width(prefix);
-            let wrapped = wrap_line_visual(
-                Line::from(Span::styled(raw_line.to_string(), body_style)),
-                content_width.saturating_sub(prefix_width),
-            );
-            for (index, wrapped_line) in wrapped.into_iter().enumerate() {
-                let actual_prefix = if index == 0 { prefix } else { "  " };
-                let display = Line::from(
-                    std::iter::once(Span::styled(actual_prefix.to_string(), prefix_style))
-                        .chain(wrapped_line.spans)
-                        .collect::<Vec<_>>(),
-                );
-                rendered.push(RenderedChatLine { display });
-            }
-        }
-    }
-
-    if rendered.is_empty() {
-        rendered.push(RenderedChatLine {
-            display: Line::from(vec![
-                Span::styled("● ", bullet_style),
-                Span::styled(String::new(), body_style),
-            ]),
-        });
-    }
-    rendered
+    // Rejoin stored lines so empty paragraph rows survive the shared text renderer.
+    prefixed_transcript_lines(
+        &transcript_projection_plain_text(lines),
+        content_width,
+        "● ",
+        bullet_style,
+        body_style,
+    )
 }
 
 fn tool_transcript_lines(
