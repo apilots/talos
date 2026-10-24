@@ -372,6 +372,10 @@ Chrome, or vice versa. A new Turn on the same kind may retain its current tab,
 but element references still require a fresh observation. Account/control-epoch
 changes also invalidate the current page, including plugin disable/re-enable after
 owned website views are closed.
+Before dispatching native CDP input, bring the selected page forward and wait
+through its first layout/paint frames. Document readiness alone does not establish
+the compositor's input hit-test surface. This wait remains cancellable and must
+not emit input after control cancellation.
 
 ## Application shell and right workspace
 

@@ -62,6 +62,32 @@ it.each(["managed","connected"] as const)("releases %s keyboard input after a fa
 
 function deferred() {let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
 
+it.each(["managed","connected"] as const)("waits for the %s page to paint before dispatching its first click",async(target)=>{
+  const waiting=deferred(),painted=deferred();
+  const {inputs,execute}=await inputFixture(target,async(method,params)=>{
+    if(method==="Runtime.evaluate"&&params.awaitPromise){waiting.resolve();await painted.promise;}
+  });
+  const clicking=execute("first",{kind:"click",element:"ref"});
+  try {
+    await waiting.promise;
+    expect(inputs).toEqual([]);
+  } finally {painted.resolve();await clicking;}
+  expect(inputs.map(input=>input.type)).toEqual(["mouseMoved","mousePressed","mouseReleased"]);
+});
+
+it.each(["managed","connected"] as const)("cancels %s input while the first page paint is pending",async(target)=>{
+  const waiting=deferred(),painted=deferred();
+  const {inputs,execute}=await inputFixture(target,async(method,params)=>{
+    if(method==="Runtime.evaluate"&&params.awaitPromise){waiting.resolve();await painted.promise;}
+  });
+  const clicking=expect(execute("first",{kind:"click",element:"ref"})).rejects.toThrow("cancelled");
+  try {
+    await waiting.promise;host.cancel("first");await clicking;
+    await execute("observe",{kind:"state"});
+    expect(inputs).toEqual([]);
+  } finally {painted.resolve();await clicking;}
+});
+
 it.each(["managed","connected"] as const)("fences subsequent %s input until cancelled input release is acknowledged",async(target)=>{
   const releasing=deferred(),acknowledged=deferred();
   const {inputs,execute}=await inputFixture(target,async(_method,params)=>{
