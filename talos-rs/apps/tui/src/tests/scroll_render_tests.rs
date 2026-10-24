@@ -431,7 +431,7 @@ fn test_live_round_is_separated_from_synced_history() {
         &mut app.render_runtime,
         "item-live",
         crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
-        "live answer",
+        "live answer\n\nSecond paragraph",
     );
     app.in_flight = true;
 
@@ -450,6 +450,8 @@ fn test_live_round_is_separated_from_synced_history() {
 
     assert!(texts[0].trim().is_empty());
     assert!(texts[1].contains("● live answer"));
+    assert!(texts[2].trim().is_empty());
+    assert!(texts[3].contains("  Second paragraph"));
 }
 
 #[test]
@@ -761,9 +763,9 @@ fn test_final_answer_preserves_newlines_with_message_bullet() {
     app.render_runtime.append_history([
         crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
             crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
-            vec![crate::render_runtime::common::style::StyledLine::plain(
-                "# Title\n\n- first\n- second",
-            )],
+            crate::render_runtime::common::style::StyledLine::plain_lines(
+                "# Title\r\n\r\nParagraph.\r\n\r\n- first\r\n- second\r\n\r\n```rust\r\nfn main() {\r\n\r\n    run();\r\n}\r\n```",
+            ),
         ),
     ]);
 
@@ -774,9 +776,26 @@ fn test_final_answer_preserves_newlines_with_message_bullet() {
         .iter()
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
-    assert!(texts.iter().any(|line| line == "● # Title"));
-    assert!(texts.iter().any(|line| line == "  - first"));
-    assert!(texts.iter().any(|line| line == "  - second"));
+    let expected = [
+        "● summarize",
+        "",
+        "● # Title",
+        "  ",
+        "  Paragraph.",
+        "  ",
+        "  - first",
+        "  - second",
+        "  ",
+        "  ```rust",
+        "  fn main() {",
+        "  ",
+        "      run();",
+        "  }",
+        "  ```",
+        "",
+        "✻ Brewed for a moment",
+    ];
+    assert_eq!(texts, expected);
 }
 
 #[test]
@@ -812,9 +831,9 @@ fn test_completed_commentary_preserves_authoritative_kind() {
     assert!(texts
         .iter()
         .any(|line| line == "● I will inspect the workspace."));
-    assert!(texts.iter().any(|line| line == "● # Summary"));
-    assert!(texts.iter().any(|line| line == "  - first"));
-    assert!(texts.iter().any(|line| line == "  - second"));
+    assert!(texts
+        .windows(4)
+        .any(|lines| lines == ["● # Summary", "  ", "  - first", "  - second"]));
 }
 
 #[test]
