@@ -74,6 +74,7 @@ jobs:
           just sandbox-base --push --tag "$IMAGE_TAG" \
             --build-arg "JUST_VERSION=${CI_JUST_VERSION}" \
             --build-arg "NEXTEST_VERSION=${CI_NEXTEST_VERSION}" \
+            --build-arg "RUST_VERSION=${RELEASE_RUST_VERSION}" \
             --metadata-file ../output/sandbox-base.json
       - name: Record digest for the source-reviewed image lock
         if: steps.image.outputs.publish == 'true'

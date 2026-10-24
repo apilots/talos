@@ -138,6 +138,9 @@ Artifact names remain stable across failed-job retries; only the build producer
 may overwrite them on a full retry. Missing or corrupt supplied artifacts fail
 rather than starting a replacement build. Debug products and test harnesses are
 separate build outputs; release installation retains release-build verification.
+Integration tests read `CARGO_BIN_EXE_<name>` at runtime so Nextest can remap
+executables extracted from an archive; compile-time `env!` embeds the producer's
+target directory. See [Nextest build reuse](https://nexte.st/docs/ci-features/archiving/).
 
 The sandbox environment is published as `ghcr.io/apilots/talos-sandbox-base` by
 `sandbox-base.yml` on owning main changes or maintainer dispatch, never by PR
@@ -154,6 +157,9 @@ publish is separate from product release installation and architecture validatio
 The local Dockerfile remains usable for standalone acceptance without supplied
 archives. CI Docker sandbox execution reuses the test archive and launcher,
 without creating a fresh target volume or compiling project/tool sources.
+The runtime image includes the checksum-verified Cargo executable matching the
+release Rust version for sandboxed development-tool acceptance, without rustc
+or a source-build toolchain.
 
 Dependency caches never count as test evidence. A separate exact-input success
 record may reuse a completed task within the same PR, runner image, architecture

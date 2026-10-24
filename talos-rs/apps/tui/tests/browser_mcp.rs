@@ -11,7 +11,9 @@ async fn bundled_browser_negotiates_stdio_before_cli_authentication_or_runtime_s
     let home = tempfile::tempdir().unwrap();
     let config = home.path().join("invalid.yaml");
     std::fs::write(&config, "invalid: [").unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_talos"))
+    let executable = std::env::var_os("CARGO_BIN_EXE_talos")
+        .expect("Cargo must provide the test executable path");
+    let mut child = Command::new(executable)
         .arg("--browser-mcp")
         .env_clear()
         .env("TALOS_HOME", home.path())
