@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +16,27 @@ from ci_plan import BINARIES, plan
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_pr_conditions_report_failures_but_allow_obsolete_runs_to_cancel(self):
+        import re
+        workflow = (ROOT / '.github/workflows/pr-e2e.yml').read_text()
+        jobs = dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)', workflow, re.M | re.S))
+        for job in ('webui', 'desktop', 'tui', 'server', 'frontend-gate', 'rust-gate', 'e2e-gate', 'installer-gate'):
+            condition = re.search(r'^    if: \$\{\{ (.*?) \}\}', jobs[job], re.M).group(1)
+            expression = condition.replace('&&', ' and ').replace('||', ' or ').replace('!', 'not ')
+            for cancelled in (False, True):
+                for build in ('success', 'skipped', 'failure'):
+                    for scope in ('success', 'failure'):
+                        for selected in ('true', 'false'):
+                            needs = SimpleNamespace(scope=SimpleNamespace(result=scope, outputs=SimpleNamespace(
+                                **{name: selected for name in ('webui', 'desktop', 'tui', 'server')})),
+                                build=SimpleNamespace(result=build))
+                            actual = eval(expression, {'__builtins__': {}, 'always': lambda: True,
+                                'cancelled': lambda: cancelled}, {'needs': needs})
+                            expected = not cancelled and (job.endswith('-gate') or (
+                                scope == 'success' and selected == 'true' and build in ('success', 'skipped')))
+                            with self.subTest(job=job, cancelled=cancelled, build=build, scope=scope, selected=selected):
+                                self.assertEqual(actual, expected)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / 'output')
         self.addCleanup(self.temp.cleanup)

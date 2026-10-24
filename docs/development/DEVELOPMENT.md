@@ -93,6 +93,10 @@ installer contracts. `talos-webui.yml` and `talos-desktop.yml` share `ci-categor
 while receiving distinct module plans. The existing five required context names remain fixed
 aggregate gates. Documentation and metadata changes skip heavy jobs while the
 policy and aggregate checks still report results.
+Module and aggregate job conditions use `!cancelled()` so failures still reach
+their gates while a new PR push can cancel obsolete work immediately. Cleanup
+and evidence-upload steps may still use `always()`.
+See [GitHub's cancellation behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation).
 
 The selector resolves Cargo and pnpm workspace ownership and reverse dependencies.
 Each changed owner contributes checks; mixed changes take their union, including

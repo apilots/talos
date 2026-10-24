@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import {mkdirSync,writeFileSync} from 'node:fs';
+import {appendFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {app,BrowserWindow} from 'electron';
 import {DesktopAppServerController} from '../../../talos-app/desktop/src/app-server-controller';
 import {handleDesktopServerRequest} from '../../../talos-app/desktop/src/desktop-server-requests';
@@ -13,7 +13,11 @@ mkdirSync(output,{recursive:true});
 app.on('window-all-closed',()=>{});
 app.setPath('userData',path.join(process.env.TALOS_HOME!,'electron-profile'));
 async function run(){await app.whenReady();
- const controller=new DesktopAppServerController({command:process.env.TALOS_APP_SERVER_BIN,env:{...process.env,TALOS_DESKTOP_HOSTNAME:'native-media-acceptance'},desktopHost:true,clientKind:'desktop',onRuntimeState:state=>console.log('RUNTIME',state),onServerRequest:request=>handleDesktopServerRequest(request)});
+ const controller=new DesktopAppServerController({command:process.env.TALOS_APP_SERVER_BIN,env:{...process.env,TALOS_DESKTOP_HOSTNAME:'native-media-acceptance'},desktopHost:true,clientKind:'desktop',onRuntimeState:state=>console.log('RUNTIME',state),onServerRequest:async request=>{
+  const started=Date.now();
+  try{return await handleDesktopServerRequest(request);}
+  finally{if(request.method==='client/desktop/frame')appendFileSync(path.join(output,'native-media-frames.jsonl'),JSON.stringify({at:started,elapsedMs:Date.now()-started,bytes:(request.params as {dataBase64?:string}).dataBase64?.length??0})+'\n');}
+ }});
  let window:BrowserWindow|undefined;
  try{
   await controller.connect();registerDesktopIpcHandlers(controller);
@@ -33,6 +37,12 @@ async function run(){await app.whenReady();
   const screenshot=await window.webContents.capturePage();writeFileSync(path.join(output,'native-docker-viewer.png'),screenshot.toPNG());
   writeFileSync(path.join(output,'native-docker-viewer.json'),JSON.stringify(result,null,2));
   console.log('NATIVE_DOCKER_MEDIA_ACCEPTANCE_PASS');
+ }catch(error){
+  if(window){
+   writeFileSync(path.join(output,'native-docker-viewer-failure.json'),JSON.stringify(await window.webContents.executeJavaScript(`({status:document.querySelector('#status')?.textContent,result:window.nativeMediaResult,diagnostics:window.nativeMediaDiagnostics})`),null,2));
+   writeFileSync(path.join(output,'native-docker-viewer-failure.png'),(await window.webContents.capturePage()).toPNG());
+  }
+  throw error;
  }finally{desktopMediaHost.reset();window?.destroy();await controller.close();await desktopBrowserHost.reset();app.quit();}
 }
 void run().catch(error=>{console.error(error);app.exit(1);});

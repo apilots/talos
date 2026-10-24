@@ -45,28 +45,28 @@ jobs:
   webui:
     name: WebUI
     needs: [scope, build]
-    if: ${{ always() && needs.scope.result == 'success' && needs.scope.outputs.webui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.webui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     uses: ./.github/workflows/talos-webui.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.webui) }}
   desktop:
     name: Desktop
     needs: [scope, build]
-    if: ${{ always() && needs.scope.result == 'success' && needs.scope.outputs.desktop == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.desktop == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     uses: ./.github/workflows/talos-desktop.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.desktop) }}
   tui:
     name: TUI
     needs: [scope, build]
-    if: ${{ always() && needs.scope.result == 'success' && needs.scope.outputs.tui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.tui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     uses: ./.github/workflows/talos-tui.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.tui) }}
   server:
     name: Server · client / SDK / skills / MCP / tools / runtime
     needs: [scope, build]
-    if: ${{ always() && needs.scope.result == 'success' && needs.scope.outputs.server == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.server == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     uses: ./.github/workflows/talos-rust.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.server) }}
@@ -105,7 +105,7 @@ jobs:
         run: python3 .github/scripts/ci_run.py run
   frontend-gate:
     name: frontend-app-quality
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [scope, webui, desktop]
     runs-on: ubuntu-24.04
     steps:
@@ -117,7 +117,7 @@ jobs:
         run: python3 .github/scripts/ci_gate.py frontend
   rust-gate:
     name: rust-format-and-check
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [scope, server, tui]
     runs-on: ubuntu-24.04
     steps:
@@ -129,7 +129,7 @@ jobs:
         run: python3 .github/scripts/ci_gate.py rust
   e2e-gate:
     name: talos-pr-e2e
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [scope, build, webui, desktop, server, tui, harness]
     runs-on: ubuntu-24.04
     steps:
@@ -141,7 +141,7 @@ jobs:
         run: python3 .github/scripts/ci_gate.py e2e
   installer-gate:
     name: talos-tui-install-gate
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [scope, installer]
     runs-on: ubuntu-24.04
     steps:
