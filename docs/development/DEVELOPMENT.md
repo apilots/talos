@@ -141,10 +141,15 @@ separate build outputs; release installation retains release-build verification.
 
 The sandbox environment is published as `ghcr.io/apilots/talos-sandbox-base` by
 `sandbox-base.yml` on owning main changes or maintainer dispatch, never by PR
-code. `.github/sandbox-base.env` pins its immutable digest for anonymous PR pulls;
-`.github/ci-toolchain.env` pins matching host/container tools. Update the image
-from the reviewed Dockerfile and version/checksum inputs, verify public pull and
-sandbox acceptance, then update its digest in a PR. The one-platform environment
+code. `.github/sandbox-base.env` records a readable environment version and its
+immutable digest, for example `talos-sandbox-base:v0.1.0@sha256:…`, for anonymous
+PR pulls. Environment versions are independent of product releases;
+`.github/ci-toolchain.env` pins matching host/container tools. To update the
+environment, dispatch the reviewed Dockerfile and version/checksum inputs with
+a new `vMAJOR.MINOR.PATCH` workflow input, verify public pull and sandbox
+acceptance, then update the version and digest together in a PR. Existing
+versions cannot be overwritten; automatic main runs verify the locked version
+instead of rebuilding it. The one-platform environment
 publish is separate from product release installation and architecture validation.
 The local Dockerfile remains usable for standalone acceptance without supplied
 archives. CI Docker sandbox execution reuses the test archive and launcher,

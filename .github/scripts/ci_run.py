@@ -188,8 +188,8 @@ def execute(task: dict, directory: Path) -> None:
             env['TALOS_TEST_ARCHIVE'] = str(verified(ROOT / 'output/ci-tests/tests-e2e.tar.zst'))
             values = dict(line.split('=', 1) for line in (ROOT / '.github/sandbox-base.env').read_text().splitlines() if '=' in line)
             image = values['CI_SANDBOX_BASE_IMAGE']
-            if not re.fullmatch(r'ghcr.io/[a-z0-9/._-]+@sha256:[0-9a-f]{64}', image):
-                raise ValueError('Sandbox base image must be digest-pinned')
+            if not re.fullmatch(r'ghcr.io/[a-z0-9/._-]+:v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)@sha256:[0-9a-f]{64}', image):
+                raise ValueError('Sandbox base image must have a semantic version and immutable digest')
             run('docker', 'pull', image)
             env['SANDBOX_DOCKER_IMAGE'] = image
         for binary in task['binaries']:

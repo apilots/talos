@@ -17,6 +17,7 @@ from ci_plan import plan
 
 class CompiledArtifactsTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / 'output').mkdir(exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / 'output')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -95,3 +96,26 @@ class CompiledArtifactsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Missing compiled artifact'):
                 ci_run.execute(sandbox,self.root/'cache')
             execute.assert_not_called()
+
+    def test_sandbox_requires_versioned_digest_before_execution(self):
+        selected = plan(['.github/release-toolchain.env'])
+        task = next(t for t in selected['categories']['server']['scenarios']['include'] if t['targets']=='group:14_sandbox')
+        archive = self.root / 'output/ci-tests/tests-e2e.tar.zst'
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(b'compiled tests'); ci_artifacts.seal(archive)
+        helper = self.root / 'output/ci-binaries/talos-linux-sandbox-launcher'
+        helper.parent.mkdir(); helper.write_bytes(b'launcher'); helper.chmod(0o755)
+        lock = self.root / '.github/sandbox-base.env'
+        lock.parent.mkdir()
+        valid = (ROOT / '.github/sandbox-base.env').read_text().strip().split('=', 1)[1]
+        version = valid.split('@')[0].rsplit(':', 1)[1]
+        for image in (valid, valid.split('@')[0], valid.replace(':' + version, ''), valid.replace(':' + version, ':v01.1.0')):
+            lock.write_text('CI_SANDBOX_BASE_IMAGE=' + image + '\n')
+            with patch.object(ci_run, 'ROOT', self.root), patch.object(ci_run, 'run') as execute:
+                if image == valid:
+                    ci_run.execute(task, self.root / 'cache')
+                    self.assertEqual(execute.call_args_list[0].args, ('docker', 'pull', valid))
+                else:
+                    with self.assertRaisesRegex(ValueError, 'semantic version and immutable digest'):
+                        ci_run.execute(task, self.root / 'cache')
+                    execute.assert_not_called()

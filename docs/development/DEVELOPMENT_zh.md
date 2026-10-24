@@ -151,8 +151,11 @@ just clean-incremental
 
 `ghcr.io/apilots/talos-sandbox-base` 由 `sandbox-base.yml` 在所属文件的
 main 变更或维护者手动触发时发布，PR 不获得发布权限。工具版本记录在
-`.github/ci-toolchain.env`，消费镜像的不可变 digest 记录在
-`.github/sandbox-base.env`。更新流程为构建并发布经审查的基础环境、验证
-匿名拉取及沙箱验收，再通过 PR 更新 digest。此单平台测试环境发布独立于
+`.github/ci-toolchain.env`，镜像使用独立于产品发行的语义版本，例如
+`talos-sandbox-base:v0.1.0@sha256:…`，版本及不可变 digest 一起记录在
+`.github/sandbox-base.env`。更新流程为从经审查的 Dockerfile 和工具输入
+手动触发工作流，填写新的 `vMAJOR.MINOR.PATCH`，验证匿名拉取及沙箱验收，
+再通过 PR 同时更新版本与 digest。已有版本禁止覆盖；main 自动触发时验证
+当前锁定版本，不重复构建。此单平台测试环境发布独立于
 产品发行安装和多架构验证；Docker 沙箱消费归档时不创建新 target 卷或编译
 项目及工具源码，本地无归档的独立验收仍保留原有编译入口。

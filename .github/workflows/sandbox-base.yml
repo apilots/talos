@@ -1,18 +1,24 @@
 name: CI environment · sandbox base image
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: New environment version (vMAJOR.MINOR.PATCH); empty verifies the locked version
+        type: string
+        default: ''
   push:
     branches: [main]
     paths:
       - talos-rs/crates/action/linux-sandbox/tests/docker/ubuntu-24.04.Dockerfile
       - .github/ci-toolchain.env
+      - .github/sandbox-base.env
       - .github/release-toolchain.env
       - .github/workflows/sandbox-base.yml
 permissions:
   contents: read
   packages: write
 concurrency:
-  group: sandbox-base-${{ github.ref }}
+  group: sandbox-base-publish
   cancel-in-progress: false
 jobs:
   publish:
@@ -21,8 +27,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - name: Load pinned tools
-        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
+      - name: Load pinned tools and image
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env .github/sandbox-base.env >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ env.CI_JUST_VERSION }}
@@ -32,12 +38,43 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish immutable source tag
+      - name: Resolve immutable environment version
+        id: image
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          locked_tag="${CI_SANDBOX_BASE_IMAGE%@*}"
+          repository="${locked_tag%:*}"
+          version="${REQUESTED_VERSION:-${locked_tag##*:}}"
+          [[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Expected vMAJOR.MINOR.PATCH" >&2; exit 1; }
+          image="${repository}:${version}"
+          scope="${repository#ghcr.io/}"
+          token="$(curl --fail --silent --show-error --retry 3 "https://ghcr.io/token?service=ghcr.io&scope=repository:${scope}:pull" | jq -er .token)"
+          status="$(curl --silent --show-error --retry 3 --head --dump-header headers.txt --output /dev/null --write-out '%{http_code}' \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/${scope}/manifests/${version}")"
+          case "$status" in
+            200)
+              digest="$(awk 'tolower($1) == "docker-content-digest:" {gsub("\r", "", $2); print $2}' headers.txt)"
+              [[ "${image}@${digest}" == "$CI_SANDBOX_BASE_IMAGE" ]] || { echo "Version already exists; choose a new version instead of overwriting ${image}" >&2; exit 1; }
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "Verified existing ${image}@${digest}; version is immutable." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Registry lookup failed (${status}); refusing to publish." >&2; exit 1 ;;
+          esac
+          echo "tag=${image}" >> "$GITHUB_OUTPUT"
+      - name: Publish new semantic version
+        if: steps.image.outputs.publish == 'true'
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: |
           mkdir -p output
-          just sandbox-base --push --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/talos-sandbox-base:sha-${GITHUB_SHA}" \
+          just sandbox-base --push --tag "$IMAGE_TAG" \
             --build-arg "JUST_VERSION=${CI_JUST_VERSION}" \
             --build-arg "NEXTEST_VERSION=${CI_NEXTEST_VERSION}" \
             --metadata-file ../output/sandbox-base.json
       - name: Record digest for the source-reviewed image lock
+        if: steps.image.outputs.publish == 'true'
         run: cat output/sandbox-base.json >> "$GITHUB_STEP_SUMMARY"
