@@ -317,7 +317,7 @@ and can expose native form-control colors.
 | `hover` | Black at 2.5% | White at 3% | Neutral interactive hover over the owning surface |
 | `selected` | Black at 5% | White at 6% | Navigation/control selection blended over its owning surface |
 | `selectedBorder` | `#DADDE1` | `#474C53` | Bordered selection controls |
-| `accent` | `#3B82F6` | `#3B82F6` | Feature emphasis such as reasoning depth and Fast controls |
+| `accent` | `#3B82F6` | `#3B82F6` | Feature emphasis such as reasoning depth, Fast controls and context usage |
 | `actionHover` | `#3D434B` | `#D2D8E1` | Inverse primary-action hover |
 | `ink`, `muted` | `#282C32`, `#5F6772` | `#E9ECF0`, `#C0C8D2` | Main and supporting text |
 

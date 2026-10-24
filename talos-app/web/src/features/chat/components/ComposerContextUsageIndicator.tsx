@@ -28,7 +28,7 @@ export function ComposerContextUsageIndicator({
     >
       <svg aria-hidden="true" className="h-[18px] w-[18px] -rotate-90" viewBox="0 0 20 20">
         <circle
-          className="text-success/20"
+          className="text-accent/20"
           cx="10"
           cy="10"
           fill="none"
@@ -38,7 +38,7 @@ export function ComposerContextUsageIndicator({
           strokeWidth="2.5"
         />
         <circle
-          className="text-success transition-[stroke-dasharray] duration-300"
+          className="text-accent transition-[stroke-dasharray] duration-300"
           cx="10"
           cy="10"
           fill="none"
