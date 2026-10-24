@@ -50,7 +50,8 @@ jobs:
         run: python3 .github/scripts/ci_run.py run
       - uses: actions/upload-artifact@v7
         with:
-          name: ci-binaries-${{ github.run_attempt }}
+          name: ci-binaries
+          overwrite: true
           path: ${{ steps.cache.outputs.path }}/binaries.tar.gz
           if-no-files-found: error
           compression-level: 0

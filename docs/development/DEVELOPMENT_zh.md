@@ -88,6 +88,8 @@ PR 运行，发行打包检查不能替代这些场景。重型安装仅在发�
 所有 Linux E2E 所需二进制通过一次 `just build --locked` 编译，并以保留执行权限的压缩
 artifact 交给同一 workflow run 的场景。普通产品 E2E 使用 debug；安装与发布仍验证 release。
 显式提供的二进制缺失时直接失败，不临时重编。Cargo 依赖缓存先恢复，再执行 locked fetch。
+二进制 artifact 在同一 workflow run 内使用固定名称，单独重跑失败 job 时可复用已经成功的
+上游构建；完整重跑则覆盖该 run 的产物。产物过期后需重新运行构建。
 
 依赖缓存不是测试证据。独立成功记录只在同一 PR、runner 镜像、架构和 UTC 日期内，完整
 任务输入指纹匹配时复用。指纹包含任务命令/范围、当前合并树源码、传递依赖、manifest/锁、

@@ -148,7 +148,7 @@ jobs:
       - uses: actions/download-artifact@v8
         if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}
         with:
-          name: ci-binaries-${{ github.run_attempt }}
+          name: ci-binaries
           path: output/ci-binaries
       - name: Unpack current-run product binaries
         if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}

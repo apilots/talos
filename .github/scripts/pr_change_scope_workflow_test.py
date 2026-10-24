@@ -16,6 +16,21 @@ from ci_plan import BINARIES, plan
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_partial_retry_consumes_same_run_binary_without_rerunning_build(self):
+        import re
+        build = (ROOT / '.github/workflows/ci-build.yml').read_text()
+        scenario = (ROOT / '.github/workflows/ci-category.yml').read_text()
+        producer = re.search(r'name: (ci-binaries[^\n]*)', build).group(1)
+        consumer = re.search(r'name: (ci-binaries[^\n]*)', scenario).group(1)
+        render = lambda name, attempt: name.replace('${{ github.run_attempt }}', str(attempt))
+        # A failed-job retry keeps the successful build and its attempt-one artifact.
+        artifacts = {render(producer, 1): 'same-run-compiled-product'}
+        for attempt in (2, 3):
+            self.assertEqual(artifacts.get(render(consumer, attempt)), 'same-run-compiled-product')
+        # A full retry may rebuild, so its sole producer must replace the old upload.
+        upload = build.split('uses: actions/upload-artifact@v7', 1)[1]
+        self.assertRegex(upload, r'overwrite: true')
+
     def test_pr_conditions_report_failures_but_allow_obsolete_runs_to_cancel(self):
         import re
         workflow = (ROOT / '.github/workflows/pr-e2e.yml').read_text()

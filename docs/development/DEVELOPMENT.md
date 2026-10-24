@@ -129,6 +129,9 @@ current workflow run supplies each scenario. Ordinary product E2E uses debug
 binaries; native installation and publication retain release build verification.
 A missing supplied binary fails explicitly rather than compiling an unplanned
 replacement. Rust dependency caches restore before `cargo fetch --locked`.
+The binary artifact name is stable within a workflow run: a failed-job-only retry
+can consume its successful upstream build without inventing a new attempt's product.
+A full retry replaces that run's artifact. After artifact expiry, rerun the build.
 
 Dependency caches never count as test evidence. A separate exact-input success
 record may reuse a completed task within the same PR, runner image, architecture
