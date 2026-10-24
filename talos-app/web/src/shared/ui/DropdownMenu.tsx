@@ -11,5 +11,5 @@ export const DropdownMenuContent = forwardRef<ElementRef<typeof MenuPrimitive.Co
 });
 
 export const DropdownMenuItem = forwardRef<ElementRef<typeof MenuPrimitive.Item>, ComponentPropsWithoutRef<typeof MenuPrimitive.Item>>(function DropdownMenuItem({ className, ...props }, ref) {
-  return <MenuPrimitive.Item {...props} className={cn("flex min-h-9 cursor-default select-none items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-surface data-[disabled]:opacity-40", className)} ref={ref} />;
+  return <MenuPrimitive.Item {...props} className={cn("flex min-h-9 cursor-default select-none items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none data-[highlighted]:bg-hover data-[disabled]:opacity-40", className)} ref={ref} />;
 });

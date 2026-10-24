@@ -63,7 +63,7 @@ export function SidebarAccountMenu({
           title={authUsername}
           aria-label={authUsername}
           aria-expanded={open}
-          className={`flex items-center rounded-[0.95rem] py-2 text-left transition hover:bg-selected/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 ${compact ? "size-10 justify-center" : "w-full gap-3 px-3"}`}
+          className={`flex items-center rounded-[0.95rem] py-2 text-left transition hover:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 ${compact ? "size-10 justify-center" : "w-full gap-3 px-3"}`}
           onClick={() => setOpen((value) => !value)}
           type="button"
         >
@@ -96,7 +96,7 @@ function AccountPopover({
   onLogout: SidebarAccountMenuProps["onLogout"];
 }) {
   return (
-    <div className={`absolute bottom-[calc(100%+0.65rem)] z-50 overflow-hidden rounded-[1.1rem] border border-border bg-card px-3 py-2 shadow-panel ${compact ? "left-0 w-60" : "left-0 right-0"}`}>
+    <div className={`absolute bottom-[calc(100%+0.65rem)] z-50 overflow-hidden rounded-[var(--radius-panel)] border border-border bg-card px-3 py-2 shadow-panel ${compact ? "left-0 w-60" : "left-0 right-0"}`}>
       <AccountMenuSection>
         <MenuStaticRow icon={<UserCircle aria-hidden="true" size={16} />} label={authUsername} muted />
         <MenuStaticRow icon={<Settings2 aria-hidden="true" size={16} />} label={`${accountLabel} account`} muted />
@@ -108,7 +108,7 @@ function AccountPopover({
       <div className="py-1.5">
         {authStatus !== "open" ? (
           <button
-            className="flex h-9 w-full items-center gap-3 rounded-[var(--radius-control)] px-2 text-left text-sm text-ink transition hover:bg-background/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="flex h-9 w-full items-center gap-3 rounded-[var(--radius-control)] px-2 text-left text-sm text-ink transition hover:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             onClick={() => {
               onClose();
               void onLogout();
@@ -158,7 +158,7 @@ function MenuLink({
 }) {
   return (
     <NavLink
-      className="flex h-9 items-center gap-3 rounded-[var(--radius-control)] px-2 text-sm text-ink transition hover:bg-background/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+      className="flex h-9 items-center gap-3 rounded-[var(--radius-control)] px-2 text-sm text-ink transition hover:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
       onClick={onClose}
       to={to}
     >

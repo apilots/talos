@@ -12,7 +12,7 @@ export function SidebarProjectActionsMenu({
 }: SidebarProjectActionsMenuProps) {
   return (
     <div
-      className="absolute right-2 top-8 z-40 w-[12.5rem] overflow-hidden rounded-[1.1rem] border border-border bg-card p-2 shadow-panel"
+      className="absolute right-2 top-8 z-40 w-[12.5rem] overflow-hidden rounded-[var(--radius-panel)] border border-border bg-card p-2 shadow-panel"
       data-sidebar-project-menu-root=""
     >
       <ProjectMenuButton icon={<Pencil aria-hidden="true" size={16} />} label="Rename project" onClick={onRename} />
@@ -32,7 +32,7 @@ function ProjectMenuButton({
 }) {
   return (
     <button
-      className="flex h-9 w-full items-center gap-3 rounded-[var(--radius-control)] px-2 text-left text-sm text-ink transition hover:bg-background/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+      className="flex h-9 w-full items-center gap-3 rounded-[var(--radius-control)] px-2 text-left text-sm text-ink transition hover:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
       onClick={onClick}
       type="button"
     >

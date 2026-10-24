@@ -14,7 +14,7 @@ export function WaitingMessageMenuButton({
 }) {
   return (
     <button
-      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-ink/80 hover:bg-muted/10 disabled:text-muted/40"
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-ink/80 hover:bg-hover disabled:text-muted/40"
       disabled={disabled}
       onClick={onClick}
       type="button"

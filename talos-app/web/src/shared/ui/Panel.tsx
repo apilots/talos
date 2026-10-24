@@ -8,7 +8,7 @@ export function Panel({ children, className, ...props }: PropsWithChildren<Panel
   return (
     <div
       className={cn(
-        "rounded-[var(--radius-panel)] border border-border/80 bg-card shadow-panel",
+        "rounded-[var(--radius-panel)] border border-border bg-card shadow-none",
         className,
       )}
       {...props}

@@ -13,3 +13,16 @@ it("clamps the 1024px layout instead of squeezing the composer or overflowing",(
  expect(result.sidebar).toBe(288);expect(result.workspace).toBe(360);
  expect(layoutWidths(1384,true,true,340,600).sidebar).toBe(340);
 });
+
+it("opens an unconfigured workspace compactly and preserves the main conversation area",()=>{
+ const available=1440-56;
+ const result=layoutWidths(available,true,true,296,null);
+ expect(result.workspace).toBe(480);
+ expect(available-result.sidebar-result.workspace).toBeGreaterThan(result.workspace);
+ expect(layoutWidths(1920-56,false,true,296,null).workspace).toBe(480);
+});
+it("preserves a user-resized workspace instead of applying the opening default again",()=>{
+ expect(layoutWidths(1560-56,true,true,296,700).workspace).toBe(700);
+ expect(layoutWidths(1560-56,false,true,296,700).workspace).toBe(700);
+ expect(layoutWidths(1024-56,true,true,296,null).workspace).toBe(360);
+});

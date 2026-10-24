@@ -37,7 +37,12 @@ it.each(["en", "zh-CN"] as const)("renders custom connection, KV and deletion te
   expect(screen.getByRole("dialog", { name: chinese ? "新增 Provider" : "Add Provider" })).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText(chinese ? "显示名称" : "Display name"), { target: { value: "LLM Gateway" } });
   fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "javascript:invalid" } });
-  expect(screen.getByRole("combobox", { name: chinese ? "接口格式" : "API format" })).toHaveTextContent(chinese ? "聊天补全" : "Chat Completions");
+  const apiFormat = screen.getByRole("combobox", { name: chinese ? "接口格式" : "API format" });
+  expect(apiFormat).toHaveTextContent("Chat Completions");
+  for (const label of ["Messages", "Responses", "Chat Completions"]) {
+    await selectOption(apiFormat, label);
+    expect(apiFormat).toHaveTextContent(label);
+  }
   expect(screen.getByLabelText(chinese ? "API Key （可选）" : "API Key (optional)")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: chinese ? "保存" : "Save" }));
   expect(screen.getByRole("alert")).toHaveTextContent(chinese ? "请填写名称及有效的 HTTP(S) Base URL" : "Enter a name and a valid HTTP(S) Base URL");

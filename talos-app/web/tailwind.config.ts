@@ -6,12 +6,18 @@ export default {
   theme: {
     extend: {
       colors: {
+        overlay: "rgb(var(--color-overlay) / var(--overlay-opacity))",
         background: "rgb(var(--color-background) / <alpha-value>)",
         sidebar: "rgb(var(--color-sidebar) / <alpha-value>)",
         card: "rgb(var(--color-card) / <alpha-value>)",
         border: "rgb(var(--color-border) / <alpha-value>)",
+        divider: "rgb(var(--color-divider) / <alpha-value>)",
+        headerBorder: "rgb(var(--color-header-border) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",
-        selected: "rgb(var(--color-selected) / <alpha-value>)",
+        hover: "rgb(var(--color-hover) / var(--hover-opacity))",
+        selectedBorder: "rgb(var(--color-selected-border) / <alpha-value>)",
+        actionHover: "rgb(var(--color-action-hover) / <alpha-value>)",
+        selected: "rgb(var(--color-selected) / var(--selected-opacity))",
         ink: "rgb(var(--color-ink) / <alpha-value>)",
         muted: "rgb(var(--color-muted) / <alpha-value>)",
         brand: "rgb(var(--color-brand) / <alpha-value>)",
@@ -20,6 +26,14 @@ export default {
         danger: "rgb(var(--color-danger) / <alpha-value>)",
         success: "rgb(var(--color-success) / <alpha-value>)",
         info: "rgb(var(--color-info) / <alpha-value>)",
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        activity: {
+          empty: "rgb(var(--color-activity-empty) / <alpha-value>)",
+          1: "rgb(var(--color-activity-1) / <alpha-value>)",
+          2: "rgb(var(--color-activity-2) / <alpha-value>)",
+          3: "rgb(var(--color-activity-3) / <alpha-value>)",
+          4: "rgb(var(--color-activity-4) / <alpha-value>)",
+        },
       },
       boxShadow: {
         panel: "var(--shadow-panel)",

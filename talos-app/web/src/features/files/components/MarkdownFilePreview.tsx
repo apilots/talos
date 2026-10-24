@@ -38,8 +38,8 @@ export function MarkdownFilePreview({ fileId, connectionKey }: { fileId: string;
   };
 
   return (
-    <section aria-label={t("preview.title")} className="flex h-full min-h-0 flex-col bg-card">
-      <div className="flex items-center gap-2.5 border-b border-border/70 px-5 py-3">
+    <section aria-label={t("preview.title")} className="flex h-full min-h-0 flex-col bg-background">
+      <div className="flex items-center gap-2.5 border-b border-divider bg-surface px-5 py-3">
         <FileText aria-hidden="true" className="shrink-0 text-muted" size={16} />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{metadata.data?.originalFilename ?? t("preview.title")}</span>
         <span className="text-[11px] text-muted">{t("preview.readOnly")}</span>
@@ -47,7 +47,7 @@ export function MarkdownFilePreview({ fileId, connectionKey }: { fileId: string;
       {error ? (
         <div className="m-5 rounded-xl border border-danger/25 bg-danger/5 p-4">
           <p className="text-sm text-danger" role="alert">{userVisibleErrorMessage(error, t("preview.loadFailed"))}</p>
-          <button className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-ink outline-none hover:bg-background focus-visible:ring-2 focus-visible:ring-brand/40" onClick={() => { void (metadata.error ? metadata.refetch() : content.refetch()); }} type="button">
+          <button className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-ink outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40" onClick={() => { void (metadata.error ? metadata.refetch() : content.refetch()); }} type="button">
             <RotateCw aria-hidden="true" size={13} />{t("preview.retry")}
           </button>
         </div>

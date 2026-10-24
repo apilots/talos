@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useState } from "react";
 
 import { cn } from "@/shared/lib/cn";
@@ -53,8 +54,8 @@ export function ProfileActivityHeatmap({
               className={cn(
                 "rounded-[calc(var(--radius-control)-0.25rem)] px-4 py-1 font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30",
                 mode === activityMode
-                  ? "bg-background text-brand shadow-sm"
-                  : "hover:text-ink",
+                  ? selectionClasses.selected
+                  : selectionClasses.idle,
               )}
               key={activityMode}
               onClick={() => setMode(activityMode)}

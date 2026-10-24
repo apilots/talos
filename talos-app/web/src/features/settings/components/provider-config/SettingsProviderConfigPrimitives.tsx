@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
@@ -31,7 +32,7 @@ export function SettingsProviderTabs<TKey extends string>({
           <button
             className={[
               "flex flex-1 items-center justify-center gap-1.5 rounded-[0.75rem] px-3 py-2 text-sm font-medium transition",
-              isActive ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
+              isActive ? selectionClasses.selected : selectionClasses.idle,
             ].join(" ")}
             key={key}
             onClick={() => onChange(key)}
@@ -64,7 +65,7 @@ export function SettingsProviderKeyField({
   onClear,
 }: SettingsProviderKeyFieldProps) {
   return (
-    <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
+    <div className="flex items-center gap-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/40 px-4 py-3">
       <span className="w-24 shrink-0 text-sm text-muted">{label}</span>
       <Input
         aria-label={label}

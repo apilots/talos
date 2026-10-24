@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useState } from "react";
 import {Globe2, Loader2, Monitor, PanelTop} from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -38,7 +39,7 @@ export function ComputerBrowserConfiguration({nodeId}: {nodeId:string}) {
           {browser.targets.map((target) => {
             const chosen=browser.selectedTargetId===target.targetId;
             const Icon=target.kind==="connected" ? Globe2 : browser.host==="desktop" ? PanelTop : Monitor;
-            return <label key={target.targetId} className={cn("flex cursor-pointer items-start gap-3 border-b border-border/70 p-4 text-sm transition-colors last:border-0 hover:bg-surface/60",chosen&&"bg-surface/60",busy||!browser.enabled?"cursor-default":"")}>
+            return <label key={target.targetId} className={cn("flex cursor-pointer items-start gap-3 border-b border-border/70 p-4 text-sm transition-colors last:border-0 hover:bg-hover",chosen&&selectionClasses.selected,busy||!browser.enabled?"cursor-default":"")}>
               <input type="radio" name="browser-target" className="mt-1 accent-brand" checked={chosen}
                 onChange={() => void operate({ kind: "selectTarget", targetId: target.targetId, expectedRevision: browser.control.revision })} />
               <div className="min-w-0 flex-1 space-y-2">

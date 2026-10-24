@@ -45,7 +45,7 @@ export function McpServerList({
       <div className="mb-4 flex items-center justify-between gap-4">
         <h3 className="text-sm font-semibold text-ink">{title}</h3>
         <button
-          className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-control)] border border-border/80 bg-card/50 px-3 text-sm font-medium text-ink transition hover:bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+          className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-control)] border border-border/80 bg-card/50 px-3 text-sm font-medium text-ink transition hover:bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
           onClick={onAdd}
           type="button"
         >
@@ -109,7 +109,7 @@ function McpServerRow({
       </span>
       {!builtin ? <button
         aria-label={t("settings:mcpServers.openPlugin")}
-        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-card/80 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         disabled={busy}
         onClick={onOpen}
         type="button"
@@ -120,7 +120,7 @@ function McpServerRow({
         aria-label={server.enabled ? t("plugins:actions.disable") : t("plugins:actions.enable")}
         className={cn(
           "flex size-9 items-center justify-center rounded-[var(--radius-control)] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30",
-          server.enabled ? "text-brand hover:bg-card/80" : "text-muted hover:bg-card/80 hover:text-ink",
+          server.enabled ? "text-brand hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink",
         )}
         disabled={busy}
         onClick={server.enabled ? onDisable : onEnable}

@@ -73,7 +73,7 @@ export function WaitingMessages({ controller }: WaitingMessagesProps) {
           const steering = steeringMessageIds.has(message.id);
           return (
             <div
-              className={`group relative flex min-h-9 items-center gap-2 rounded-md px-1.5 py-1${steering ? "" : " hover:bg-muted/5"}`}
+              className={`group relative flex min-h-9 items-center gap-2 rounded-md px-1.5 py-1${steering ? "" : " hover:bg-hover"}`}
               key={message.id}
             >
               {editing ? (

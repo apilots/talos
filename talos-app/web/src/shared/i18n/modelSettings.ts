@@ -107,7 +107,7 @@ export const modelSettingsResources = {
     deleteModelDetail: "该模型将从当前 Provider 中移除。保存更改后生效。",
     providerDetail: "连接自定义模型服务。",
     apiFormat: "接口格式",
-    apiFormatChat: "聊天补全",
+    apiFormatChat: "Chat Completions",
     reasoningReplay: "思考历史",
     reasoningReplay_protocol_default: "遵循协议默认",
     reasoningReplay_omit: "不回传思考",

@@ -6,7 +6,7 @@ import { Panel } from "@/shared/ui/Panel";
 export function CommandPalette() {
   const { t } = useTranslation("common");
   return (
-    <Panel className="rounded-[1.25rem] border-border/80 bg-card/88 p-4">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.88] p-4">
       <div className="flex items-center gap-3 text-sm text-muted">
         <Search size={16} />
         <span>{t("commandPalettePlaceholder")}</span>

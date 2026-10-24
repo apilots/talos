@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { Fragment, useLayoutEffect, useRef } from "react";
 import { Box, ChartNoAxesColumn, Eraser, Gauge, Package, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -58,7 +59,7 @@ export function ComposerSuggestionMenu({
     <div
       aria-label={t("composerSuggestions")}
       className={cn(
-        "absolute bottom-[calc(100%+10px)] left-0 right-0 z-50 mx-auto max-h-[min(520px,42vh)] w-full overflow-hidden rounded-[1.35rem] border border-border/70 bg-card px-2 py-2 shadow-[0_24px_64px_rgba(20,24,32,0.16)]",
+        "absolute bottom-[calc(100%+10px)] left-0 right-0 z-50 mx-auto max-h-[min(520px,42vh)] w-full overflow-hidden rounded-[var(--radius-panel)] border border-border/70 bg-card px-2 py-2 shadow-panel",
         loading && "min-h-[min(420px,42vh)]",
       )}
       data-testid="composer-suggestions"
@@ -151,7 +152,7 @@ export function ComposerSuggestionMenu({
 function rowClassName(selected: boolean) {
   return cn(
     "grid min-h-12 w-full grid-cols-[1.25rem_minmax(8rem,auto)_minmax(0,1fr)] items-center gap-3 rounded-2xl px-2.5 py-2 text-left outline-none transition-colors focus:outline-none",
-    selected ? "bg-muted/15" : "hover:bg-muted/10",
+    selected ? selectionClasses.selected : selectionClasses.idle,
   );
 }
 

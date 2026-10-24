@@ -37,10 +37,10 @@ export function ComposerSubmitButton({
         "flex h-9 w-9 shrink-0 items-center justify-center rounded-full outline-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/25",
         isCancelling && "animate-pulse",
         isBusy
-          ? "bg-ink text-background hover:bg-ink/85"
+          ? "bg-ink text-background hover:bg-actionHover"
           : !canSubmit || disabled
             ? "cursor-not-allowed bg-muted/20 text-muted/45"
-            : "bg-brand text-background hover:bg-brand/85",
+            : "bg-brand text-background hover:bg-actionHover",
       )}
       data-smoke="chat-composer-send"
       data-state={state}

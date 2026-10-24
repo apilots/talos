@@ -27,7 +27,7 @@ export function SettingsGeneralSection({
         />
       </div>
 
-      <Panel className="rounded-[1.45rem] border-border/80 bg-card/82 p-6">
+      <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-6">
         <SectionHeader
           icon={<Globe2 size={18} />}
           subtitle={t("settings:fields.languageDetail")}

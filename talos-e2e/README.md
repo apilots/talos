@@ -177,7 +177,9 @@ system Chrome instance against real Server/File APIs. Only upstream Auth is a
 contract fixture. Deterministic local previews cover independent same-URL tabs,
 retained form state across switching/collapse, keyboard selection, native modal
 and Escape focus, close/account-scope destruction, and authenticated Markdown
-rendering with non-owner metadata/content rejection. Web-only changes run this
+rendering with non-owner metadata/content rejection. It also checks the compact
+workspace opening width, retained drag width and transparent expanded/narrow
+backdrops. Web-only changes run this
 case alongside Computer registration without requiring a Docker Worker or model.
 Desktop-only source/resource changes select native cases `20/02`, `20/03`, and
 `20/04` through the standard runner in the dedicated Browser job. Media, preload,

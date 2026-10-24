@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
@@ -92,9 +93,9 @@ export function SettingsNavigation({ activeSection, canManageConfig, canOpenAcco
   };
 
   return (
-    <aside className="flex h-screen w-full flex-col border-r border-border/70 bg-sidebar px-4 py-5">
+    <aside className="flex h-screen w-full flex-col border-r border-divider bg-sidebar px-4 py-5">
       <Link
-        className="mb-7 inline-flex items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-sm text-muted transition hover:bg-selected/60 hover:text-ink"
+        className="mb-7 inline-flex items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-sm text-muted transition hover:bg-hover hover:text-ink"
         to="/"
       >
         <ArrowLeft size={15} />
@@ -155,8 +156,8 @@ function NavigationGroup({
           const Icon = item.icon;
           const isCurrent = item.external ? false : activeSection === item.id;
           const className = cn(
-            "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-selected/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30",
-            isCurrent && "bg-selected text-ink",
+            "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm transition focus-visible:ring-2 focus-visible:ring-brand/30",
+            isCurrent ? selectionClasses.selected : selectionClasses.idle,
             item.external && "disabled:cursor-not-allowed disabled:opacity-55",
           );
 

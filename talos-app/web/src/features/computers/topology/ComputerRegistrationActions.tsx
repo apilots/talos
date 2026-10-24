@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -46,7 +47,7 @@ export function ComputerRegistrationActions({ node, pending, onToggleAccess, onD
         {t("computers:removeRegistration")}
       </Button>
       {confirming ? createPortal(
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]" onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
+        <div className={`fixed inset-0 z-[1000] flex items-center justify-center px-4 ${overlayClasses.tint}`} onClick={(event) => { if (event.target === event.currentTarget) close(); }}>
           <div role="dialog" aria-modal="true" aria-labelledby="computer-remove-title" aria-describedby="computer-remove-description"
             className="w-full max-w-lg rounded-[var(--radius-panel)] border border-border bg-card p-6 shadow-panel"
             onKeyDown={(event) => {
@@ -63,7 +64,7 @@ export function ComputerRegistrationActions({ node, pending, onToggleAccess, onD
             <p className="mt-3 text-sm leading-6 text-muted">{t("computers:removeRetention")}</p>
             {mutation.error ? <p role="alert" className="mt-4 text-sm text-danger">{userVisibleErrorMessage(mutation.error, t("computers:removeError"))}</p> : null}
             <div className="mt-6 flex justify-end gap-3">
-              <button ref={cancel} type="button" disabled={mutation.isPending} onClick={close} className="rounded-[var(--radius-control)] px-3.5 py-2.5 text-sm text-muted hover:bg-surface">{t("common:cancel")}</button>
+              <button ref={cancel} type="button" disabled={mutation.isPending} onClick={close} className="rounded-[var(--radius-control)] px-3.5 py-2.5 text-sm text-muted hover:bg-hover">{t("common:cancel")}</button>
               <Button variant="danger" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{t(mutation.isPending ? "computers:removing" : "computers:removeRegistration")}</Button>
             </div>
           </div>

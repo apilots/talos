@@ -19,7 +19,7 @@ export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisib
     <div role="group" aria-label={t("navigation.history")} className="flex shrink-0 items-center gap-0.5">
       <Button variant="ghost" className="p-2" aria-label={t("navigation.back")} onClick={() => navigate(-1)}><ArrowLeft aria-hidden="true" size={16} /></Button>
       <Button variant="ghost" className="p-2" aria-label={t("navigation.forward")} onClick={() => navigate(1)}><ArrowRight aria-hidden="true" size={16} /></Button>
-      <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link>
+      <Link to="/" aria-label={t("navigation.newChat")} className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><PencilLine aria-hidden="true" size={16} /></Link>
     </div>
 
   </div>;
@@ -52,7 +52,7 @@ export function AppSessionContext() {
 /** A header belongs to one full-height region, with its own vertical boundary. */
 export function AppTopBar({ children, label, className }: { children: ReactNode; label?: string; className?: string }) {
   const { t } = useTranslation("common");
-  return <header aria-label={label ?? t("workspace.navigation")} className={cn("flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-surface px-2 sm:px-4", className)}>{children}</header>;
+  return <header aria-label={label ?? t("workspace.navigation")} className={cn("flex h-12 shrink-0 items-center gap-2 border-b border-divider bg-surface px-2 sm:px-4", className)}>{children}</header>;
 }
 
 /** Geometry/count controls know no Computer authority or Session context. */

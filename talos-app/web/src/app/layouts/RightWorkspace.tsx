@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEffect, useRef, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
 import "./RightWorkspace.css";
 import { FileText, Globe2, Monitor, X } from "lucide-react";
@@ -19,11 +20,11 @@ type TabProps = {
 function WindowTab({ name, kind, selected, selectedRef, id, onSelect, onClose, onKeyDown }: TabProps & { name: string; kind: WorkspaceWindow["kind"] }) {
   const { t } = useTranslation("common");
   const Icon = kind === "computer" ? Monitor : kind === "markdown" ? FileText : Globe2;
-  return <div className={cn("flex min-w-0 max-w-64 shrink-0 items-center rounded-lg border", selected ? "border-border bg-background text-ink" : "border-transparent text-muted hover:bg-surface")}>
+  return <div className={cn("flex min-w-0 max-w-64 shrink-0 items-center rounded-lg border", selected ? `${selectionClasses.selected} ${selectionClasses.border}` : `border-transparent ${selectionClasses.idle}`)}>
     <button ref={selected ? selectedRef : undefined} id={id} role="tab" type="button" aria-selected={selected} tabIndex={selected ? 0 : -1} aria-controls={`${id}-panel`} onKeyDown={onKeyDown} onClick={onSelect} title={name} className="flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
       <Icon aria-hidden="true" size={13} className="shrink-0" /><span className="truncate">{name}</span>
     </button>
-    <button type="button" aria-label={t("workspace.close", { name })} onClick={onClose} className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-selected hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><X aria-hidden="true" size={12} /></button>
+    <button type="button" aria-label={t("workspace.close", { name })} onClick={onClose} className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><X aria-hidden="true" size={12} /></button>
   </div>;
 }
 function ComputerTab({ nodeId, ...props }: TabProps & { nodeId: string }) {
@@ -117,11 +118,11 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   }, [active, visible]);
   const modalPresentation = visible ? modal : previous.current.modal;
   return <dialog style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
-    "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-border bg-surface p-0 text-ink open:flex backdrop:bg-black/20",
+    "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-divider bg-surface p-0 text-ink open:flex backdrop:bg-transparent",
     modalPresentation ? "fixed inset-y-0 left-14 right-0 z-40 h-screen w-[calc(100vw-56px)]" : "relative h-full shrink-0",
   )}>
     {!modal && visible ? <AppResizeHandle label={t("workspace.resize")} controls="talos-right-workspace" value={width} min={WORKSPACE_WIDTH.min} max={maxWidth} direction={-1} onResize={setWidth} onDragging={dragging => setResizing(dragging ? "workspace" : null)} className="-left-1 inset-y-0" /> : null}
-    <AppTopBar label={t("workspace.controls")} className="gap-1.5 px-3 sm:px-3">
+    <AppTopBar label={t("workspace.controls")} className="relative gap-1.5 px-3 sm:px-3">
       <div role="tablist" aria-label={t("workspace.windows")} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
       {windows.map(window => {
         const key = workspaceWindowKey(window);
@@ -140,7 +141,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
       <OpenWebpageButton icon="plus" />
       {visible ? <WorkspaceControls toggleRef={toggleRef} /> : null}
     </AppTopBar>
-    <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/50 bg-background">
+    <div className="min-h-0 flex-1 overflow-hidden bg-background">
       {windows.map(window => {
         const key=workspaceWindowKey(window);
         const activeWindow=key===active;

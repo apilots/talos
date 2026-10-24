@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
@@ -59,7 +60,7 @@ export function FilesPage() {
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="files-page-content mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-8 py-7">
-          <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 px-5 py-4">
+          <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Input
                 className="min-w-0 flex-1"
@@ -82,7 +83,7 @@ export function FilesPage() {
               <div className="flex items-center gap-1.5">
                 <button
                   aria-label={t("files:listView")}
-                  className={files.view === "list" ? "rounded-xl border border-brand/40 bg-brand/10 p-2 text-brand" : "rounded-xl border border-border bg-card/80 p-2 text-muted"}
+                  className={files.view === "list" ? `rounded-xl border p-2 ${selectionClasses.border} ${selectionClasses.selected}` : `rounded-xl border border-border bg-card p-2 ${selectionClasses.idle}`}
                   onClick={() => files.setView("list")}
                   type="button"
                 >
@@ -90,7 +91,7 @@ export function FilesPage() {
                 </button>
                 <button
                   aria-label={t("files:gridView")}
-                  className={files.view === "grid" ? "rounded-xl border border-brand/40 bg-brand/10 p-2 text-brand" : "rounded-xl border border-border bg-card/80 p-2 text-muted"}
+                  className={files.view === "grid" ? `rounded-xl border p-2 ${selectionClasses.border} ${selectionClasses.selected}` : `rounded-xl border border-border bg-card p-2 ${selectionClasses.idle}`}
                   onClick={() => files.setView("grid")}
                   type="button"
                 >
@@ -101,7 +102,7 @@ export function FilesPage() {
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {(Object.keys(categoryLabels) as FileCategory[]).map((itemCategory) => (
                 <button
-                  className={files.category === itemCategory ? "rounded-full border border-brand/40 bg-brand/10 px-3 py-1.5 text-xs text-brand" : "rounded-full border border-border bg-background/55 px-3 py-1.5 text-xs text-muted"}
+                  className={files.category === itemCategory ? `rounded-full border px-3 py-1.5 text-xs ${selectionClasses.border} ${selectionClasses.selected}` : `rounded-full border border-border bg-card px-3 py-1.5 text-xs ${selectionClasses.idle}`}
                   key={itemCategory}
                   onClick={() => {
                     if (itemCategory === "all") {
@@ -142,14 +143,14 @@ export function FilesPage() {
           ) : null}
 
           {files.isLoading ? (
-            <Panel className="rounded-[1.45rem] border-border/80 bg-card/78 p-14 text-center text-sm text-muted">
+            <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.78] p-14 text-center text-sm text-muted">
               {t("files:loading")}
             </Panel>
           ) : files.view === "grid" ? (
             <div className="files-page-grid grid gap-4">
               <button
                 aria-label={t("files:upload")}
-                className="rounded-[1.3rem] border border-dashed border-border/80 bg-card/60 p-4 text-left transition hover:border-brand/40 hover:bg-card/90 disabled:opacity-50"
+                className="rounded-[var(--radius-panel)] border border-dashed border-border/80 bg-card/60 p-4 text-left transition hover:border-brand/40 hover:bg-hover disabled:opacity-50"
                 disabled={files.isUploading}
                 onClick={() => fileInputRef.current?.click()}
                 type="button"
@@ -170,7 +171,7 @@ export function FilesPage() {
                 const fileCategory = classifyFile(file);
                 return (
                   <button
-                    className="rounded-[1.3rem] border border-border/80 bg-card/82 p-4 text-left transition hover:border-brand/35"
+                    className={`rounded-[var(--radius-panel)] border p-4 text-left transition ${files.selectedFile?.fileId === file.fileId ? `${selectionClasses.selected} ${selectionClasses.border}` : "border-border/80 bg-card/[0.82] hover:border-selectedBorder"}`}
                     key={file.fileId}
                     onClick={() => files.selectFile(file.fileId)}
                     type="button"
@@ -193,7 +194,7 @@ export function FilesPage() {
               })}
             </div>
           ) : (
-            <Panel className="overflow-x-auto rounded-[1.4rem] border-border/80 bg-card/82">
+            <Panel className="overflow-x-auto rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82]">
               <div className="min-w-[640px]">
                 <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-border/80 px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-muted">
                   <div>{t("files:table.name")}</div>
@@ -203,7 +204,7 @@ export function FilesPage() {
                 </div>
                 <button
                   aria-label={t("files:upload")}
-                  className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-dashed border-border/80 bg-background/20 px-5 py-4 text-left transition hover:border-brand/40 hover:bg-background/35 disabled:opacity-50"
+                  className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-dashed border-border/80 bg-background/20 px-5 py-4 text-left transition hover:border-brand/40 hover:bg-hover disabled:opacity-50"
                   disabled={files.isUploading}
                   onClick={() => fileInputRef.current?.click()}
                   type="button"
@@ -222,7 +223,7 @@ export function FilesPage() {
                 </button>
                 {files.filteredItems.map((file) => (
                   <button
-                    className="grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b border-border/60 px-5 py-4 text-left last:border-b-0 hover:bg-background/35"
+                    className={`grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_120px_110px] gap-4 border-b px-5 py-4 text-left last:border-b-0 ${files.selectedFile?.fileId === file.fileId ? `${selectionClasses.selected} ${selectionClasses.border}` : "border-border/60 hover:bg-hover"}`}
                     key={file.fileId}
                     onClick={() => files.selectFile(file.fileId)}
                     type="button"

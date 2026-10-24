@@ -1,3 +1,4 @@
+import { documentOverlayClasses } from "@/shared/ui/overlayStyles";
 import { useEnvironmentKey } from "@/features/computers";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -46,10 +47,10 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
     : null;
 
   return (
-    <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-black/30 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
+    <div className={documentOverlayClasses.frame}>
       <button
         aria-label={t("dialog.closeSkillBackdrop")}
-        className="absolute inset-0 cursor-default"
+        className={documentOverlayClasses.backdrop}
         onClick={onClose}
         type="button"
       />
@@ -72,7 +73,7 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
           </div>
           <button
             aria-label={t("dialog.closeSkill")}
-            className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-card hover:text-ink"
+            className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-hover hover:text-ink"
             onClick={onClose}
             type="button"
           >

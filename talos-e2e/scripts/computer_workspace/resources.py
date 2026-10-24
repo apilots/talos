@@ -182,6 +182,8 @@ def run(cluster):
             expect(workspace).to_be_visible()
             expect(workspace.get_by_role('tab')).to_have_count(1)
             expect(workspace.get_by_role('tab')).to_be_focused()
+            settle_workspace(workspace)
+            require(workspace.bounding_box()['width'] == 480, 'Workspace opening default compressed the conversation area')
             address = workspace.get_by_role('textbox', name='Web address', exact=True)
             address.fill(destination)
             address.press('Enter')
@@ -189,6 +191,15 @@ def run(cluster):
             first_frame = first.content_frame()
             first_frame.get_by_role('textbox', name='Draft').fill('first tab draft')
             workspace_focus_resize(page, workspace, address, first, first_frame.get_by_role('textbox', name='Draft'))
+            handle = workspace.get_by_role('separator', name='Resize workspace', exact=True).bounding_box()
+            opening_width = workspace.bounding_box()['width']
+            page.mouse.move(handle['x'] + handle['width'] / 2, handle['y'] + 100)
+            page.mouse.down()
+            page.mouse.move(handle['x'] + handle['width'] / 2 - 96, handle['y'] + 100, steps=6)
+            page.mouse.up()
+            settle_workspace(workspace)
+            resized_width = workspace.bounding_box()['width']
+            require(abs(resized_width - opening_width - 96) <= 1, 'Dragging did not adjust the workspace width')
             # A second tab with the same URL has independent DOM and form state.
             workspace.get_by_role('button', name='New webpage tab', exact=True).click()
             workspace.get_by_role('textbox', name='Web address', exact=True).last.fill(destination)
@@ -211,6 +222,8 @@ def run(cluster):
             verify_workspace_exit(page, exit_panel, 'workspace')
             require(first.evaluate('(frame) => frame.isConnected'), 'Collapsing destroyed a preview')
             toggle.click()
+            settle_workspace(workspace)
+            require(abs(workspace.bounding_box()['width'] - resized_width) <= 1, 'Reopening discarded the user-resized width')
             expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first tab draft')
             tabs.nth(0).press('End')
             expect(tabs.nth(1)).to_be_focused()
@@ -218,6 +231,7 @@ def run(cluster):
             # Exercise the browser's real modal/top-layer/focus behavior, not jsdom.
             workspace.get_by_role('button', name='Expand workspace', exact=True).click()
             require(workspace.evaluate('(dialog) => dialog.matches(":modal")'), 'Expanded workspace is not a native modal dialog')
+            require(workspace.evaluate('node => getComputedStyle(node, "::backdrop").backgroundColor') == 'rgba(0, 0, 0, 0)', 'Expanded workspace tinted the Computer rail')
             page.keyboard.press('Escape')
             expect(workspace).not_to_be_visible()
             expect(page.get_by_role('button', name='Show workspace (2 open windows)', exact=True)).to_be_focused()
@@ -248,6 +262,7 @@ def run(cluster):
             # Narrow layout uses the same native modal and keyboard focus owner.
             page.set_viewport_size({'width': 820, 'height': 900})
             page.wait_for_function('document.querySelector("#talos-right-workspace")?.matches(":modal")')
+            require(workspace.evaluate('node => getComputedStyle(node, "::backdrop").backgroundColor') == 'rgba(0, 0, 0, 0)', 'Narrow workspace tinted the Computer rail')
             settle_workspace(workspace)
             page.screenshot(path=str(REPORT / 'workspace-narrow-markdown.png'), full_page=True)
             page.keyboard.press('Escape')

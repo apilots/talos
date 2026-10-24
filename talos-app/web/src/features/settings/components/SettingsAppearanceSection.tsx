@@ -1,3 +1,4 @@
+import { toggleClasses } from "@/shared/ui/controlStyles";
 import { Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -17,7 +18,7 @@ export function SettingsAppearanceSection({
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <Panel className="rounded-[1.45rem] border-border/80 bg-card/82 p-6">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-6">
       <SectionHeader
         icon={<Sparkles size={18} />}
         subtitle={t("settings:appearanceDetail")}
@@ -52,8 +53,8 @@ export function SettingsAppearanceSection({
             className={[
               "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition",
               desktopNotifications
-                ? "bg-brand/12 text-brand"
-                : "bg-background/60 text-muted",
+                ? toggleClasses.on
+                : toggleClasses.off,
             ].join(" ")}
           >
             {desktopNotifications ? t("settings:toggleOn") : t("settings:toggleOff")}

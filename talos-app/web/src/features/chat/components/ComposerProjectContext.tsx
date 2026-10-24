@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, FolderOpen, FolderPlus, Plus, Search, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -108,8 +109,8 @@ export function ComposerProjectContext({
                   return (
                     <button
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] outline-none transition hover:bg-muted/10 focus:outline-none",
-                        project.id === activeProjectId && "text-brand",
+                        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] outline-none transition hover:bg-hover focus:outline-none",
+                        project.id === activeProjectId && selectionClasses.selected,
                         unavailable && "text-muted",
                       )}
                       key={project.id}
@@ -133,7 +134,7 @@ export function ComposerProjectContext({
                 })}
               </div>
               <button
-                className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none"
+                className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] text-muted outline-none transition hover:bg-hover hover:text-ink focus:outline-none"
                 onClick={() => setMode("add_menu")}
                 type="button"
               >
@@ -144,15 +145,15 @@ export function ComposerProjectContext({
             </>
           ) : (
             <div className="py-1">
-              <button className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none" onClick={() => setMode("list")} type="button">
+              <button className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-muted outline-none transition hover:bg-hover hover:text-ink focus:outline-none" onClick={() => setMode("list")} type="button">
                 <ArrowLeft size={12} />
                 {t("chat:backToProjects")}
               </button>
-              <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-muted/10 focus:outline-none" onClick={() => { close(); setDirectoryDialogMode("create"); }} type="button">
+              <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-hover focus:outline-none" onClick={() => { close(); setDirectoryDialogMode("create"); }} type="button">
                 <Plus size={14} />
                 {t("chat:startFromScratch")}
               </button>
-              <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-muted/10 focus:outline-none" onClick={() => { close(); setDirectoryDialogMode("existing"); }} type="button">
+              <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-hover focus:outline-none" onClick={() => { close(); setDirectoryDialogMode("existing"); }} type="button">
                 <FolderOpen size={14} />
                 {t("chat:useExistingFolder")}
               </button>

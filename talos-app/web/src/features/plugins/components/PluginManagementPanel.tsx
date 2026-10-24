@@ -83,7 +83,7 @@ export function PluginManagementPanel({
         <section>
           <h2 className="mb-3 text-sm font-semibold text-ink">{resolvedCatalogLabel}</h2>
           {marketplacePlugins.length === 0 ? (
-            <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
+            <div className="rounded-[var(--radius-panel)] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
               {t("panel.noMarketplacePlugins")}
             </div>
           ) : (

@@ -71,7 +71,7 @@ export function PluginCatalogActions({
         <RefreshCw size={15} />
       </button>
       {menuOpen ? (
-        <div className="absolute right-0 top-11 z-20 w-56 rounded-[1rem] border border-border/80 bg-card p-1.5 shadow-[0_18px_36px_rgba(35,32,28,0.14)]">
+        <div className="absolute right-0 top-11 z-20 w-56 rounded-[1rem] border border-border/80 bg-card p-1.5 shadow-panel">
           {activeTab === "skills" ? (
             <SkillsMenu onAddMarketplace={onAddMarketplace} onCreateSkill={onCreateSkill} />
           ) : (
@@ -95,7 +95,7 @@ function SkillsMenu({
   return (
     <>
       <button
-        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
+        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-hover"
         onClick={() => void onCreateSkill()}
         type="button"
       >
@@ -103,7 +103,7 @@ function SkillsMenu({
         {t("actions.createSkill")}
       </button>
       <button
-        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
+        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-hover"
         onClick={onAddMarketplace}
         type="button"
       >
@@ -126,7 +126,7 @@ function PluginsMenu({
   return (
     <>
       <button
-        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
+        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-hover"
         onClick={onCreatePlugin}
         type="button"
       >
@@ -134,7 +134,7 @@ function PluginsMenu({
         {t("actions.createPlugin")}
       </button>
       <button
-        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
+        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-hover"
         onClick={onAddMarketplace}
         type="button"
       >

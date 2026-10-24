@@ -1,3 +1,4 @@
+import { actionClasses } from "@/shared/ui/controlStyles";
 import { useEffect, useMemo, useState } from "react";
 import { PanelRightOpen, Save, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -69,7 +70,7 @@ export function FileDetailsPanel({
   );
 
   return (
-    <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 p-5">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="truncate text-base font-medium text-ink">{file.originalFilename}</h2>
@@ -79,7 +80,7 @@ export function FileDetailsPanel({
         </div>
         <button
           aria-label={t("closeDetails")}
-          className="rounded-xl p-2 text-muted transition hover:bg-background/70 hover:text-ink"
+          className="rounded-xl p-2 text-muted transition hover:bg-hover hover:text-ink"
           onClick={onClose}
           type="button"
         >
@@ -89,7 +90,7 @@ export function FileDetailsPanel({
 
       {isMarkdownFile(file) ? (
         <button
-          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm text-ink outline-none transition hover:border-brand/30 hover:bg-background focus-visible:ring-2 focus-visible:ring-brand/40"
+          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm text-ink outline-none transition hover:border-brand/30 hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40"
           onClick={() => openWorkspaceWindow({ kind: "markdown", fileId: file.fileId })}
           type="button"
         >
@@ -121,7 +122,7 @@ export function FileDetailsPanel({
           <p className="text-xs text-danger" role="status">{t("metadataInvalid")}</p>
         ) : null}
         <button
-          className="flex items-center justify-center gap-2 justify-self-end rounded-xl border border-brand/30 bg-brand/10 px-4 py-2 text-sm text-brand transition hover:bg-brand/15 disabled:opacity-50"
+          className={`flex items-center justify-center gap-2 justify-self-end rounded-xl px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed ${actionClasses.primary}`}
           disabled={isUpdating || parsedMetadata === null}
           onClick={() => {
             if (parsedMetadata !== null) {

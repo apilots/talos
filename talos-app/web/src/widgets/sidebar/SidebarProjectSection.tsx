@@ -197,7 +197,7 @@ function ProjectGroup({
         <span className="flex items-center justify-end gap-1">
           <button
             aria-label="Project actions"
-            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
+            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
             data-sidebar-project-menu-trigger=""
             onClick={(event) => {
               event.stopPropagation();
@@ -209,7 +209,7 @@ function ProjectGroup({
           </button>
           <button
             aria-label="New chat in project"
-            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
+            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
             onClick={(event) => {
               event.stopPropagation();
               onCreateProjectThread();
@@ -220,7 +220,7 @@ function ProjectGroup({
           </button>
           <button
             aria-label={open ? "Collapse project" : "Expand project"}
-            className="flex size-5 items-center justify-center rounded text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="flex size-5 items-center justify-center rounded text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             onClick={(event) => {
               event.stopPropagation();
               onToggleProject();

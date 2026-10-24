@@ -1,28 +1,29 @@
 .trigger { display: inline-flex; min-height: 32px; min-width: 0; max-width: 100%; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 8px; color: rgb(var(--color-ink) / .8); font-size: 12px; font-weight: 500; white-space: nowrap; outline: none; }
-.trigger:hover, .trigger[aria-expanded=true] { background: rgb(var(--color-ink) / .025); }
+.trigger:hover { background: rgb(var(--color-hover) / var(--hover-opacity)); }
+.trigger[aria-expanded=true] { background: rgb(var(--color-selected) / var(--selected-opacity)); }
 .trigger:disabled { cursor: not-allowed; opacity: .45; }
 .triggerName { min-width: 0; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
 .triggerEffort { flex-shrink: 0; color: rgb(var(--color-muted)); }
 .trigger > svg { flex-shrink: 0; }
-.triggerFast { color: #3b82f6; }
-.picker { --picker-accent: #3b82f6; width: 260px; max-width: calc(100vw - 24px); max-height: var(--radix-popover-content-available-height); padding: 7px; border: 1px solid rgb(var(--color-border)); border-radius: 17px; background: rgb(var(--color-card)); color: rgb(var(--color-ink)); box-shadow: 0 7px 22px #0000000b, 0 2px 5px #00000004; z-index: 60; }
+.triggerFast { color: rgb(var(--color-accent)); }
+.picker { --picker-accent: rgb(var(--color-accent)); width: 260px; max-width: calc(100vw - 24px); max-height: var(--radix-popover-content-available-height); padding: 7px; border: 1px solid rgb(var(--color-border)); border-radius: 17px; background: rgb(var(--color-card)); color: rgb(var(--color-ink)); box-shadow: var(--shadow-panel); z-index: 60; }
 .picker[data-view=overview] { height: 118px; padding: 9px 11px 11px; display: flex; flex-direction: column; justify-content: space-between; }
 .picker button { outline: none; }
-.trigger:focus-visible, .picker button:focus-visible { outline: 2px solid var(--picker-accent, #3b82f6); outline-offset: 2px; }
+.trigger:focus-visible, .picker button:focus-visible { outline: 2px solid rgb(var(--color-brand) / .4); outline-offset: 2px; }
 .overviewHead { display: grid; grid-template-columns: 24px minmax(0, 1fr) 24px; align-items: center; height: 24px; }
 .currentLevel { text-align: center; color: var(--picker-accent); font-size: 14px; font-weight: 500; line-height: 22px; }
 .currentLevel[data-off=true] { color: rgb(var(--color-muted)); }
 .fastSlot { position: relative; width: 24px; height: 24px; }
 .fastToggle, .resetEffort { display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; padding: 4px; border-radius: 7px; color: rgb(var(--color-muted)); }
-.fastToggle:hover, .resetEffort:hover:not(:disabled) { background: rgb(var(--color-surface)); }
+.fastToggle:hover, .resetEffort:hover:not(:disabled) { background: rgb(var(--color-hover) / var(--hover-opacity)); }
 .fastToggle[aria-pressed=true] { color: var(--picker-accent); background: color-mix(in srgb, var(--picker-accent) 8%, transparent); }
 .fastToggle[aria-disabled=true] { opacity: .5; cursor: default; }
 .resetEffort:disabled { opacity: .4; cursor: default; }
-.controlTooltip { position: absolute; left: -13px; bottom: calc(100% + 9px); padding: 7px 10px; border-radius: 11px; background: #242424; color: #fff; font-size: 11px; line-height: 17px; box-shadow: 0 5px 14px #0002; width: max-content; max-width: 238px; white-space: normal; pointer-events: none; visibility: hidden; opacity: 0; z-index: 1; }
-.tooltipDetail { display: block; color: #c2c2c2; font-size: 10px; }
+.controlTooltip { position: absolute; left: -13px; bottom: calc(100% + 9px); padding: 7px 10px; border-radius: 11px; background: rgb(var(--color-card)); color: rgb(var(--color-ink)); font-size: 11px; line-height: 17px; box-shadow: var(--shadow-panel); width: max-content; max-width: 238px; white-space: normal; pointer-events: none; visibility: hidden; opacity: 0; z-index: 1; }
+.tooltipDetail { display: block; color: rgb(var(--color-muted)); font-size: 10px; }
 .fastSlot:hover .controlTooltip, .fastSlot:focus-within .controlTooltip { visibility: visible; opacity: 1; }
 .currentModel { display: flex; width: 100%; min-height: 23px; align-items: center; justify-content: center; gap: 4px; padding: 1px 5px; border-radius: 7px; color: rgb(var(--color-muted)); }
-.currentModel:hover { background: rgb(var(--color-surface)); }
+.currentModel:hover { background: rgb(var(--color-hover) / var(--hover-opacity)); }
 .modelName { min-width: 0; overflow: hidden; font-size: 12px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 .currentModel > svg { flex-shrink: 0; }
 .effortSlider { position: relative; display: flex; width: 100%; height: 24px; align-items: center; touch-action: none; user-select: none; }
@@ -42,14 +43,14 @@
 @keyframes model-picker-cat-run { from { left: -29px; } to { left: 100%; } }
 .listHead { display: flex; min-height: 34px; align-items: center; gap: 5px; padding: 1px 0 6px; }
 .back { display: flex; width: 25px; height: 25px; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 7px; color: rgb(var(--color-muted)); }
-.back:hover, .providerSwitch:hover, .option:hover { background: rgb(var(--color-surface)); }
+.back:hover, .providerSwitch:hover, .option:hover { background: rgb(var(--color-hover) / var(--hover-opacity)); }
 .listTitle { flex: 1; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .providerSwitch { display: flex; max-width: 138px; align-items: center; gap: 3px; padding: 5px 6px; overflow: hidden; border-radius: 7px; color: rgb(var(--color-muted)); font-size: 10px; white-space: nowrap; }
 .providerSwitch > span { overflow: hidden; text-overflow: ellipsis; }
 .providerSwitch > svg { flex-shrink: 0; }
 .listContent { min-height: 35px; max-height: min(238px, calc(var(--radix-popover-content-available-height) - 52px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: rgb(var(--color-border)) transparent; }
 .option { display: flex; min-height: 35px; width: 100%; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; text-align: left; font-size: 12px; }
-.option.selected { background: rgb(var(--color-surface)); }
+.option.selected { background: rgb(var(--color-selected) / var(--selected-opacity)); }
 .option > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .option > svg { flex-shrink: 0; }
 .optionGroup { padding: 8px 10px 5px; color: rgb(var(--color-muted)); font-size: 10px; }

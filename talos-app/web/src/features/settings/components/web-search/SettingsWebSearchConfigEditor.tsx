@@ -69,7 +69,7 @@ export function SettingsWebSearchConfigEditor() {
 
   if (error) {
     return (
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
         <div className="text-sm text-danger">{userVisibleErrorMessage(error, "Request failed.")}</div>
       </Panel>
     );
@@ -77,7 +77,7 @@ export function SettingsWebSearchConfigEditor() {
 
   if (isLoading || !draft || !serverRead) {
     return (
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
         <div className="text-sm text-muted">{t("webSearchPanel.loading")}</div>
       </Panel>
     );
@@ -87,7 +87,7 @@ export function SettingsWebSearchConfigEditor() {
   const serverProviderConfig = serverConfig?.[activeProvider];
 
   return (
-    <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/[0.82] p-5">
       <div className="mb-5">
         <div className="text-sm font-medium text-ink">{t("webSearchPanel.title")}</div>
         <div className="mt-1 text-sm text-muted">{t("webSearchPanel.detail")}</div>
@@ -127,7 +127,7 @@ export function SettingsWebSearchConfigEditor() {
           value={providerConfig.api_key ?? ""}
         />
 
-        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
+        <div className="flex items-center gap-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/40 px-4 py-3">
           <span className="w-24 shrink-0 text-sm text-muted">{t("webSearchPanel.baseUrl")}</span>
           <Input
             aria-label={t("webSearchPanel.baseUrl")}
@@ -139,7 +139,7 @@ export function SettingsWebSearchConfigEditor() {
           />
         </div>
 
-        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
+        <div className="flex items-center gap-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/40 px-4 py-3">
           <span className="w-24 shrink-0 text-sm text-muted">{t("webSearchPanel.timeout")}</span>
           <Input
             aria-label={t("webSearchPanel.timeout")}

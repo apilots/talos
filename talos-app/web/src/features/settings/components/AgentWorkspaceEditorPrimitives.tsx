@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownRenderer } from "@/widgets/message-list/MarkdownRenderer";
@@ -18,7 +19,7 @@ export function EditorModeSwitch({
       <button
         className={[
           "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-          mode === "preview" ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
+          mode === "preview" ? selectionClasses.selected : selectionClasses.idle,
         ].join(" ")}
         onClick={() => setMode("preview")}
         type="button"
@@ -28,7 +29,7 @@ export function EditorModeSwitch({
       <button
         className={[
           "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-          mode === "edit" ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
+          mode === "edit" ? selectionClasses.selected : selectionClasses.idle,
         ].join(" ")}
         onClick={() => setMode("edit")}
         type="button"

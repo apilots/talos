@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { deriveProjectName } from "@/shared/types/domain";
 import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useState } from "react";
@@ -171,7 +172,7 @@ export function ProjectDirectoryDialog({
 
   return (
     <div className="fixed inset-0 z-[70]">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} role="presentation" />
+      <div className={`absolute inset-0 ${overlayClasses.tint}`} onClick={onClose} role="presentation" />
       <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-center px-4 py-10 lg:left-[280px]">
         <div className="pointer-events-auto flex max-h-[calc(100vh-80px)] w-[min(680px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-panel)] border border-border bg-card shadow-panel">
           <div className="flex items-center gap-3 border-b border-border/60 px-4 py-3">
@@ -180,7 +181,7 @@ export function ProjectDirectoryDialog({
             </div>
             <button
               aria-label={t("common:close")}
-              className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-surface hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30"
+              className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30"
               onClick={onClose}
               type="button"
             >

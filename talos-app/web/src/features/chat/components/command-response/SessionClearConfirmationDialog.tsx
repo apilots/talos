@@ -1,3 +1,4 @@
+import { overlayClasses } from "@/shared/ui/overlayStyles";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Eraser, X } from "lucide-react";
@@ -41,7 +42,7 @@ export function SessionClearConfirmationDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]">
+    <div className={`fixed inset-0 z-[1000] flex items-center justify-center px-4 ${overlayClasses.tint}`}>
       <div className="absolute inset-0" onClick={clearing ? undefined : onCancel} role="presentation" />
       <div
         aria-labelledby="clear-session-title"
@@ -51,7 +52,7 @@ export function SessionClearConfirmationDialog({
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="mb-4 flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-danger/20 bg-danger/8 text-danger">
+            <div className="mb-4 flex size-9 items-center justify-center rounded-[var(--radius-control)] border border-danger/20 bg-danger/[0.08] text-danger">
               <Eraser aria-hidden="true" size={17} />
             </div>
             <h2 className="text-lg font-semibold text-ink" id="clear-session-title">
@@ -63,7 +64,7 @@ export function SessionClearConfirmationDialog({
           </div>
           <button
             aria-label={t("common:close")}
-            className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             disabled={clearing}
             onClick={onCancel}
             type="button"
@@ -76,7 +77,7 @@ export function SessionClearConfirmationDialog({
           {t("chat:clearSessionDraftPreserved")}
         </div>
         {error ? (
-          <p className="mt-3 rounded-[var(--radius-control)] border border-danger/25 bg-danger/8 px-3 py-2 text-[12px] text-danger" role="alert">
+          <p className="mt-3 rounded-[var(--radius-control)] border border-danger/25 bg-danger/[0.08] px-3 py-2 text-[12px] text-danger" role="alert">
             {error}
           </p>
         ) : null}

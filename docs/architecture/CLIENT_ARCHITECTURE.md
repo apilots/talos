@@ -297,6 +297,22 @@ new capability as complete until those paths and their tests are aligned.
 - Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
 - Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
 
+### Web visual system
+
+Web and Desktop share theme tokens in `talos-app/web/src/app/styles/index.css`
+and their Tailwind mappings. Reuse `shared/ui/controlStyles.ts` for selection,
+actions and toggle states, and `shared/ui/overlayStyles.ts` for dialog scrims.
+Keep layout, handlers and accessibility ownership in the existing components.
+
+Selection and hover use shared neutral tints over their owning surfaces; retain
+selection on hover/focus. Feature emphasis uses `accent`, while semantic
+warning/danger/success/info roles remain separate. Ordinary dialog scrims cover
+the viewport; the right workspace keeps its transparent native backdrop.
+Preserve visible keyboard focus and explicit user-resized widths.
+
+Use supported Tailwind alpha values or arbitrary values such as `bg-card/[0.82]`;
+unsupported values like `bg-card/82` silently omit CSS.
+
 ### Workspace inspection
 
 Settings → Personalization → Workspace shows the configured default workspace

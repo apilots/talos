@@ -1,3 +1,4 @@
+import { selectionClasses } from "@/shared/ui/controlStyles";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -50,7 +51,7 @@ function TransportButton({
     <button
       className={cn(
         "h-10 rounded-[0.75rem] text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30",
-        active ? "bg-muted/45 text-ink" : "text-muted hover:bg-card/60 hover:text-ink",
+        active ? selectionClasses.selected : selectionClasses.idle,
         disabled && !active ? "cursor-not-allowed opacity-60 hover:bg-transparent hover:text-muted" : null,
       )}
       disabled={disabled && !active}

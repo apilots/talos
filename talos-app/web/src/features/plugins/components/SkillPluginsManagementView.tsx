@@ -74,11 +74,11 @@ function AvailableSkillsSection({ loading, onOpen, query, skills }: AvailableSki
         </span>
       </div>
       {loading ? (
-        <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
+        <div className="rounded-[var(--radius-panel)] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
           {t("localSkills.loading")}
         </div>
       ) : skills.length === 0 ? (
-        <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
+        <div className="rounded-[var(--radius-panel)] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
           {query.trim() ? t("localSkills.noMatch") : t("localSkills.empty")}
         </div>
       ) : (

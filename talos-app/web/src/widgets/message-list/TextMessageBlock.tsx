@@ -35,7 +35,7 @@ export function TextMessageBlock({
           className={cn(
             "mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border text-brand md:size-8",
             isThinking
-              ? "border-brand/18 bg-brand/6"
+              ? "border-brand/[0.18] bg-brand/[0.06]"
               : isSystem
                 ? "border-border/80 bg-background/45"
                 : "border-border bg-surface/90",
@@ -48,11 +48,11 @@ export function TextMessageBlock({
         className={cn(
           "min-w-0",
           isUser
-            ? "max-w-[min(100%,39rem)] rounded-[1.25rem] border border-border/70 bg-surface px-4 py-3 text-ink"
+            ? "max-w-[min(100%,39rem)] rounded-[var(--radius-panel)] border border-border/70 bg-surface px-4 py-3 text-ink"
             : isThinking
-              ? "flex-1 rounded-[1.25rem] border border-border/70 bg-background/34 px-4 py-3 text-muted"
+              ? "flex-1 rounded-[var(--radius-panel)] border border-border/70 bg-background/[0.34] px-4 py-3 text-muted"
               : isSystem
-                ? "flex-1 rounded-[1.25rem] border border-border/65 bg-background/40 px-4 py-3 text-muted"
+                ? "flex-1 rounded-[var(--radius-panel)] border border-border/65 bg-background/40 px-4 py-3 text-muted"
                 : "flex-1 px-1 py-2 text-ink",
         )}
         data-response-surface={!isUser && !isThinking && !isSystem ? "plain" : undefined}
