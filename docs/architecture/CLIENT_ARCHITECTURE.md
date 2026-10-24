@@ -314,9 +314,9 @@ and can expose native form-control colors.
 | `border` | `#E9ECEF` | `#3D434B` | Controls and contained panels |
 | `divider` | `#EAEDF0` | `#343A42` | Single shared-region boundaries |
 | `headerBorder` | `#E1E4E8` | `#434952` | Header splits aligned with body boundaries |
-| `hover` | `#F4F5F6` | `#2F3237` | Neutral interactive hover |
-| `selected` | `#ECEEF0` | `#363A40` | Navigation and control selection |
-| `selectedBorder` | `#C9CDD2` | `#555A62` | Bordered selection controls |
+| `hover` | Black at 2.5% | White at 3% | Neutral interactive hover over the owning surface |
+| `selected` | Black at 5% | White at 6% | Navigation/control selection blended over its owning surface |
+| `selectedBorder` | `#DADDE1` | `#474C53` | Bordered selection controls |
 | `actionHover` | `#3D434B` | `#D2D8E1` | Inverse primary-action hover |
 | `ink`, `muted` | `#282C32`, `#5F6772` | `#E9ECF0`, `#C0C8D2` | Main and supporting text |
 
@@ -324,7 +324,12 @@ and can expose native form-control colors.
 primary/secondary/ghost/danger actions and on/off badges. Reuse these styles for
 custom-shaped controls and the existing `Button`, `Input`, `Panel` and editor
 primitives; page code must not duplicate colors or introduce new state owners.
-Use opaque `selected` with `ink` for navigation and edit/preview segments; keep
+Use `selected` with `ink` for navigation and edit/preview segments. Its shared
+neutral tint keeps a comparable subtle contrast over white content, gray shell
+and dark panels: light selection is approximately #F2F2F2 over white and #EEEEEE
+over the shell; dark selection is approximately #2D3035 over cards and #34373B
+over the shell. Keep the global selected/hover opacity in Tailwind and direct CSS
+consumers; do not replace it with a page-local opaque approximation. Keep
 selection on hover and keyboard focus instead of replacing it with the lighter
 `hover` role. Plugin/document tabs, model-capability labels and file selections
 use the same presentation as navigation and editor segments. Native checkbox/

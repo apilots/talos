@@ -136,7 +136,7 @@
 }
 .cmp-segments button[aria-pressed="true"] {
   color: rgb(var(--color-ink));
-  background: rgb(var(--color-selected));
+  background: rgb(var(--color-selected) / var(--selected-opacity));
   box-shadow: none;
 }
 .cmp-content {
@@ -181,7 +181,7 @@
 }
 .cmp-flow-buttons button[aria-pressed="true"] {
   color: rgb(var(--color-ink));
-  background: rgb(var(--color-selected));
+  background: rgb(var(--color-selected) / var(--selected-opacity));
   border-color: rgb(var(--color-selected-border));
 }
 .cmp-flow-key {
@@ -506,7 +506,7 @@
   border-top: 1px solid rgb(var(--color-border));
 }
 .cmp-table tr.is-selected {
-  background: rgb(var(--color-selected));
+  background: rgb(var(--color-selected) / var(--selected-opacity));
 }
 .cmp-name-button {
   display: block;
@@ -650,5 +650,5 @@
 .cmp-segments button:not([aria-pressed="true"]):hover,
 .cmp-flow-buttons button:not([aria-pressed="true"]):hover {
   color: rgb(var(--color-ink));
-  background: rgb(var(--color-hover));
+  background: rgb(var(--color-hover) / var(--hover-opacity));
 }

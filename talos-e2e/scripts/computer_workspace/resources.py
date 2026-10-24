@@ -111,18 +111,27 @@ def theme_geometry(browser, url, token):
             settle_workspace(workspace)
             business = page.get_by_role('region', name='Business area', exact=True)
             header = business.locator('header[aria-label="Application navigation"]')
-            geometry = business.get_by_role('main').evaluate('''main => {
+            geometry = business.get_by_role('main').evaluate(r'''main => {
               const body = main.parentElement;
               const header = document.querySelector('header[aria-label="Application navigation"]');
               const sidebar = body.firstElementChild;
               const style = node => getComputedStyle(node);
               const card = style(document.documentElement).getPropertyValue('--color-card').trim().split(' ').filter(Boolean).join(', ');
+              const selectedTab = document.querySelector('#talos-right-workspace [role=tab][aria-selected=true]').parentElement;
+              const selectedFill = style(selectedTab).backgroundColor.match(/[\d.]+/g).map(Number);
+              const base = style(selectedTab.closest('header')).backgroundColor.match(/[\d.]+/g).map(Number);
+              const alpha = selectedFill[3] ?? 1;
+              const composite = selectedFill.slice(0, 3).map((value, index) => value * alpha + base[index] * (1 - alpha));
+              const luminance = rgb => rgb.slice(0, 3).map(value => { value /= 255; return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4; }).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+              const selectedLuminance = luminance(composite), baseLuminance = luminance(base);
               return {theme:document.documentElement.dataset.theme,
+                selectedTabContrast:(Math.max(selectedLuminance, baseLuminance) + .05) / (Math.min(selectedLuminance, baseLuminance) + .05),
                 canvas:style(main).backgroundColor, shell:style(header).backgroundColor,
                 inputColor:style(main.querySelector('input:not([type=file])')).backgroundColor,
                 panelColor:style(main.querySelector('.files-page-content').firstElementChild).backgroundColor,
                 cardColor:'rgb(' + card + ')',
                 selectedToken:style(document.documentElement).getPropertyValue('--color-selected').trim().split(' ').filter(Boolean).join(', '),
+                selectedOpacity:style(document.documentElement).getPropertyValue('--selected-opacity').trim(),
                 selectedTab:style(document.querySelector('#talos-right-workspace [role=tab][aria-selected=true]').parentElement).backgroundColor,
                 outerRadius:style(body).borderTopLeftRadius, innerRadius:style(main).borderTopLeftRadius,
                 sidebarRadius:style(sidebar).borderTopRightRadius,
@@ -132,7 +141,8 @@ def theme_geometry(browser, url, token):
             }''')
             require(geometry['theme'] == theme, 'Persisted theme was not applied')
             require(geometry['workspaceWidth'] == 480, 'Workspace opening default compressed the main canvas')
-            require(geometry['selectedTab'] == 'rgb(' + geometry['selectedToken'] + ')', 'Resource selection diverged from shared state colors')
+            require(geometry['selectedTab'] == 'rgba(' + geometry['selectedToken'] + ', ' + geometry['selectedOpacity'] + ')', 'Resource selection diverged from shared state colors')
+            require(1.05 < geometry['selectedTabContrast'] < (1.14 if theme == 'light' else 1.25), 'Workspace selection exceeded the subtle reference contrast')
             require(geometry['canvas'] != geometry['shell'], 'Theme flattened canvas and shell')
             require(geometry['inputColor'] == geometry['cardColor'], 'Input fell back to native browser colors')
             require(geometry['panelColor'] not in ('transparent', 'rgba(0, 0, 0, 0)'), 'Panel color utility did not produce a background')

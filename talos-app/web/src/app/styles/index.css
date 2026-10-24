@@ -14,9 +14,11 @@
   --color-divider: 52 58 66;
   --color-header-border: 67 73 82;
   --color-surface: 39 42 46;
-  --color-hover: 47 50 55;
-  --color-selected: 54 58 64;
-  --color-selected-border: 85 90 98;
+  --color-hover: 255 255 255;
+  --hover-opacity: 0.03;
+  --color-selected: 255 255 255;
+  --selected-opacity: 0.06;
+  --color-selected-border: 71 76 83;
   --color-action-hover: 210 216 225;
   --color-ink: 233 236 240;
   --color-muted: 192 200 210;
@@ -43,9 +45,11 @@
   --color-divider: 234 237 240;
   --color-header-border: 225 228 232;
   --color-surface: 250 250 250;
-  --color-hover: 244 245 246;
-  --color-selected: 236 238 240;
-  --color-selected-border: 201 205 210;
+  --color-hover: 0 0 0;
+  --hover-opacity: 0.025;
+  --color-selected: 0 0 0;
+  --selected-opacity: 0.05;
+  --color-selected-border: 218 221 225;
   --color-action-hover: 61 67 75;
   --color-ink: 40 44 50;
   --color-muted: 95 103 114;
@@ -106,14 +110,14 @@ input[type="radio"] {
 
 @layer components {
   .sidebar-interactive-row:hover {
-    background-color: rgb(var(--color-hover));
+    background-color: rgb(var(--color-hover) / var(--hover-opacity));
   }
 
   .sidebar-interactive-row[aria-current="page"]:hover,
   .sidebar-interactive-row[data-selected="true"]:hover,
   .sidebar-interactive-row[aria-current="page"],
   .sidebar-interactive-row[data-selected="true"] {
-    background-color: rgb(var(--color-selected));
+    background-color: rgb(var(--color-selected) / var(--selected-opacity));
   }
 
   .form-control-focus {
