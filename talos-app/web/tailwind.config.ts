@@ -27,6 +27,13 @@ export default {
         success: "rgb(var(--color-success) / <alpha-value>)",
         info: "rgb(var(--color-info) / <alpha-value>)",
         accent: "rgb(var(--color-accent) / <alpha-value>)",
+        activity: {
+          empty: "rgb(var(--color-activity-empty) / <alpha-value>)",
+          1: "rgb(var(--color-activity-1) / <alpha-value>)",
+          2: "rgb(var(--color-activity-2) / <alpha-value>)",
+          3: "rgb(var(--color-activity-3) / <alpha-value>)",
+          4: "rgb(var(--color-activity-4) / <alpha-value>)",
+        },
       },
       boxShadow: {
         panel: "var(--shadow-panel)",

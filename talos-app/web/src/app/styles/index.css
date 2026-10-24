@@ -29,6 +29,11 @@
   --color-success: 94 234 212;
   --color-info: 125 211 252;
   --color-accent: 59 130 246;
+  --color-activity-empty: var(--color-surface);
+  --color-activity-1: 216 235 255;
+  --color-activity-2: 175 216 255;
+  --color-activity-3: 109 182 255;
+  --color-activity-4: 31 143 255;
   --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.2);
   --radius-panel: 0.75rem;
   --radius-control: 0.625rem;
@@ -60,6 +65,7 @@
   --color-danger: 179 79 79;
   --color-success: 44 127 109;
   --color-info: 63 118 168;
+  --color-activity-empty: 243 244 246;
   --shadow-panel: 0 8px 24px rgba(40, 44, 50, 0.055);
 }
 
