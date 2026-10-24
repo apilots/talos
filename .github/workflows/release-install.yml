@@ -1,0 +1,48 @@
+name: Release · container installation
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Exact source commit used to build the products.
+        type: string
+        required: true
+      version:
+        description: Version of the current run's TUI product.
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  container-install:
+    name: Install release product · Ubuntu amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Download this run's Linux TUI product
+        uses: actions/download-artifact@v4
+        with:
+          name: talos-tui-linux-amd64
+          path: dist/products/release/tui
+      - name: Install and exercise the release product in Ubuntu
+        env:
+          TUI_INSTALL_PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
+          TUI_INSTALL_E2E_VERSION: ${{ inputs.version }}
+          TUI_INSTALL_EXPECTED_ARCH: amd64
+        run: just e2e-case 15_tui_install/02_linux_docker
+      - name: Upload container installation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-container-installation
+          path: |
+            talos-e2e/reports/e2e_report_*.md
+            talos-e2e/reports/15_tui_install/02_linux_docker/
+          if-no-files-found: warn
+          retention-days: 14

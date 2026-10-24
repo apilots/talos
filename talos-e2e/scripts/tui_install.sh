@@ -219,33 +219,33 @@ run_installed_tui_acceptance() {
 run_linux_docker_tui_install() {
   local dockerfile="${TALOS_E2E_DIR}/docker/tui-install-ubuntu-24.04.Dockerfile"
   local container_report_dir
-  local target_volume
-  local rust_version
+  local product_dir
+  local expected_arch
 
   require_command docker
   docker info >/dev/null
-  target_volume="tui-install-target-${TALOS_E2E_RUN_ID}-${RANDOM}"
+  [[ -n "${TUI_INSTALL_PRODUCT_DIR:-}" ]] || {
+    echo "Docker installation acceptance requires TUI_INSTALL_PRODUCT_DIR from this release build." >&2
+    return 1
+  }
+  expected_arch="${TUI_INSTALL_EXPECTED_ARCH:-$(normalize_tui_install_arch "$(docker info --format '{{.Architecture}}')")}"
+  product_dir="$(cd "${TUI_INSTALL_PRODUCT_DIR}" && pwd)"
+  [[ -s "${product_dir}/tui/SHA256SUMS" ]] || {
+    echo "The current release TUI product and SHA256SUMS are required." >&2
+    return 1
+  }
   container_report_dir="${SCENARIO_REPORT_DIR}/container"
-  [[ -s "${REPO_ROOT}/talos-rs/Cargo.lock" ]] || {
-    echo "The committed talos-rs/Cargo.lock is required for Docker installation acceptance." >&2
-    return 1
-  }
   mkdir -p "${container_report_dir}"
-  mkdir -p "${REPO_ROOT}/talos-rs/target"
-
-  rust_version="$(awk -F= '$1 == "RELEASE_RUST_VERSION" { print $2 }' \
-    "${REPO_ROOT}/.github/release-toolchain.env")"
-  [[ "${rust_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-    echo "The shared toolchain must specify RELEASE_RUST_VERSION." >&2
-    return 1
-  }
-  e2e_docker volume "${target_volume}" >/dev/null
   local image
-  image="$(e2e_image talos-tui-install-e2e "${TUI_INSTALL_DOCKER_IMAGE}" --build-arg "RUST_VERSION=${rust_version}" -f "${dockerfile}" "${REPO_ROOT}")"
+  image="$(e2e_image talos-tui-install-e2e "${TUI_INSTALL_DOCKER_IMAGE}" -f "${dockerfile}" "${REPO_ROOT}")"
   e2e_docker container "tui-install-${TALOS_E2E_RUN_ID}-${RANDOM}" --rm \
     -v "${REPO_ROOT}:/workspace/talos:ro" \
-    -v "${target_volume}:/workspace/talos/talos-rs/target" \
+    -v "${product_dir}:/opt/talos-product:ro" \
     -v "${container_report_dir}:/tmp/talos-e2e-report" \
+    -e TUI_INSTALL_PRODUCT_DIR=/opt/talos-product \
+    -e "TUI_INSTALL_E2E_VERSION=${TUI_INSTALL_E2E_VERSION}" \
+    -e TUI_INSTALL_EXPECTED_PLATFORM=linux \
+    -e "TUI_INSTALL_EXPECTED_ARCH=${expected_arch}" \
     -e TALOS_E2E_TMP_ROOT=/tmp/talos-e2e \
     -e TALOS_SCENARIO_REPORT_DIR=/tmp/talos-e2e-report \
     "${image}" \

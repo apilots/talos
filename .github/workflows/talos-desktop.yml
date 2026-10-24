@@ -1,0 +1,16 @@
+name: CI · Desktop
+on:
+  workflow_call:
+    inputs:
+      plan:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  checks:
+    name: Desktop
+    uses: ./.github/workflows/ci-category.yml
+    with:
+      plan: ${{ inputs.plan }}

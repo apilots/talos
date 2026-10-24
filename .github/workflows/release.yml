@@ -250,7 +250,7 @@ jobs:
       source_ref: ${{ github.sha }}
 
   build:
-    name: Build ${{ matrix.name }}
+    name: Release · build ${{ matrix.name }}
     needs:
       - prepare
       - validate-source
@@ -284,16 +284,22 @@ jobs:
             build_target: server-webui
             product_subdir: server
           - name: TUI linux-amd64
+            install_platform: linux
+            install_arch: amd64
             artifact_name: talos-tui-linux-amd64
             runner: ubuntu-24.04
             build_target: tui
             product_subdir: tui
           - name: TUI linux-arm64
+            install_platform: linux
+            install_arch: arm64
             artifact_name: talos-tui-linux-arm64
             runner: ubuntu-24.04-arm
             build_target: tui
             product_subdir: tui
           - name: TUI macOS ARM64
+            install_platform: macos
+            install_arch: arm64
             artifact_name: talos-tui-macos-arm64
             runner: macos-26
             build_target: tui
@@ -379,11 +385,18 @@ jobs:
           PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
         run: bash build/scripts/verify-release-artifacts.sh "${{ matrix.product_subdir }}"
 
+      - uses: taiki-e/install-action@v2
+        if: ${{ matrix.build_target == 'tui' }}
+        with:
+          tool: just
+
       - name: Verify native TUI installation
         if: ${{ matrix.build_target == 'tui' }}
         env:
           TUI_INSTALL_PRODUCT_DIR: ${{ github.workspace }}/dist/products/release
-        run: talos-e2e/run_e2e.sh --case 15_tui_install/01_native_install
+          TUI_INSTALL_EXPECTED_PLATFORM: ${{ matrix.install_platform }}
+          TUI_INSTALL_EXPECTED_ARCH: ${{ matrix.install_arch }}
+        run: just e2e-case 15_tui_install/01_native_install
 
       - name: Upload native installation report
         if: ${{ !cancelled() && matrix.build_target == 'tui' }}
@@ -404,9 +417,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  installation:
+    name: Release · container installation
+    needs: [prepare, validate-source, build]
+    uses: ./.github/workflows/release-install.yml
+    with:
+      source_ref: ${{ needs.validate-source.outputs.source_sha }}
+      version: ${{ needs.prepare.outputs.version }}
+
   docker-image:
-    name: Build ${{ matrix.product }} image ${{ matrix.platform }}
+    name: Release · image ${{ matrix.product }} ${{ matrix.platform }}
     needs:
+      - installation
       - prepare
       - validate-source
       - quality
@@ -524,8 +546,9 @@ jobs:
           retention-days: 14
 
   docker-manifest:
-    name: Publish ${{ matrix.product }} image manifest
+    name: Release · publish ${{ matrix.product }} image manifest
     needs:
+      - installation
       - prepare
       - docker-image
       - build
@@ -647,6 +670,7 @@ jobs:
   publish:
     name: Publish release
     needs:
+      - installation
       - prepare
       - validate-source
       - quality

@@ -1,120 +1,53 @@
-name: talos-rust
-
-concurrency:
-  group: talos-rust-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
+name: CI · Server, client, SDK, skills, MCP and tools
 on:
-  workflow_dispatch:
-  pull_request: {}
-  push:
-    branches:
-      - main
-
+  workflow_call:
+    inputs:
+      plan:
+        type: string
+        required: true
+      mcp:
+        type: boolean
+        required: true
 permissions:
   contents: read
-
+  actions: read
 jobs:
-  change-scope:
-    name: Check Rust change scope
-    runs-on: ubuntu-latest
-    outputs:
-      run_workflow: ${{ steps.scope.outputs.run_workflow }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Decide whether Rust checks apply
-        id: scope
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BASE_SHA: ${{ github.event.before }}
-          PUSH_HEAD_SHA: ${{ github.sha }}
-        run: python3 .github/scripts/pr_change_scope.py rust
-
-  rust-quality:
-    needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
-    name: rust-format-and-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Talos
-        uses: actions/checkout@v6
-
-      - name: Load shared toolchain versions
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RELEASE_RUST_VERSION }}
-          components: rustfmt
-
-      - name: Fetch locked CI dependencies
-        run: cargo fetch --locked --manifest-path talos-rs/Cargo.toml
-
-      - name: Cache Rust build output
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: talos-rs
-          shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
-
-      - name: Install just and scoped test runner
-        uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-nextest
-
-      - name: Install Protocol Buffer compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
-
-      - name: Check error contract guardrails
-        run: |
-          python3 scripts/check_error_contract_tests.py
-          python3 scripts/check_error_contract.py
-
-      - name: Check Rust formatting
-        run: just fmt-check
-
-      - name: Check Rust workspace
-        run: just check
-
-      - name: Verify Sync SDK and client boundaries
-        run: |
-          just test -p talos-sync -p talos-app-protocol -p talos-sdk -p talos-mcp
-
-      - name: Verify log rotation and root timezone configuration
-        run: just test -p talos-logging -p talos-config
-
-  mcp-native-cleanup:
-    needs: change-scope
-    if: ${{ always() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.run_workflow == 'true') }}
-    name: MCP native macOS cleanup
+  checks:
+    name: Server · affected modules
+    uses: ./.github/workflows/ci-category.yml
+    with:
+      plan: ${{ inputs.plan }}
+  mcp-native:
+    name: MCP · native macOS process cleanup
+    if: inputs.mcp
     runs-on: macos-26
     timeout-minutes: 20
+    env:
+      CI_TASK: '{"name":"mcp-native-macos","kind":"mcp","rust":["talos-mcp"],"frontend":[],"binaries":[]}'
     steps:
-      - name: Checkout Talos
-        uses: actions/checkout@v6
-      - name: Load shared toolchain versions
+      - uses: actions/checkout@v6
+      - id: cache
+        uses: ./.github/actions/ci-cache
+        with:
+          task: ${{ env.CI_TASK }}
+      - if: steps.cache.outputs.hit != 'true'
         run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.cache.outputs.hit != 'true'
         with:
           toolchain: ${{ env.RELEASE_RUST_VERSION }}
-      - name: Cache Rust build output
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
+        if: steps.cache.outputs.hit != 'true'
         with:
           workspaces: talos-rs
           shared-key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.RELEASE_RUST_VERSION }}-debug
-      - name: Install just and scoped test runner
-        uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2
+        if: steps.cache.outputs.hit != 'true'
         with:
           tool: just,cargo-nextest
-      - name: Verify MCP exit, cancellation and process-group reclamation
-        run: just test -p talos-mcp
+      - name: Check native MCP lifecycle through just
+        if: steps.cache.outputs.hit != 'true'
+        env:
+          CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
+          CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
+        run: python3 .github/scripts/ci_run.py run
