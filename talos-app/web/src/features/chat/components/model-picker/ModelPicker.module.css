@@ -5,8 +5,8 @@
 .triggerName { min-width: 0; max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
 .triggerEffort { flex-shrink: 0; color: rgb(var(--color-muted)); }
 .trigger > svg { flex-shrink: 0; }
-.triggerFast { color: rgb(var(--color-info)); }
-.picker { --picker-accent: rgb(var(--color-info)); width: 260px; max-width: calc(100vw - 24px); max-height: var(--radix-popover-content-available-height); padding: 7px; border: 1px solid rgb(var(--color-border)); border-radius: 17px; background: rgb(var(--color-card)); color: rgb(var(--color-ink)); box-shadow: var(--shadow-panel); z-index: 60; }
+.triggerFast { color: rgb(var(--color-accent)); }
+.picker { --picker-accent: rgb(var(--color-accent)); width: 260px; max-width: calc(100vw - 24px); max-height: var(--radix-popover-content-available-height); padding: 7px; border: 1px solid rgb(var(--color-border)); border-radius: 17px; background: rgb(var(--color-card)); color: rgb(var(--color-ink)); box-shadow: var(--shadow-panel); z-index: 60; }
 .picker[data-view=overview] { height: 118px; padding: 9px 11px 11px; display: flex; flex-direction: column; justify-content: space-between; }
 .picker button { outline: none; }
 .trigger:focus-visible, .picker button:focus-visible { outline: 2px solid rgb(var(--color-brand) / .4); outline-offset: 2px; }

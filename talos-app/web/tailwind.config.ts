@@ -26,6 +26,7 @@ export default {
         danger: "rgb(var(--color-danger) / <alpha-value>)",
         success: "rgb(var(--color-success) / <alpha-value>)",
         info: "rgb(var(--color-info) / <alpha-value>)",
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
       },
       boxShadow: {
         panel: "var(--shadow-panel)",

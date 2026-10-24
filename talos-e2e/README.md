@@ -185,7 +185,9 @@ and transparent expanded/narrow native backdrops, saving theme
 screenshots and geometry evidence. A separate browser component fixture renders
 the production project-removal and session-deletion dialogs with compiled CSS to
 check neutral-theme danger fills/text on hover and disabled states; it invokes
-Cancel only and never submits destructive actions. Web-only changes run this
+Cancel only and never submits destructive actions. A second production-component
+fixture preserves the pure-blue reasoning/Fast accent in both themes, exercises
+slider keyboard changes and Fast selection, and never sends a model request. Web-only changes run this
 case alongside Computer registration without requiring a Docker Worker or model.
 Desktop-only source/resource changes select native cases `20/02`, `20/03`, and
 `20/04` through the standard runner in the dedicated Browser job. Media, preload,
