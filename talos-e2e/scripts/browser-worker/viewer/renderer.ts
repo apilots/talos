@@ -5,6 +5,8 @@ const options={actorCredentials:{credential:{type:'existing_session_token' as co
 const nodeId=new URL(location.href).searchParams.get('node')!;
 const status=document.querySelector('#status')!;
 (async()=>{
+ const actor=await bridge.invoke<import('@talos/sdk-core').AppProtocol.UserCurrentResponse>('user/current',{},options);
+ if(actor.status==='error')throw actor.error;
  const response=await bridge.invoke<import('@talos/sdk-core').AppProtocol.BrowserSnapshot>('browser/operate',{nodeId,operation:{kind:'read'}},options);
  if(response.status==='error')throw response.error;
  const snapshot=response.data;

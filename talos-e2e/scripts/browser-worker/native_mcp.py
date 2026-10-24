@@ -13,7 +13,7 @@ class Page(BaseHTTPRequestHandler):
  def do_GET(self):
   if self.path=='/report.csv':
    self.send_response(200);self.send_header('Content-Type','text/csv');self.send_header('Content-Disposition','attachment; filename="report.csv"');self.end_headers();self.wfile.write(b'name,value\nworker,1\n');return
-  html=b'''<title>Native Worker fixture</title><input name="name"><button onclick="document.querySelector('p').textContent='Hello '+document.querySelector('input').value">Submit</button><p>Ready</p><input id="upload" type="file" onchange="document.querySelector('#uploaded').textContent=this.files[0].name"><p id="uploaded"></p><a href="/report.csv">Download</a>'''
+  html=b'''<title>Native Worker fixture</title><input name="name"><button onclick="document.querySelector('p').textContent='Hello '+document.querySelector('input').value">Submit</button><p>Ready</p><input id="upload" type="file" onchange="document.querySelector('#uploaded').textContent=this.files[0].name"><p id="uploaded"></p><a href="/report.csv">Download</a><script>window.fixtureInputs=[];for(const type of ['input','click','keydown'])document.addEventListener(type,event=>window.fixtureInputs.push({type,target:event.target.tagName,x:event.clientX,y:event.clientY}));</script>'''
   self.send_response(200);self.send_header('Content-Type','text/html');self.send_header('Content-Length',str(len(html)));self.end_headers();self.wfile.write(html)
 page=ThreadingHTTPServer(('127.0.0.1',18080),Page);threading.Thread(target=page.serve_forever,daemon=True).start()
 home=Path(os.environ['TALOS_E2E_TMP_ROOT'])/('mcp-home-'+uuid.uuid4().hex[:8]);home.mkdir()
