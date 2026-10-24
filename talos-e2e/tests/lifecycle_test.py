@@ -153,6 +153,29 @@ python3 -c 'import subprocess;from pathlib import Path;p=subprocess.Popen(["slee
         self.assertIn(f'-v {volume}:/workspace/talos/talos-rs/target', calls.read_text())
         self.assertNotIn('sandbox-linux-target', calls.read_text())
 
+    def test_supplied_sandbox_archive_reuses_image_and_has_no_build_volume(self):
+        binary = self.root / 'bin'; binary.mkdir()
+        calls = self.root / 'archive-docker-calls'
+        docker = binary / 'docker'
+        docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_CALLS"\n')
+        docker.chmod(0o755)
+        archive = SCRIPTS.parent / 'reports' / 'fixture-archive.tar.zst'
+        archive.parent.mkdir(exist_ok=True); archive.touch()
+        self.addCleanup(archive.unlink)
+        helper = self.root / 'launcher'; helper.touch(); helper.chmod(0o755)
+        env = dict(self.env, PATH=str(binary)+os.pathsep+self.env['PATH'], DOCKER_CALLS=str(calls),
+                   TALOS_TEST_ARCHIVE=str(archive), TALOS_E2E_SANDBOX_BIN=str(helper),
+                   SANDBOX_DOCKER_IMAGE='ghcr.io/apilots/talos-sandbox-base@sha256:'+'a'*64)
+        source = f'source "{SCRIPTS}/common.sh"\nsource "{SCRIPTS}/sandbox.sh"\nrun_linux_docker_sandbox_group'
+        result = subprocess.run(['bash','-c',source],env=env,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        commands = calls.read_text()
+        self.assertNotIn('volume create',commands)
+        self.assertNotIn('build --label',commands)
+        self.assertIn('TALOS_TEST_ARCHIVE='+str(archive),commands)
+        self.assertIn('TALOS_LINUX_SANDBOX_HELPER='+str(helper),commands)
+        self.assertIn('sandbox_e2e_tests',commands)
+
     def test_deep_case_root_keeps_chromium_socket_short_and_retires_temp_orphans(self):
         private = self.root / ('nested-worktree-' * 12)
         self.env['TALOS_E2E_RESOURCE_ROOT'] = str(private)

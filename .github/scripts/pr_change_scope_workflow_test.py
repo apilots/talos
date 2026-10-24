@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import tarfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -55,37 +56,33 @@ class WorkflowTests(unittest.TestCase):
         import re
         build = (ROOT / '.github/workflows/ci-build.yml').read_text()
         scenario = (ROOT / '.github/workflows/ci-category.yml').read_text()
-        producer = re.search(r'name: (ci-binaries[^\n]*)', build).group(1)
-        consumer = re.search(r'name: (ci-binaries[^\n]*)', scenario).group(1)
-        render = lambda name, attempt: name.replace('${{ github.run_attempt }}', str(attempt))
-        # A failed-job retry keeps the successful build and its attempt-one artifact.
-        artifacts = {render(producer, 1): 'same-run-compiled-product'}
+        names = re.findall(r'name: (ci-(?:binary|tests)-[^\n]+)', build)
+        self.assertEqual(len(names), 9)
         for attempt in (2, 3):
-            self.assertEqual(artifacts.get(render(consumer, attempt)), 'same-run-compiled-product')
-        # A full retry may rebuild, so its sole producer must replace the old upload.
-        upload = build.split('uses: actions/upload-artifact@v7', 1)[1]
-        self.assertRegex(upload, r'overwrite: true')
+            # A failed-job retry consumes stable current-run products from attempt one.
+            self.assertTrue(all('run_attempt' not in name for name in names))
+            self.assertIn('pattern: ${{ matrix.binary_pattern }}', scenario)
+        self.assertEqual(build.count('overwrite: true'), len(names))
 
     def test_pr_conditions_report_failures_but_allow_obsolete_runs_to_cancel(self):
+        import itertools
         import re
         workflow = (ROOT / '.github/workflows/pr-e2e.yml').read_text()
         jobs = dict(re.findall(r'^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)', workflow, re.M | re.S))
         for job in ('webui', 'desktop', 'tui', 'server', 'frontend-gate', 'rust-gate', 'e2e-gate', 'installer-gate'):
             condition = re.search(r'^    if: \$\{\{ (.*?) \}\}', jobs[job], re.M).group(1)
             expression = condition.replace('&&', ' and ').replace('||', ' or ').replace('!', 'not ')
-            for cancelled in (False, True):
-                for build in ('success', 'skipped', 'failure'):
-                    for scope in ('success', 'failure'):
-                        for selected in ('true', 'false'):
-                            needs = SimpleNamespace(scope=SimpleNamespace(result=scope, outputs=SimpleNamespace(
-                                **{name: selected for name in ('webui', 'desktop', 'tui', 'server')})),
-                                build=SimpleNamespace(result=build))
-                            actual = eval(expression, {'__builtins__': {}, 'always': lambda: True,
-                                'cancelled': lambda: cancelled}, {'needs': needs})
-                            expected = not cancelled and (job.endswith('-gate') or (
-                                scope == 'success' and selected == 'true' and build in ('success', 'skipped')))
-                            with self.subTest(job=job, cancelled=cancelled, build=build, scope=scope, selected=selected):
-                                self.assertEqual(actual, expected)
+            for cancelled, build, tests, scope, selected in itertools.product(
+                (False, True), ('success', 'skipped', 'failure'), ('success', 'skipped', 'failure'),
+                ('success', 'failure'), ('true', 'false')):
+                needs = SimpleNamespace(scope=SimpleNamespace(result=scope, outputs=SimpleNamespace(
+                    **{name: selected for name in ('webui', 'desktop', 'tui', 'server')})),
+                    build=SimpleNamespace(result=build), tests=SimpleNamespace(result=tests))
+                actual = eval(expression, {'__builtins__': {}, 'cancelled': lambda: cancelled}, {'needs': needs})
+                expected = not cancelled and (job.endswith('-gate') or (
+                    scope == 'success' and selected == 'true' and build in ('success', 'skipped')
+                    and (job not in ('tui', 'server') or tests in ('success', 'skipped'))))
+                self.assertEqual(actual, expected, (job, cancelled, build, tests, scope, selected))
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT / 'output')
@@ -128,15 +125,16 @@ class WorkflowTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('native-binary')
             path.chmod(0o755)
+        task['tests'] = {}  # This regression isolates executable distribution.
         ci_run.execute(task, self.root / 'cache')
         self.assertEqual(len(self.calls), 1)
         args = self.calls[0][0]
         self.assertEqual(args[:3], ('just', 'build', '--locked'))
-        for b in task['binaries']:
-            self.assertEqual(args.count(BINARIES[b][1]), 1 + int(BINARIES[b][0] == BINARIES[b][1]))
-        with ci_run.tarfile.open(self.root / 'cache/binaries.tar.gz') as archive:
-            self.assertEqual(set(archive.getnames()), {BINARIES[b][1] for b in task['binaries']})
-            self.assertTrue(all(member.mode & 0o111 for member in archive.getmembers()))
+        for binary in task['binaries']:
+            path = self.root / 'cache' / f'binary-{binary}.tar.gz'
+            with tarfile.open(path) as archive:
+                self.assertEqual(archive.getnames(), [BINARIES[binary][1]])
+                self.assertTrue(archive.getmembers()[0].mode & 0o111)
 
     def test_missing_artifact_cannot_trigger_unplanned_compile(self):
         task = plan(['talos-rs/apps/tui/src/render/chat_lines.rs'])['categories']['tui']['scenarios']['include'][0]
@@ -152,8 +150,8 @@ class WorkflowTests(unittest.TestCase):
 
     def test_gate_rejects_selected_failures_and_unexpected_skips(self):
         selected = plan(['talos-rs/apps/tui/src/render/chat_lines.rs'])
-        needs = {name: {'result': 'skipped'} for name in ('scope','build','webui','desktop','server','tui','harness','installer')}
-        for name in ('scope', 'build', 'tui'):
+        needs = {name: {'result': 'skipped'} for name in ('scope','build','tests','webui','desktop','server','tui','harness','installer')}
+        for name in ('scope', 'build', 'tests', 'tui'):
             needs[name]['result'] = 'success'
         for mode in ('frontend','rust','e2e','installer'):
             validate(mode, selected, needs)
@@ -175,13 +173,13 @@ class WorkflowTests(unittest.TestCase):
         task = plan(['talos-rs/apps/tui/src/render/chat_lines.rs'])['build']
         directory = self.root / 'cache'
         directory.mkdir()
-        (directory / 'binaries.tar.gz').write_bytes(b'archive')
+        (directory / 'binary-cli.tar.gz').write_bytes(b'archive')
         self.assertFalse(ci_run.cached(directory, 'key', task))
         ci_run.record(directory, 'key', task)
         self.assertTrue(ci_run.cached(directory, 'key', task))
         self.assertFalse(ci_run.cached(directory, 'new-key', task))
         self.assertFalse(ci_run.cached(directory, 'key', {**task, 'name': 'other'}))
-        (directory / 'binaries.tar.gz').write_bytes(b'corrupted')
+        (directory / 'binary-cli.tar.gz').write_bytes(b'corrupted')
         self.assertFalse(ci_run.cached(directory, 'key', task))
         record = json.loads((directory / 'success.json').read_text())
         record['conclusion'] = 'failure'

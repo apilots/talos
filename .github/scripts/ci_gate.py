@@ -9,11 +9,11 @@ def validate(mode, plan, needs):
         raise ValueError('Module change detection did not succeed')
     categories = plan['categories']
     expected = {c: bool(task['quality'] or task['scenarios']['include']) for c, task in categories.items()}
-    expected.update(scope=True, build=bool(plan['build']['binaries']),
+    expected.update(scope=True, build=bool(plan['build']['binaries']), tests=bool(plan['test_build']['tests']),
                     installer=plan['installer'], harness=plan['harness'])
     owners = {'frontend': ('scope', 'webui', 'desktop'), 'rust': ('scope', 'server', 'tui'),
               'installer': ('scope', 'installer'),
-              'e2e': ('scope', 'build', 'webui', 'desktop', 'server', 'tui', 'harness')}[mode]
+              'e2e': ('scope', 'build', 'tests', 'webui', 'desktop', 'server', 'tui', 'harness')}[mode]
     for owner in owners:
         wanted = 'success' if expected[owner] else 'skipped'
         if needs[owner]['result'] != wanted:

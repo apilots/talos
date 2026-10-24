@@ -77,7 +77,9 @@ def docker_create(kind, name, args, scope=None):
     register(kind, name, scope)
     command = ['docker', 'run', *docker_labels(), '--name', name, *args] if kind == 'container' else ['docker', kind, 'create', *docker_labels(), *args, name]
     try:
-        return subprocess.run(command, check=True, capture_output=True, text=True).stdout.strip()
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        print(result.stderr, file=sys.stderr, end='')
+        return result.stdout.strip()
     except subprocess.CalledProcessError as error:
         print(error.stdout, file=sys.stderr)
         print(error.stderr, file=sys.stderr)

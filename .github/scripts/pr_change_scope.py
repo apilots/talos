@@ -132,7 +132,8 @@ def main() -> int:
         values.update({category: str(bool(task["quality"] or task["scenarios"]["include"])).lower()
                        for category, task in selected["categories"].items()})
         values.update(installer=str(selected["installer"]).lower(),
-                      build=str(bool(selected["build"]["binaries"])).lower())
+                      build=str(bool(selected["build"]["binaries"])).lower(),
+                      tests=str(bool(selected["test_build"]["tests"])).lower())
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with open(summary, "a") as stream:

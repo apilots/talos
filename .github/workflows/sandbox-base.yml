@@ -1,0 +1,43 @@
+name: CI environment · sandbox base image
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - talos-rs/crates/action/linux-sandbox/tests/docker/ubuntu-24.04.Dockerfile
+      - .github/ci-toolchain.env
+      - .github/release-toolchain.env
+      - .github/workflows/sandbox-base.yml
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: sandbox-base-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    name: Publish · Linux amd64 sandbox environment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Load pinned tools
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ env.CI_JUST_VERSION }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish immutable source tag
+        run: |
+          mkdir -p output
+          just sandbox-base --push --tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/talos-sandbox-base:sha-${GITHUB_SHA}" \
+            --build-arg "JUST_VERSION=${CI_JUST_VERSION}" \
+            --build-arg "NEXTEST_VERSION=${CI_NEXTEST_VERSION}" \
+            --metadata-file ../output/sandbox-base.json
+      - name: Record digest for the source-reviewed image lock
+        run: cat output/sandbox-base.json >> "$GITHUB_STEP_SUMMARY"

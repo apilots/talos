@@ -123,15 +123,32 @@ packaging checks do not substitute for these scenarios. Heavy installation runs
 only before publication or through `release-preflight.yml`; container acceptance
 consumes the same run's TUI product, without a Rust toolchain or build volume.
 
-All selected Linux E2E binary requirements are compiled together once through
-`just build --locked`. A compressed, executable-preserving artifact from the
-current workflow run supplies each scenario. Ordinary product E2E uses debug
-binaries; native installation and publication retain release build verification.
-A missing supplied binary fails explicitly rather than compiling an unplanned
-replacement. Rust dependency caches restore before `cargo fetch --locked`.
-The binary artifact name is stable within a workflow run: a failed-job-only retry
-can consume its successful upstream build without inventing a new attempt's product.
-A full retry replaces that run's artifact. After artifact expiry, rerun the build.
+All selected Linux E2E binary requirements are compiled together through
+`just build --locked`. An independent shared producer builds the selected Rust test
+archives through `just test-archive`, preserving each owner's package and feature
+selection while reusing one Cargo target directory. Server, TUI and Rust E2E
+consumers execute their own archive through `just test`; the native and Docker
+sandbox journeys execute the same Linux sandbox tests in both environments.
+The product and test producers run in parallel; frontend scenarios do not wait
+for Rust test compilation. Native macOS checks retain native build and execution.
+
+Each executable has its own checksum-verified, executable-preserving archive.
+Consumers download only their declared current-run binaries and test archive.
+Artifact names remain stable across failed-job retries; only the build producer
+may overwrite them on a full retry. Missing or corrupt supplied artifacts fail
+rather than starting a replacement build. Debug products and test harnesses are
+separate build outputs; release installation retains release-build verification.
+
+The sandbox environment is published as `ghcr.io/apilots/talos-sandbox-base` by
+`sandbox-base.yml` on owning main changes or maintainer dispatch, never by PR
+code. `.github/sandbox-base.env` pins its immutable digest for anonymous PR pulls;
+`.github/ci-toolchain.env` pins matching host/container tools. Update the image
+from the reviewed Dockerfile and version/checksum inputs, verify public pull and
+sandbox acceptance, then update its digest in a PR. The one-platform environment
+publish is separate from product release installation and architecture validation.
+The local Dockerfile remains usable for standalone acceptance without supplied
+archives. CI Docker sandbox execution reuses the test archive and launcher,
+without creating a fresh target volume or compiling project/tool sources.
 
 Dependency caches never count as test evidence. A separate exact-input success
 record may reuse a completed task within the same PR, runner image, architecture

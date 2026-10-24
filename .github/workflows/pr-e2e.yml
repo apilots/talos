@@ -19,6 +19,7 @@ jobs:
     outputs:
       plan: ${{ steps.scope.outputs.plan }}
       build: ${{ steps.scope.outputs.build }}
+      tests: ${{ steps.scope.outputs.tests }}
       webui: ${{ steps.scope.outputs.webui }}
       desktop: ${{ steps.scope.outputs.desktop }}
       tui: ${{ steps.scope.outputs.tui }}
@@ -43,6 +44,13 @@ jobs:
     uses: ./.github/workflows/ci-build.yml
     with:
       task: ${{ toJSON(fromJSON(needs.scope.outputs.plan).build) }}
+  tests:
+    name: Build · shared Rust tests
+    needs: scope
+    if: ${{ !cancelled() && (needs.scope.outputs.tests == 'true') }}
+    uses: ./.github/workflows/ci-build.yml
+    with:
+      task: ${{ toJSON(fromJSON(needs.scope.outputs.plan).test_build) }}
   webui:
     name: WebUI
     needs: [scope, build]
@@ -59,15 +67,15 @@ jobs:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.desktop) }}
   tui:
     name: TUI
-    needs: [scope, build]
-    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.tui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    needs: [scope, build, tests]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.tui == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     uses: ./.github/workflows/talos-tui.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.tui) }}
   server:
     name: Server · client / SDK / skills / MCP / tools / runtime
-    needs: [scope, build]
-    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.server == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    needs: [scope, build, tests]
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.scope.outputs.server == 'true' && (needs.build.result == 'success' || needs.build.result == 'skipped') && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     uses: ./.github/workflows/talos-rust.yml
     with:
       plan: ${{ toJSON(fromJSON(needs.scope.outputs.plan).categories.server) }}
@@ -131,7 +139,7 @@ jobs:
   e2e-gate:
     name: talos-pr-e2e
     if: ${{ !cancelled() }}
-    needs: [scope, build, webui, desktop, server, tui, harness]
+    needs: [scope, build, tests, webui, desktop, server, tui, harness]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6

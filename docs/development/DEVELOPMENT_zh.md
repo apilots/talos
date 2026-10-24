@@ -136,3 +136,23 @@ just clean-incremental
 目录不是常规验证步骤。
 
 版本化产品发布参见[发布流程](RELEASE_zh.md)。
+
+### CI 编译产物与沙箱环境复用
+
+共享产品构建通过 `just build --locked` 编译业务二进制，独立且并行的
+共享测试构建通过 `just test-archive` 为 Server、TUI、Rust E2E 生成测试归档。各归档保留
+原有包与特性选择，在同一 Cargo target 目录中复用编译结果；消费端仍通过
+`just test` 运行。原生与 Docker 沙箱使用同一 Linux 测试归档，保留两套
+完整业务验证；macOS 原生检查继续在原生平台编译执行。
+
+每个二进制独立打包、保留可执行权限并校验摘要，消费端只下载声明需要的
+当前运行产物。失败任务单独重跑复用同一次运行的稳定产物名；全量重跑仅由
+构建生产者覆盖。缺失或损坏的指定产物直接失败，不临时编译兜底。
+
+`ghcr.io/apilots/talos-sandbox-base` 由 `sandbox-base.yml` 在所属文件的
+main 变更或维护者手动触发时发布，PR 不获得发布权限。工具版本记录在
+`.github/ci-toolchain.env`，消费镜像的不可变 digest 记录在
+`.github/sandbox-base.env`。更新流程为构建并发布经审查的基础环境、验证
+匿名拉取及沙箱验收，再通过 PR 更新 digest。此单平台测试环境发布独立于
+产品发行安装和多架构验证；Docker 沙箱消费归档时不创建新 target 卷或编译
+项目及工具源码，本地无归档的独立验收仍保留原有编译入口。
