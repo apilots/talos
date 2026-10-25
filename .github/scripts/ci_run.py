@@ -9,11 +9,11 @@ import re
 from pathlib import Path
 import subprocess
 import sys
-import tarfile
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from ci_artifacts import inventory, pack_binary, seal, verified
 from ci_impact import ROOT, is_document
 from ci_plan import BINARIES, task_roots
 
@@ -105,7 +105,7 @@ def cached(directory: Path, key: str, task: dict) -> bool:
         if record['key'] != key or record['conclusion'] != 'success' or record['task'] != task:
             return False
         if task['kind'] == 'build':
-            return hashlib.sha256((directory / 'binaries.tar.gz').read_bytes()).hexdigest() == record['archive_sha256']
+            return bool(record['artifacts']) and inventory(directory) == record['artifacts']
         return True
     except (OSError, ValueError, KeyError):
         return False
@@ -145,7 +145,7 @@ def record(directory: Path, key: str, task: dict) -> None:
                  sha=os.environ.get('GITHUB_SHA'), run=os.environ.get('GITHUB_RUN_ID'),
                  attempt=os.environ.get('GITHUB_RUN_ATTEMPT'))
     if task['kind'] == 'build':
-        value['archive_sha256'] = hashlib.sha256((directory / 'binaries.tar.gz').read_bytes()).hexdigest()
+        value['artifacts'] = inventory(directory)
     (directory / 'success.json').write_text(json.dumps(value, indent=2))
 
 
@@ -155,7 +155,12 @@ def execute(task: dict, directory: Path) -> None:
             args = [value for package in task['rust'] for value in ('-p', package)]
             run('just', 'fmt-check')
             run('just', 'check', '--locked', *args)
-            run('just', 'test', '--locked', *args)
+            archive = os.environ.get('TALOS_TEST_ARCHIVE')
+            if archive:
+                verified(Path(archive))
+                run('just', 'test')  # The archive contains exactly this task's packages.
+            else:
+                run('just', 'test', '--locked', *args)
         if task['frontend']:
             filters = [value for package in task['frontend'] for value in ('--filter', package)]
             for script in ('lint', 'test', 'typecheck'):
@@ -167,16 +172,26 @@ def execute(task: dict, directory: Path) -> None:
     elif task['kind'] == 'build':
         args = [value for binary in task['binaries'] for value in
                 ('-p', BINARIES[binary][0], '--bin', BINARIES[binary][1])]
-        if not args:
-            raise ValueError('No binaries selected')
-        run('just', 'build', '--locked', *args)
+        if args:
+            run('just', 'build', '--locked', *args)
         directory.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(directory / 'binaries.tar.gz', 'w:gz', compresslevel=3) as archive:
-            for binary in task['binaries']:
-                name = BINARIES[binary][1]
-                archive.add(ROOT / 'talos-rs/target/debug' / name, arcname=name)
+        for binary in task['binaries']:
+            pack_binary(directory, binary, ROOT / 'talos-rs/target/debug' / BINARIES[binary][1])
+        for owner, packages in task.get('tests', {}).items():
+            archive = directory / f'tests-{owner}.tar.zst'
+            package_args = [arg for package in packages for arg in ('-p', package)]
+            run('just', 'test-archive', '--locked', *package_args, '--archive-file', str(archive))
+            seal(archive)
     elif task['kind'] == 'e2e':
         env = dict(os.environ)
+        if task.get('rust_tests'):
+            env['TALOS_TEST_ARCHIVE'] = str(verified(ROOT / 'output/ci-tests/tests-e2e.tar.zst'))
+            values = dict(line.split('=', 1) for line in (ROOT / '.github/sandbox-base.env').read_text().splitlines() if '=' in line)
+            image = values['CI_SANDBOX_BASE_IMAGE']
+            if not re.fullmatch(r'ghcr.io/[a-z0-9/._-]+:v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)@sha256:[0-9a-f]{64}', image):
+                raise ValueError('Sandbox base image must have a semantic version and immutable digest')
+            run('docker', 'pull', image)
+            env['SANDBOX_DOCKER_IMAGE'] = image
         for binary in task['binaries']:
             _, name, variable = BINARIES[binary]
             path = ROOT / 'output/ci-binaries' / name

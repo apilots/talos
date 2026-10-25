@@ -55,6 +55,12 @@ jobs:
             echo "server_checks=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Load policy test tools
+        run: cat .github/ci-toolchain.env >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ env.CI_JUST_VERSION }}
+
       - name: Test repository policy scripts
         run: |
           python3 -m unittest discover -s scripts -p 'check_changed_files_tests.py'

@@ -38,7 +38,7 @@ def scenario_task(category: str, target: str, root: Path = ROOT) -> dict:
     node = bool(requirements['commands'] & {'node', 'pnpm', 'npx'})
     return dict(name=target.splitlines()[0].split(':', 1)[1].replace('/', ' · '),
                 kind='e2e', category=category, targets=target, cases=sorted(set(cases)),
-                binaries=sorted(binaries), node=node, chrome='chrome' in requirements['checks'],
+                binaries=sorted(binaries), binary_pattern='ci-binary-' + ('{' + ','.join(sorted(binaries)) + '}' if len(binaries) > 1 else next(iter(binaries), 'none')), node=node, chrome='chrome' in requirements['checks'],
                 docker=docker, rust_tests='cargo-nextest' in requirements['commands'],
                 rust=['talos-tools'] if 'cargo-nextest' in requirements['commands'] else [], frontend=[])
 
@@ -80,11 +80,20 @@ def plan(paths: list[str], root: Path = ROOT) -> dict:
         selected.targets['webui'].add(registration)
     for category, targets in selected.targets.items():
         categories[category]['scenarios']['include'] = [scenario_task(category, target, root) for target in sorted(targets)]
-    binaries = sorted({b for c in categories.values() for task in c['scenarios']['include'] for b in task['binaries']})
+    tests = {category: c['quality'][0]['rust'] for category, c in categories.items()
+             if c['quality'] and c['quality'][0]['rust']}
+    e2e_tests = sorted({p for c in categories.values() for t in c['scenarios']['include'] for p in t['rust']})
+    if e2e_tests:
+        tests['e2e'] = e2e_tests
+    binaries = sorted({b for c in categories.values() for task in c['scenarios']['include'] for b in task['binaries']}
+                      | ({'sandbox'} if tests else set()))
     return dict(categories=categories, installer=selected.installer, mcp=selected.mcp,
                 harness=selected.harness,
-                build=dict(name='shared-debug-binaries', kind='build', category='build',
-                           binaries=binaries, rust=[], frontend=[], node=False, chrome=False, docker=False))
+                build=dict(name='Build · shared debug binaries', kind='build', category='build',
+                           binaries=binaries, rust=[], tests={}, frontend=[], node=False, chrome=False, docker=False),
+                test_build=dict(name='Build · shared Rust test archives', kind='build', category='test-build',
+                                binaries=[], rust=sorted({p for group in tests.values() for p in group}),
+                                tests=tests, frontend=[], node=False, chrome=False, docker=False))
 
 
 def task_roots(task: dict, root: Path = ROOT) -> set[str]:
@@ -95,7 +104,7 @@ def task_roots(task: dict, root: Path = ROOT) -> set[str]:
         frontend_names.update(frontend.roots)
     roots = {rust.roots[n] for n in rust.closure(rust_names)}
     roots.update(frontend.roots[n] for n in frontend.closure(frontend_names))
-    roots.update({'.github/workflows', '.github/actions', '.github/scripts', '.github/release-toolchain.env',
+    roots.update({'.github/workflows', '.github/actions', '.github/scripts', '.github/release-toolchain.env', '.github/ci-toolchain.env', '.github/sandbox-base.env',
                   'scripts', 'conf', 'justfile', 'build', 'build.sh', 'resources'})
     if rust_names:
         roots.update({'talos-rs/Cargo.toml', 'talos-rs/Cargo.lock', 'talos-rs/.cargo',
@@ -106,6 +115,8 @@ def task_roots(task: dict, root: Path = ROOT) -> set[str]:
         roots.update({'talos-app/package.json', 'talos-app/pnpm-lock.yaml', 'talos-app/pnpm-workspace.yaml',
                       'talos-app/scripts', 'talos-app/shared'})
         roots.update(p.relative_to(root).as_posix() for p in (root / 'talos-app').glob('*') if p.is_file())
+    if task.get('tests'):
+        roots.add('talos-rs')  # Test fixtures may reference other workspace members.
     if task['kind'] == 'harness':
         roots.update({'talos-e2e', 'talos-rs', 'talos-app'})
     if task['kind'] == 'e2e':

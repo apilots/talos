@@ -63,6 +63,7 @@ CI 的 Rust、Node 和 pnpm 版本统一来自 `.github/release-toolchain.env`�
 Server 内部模块和轻量安装契约。`talos-webui.yml` 与 `talos-desktop.yml` 共享
 `ci-category.yml`，各自接收对应模块计划。既有五个必需检查名保留为汇总门禁；文档和纯版本
 变更跳过重型任务，policy 与汇总门禁仍正常回报。
+草稿 PR 的 push 同样执行检查；同一提交转为 ready 不重复运行业务 CI。
 模块和汇总 job 使用 `!cancelled()`，失败仍进入门禁，而新 push 可以取消过时执行。
 清理与证据上传 step 仍可使用 `always()`。
 
@@ -136,3 +137,30 @@ just clean-incremental
 目录不是常规验证步骤。
 
 版本化产品发布参见[发布流程](RELEASE_zh.md)。
+
+### CI 编译产物与沙箱环境复用
+
+共享产品构建通过 `just build --locked` 编译业务二进制，独立且并行的
+共享测试构建通过 `just test-archive` 为 Server、TUI、Rust E2E 生成测试归档。各归档保留
+原有包与特性选择，在同一 Cargo target 目录中复用编译结果；消费端仍通过
+`just test` 运行。原生与 Docker 沙箱使用同一 Linux 测试归档，保留两套
+完整业务验证；macOS 原生检查继续在原生平台编译执行。
+
+每个二进制独立打包、保留可执行权限并校验摘要，消费端只下载声明需要的
+当前运行产物。失败任务单独重跑复用同一次运行的稳定产物名；全量重跑仅由
+构建生产者覆盖。缺失或损坏的指定产物直接失败，不临时编译兜底。
+集成测试在运行时读取 `CARGO_BIN_EXE_<name>`，允许 Nextest 重映射归档中的
+二进制位置；编译时 `env!` 会嵌入生产者目录，不能用于消费端路径解析。
+
+`ghcr.io/apilots/talos-sandbox-base` 由 `sandbox-base.yml` 在所属文件的
+main 变更或维护者手动触发时发布，PR 不获得发布权限。工具版本记录在
+`.github/ci-toolchain.env`，镜像使用独立于产品发行的语义版本，例如
+`talos-sandbox-base:v0.1.0@sha256:…`，版本及不可变 digest 一起记录在
+`.github/sandbox-base.env`。更新流程为从经审查的 Dockerfile 和工具输入
+手动触发工作流，填写新的 `vMAJOR.MINOR.PATCH`，验证匿名拉取及沙箱验收，
+再通过 PR 同时更新版本与 digest。已有版本禁止覆盖；main 自动触发时验证
+当前锁定版本，不重复构建。此单平台测试环境发布独立于
+产品发行安装和多架构验证；Docker 沙箱消费归档时不创建新 target 卷或编译
+项目及工具源码，本地无归档的独立验收仍保留原有编译入口。
+运行镜像保留经过摘要校验、与发行 Rust 版本一致的 Cargo 可执行文件，供
+沙箱内开发工具业务验收使用，但不包含 rustc 或源码编译工具链。

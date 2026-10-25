@@ -27,7 +27,7 @@ jobs:
           task: ${{ toJSON(matrix) }}
       - name: Load shared toolchains
         if: steps.cache.outputs.hit != 'true'
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@master
         if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
         with:
@@ -41,7 +41,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.cache.outputs.hit != 'true'
         with:
-          tool: just,cargo-nextest
+          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }}
       - name: Prepare Rust test prerequisites
         if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
         run: |
@@ -62,9 +62,26 @@ jobs:
       - name: Install frontend dependencies
         if: steps.cache.outputs.hit != 'true' && matrix.node
         run: pnpm --dir talos-app install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
+        with:
+          name: ci-tests-${{ matrix.category }}
+          path: output/ci-tests
+      - uses: actions/download-artifact@v8
+        if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
+        with:
+          name: ci-binary-sandbox
+          path: output/ci-binaries
+      - name: Verify and unpack the supplied helper
+        if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
+        env:
+          CI_BINARIES: '["sandbox"]'
+        run: python3 .github/scripts/ci_artifacts.py
       - name: Check affected packages
         if: steps.cache.outputs.hit != 'true'
         env:
+          TALOS_TEST_ARCHIVE: ${{ matrix.ecosystem == 'rust' && format('{0}/output/ci-tests/tests-{1}.tar.zst', github.workspace, matrix.category) || '' }}
+          TALOS_LINUX_SANDBOX_HELPER: ${{ github.workspace }}/output/ci-binaries/talos-linux-sandbox-launcher
           CI_TASK: ${{ toJSON(matrix) }}
           CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
           CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
@@ -88,7 +105,7 @@ jobs:
           task: ${{ toJSON(matrix) }}
       - name: Load shared toolchains
         if: steps.cache.outputs.hit != 'true'
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
       - name: Install selected scenario prerequisites
         if: steps.cache.outputs.hit != 'true'
         env:
@@ -117,7 +134,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.cache.outputs.hit != 'true'
         with:
-          tool: ${{ matrix.rust_tests && 'just,cargo-nextest' || 'just' }}
+          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }}
       - uses: actions/setup-python@v6
         if: steps.cache.outputs.hit != 'true'
         with:
@@ -148,11 +165,19 @@ jobs:
       - uses: actions/download-artifact@v8
         if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}
         with:
-          name: ci-binaries
+          pattern: ${{ matrix.binary_pattern }}
+          merge-multiple: true
           path: output/ci-binaries
       - name: Unpack current-run product binaries
         if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}
-        run: tar -xf output/ci-binaries/binaries.tar.gz -C output/ci-binaries
+        env:
+          CI_BINARIES: ${{ toJSON(matrix.binaries) }}
+        run: python3 .github/scripts/ci_artifacts.py
+      - uses: actions/download-artifact@v8
+        if: steps.cache.outputs.hit != 'true' && matrix.rust_tests
+        with:
+          name: ci-tests-e2e
+          path: output/ci-tests
       - name: Run selected product scenarios through just
         if: steps.cache.outputs.hit != 'true'
         env:

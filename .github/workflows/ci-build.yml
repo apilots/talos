@@ -1,4 +1,4 @@
-name: CI · shared product binaries
+name: CI · shared compiled products
 on:
   workflow_call:
     inputs:
@@ -10,7 +10,7 @@ permissions:
   actions: read
 jobs:
   build:
-    name: Build · shared debug binaries
+    name: ${{ fromJSON(inputs.task).name }}
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -23,7 +23,7 @@ jobs:
         with:
           task: ${{ inputs.task }}
       - if: steps.cache.outputs.hit != 'true'
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@master
         if: steps.cache.outputs.hit != 'true'
         with:
@@ -36,24 +36,97 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.cache.outputs.hit != 'true'
         with:
-          tool: just
+          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }}
       - name: Prepare build prerequisites after restoring Rust dependencies
         if: steps.cache.outputs.hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends protobuf-compiler libssl-dev pkg-config
           cargo fetch --locked --manifest-path talos-rs/Cargo.toml
-      - name: Compile selected binaries once through just
+      - name: Compile selected binaries and shared tests through just
         if: steps.cache.outputs.hit != 'true'
         env:
           CI_CACHE_KEY: ${{ steps.cache.outputs.key }}
           CI_CACHE_DIR: ${{ steps.cache.outputs.path }}
         run: python3 .github/scripts/ci_run.py run
       - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(inputs.task).binaries, 'server')
         with:
-          name: ci-binaries
+          name: ci-binary-server
           overwrite: true
-          path: ${{ steps.cache.outputs.path }}/binaries.tar.gz
+          path: ${{ steps.cache.outputs.path }}/binary-server.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(inputs.task).binaries, 'cli')
+        with:
+          name: ci-binary-cli
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/binary-cli.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(inputs.task).binaries, 'worker')
+        with:
+          name: ci-binary-worker
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/binary-worker.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(inputs.task).binaries, 'app_server')
+        with:
+          name: ci-binary-app_server
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/binary-app_server.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(inputs.task).binaries, 'test_client')
+        with:
+          name: ci-binary-test_client
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/binary-test_client.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: contains(fromJSON(inputs.task).binaries, 'sandbox')
+        with:
+          name: ci-binary-sandbox
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/binary-sandbox.tar.gz*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: ${{ fromJSON(inputs.task).tests.server }}
+        with:
+          name: ci-tests-server
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/tests-server.tar.zst*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: ${{ fromJSON(inputs.task).tests.tui }}
+        with:
+          name: ci-tests-tui
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/tests-tui.tar.zst*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        if: ${{ fromJSON(inputs.task).tests.e2e }}
+        with:
+          name: ci-tests-e2e
+          overwrite: true
+          path: ${{ steps.cache.outputs.path }}/tests-e2e.tar.zst*
           if-no-files-found: error
           compression-level: 0
           retention-days: 3

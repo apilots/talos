@@ -7,6 +7,7 @@ import {DesktopAppServerController} from '../../../talos-app/desktop/src/app-ser
 import {handleDesktopServerRequest} from '../../../talos-app/desktop/src/desktop-server-requests';
 import {desktopBrowserHost} from '../../../talos-app/desktop/src/browser-host';
 import type {AppProtocol as P} from '@talos/sdk-core';
+import {findDownloadedFile} from './download-receipt.mjs';
 const root=process.env.TALOS_RESOURCE_DIR!;
 const output=process.env.TALOS_SCENARIO_REPORT_DIR??path.join(root,'output/browser-worker');
 mkdirSync(output,{recursive:true});
@@ -21,11 +22,6 @@ async function run(){console.log("NATIVE_MCP_START");await app.whenReady();conso
   assert.equal(state.host,'desktop');assert.equal(state.display.kind,'unavailable');assert.equal(state.selectedTargetId,'managed');
   const upload=await controller.invoke<P.FileUploadResponse>('file/upload',{request:{filename:'browser-upload.png',scope:{type:'personal'},tags:[],metadata:{}},dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5n8AAAAASUVORK5CYII='});
   const operate=(operation:P.BrowserOperation)=>controller.invoke<P.BrowserSnapshot>('browser/operate',{nodeId:'embedded',operation});
-  const findFile=(value:unknown):string|undefined=>{
-    if(typeof value==='string'&&value.startsWith('{')){try{return findFile(JSON.parse(value));}catch{return undefined;}}
-    if(typeof value==='object'&&value!==null){const file=value as Record<string,unknown>;if(file.originalFilename==='report.csv'&&typeof file.fileId==='string')return file.fileId;for(const child of Object.values(file)){const found=findFile(child);if(found)return found;}}
-    return undefined;
-  };
   async function idleSnapshot(){
     let observed=await operate({kind:'read'});
     for(let attempt=0;observed.control.owner.kind==='agent'&&attempt<50;attempt++){
@@ -61,7 +57,7 @@ async function run(){console.log("NATIVE_MCP_START");await app.whenReady();conso
       const targets=await (await fetch('http://127.0.0.1:9222/json/list')).json() as {id:string}[];
       assert(targets.some(target=>target.id===targetId),'MCP must observe the owned prepared Chrome target');
     }
-    const downloaded=findFile(tools.find(result=>result.toolName.endsWith('browser_download')));assert(downloaded);
+    const downloaded=findDownloadedFile(tools);assert(downloaded,'MCP download attempts must include a persisted report.csv receipt');
     const content=await controller.invoke<P.FileContentResponse>('file/content',{fileId:downloaded});assert.equal(Buffer.from(content.dataBase64,'base64').toString(),'name,value\nworker,1\n');
     const after=await idleSnapshot();assert.equal(after.selectedTargetId,mode);
     writeFileSync(path.join(output,'native-mcp-'+mode+'-state.json'),JSON.stringify({before,after,targetId},null,2));

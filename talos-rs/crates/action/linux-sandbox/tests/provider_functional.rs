@@ -20,7 +20,10 @@ const BWRAP: &str = "/usr/bin/bwrap";
 fn provider() -> LinuxSandboxProvider {
     LinuxSandboxProvider::new(
         LinuxSandboxProviderConfig::with_bubblewrap(
-            PathBuf::from(env!("CARGO_BIN_EXE_talos-linux-sandbox-launcher")),
+            PathBuf::from(
+                std::env::var_os("CARGO_BIN_EXE_talos-linux-sandbox-launcher")
+                    .expect("Cargo must provide the sandbox launcher path"),
+            ),
             PathBuf::from(BWRAP),
         )
         .expect("Linux provider config must be valid"),

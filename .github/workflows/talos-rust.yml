@@ -32,7 +32,7 @@ jobs:
         with:
           task: ${{ env.CI_TASK }}
       - if: steps.cache.outputs.hit != 'true'
-        run: cat .github/release-toolchain.env >> "$GITHUB_ENV"
+        run: cat .github/release-toolchain.env .github/ci-toolchain.env >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@master
         if: steps.cache.outputs.hit != 'true'
         with:
@@ -45,7 +45,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.cache.outputs.hit != 'true'
         with:
-          tool: just,cargo-nextest
+          tool: just@${{ env.CI_JUST_VERSION }},cargo-nextest@${{ env.CI_NEXTEST_VERSION }}
       - name: Check native MCP lifecycle through just
         if: steps.cache.outputs.hit != 'true'
         env:

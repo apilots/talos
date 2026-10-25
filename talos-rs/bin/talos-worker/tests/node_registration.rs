@@ -147,7 +147,9 @@ async fn verify_node_lifecycle(configuration: Configuration) {
 
     let log_path = directory.path().join("node.log");
     let log = std::fs::File::create(&log_path).unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_talos-worker"));
+    let mut command = Command::new(
+        std::env::var_os("CARGO_BIN_EXE_talos-worker").expect("Cargo must provide the worker path"),
+    );
     command.env("TALOS_HOME", &home);
     match configuration {
         Configuration::Explicit => {

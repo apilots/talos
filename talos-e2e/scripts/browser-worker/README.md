@@ -35,6 +35,8 @@ Use `--case 20_browser_workspace/04_desktop_mcp` with
 and requires fresh successful observations.
 Download collection waits for a persisted File API receipt through bounded real
 MCP calls; a download link or filename in page text is not completion evidence.
+Receipt validation inspects all successful collection responses, including a
+completed response after an earlier pending one, then verifies File API content.
 Failed native MCP tasks preserve the synthetic page's input events and pixels
 before closing their owned views.
 Use `--case 20_browser_workspace/05_docker_worker` with

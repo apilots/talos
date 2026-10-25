@@ -62,14 +62,27 @@ check *args:
 
 # Run tests through nextest. Prefer scoped runs such as `just test -p talos-service`.
 test *args:
-    @if ! cargo nextest --version >/dev/null 2>&1; then \
-      echo "cargo-nextest is required. Run: just install-tools" >&2; \
-      exit 127; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "${TALOS_TEST_ARCHIVE:-}" ]]; then
+      test -f "${TALOS_TEST_ARCHIVE}"
+      if [[ "$(uname -s)" == Linux ]]; then test -x "${TALOS_LINUX_SANDBOX_HELPER:?Missing supplied sandbox helper}"; fi
+      RUST_MIN_STACK={{ rust_min_stack }} cargo-nextest nextest run --no-fail-fast --archive-file "${TALOS_TEST_ARCHIVE}" --workspace-remap "$PWD" "$@"
+    else
+      if [[ "$(uname -s)" == Linux ]]; then
+        if [[ -n "${TALOS_LINUX_SANDBOX_HELPER:-}" ]]; then test -x "${TALOS_LINUX_SANDBOX_HELPER}";
+        else cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher; fi
+      fi
+      RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --no-fail-fast "$@"
     fi
-    @if [ "$(uname -s)" = "Linux" ]; then \
-      cargo build -p talos-linux-sandbox --bin talos-linux-sandbox-launcher; \
-    fi
-    RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --no-fail-fast "$@"
+
+# Compile exactly the caller's package selection for relocation to test consumers.
+test-archive *args:
+    cargo nextest archive "$@"
+
+# Build the single-platform reusable sandbox environment, separately from PR tests.
+sandbox-base *args:
+    docker buildx build --platform linux/amd64 --target runtime -f crates/action/linux-sandbox/tests/docker/ubuntu-24.04.Dockerfile "$@" ..
 
 # Run fast Clippy checks for selected packages without linting path dependencies.
 clippy *args:

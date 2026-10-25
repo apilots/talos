@@ -3,6 +3,8 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn startup_failures_are_reported_once_before_the_log_guard_drains() {
+    let executable = std::env::var_os("CARGO_BIN_EXE_app-server")
+        .expect("Cargo must provide the app-server path");
     for kind in ["Business", "Internal"] {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
@@ -13,7 +15,7 @@ fn startup_failures_are_reported_once_before_the_log_guard_drains() {
         } else {
             fs::create_dir(&config).unwrap();
         }
-        let output = Command::new(env!("CARGO_BIN_EXE_app-server"))
+        let output = Command::new(&executable)
             .env_clear()
             .env("TALOS_HOME", root)
             .env("TALOS_CONFIG", config)

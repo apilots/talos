@@ -93,6 +93,8 @@ installer contracts. `talos-webui.yml` and `talos-desktop.yml` share `ci-categor
 while receiving distinct module plans. The existing five required context names remain fixed
 aggregate gates. Documentation and metadata changes skip heavy jobs while the
 policy and aggregate checks still report results.
+Draft PR pushes run the same checks; marking an unchanged head ready does not
+repeat business CI.
 Module and aggregate job conditions use `!cancelled()` so failures still reach
 their gates while a new PR push can cancel obsolete work immediately. Cleanup
 and evidence-upload steps may still use `always()`.
@@ -123,15 +125,43 @@ packaging checks do not substitute for these scenarios. Heavy installation runs
 only before publication or through `release-preflight.yml`; container acceptance
 consumes the same run's TUI product, without a Rust toolchain or build volume.
 
-All selected Linux E2E binary requirements are compiled together once through
-`just build --locked`. A compressed, executable-preserving artifact from the
-current workflow run supplies each scenario. Ordinary product E2E uses debug
-binaries; native installation and publication retain release build verification.
-A missing supplied binary fails explicitly rather than compiling an unplanned
-replacement. Rust dependency caches restore before `cargo fetch --locked`.
-The binary artifact name is stable within a workflow run: a failed-job-only retry
-can consume its successful upstream build without inventing a new attempt's product.
-A full retry replaces that run's artifact. After artifact expiry, rerun the build.
+All selected Linux E2E binary requirements are compiled together through
+`just build --locked`. An independent shared producer builds the selected Rust test
+archives through `just test-archive`, preserving each owner's package and feature
+selection while reusing one Cargo target directory. Server, TUI and Rust E2E
+consumers execute their own archive through `just test`; the native and Docker
+sandbox journeys execute the same Linux sandbox tests in both environments.
+The product and test producers run in parallel; frontend scenarios do not wait
+for Rust test compilation. Native macOS checks retain native build and execution.
+
+Each executable has its own checksum-verified, executable-preserving archive.
+Consumers download only their declared current-run binaries and test archive.
+Artifact names remain stable across failed-job retries; only the build producer
+may overwrite them on a full retry. Missing or corrupt supplied artifacts fail
+rather than starting a replacement build. Debug products and test harnesses are
+separate build outputs; release installation retains release-build verification.
+Integration tests read `CARGO_BIN_EXE_<name>` at runtime so Nextest can remap
+executables extracted from an archive; compile-time `env!` embeds the producer's
+target directory. See [Nextest build reuse](https://nexte.st/docs/ci-features/archiving/).
+
+The sandbox environment is published as `ghcr.io/apilots/talos-sandbox-base` by
+`sandbox-base.yml` on owning main changes or maintainer dispatch, never by PR
+code. `.github/sandbox-base.env` records a readable environment version and its
+immutable digest, for example `talos-sandbox-base:v0.1.0@sha256:…`, for anonymous
+PR pulls. Environment versions are independent of product releases;
+`.github/ci-toolchain.env` pins matching host/container tools. To update the
+environment, dispatch the reviewed Dockerfile and version/checksum inputs with
+a new `vMAJOR.MINOR.PATCH` workflow input, verify public pull and sandbox
+acceptance, then update the version and digest together in a PR. Existing
+versions cannot be overwritten; automatic main runs verify the locked version
+instead of rebuilding it. The one-platform environment
+publish is separate from product release installation and architecture validation.
+The local Dockerfile remains usable for standalone acceptance without supplied
+archives. CI Docker sandbox execution reuses the test archive and launcher,
+without creating a fresh target volume or compiling project/tool sources.
+The runtime image includes the checksum-verified Cargo executable matching the
+release Rust version for sandboxed development-tool acceptance, without rustc
+or a source-build toolchain.
 
 Dependency caches never count as test evidence. A separate exact-input success
 record may reuse a completed task within the same PR, runner image, architecture
