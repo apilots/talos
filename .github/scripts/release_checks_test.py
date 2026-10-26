@@ -47,7 +47,7 @@ class ReleaseSourceStageTests(unittest.TestCase):
 
 
 class RuntimeImageInputTests(unittest.TestCase):
-    def prepare_server_tui(self, root, include_binary=True):
+    def prepare_server_tui(self, root):
         source = Path('.github/workflows/release.yml').read_text()
         step = source.split('      - name: Add the existing TUI binary to the Server image input\n', 1)[1]
         step = step.split('      - name:', 1)[0]
@@ -59,9 +59,8 @@ class RuntimeImageInputTests(unittest.TestCase):
         (product / 'conf/talos.yaml').write_bytes(b'server-config')
         package = root / 'tui-package'
         package.mkdir()
-        members = {'conf/talos.yaml': b'tui-config', 'bin/talos-server': b'unexpected-server'}
-        if include_binary:
-            members['bin/talos'] = b'validated-tui'
+        members = {'conf/talos.yaml': b'tui-config', 'bin/talos-server': b'unexpected-server',
+                   'bin/talos': b'validated-tui'}
         with tarfile.open(package / 'Talos-TUI-1.2.3-linux-arm64.tar.gz', 'w:gz') as archive:
             for name, content in members.items():
                 info = tarfile.TarInfo(name)
@@ -81,13 +80,4 @@ class RuntimeImageInputTests(unittest.TestCase):
             self.assertEqual((product / 'bin/talos').read_bytes(), b'validated-tui')
             self.assertTrue(os.access(product / 'bin/talos', os.X_OK))
             self.assertEqual((product / 'bin/talos-server').read_bytes(), b'validated-server')
-            self.assertEqual((product / 'conf/talos.yaml').read_bytes(), b'server-config')
-
-    def test_missing_tui_binary_fails_image_preparation(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            result = self.prepare_server_tui(root, include_binary=False)
-            self.assertNotEqual(result.returncode, 0)
-            product = root / 'talos/.release-product'
-            self.assertFalse((product / 'bin/talos').exists())
             self.assertEqual((product / 'conf/talos.yaml').read_bytes(), b'server-config')

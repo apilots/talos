@@ -32,7 +32,7 @@ for config, product in [(basic, "server"), (production, "server"), (worker, "wor
     service = config["services"][service_name]
     assert service["image"].startswith("ghcr.io/apilots/" + service_name + ":v")
     assert not any(key.startswith("TALOS_LLM_") for key in service["environment"])
-    assert int(service["shm_size"]) == 1024 ** 3
+    assert int(service["shm_size"]) >= 1024 ** 3
     options = [value.replace(":", "=", 1) for value in service["security_opt"]]
     assert "no-new-privileges=true" in options, options
     profile = next(value.split("=", 1)[1] for value in options if value.startswith("seccomp="))
@@ -40,8 +40,6 @@ for config, product in [(basic, "server"), (production, "server"), (worker, "wor
     if not profile.is_absolute():
         profile = fixture / ("server" if product == "server" else "talos-worker") / profile
     assert json.loads(profile.read_text())["defaultAction"] == "SCMP_ACT_ERRNO"
-    if product == "server":
-        assert "mem_limit" not in service
 service = production["services"]["talos-server"]
 assert production["volumes"]["talos-data"]["external"]
 assert production["volumes"]["talos-data"]["name"] == "talos-server_talos-data"

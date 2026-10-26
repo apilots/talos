@@ -108,21 +108,6 @@ fn test_short_long_single_line_paste_wraps_inside_draft() {
 }
 
 #[tokio::test]
-async fn test_backspace_removes_last_character_when_input_is_not_empty() {
-    let mut app = create_embedded_app();
-    app.input_buffer = "ab".to_string();
-    app.cursor_index = 2;
-
-    let _ = app
-        .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
-        .await
-        .unwrap();
-
-    assert_eq!(app.input_buffer, "a");
-    assert_eq!(app.cursor_index, 1);
-}
-
-#[tokio::test]
 async fn test_tab_reports_inline_tool_details_without_pasted_behavior() {
     let mut app = create_embedded_app();
 

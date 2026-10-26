@@ -71,6 +71,7 @@ describe("SettingsLlmConfigEditor", () => {
     cleanup();
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("saves a new custom provider without randomUUID on an HTTP origin", async () => {

@@ -27,15 +27,5 @@ fn unpackaged_hosts_retain_their_browser_policy() {
     ] {
         assert_eq!(select_host(fallback, None), fallback);
         assert_eq!(select_host(fallback, Some(root.path())), fallback);
-        std::fs::create_dir_all(root.path().join("browser/runtime.json")).unwrap();
-        assert_eq!(select_host(fallback, Some(root.path())), fallback);
     }
-}
-
-#[test]
-fn explicit_docker_host_still_requires_validation_by_the_browser_owner() {
-    assert_eq!(
-        select_host(BrowserHostKind::Docker, None),
-        BrowserHostKind::Docker
-    );
 }

@@ -29,7 +29,8 @@ it("keeps the active window when closing a background window and chooses a neigh
   store.closeWorkspaceWindow(key("a"));store.setWorkspaceOpen(true);store.setWorkspaceExpanded(true);
   expect(useAppStore.getState()).toMatchObject({ workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false });
 });
-it("creates independent blank webpage tabs with stable identity through navigation", () => {
+it("creates independent blank webpage tabs with stable identity through navigation on HTTP", () => {
+  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const store=useAppStore.getState();store.openWorkspaceWindow({kind:"markdown",fileId:"owned-file"});
   store.createWorkspaceWebpage();const first=useAppStore.getState().workspaceActiveKey!;
   store.createWorkspaceWebpage();const second=useAppStore.getState().workspaceActiveKey!;
@@ -42,15 +43,6 @@ it("creates independent blank webpage tabs with stable identity through navigati
   store.selectWorkspaceWindow(first);store.navigateWorkspaceWebpage(first,"http://localhost:3010/");
   expect(useAppStore.getState().workspaceActiveKey).toBe(first);
   store.closeWorkspaceWindow(first);store.navigateWorkspaceWebpage(first,"https://ignored.test/");
-  expect(useAppStore.getState().workspaceWindows).toHaveLength(2);
-});
-it("creates independent webpage tabs without randomUUID on an HTTP origin", () => {
-  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
-  const store = useAppStore.getState();
-  store.createWorkspaceWebpage();
-  const first = useAppStore.getState().workspaceActiveKey;
-  store.createWorkspaceWebpage();
-  expect(useAppStore.getState().workspaceActiveKey).not.toBe(first);
   expect(useAppStore.getState().workspaceWindows).toHaveLength(2);
 });
 it("rejects unsafe or credential-bearing navigation without changing a blank tab", () => {

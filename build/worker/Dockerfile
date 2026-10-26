@@ -38,7 +38,6 @@ FROM ${PRODUCT_STAGE} AS product
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG VERSION=dev
 ARG REVISION=unknown
-ARG DEBIAN_FRONTEND=noninteractive
 LABEL org.opencontainers.image.title="Talos Worker" \
       org.opencontainers.image.description="User-owned Talos execution Worker" \
       org.opencontainers.image.licenses="Apache-2.0" \

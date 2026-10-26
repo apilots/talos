@@ -59,7 +59,6 @@ FROM ${RUNTIME_IMAGE} AS runtime
 
 ARG VERSION=dev
 ARG REVISION=unknown
-ARG DEBIAN_FRONTEND=noninteractive
 
 LABEL org.opencontainers.image.title="Talos Server" \
       org.opencontainers.image.description="Talos HTTP API and WebUI server" \
