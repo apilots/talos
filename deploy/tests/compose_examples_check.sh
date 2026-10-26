@@ -5,17 +5,17 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mkdir -p "$root/output"
 fixture="$(mktemp -d "$root/output/compose-examples.XXXXXX")"
 trap 'rm -rf "$fixture"' EXIT
-mkdir -p "$fixture/server" "$fixture/worker"
+mkdir -p "$fixture/server" "$fixture/talos-worker"
 cp "$root/deploy/docker/talos-server/.env.example" "$fixture/server/.env"
 cp "$root/deploy/docker/talos-server/docker-compose.yml" "$fixture/server/"
 cp "$root/deploy/docker/talos-server/compose.production.yml" "$fixture/server/"
-cp "$root/deploy/docker/talos-worker/.env.example" "$fixture/worker/.env"
-cp "$root/deploy/docker/talos-worker/docker-compose.yml" "$fixture/worker/"
-cp "$root/deploy/docker/talos-worker/chromium-seccomp.json" "$fixture/worker/"
+cp "$root/deploy/docker/talos-worker/.env.example" "$fixture/talos-worker/.env"
+cp "$root/deploy/docker/talos-worker/docker-compose.yml" "$fixture/talos-worker/"
+cp "$root/deploy/docker/talos-worker/chromium-seccomp.json" "$fixture/talos-worker/"
 (cd "$fixture/server" && docker compose config --format json) > "$fixture/basic.json"
 (cd "$fixture/server" && docker compose -f compose.production.yml config --format json) > "$fixture/production.json"
 # This is an isolated rendering identity, never registered or started.
-(cd "$fixture/worker" && TALOS_WORKER_NODE_ID=00000000-0000-0000-0000-000000000001 \
+(cd "$fixture/talos-worker" && TALOS_WORKER_NODE_ID=00000000-0000-0000-0000-000000000001 \
   docker compose config --format json) > "$fixture/worker.json"
 python3 - "$fixture" <<'PY'
 import json
@@ -32,6 +32,16 @@ for config, product in [(basic, "server"), (production, "server"), (worker, "wor
     service = config["services"][service_name]
     assert service["image"].startswith("ghcr.io/apilots/" + service_name + ":v")
     assert not any(key.startswith("TALOS_LLM_") for key in service["environment"])
+    assert int(service["shm_size"]) == 1024 ** 3
+    options = [value.replace(":", "=", 1) for value in service["security_opt"]]
+    assert "no-new-privileges=true" in options, options
+    profile = next(value.split("=", 1)[1] for value in options if value.startswith("seccomp="))
+    profile = Path(profile)
+    if not profile.is_absolute():
+        profile = fixture / ("server" if product == "server" else "talos-worker") / profile
+    assert json.loads(profile.read_text())["defaultAction"] == "SCMP_ACT_ERRNO"
+    if product == "server":
+        assert "mem_limit" not in service
 service = production["services"]["talos-server"]
 assert production["volumes"]["talos-data"]["external"]
 assert production["volumes"]["talos-data"]["name"] == "talos-server_talos-data"

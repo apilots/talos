@@ -202,11 +202,19 @@ def execute(task: dict, directory: Path) -> None:
             destination = ROOT / '.release-product/bin'
             destination.mkdir(parents=True, exist_ok=True)
             import shutil
-            for name in ('talos-worker', 'talos-linux-sandbox-launcher'):
+            products = {'talos-worker', 'talos-linux-sandbox-launcher'}
+            if 'server' in task['images']:
+                products.update({'talos-server', 'talos'})
+            for name in sorted(products):
                 shutil.copy2(ROOT / 'output/ci-binaries' / name, destination / name)
-            run('docker', 'build', '--build-arg', 'PRODUCT_STAGE=packaged', '-f',
-                'build/worker/Dockerfile', '-t', 'talos-worker:browser-e2e', '..')
-            env['TALOS_E2E_WORKER_IMAGE'] = 'talos-worker:browser-e2e'
+            if 'server' in task['images']:
+                run('pnpm', '--dir', 'talos-app', '--filter', 'talos-web', 'build')
+                shutil.copytree(ROOT / 'talos-app/web/dist', ROOT / '.release-product/webui', dirs_exist_ok=True)
+            for image in task['images']:
+                tag = f'talos-{image}:browser-e2e'
+                run('docker', 'build', '--build-arg', 'PRODUCT_STAGE=packaged', '-f',
+                    f'build/{image}/Dockerfile', '-t', tag, '..')
+                env[f'TALOS_E2E_{image.upper()}_IMAGE'] = tag
         for target in task['targets'].splitlines():
             kind, value = target.split(':', 1)
             if kind not in ('case', 'group'):

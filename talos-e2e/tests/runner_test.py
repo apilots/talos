@@ -276,6 +276,21 @@ has_real_llm_key() { return 1; }
         self.assertIn("Docker daemon", output.getvalue())
         self.assertNotIn("never-print-this-value", output.getvalue())
 
+    def test_packaged_server_requires_only_host_docker_python_and_current_image(self):
+        root = E2E / 'scenarios'
+        case = '20_browser_workspace/06_docker_server.sh'
+        required = runner.requirements(root, case)
+        self.assertEqual(set(required['commands']), {'docker', 'python3'})
+        self.assertEqual(required['python_modules'], ['yaml'])
+        self.assertEqual(set(required['checks']), {'docker', 'server_image'})
+        self.assertEqual(required['binaries'], [])
+        with patch.dict(os.environ, {'TALOS_E2E_SERVER_IMAGE': 'owned-server:current'}), \
+             patch.object(runner, 'probe', return_value=True) as probe:
+            self.assertIsNone(runner.check_dependency('checks', 'server_image', root))
+            probe.assert_called_once_with(['docker', 'image', 'inspect', 'owned-server:current'])
+        with patch.object(runner, 'probe', return_value=False):
+            self.assertIn('current Server image', runner.check_dependency('checks', 'server_image', root))
+
     def test_container_cases_do_not_require_native_host_packaging_dependencies(self):
         # A clean Linux runner has Docker/Cargo but no native packaging protoc/PyYAML.
         with patch.object(runner.platform, "system", return_value="Linux"), \

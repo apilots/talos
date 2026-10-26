@@ -15,7 +15,6 @@ import urllib.request
 import urllib.error
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import yaml
 
 from lifecycle import container_args, docker_create
 
@@ -259,7 +258,13 @@ class Fixture(BaseHTTPRequestHandler):
                 'choices': [{'index': 0, 'message': delta, 'finish_reason': finish}], 'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}})
 
 def config(home, http_port, mock_port):
+    import yaml
     document = yaml.safe_load((ROOT / 'conf/talos-dev.yaml').read_text())
+    return configure(document, home, http_port, mock_port)
+
+def configure(document, home, http_port, mock_port):
+    """Bind an already decoded public profile to the local deterministic model."""
+    document = copy.deepcopy(document)
     document['gateway'].update(port=http_port, host='127.0.0.1', auth=True)
     document['cloud'].update(api_base_url=f'http://127.0.0.1:{mock_port}', web_base_url=f'http://127.0.0.1:{mock_port}')
     document['llm'].update(provider='openai', model='browser-fixture')
@@ -365,6 +370,7 @@ print(json.dumps({'commit':source['commit'],'lockSha256':metadata['lockSha256'],
     return result
 
 def run():
+    import yaml
     mock = ThreadingHTTPServer(('0.0.0.0', 0), Fixture)
     print('FIXTURE_PORT', mock.server_port, flush=True)
     threading.Thread(target=mock.serve_forever, daemon=True).start()

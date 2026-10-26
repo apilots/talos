@@ -159,6 +159,11 @@ configuration-only procedure.
 Install `deploy/docker/talos-server/compose.production.yml` as
 `/opt/talos-server/docker-compose.yml`; the repository basic Compose example
 is a different profile. Keep the production `.env` beside the installed file.
+Install `deploy/docker/talos-worker/chromium-seccomp.json` at
+`/opt/talos-server/chromium-seccomp.json` and set
+`TALOS_CHROMIUM_SECCOMP_PROFILE=/opt/talos-server/chromium-seccomp.json`
+in that deployment `.env`. The shared profile and 1 GiB shared memory support
+the Server image's embedded Browser without disabling Chromium's sandbox.
 From `/opt/talos-server`, explicitly select that installed production file:
 
 ```bash
@@ -181,7 +186,9 @@ flows for deployment-file naming changes.
 2. Prepare the new Compose, `.env`, reviewed `conf/talos.yaml`, TLS identity and
    agent proxy fragment offline. Validate with the installed proxy version.
 3. In a local disposable directory, copy `docker/talos-server/.env.example` to `.env` and
-   `docker/talos-server/compose.production.yml` beside it, then run:
+   `docker/talos-server/compose.production.yml` beside it. Copy the shared
+   `docker/talos-worker/chromium-seccomp.json` too and set
+   `TALOS_CHROMIUM_SECCOMP_PROFILE` to that test copy's absolute path, then run:
 
    ```bash
    docker compose --project-name talos-server \
