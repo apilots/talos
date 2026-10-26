@@ -1,5 +1,5 @@
 import { useEnvironmentKey } from "@/features/computers";
-import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useQuery } from "@tanstack/react-query";
 import type { Plugin, McpServerInfo } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
@@ -11,13 +11,12 @@ import {
   listManagedMcpPlugins,
   uninstallPlugin,
 } from "@/features/plugins/api";
-import { mcpServerDefinition, pluginEnabled, pluginTitle } from "@/features/plugins/lib/pluginDisplay";
+import { isOfficialBrowserPlugin, mcpServerDefinition, pluginEnabled, pluginTitle } from "@/features/plugins/lib/pluginDisplay";
 import { McpServerForm } from "./mcp/McpServerForm";
 import { McpServerList, type McpServerView } from "./mcp/McpServerList";
 import { McpSourceList, type McpSourceView } from "./mcp/McpSourceList";
 
 import { getTalosClient } from "@/shared/api/client";
-import { McpCredentialsForm } from "./mcp/McpCredentialsForm";
 
 type McpFormState =
   | {
@@ -32,7 +31,6 @@ export function SettingsMcpServersSection() {
   const environmentKey = useEnvironmentKey();
   const { t } = useTranslation("settings");
   const [actionError, setActionError] = useState<unknown>(null);
-  const [configOpen, setConfigOpen] = useState<string | null>(null);
   const [formState, setFormState] = useState<McpFormState | null>(null);
   const [actionPluginId, setActionPluginId] = useState<string | null>(null);
   const pluginsQuery = useQuery({
@@ -51,9 +49,9 @@ export function SettingsMcpServersSection() {
   });
   const connections = connectionsQuery.data ?? [];
   const plugins = pluginsQuery.data?.plugins ?? [];
-  const servers = plugins.map((plugin) => ({ ...mapServerView(plugin), connection: connections.find((server) => server.source.kind === "plugin" && "install_id" in plugin.status && server.source.installId === plugin.status.install_id) }));
+  const servers = plugins.map((plugin) => ({ ...mapServerView(plugin), connection: connections.find((server) => "install_id" in plugin.status && server.source.installId === plugin.status.install_id) }));
   async function saved() { await pluginsQuery.refetch(); await connectionsQuery.refetch(); setFormState(null); }
-  const sources = sourceViews(plugins, (count) => t("mcpServers.serverCount", { count }), t("mcpServers.browser.builtInSource"));
+  const sources = sourceViews(plugins, (count) => t("mcpServers.serverCount", { count }));
 
   async function runPluginAction(plugin: Plugin, action: (plugin: Plugin) => Promise<unknown>) {
     setActionError(null);
@@ -129,19 +127,11 @@ export function SettingsMcpServersSection() {
         onAdd={() => setFormState({ mode: "create" })}
         onDisable={(plugin) => void runPluginAction(plugin, disablePlugin)}
         onEnable={(plugin) => void runPluginAction(plugin, enablePlugin)}
-        onOpen={(plugin) => { if (plugin.id !== "builtin_browser") setFormState({ mode: "update", pluginId: plugin.id }); }}
+        onOpen={(plugin) => { if (!isOfficialBrowserPlugin(plugin)) setFormState({ mode: "update", pluginId: plugin.id }); }}
         onUninstall={(plugin) => void runPluginAction(plugin, uninstallPlugin)}
         servers={servers}
         title={t("mcpServers.servers")}
       />
-      {connections.some((server) => server.source.kind === "config") ? <section className="space-y-3">
-        <h3 className="text-sm font-semibold">{t("mcpServers.configServers")}</h3>
-        {connections.filter((server) => server.source.kind === "config").map((server) => <div className="rounded-xl border border-border p-4" key={server.name}>
-          <button className="flex w-full items-center justify-between text-sm" onClick={() => setConfigOpen(configOpen === server.name ? null : server.name)} type="button"><span>{server.displayName ?? server.name}</span><span className="text-muted">{t(`mcpServers.connectionState.${server.status.status}`)}</span></button>
-          {"error" in server.status ? <p className="mt-2 text-xs text-danger">{apiErrorMessage(server.status.error)}</p> : null}
-          {configOpen === server.name ? <McpCredentialsForm server={{ type: "config", name: server.name }} stdio={server.transport === "stdio"} /> : null}
-        </div>)}
-      </section> : null}
       <McpSourceList sources={sources} title={t("mcpServers.fromPlugins")} />
     </div>
   );
@@ -159,17 +149,17 @@ function mapServerView(plugin: Plugin): McpServerView {
   };
 }
 
-function sourceViews(plugins: Plugin[], formatCount: (count: number) => string, builtInName: string): McpSourceView[] {
+function sourceViews(plugins: Plugin[], formatCount: (count: number) => string): McpSourceView[] {
   const counts = new Map<string, number>();
   for (const plugin of plugins) {
-    const sourceId = plugin.id === "builtin_browser" ? "builtin" : plugin.source_id ?? "manual";
+    const sourceId = plugin.source_id ?? "manual";
     counts.set(sourceId, (counts.get(sourceId) ?? 0) + 1);
   }
   return [...counts.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([id, count]) => ({
       id,
-      name: id === "builtin" ? builtInName : id,
+      name: id,
       count: formatCount(count),
     }));
 }

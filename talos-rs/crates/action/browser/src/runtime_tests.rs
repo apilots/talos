@@ -536,3 +536,25 @@ async fn ipc_reports_original_source_once_and_shutdown_waits_for_private_socket_
     let diagnostic = std::fs::read_to_string(log).unwrap();
     assert_eq!(diagnostic.matches("private-backend-diagnostic").count(), 1);
 }
+
+#[tokio::test]
+async fn native_environment_preparation_never_touches_python_or_a_lock_file() {
+    let home = tempfile::tempdir().unwrap();
+    let runtime = BrowserRuntime::new(
+        home.path().into(),
+        BrowserHostKind::Desktop,
+        Arc::new(|| Ok(true)),
+    )
+    .unwrap();
+    assert!(runtime
+        .prepare_browser_environment(&home.path().join("missing.lock"))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(runtime
+        .reuse_browser_environment(&home.path().join("missing.lock"))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(!home.path().join("browser/environments").exists());
+}

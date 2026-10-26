@@ -6,7 +6,7 @@ export type DesktopRendererMethod = Exclude<
   AppProtocol.ClientMethod, "initialize" | "computer/create" | "computer/rotateCredential"
 >;
 
-const mcpDefinitionRef = (value: unknown) => isRecord(value) && ((value.type === "plugin" && typeof value.installId === "string") || (value.type === "config" && typeof value.name === "string"));
+const mcpDefinitionRef = (value: unknown) => isRecord(value) && value.type === "plugin" && typeof value.installId === "string";
 const mcpCredentials = (value: unknown) => isRecord(value) && isRecord(value.authentication) && (value.authentication.type === "none" || value.authentication.type === "bearer" || (value.authentication.type === "header" && typeof value.authentication.name === "string")) && (value.token === undefined || value.token === null || typeof value.token === "string") && [value.env, value.headers].every((map) => map === undefined || map === null || (isRecord(map) && Object.values(map).every((entry) => typeof entry === "string")));
 const browserParams = (params:unknown) => isRecord(params) && typeof params.nodeId === "string" && isRecord(params.operation) && ["read","selectTarget","connect","disconnect","pause","resume","openLocal","takeControl","releaseControl"].includes(String(params.operation.kind));
 const desktopOpenParams = (params:unknown) => isRecord(params) && ["nodeId","targetId","viewerId","generation"].every(key=>typeof params[key] === "string") && (

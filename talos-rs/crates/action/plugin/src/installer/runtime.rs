@@ -22,7 +22,21 @@ pub(crate) fn installed_mcp_servers(
     if install.kind != PluginKind::McpServer || !install.enabled {
         return Ok(Vec::new());
     }
-    let server = server_from_installed_mcp_manifest(&install.installed_path)?;
+    let mut server = server_from_installed_mcp_manifest(&install.installed_path)?;
+    if install.plugin_id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID {
+        server = crate::manager::official::verified_installed_browser(install)?.0;
+        if let talos_types::McpTransportDefinition::Stdio { command, .. } = &mut server.transport {
+            *command = std::env::current_exe()
+                .map_err(|error| {
+                    talos_error::TalosError::internal_with_source(
+                        "The Browser host executable is unavailable.",
+                        error,
+                    )
+                })?
+                .to_string_lossy()
+                .into_owned();
+        }
+    }
     Ok(vec![talos_types::McpServerRuntimeDescriptor {
         content_revision: Some(install.content_digest.clone()),
         server,

@@ -33,6 +33,8 @@ node_modules/
 dist/
 talos-app/desktop/resources/app-server/
 talos-app/desktop/resources/conf/
+talos-app/desktop/resources/plugins/
+/plugins/apilots-mcps/
 
 # ci
 *reports

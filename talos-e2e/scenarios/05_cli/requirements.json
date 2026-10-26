@@ -24,6 +24,20 @@
       "binaries": [
         "server"
       ]
+    },
+    "plugin_lifecycle.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "curl",
+        "git",
+        "node"
+      ],
+      "checks": [],
+      "binaries": [
+        "server",
+        "cli"
+      ]
     }
   }
 }

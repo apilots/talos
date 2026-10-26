@@ -12,6 +12,21 @@ from ci_plan import plan
 
 
 class ChangeScopeTests(unittest.TestCase):
+    def test_plugin_cli_selects_its_secretless_lifecycle_and_current_binaries(self):
+        result = plan(['talos-rs/apps/tui/src/cli/plugin.rs'])
+        tasks = result['categories']['tui']['scenarios']['include']
+        task = next(task for task in tasks if '05_cli/plugin_lifecycle.sh' in task['cases'])
+        self.assertTrue({'server', 'cli'} <= set(task['binaries']))
+
+    def test_shared_plugin_cli_fixture_selects_both_worker_consumers(self):
+        result = plan(['talos-e2e/scripts/plugin_cli.py'])
+        for category, case in [('tui', '05_cli/plugin_lifecycle.sh'),
+                               ('desktop', '20_browser_workspace/05_docker_worker.sh')]:
+            tasks = result['categories'][category]['scenarios']['include']
+            task = next(task for task in tasks if case in task['cases'])
+            self.assertTrue({'server', 'cli'} <= set(task['binaries']))
+        self.assertTrue(task['docker'])
+
     def test_tui_leaf_selects_only_tui(self):
         result = impact(['talos-rs/apps/tui/src/render/chat_lines.rs'])
         self.assertEqual(result.rust, {'talos-tui'})

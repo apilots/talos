@@ -16,6 +16,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 wait-timeout = { workspace = true }
+uuid = { workspace = true }
 talos-config = { workspace = true }
 talos-error = { workspace = true }
 talos-fs = { workspace = true }

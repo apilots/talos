@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    default_timezone, AgentKernelMcpConfig, AgentKernelPromptConfig, PlannerMode,
-    PluginsRuntimeConfig, RuntimeEnv, SkillsRuntimeConfig, ToolsRuntimeConfig,
+    default_timezone, AgentKernelPromptConfig, PlannerMode, PluginsRuntimeConfig, RuntimeEnv,
+    SkillsRuntimeConfig, ToolsRuntimeConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -283,10 +283,6 @@ pub struct AgentKernelConfig {
     /// Plugin manager runtime defaults
     #[serde(default)]
     pub plugins: PluginsRuntimeConfig,
-
-    /// MCP server connections available to this kernel
-    #[serde(default)]
-    pub mcp: AgentKernelMcpConfig,
 }
 
 fn default_kernel_tool_parallelism() -> usize {
@@ -321,7 +317,6 @@ impl Default for AgentKernelConfig {
             tools: ToolsRuntimeConfig::default(),
             skills: SkillsRuntimeConfig::default(),
             plugins: PluginsRuntimeConfig::default(),
-            mcp: AgentKernelMcpConfig::default(),
         }
     }
 }

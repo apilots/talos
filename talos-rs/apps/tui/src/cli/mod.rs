@@ -17,6 +17,7 @@ use talos_tui::{display_tool_name, GatewayClient as TerminalGatewayClient, Termi
 use tokio::sync::{mpsc, Mutex};
 use tracing::error;
 
+mod plugin;
 mod types;
 
 use types::{Cli, Commands, ExecCmd, ModelsCmd, SessionCommands};
@@ -36,15 +37,23 @@ pub(crate) fn parse_terminal_mode() -> TerminalMode {
 
 pub(crate) async fn run_cli_with_client(
     command: Commands,
-    client: EmbeddedServerClient,
+    mut client: EmbeddedServerClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if let Commands::Plugin(command) = command {
+        let result = plugin::execute(&mut client, command).await;
+        let shutdown_result = talos_sdk::GatewayClient::shutdown(&mut client).await;
+        let response = result?;
+        shutdown_result?;
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
     let client: Arc<dyn TerminalGatewayClient> = Arc::new(Mutex::new(client));
     let result = match command {
         Commands::Exec(cmd) => execute_exec_command(client.clone(), cmd).await,
         Commands::Models(cmd) => execute_models_command(client.clone(), cmd).await,
         Commands::Session(cmd) => execute_session_command(client.clone(), cmd).await,
         Commands::Status => execute_status_command(client.clone()).await,
-        Commands::Tui => unreachable!(),
+        Commands::Tui | Commands::Plugin(_) => unreachable!(),
     };
     let shutdown_result = client.shutdown().await;
     result?;

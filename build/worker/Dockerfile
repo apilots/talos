@@ -9,7 +9,7 @@ FROM ${BROWSER_SUPPLIER_IMAGE} AS browser-supplier
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/talos/browser/engines
 RUN npm install --prefix /opt/talos/browser/supplier --ignore-scripts playwright@1.64.1 \
     && node /opt/talos/browser/supplier/node_modules/playwright/cli.js install --no-shell chromium \
-    && node -e 'const fs=require("fs");const p=require("/opt/talos/browser/supplier/node_modules/playwright");fs.writeFileSync("/opt/talos/browser/runtime.json",JSON.stringify({schemaVersion:1,browserUseVersion:"0.13.11",chromiumVersion:"156.0.8078.4",python:"/opt/talos/browser/venv/bin/python",driver:"/opt/talos/browser/browser_driver.py",chromium:p.chromium.executablePath()}));' \
+    && node -e 'const fs=require("fs");const p=require("/opt/talos/browser/supplier/node_modules/playwright");fs.writeFileSync("/opt/talos/browser/runtime.json",JSON.stringify({schemaVersion:1,browserUseVersion:"",chromiumVersion:"156.0.8078.4",python:"/opt/talos/browser/venv/bin/python",driver:"/opt/talos/browser/browser_driver.py",chromium:p.chromium.executablePath()}));' \
     && chmod -R a+rX /opt/talos/browser/engines
 
 FROM ${RUST_IMAGE} AS rust-builder
@@ -33,6 +33,11 @@ COPY talos/.release-product/bin/talos-worker talos/.release-product/bin/talos-li
 
 FROM ${PRODUCT_STAGE} AS product
 
+FROM ${BROWSER_SUPPLIER_IMAGE} AS official-mcps
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY talos/build/plugins /build/plugins
+RUN node /build/plugins/snapshot.mjs /snapshot
+
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG VERSION=dev
 ARG REVISION=unknown
@@ -50,11 +55,13 @@ RUN TZ=Etc/UTC apt-get update && TZ=Etc/UTC apt-get install -y --no-install-reco
     libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 \
     libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
-COPY talos/build/worker/browser/requirements.lock /opt/talos/browser/requirements.lock
+COPY --from=official-mcps /snapshot /opt/talos/plugins/apilots-mcps
 RUN python3 -m venv /opt/talos/browser/venv \
-    && /opt/talos/browser/venv/bin/pip install --no-cache-dir --require-hashes -r /opt/talos/browser/requirements.lock
+    && /opt/talos/browser/venv/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r /opt/talos/plugins/apilots-mcps/mcp/browser/requirements.lock
 COPY --from=browser-supplier /opt/talos/browser/engines /opt/talos/browser/engines
 COPY --from=browser-supplier /opt/talos/browser/runtime.json /opt/talos/browser/runtime.json
+COPY talos/build/worker/browser/environment.py /opt/talos/browser/environment.py
+RUN /opt/talos/browser/venv/bin/python /opt/talos/browser/environment.py
 COPY talos/talos-rs/crates/action/browser/resources/browser_driver.py /opt/talos/browser/browser_driver.py
 COPY talos/build/worker/browser/desktop /opt/talos/browser/desktop
 COPY talos/talos-app/shared/browser-home /opt/talos/browser/desktop

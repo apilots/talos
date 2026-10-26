@@ -28,6 +28,9 @@ pub(crate) enum Commands {
     /// Available models.
     Models(ModelsCmd),
 
+    /// Manage Skills and MCP installations through the selected Worker's Plugin service.
+    Plugin(PluginCmd),
+
     /// System status check.
     Status,
 }
@@ -80,4 +83,48 @@ pub(crate) struct ModelsCmd {
     /// Output format. Supported values: table, json.
     #[arg(long, default_value = "table")]
     pub(crate) format: String,
+}
+
+#[derive(Args)]
+pub(crate) struct PluginCmd {
+    /// Target Computer ID. Omit to use this embedded Worker.
+    #[arg(long, global = true)]
+    pub(crate) node: Option<String>,
+    #[command(subcommand)]
+    pub(crate) command: PluginCommands,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum PluginCommands {
+    /// List installed plugins, including disabled installations.
+    List,
+    /// Install a discovered plugin by its Plugin ID.
+    Install {
+        plugin_id: String,
+        /// Require this source commit.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Install without enabling the plugin.
+        #[arg(long)]
+        disabled: bool,
+        /// Replace an existing conflicting installation.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Update an installation from its existing source.
+    Update {
+        install_id: String,
+        /// Require this source commit.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Replace local edits with the source contents.
+        #[arg(long)]
+        replace_local_changes: bool,
+    },
+    /// Enable an existing installation.
+    Enable { install_id: String },
+    /// Disable an existing installation.
+    Disable { install_id: String },
+    /// Uninstall through the existing Plugin lifecycle.
+    Uninstall { install_id: String },
 }

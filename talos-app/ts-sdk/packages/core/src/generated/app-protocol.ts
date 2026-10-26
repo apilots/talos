@@ -879,7 +879,7 @@ export type McpTransportKind = "stdio" | "streamableHttp";
 
 export type McpServerRuntimeDescriptor = { content_revision: ContentDigest | null, server: McpServerDefinition, source: McpServerSource, };
 
-export type McpServerSource = { "kind": "config" } | { "kind": "plugin", pluginId: PluginId, installId: PluginInstallId, };
+export type McpServerSource = { "kind": "plugin", pluginId: PluginId, installId: PluginInstallId, };
 
 export type McpServerInfo = { name: string, displayName: string | null, source: McpServerSource, transport: McpTransportKind, status: McpServerStatus, toolCount: number, };
 
@@ -897,7 +897,7 @@ expiresAt: bigint, };
 
 export type McpAuthentication = { "type": "none" } | { "type": "oauth", config: McpOAuthConfig, } | { "type": "bearer" } | { "type": "header", name: string, };
 
-export type McpDefinitionRef = { "type": "plugin", installId: PluginInstallId, } | { "type": "config", name: string, };
+export type McpDefinitionRef = { "type": "plugin", installId: PluginInstallId, };
 
 export type McpCredentialValues = { authentication: McpAuthentication, token?: string, env?: { [key in string]?: string }, headers?: { [key in string]?: string }, };
 

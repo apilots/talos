@@ -81,7 +81,8 @@
       ],
       "binaries": [
         "server",
-        "app_server"
+        "app_server",
+        "cli"
       ]
     },
     "04_desktop_mcp.sh": {

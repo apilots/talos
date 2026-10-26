@@ -1,5 +1,12 @@
 import type { McpServerDefinition, Plugin, SkillSummary } from "@talos/sdk-browser";
 
+// Normal Plugin identity derived from the official Git source and mcp/browser path.
+export const OFFICIAL_BROWSER_PLUGIN_ID = "plugin_db03ad38c5bfbfed8f9bdd34";
+
+export function isOfficialBrowserPlugin(plugin: Pick<Plugin, "id">) {
+  return plugin.id === OFFICIAL_BROWSER_PLUGIN_ID;
+}
+
 export function titleFromName(name: string) {
   return name
     .split(/[-_]/)

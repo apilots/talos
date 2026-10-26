@@ -58,7 +58,7 @@ Alpha skill.
     assert!(first_added.plugins[0].source_commit.is_some());
 }
 
-fn run_git<const N: usize>(cwd: &std::path::Path, args: [&str; N]) {
+pub(crate) fn run_git<const N: usize>(cwd: &std::path::Path, args: [&str; N]) {
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(cwd)

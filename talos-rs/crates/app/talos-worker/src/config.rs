@@ -26,27 +26,8 @@ pub(crate) fn service(
     let gate = plugins.execution_gate();
     let hook: ConfigReloadHook = Arc::new(move |trigger| {
         let current = active.read().expect("Worker config lock poisoned").clone();
-        let mut candidate = match &trigger {
-            ConfigReloadTrigger::McpCredentials(_) => current.clone(),
-            _ => current.reload()?,
-        };
+        let mut candidate = current.reload()?;
         match trigger {
-            ConfigReloadTrigger::McpCredentials(server) => {
-                let target = candidate
-                    .agent
-                    .kernel
-                    .mcp
-                    .servers
-                    .iter_mut()
-                    .find(|entry| entry.name == server.name)
-                    .ok_or_else(|| {
-                        TalosError::new(
-                            ErrorCode::ResourceNotFound,
-                            "The configured MCP server was not found.",
-                        )
-                    })?;
-                *target = *server;
-            }
             ConfigReloadTrigger::Updated(ConfigValue::Llm(value)) => {
                 let mut value = *value;
                 talos_config::resolve_llm_update_for_runtime(&current.llm, &mut value);

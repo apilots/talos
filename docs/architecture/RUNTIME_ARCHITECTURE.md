@@ -271,6 +271,8 @@ policy decision.
 
 ## MCP implementation rules
 
+- MCP definitions and credentials belong to installed Plugins. YAML owns Plugin sources/roots and global MCP tool policy, not a second server list. The selected Worker loads enabled manifests and owns token/OAuth storage.
+- `talos plugin list/install/enable/disable/update/uninstall` calls the existing SDK/Service APIs. `--node` selects a Computer; omission uses the embedded Worker. Source management and manual MCP JSON import retain their existing page/API entry points.
 - Keep tool and call-state mutation in existing MCP connection/tool call manager boundaries. Do not thread mutation through unrelated function parameters.
 - Reuse connections according to incremental checks, lifecycle state, and negotiated capabilities; avoid unnecessary session or connection resets.
 - Strongly type servers, tools, resources, prompts, call results, capabilities, and transport configuration. Model user configuration, runtime state, source, installation/startup method, and errors separately.

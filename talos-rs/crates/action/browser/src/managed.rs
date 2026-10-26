@@ -71,26 +71,38 @@ pub struct ManagedBrowser {
 }
 impl ManagedBrowser {
     /// Only the composition root passes the standard image's protected resource directory.
-    pub fn packaged(home: PathBuf, resources: &Path) -> TalosResult<Arc<Self>> {
+    pub(crate) fn prepared(
+        home: PathBuf,
+        resources: &Path,
+        python: &Path,
+        version: &str,
+    ) -> TalosResult<Arc<Self>> {
         if !cfg!(target_os = "linux") {
             return Err(unavailable(
                 "Managed Docker browser resources require Linux.",
             ));
         }
-        let package: Package = talos_fs::read_json(&resources.join("runtime.json"))?;
+        let mut package: Package = talos_fs::read_json(&resources.join("runtime.json"))?;
         if package.schema_version != 1
-            || package.browser_use_version != "0.13.11"
+            || package.browser_use_version.is_empty()
             || package.chromium_version != "156.0.8078.4"
         {
             return Err(unavailable(
                 "The packaged browser runtime version is unsupported.",
             ));
         }
-        for path in [&package.python, &package.driver, &package.chromium] {
+        for path in [&package.driver, &package.chromium] {
             if !path.is_absolute() || !path.is_file() || !path.starts_with(resources) {
                 return Err(unavailable("The packaged browser runtime is incomplete."));
             }
         }
+        if !python.is_absolute() || !python.is_file() || version.is_empty() {
+            return Err(unavailable(
+                "The verified browser dependency environment is incomplete.",
+            ));
+        }
+        package.python = python.to_path_buf();
+        package.browser_use_version = version.to_owned();
         let downloads = home.join("browser/downloads");
         Ok(Arc::new(Self {
             driver: Driver {

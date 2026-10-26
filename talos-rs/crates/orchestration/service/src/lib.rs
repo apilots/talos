@@ -39,9 +39,7 @@ pub use inner_model::{
 };
 pub use memory::MemoryService;
 pub use message_queue::SessionMessageQueueService;
-pub use plugin::{
-    mcp_definition_from_config, mcp_relay_callback_uri, McpCredentialStore, PluginManagerService,
-};
+pub use plugin::{mcp_relay_callback_uri, McpCredentialStore, PluginManagerService};
 pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};
 pub use skills::SkillsService;
