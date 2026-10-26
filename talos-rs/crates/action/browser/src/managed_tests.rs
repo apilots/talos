@@ -62,6 +62,9 @@ async fn packaged_desktop_capability_survives_component_failure_without_becoming
             reason: BrowserDisplayUnavailableReason::NotBundled,
         }
     );
+    runtime
+        .set_desktop_connector(crate::tests::desktop_connector())
+        .unwrap();
     runtime.set_backend(backend.clone()).unwrap();
     assert!(backend
         .endpoint()
@@ -117,6 +120,9 @@ async fn packaged_startup_failure_preserves_display_and_reports_readiness_error(
         Arc::new(|| Ok(true)),
     )
     .unwrap();
+    runtime
+        .set_desktop_connector(crate::tests::desktop_connector())
+        .unwrap();
     runtime.set_backend(backend.clone()).unwrap();
     let error = backend.endpoint().await.unwrap_err().to_api_error();
     let snapshot = runtime.snapshot().unwrap();

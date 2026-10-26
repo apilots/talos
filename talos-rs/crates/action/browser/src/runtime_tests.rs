@@ -19,6 +19,17 @@ pub(super) struct Backend {
     cleanup_started: tokio::sync::Notify,
     cleanup_continue: tokio::sync::Notify,
 }
+
+pub(super) fn desktop_connector() -> crate::DesktopConnector {
+    Arc::new(|_| {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "The test desktop ingress is offline.",
+            ))
+        })
+    })
+}
 impl Backend {
     pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -192,6 +203,7 @@ async fn newer_pause_wins_over_waiting_takeover_and_release() {
         let backend = Backend::new();
         backend.desktop.store(true, Ordering::SeqCst);
         runtime.set_backend(backend.clone()).unwrap();
+        runtime.set_desktop_connector(desktop_connector()).unwrap();
         let operation = if release {
             let handoff = runtime
                 .operate(

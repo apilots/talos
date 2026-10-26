@@ -282,10 +282,7 @@ impl TalosService {
                     },
                 )
                 .await?;
-            if !matches!(
-                snapshot.display,
-                BrowserDisplayCapability::DockerDesktop { .. }
-            ) {
+            if let BrowserDisplayCapability::Unavailable { reason } = snapshot.display {
                 return Err(TalosError::localized(
                     talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
                         operation: if matches!(
@@ -296,14 +293,7 @@ impl TalosService {
                         } else {
                             talos_error::BrowserCapabilityOperation::ReleaseControl
                         },
-                        reason: if matches!(
-                            snapshot.host,
-                            BrowserHostKind::Desktop | BrowserHostKind::Native
-                        ) {
-                            talos_error::BrowserCapabilityReason::NativeHost
-                        } else {
-                            talos_error::BrowserCapabilityReason::NotBundled
-                        },
+                        reason: reason.into(),
                     },
                 ));
             }

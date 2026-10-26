@@ -58,8 +58,10 @@ to its absolute deployed path. Do not use privileged mode or disable the sandbox
 The profiles do not impose a fixed process memory limit. Set a measured deployment
 budget that accommodates the Server, embedded Worker and browser workload rather
 than the old 1 GiB Server-only allowance. Browser/CDP/VNC listeners remain private;
-installing their resources does not change authentication or provide an anonymous
-desktop relay. The existing authenticated media ingress is still required.
+installing their resources does not change authentication. The embedded Worker
+supports Browser tools but does not advertise remote desktop streaming: it has no
+registered Worker's authenticated media connector. Use a registered Docker Worker
+for that desktop stream.
 
 The Server image also includes the `talos` CLI/TUI from the validated TUI product:
 
