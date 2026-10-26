@@ -120,6 +120,8 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             owner = rust.owner(path)
             if owner:
                 direct_rust.add(owner)
+                if path.startswith('talos-rs/apps/tui/src/cli/'):
+                    result.targets['tui'].add('case:05_cli/plugin_lifecycle')
 
             else:
                 result.full(rust, frontend, frontend_checks=False)
@@ -168,7 +170,13 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             result.full(rust, frontend)
         elif path.startswith('talos-e2e/'):
             result.harness = True
-            if path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
+            if path in ('talos-e2e/scripts/plugin_cli.py',
+                        'talos-e2e/scenarios/05_cli/plugin_lifecycle.sh',
+                        'talos-e2e/scenarios/05_cli/requirements.json'):
+                result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                if path == 'talos-e2e/scripts/plugin_cli.py':
+                    result.targets['desktop'].add('case:20_browser_workspace/05_docker_worker')
+            elif path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
                                 'talos-e2e/tests/tui_install_target_test.sh', 'talos-e2e/docker/tui-install-')):
                 result.installer = True
             elif path.startswith(('talos-e2e/scenarios/08_tui/', 'talos-e2e/scripts/tui')):

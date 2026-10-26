@@ -19,14 +19,18 @@ pub struct PluginManagerService {
     pub(super) manager: PluginManager,
     pub(crate) execution_gate: Arc<RwLock<()>>,
     pub(super) mcp: Option<McpContext>,
-    pub(super) config_service: Option<crate::ConfigService>,
-    browser: Option<Arc<talos_browser::BrowserRuntime>>,
+    pub(super) browser: Option<Arc<talos_browser::BrowserRuntime>>,
+    pub(super) preparation_slots: Arc<tokio::sync::Semaphore>,
+    pub(super) preparations: Arc<
+        std::sync::Mutex<
+            std::collections::BTreeMap<String, super::preparation::PendingPluginChange>,
+        >,
+    >,
 }
 
 #[derive(Clone)]
 pub(super) struct McpContext {
     pub runtime: Arc<talos_mcp::TalosMcpRuntime>,
-    pub config: Arc<std::sync::RwLock<talos_config::Config>>,
     pub credentials: super::McpCredentialStore,
     pub oauth: Arc<super::oauth::OAuthAttempts>,
 }
@@ -37,8 +41,9 @@ impl PluginManagerService {
             manager: PluginManager::new(config).with_max_skill_md_bytes(skills.max_skill_md_bytes),
             execution_gate: Arc::default(),
             mcp: None,
-            config_service: None,
             browser: None,
+            preparations: Arc::default(),
+            preparation_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         }
     }
 
@@ -47,8 +52,9 @@ impl PluginManagerService {
             manager,
             execution_gate: Arc::default(),
             mcp: None,
-            config_service: None,
             browser: None,
+            preparations: Arc::default(),
+            preparation_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         }
     }
 
@@ -58,12 +64,70 @@ impl PluginManagerService {
         self
     }
 
-    /// Attaches the Worker's existing atomic configuration publisher for configured MCP credentials.
-    /// Hosts must compose this after the MCP hook; it never owns product persistence.
-    #[must_use]
-    pub fn with_config_service(mut self, service: crate::ConfigService) -> Self {
-        self.config_service = Some(service);
-        self
+    /// Startup composition uses the installed Plugin revision, never a hardcoded library version.
+    pub async fn initialize_browser_environment(&self) -> TalosResult<()> {
+        if let (Some(browser), Some((installation, lock))) = (
+            &self.browser,
+            self.manager.installed_browser_requirements()?,
+        ) {
+            if let Some(prepared) = browser.reuse_browser_environment(&lock).await? {
+                self.activate_installed_browser(installation, prepared)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Bounded startup repair uses the same source refresh and Plugin install owners.
+    pub async fn bootstrap_official_browser(&self) -> TalosResult<()> {
+        if self.manager.installed_browser_requirements()?.is_none() {
+            let manager = self.manager.clone();
+            tokio::task::spawn_blocking(move || {
+                let source = talos_config::official_mcp_source();
+                let source_id = manager.list_sources(PluginSourceListRequest { node_id: None })?
+                    .sources.into_iter().find(|record| {
+                        matches!(&record.location, talos_types::MarketplaceSourceLocation::Git {url, reference}
+                            if *url == source.url && *reference == source.reference)
+                            && record.sparse_paths == source.sparse_paths
+                    }).ok_or_else(|| talos_error::TalosError::internal("Official MCP source is unavailable."))?.id;
+                manager.refresh_source(PluginSourceRefreshRequest { node_id: None, source_id })
+            }).await.map_err(|error| {
+                talos_error::TalosError::internal_with_source("Official MCP discovery could not finish.", error)
+            })??;
+            if let Some(request) = self.manager.default_browser_install_request()? {
+                self.install(request).await?;
+            }
+        }
+        if let (Some(browser), Some((installation, lock))) = (
+            &self.browser,
+            self.manager.installed_browser_requirements()?,
+        ) {
+            if let Some(prepared) = browser.prepare_browser_environment(&lock).await? {
+                self.activate_installed_browser(installation, prepared)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn activate_installed_browser(
+        &self,
+        installation: talos_types::PluginInstall,
+        prepared: talos_browser::PreparedBrowserEnvironment,
+    ) -> TalosResult<()> {
+        let _guard = self.commit_guard()?;
+        if self
+            .manager
+            .installed_browser_requirements()?
+            .map(|(current, _)| current)
+            != Some(installation)
+        {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Browser changed during environment preparation.",
+            ));
+        }
+        self.activate_prepared_browser(Some(prepared)).await
     }
 
     /// The node-local gate shared by actual execution and environment commits.
@@ -76,13 +140,11 @@ impl PluginManagerService {
         mut self,
         runtime: Arc<talos_mcp::TalosMcpRuntime>,
         hook: talos_plugin::McpChangeHook,
-        config: Arc<std::sync::RwLock<talos_config::Config>>,
         credentials: super::McpCredentialStore,
     ) -> Self {
         self.manager = self.manager.with_mcp_change_hook(hook);
         self.mcp = Some(McpContext {
             runtime,
-            config,
             credentials,
             oauth: Arc::default(),
         });
@@ -191,22 +253,57 @@ impl PluginManagerService {
         &self,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
+        let prepared = self
+            .prepare_change(agent_protocol::WorkerPluginChange::Install(request.clone()))
+            .await?;
+        self.install_prepared(request, prepared).await
+    }
+
+    pub(super) async fn install_prepared(
+        &self,
+        mut request: PluginInstallRequest,
+        prepared: super::preparation::PreparedServiceChange,
+    ) -> TalosResult<PluginInstallResponse> {
         let _guard = self.commit_guard()?;
-        let result = self.install_with_credentials(request).map(|mut response| {
-            super::redaction::plugin(&mut response.plugin);
-            response
-        });
+        self.prepare_install_credentials(&mut request)?;
+        let result = self
+            .manager
+            .install_prepared(request, prepared.plugin)
+            .map(|mut response| {
+                super::redaction::plugin(&mut response.plugin);
+                response
+            });
         self.recover_credentials();
+        if result.is_ok() {
+            self.activate_prepared_browser(prepared.environment).await?;
+        }
         result
     }
 
     pub async fn update(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
+        let prepared = self
+            .prepare_change(agent_protocol::WorkerPluginChange::Update(request.clone()))
+            .await?;
+        self.update_prepared(request, prepared).await
+    }
+
+    pub(super) async fn update_prepared(
+        &self,
+        request: PluginUpdateRequest,
+        prepared: super::preparation::PreparedServiceChange,
+    ) -> TalosResult<PluginUpdateResponse> {
         let _guard = self.commit_guard()?;
-        let result = self.manager.update(request).map(|mut response| {
-            super::redaction::plugin(&mut response.plugin);
-            response
-        });
+        let result = self
+            .manager
+            .update_prepared(request, prepared.plugin)
+            .map(|mut response| {
+                super::redaction::plugin(&mut response.plugin);
+                response
+            });
         self.recover_credentials();
+        if result.is_ok() {
+            self.activate_prepared_browser(prepared.environment).await?;
+        }
         result
     }
 
@@ -223,7 +320,7 @@ impl PluginManagerService {
     pub async fn enable(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
         let _guard = self.commit_guard()?;
         let mut response = self.manager.enable(request)?;
-        if response.plugin.id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
+        if response.plugin.id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID {
             if let Some(browser) = &self.browser {
                 browser.plugin_enabled().await?;
             }
@@ -243,7 +340,7 @@ impl PluginManagerService {
         });
         self.recover_credentials();
         let response = result?;
-        if response.plugin.id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
+        if response.plugin.id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID {
             if let Some(browser) = &self.browser {
                 browser.plugin_disabled().await?;
             }

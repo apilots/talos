@@ -83,6 +83,7 @@ pub(crate) fn manual_mcp_candidate(server: McpServerDefinition) -> TalosResult<I
     Ok(InstallCandidate {
         plugin: manual_mcp_plugin(server),
         source: super::InstallSource::Manual,
+        prepared_dir: None,
     })
 }
 

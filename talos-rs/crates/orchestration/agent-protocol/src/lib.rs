@@ -16,6 +16,8 @@ mod environment_memory_pb;
 mod environment_oauth;
 mod environment_oauth_pb;
 pub mod environment_pb;
+mod environment_plugin_changes;
+mod environment_plugin_changes_pb;
 mod environment_plugins_pb;
 mod environment_skills_pb;
 pub mod error_pb;
@@ -46,6 +48,9 @@ pub use run::{
 };
 
 pub use environment::{WorkerEnvironment, WorkerEnvironmentContext};
+pub use environment_plugin_changes::{
+    WorkerPluginChange, WorkerPluginInstall, WorkerPluginPrepared, WorkerPluginUpdate,
+};
 
 pub use environment_oauth::{
     McpAuthenticationCallbackParams, McpAuthenticationStartParams, McpOAuthCallbackOutcome,

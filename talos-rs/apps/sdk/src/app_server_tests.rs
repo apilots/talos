@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use talos_agent_api::{
     AgentEvent, AgentEventPayload, AgentTurnRef, AgentTurnStarted, TimelineEvent,
 };
+use talos_app_protocol::jsonrpc::{JsonRpcRequest, RequestId};
 
 #[test]
 fn skips_cached_actor_credentials_for_local_session_methods() {
@@ -154,6 +155,60 @@ async fn rejected_cached_credentials_preserve_the_original_request_error() {
     assert!(client.actor_credentials.is_none());
     drop(client.stdin.take());
     child.wait().await.expect("fixture exit");
+}
+
+#[tokio::test]
+async fn slow_plugin_requests_accept_delayed_responses_without_extending_other_requests() {
+    for method in ["plugin/install", "plugin/update", "session/list"] {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut client = test_app_server_client(false);
+        client.stdin = child.stdin.take();
+        let pending = client.pending_responses.clone();
+        let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+        {
+            let mut request = std::pin::pin!(client.request_value(method, ()));
+            let line = tokio::select! {
+                result = &mut request => panic!("request completed before its response: {result:?}"),
+                line = lines.next_line() => line.unwrap().unwrap(),
+            };
+            let frame: JsonRpcRequest = serde_json::from_str(&line).unwrap();
+            let RequestId::Number(id) = frame.id else {
+                panic!("numeric request ID")
+            };
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(31)).await;
+            let state = std::future::poll_fn(|context| {
+                std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), context))
+            })
+            .await;
+            if method == "session/list" {
+                assert!(matches!(state, std::task::Poll::Ready(Err(_))));
+                assert!(pending.lock().await.is_empty());
+            } else {
+                assert!(
+                    state.is_pending(),
+                    "Plugin preparation may exceed 30 seconds"
+                );
+                let expected = serde_json::json!({"accepted": true});
+                pending
+                    .lock()
+                    .await
+                    .remove(&id)
+                    .unwrap()
+                    .send(Ok(expected.clone()))
+                    .unwrap();
+                assert_eq!(request.await.unwrap(), expected);
+            }
+            tokio::time::resume();
+        }
+        drop(client.stdin.take());
+        child.wait().await.unwrap();
+    }
 }
 
 #[tokio::test]

@@ -4,17 +4,19 @@ use crate::installer::{
     rollback_install_activation, rollback_uninstall_activation, rollback_update_activation,
     stage_uninstall_plugin, update_plugin, InstallCandidate,
 };
-use crate::scanner::{scan_source, scanned_at_ms};
+use crate::scanner::scanned_at_ms;
 use crate::source::{config_source, source_from_input};
-use crate::state::SourceScanCacheFile;
 use crate::PluginStateStore;
 mod matchers;
+mod preparation;
+mod source_refresh;
+pub use preparation::PreparedPluginChange;
 mod mcp;
 pub use mcp::{McpChangeHook, McpDiscovery};
-pub(crate) mod builtin;
+pub(crate) mod official;
 #[cfg(test)]
-#[path = "manager/builtin_tests.rs"]
-mod builtin_tests;
+#[path = "manager/official_tests.rs"]
+mod official_tests;
 mod read;
 use matchers::{plugin_matches_list, plugin_matches_search};
 use talos_config::{
@@ -84,8 +86,25 @@ impl PluginManager {
         &self,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        self.state
-            .with_exclusive_lock("plugin.source.add", || self.add_source_locked(request))
+        let refresh = request.refresh;
+        let mut request = request;
+        request.refresh = false;
+        let added = self
+            .state
+            .with_exclusive_lock("plugin.source.add", || self.add_source_locked(request))?;
+        if refresh {
+            let refreshed = self.refresh_source(PluginSourceRefreshRequest {
+                node_id: None,
+                source_id: added.source.id,
+            })?;
+            Ok(PluginSourceAddResponse {
+                source: refreshed.source,
+                plugins: refreshed.plugins,
+                warnings: refreshed.warnings,
+            })
+        } else {
+            Ok(added)
+        }
     }
 
     fn add_source_locked(
@@ -105,18 +124,6 @@ impl PluginManager {
         file.sources.push(source.clone());
         self.state.save_sources(&file)?;
 
-        if request.refresh {
-            let refreshed = self.refresh_source_locked(PluginSourceRefreshRequest {
-                node_id: None,
-                source_id: source.id,
-            })?;
-            return Ok(PluginSourceAddResponse {
-                source: refreshed.source,
-                plugins: refreshed.plugins,
-                warnings: refreshed.warnings,
-            });
-        }
-
         Ok(PluginSourceAddResponse {
             source,
             plugins: Vec::new(),
@@ -128,61 +135,7 @@ impl PluginManager {
         &self,
         request: PluginSourceRefreshRequest,
     ) -> TalosResult<PluginSourceRefreshResponse> {
-        self.state.with_exclusive_lock("plugin.source.refresh", || {
-            self.refresh_source_locked(request)
-        })
-    }
-
-    fn refresh_source_locked(
-        &self,
-        request: PluginSourceRefreshRequest,
-    ) -> TalosResult<PluginSourceRefreshResponse> {
-        if let Some(mut source) = self
-            .config_sources()
-            .into_iter()
-            .find(|source| source.id == request.source_id)
-        {
-            let scan = scan_source(&self.state, &source)?;
-            source.last_checked_commit = scan.source_commit.clone();
-            source.last_checked_at_ms = Some(scanned_at_ms());
-            source.updated_at_ms = source.last_checked_at_ms.unwrap_or_default();
-            let warnings = scan.warnings;
-            let plugins =
-                plugins_with_source_commit(scan.plugins, source.last_checked_commit.clone());
-            self.save_scan_cache(&source, plugins.clone(), warnings.clone())?;
-            return Ok(PluginSourceRefreshResponse {
-                source,
-                plugins,
-                warnings,
-            });
-        }
-
-        let mut file = self.state.load_sources()?;
-        let Some(source) = file
-            .sources
-            .iter_mut()
-            .find(|source| source.id == request.source_id)
-        else {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::ResourceNotFound,
-                format!("plugin source `{}` not found", request.source_id.0),
-            ));
-        };
-        let scan = scan_source(&self.state, source)?;
-        source.last_checked_commit = scan.source_commit.clone();
-        source.last_checked_at_ms = Some(scanned_at_ms());
-        source.updated_at_ms = source.last_checked_at_ms.unwrap_or_default();
-        let warnings = scan.warnings;
-        let plugins = plugins_with_source_commit(scan.plugins, source.last_checked_commit.clone());
-        self.save_scan_cache(source, plugins.clone(), warnings.clone())?;
-        let source = source.clone();
-        self.state.save_sources(&file)?;
-
-        Ok(PluginSourceRefreshResponse {
-            source,
-            plugins,
-            warnings,
-        })
+        self.refresh_source_staged(request)
     }
 
     pub fn search(&self, request: PluginSearchRequest) -> TalosResult<PluginSearchResponse> {
@@ -310,19 +263,19 @@ impl PluginManager {
                 crate::installer::manual_mcp_candidate(self.prepare_manual_mcp(*server)?.1)?
             }
         };
-        if candidate.plugin.id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID
-            || candidate.plugin.metadata.name == talos_types::BUILTIN_BROWSER_SERVER_NAME
-            || matches!(&candidate.plugin.definition, talos_types::PluginDefinition::McpServer(mcp)
-                if mcp.server.name == talos_types::BUILTIN_BROWSER_SERVER_NAME)
-        {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "This plugin identity is reserved for the bundled Browser.",
-            ));
-        }
-        let enabled = request.enable != Some(false);
+        self.activate_install(candidate, request.enable, request.conflict_policy)
+    }
+
+    fn activate_install(
+        &self,
+        candidate: InstallCandidate,
+        enable: Option<bool>,
+        conflict_policy: talos_types::PluginInstallConflictPolicy,
+    ) -> TalosResult<PluginInstallResponse> {
+        official::validate_candidate(&candidate)?;
+        let enabled = enable != Some(false);
         let previous_installs = self.state.load_installs()?;
-        let activation = install_plugin(&self.state, candidate, request.conflict_policy, enabled)?;
+        let activation = install_plugin(&self.state, candidate, conflict_policy, enabled)?;
         self.finish_install(previous_installs, activation)
     }
 
@@ -352,11 +305,15 @@ impl PluginManager {
     }
 
     pub fn update(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
-        self.state
-            .with_exclusive_lock("plugin.update", || self.update_locked(request))
+        let prepared = self.prepare_update(&request)?;
+        self.update_prepared(request, prepared)
     }
 
-    fn update_locked(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
+    fn update_locked(
+        &self,
+        request: PluginUpdateRequest,
+        candidate: InstallCandidate,
+    ) -> TalosResult<PluginUpdateResponse> {
         let previous_installs = self.state.load_installs()?;
         let install = previous_installs
             .installs
@@ -369,22 +326,7 @@ impl PluginManager {
                 )
             })?;
         let enabled = install.enabled;
-        if install.plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "The built-in Browser is updated with Talos.",
-            ));
-        }
-        let candidate = self.update_candidate(install)?;
-        if candidate.plugin.metadata.name == talos_types::BUILTIN_BROWSER_SERVER_NAME
-            || matches!(&candidate.plugin.definition,talos_types::PluginDefinition::McpServer(mcp)
-                if mcp.server.name==talos_types::BUILTIN_BROWSER_SERVER_NAME)
-        {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "This plugin identity is reserved for the bundled Browser.",
-            ));
-        }
+        official::validate_candidate(&candidate)?;
         if request.expected_source_commit.is_some()
             && candidate.plugin.source_commit != request.expected_source_commit
         {
@@ -441,7 +383,7 @@ impl PluginManager {
             .cloned();
         if removed_install
             .as_ref()
-            .is_some_and(|install| install.plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID)
+            .is_some_and(official::is_official_browser)
         {
             return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
@@ -583,25 +525,6 @@ impl PluginManager {
             .collect()
     }
 
-    fn save_scan_cache(
-        &self,
-        source: &talos_types::MarketplaceSource,
-        plugins: Vec<Plugin>,
-        warnings: Vec<talos_types::PluginWarning>,
-    ) -> TalosResult<()> {
-        self.state.save_source_scan_cache(
-            &source.id,
-            &SourceScanCacheFile {
-                version: 1,
-                source_id: source.id.clone(),
-                scanned_at_ms: source.updated_at_ms,
-                source_commit: source.last_checked_commit.clone(),
-                plugins,
-                warnings,
-            },
-        )
-    }
-
     fn install_candidate(
         &self,
         plugin_id: &talos_types::PluginId,
@@ -619,6 +542,7 @@ impl PluginManager {
                 return Ok(InstallCandidate {
                     plugin,
                     source: crate::installer::InstallSource::Marketplace(source),
+                    prepared_dir: None,
                 });
             }
         }
@@ -788,36 +712,6 @@ impl PluginManager {
             }
         }
         Ok(())
-    }
-
-    fn update_candidate(&self, install: &PluginInstall) -> TalosResult<InstallCandidate> {
-        let source_id = install_source_id(install).ok_or_else(|| {
-            TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                format!("plugin install `{}` has no update source", install.id.0),
-            )
-        })?;
-        let refreshed = self.refresh_source_locked(PluginSourceRefreshRequest {
-            node_id: None,
-            source_id,
-        })?;
-        let plugin = refreshed
-            .plugins
-            .into_iter()
-            .find(|plugin| plugin.id == install.plugin_id)
-            .ok_or_else(|| {
-                TalosError::new(
-                    talos_error::ErrorCode::ResourceNotFound,
-                    format!(
-                        "plugin `{}` not found in refreshed source",
-                        install.plugin_id.0
-                    ),
-                )
-            })?;
-        Ok(InstallCandidate {
-            plugin,
-            source: crate::installer::InstallSource::Marketplace(refreshed.source),
-        })
     }
 }
 

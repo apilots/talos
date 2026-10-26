@@ -108,10 +108,10 @@ impl TalosMcpRuntime {
         for mut descriptor in descriptors {
             let builtin = matches!(&descriptor.descriptor.source,
                 talos_types::McpServerSource::Plugin { plugin_id, .. }
-                if plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID);
+                if plugin_id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID);
             if builtin {
                 let valid = descriptor.descriptor.server.name
-                    == talos_types::BUILTIN_BROWSER_SERVER_NAME
+                    == talos_types::BROWSER_MCP_SERVER_NAME
                     && descriptor.descriptor.server.credentials.is_none()
                     && matches!(&descriptor.descriptor.server.transport,
                         talos_types::McpTransportDefinition::Stdio { command, args, env, .. }
@@ -136,8 +136,7 @@ impl TalosMcpRuntime {
                         },
                     ));
                 }
-            } else if descriptor.descriptor.server.name == talos_types::BUILTIN_BROWSER_SERVER_NAME
-            {
+            } else if descriptor.descriptor.server.name == talos_types::BROWSER_MCP_SERVER_NAME {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,
                     "The Browser MCP name is reserved for the bundled plugin.",
@@ -235,17 +234,12 @@ impl TalosMcpRuntime {
                 .values()
                 .filter(|server| match (definition, &server.descriptor.source) {
                     (
-                        talos_types::McpDefinitionRef::Config { name },
-                        talos_types::McpServerSource::Config,
-                    ) => server.descriptor.server.name == *name,
-                    (
                         talos_types::McpDefinitionRef::Plugin { install_id },
                         talos_types::McpServerSource::Plugin {
                             install_id: current,
                             ..
                         },
                     ) => install_id == current,
-                    _ => false,
                 })
         {
             server.abort_calls.cancel();

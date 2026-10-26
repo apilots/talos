@@ -80,6 +80,12 @@ impl AgentHarnessRpcAdapter {
             Call::SearchPlugins(value) => unary!(value, search_plugins, SearchPlugins),
             Call::ListPlugins(value) => unary!(value, list_plugins, ListPlugins),
             Call::ReadPlugin(value) => unary!(value, read_plugin, ReadPlugin),
+            Call::PreparePluginChange(value) => {
+                unary!(value, prepare_plugin_change, PreparePluginChange)
+            }
+            Call::CancelPluginChange(value) => {
+                unary!(value, cancel_plugin_change, CancelPluginChange)
+            }
             Call::InstallPlugin(value) => unary!(value, install_plugin, InstallPlugin),
             Call::UpdatePlugin(value) => unary!(value, update_plugin, UpdatePlugin),
             Call::UninstallPlugin(value) => unary!(value, uninstall_plugin, UninstallPlugin),

@@ -1,6 +1,9 @@
 //! Reusable environment implementation assembled and owned by TalosWorker.
 use crate::{fs::FsService, Actor};
-use agent_protocol::{AgentFuture, WorkerEnvironment, WorkerEnvironmentContext};
+use agent_protocol::{
+    AgentFuture, WorkerEnvironment, WorkerEnvironmentContext, WorkerPluginChange,
+    WorkerPluginInstall, WorkerPluginPrepared, WorkerPluginUpdate,
+};
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -200,8 +203,52 @@ impl WorkerEnvironment for WorkerEnvironmentService {
     plugin_environment_method!(search_plugins(PluginSearchRequest) -> PluginSearchResponse => sync search);
     plugin_environment_method!(list_plugins(PluginListRequest) -> PluginListResponse => sync list_plugins);
     plugin_environment_method!(read_plugin(PluginReadRequest) -> PluginReadResponse => sync read);
-    plugin_environment_method!(install_plugin(PluginInstallRequest) -> PluginInstallResponse => async install);
-    plugin_environment_method!(update_plugin(PluginUpdateRequest) -> PluginUpdateResponse => async update);
+    fn prepare_plugin_change(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPluginChange,
+    ) -> AgentFuture<'_, TalosResult<WorkerPluginPrepared>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.plugin_manager()?
+                .prepare_plugin_change(context, params)
+                .await
+        })
+    }
+    fn cancel_plugin_change(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPluginPrepared,
+    ) -> AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.plugin_manager()?.cancel_plugin_change(context, params)
+        })
+    }
+    fn install_plugin(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPluginInstall,
+    ) -> AgentFuture<'_, TalosResult<PluginInstallResponse>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.plugin_manager()?
+                .commit_plugin_install(context, params)
+                .await
+        })
+    }
+    fn update_plugin(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPluginUpdate,
+    ) -> AgentFuture<'_, TalosResult<PluginUpdateResponse>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.plugin_manager()?
+                .commit_plugin_update(context, params)
+                .await
+        })
+    }
     plugin_environment_method!(uninstall_plugin(PluginUninstallRequest) -> PluginUninstallResponse => async uninstall);
     plugin_environment_method!(enable_plugin(PluginEnableRequest) -> PluginEnableResponse => async enable);
     plugin_environment_method!(disable_plugin(PluginDisableRequest) -> PluginDisableResponse => async disable);

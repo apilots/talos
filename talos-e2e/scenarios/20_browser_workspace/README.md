@@ -19,6 +19,20 @@ talos-e2e/run_e2e.sh --case 20_browser_workspace/01_resource_tabs
 | `04_desktop_mcp` | Actual Desktop controller/app-server/embedded Worker → model task → Browser MCP → File API | Tool discovery and typed dispatch in both bundled and explicitly prepared Chrome modes: browser state/actions, screenshot and attachment authorization, uploads/downloads; pause/resume followed by a real target switch and first navigation without a preparatory tool; disconnect leaves Chrome alive. Local browser capability remains independent of remote display. |
 | `05_docker_worker` | Outbound Docker Worker → ordinary task/tools → private live desktop → restart/profile recovery | First non-navigation tool opens a task tab while preserving the private HTTP homepage; navigation/DOM/files and forged attachment rejection; default homepage, background after closing all browser windows and working Browser/Terminal/Files launchers; authenticated media, three consecutive rejected Worker admissions release their candidate reservations while preserving the live controller, input/control fencing, held-key release, backpressure, expiry and viewer teardown; replacement Worker reuses its owned profile. |
 
+Case 04 prepares the official MCP snapshot from `build/plugins/official-mcp.json`.
+Case 05 checks the installed source commit, dependency lock and actual browser-use
+version, reuses matching preinstallation across replacement and unchanged updates,
+and preserves disabled state across restart through the original Plugin API. In
+its disposable container, removing packaged environment metadata triggers exact-lock
+online preparation; another real Browser task must then succeed with the prepared
+environment. Persisted manual pause is resumed explicitly through the public API.
+The native account/directory fixture also runs the real `talos plugin` CLI against
+the outbound Docker Worker for both Skill and MCP lifecycle operations; no remote
+installation may appear in the client home. After online repair, a replacement
+container removes its packaged environment metadata before Worker startup and
+disables external package DNS while retaining the control-plane hosts entry. It
+must reuse the same home environment and complete another real Browser task.
+
 Responsive preview checks keep the same address/iframe DOM and drafts. Address
 focus survives both directions; leaving a native modal preserves the iframe's
 current input focus. Entering a native modal resets a cross-origin child input's

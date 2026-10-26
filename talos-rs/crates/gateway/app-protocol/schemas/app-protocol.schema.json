@@ -7023,24 +7023,6 @@
             "type"
           ],
           "type": "object"
-        },
-        {
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "config"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "type"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -7237,20 +7219,6 @@
     },
     "McpServerSource": {
       "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "enum": [
-                "config"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
         {
           "properties": {
             "install_id": {

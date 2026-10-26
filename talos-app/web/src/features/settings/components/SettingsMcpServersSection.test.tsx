@@ -94,7 +94,7 @@ describe("SettingsMcpServersSection", () => {
   });
 
   it("shows only plugin enablement for the built-in Browser", async () => {
-    const plugin = mcpPlugin(true); plugin.id = "builtin_browser";
+    const plugin = mcpPlugin(true); plugin.id = "plugin_db03ad38c5bfbfed8f9bdd34";
     if (plugin.definition.kind === "mcp_server") plugin.definition.plugin.server.display_name = "Browser";
     apiMocks.listManagedMcpPlugins.mockResolvedValue({ plugins: [plugin], warnings: [] });
     render(<SettingsMcpServersSection />, { wrapper: createWrapper() });
@@ -110,13 +110,17 @@ describe("SettingsMcpServersSection", () => {
       plugins: [mcpPlugin(true)],
       warnings: [],
     });
+    apiMocks.listConnections.mockResolvedValueOnce({
+      data: [{ name: "playwright", displayName: null, source: { kind: "plugin", pluginId: "plugin-playwright", installId: "install-playwright" }, transport: "stdio", status: { status: "ready" }, toolCount: 3 }],
+      nextCursor: null,
+    });
 
     render(<SettingsMcpServersSection />, { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(screen.getByText("Playwright MCP")).toBeInTheDocument();
     });
-    expect(screen.getByText("stdio")).toBeInTheDocument();
+    expect(await screen.findByText("stdio · Ready · 3 tools")).toBeInTheDocument();
     expect(screen.getByText("source-browser")).toBeInTheDocument();
     expect(screen.getByText("1 server")).toBeInTheDocument();
   });

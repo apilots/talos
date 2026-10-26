@@ -1,7 +1,7 @@
 //! SDK request serialization and response correlation; transport policy stays private.
 
 use super::credentials::actor_credentials_for_method;
-use super::{AppServerClient, APP_SERVER_REQUEST_TIMEOUT};
+use super::{AppServerClient, APP_SERVER_PLUGIN_REQUEST_TIMEOUT, APP_SERVER_REQUEST_TIMEOUT};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use talos_app_protocol::jsonrpc::{JsonRpcRequest, RequestId};
@@ -44,7 +44,11 @@ impl AppServerClient {
             self.pending_responses.lock().await.remove(&id);
             return Err(error);
         }
-        let response = match tokio::time::timeout(APP_SERVER_REQUEST_TIMEOUT, rx).await {
+        let timeout = match method {
+            "plugin/install" | "plugin/update" => APP_SERVER_PLUGIN_REQUEST_TIMEOUT,
+            _ => APP_SERVER_REQUEST_TIMEOUT,
+        };
+        let response = match tokio::time::timeout(timeout, rx).await {
             Ok(response) => response,
             Err(_) => {
                 self.pending_responses.lock().await.remove(&id);

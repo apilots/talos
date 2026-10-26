@@ -157,6 +157,17 @@ impl AgentEnvironmentClient {
                 }
                 Call::ListPlugins(value) => unary!(value, environment, list_plugins, ListPlugins),
                 Call::ReadPlugin(value) => unary!(value, environment, read_plugin, ReadPlugin),
+                Call::PreparePluginChange(value) => {
+                    unary!(
+                        value,
+                        environment,
+                        prepare_plugin_change,
+                        PreparePluginChange
+                    )
+                }
+                Call::CancelPluginChange(value) => {
+                    unary!(value, environment, cancel_plugin_change, CancelPluginChange)
+                }
                 Call::InstallPlugin(value) => {
                     unary!(value, environment, install_plugin, InstallPlugin)
                 }

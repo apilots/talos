@@ -18,6 +18,8 @@ pub struct PluginStateStore {
     root: PathBuf,
     #[cfg(test)]
     fail_next_save_installs: Arc<AtomicBool>,
+    #[cfg(test)]
+    fail_next_save_scan_cache: Arc<std::sync::atomic::AtomicU8>,
 }
 
 impl PluginStateStore {
@@ -26,6 +28,8 @@ impl PluginStateStore {
             root: resolve_talos_home().join("plugins"),
             #[cfg(test)]
             fail_next_save_installs: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_save_scan_cache: Arc::default(),
         }
     }
 
@@ -34,12 +38,26 @@ impl PluginStateStore {
             root: root.into(),
             #[cfg(test)]
             fail_next_save_installs: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_save_scan_cache: Arc::default(),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn fail_next_save_installs(&self) {
         self.fail_next_save_installs.store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_scan_cache_save(&self, failure: ScanCacheFailure) {
+        self.fail_next_save_scan_cache
+            .store(failure as u8, Ordering::SeqCst);
+    }
+
+    pub(crate) fn staging_store(&self, root: PathBuf) -> Self {
+        let mut staging = self.clone();
+        staging.root = root;
+        staging
     }
 
     pub fn sources_path(&self) -> PathBuf {
@@ -75,8 +93,53 @@ impl PluginStateStore {
     }
 
     pub fn cleanup_install_temps(&self) -> TalosResult<()> {
-        remove_transaction_root(&self.root.join(".tmp"), "plugin install temp")?;
+        let temporary = self.root.join(".tmp");
+        if temporary.exists() {
+            for entry in std::fs::read_dir(&temporary).map_err(|error| {
+                TalosError::internal_with_source(
+                    "Plugin temporary files could not be inspected.",
+                    error,
+                )
+            })? {
+                let entry = entry.map_err(|error| {
+                    TalosError::internal_with_source(
+                        "A plugin temporary file could not be inspected.",
+                        error,
+                    )
+                })?;
+                if entry.file_name() == "prepared" {
+                    for candidate in std::fs::read_dir(entry.path()).map_err(|error| {
+                        TalosError::internal_with_source(
+                            "Plugin preparations could not be inspected.",
+                            error,
+                        )
+                    })? {
+                        let path = candidate
+                            .map_err(|error| {
+                                TalosError::internal_with_source(
+                                    "A plugin preparation could not be inspected.",
+                                    error,
+                                )
+                            })?
+                            .path();
+                        if path.is_dir() && !path.is_symlink() {
+                            if let Some(_lease) =
+                                talos_fs::std_fs().try_file_lock(&path.join("lease"))?
+                            {
+                                remove_transaction_root(&path, "abandoned plugin preparation")?;
+                            }
+                        }
+                    }
+                } else {
+                    remove_transaction_root(&entry.path(), "plugin install temp")?;
+                }
+            }
+        }
         Ok(())
+    }
+
+    pub fn preparation_root(&self) -> PathBuf {
+        self.root.join(".tmp/prepared")
     }
 
     pub fn with_exclusive_lock<T>(
@@ -184,7 +247,18 @@ impl PluginStateStore {
         source_id: &MarketplaceSourceId,
         cache: &SourceScanCacheFile,
     ) -> TalosResult<()> {
-        talos_fs::write_json_pretty(&self.source_scan_cache_path(source_id), cache)
+        #[cfg(test)]
+        let failure = self.fail_next_save_scan_cache.swap(0, Ordering::SeqCst);
+        #[cfg(test)]
+        if failure == ScanCacheFailure::BeforeWrite as u8 {
+            return Err(TalosError::internal("injected scan cache save failure"));
+        }
+        talos_fs::write_json_pretty(&self.source_scan_cache_path(source_id), cache)?;
+        #[cfg(test)]
+        if failure == ScanCacheFailure::AfterWrite as u8 {
+            return Err(TalosError::internal("injected scan cache sync failure"));
+        }
+        Ok(())
     }
 
     pub fn remove_marketplace_cache(&self, source_id: &MarketplaceSourceId) -> TalosResult<()> {
@@ -264,4 +338,11 @@ impl Default for PluginInstallsFile {
             installs: Vec::new(),
         }
     }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum ScanCacheFailure {
+    BeforeWrite = 1,
+    AfterWrite = 2,
 }

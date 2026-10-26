@@ -71,10 +71,10 @@ impl McpConnection {
     }
 
     pub fn is_builtin_browser(&self) -> bool {
-        self.name() == talos_types::BUILTIN_BROWSER_SERVER_NAME
+        self.name() == talos_types::BROWSER_MCP_SERVER_NAME
             && matches!(&self.server.descriptor.source,
                 talos_types::McpServerSource::Plugin { plugin_id, .. }
-                if plugin_id.0 == talos_types::BUILTIN_BROWSER_PLUGIN_ID)
+                if plugin_id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID)
     }
 
     /// Private executor capability; it is never accepted as a tool argument.

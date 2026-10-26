@@ -134,7 +134,6 @@ pub struct McpServerRuntimeDescriptor {
     rename_all_fields = "camelCase"
 )]
 pub enum McpServerSource {
-    Config,
     Plugin {
         plugin_id: super::PluginId,
         install_id: super::PluginInstallId,

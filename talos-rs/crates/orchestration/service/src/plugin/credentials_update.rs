@@ -1,8 +1,8 @@
-use talos_error::{ErrorCode, TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_types::*;
 
 impl super::PluginManagerService {
-    /// Serializes a complete credential change with Plugin/config commits. Network OAuth work is excluded.
+    /// Serializes a complete credential change with Plugin commits. Network OAuth work is excluded.
     pub async fn update_mcp_credentials(
         &self,
         request: McpCredentialsUpdateRequest,
@@ -32,24 +32,7 @@ impl super::PluginManagerService {
                     context.credentials.remove_for(owner, &binding.reference)?;
                     return self.manager.publish_mcp_definitions();
                 }
-                let has_legacy = self.configured_mcp(owner)?.as_ref().is_some_and(|server| {
-                    matches!(
-                        &server.transport,
-                        talos_config::McpTransportConfig::Http {
-                            bearer_token: Some(_),
-                            ..
-                        }
-                    )
-                });
-                if !has_legacy {
-                    return Ok(());
-                }
-                context.runtime.revoke_credentials(owner);
-                // Persist a missing binding so a restart cannot restore the removed inline token.
-                server.credentials = Some(McpCredentialBinding {
-                    reference: uuid::Uuid::new_v4().to_string(),
-                    authentication: McpAuthentication::Bearer,
-                });
+                return Ok(());
             }
             McpCredentialsChange::Replace { credentials } => {
                 remove_old_inline_values(&mut server, &credentials)?;
@@ -65,70 +48,8 @@ impl super::PluginManagerService {
         owner: &McpDefinitionRef,
         server: McpServerDefinition,
     ) -> TalosResult<()> {
-        let configured = self.configured_mcp(owner)?;
-        match owner {
-            McpDefinitionRef::Plugin { install_id } => {
-                self.manager.set_mcp_credentials(install_id, server)
-            }
-            McpDefinitionRef::Config { .. } => {
-                let previous = configured.expect("configuration owner was resolved");
-                let mut next = previous.clone();
-                next.credentials = server.credentials;
-                match (&mut next.transport, server.transport) {
-                    (
-                        talos_config::McpTransportConfig::Stdio { env, .. },
-                        McpTransportDefinition::Stdio { env: public, .. },
-                    ) => *env = public.into_iter().collect(),
-                    (
-                        talos_config::McpTransportConfig::Http { bearer_token, .. },
-                        McpTransportDefinition::StreamableHttp { .. },
-                    ) => *bearer_token = None,
-                    _ => {
-                        return Err(TalosError::new(
-                            ErrorCode::Conflict,
-                            "The MCP transport changed while credentials were prepared.",
-                        ))
-                    }
-                }
-                self.config_service
-                    .as_ref()
-                    .ok_or_else(|| {
-                        TalosError::new(
-                            ErrorCode::ServiceUnavailable,
-                            "Worker configuration publisher is unavailable",
-                        )
-                    })?
-                    .update_mcp_credentials(&previous, &next)
-            }
-        }
-    }
-    fn configured_mcp(
-        &self,
-        owner: &McpDefinitionRef,
-    ) -> TalosResult<Option<talos_config::McpServerConfig>> {
-        let context = self.mcp_context()?;
-        Ok(match owner {
-            McpDefinitionRef::Config { name } => Some(
-                context
-                    .config
-                    .read()
-                    .expect("application config lock poisoned")
-                    .agent
-                    .kernel
-                    .mcp
-                    .servers
-                    .iter()
-                    .find(|server| server.name == *name)
-                    .cloned()
-                    .ok_or_else(|| {
-                        TalosError::new(
-                            ErrorCode::ResourceNotFound,
-                            "The configured MCP service was not found.",
-                        )
-                    })?,
-            ),
-            McpDefinitionRef::Plugin { .. } => None,
-        })
+        let McpDefinitionRef::Plugin { install_id } = owner;
+        self.manager.set_mcp_credentials(install_id, server)
     }
 }
 

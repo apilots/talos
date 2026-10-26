@@ -170,6 +170,8 @@ Execution plan and sandbox selection
 Typed result -> bounded Timeline event -> next model input
 ```
 
+MCP 定义和凭据由已安装 Plugin 管理。YAML 只配置 Plugin 来源、扫描根与全局工具策略；目标 Worker 加载已启用 manifest，并保存私有 Token/OAuth 凭据。`talos plugin` 命令复用现有 SDK/Service，`--node` 选择 Computer，省略时使用内嵌 Worker；来源管理和手动 JSON 导入继续走原页面/API。
+
 Policy、Sandbox、MCP 初始化和 schema 错误必须保持可见。没有显式策略决策时，
 Provider 不得通过权限更弱的执行路径重试。
 

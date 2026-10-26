@@ -139,12 +139,30 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
         encode_read_plugin_result
     );
     environment_rpc!(
+        prepare_plugin_change,
+        PreparePluginChangeRequest,
+        PreparePluginChangeResponse,
+        prepare_plugin_change_response,
+        Value,
+        decode_prepare_plugin_change_params,
+        encode_prepare_plugin_change_result
+    );
+    environment_rpc!(
+        cancel_plugin_change,
+        CancelPluginChangeRequest,
+        CancelPluginChangeResponse,
+        cancel_plugin_change_response,
+        Value,
+        decode_cancel_plugin_change_params,
+        encode_cancel_plugin_change_result
+    );
+    environment_rpc!(
         install_plugin,
         InstallPluginRequest,
         InstallPluginResponse,
         install_plugin_response,
         Value,
-        decode_install_plugin_params,
+        decode_worker_install_plugin_params,
         encode_install_plugin_result
     );
     environment_rpc!(
@@ -153,7 +171,7 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
         UpdatePluginResponse,
         update_plugin_response,
         Value,
-        decode_update_plugin_params,
+        decode_worker_update_plugin_params,
         encode_update_plugin_result
     );
     environment_rpc!(

@@ -40,7 +40,10 @@ impl Fixture {
                     cwd: None,
                 },
             },
-            source: McpServerSource::Config,
+            source: McpServerSource::Plugin {
+                plugin_id: talos_types::PluginId("fixture".into()),
+                install_id: talos_types::PluginInstallId("fixture".into()),
+            },
         }
     }
     fn marker(&self, name: &str, suffix: &str) -> PathBuf {

@@ -18,29 +18,6 @@ pub struct ConfigService {
 }
 
 impl ConfigService {
-    /// The caller holds the shared execution gate across private credentials and this commit.
-    pub(crate) fn update_mcp_credentials(
-        &self,
-        previous: &talos_config::McpServerConfig,
-        next: &talos_config::McpServerConfig,
-    ) -> TalosResult<()> {
-        let prepared =
-            self.prepare_reload(ConfigReloadTrigger::McpCredentials(Box::new(next.clone())))?;
-        if let Err(error) = self.config_store.save_mcp_server(previous, next) {
-            // A successful rename followed by fsync failure must still publish the persisted candidate.
-            if self
-                .config_store
-                .load_mcp_servers()
-                .is_ok_and(|servers| servers.iter().any(|server| server == next))
-            {
-                prepared.publish();
-            }
-            return Err(error);
-        }
-        prepared.publish();
-        Ok(())
-    }
-
     pub fn new(
         config_store: Arc<dyn ConfigStore>,
         execution_gate: Arc<RwLock<()>>,

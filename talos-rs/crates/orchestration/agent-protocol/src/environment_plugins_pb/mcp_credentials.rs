@@ -100,9 +100,6 @@ pub(crate) fn encode_mcp_definition_ref(
                     install_id: install_id.0,
                 })
             }
-            d::McpDefinitionRef::Config { name } => {
-                pb::mcp_definition_ref::Value::Config(pb::McpDefinitionRefConfig { name })
-            }
         }),
     })
 }
@@ -113,8 +110,5 @@ pub(crate) fn decode_mcp_definition_ref(
         pb::mcp_definition_ref::Value::Plugin(value) => d::McpDefinitionRef::Plugin {
             install_id: d::PluginInstallId(value.install_id),
         },
-        pb::mcp_definition_ref::Value::Config(value) => {
-            d::McpDefinitionRef::Config { name: value.name }
-        }
     })
 }

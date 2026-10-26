@@ -13,7 +13,6 @@ use ts_rs::TS;
 )]
 pub enum McpDefinitionRef {
     Plugin { install_id: PluginInstallId },
-    Config { name: String },
 }
 
 /// Write-only values for a complete credential replacement. Omitted maps mean no secret entries.

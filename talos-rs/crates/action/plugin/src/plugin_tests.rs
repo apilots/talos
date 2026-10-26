@@ -22,9 +22,16 @@ fn lists_default_official_source_and_user_sources() {
         .expect("sources should list")
         .sources;
 
-    assert_eq!(sources.len(), 1);
-    assert_eq!(sources[0].source_type, MarketplaceSourceType::Official);
-    assert_eq!(sources[0].display_name, "Apilots Skills");
+    assert_eq!(sources.len(), 2);
+    assert!(sources
+        .iter()
+        .all(|source| source.source_type == MarketplaceSourceType::Official));
+    assert!(sources
+        .iter()
+        .any(|source| source.display_name == "Apilots Skills"));
+    assert!(sources
+        .iter()
+        .any(|source| source.display_name == "Apilots MCPs"));
 }
 
 #[test]

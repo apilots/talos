@@ -16,8 +16,11 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 #[path = "desktop.rs"]
 pub mod desktop;
+#[path = "environment.rs"]
+mod environment;
 #[path = "invocation.rs"]
 mod invocation;
+pub use environment::PreparedBrowserEnvironment;
 #[path = "control.rs"]
 mod operations;
 pub use invocation::{BrowserDispatch, BrowserInvocationLease};
@@ -117,6 +120,8 @@ pub struct BrowserRuntime {
     shutdown: CancellationToken,
     desktop_connector: RwLock<Option<desktop::DesktopConnector>>,
     pub(crate) ipc_tasks: tokio_util::task::TaskTracker,
+    managed_environment: Mutex<environment::ManagedEnvironmentBinding>,
+    restart_required: std::sync::atomic::AtomicBool,
 }
 
 impl BrowserRuntime {
@@ -168,6 +173,8 @@ impl BrowserRuntime {
             shutdown: CancellationToken::new(),
             desktop_connector: RwLock::new(None),
             ipc_tasks: tokio_util::task::TaskTracker::new(),
+            managed_environment: Mutex::new(Default::default()),
+            restart_required: std::sync::atomic::AtomicBool::new(false),
         }))
     }
 
@@ -180,6 +187,14 @@ impl BrowserRuntime {
         Ok(())
     }
     fn backend(&self) -> TalosResult<Arc<dyn BrowserBackend>> {
+        if self
+            .restart_required
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(unavailable(
+                "Browser dependencies changed. Restart this Worker before continuing.",
+            ));
+        }
         self.backend
             .read()
             .map_err(|_| poisoned())?
@@ -199,7 +214,14 @@ impl BrowserRuntime {
             BrowserHostKind::Native => &[BrowserTargetKind::Connected],
             BrowserHostKind::Server => &[],
         };
-        let backend = self.backend.read().map_err(|_| poisoned())?;
+        let backend = if self
+            .restart_required
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            None
+        } else {
+            self.backend.read().map_err(|_| poisoned())?.clone()
+        };
         let targets = kinds
             .iter()
             .map(|kind| BrowserTarget {
@@ -225,8 +247,9 @@ impl BrowserRuntime {
                     },
                     Ok(()) => backend.as_ref().map_or_else(
                         || BrowserReadiness::Unavailable {
-                            error: unavailable("This Computer's browser backend is unavailable.")
-                                .to_api_error(),
+                            error: unavailable(if self.restart_required.load(std::sync::atomic::Ordering::Acquire) {
+                                "Browser dependencies changed. Restart this Worker before continuing."
+                            } else { "This Computer's browser backend is unavailable." }).to_api_error(),
                         },
                         |backend| backend.readiness(*kind),
                     ),
@@ -339,7 +362,8 @@ impl BrowserRuntime {
                     error,
                 )
             })?;
-        if let Ok(backend) = self.backend() {
+        let backend = self.backend.read().map_err(|_| poisoned())?.clone();
+        if let Some(backend) = backend {
             backend.release_inputs().await?;
             backend.shutdown().await?;
             self.state

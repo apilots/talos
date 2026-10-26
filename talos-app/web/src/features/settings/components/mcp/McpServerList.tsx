@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { cn } from "@/shared/lib/cn";
+import { isOfficialBrowserPlugin } from "@/features/plugins/lib/pluginDisplay";
 
 export interface McpServerView {
   connection?: McpServerInfo;
@@ -92,13 +93,13 @@ function McpServerRow({
   server: McpServerView;
 }) {
   const { t } = useTranslation(["plugins", "settings"]);
-  const builtin = server.id === "builtin_browser";
+  const builtin = isOfficialBrowserPlugin(server);
   return (
     <div className={cn("grid min-h-[4.5rem] items-center gap-4 border-b border-border/65 px-5 last:border-b-0 max-sm:py-3", builtin ? "grid-cols-[minmax(0,1fr)_max-content_max-content] max-sm:grid-cols-[minmax(0,1fr)_max-content]" : "grid-cols-[minmax(0,1fr)_max-content_max-content_max-content_max-content] max-sm:grid-cols-3")}>
       <div className={cn("min-w-0",!builtin&&"max-sm:col-span-3")}>
         <span className="block truncate text-sm font-medium text-ink">{server.name}</span>
         <span className="mt-0.5 block truncate text-xs text-muted max-sm:whitespace-normal max-sm:break-words">
-          {server.id === "builtin_browser" ? t("settings:mcpServers.browser.builtIn") : server.transport ?? t("settings:mcpServers.unknownTransport")}
+          {builtin ? t("settings:mcpServers.browser.builtIn") : server.transport ?? t("settings:mcpServers.unknownTransport")}
           {server.connection ? ` · ${t(`settings:mcpServers.connectionState.${server.connection.status.status}`)} · ${t("settings:mcpServers.toolsCount", { count: server.connection.toolCount })}` : ""}
         </span>
         {server.connection && "error" in server.connection.status ? <p className="mt-1 text-xs text-danger">{apiErrorMessage(server.connection.status.error)}</p> : null}

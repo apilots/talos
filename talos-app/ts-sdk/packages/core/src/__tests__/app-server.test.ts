@@ -95,9 +95,9 @@ describe("AppServerClient", () => {
     await client.listModels();
     await client.listMcpServers({ cursor: "alpha", limit: 1 });
     await client.importMcpServer({ json: '{"name":"server","command":"npx"}', enable: false, conflictPolicy: "reject" });
-    await client.startMcpAuthentication({ server: { type: "config", name: "server" }, config: { scopes: ["read"] } });
-    await client.readMcpAuthentication({ server: { type: "config", name: "server" } });
-    await client.updateMcpCredentials({ server: { type: "config", name: "server" }, change: { type: "clear" } });
+    await client.startMcpAuthentication({ server: { type: "plugin", installId: "install-server" }, config: { scopes: ["read"] } });
+    await client.readMcpAuthentication({ server: { type: "plugin", installId: "install-server" } });
+    await client.updateMcpCredentials({ server: { type: "plugin", installId: "install-server" }, change: { type: "clear" } });
     await client.readProfile();
     await client.patchSession({
       sessionId: "session-1",
@@ -150,9 +150,9 @@ describe("AppServerClient", () => {
       { method: "model/list", params: {} },
       { method: "mcp/server/list", params: { cursor: "alpha", limit: 1 } },
       { method: "mcp/server/import", params: { json: '{"name":"server","command":"npx"}', enable: false, conflictPolicy: "reject" } },
-      { method: "mcp/server/auth/start", params: { server: { type: "config", name: "server" }, config: { scopes: ["read"] } } },
-      { method: "mcp/server/auth/read", params: { server: { type: "config", name: "server" } } },
-      { method: "mcp/server/credentials/update", params: { server: { type: "config", name: "server" }, change: { type: "clear" } } },
+      { method: "mcp/server/auth/start", params: { server: { type: "plugin", installId: "install-server" }, config: { scopes: ["read"] } } },
+      { method: "mcp/server/auth/read", params: { server: { type: "plugin", installId: "install-server" } } },
+      { method: "mcp/server/credentials/update", params: { server: { type: "plugin", installId: "install-server" }, change: { type: "clear" } } },
       { method: "profile/read", params: {} },
       {
         method: "session/patch",

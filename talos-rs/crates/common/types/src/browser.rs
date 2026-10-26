@@ -6,8 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-pub const BUILTIN_BROWSER_PLUGIN_ID: &str = "builtin_browser";
-pub const BUILTIN_BROWSER_SERVER_NAME: &str = "talos_browser";
+// Derived by the existing source/path Plugin identity rules; never a separate builtin identity.
+pub const OFFICIAL_BROWSER_PLUGIN_ID: &str = "plugin_db03ad38c5bfbfed8f9bdd34";
+pub const BROWSER_MCP_SERVER_NAME: &str = "talos_browser";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

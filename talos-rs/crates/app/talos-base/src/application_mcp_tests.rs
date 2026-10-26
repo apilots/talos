@@ -48,22 +48,31 @@ fn unreadable_credentials_publish_a_failed_server_status() {
         "invalid credential record",
     )
     .unwrap();
-    let mut config = talos_config::AgentKernelConfig::default();
-    config.mcp.servers.push(talos_config::McpServerConfig {
-        name: "broken_credentials".into(),
-        credentials: Some(McpCredentialBinding {
-            reference: reference.into(),
-            authentication: McpAuthentication::Bearer,
-        }),
-        transport: talos_config::McpTransportConfig::Http {
-            url: "https://example.com/mcp".into(),
-            bearer_token: None,
+    let config = talos_config::AgentKernelConfig::default();
+    let descriptor = talos_types::McpServerRuntimeDescriptor {
+        content_revision: None,
+        source: talos_types::McpServerSource::Plugin {
+            plugin_id: talos_types::PluginId("broken_credentials".into()),
+            install_id: talos_types::PluginInstallId("broken_credentials".into()),
         },
-    });
+        server: talos_types::McpServerDefinition {
+            name: "broken_credentials".into(),
+            display_name: None,
+            description: None,
+            credentials: Some(McpCredentialBinding {
+                reference: reference.into(),
+                authentication: McpAuthentication::Bearer,
+            }),
+            transport: talos_types::McpTransportDefinition::StreamableHttp {
+                url: "https://example.com/mcp".into(),
+                headers: Default::default(),
+            },
+        },
+    };
     let runtime = talos_mcp::TalosMcpRuntime::new();
     let credentials = talos_service::McpCredentialStore::new(credentials_root);
 
-    talos_worker::prepare_mcp(&runtime, &config, vec![], &credentials)
+    talos_worker::prepare_mcp(&runtime, &config, vec![descriptor], &credentials)
         .unwrap()
         .publish();
 
@@ -163,21 +172,6 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
     assert!(runtime
         .tool_registry
         .is_tool_available("mcp__healthy__changed"));
-    // Disk edits are not active configuration until reload succeeds.
-    config.agent.kernel.mcp.servers = vec![talos_config::McpServerConfig {
-        credentials: None,
-        name: "healthy".into(),
-        transport: talos_config::McpTransportConfig::Stdio {
-            command: "/usr/bin/python3".into(),
-            args: vec![
-                source.to_str().unwrap().into(),
-                workspace.join("static").to_str().unwrap().into(),
-                "normal".into(),
-            ],
-            env: Default::default(),
-        },
-    }];
-    save(&config);
     plugins
         .disable(PluginDisableRequest {
             node_id: None,
@@ -196,21 +190,6 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .await
         .unwrap();
     available(&runtime, "healthy").await;
-    assert_eq!(
-        runtime
-            .worker
-            .config_service()
-            .reload_config(ConfigReloadRequest { node_id: None })
-            .await
-            .unwrap_err()
-            .error_code(),
-        talos_error::ErrorCode::Conflict
-    );
-    assert!(runtime
-        .tool_registry
-        .is_tool_available("mcp__healthy__inspect"));
-    config.agent.kernel.mcp.servers[0].name = "static".into();
-    save(&config);
     fs::write(
         damaged.install.installed_path.join("talos-mcp.json"),
         "broken manifest",
@@ -222,7 +201,6 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .reload_config(ConfigReloadRequest { node_id: None })
         .await
         .unwrap();
-    available(&runtime, "static").await;
     assert!(runtime
         .tool_registry
         .is_tool_available("mcp__healthy__inspect"));
@@ -274,17 +252,5 @@ async fn application_plugin_changes_and_config_reload_publish_after_commit() {
         .tool_registry
         .is_tool_available("mcp__healthy__inspect"));
     runtime.shutdown().await.unwrap();
-    assert!(!runtime
-        .tool_registry
-        .is_tool_available("mcp__static__inspect"));
-    // A late assembly error occurs before the first MCP publication.
-    fs::remove_file(workspace.join("static.pid")).unwrap();
-    config.automation.profile_usage_retention.cron = "invalid cron".into();
-    assert!(
-        build_application_runtime_with_migration_dir(config, &test_migrations_dir())
-            .await
-            .is_err()
-    );
-    assert!(!workspace.join("static.pid").exists());
     fs::remove_dir_all(workspace).unwrap();
 }

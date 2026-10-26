@@ -12,10 +12,10 @@ impl PluginManagerService {
         })
     }
 
-    pub(super) fn install_with_credentials(
+    pub(super) fn prepare_install_credentials(
         &self,
-        mut request: PluginInstallRequest,
-    ) -> TalosResult<PluginInstallResponse> {
+        request: &mut PluginInstallRequest,
+    ) -> TalosResult<()> {
         if let PluginInstallTarget::ManualMcpServer {
             server,
             credentials,
@@ -51,46 +51,25 @@ impl PluginManagerService {
                 }
             }
         }
-        self.manager.install(request)
+        Ok(())
     }
 
     pub(super) fn definition(
         &self,
         reference: &McpDefinitionRef,
     ) -> TalosResult<McpServerDefinition> {
-        match reference {
-            McpDefinitionRef::Plugin { install_id } => self.manager.read_mcp_definition(install_id),
-            McpDefinitionRef::Config { name } => self
-                .mcp_context()?
-                .config
-                .read()
-                .expect("application config lock poisoned")
-                .agent
-                .kernel
-                .mcp
-                .servers
-                .iter()
-                .find(|server| server.name == *name)
-                .map(mcp_definition_from_config)
-                .ok_or_else(|| {
-                    TalosError::new(
-                        ErrorCode::ResourceNotFound,
-                        "The configured MCP service was not found.",
-                    )
-                }),
-        }
+        let McpDefinitionRef::Plugin { install_id } = reference;
+        self.manager.read_mcp_definition(install_id)
     }
 
     pub(super) fn authorization_definition(
         &self,
         owner: &McpDefinitionRef,
     ) -> TalosResult<McpServerDefinition> {
-        let enabled=match owner {
-            McpDefinitionRef::Plugin {install_id} => self.manager.mcp_servers()?.servers.iter().any(|server|
-                matches!(&server.source, McpServerSource::Plugin {install_id:candidate,..} if candidate==install_id)),
-            McpDefinitionRef::Config {name} => self.mcp_context()?.config.read().expect("Worker config lock poisoned")
-                .agent.kernel.mcp.servers.iter().any(|server|server.name==*name),
-        };
+        let McpDefinitionRef::Plugin { install_id } = owner;
+        let enabled = self.manager.mcp_servers()?.servers.iter().any(|server| {
+            matches!(&server.source, McpServerSource::Plugin { install_id: candidate, .. } if candidate == install_id)
+        });
         if !enabled {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
@@ -107,44 +86,12 @@ impl PluginManagerService {
                 self.authorization_definition(owner)
                     .is_ok_and(|current| current == *captured)
             });
-            let active = context
-                .config
-                .read()
-                .expect("application config lock poisoned")
-                .clone();
-            let persisted = active.reload();
             let result = context.credentials.recover(|owner, reference| {
-                let matches = |server: &McpServerDefinition| {
-                    references(server.credentials.as_ref(), reference)
-                };
-                match owner {
-                    McpDefinitionRef::Plugin { install_id } => {
-                        match self.manager.read_mcp_definition(install_id) {
-                            Ok(server) => matches(&server),
-                            Err(error) if error.error_code() == ErrorCode::ResourceNotFound => {
-                                Ok(false)
-                            }
-                            Err(error) => Err(error),
-                        }
-                    }
-                    McpDefinitionRef::Config { name } => {
-                        let contains = |config: &talos_config::Config| match config
-                            .agent
-                            .kernel
-                            .mcp
-                            .servers
-                            .iter()
-                            .find(|server| server.name == *name)
-                        {
-                            Some(server) => references(server.credentials.as_ref(), reference),
-                            None => Ok(false),
-                        };
-                        if contains(&active)? {
-                            Ok(true)
-                        } else {
-                            contains(persisted.as_ref().map_err(Clone::clone)?)
-                        }
-                    }
+                let McpDefinitionRef::Plugin { install_id } = owner;
+                match self.manager.read_mcp_definition(install_id) {
+                    Ok(server) => references(server.credentials.as_ref(), reference),
+                    Err(error) if error.error_code() == ErrorCode::ResourceNotFound => Ok(false),
+                    Err(error) => Err(error),
                 }
             });
             if let Err(error) = result {
@@ -161,44 +108,13 @@ impl PluginManagerService {
         if let Some(response) = self.mcp_context()?.oauth.response(&request.server, &server) {
             return Ok(response);
         }
-        let legacy = match &request.server {
-            McpDefinitionRef::Config { name } => self
-                .mcp_context()?
-                .config
-                .read()
-                .expect("application config lock poisoned")
-                .agent
-                .kernel
-                .mcp
-                .servers
-                .iter()
-                .any(|server| {
-                    server.name == *name
-                        && matches!(
-                            &server.transport,
-                            talos_config::McpTransportConfig::Http {
-                                bearer_token: Some(_),
-                                ..
-                            }
-                        )
-                }),
-            _ => false,
-        };
         let authentication = server
             .credentials
             .as_ref()
             .map(|binding| binding.authentication.clone())
-            .unwrap_or(if legacy {
-                McpAuthentication::Bearer
-            } else {
-                McpAuthentication::None
-            });
+            .unwrap_or(McpAuthentication::None);
         let state = if server.credentials.is_none() {
-            if legacy {
-                McpAuthenticationState::CredentialsStored
-            } else {
-                McpAuthenticationState::Unconfigured
-            }
+            McpAuthenticationState::Unconfigured
         } else {
             match self
                 .mcp_context()?
@@ -219,36 +135,6 @@ impl PluginManagerService {
             authentication,
             state,
         })
-    }
-}
-
-/// Canonical configuration conversion excludes legacy bearer values from serializable definitions.
-pub fn mcp_definition_from_config(server: &talos_config::McpServerConfig) -> McpServerDefinition {
-    let transport = match &server.transport {
-        talos_config::McpTransportConfig::Stdio { command, args, env } => {
-            McpTransportDefinition::Stdio {
-                command: command.clone(),
-                args: args.clone(),
-                env: env
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-                cwd: None,
-            }
-        }
-        talos_config::McpTransportConfig::Http { url, .. } => {
-            McpTransportDefinition::StreamableHttp {
-                url: url.clone(),
-                headers: Default::default(),
-            }
-        }
-    };
-    McpServerDefinition {
-        credentials: server.credentials.clone(),
-        name: server.name.clone(),
-        display_name: None,
-        description: None,
-        transport,
     }
 }
 

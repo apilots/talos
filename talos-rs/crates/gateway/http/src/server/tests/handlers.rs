@@ -664,7 +664,6 @@ Use this skill for protocol contract verification.
             let prepared = owner.prepare(servers.into_iter().map(Into::into).collect())?;
             Ok(Box::new(move || prepared.publish()))
         }),
-        Arc::new(std::sync::RwLock::new(config.clone())),
         talos_service::McpCredentialStore::new(temp.path().join("credentials")),
     );
     let state = test_state_with_config_and_plugin_manager(config, plugin_manager, false).await;
@@ -775,7 +774,10 @@ Use this skill for protocol contract verification.
             .into_iter()
             .map(|name| talos_types::McpServerRuntimeDescriptor {
                 content_revision: None,
-                source: talos_types::McpServerSource::Config,
+                source: talos_types::McpServerSource::Plugin {
+                    plugin_id: talos_types::PluginId("fixture".into()),
+                    install_id: talos_types::PluginInstallId("fixture".into()),
+                },
                 server: talos_types::McpServerDefinition {
                     credentials: None,
                     name: name.into(),

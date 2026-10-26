@@ -18,6 +18,43 @@ struct McpManifest {
     display_name: Option<String>,
     icon: Option<String>,
     transport: McpManifestTransport,
+    #[serde(default)]
+    default_install: bool,
+    browser: Option<BrowserPluginConfig>,
+}
+
+/// Browser-owned dependency inputs; never projected into external MCP connections.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserPluginConfig {
+    pub api_version: u32,
+    pub docker_requirements: PathBuf,
+}
+
+impl BrowserPluginConfig {
+    fn validate(&self) -> TalosResult<()> {
+        if self.api_version != 1
+            || self.docker_requirements.as_os_str().is_empty()
+            || self
+                .docker_requirements
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "The Browser plugin API or dependency lock path is unsupported.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn browser_configuration(plugin_dir: &Path) -> TalosResult<Option<BrowserPluginConfig>> {
+    Ok(read_mcp_manifest(&plugin_dir.join("talos-mcp.json"))?.browser)
+}
+
+pub(crate) fn requests_default_install(plugin_dir: &Path) -> TalosResult<bool> {
+    Ok(read_mcp_manifest(&plugin_dir.join("talos-mcp.json"))?.default_install)
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,14 +167,22 @@ fn read_mcp_manifest(manifest_path: &Path) -> TalosResult<McpManifest> {
         )
         .context(diagnostic)
     })?;
-    serde_json::from_str(&contents).map_err(|err| {
+    let manifest: McpManifest = serde_json::from_str(&contents).map_err(|err| {
         TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "The MCP manifest is invalid.",
         )
         .with_source(err)
-    })
+    })?;
+    if let Some(browser) = &manifest.browser {
+        browser.validate()?;
+    }
+    Ok(manifest)
 }
+
+#[cfg(test)]
+#[path = "mcp_manifest_tests.rs"]
+mod tests;
 
 fn transport_from_manifest(
     transport: McpManifestTransport,

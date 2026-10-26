@@ -232,15 +232,16 @@ pub(crate) async fn prepare_registered_worker(
         host,
     )
     .await?;
-    if let Some(browser_resources) =
-        browser_resources.filter(|_| host == talos_types::BrowserHostKind::Docker)
-    {
-        worker
-            .browser()
-            .set_backend(talos_browser::ManagedBrowser::packaged(
-                config.talos_paths().talos_home.clone(),
-                &browser_resources,
-            )?)?;
+    if host == talos_types::BrowserHostKind::Docker {
+        if let Err(error) = worker
+            .plugin_manager()
+            .initialize_browser_environment()
+            .await
+        {
+            // A failed optional Browser backend must leave the Worker available for repair.
+            // Without a bound backend, its existing readiness projection reports Unavailable.
+            talos_logging::report_error(&error);
+        }
         let media = resources.clone();
         worker
             .browser()
