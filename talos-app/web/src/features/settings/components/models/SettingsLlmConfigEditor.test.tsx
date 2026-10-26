@@ -73,6 +73,27 @@ describe("SettingsLlmConfigEditor", () => {
     vi.restoreAllMocks();
   });
 
+  it("saves a new custom provider without randomUUID on an HTTP origin", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    const response = customProviderFixture();
+    getLlmConfig.mockResolvedValue(response);
+    updateLlmConfig.mockImplementation(async (config) => ({ ...response, config }));
+    render(<SettingsLlmConfigEditor />, { wrapper: createWrapper() });
+    await userEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Add Provider" }));
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "HTTP gateway" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "http://inference.test/v1" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => expect(updateLlmConfig).toHaveBeenCalledOnce());
+    const providers = updateLlmConfig.mock.calls[0][0].custom_providers;
+    const id = Object.keys(providers).find(key => key !== "llm-gateway")!;
+    expect(id).toMatch(/^custom-[0-9a-f-]{36}$/);
+    expect(providers[id]).toMatchObject({ name: "HTTP gateway", base_url: "http://inference.test/v1" });
+    expect(providers["llm-gateway"]).toEqual(response.config.custom_providers["llm-gateway"]);
+  });
+
   it("shows config read errors instead of staying in loading state", async () => {
     getLlmConfig.mockRejectedValue(new Error("failed to read config"));
 

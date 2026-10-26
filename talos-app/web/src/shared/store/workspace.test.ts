@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAppStore } from "./app-store";
 import { normalizeWorkspaceWebpageUrl, workspaceWindowKey } from "./workspace-window";
 
 const computer = (nodeId: string) => ({ kind: "computer" as const, nodeId });
 const key = (nodeId: string) => workspaceWindowKey(computer(nodeId));
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   useAppStore.getState().setConnection({ userId: "workspace-review", controlPlaneEndpoint: "http://localhost:8080" });
   useAppStore.setState({ workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false });
@@ -41,6 +42,15 @@ it("creates independent blank webpage tabs with stable identity through navigati
   store.selectWorkspaceWindow(first);store.navigateWorkspaceWebpage(first,"http://localhost:3010/");
   expect(useAppStore.getState().workspaceActiveKey).toBe(first);
   store.closeWorkspaceWindow(first);store.navigateWorkspaceWebpage(first,"https://ignored.test/");
+  expect(useAppStore.getState().workspaceWindows).toHaveLength(2);
+});
+it("creates independent webpage tabs without randomUUID on an HTTP origin", () => {
+  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  const store = useAppStore.getState();
+  store.createWorkspaceWebpage();
+  const first = useAppStore.getState().workspaceActiveKey;
+  store.createWorkspaceWebpage();
+  expect(useAppStore.getState().workspaceActiveKey).not.toBe(first);
   expect(useAppStore.getState().workspaceWindows).toHaveLength(2);
 });
 it("rejects unsafe or credential-bearing navigation without changing a blank tab", () => {

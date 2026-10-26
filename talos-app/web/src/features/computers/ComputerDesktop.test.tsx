@@ -57,6 +57,18 @@ function show(value:BrowserSnapshot) {
 }
 afterEach(async()=>{cleanup();useAppStore.setState({workspaceWindows:[],workspaceActiveKey:null,workspaceOpen:false,workspaceExpanded:false});fixture.rfbs.length=0;fixture.scope="alice";vi.unstubAllGlobals();vi.resetAllMocks();await i18n.changeLanguage("en");});
 
+it("opens Your computer without randomUUID on an HTTP origin", async () => {
+  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
+  const { query } = show(snapshot());
+  fireEvent.click(await screen.findByRole("button", { name: "Your computer" }));
+  await screen.findByText("Agent can operate");
+  expect(fixture.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    viewerId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+    inputMode: "readOnly",
+  }));
+  query.clear();
+});
+
 it("does not advertise or request a remote stream for a native Desktop",async()=>{
   const {query}=show(snapshot("desktop"));
   await waitFor(()=>expect(fixture.operate).toHaveBeenCalled());
