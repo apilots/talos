@@ -13,6 +13,7 @@ def prepare_context(repo, destination):
     for path in sorted(paths):
         if (path.parts[0] not in ('talos-rs', 'talos-app', 'conf')
                 and not path.is_relative_to('build/worker/browser')
+                and not path.is_relative_to('build/plugins')
                 and str(path) not in ('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES')):
             continue
         source, target = repo / path, destination / path

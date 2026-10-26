@@ -160,6 +160,8 @@ flowchart LR
 2. **短提交**：准备结果只在同一次 install/update 请求内使用，包含 actor、目标、来源 commit、内容摘要和预期原安装修订等明确类型，不能接受客户端伪造的候选路径或跨 actor/目标复用。服务端重新核验目标权限并取得原 node gate，检查无非终态 Turn；经原 install/update 下发，由 Worker 取得原 execution gate 和插件文件锁，重验候选与原安装修订后执行原事务及发布。提交不重新拉 Git 或下载依赖；候选失效明确冲突，重新准备后重试。
 3. **不新增状态系统**：内部准备复用原 source/cache 与 Browser owner，不暴露第二套页面状态、公共 receipt 或持久化任务队列。请求中断留下的候选只作为可清理缓存，不能在重启后自行安装。任何失败都不释放必要的执行准入检查，也不允许旧 capability 绕过更新边界。
 
+准备后的服务端鉴权、准入或提交失败时，经同一 WorkerEnvironment 私有取消调用释放候选与准备名额；取消只能操作相同 actor 的候选，不取得安装提交锁。候选已消费时取消为空操作；服务端或连接丢失仍由原有过期清理兜底。Rust AppServer SDK 仅为 `plugin/install`、`plugin/update` 使用覆盖 Worker 准备和提交预算的 900 秒时限，其余请求保持 30 秒。
+
 首次默认安装复用相同 Worker 准备/提交函数，启动未承载 Turn 时由 Worker 本地初始化；不要求服务端在线。source 刷新只更新可安装候选，不更改已安装修订；其既有策略不扩成新的安装生命周期。
 
 ## 7. 现有安装与页面

@@ -55,6 +55,44 @@ fn actor(id: &str) -> WorkerEnvironmentContext {
 }
 
 #[tokio::test]
+async fn cancellation_is_actor_bound_and_releases_the_candidate_without_commit() {
+    let (_directory, service, request) = fixture();
+    let prepared = service
+        .prepare_plugin_change(actor("alice"), WorkerPluginChange::Install(request.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .cancel_plugin_change(actor("bob"), prepared.clone())
+            .unwrap_err()
+            .error_code(),
+        ErrorCode::PermissionDenied
+    );
+    service
+        .cancel_plugin_change(actor("alice"), prepared.clone())
+        .unwrap();
+    service
+        .cancel_plugin_change(actor("alice"), prepared.clone())
+        .unwrap();
+    assert_eq!(
+        service
+            .commit_plugin_install(
+                actor("alice"),
+                WorkerPluginInstall {
+                    request,
+                    preparation_id: prepared.preparation_id,
+                }
+            )
+            .await
+            .unwrap_err()
+            .error_code(),
+        ErrorCode::Conflict
+    );
+    assert!(service.preparations.lock().unwrap().is_empty());
+    assert_eq!(service.preparation_slots.available_permits(), 4);
+}
+
+#[tokio::test]
 async fn preparation_does_not_hold_execution_gate_and_commit_still_requires_it() {
     let (_directory, service, request) = fixture();
     let gate = service.execution_gate();

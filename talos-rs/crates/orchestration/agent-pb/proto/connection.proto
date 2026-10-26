@@ -69,6 +69,7 @@ message WorkerRpcCall {
     UpdatePluginRequest update_plugin = 68;
     InstallPluginRequest install_plugin = 67;
     PreparePluginChangeRequest prepare_plugin_change = 120;
+    CancelPluginChangeRequest cancel_plugin_change = 121;
     ReadPluginRequest read_plugin = 66;
     ListPluginsRequest list_plugins = 65;
     SearchPluginsRequest search_plugins = 64;
@@ -148,6 +149,7 @@ message WorkerRpcResult {
     UpdatePluginResponse update_plugin = 68;
     InstallPluginResponse install_plugin = 67;
     PreparePluginChangeResponse prepare_plugin_change = 120;
+    CancelPluginChangeResponse cancel_plugin_change = 121;
     ReadPluginResponse read_plugin = 66;
     ListPluginsResponse list_plugins = 65;
     SearchPluginsResponse search_plugins = 64;

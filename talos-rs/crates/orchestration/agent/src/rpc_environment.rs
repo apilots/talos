@@ -148,6 +148,15 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
         encode_prepare_plugin_change_result
     );
     environment_rpc!(
+        cancel_plugin_change,
+        CancelPluginChangeRequest,
+        CancelPluginChangeResponse,
+        cancel_plugin_change_response,
+        Value,
+        decode_cancel_plugin_change_params,
+        encode_cancel_plugin_change_result
+    );
+    environment_rpc!(
         install_plugin,
         InstallPluginRequest,
         InstallPluginResponse,

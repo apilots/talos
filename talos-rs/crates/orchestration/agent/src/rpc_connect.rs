@@ -83,6 +83,9 @@ impl AgentHarnessRpcAdapter {
             Call::PreparePluginChange(value) => {
                 unary!(value, prepare_plugin_change, PreparePluginChange)
             }
+            Call::CancelPluginChange(value) => {
+                unary!(value, cancel_plugin_change, CancelPluginChange)
+            }
             Call::InstallPlugin(value) => unary!(value, install_plugin, InstallPlugin),
             Call::UpdatePlugin(value) => unary!(value, update_plugin, UpdatePlugin),
             Call::UninstallPlugin(value) => unary!(value, uninstall_plugin, UninstallPlugin),

@@ -327,6 +327,17 @@ impl WorkerEnvironment for AgentEnvironmentClient {
         decode_prepare_plugin_change_result
     );
     environment_method!(
+        cancel_plugin_change,
+        WorkerPluginPrepared,
+        (),
+        CancelPluginChangeRequest,
+        CancelPluginChange,
+        cancel_plugin_change_response,
+        Value,
+        encode_prepare_plugin_change_result,
+        decode_cancel_plugin_change_result
+    );
+    environment_method!(
         install_plugin,
         WorkerPluginInstall,
         PluginInstallResponse,

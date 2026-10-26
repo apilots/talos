@@ -135,6 +135,28 @@ impl PluginManagerService {
         Ok(prepared.prepared)
     }
 
+    /// Releases an abandoned candidate without entering the installation commit gate.
+    pub fn cancel_plugin_change(
+        &self,
+        actor: WorkerEnvironmentContext,
+        prepared: WorkerPluginPrepared,
+    ) -> TalosResult<()> {
+        let mut pending = self
+            .preparations
+            .lock()
+            .map_err(|_| TalosError::internal("Plugin preparation lock is poisoned."))?;
+        if let Some(change) = pending.get(&prepared.preparation_id) {
+            if change.actor != actor {
+                return Err(TalosError::new(
+                    ErrorCode::PermissionDenied,
+                    "The plugin preparation belongs to another actor.",
+                ));
+            }
+            pending.remove(&prepared.preparation_id);
+        }
+        Ok(())
+    }
+
     pub async fn commit_plugin_install(
         &self,
         actor: WorkerEnvironmentContext,

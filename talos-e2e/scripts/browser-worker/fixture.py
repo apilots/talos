@@ -134,6 +134,7 @@ def has_download_receipt(value):
     return False
 
 class Fixture(BaseHTTPRequestHandler):
+    browser_page_url = 'http://127.0.0.1:18080/'
     protocol_version = 'HTTP/1.1'
     def log_message(self, *_):
         pass
@@ -208,7 +209,7 @@ class Fixture(BaseHTTPRequestHandler):
                 suffix = sequence[step]
                 name = next((n for n in names if n.endswith(suffix)), None)
                 if suffix == 'browser_navigate':
-                    args = {'url': 'http://127.0.0.1:18080/'}
+                    args = {'url': self.browser_page_url}
                 elif suffix == 'browser_tab':
                     args = {'action': 'open', 'url': 'about:blank'}
                 elif suffix in ('browser_fill', 'browser_click', 'browser_upload'):

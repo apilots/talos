@@ -589,6 +589,15 @@ async fn test_application_with_coordinator(
     coordinator: Arc<dyn AgentCoordinator>,
     config: TalosConfig,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
+    test_application_with_environment(agent_execution, coordinator, config, None).await
+}
+
+async fn test_application_with_environment(
+    agent_execution: Arc<TestAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
+    config: TalosConfig,
+    environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
+) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_test_migrations(storage.pool()).await;
     let profile_store: Arc<dyn ProfileStore> =
@@ -617,7 +626,10 @@ async fn test_application_with_coordinator(
         execution: agent_execution,
         delegate: coordinator,
     });
-    let coordinator = crate::test_support::with_environment(coordinator, config.clone());
+    let coordinator = match environment {
+        Some(environment) => crate::test_support::with_worker_environment(coordinator, environment),
+        None => crate::test_support::with_environment(coordinator, config.clone()),
+    };
     let service = TalosService::new(
         coordinator,
         nodes,
@@ -1025,3 +1037,6 @@ async fn assert_session_creation_rolled_back(
 
 #[path = "session_deletion_tests.rs"]
 mod session_deletion_tests;
+
+#[path = "plugin_preparation_tests.rs"]
+mod plugin_preparation_tests;

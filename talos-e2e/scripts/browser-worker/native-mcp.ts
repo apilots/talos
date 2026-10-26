@@ -86,7 +86,7 @@ async function run(){console.log("NATIVE_MCP_START");await app.whenReady();conso
  }catch(error){
   // Preserve the actual page/input evidence before cleanup destroys its views.
   // This reads only the synthetic fixture page and does not change tool behavior.
-  for(const page of webContents.getAllWebContents().filter(page=>page.getURL()==='http://127.0.0.1:18080/')){
+  for(const page of webContents.getAllWebContents().filter(page=>page.getURL()===process.env.TALOS_E2E_BROWSER_PAGE_URL)){
    try{
     const state=await page.executeJavaScript(`({value:document.querySelector('input')?.value,text:document.body.innerText,active:document.activeElement?.tagName,events:window.fixtureInputs})`);
     writeFileSync(path.join(output,'native-mcp-failure-'+page.id+'.json'),JSON.stringify({state,focused:page.isFocused()},null,2));

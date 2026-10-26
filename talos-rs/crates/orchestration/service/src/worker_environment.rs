@@ -215,6 +215,16 @@ impl WorkerEnvironment for WorkerEnvironmentService {
                 .await
         })
     }
+    fn cancel_plugin_change(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPluginPrepared,
+    ) -> AgentFuture<'_, TalosResult<()>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.plugin_manager()?.cancel_plugin_change(context, params)
+        })
+    }
     fn install_plugin(
         &self,
         context: WorkerEnvironmentContext,

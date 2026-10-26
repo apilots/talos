@@ -129,19 +129,31 @@ impl TalosService {
                 WorkerPluginChange::Install(request.clone()),
             )
             .await?;
-        let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let node = self.resolve_computer_node(actor, &node).await?;
-        let environment = self.worker_environment(actor, Some(&node)).await?;
-        self.sessions.reject_nonterminal_turns(&node).await?;
-        environment
-            .install_plugin(
-                actor.worker_environment_context(),
-                WorkerPluginInstall {
-                    request,
-                    preparation_id: prepared.preparation_id,
-                },
-            )
-            .await
+        let result = async {
+            let _guard = self.execution_gate.for_node(&node).write_owned().await;
+            let node = self.resolve_computer_node(actor, &node).await?;
+            let environment = self.worker_environment(actor, Some(&node)).await?;
+            self.sessions.reject_nonterminal_turns(&node).await?;
+            environment
+                .install_plugin(
+                    actor.worker_environment_context(),
+                    WorkerPluginInstall {
+                        request,
+                        preparation_id: prepared.preparation_id.clone(),
+                    },
+                )
+                .await
+        }
+        .await;
+        if result.is_err() {
+            if let Err(error) = environment
+                .cancel_plugin_change(actor.worker_environment_context(), prepared)
+                .await
+            {
+                talos_logging::report_error(&error);
+            }
+        }
+        result
     }
     pub async fn update_plugin(
         &self,
@@ -160,19 +172,31 @@ impl TalosService {
                 WorkerPluginChange::Update(request.clone()),
             )
             .await?;
-        let _guard = self.execution_gate.for_node(&node).write_owned().await;
-        let node = self.resolve_computer_node(actor, &node).await?;
-        let environment = self.worker_environment(actor, Some(&node)).await?;
-        self.sessions.reject_nonterminal_turns(&node).await?;
-        environment
-            .update_plugin(
-                actor.worker_environment_context(),
-                WorkerPluginUpdate {
-                    request,
-                    preparation_id: prepared.preparation_id,
-                },
-            )
-            .await
+        let result = async {
+            let _guard = self.execution_gate.for_node(&node).write_owned().await;
+            let node = self.resolve_computer_node(actor, &node).await?;
+            let environment = self.worker_environment(actor, Some(&node)).await?;
+            self.sessions.reject_nonterminal_turns(&node).await?;
+            environment
+                .update_plugin(
+                    actor.worker_environment_context(),
+                    WorkerPluginUpdate {
+                        request,
+                        preparation_id: prepared.preparation_id.clone(),
+                    },
+                )
+                .await
+        }
+        .await;
+        if result.is_err() {
+            if let Err(error) = environment
+                .cancel_plugin_change(actor.worker_environment_context(), prepared)
+                .await
+            {
+                talos_logging::report_error(&error);
+            }
+        }
+        result
     }
     pub async fn uninstall_plugin(
         &self,

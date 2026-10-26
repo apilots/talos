@@ -87,6 +87,11 @@ pub trait WorkerEnvironment: Send + Sync {
         context: WorkerEnvironmentContext,
         params: crate::WorkerPluginChange,
     ) -> AgentFuture<'_, AgentResult<crate::WorkerPluginPrepared>>;
+    fn cancel_plugin_change(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: crate::WorkerPluginPrepared,
+    ) -> AgentFuture<'_, AgentResult<()>>;
     fn uninstall_plugin(
         &self,
         context: WorkerEnvironmentContext,

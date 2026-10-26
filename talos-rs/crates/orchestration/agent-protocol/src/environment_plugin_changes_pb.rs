@@ -61,6 +61,20 @@ pub fn encode_worker_install_plugin_params(
         preparation_id: value.preparation_id,
     })
 }
+
+pub fn decode_cancel_plugin_change_params(
+    value: Option<pb::PluginPreparedResult>,
+) -> TalosResult<WorkerPluginPrepared> {
+    decode_prepare_plugin_change_result(value.ok_or_else(wire::invalid)?)
+}
+
+pub fn encode_cancel_plugin_change_result(_: ()) -> TalosResult<pb::Empty> {
+    Ok(pb::Empty {})
+}
+
+pub fn decode_cancel_plugin_change_result(_: pb::Empty) -> TalosResult<()> {
+    Ok(())
+}
 pub fn decode_worker_install_plugin_params(
     value: Option<pb::WorkerPluginInstallParams>,
 ) -> TalosResult<WorkerPluginInstall> {
