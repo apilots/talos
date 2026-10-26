@@ -10,7 +10,7 @@ import { AppResizeHandle } from "./AppResizeHandle";
 import { WORKSPACE_WIDTH } from "@/shared/store/ui-slice";
 import { AppTopBar, WorkspaceControls } from "./AppTopBar";
 import { MarkdownFilePreview, useFileMetadata } from "@/features/files";
-import { OpenWebpageButton, WebPagePreview } from "@/features/web-preview";
+import { DesktopBrowserPage, desktopBrowserRequest, OpenWebpageButton, WebPagePreview } from "@/features/web-preview";
 import { workspaceWindowKey, type WorkspaceWindow } from "@/shared/store/workspace-window";
 
 type TabProps = {
@@ -38,6 +38,7 @@ function MarkdownTab({ fileId, scope, ...props }: TabProps & { fileId: string; s
 function WorkspaceTab({ window, scope, ...props }: TabProps & { window: WorkspaceWindow; scope: string }) {
   const { t } = useTranslation("webPreview");
   switch (window.kind) {
+    case "browser": return <WindowTab {...props} kind="browser" name={window.title} />;
     case "computer": return <ComputerTab {...props} nodeId={window.nodeId} />;
     case "markdown": return <MarkdownTab {...props} fileId={window.fileId} scope={scope} />;
     case "webpage": return <WindowTab {...props} kind="webpage" name={window.url ? new URL(window.url).host : t("newTab")} />;
@@ -59,6 +60,8 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const close = useAppStore(state => state.closeWorkspaceWindow);
   const navigateWebpage = useAppStore(state => state.navigateWorkspaceWebpage);
   const visible = useAppStore(state => state.workspaceOpen);
+  const focusRevision = useAppStore(state => state.workspaceFocusRevision);
+  const previousFocusRevision = useRef(focusRevision);
   const setWidth = useAppStore(state => state.setWorkspaceWidth);
   const setResizing = useAppStore(state => state.setResizingPane);
   const setOpen = useAppStore(state => state.setWorkspaceOpen);
@@ -113,9 +116,11 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     // the native dialog restore its opener before this update observes focus.
   }, [modal, visible, toggleRef]);
   useEffect(() => {
+    if (previousFocusRevision.current === focusRevision) return;
+    previousFocusRevision.current = focusRevision;
     if (!visible) return;
     selectedTab.current?.focus();selectedTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [active, visible]);
+  }, [focusRevision, visible]);
   const modalPresentation = visible ? modal : previous.current.modal;
   return <dialog style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
     "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-divider bg-surface p-0 text-ink open:flex backdrop:bg-transparent",
@@ -133,6 +138,11 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
             : event.key === "Home" ? 0 : event.key === "End" ? windows.length - 1 : null;
           if (next !== null) { event.preventDefault(); select(workspaceWindowKey(windows[next])); }
         }} onClose={() => {
+          if (window.kind === "browser") {
+            const sessionId = useAppStore.getState().desktopBrowser?.sessionId;
+            if (sessionId) void desktopBrowserRequest({ kind: "close", sessionId, tabId: window.id }).then(() => useAppStore.getState().focusWorkspace()).catch(error => console.error("Browser tab close failed", error));
+            return;
+          }
           close(key);
           if (active !== key) selectedTab.current?.focus();
         }} />;
@@ -147,7 +157,8 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
         const activeWindow=key===active;
         const selected=visible && activeWindow;
         return <div key={key} id={`${tabId(key)}-panel`} role="tabpanel" aria-labelledby={tabId(key)} hidden={!activeWindow} inert={!selected} className="h-full min-h-0">
-          {window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={url => navigateWebpage(key,url)} />
+          {window.kind === "browser" ? activeWindow ? <DesktopBrowserPage tab={window} selected={selected} /> : null
+            : window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={url => navigateWebpage(key,url)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
             : activeWindow && window.kind === "markdown" ? <MarkdownFilePreview fileId={window.fileId} connectionKey={scope} /> : null}
         </div>;

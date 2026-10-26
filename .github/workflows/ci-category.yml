@@ -113,7 +113,7 @@ jobs:
         run: |
           packages=(bubblewrap curl libssl-dev pkg-config protobuf-compiler ripgrep sqlite3 tmux xvfb openssl)
           if [[ "$CATEGORY" == desktop ]]; then
-            packages+=(caddy libgtk-3-0 libgbm1 libnss3 libasound2t64)
+            packages+=(openbox x11-utils caddy libgtk-3-0 libgbm1 libnss3 libasound2t64)
           fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "${packages[@]}"

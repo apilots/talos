@@ -11,9 +11,11 @@ import { AppMainContent } from "./AppMainContent";
 import { AppBusinessRegion } from "./AppBusinessRegion";
 import { layoutWidths } from "./layout-sizing";
 import { SidebarComputerEntry } from "./SidebarComputerEntry";
+import { useDesktopBrowserWorkspace } from "@/features/web-preview";
 
 /** Five areas: app navigation, rail, project/sidebar, route content, workspace. */
 export function AppLayout() {
+  useDesktopBrowserWorkspace();
   const location = useLocation();
   const { selected: computer } = useComputers();
   const computerId = useSelectedComputerId();

@@ -1,8 +1,9 @@
 import path from "node:path";
 import { hostname } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { app, BrowserWindow } from "electron";
+import { app, type BaseWindow } from "electron";
+import { createDesktopWindow,desktopWindows } from "./desktop-window";
 
 import { resolveAppServerCommand } from "./app-server-binary";
 import { DesktopAppServerController } from "./app-server-controller";
@@ -51,29 +52,31 @@ async function createController(): Promise<DesktopAppServerController> {
   });
 }
 
-async function createMainWindow(): Promise<BrowserWindow> {
-  const window = new BrowserWindow({
+async function createMainWindow(): Promise<BaseWindow> {
+  const {window,view} = createDesktopWindow({
     width: 1280,
     height: 820,
     minWidth: 960,
     minHeight: 640,
     title: "Talos",
-    webPreferences: {
+  }, {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       preload: path.join(dirname, "preload.cjs"),
-    },
   });
 
   if (rendererDevUrl) {
-    await window.loadURL(rendererDevUrl);
+    desktopBrowserHost.workspace.setWindow(window,view,rendererDevUrl);
+    await view.webContents.loadURL(rendererDevUrl);
   } else {
-    await window.loadFile(resolveRendererEntryPath({
+    const entry=resolveRendererEntryPath({
       appPath: app.getAppPath(),
       dirname,
       isPackaged: app.isPackaged,
-    }));
+    });
+    desktopBrowserHost.workspace.setWindow(window,view,pathToFileURL(entry).href);
+    await view.webContents.loadFile(entry);
   }
 
   return window;
@@ -86,7 +89,7 @@ app.whenReady().then(async () => {
   await createMainWindow();
 
   app.on("activate", async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    if (desktopWindows.size === 0) {
       await createMainWindow();
     }
   });

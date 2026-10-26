@@ -48,7 +48,7 @@ Docker 桌面提供 Browser、Terminal 和 File manager 三个真实的本地入
 | 通用第三方 MCP 调用只传工具参数和 cancellation，不承载 Browser 身份 | 经过内置身份核验的 Browser 分支从真实 ToolContext 创建单次调用授权；Rust app-server 的 typed host request/response 关联独立承载 Desktop 宿主执行 |
 | 标准 Worker 基于 Ubuntu 24.04、非 root；Compose 无 `ports`；执行使用 outbound Connect | 仅该镜像增加浏览器/虚拟桌面依赖，继续零新增 Worker 入站 |
 | 当前 Connect 是 typed RPC 与有限公平队列，不能直接承载 VNC | 短命令保持原路径；另加独立媒体流及网关 WSS 路由 |
-| Desktop 已随 Electron 自带 Chromium；产品主 BrowserWindow 与网站目标必须隔离 | DesktopBrowserHost / WebsiteAccount 复用自带引擎和现有宿主 IPC，拥有独立 BaseWindow、网站 WebContentsView 与持久 partition；产品主 renderer 不属于浏览器目标 |
+| Desktop 已随 Electron 自带 Chromium；产品主 BrowserWindow 与网站目标必须隔离 | DesktopBrowserHost / WebsiteAccount 复用自带引擎和现有宿主 IPC，复用主窗口右侧 Tab、独立网站 WebContentsView 与持久 partition；产品主 renderer 不属于浏览器目标 |
 | 用户 Chrome 的授权、版本、策略、profile 不由产品完全控制 | 明确连接、能力检测和可操作的失败状态；不承诺默认已打开的 Chrome 可附着 |
 | Browser Use 能连 CDP，上游 CLI MCP 有 Python 执行 | Docker 使用固定版本 Browser Use primitives；产品只暴露有类型、可撤销的工具 |
 
@@ -194,7 +194,7 @@ flowchart LR
 
 **Desktop 默认直接使用自带浏览器。** “自带”指复用已有 Electron/Chromium，无第二份浏览器安装。管理目标有独立持久 session partition、sandbox/contextIsolation、nodeIntegration=false，不加载 Talos preload，不能访问产品 IPC；禁止目标选到主产品 renderer、DevTools、文件系统或其他账户的 partition。
 
-本机网页直接由 Electron WebContentsView（或已有同等宿主视图）呈现，不产生 noVNC/CDP screencast/媒体 grant。浏览器原语复用同一 MCP 面，但 Desktop 后端由原 app-server/Worker 的 typed host request → 现有 DesktopAppServerController server-request 边界 → 具体 website webContents 执行。WebsiteAccount 拥有独立的本地窗口、标签和 profile。一个单独、固定打包的 trusted chrome WebContentsView 提供标签、地址栏、历史/刷新及隐藏窗口；共享离线首页为首次打开提供有效内容。导航栏只注入窄 browser-navigation preload，接受 main-frame+WebContents+固定资源 URL 三重校验后的闭合动作；网站视图没有任何 preload/Node，导航栏不加入 BrowserHost targets、也不附着 debugger。关闭窗口隐藏并保留网站标签，Session 的“打开浏览器”重新显示同一窗口。用户 Chrome 不注入这层 UI，保留其原窗口与操作习惯。
+本机网页由 Electron WebContentsView 在主窗口右侧 Tab 呈现，不产生独立浏览器窗口、noVNC/CDP screencast/媒体 grant。浏览器原语复用同一 MCP 面、typed host request 和 DesktopAppServerController 边界。WebsiteAccount 继续拥有隔离的网站目标、持久 partition 和下载，不再拥有独立窗口或导航栏 renderer。现有产品 preload 只向受信产品 main frame 提供有类型的本地呈现桥；绑定通过 user/current 解析真实 actor，按 opaque session token、账户与宿主生命周期撤销。网站没有任何 preload/Node，产品 renderer 不加入自动化目标。右侧工作区统一拥有标签、地址栏、历史/刷新和隐藏；Agent 新建或选择操作目标不改变用户的当前 Tab、不展开抽屉、不聚焦窗口。后台网站视图通过 Electron sibling ordering 位于不透明的产品 renderer 下方，并关闭后台节流以继续绘制和接收目标内输入；只把当前查看的网站移至右侧视口上方。收起保留目标，关闭网页 Tab 销毁目标，登录态保留原持久 partition。用户 Chrome 继续保留原窗口。详细边界与验收以 [feat-050](../feat-050-desktop-browser-tabs/design.md) 为准。
 
 Electron main 只接受有类型的导航/DOM/输入/截图/标签等已授权操作，持有 target 与 debugger 映射；不暴露任意 JS、CDP 方法或全局调试端口。截图沿原工具 image 通路，非持续串流。
 
@@ -518,7 +518,7 @@ Session/Project 顶栏上下文复用现有 Session 与 Project 查询缓存。�
 
 三类真实描述在右工作区以浏览器式多个 Tab 共存，一项描述对应一个 Tab；不是把 Agent 浏览器内部标签搬到外壳，也不要求所有内容后台活跃。Tab 条末尾的“＋”立即创建并选中新的真实空网页 Tab，计入已开 Tab 数；页内地址栏接受输入，未导航时呈现可操作的 New Tab 空态，不先弹 URL dialog，也不把空态当作地址错误。空地址不创建 iframe，不声称已访问网站；刷新/外部打开在未导航时不可用，“输入地址”只聚焦页内地址栏。尚无 Tab 时，中间 header 末尾的 Plus 创建新网页 Tab；已有 Tab 的收起态只提供 PanelRight 与数量，先展开再通过 Tab 条 Plus 新建，避免重复入口。Tab 条使用 `tablist` / `tab` / `tabpanel` 语义和明确关联，当前 Tab 为键盘入口，左右箭头及 Home/End 切换，关闭后焦点落在合适的相邻/当前 Tab；最后一项关闭后返回可见顶栏入口。同时只有选中的可见 panel 可交互；网页组件跨 Tab/收起保留 DOM，以 `hidden` + `inert` 隔离非活动 panel 并保留表单和滚动。Computer 仍只在 selected 且 visible 时挂载媒体内容，Markdown 只挂载当前项并复用查询缓存；原 Computer viewer cleanup、重新鉴权和 Human 暂停语义保持不变。
 
-资源内容、外壳和授权各有原 owner：Markdown 展示复用原 File API 取内容及既有 MarkdownRenderer，从真实 Files 项进入，不建立第二套文件存储/读取服务。原 FileService 对 `.md` / `.markdown` 的完整上传内容验证有效 UTF-8 文本（除换行、回车、制表外不接受控制字符），以 `text/markdown` 识别，并继续交给 `storage.files.allowed_mime_types` 白名单与原文件大小/所有权规则；客户端扩展名或 Content-Type 不能绕过服务端准入，配置排除该类型时仍拒绝上传。网页或本地服务预览是独立 iframe 内容，独立于 Agent 使用的受管/用户浏览器，不共享其 profile、标签、CDP、控制权或浏览历史；不创建 Browser MCP 目标，不驱动 Desktop 浏览器宿主。预览服从页面自己的 CSP/X-Frame-Options 等嵌入限制，不绕过限制，也不增加转发 Worker localhost 的代理。预览可访问性由查看客户端原有网络环境决定，不能把其 localhost 解释为远端 Computer 的 localhost。外壳负责真实窗口身份和可见性；各内容组件负责加载、渲染和释放，既有文件/浏览器/媒体能力继续负责鉴权。
+资源内容、外壳和授权各有原 owner：Markdown 展示复用原 File API 取内容及既有 MarkdownRenderer，从真实 Files 项进入，不建立第二套文件存储/读取服务。原 FileService 对 `.md` / `.markdown` 的完整上传内容验证有效 UTF-8 文本（除换行、回车、制表外不接受控制字符），以 `text/markdown` 识别，并继续交给 `storage.files.allowed_mime_types` 白名单与原文件大小/所有权规则；客户端扩展名或 Content-Type 不能绕过服务端准入，配置排除该类型时仍拒绝上传。Web 客户端的网页或本地服务预览是独立 iframe 内容，独立于 Agent 使用的受管/用户浏览器，不共享其 profile、标签、CDP、控制权或浏览历史；不创建 Browser MCP 目标，不驱动 Desktop 浏览器宿主。Desktop 的 ＋ 则通过现有本地呈现桥创建真实受管网页 Tab，以宿主网站 ID 关联并共享 Agent 的同一目标；两种内容不能按 URL 混同。预览服从页面自己的 CSP/X-Frame-Options 等嵌入限制，不绕过限制，也不增加转发 Worker localhost 的代理。预览可访问性由查看客户端原有网络环境决定，不能把其 localhost 解释为远端 Computer 的 localhost。外壳负责真实窗口身份和可见性；各内容组件负责加载、渲染和释放，既有文件/浏览器/媒体能力继续负责鉴权。
 
 真实入口与内容组件分离：Files 详情中的 Markdown 预览按钮创建 `markdown/fileId` 窗口；Tab 条“＋”或工作区为空时中间 header 末尾的 Plus 入口立即创建独立网页 Tab，地址在页内输入；不复制参考图中未实现的 Tools、recents 或 Terminal 占位功能。MarkdownFilePreview 先读取原共享元数据，确认类型后读取原内容，按 account/connection/file 身份缓存；提供加载、空内容、无权限/加载失败和明确重试，沿既有 MarkdownRenderer 渲染，不执行原始 HTML。Markdown 中合规的绝对 HTTP/HTTPS 链接经原外部打开路径处理，不导航产品主窗。WebPagePreview 提供 New Tab 空态、页内地址、刷新和外部打开；地址变化交回 UI owner 更新同一稳定 Tab 的描述，刷新或显式重新提交同地址只重建自己的 iframe，不新建或合并 Tab。地址栏反映本 UI 显式提交的目标地址，不能观察或宣称同步跨域 iframe 内部的跳转和浏览历史。iframe 固定 `sandbox="allow-scripts allow-forms"`、`referrerPolicy="no-referrer"`，不授予 same-origin、popup 或 top-navigation，不注入 Talos token、preload 或宿主 bridge。页面始终提示嵌入/本地地址限制；iframe 的 load/error 事件不能可靠判定加载成功、网络失败或拒绝嵌入，产品不据此宣告结果；由浏览器呈现实际策略/加载画面，用户可刷新、修改地址或外部打开。
 
@@ -544,7 +544,7 @@ Session/Project 顶栏上下文复用现有 Session 与 Project 查询缓存。�
 
 新增区块复用原图标、Badge、圆角、间距、配色与按钮层级；设置选择采用现有列表风格，viewer 明确区分查看/接管与连接反馈。标准 16:10 远程画面完整缩放，不拉伸或裁掉应用/dock；自然比例之外保留克制的留白。主要操作紧邻画面下方并居中排列，状态提示与操作层级清楚，窄栏按钮不逐词换行。整体展开与窄屏继续按比例显示，按可用视口高度限制画面尺寸，过小窗口保留滚动和返回路径；Computer 业务按钮不重复提供应用工作区的收起、关闭或整区放大控制。
 
-Docker 桌面保留现有浅冷色背景，在中央以低对比玻璃质感 Talos 图形与细轨道线作克制点缀，不增加宣传文字，轻量 Openbox/tint2 dock 紧凑展示 Browser、Terminal、File manager 三个真实可点击入口；不摆放伪应用、Dashboard 卡片或大型品牌欢迎文字。首次查看有真实浏览器窗口与离线首页，关闭最后一个窗口仍可从 dock 重开。固定版本 Chrome for Testing 使用 keep-alive 保留同一个受监督进程和 CDP；崩溃仍显式不可用。首页是浏览器内的静态内容，只提供时钟、网址输入和固定官网/源码链接，不提供业务状态或浏览器授权；它与桌面装饰背景是不同层次。Docker 的私有 HTTP 首页只传输固定打包资源，不暴露任意本地文件、目录或写入能力；其进程复用 ManagedBrowser 的健康检查与清理，不新增 Dashboard 服务。Desktop 自带浏览器复用该首页与独立导航栏，仍从打包文件加载；用户 Chrome 保持原窗口 UI。远程画面始终来自真实应用/Xvfb；原型中的发布清单仍只是示例网页，不新增 Dashboard 业务。
+Docker 桌面保留现有浅冷色背景，在中央以低对比玻璃质感 Talos 图形与细轨道线作克制点缀，不增加宣传文字，轻量 Openbox/tint2 dock 紧凑展示 Browser、Terminal、File manager 三个真实可点击入口；不摆放伪应用、Dashboard 卡片或大型品牌欢迎文字。首次查看有真实浏览器窗口与离线首页，关闭最后一个窗口仍可从 dock 重开。固定版本 Chrome for Testing 使用 keep-alive 保留同一个受监督进程和 CDP；崩溃仍显式不可用。首页是浏览器内的静态内容，只提供时钟、网址输入和固定官网/源码链接，不提供业务状态或浏览器授权；它与桌面装饰背景是不同层次。Docker 的私有 HTTP 首页只传输固定打包资源，不暴露任意本地文件、目录或写入能力；其进程复用 ManagedBrowser 的健康检查与清理，不新增 Dashboard 服务。Desktop 自带浏览器复用该首页与右侧工作区导航栏，首页仍从打包文件加载；用户 Chrome 保持原窗口 UI。远程画面始终来自真实应用/Xvfb；原型中的发布清单仍只是示例网页，不新增 Dashboard 业务。
 
 | 执行宿主 / 视图 | 展示与操作 |
 | --- | --- |

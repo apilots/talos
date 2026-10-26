@@ -23,12 +23,28 @@ owned disposable profiles and the existing product preload, controller, stdio an
 browser-host modules. Linux runs require Xvfb and normal Electron sandbox support.
 
 Use `--case 20_browser_workspace/03_desktop_browser` through the standard runner to
-verify the shared offline home, isolated native toolbar, real tab
-open/focus/close, stale tab/document rejection, explicit debugger detach failure
-and reset recovery. Website views must have no toolbar/product preload, and the
-toolbar must be absent from automation targets. Closing a background tab must
-preserve the current tab; closing the local browser window hides it, and reopening
-retains the dedicated profile. Prepared user Chrome keeps its own UI.
+verify the shared offline home, native right-workspace presentation, real tab
+open/focus/close, stale tab/document rejection, debugger detach failure and reset
+recovery. The registered product renderer is excluded from automation, website
+views have no preload, and managed actions must never activate a native window.
+Background input/click/key/scroll/screenshot runs with another owned window focused,
+the workspace withdrawn, and the product actually minimized. Popup pages become
+managed tabs without adding OS windows. Cookies/local storage survive target reset;
+prepared user Chrome keeps its own UI and private temporary profile.
+
+Linux focus/minimize acceptance requires Openbox and xprop in addition to Xvfb.
+The wrapper starts an owned window manager only when the selected display has none;
+it never replaces an existing manager. Desktop CI provisions these packages. Use
+Electron 42.9.2 or newer in the 42 series (currently locked to 42.11.18), including
+the upstream hidden-WebContentsView compositor fix. Native views execute behind
+the opaque product renderer rather than being made non-rendering with setVisible.
+
+`02_desktop_resources` drives the production main, preload, compiled UI and real
+app-server: native tabs, same-URL independent forms, close/disposal, hide/show and
+responsive geometry coexist with Markdown. Electron persistent partitions are not
+Playwright default-context pages; the fixture reuses the existing Desktop CDP helper
+only against targets from its owned private endpoint. Renderer viewport emulation
+stays within the native window size; physical focus/minimize is the engine case.
 
 Use `--case 20_browser_workspace/04_desktop_mcp` with
 `TALOS_E2E_APP_SERVER_BIN` pointing to the current app-server. It executes a second real MCP task after revision-bound pause/resume
@@ -131,3 +147,5 @@ Do not substitute the deterministic model's canned response or mark this step
 passed before execution. Keep provider credentials out of logs, events and
 screenshots; preserve only redacted evidence in ignored output. This optional
 authorized run is not part of the secretless GitHub fixture above.
+
+The product shell uses Electron BaseWindow and a trusted WebContentsView so native website views can be ordered above or below the actual renderer. On macOS only, minimize detaches website views and restore reattaches those same targets; Linux keeps them attached to retain native input. Native acceptance verifies restore, fresh targets created while minimized, window focus/count and retained login state.

@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {appendFileSync,mkdirSync,writeFileSync} from 'node:fs';
+import {appendFileSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {app,BrowserWindow,webContents} from 'electron';
+import {app,BaseWindow,BrowserWindow,webContents,type WebContentsView} from 'electron';
 import type {AppProtocol} from '@talos/sdk-core';
 import {DesktopBrowserHost} from '../../../talos-app/desktop/src/browser-host';
+import {createDesktopWindow} from '../../../talos-app/desktop/src/desktop-window';
 const root=process.env.TALOS_RESOURCE_DIR!;
 const output=process.env.TALOS_SCENARIO_REPORT_DIR??path.join(root,'output/browser-worker');
 mkdirSync(output,{recursive:true});
 const tracePath=path.join(output,'native-engine-cdp.jsonl');
 writeFileSync(tracePath,'');
+for(const name of ['native-engine-acceptance.json','native-engine-modes.json'])rmSync(path.join(output,name),{force:true});
 function trace(event:Record<string,unknown>){appendFileSync(tracePath,JSON.stringify({at:Date.now(),...event})+'\n');}
 // Observe real CDP commands and replies without logging URLs, arguments or page data.
 const NativeSocket=globalThis.WebSocket;
@@ -36,17 +38,21 @@ class ObservedChromeSocket extends NativeSocket {
 }
 globalThis.WebSocket=ObservedChromeSocket;
 app.on('window-all-closed',()=>{});
-app.setPath('userData',path.join(import.meta.dirname,'../profile-'+randomUUID()));
+app.setPath('userData',path.join(process.env.TALOS_HOME??path.join(import.meta.dirname,'..'),'profile-'+randomUUID()));
 async function run(){
 console.log('NATIVE_START');
 await app.whenReady();
 console.log('NATIVE_READY');
 const uuidFilename='12345678-1234-1234-1234-123456789abc';
 let finishPendingReport:(()=>void)|undefined;
-const fixture=createServer((req,res)=>{const pathname=new URL(req.url??'/', 'http://127.0.0.1').pathname;trace({phase:'httpRequest',pathname});res.once('finish',()=>trace({phase:'httpResponseFinished',pathname,status:res.statusCode}));if(req.url==='/uuid'){res.writeHead(200,{'content-type':'application/pdf','content-disposition':`attachment; filename="${uuidFilename}"`});res.end('%PDF-1.7 UUID download');return;}if(req.url==='/report.csv'||req.url==='/report.csv?part=2'){res.writeHead(200,{'content-type':'text/csv','content-disposition':'attachment; filename="report.csv"'});if(req.url.endsWith('?part=2')){res.write('name,value\nworker,');finishPendingReport=()=>{res.end('2\n');finishPendingReport=undefined;};}else res.end('name,value\nworker,1\n');return;}res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><title>Talos browser acceptance</title><input id="name" placeholder="Name"><button id="hello" onclick="document.querySelector('h1').textContent='Hello '+document.querySelector('#name').value">Hello</button><h1>Ready</h1><input id="upload" type="file" onchange="document.querySelector('h2').textContent=this.files[0].name"><h2></h2><a id="download" href="/report.csv">Download</a><a id="second-download" href="/report.csv?part=2">Second report</a><a id="uuid-download" href="/uuid">UUID download</a><script>window.events=[];for(const type of ["mousedown","mouseup","click","pointerdown"])document.addEventListener(type,event=>window.events.push({type,x:event.clientX,y:event.clientY,target:event.target.id}));</script>`);});
+const fixture=createServer((req,res)=>{const pathname=new URL(req.url??'/', 'http://127.0.0.1').pathname;trace({phase:'httpRequest',pathname});res.once('finish',()=>trace({phase:'httpResponseFinished',pathname,status:res.statusCode}));if(req.url==='/uuid'){res.writeHead(200,{'content-type':'application/pdf','content-disposition':`attachment; filename="${uuidFilename}"`});res.end('%PDF-1.7 UUID download');return;}if(req.url==='/report.csv'||req.url==='/report.csv?part=2'){res.writeHead(200,{'content-type':'text/csv','content-disposition':'attachment; filename="report.csv"'});if(req.url.endsWith('?part=2')){res.write('name,value\nworker,');finishPendingReport=()=>{res.end('2\n');finishPendingReport=undefined;};}else res.end('name,value\nworker,1\n');return;}res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><title>Talos browser acceptance</title><input id="name" placeholder="Name"><button id="hello" onclick="document.querySelector('h1').textContent='Hello '+document.querySelector('#name').value">Hello</button><h1>Ready</h1><input id="upload" type="file" onchange="document.querySelector('h2').textContent=this.files[0].name"><h2></h2><a id="download" href="/report.csv">Download</a><a id="second-download" href="/report.csv?part=2">Second report</a><a id="uuid-download" href="/uuid">UUID download</a><script>window.events=[];for(const type of ["mousedown","mouseup","click","pointerdown","keydown","wheel"])document.addEventListener(type,event=>window.events.push({type,x:event.clientX,y:event.clientY,target:event.target.id,key:event.key}));</script>`);});
 await new Promise<void>(resolve=>fixture.listen(0,'127.0.0.1',resolve));
 const address=fixture.address();assert(address&&typeof address!=='string');
 const host=new DesktopBrowserHost(),generation=randomUUID();
+const {window:product,view:productView}=createDesktopWindow({width:1180,height:840,show:false},{sandbox:true,contextIsolation:true,nodeIntegration:false});
+const productContents=productView.webContents;
+await productContents.loadURL('data:text/html,<title>Owned Talos product</title><input id="office" value="office">');
+host.workspace.setWindow(product,productView);host.workspace.bind('alice');
 let targetId:string|null=null;let selectedTarget:AppProtocol.BrowserTargetKind='managed';
 const modes:Partial<Record<AppProtocol.BrowserTargetKind,Record<string,unknown>>>={};
 async function operation(operation:AppProtocol.BrowserHostOperation,userId='alice',target=selectedTarget) {
@@ -112,13 +118,13 @@ try {
  assert.match(initial.page.text??'',/Ready when you are/);
  const initialWebsite=webContents.fromId(Number(initial.page.targetId));assert(initialWebsite);
  assert.equal(await initialWebsite.executeJavaScript('typeof window.talosBrowser'),'undefined');
- const toolbar=webContents.getAllWebContents().find(contents=>contents.getURL().endsWith('/browser-window/index.html'));assert(toolbar);
- assert.equal(toolbar.debugger.isAttached(),false);
- await assert.rejects(action({kind:'tab',action:'focus',tabId:String(toolbar.id),url:null}));
+ assert.equal(productContents.debugger.isAttached(),false);
+ await assert.rejects(action({kind:'tab',action:'focus',tabId:String(productContents.id),url:null}));
  console.log('NATIVE_NAVIGATE');
  await action({kind:'navigate',url:`http://127.0.0.1:${address.port}`});
  console.log('NATIVE_NAVIGATED');
  let state=await action({kind:'state'});const input=state.elements.find(e=>e.attributes.id==='name');assert(input);
+ await action({kind:'fill',element:'scoped-reference',text:'temporary value'},input);
  await action({kind:'fill',element:'scoped-reference',text:'Worker'},input);
  state=await action({kind:'state'});const button=state.elements.find(e=>e.attributes.id==='hello');assert(button);
  await action({kind:'click',element:'scoped-reference'},button);
@@ -129,10 +135,82 @@ try {
  state=await action({kind:'state'});assert.match(state.page.text??'',/upload.csv/);
  await downloadLifecycle();
  await assert.rejects(operation({kind:'execute',action:{kind:'click',element:'forged'},targetId,element:button,upload:null},'bob'));
- assert.equal(BrowserWindow.getAllWindows().length,0);
- for(const contents of webContents.getAllWebContents()){const prefs=contents.getLastWebPreferences();assert.equal(prefs.nodeIntegration,false);assert.equal(prefs.contextIsolation,true);assert.equal(prefs.sandbox,true);if(prefs.preload){assert.equal(prefs.preload,path.join(import.meta.dirname,"browser-window/preload.cjs"));assert.equal(contents.debugger.isAttached(),false);}}
+ assert.equal(BaseWindow.getAllWindows().length,1);
+ for(const contents of webContents.getAllWebContents()){const prefs=contents.getLastWebPreferences();assert.equal(prefs.nodeIntegration,false);assert.equal(prefs.contextIsolation,true);assert.equal(prefs.sandbox,true);assert.equal(prefs.preload,undefined);}
  await tabLifecycle();
- // A detached dedicated target must fail explicitly, never redirect an old action.
+ // Real target-scoped input must work while another owned window has focus and
+ // while the product is actually minimized. No user's browser/profile is borrowed.
+ const office=new BrowserWindow({width:500,height:300,show:false,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
+ await office.loadURL('data:text/html,<title>Owned office fixture</title><input id="office" autofocus value="untouched">');
+ const until=async(test:()=>boolean|Promise<boolean>,label:string)=>{const deadline=Date.now()+10000;while(!await test()){if(Date.now()>deadline)throw Error(label);await new Promise(resolve=>setTimeout(resolve,20));}};
+ try {
+  product.showInactive();office.show();app.focus({steal:true});office.focus();await until(()=>office.isFocused(),'Owned office did not receive focus');
+  const windows=BaseWindow.getAllWindows().length;
+  const binding=host.workspace.bind('alice');
+  await host.workspace.request({kind:'present',sessionId:binding.sessionId,tabId:targetId,bounds:{x:650,y:120,width:480,height:600}});
+  const topContents=()=>(product.contentView.children.at(-1) as WebContentsView).webContents;
+  console.log("NATIVE_STACKING",JSON.stringify({targetId,children:product.contentView.children.map(view=>({product:view===productView,id:(view as WebContentsView).webContents?.id}))}));
+  assert.equal(String(topContents()?.id),targetId);
+  for(const mode of ['shown-in-background','collapsed','minimized']) {
+   if(mode==='collapsed'){await host.workspace.request({kind:'present',sessionId:binding.sessionId,tabId:null,bounds:null});assert.equal(product.contentView.children.at(-1),productView);}
+   if(mode==='minimized'){product.minimize();await until(()=>product.isMinimized(),'Product did not minimize');office.focus();await until(()=>office.isFocused(),'Office focus was not retained');}
+   await action({kind:'navigate',url:`http://127.0.0.1:${address.port}/background-${mode}`});
+   let observation=await action({kind:'state'});const field=observation.elements.find(e=>e.attributes.id==='name');assert(field);
+   await action({kind:'fill',element:'fixture',text:mode},field);
+   await action({kind:'key',key:'Enter'});
+   await action({kind:'key',key:process.platform==='darwin'?'Meta+w':'Control+w'});
+   observation=await action({kind:'state'});const submit=observation.elements.find(e=>e.attributes.id==='hello');assert(submit);
+   await action({kind:'click',element:'fixture'},submit);
+   assert.match((await action({kind:'state'})).page.text??'',new RegExp('Hello '+mode));
+   await action({kind:'scroll',deltaX:0,deltaY:100});
+   const image=await action({kind:'screenshot'});assert(image.screenshot);writeFileSync(path.join(output,'native-background-'+mode+'.png'),Buffer.from(image.screenshot,'base64'));
+   const website=webContents.fromId(Number(targetId));assert(website);
+   assert.equal(await website.executeJavaScript('window.events.some(event=>event.type==="keydown"&&event.key==="Enter")'),true);
+   await until(()=>website.executeJavaScript('window.events.some(event=>event.type==="wheel")'),"Target wheel event was not delivered");
+   assert.equal(office.isFocused(),true,mode+' stole the office window focus');assert.equal(product.isFocused(),false);
+   assert.equal(await office.webContents.executeJavaScript('document.querySelector("input").value'),'untouched');
+   assert.equal(BaseWindow.getAllWindows().length,windows);
+   if(mode==='minimized')assert.equal(product.isMinimized(),true);
+   console.log('MANAGED_BACKGROUND_PASS '+mode);
+  }
+  // Restore must reattach the existing target and preserve its form state.
+  const existingId=targetId;product.restore();await until(()=>!product.isMinimized(),'Product did not restore');
+  office.focus();await until(()=>office.isFocused(),'Office focus was not retained after restore');
+  await host.workspace.request({kind:'present',sessionId:binding.sessionId,tabId:existingId,bounds:{x:650,y:120,width:480,height:600}});
+  assert.equal(String(topContents()?.id),existingId);assert.match((await action({kind:'state'})).page.text??'',/Hello minimized/);
+  product.minimize();await until(()=>product.isMinimized(),'Product did not minimize again');office.focus();await until(()=>office.isFocused(),'Office focus was not retained');
+  const website=webContents.fromId(Number(targetId));assert(website);
+  // Native window managers finish restoring/minimizing geometry asynchronously.
+  let lastBounds=JSON.stringify(product.getBounds()),settledAt=Date.now();
+  await until(()=>{const current=JSON.stringify(product.getBounds());if(current!==lastBounds){lastBounds=current;settledAt=Date.now();}return Date.now()-settledAt>=150;},'Native minimize geometry did not settle');
+  const originalBounds=product.getBounds();
+  await website.executeJavaScript('alert("No native modal");window.focus();window.resizeTo(400,400);window.moveTo(0,0)');
+  assert.deepEqual(product.getBounds(),originalBounds);assert(office.isFocused());assert(product.isMinimized());
+  const before=(await action({kind:'state'})).page.tabs.length;
+  await website.executeJavaScript(`window.open('http://127.0.0.1:${address.port}/popup')`);
+  let popupState=await action({kind:'state'});
+  for(let attempt=0;attempt<50&&popupState.page.tabs.length===before;attempt++){await new Promise(resolve=>setTimeout(resolve,20));popupState=await action({kind:'state'});}
+  assert.equal(popupState.page.tabs.length,before+1);assert.equal(BaseWindow.getAllWindows().length,windows);assert(office.isFocused());assert(product.isMinimized());
+  for(let attempt=0;attempt<50&&!popupState.page.tabs.some(tab=>tab.url.endsWith('/popup'));attempt++){await new Promise(resolve=>setTimeout(resolve,20));popupState=await action({kind:'state'});}
+  const popup=popupState.page.tabs.find(tab=>tab.url.endsWith('/popup'));assert(popup);
+  const opened=await operation({kind:'execute',action:{kind:'state'},targetId:popup.tabId,element:null,upload:null});assert(opened.kind==='observation');assert.match(opened.page.text??'',/Ready/);
+
+  await website.executeJavaScript('document.cookie="talos_login=retained; path=/"; localStorage.setItem("talos_login","retained")');
+  await website.session.flushStorageData();await website.session.cookies.flushStore();
+  const otherAccount=await operation({kind:'execute',action:{kind:'navigate',url:`http://127.0.0.1:${address.port}/other-account`},targetId:null,element:null,upload:null},'bob');assert(otherAccount.kind==='observation');
+  const otherWebsite=webContents.fromId(Number(otherAccount.page.targetId));assert(otherWebsite);
+  assert.equal((await otherWebsite.session.cookies.get({url:`http://127.0.0.1:${address.port}`})).some(cookie=>cookie.name==='talos_login'),false);
+
+  await host.reset();targetId=null;
+  await action({kind:'navigate',url:`http://127.0.0.1:${address.port}/restored`});
+  const restored=webContents.fromId(Number(targetId));assert(restored);
+  assert.match(await restored.executeJavaScript('document.cookie'),/talos_login=retained/);
+  assert.equal(await restored.executeJavaScript('localStorage.getItem("talos_login")'),'retained');
+  assert((await action({kind:'screenshot'})).screenshot,'A new target created while minimized must paint');
+  assert.equal(typeof await restored.executeJavaScript('window.talos'),'undefined');
+  assert(office.isFocused());assert(product.isMinimized());
+  console.log('MANAGED_POPUP_PROFILE_PASS');
+ } finally {office.destroy();}
  const detached=webContents.fromId(Number(targetId));assert(detached);detached.debugger.detach();
  await assert.rejects(action({kind:'state'}));
  await host.reset();targetId=null;
@@ -165,9 +243,9 @@ try {
   console.log('PREPARED_CHROME_ACCEPTANCE_PASS');
  }
  writeFileSync(path.join(output,'native-engine-modes.json'),JSON.stringify(modes,null,2));
- writeFileSync(path.join(output,'native-engine-acceptance.json'),JSON.stringify({navigate:true,dom:true,fill:true,click:true,screenshot:true,upload:true,download:true,downloadCollisionAndUuid:true,accountIsolation:true,tabs:true,staleTabAndDocumentReferences:true,debuggerDetachExplicitFailure:true,resetRecovery:true,sandbox:true,noProductRendererDebugger:true},null,2));
+ writeFileSync(path.join(output,'native-engine-acceptance.json'),JSON.stringify({navigate:true,dom:true,fill:true,click:true,screenshot:true,upload:true,download:true,downloadCollisionAndUuid:true,accountIsolation:true,tabs:true,staleTabAndDocumentReferences:true,debuggerDetachExplicitFailure:true,resetRecovery:true,sandbox:true,noProductRendererDebugger:true,backgroundInputAndScreenshot:true,minimizedWithoutFocus:true,popupWithoutWindow:true,profileRetained:true,nativeStacking:true,dialogsAndMenuIsolation:true,restoreRetainsTarget:true,freshMinimizedTargetCapture:true},null,2));
  console.log('NATIVE_ENGINE_ACCEPTANCE_PASS');
-}finally{await host.reset();console.log('NATIVE_HOST_RESET');fixture.closeAllConnections();await new Promise<void>(resolve=>fixture.close(()=>resolve()));console.log('NATIVE_FIXTURE_CLOSED');app.quit();}
+}finally{await host.reset();product.destroy();console.log('NATIVE_HOST_RESET');fixture.closeAllConnections();await new Promise<void>(resolve=>fixture.close(()=>resolve()));console.log('NATIVE_FIXTURE_CLOSED');app.quit();}
 
 }
 void run().catch(error=>{console.error(error);app.exit(1);});

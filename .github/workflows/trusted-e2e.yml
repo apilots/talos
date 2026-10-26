@@ -68,7 +68,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bubblewrap build-essential curl libssl-dev pkg-config \
-            protobuf-compiler ripgrep sqlite3 tmux xvfb
+            protobuf-compiler ripgrep sqlite3 tmux xvfb openbox x11-utils
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
 

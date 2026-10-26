@@ -5,47 +5,46 @@ import {createHash} from "node:crypto";
 import type {AppProtocol} from "@talos/sdk-core";
 import {tmpdir} from "node:os";
 import path from "node:path";
-const fixture=vi.hoisted(()=>({home:"",sessions:new Map<string,unknown>(),states:[] as unknown[],load:undefined as ((url:string)=>Promise<void>)|undefined}));
+const fixture=vi.hoisted(()=>({capture:undefined as (()=>Promise<unknown>)|undefined,home:"",sessions:new Map<string,unknown>(),states:[] as unknown[],load:undefined as ((url:string)=>Promise<void>)|undefined}));
 vi.mock("electron",async()=>{
   const {EventEmitter}=await import("node:events");let nextId=0;
   class Contents extends EventEmitter {
     id=++nextId;url="";destroyed=false;
     debugger={attach:vi.fn(),sendCommand:async()=>({})};
+    capturePage=vi.fn(()=>fixture.capture?.()??Promise.resolve({isEmpty:()=>false,toPNG:()=>Buffer.from("fixture-image")}));
     navigationHistory={canGoBack:()=>false,canGoForward:()=>false};
-    setWindowOpenHandler(){}focus(){}getURL(){return this.url;}getTitle(){return "Downloads";}isLoading(){return false;}isDestroyed(){return this.destroyed;}
+    setIgnoreMenuShortcuts=vi.fn();
+    setBackgroundThrottling(){}
+    setWindowOpenHandler(){}getURL(){return this.url;}getTitle(){return "Downloads";}isLoading(){return false;}isDestroyed(){return this.destroyed;}
     async loadURL(url:string){this.url=url;await fixture.load?.(url);this.emit("did-finish-load");}
     send(_channel:string,value:unknown){fixture.states.push(value);}
     close(){this.destroyed=true;this.emit("destroyed");}
   }
-  class Window extends EventEmitter {
-    contentView={addChildView(){},removeChildView(){}};
-    isDestroyed(){return false;}getContentSize(){return [1180,840];}setTitle(){}close(){}show(){}focus(){}
+  class View {
+    children:unknown[]=[];
+    addChildView(view:unknown,index=this.children.length){this.removeChildView(view);this.children.splice(index,0,view);}
+    removeChildView(view:unknown){this.children=this.children.filter(child=>child!==view);}
+    setBounds(){}
   }
-  return {app:{getPath:()=>fixture.home},BaseWindow:Window,WebContentsView:class{webContents=new Contents();setBounds(){}},session:{fromPartition:vi.fn((partition:string)=>{
+  class Window extends EventEmitter {
+    webContents=new Contents();
+    contentView=new View();
+    minimized=false;isMinimized(){return this.minimized;}
+    isDestroyed(){return false;}
+  }
+  return {app:{getPath:()=>fixture.home},BrowserWindow:Window,WebContentsView:class{webContents=new Contents();setBounds(){}},session:{fromPartition:vi.fn((partition:string)=>{
     let value=fixture.sessions.get(partition);
     if(!value){value=Object.assign(new EventEmitter(),{setPermissionRequestHandler(){}});fixture.sessions.set(partition,value);}
     return value;
-  })},ipcMain:{on:vi.fn(),removeListener:vi.fn()}};
+  })}};
 });
 import {WebsiteAccount,checkedUrl,downloadRoot} from "./browser-website";
 import {DesktopBrowserHost} from "./browser-host";
-import {parseBrowserChromeAction} from "./browser-window-contract";
+import {BrowserWindow,type WebContentsView} from "electron";
 let host:DesktopBrowserHost;
-beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-website-"));fixture.sessions.clear();fixture.states=[];fixture.load=undefined;host=new DesktopBrowserHost();});
-afterEach(async()=>{await host.reset();vi.restoreAllMocks();rmSync(fixture.home,{recursive:true,force:true});});
-it.each(["b","c"])("closing tab %s retains another active tab or chooses a remaining one",async(id)=>{
-  const account=new WebsiteAccount("alice");
-  const views=Reflect.get(account,"views") as Map<string,unknown>;
-  for(const tabId of ["a","b","c"])views.set(tabId,{id:tabId,view:{webContents:{close:vi.fn()}}});
-  Reflect.set(account,"active","c");
-  const focus=vi.spyOn(account,"focus").mockResolvedValue();
-  await account.remove(id);
-  expect([...views.keys()]).toEqual(id==="b"?["a","c"]:["a","b"]);
-  if(id==="b"){expect(Reflect.get(account,"active")).toBe("c");expect(focus).not.toHaveBeenCalled();}
-  else expect(focus).toHaveBeenCalledExactlyOnceWith("a");
-});
-it("keeps browser chrome actions closed and rejects unsafe navigation schemes",()=>{
-  for(const action of [{kind:"executeJavaScript",code:"x"},{kind:"navigate",url:1},{kind:"close",tabId:"../app"}])expect(()=>parseBrowserChromeAction(action)).toThrow();
+beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-website-"));fixture.sessions.clear();fixture.states=[];fixture.load=undefined;fixture.capture=undefined;host=new DesktopBrowserHost();const window=new BrowserWindow();host.workspace.setWindow(window,{webContents:window.webContents} as WebContentsView);host.workspace.bind("alice");});
+afterEach(async()=>{vi.useRealTimers();await host.reset();vi.restoreAllMocks();rmSync(fixture.home,{recursive:true,force:true});});
+it("rejects unsafe navigation schemes",()=>{
   for(const url of ["file:///etc/passwd","javascript:alert(1)","https://user:secret@example.test"])expect(()=>checkedUrl(url)).toThrow();
   expect(checkedUrl("https://talos.love")).toBe("https://talos.love/");
 });
@@ -119,15 +118,15 @@ it("rejects oversized completed bytes and lets the user retry with a fresh downl
   expect(fixture.states.at(-1)).toMatchObject({error:null});
 });
 
-it.each(["chrome","page"] as const)("reset interrupts a stalled managed %s load and prevents late target recreation",async(kind)=>{
+it.each(["home","page"] as const)("reset interrupts a stalled managed %s load and prevents late target recreation",async(kind)=>{
   let started!:()=>void,finish!:()=>void;
   const loading=new Promise<void>(resolve=>{started=resolve;}),loaded=new Promise<void>(resolve=>{finish=resolve;});
   const load=vi.fn(async(url:string)=>{
-    if(kind==="chrome"?url.endsWith("/browser-window/index.html"):url==="https://pending.test/"){started();await loaded;}
+    if(kind==="home"?url.endsWith("/home/home.html"):url==="https://pending.test/"){started();await loaded;}
   });
   fixture.load=load;
   const close=vi.spyOn(WebsiteAccount.prototype,"close");
-  const action=host.execute("loading",request({kind:"execute",action:kind==="chrome"?{kind:"state"}:{kind:"tab",action:"open",url:"https://pending.test/",tabId:null},targetId:null,element:null,upload:null}));
+  const action=host.execute("loading",request({kind:"execute",action:kind==="home"?{kind:"state"}:{kind:"tab",action:"open",url:"https://pending.test/",tabId:null},targetId:null,element:null,upload:null}));
   const cancelled=expect(action).rejects.toThrow("cancelled");
   await loading;
   let reset=false;
@@ -141,4 +140,49 @@ it.each(["chrome","page"] as const)("reset interrupts a stalled managed %s load 
   expect(load).toHaveBeenCalledTimes(count);
   fixture.load=undefined;
   await expect(collect()).resolves.toEqual([]);
+});
+
+it("captures a background website without activation and bounds a stalled native capture",async()=>{
+ const account=new WebsiteAccount("capture-owner"),tab=await account.open("about:blank");
+ expect(await account.screenshot(tab.id)).toBe(Buffer.from("fixture-image").toString("base64"));
+ expect(tab.view!.webContents.capturePage).toHaveBeenCalledWith(undefined,{stayHidden:true,stayAwake:true});
+ vi.useFakeTimers();fixture.capture=()=>new Promise(()=>{});
+ const rejected=expect(account.screenshot(tab.id)).rejects.toThrow("capture timed out");
+ await vi.advanceTimersByTimeAsync(3001);await rejected;account.close();
+});
+
+it.each(["darwin","linux"] as const)("preserves minimized targets and restores presentation on %s without leaking window listeners",async(platform)=>{
+ const window=new BrowserWindow(),account=new WebsiteAccount("minimize-owner",()=>{},platform);account.attach(window);
+ const first=await account.open("about:blank"),second=await account.open("about:blank");
+ const bounds={x:100,y:80,width:600,height:500},geometry=vi.spyOn(second.view!,"setBounds");
+ account.present(second.id,bounds);expect(window.contentView.children.at(-1)).toBe(second.view);
+ Reflect.set(window,"minimized",true);window.emit("minimize");expect(window.contentView.children).toHaveLength(platform==="darwin"?0:2);
+ const third=await account.open("about:blank");account.present(second.id,bounds);
+ expect(window.contentView.children).toHaveLength(platform==="darwin"?0:3);expect(second.view!.webContents.isDestroyed()).toBe(false);
+ Reflect.set(window,"minimized",false);window.emit("restore");
+ expect(window.contentView.children).toHaveLength(3);expect(window.contentView.children).toContain(first.view);expect(window.contentView.children).toContain(third.view);
+ expect(window.contentView.children.at(-1)).toBe(second.view);expect(geometry).toHaveBeenLastCalledWith(bounds);
+ account.close();expect(window.contentView.children).toEqual([]);expect(window.listenerCount("minimize")).toBe(0);expect(window.listenerCount("restore")).toBe(0);expect(window.listenerCount("closed")).toBe(0);
+});
+
+it("releases native window ownership even for an account that is no longer bound",async()=>{
+ const window=new BrowserWindow(),account=new WebsiteAccount("unbound-owner");account.attach(window);await account.open("about:blank");
+ window.emit("closed");expect(window.listenerCount("minimize")).toBe(0);expect(window.contentView.children).toEqual([]);
+ await expect(account.open("about:blank")).resolves.toMatchObject({title:expect.any(Function)});account.close();
+});
+
+it("isolates Agent key accelerators only until their native dispatch settles",async()=>{
+ const account=new WebsiteAccount("editing-owner"),tab=await account.open("about:blank"),contents=tab.view!.webContents;
+ const shortcuts=vi.mocked(contents.setIgnoreMenuShortcuts);expect(shortcuts).not.toHaveBeenCalled();
+ let finish!:(value:Record<string,unknown>)=>void;
+ vi.spyOn(contents.debugger,"sendCommand").mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const sending=tab.send("Input.dispatchKeyEvent",{type:"keyDown",key:"w",modifiers:4});
+ expect(shortcuts).toHaveBeenLastCalledWith(true);
+ // Cancellation can release a key while its original dispatch is still pending.
+ await tab.send("Input.dispatchKeyEvent",{type:"keyUp",key:"w"});
+ expect(shortcuts).toHaveBeenLastCalledWith(true);finish({});await sending;
+ expect(shortcuts).toHaveBeenLastCalledWith(false);
+ vi.spyOn(contents.debugger,"sendCommand").mockRejectedValueOnce(new Error("dispatch failed"));
+ await expect(tab.send("Input.dispatchKeyEvent",{type:"keyUp",key:"w"})).rejects.toThrow("dispatch failed");
+ expect(shortcuts).toHaveBeenLastCalledWith(false);account.close();
 });

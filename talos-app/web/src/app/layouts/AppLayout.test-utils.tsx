@@ -24,14 +24,14 @@ vi.mock("@/features/chat", () => ({
   useProjectsQuery: () => ({ data: [{ id: "bound-project", name: "Bound project", origin: "remote", updatedAt: 1 }] }),
 }));
 vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: { originalFilename: "review.md" } }), MarkdownFilePreview: () => <section aria-label="Markdown preview">Actual file</section> }));
-vi.mock("@/features/web-preview", () => ({ OpenWebpageButton: ({ icon }: { icon: string }) => <button>{icon === "plus" ? "New webpage tab" : "Open webpage preview"}</button>, WebPagePreview: ({ url }: { url: string }) => <section aria-label="Webpage preview">{url}<input aria-label="Preview address" /><iframe title="Preview content" /></section> }));
+vi.mock("@/features/web-preview", () => ({ DesktopBrowserPage: () => <section aria-label="Native webpage" />, desktopBrowserRequest: vi.fn(async()=>null), useDesktopBrowserWorkspace: () => {}, useWorkspaceWebpageCreation: () => ({create: useAppStore.getState().createWorkspaceWebpage, disabled:false,error:false}), OpenWebpageButton: ({ icon }: { icon: string }) => <button>{icon === "plus" ? "New webpage tab" : "Open webpage preview"}</button>, WebPagePreview: ({ url }: { url: string }) => <section aria-label="Webpage preview">{url}<input aria-label="Preview address" /><iframe title="Preview content" /></section> }));
 beforeEach(() => {
   fixture.wide = true; fixture.selectedId = "selected-worker"; fixture.available = true; fixture.mounted = []; fixture.closed = []; fixture.entries = [];
   vi.stubGlobal("matchMedia", () => ({ get matches() { return fixture.wide; }, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   HTMLElement.prototype.setPointerCapture=vi.fn();HTMLElement.prototype.hasPointerCapture=vi.fn(()=>true);HTMLElement.prototype.releasePointerCapture=vi.fn();
   HTMLDialogElement.prototype.showModal = function () { this.open = true;this.querySelector<HTMLElement>("button,input,[tabindex]")?.focus(); };
   HTMLDialogElement.prototype.close = function () { this.open = false;if(this.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); };
-  useAppStore.setState({ sidebarOpen: false, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false,sidebarWidth:296,workspaceWidth:null,resizingPane:null });
+  useAppStore.setState({ sidebarOpen: false, desktopBrowser: null, workspaceFocusRevision: 0, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false,sidebarWidth:296,workspaceWidth:null,resizingPane:null });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals();vi.restoreAllMocks(); });
 export function show(path = "/sessions/session", strict = false) {

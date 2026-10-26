@@ -2,15 +2,13 @@ import {createHash} from "node:crypto";
 import {constants,mkdirSync,mkdtempSync,openSync,closeSync,fstatSync,fchmodSync,linkSync,rmSync} from "node:fs";
 import path from "node:path";
 import {fileURLToPath,pathToFileURL} from "node:url";
-import {app,BaseWindow,WebContentsView,session,ipcMain,type IpcMainEvent,type DownloadItem,type Session} from "electron";
+import {app,WebContentsView,session,type BaseWindow,type DownloadItem,type Session} from "electron";
 import {trackInputs,release,type Send} from "./browser-input";
-import {BROWSER_CHROME_ACTION,BROWSER_CHROME_STATE,parseBrowserChromeAction,type BrowserChromeState} from "./browser-window-contract";
+import type {DesktopBrowserBounds,DesktopBrowserTab} from "@talos/sdk-app-server/desktop";
 export type WebsiteTab={id:string;send:Send;view?:WebContentsView;url:()=>string;title:()=>string};
 export const MAX_TABS=16;
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),"browser-window");
-const chromeUrl=pathToFileURL(path.join(resources,"index.html")).href;
 const homeUrl=pathToFileURL(path.join(resources,"home/home.html")).href;
-const CHROME_HEIGHT=88;
 export function checkedUrl(url:string):string {
   const parsed=new URL(url);
   if(url!=="about:blank" && (!["http:","https:"].includes(parsed.protocol)||parsed.username||parsed.password))throw new Error("Unsupported browser URL.");
@@ -20,23 +18,30 @@ export function downloadRoot(user:string):string {
   const directory=path.join(app.getPath("userData"),"browser",createHash("sha256").update(user).digest("hex").slice(0,32),"downloads");
   mkdirSync(directory,{recursive:true,mode:0o700});return directory;
 }
-/** Website/profile owner. The trusted chrome is a sibling view, never an automation target. */
+/** Owns isolated website targets. Presentation never changes the operation target. */
 export class WebsiteAccount {
   private window:BaseWindow|undefined;
-  private chrome:WebContentsView|undefined;
-  private active:string|undefined;
+  private presentation:{id:string;bounds:DesktopBrowserBounds}|undefined;
+  private get detachedWhileMinimized():boolean {return this.platform==="darwin" && Boolean(this.window?.isMinimized());}
+  private readonly windowClosed=()=>this.attach(undefined);
+  private readonly synchronizeViews=()=>{
+    const window=this.window;if(!window || window.isDestroyed())return;
+    for(const tab of this.views.values())if(tab.view) {
+      // A minimized macOS native ancestor suspends its compositor even with
+      // backgroundThrottling disabled. Detached targets keep painting without
+      // creating or restoring an OS window. Reattach the same views on restore.
+      if(this.detachedWhileMinimized)window.contentView.removeChildView(tab.view);
+      else if(this.presentation?.id===tab.id) {tab.view.setBounds(this.presentation.bounds);window.contentView.addChildView(tab.view);}
+      else window.contentView.addChildView(tab.view,0);
+    }
+  };
   private readonly views=new Map<string,WebsiteTab>();
   private readonly partition:string;
-  private error:string|null=null;
+  error:string|null=null;
   private downloadSession:Session|undefined;
   private readonly downloads=new Map<DownloadItem,string>();
   readonly downloadDirectory:string;
-  constructor(user:string) {this.downloadDirectory=downloadRoot(user);this.partition=`persist:talos-browser-${createHash("sha256").update(user).digest("hex").slice(0,32)}`;}
-  private readonly onChromeAction=(event:IpcMainEvent,value:unknown)=>{
-    const contents=this.chrome?.webContents;
-    if(!contents || event.sender!==contents || event.senderFrame!==contents.mainFrame || contents.getURL()!==chromeUrl)return;
-    void this.navigate(value).catch(error=>{console.error("Browser chrome navigation failed",error);this.error="The page could not be opened. Check the address and try again.";this.updateChrome();});
-  };
+  constructor(user:string,private readonly changed:()=>void=()=>{},private readonly platform:NodeJS.Platform=process.platform) {this.downloadDirectory=downloadRoot(user);this.partition=`persist:talos-browser-${createHash("sha256").update(user).digest("hex").slice(0,32)}`;}
   private readonly onDownload=(_event:Electron.Event,item:DownloadItem)=>{
     let directory:string|undefined;
     try {
@@ -53,15 +58,15 @@ export class WebsiteAccount {
         } catch(error){this.failDownload(error);}
         finally {
           try {rmSync(pending,{recursive:true,force:true});}catch(error){this.failDownload(error);}
-          this.updateChrome();
+          this.changed();
         }
       });
       item.on("updated",()=>{if(item.getReceivedBytes()>20*1024*1024)item.cancel();});
-      item.setSavePath(path.join(pending,filename));this.error=null;this.updateChrome();
+      item.setSavePath(path.join(pending,filename));this.error=null;this.changed();
     } catch(error) {
       this.downloads.delete(item);item.cancel();
       if(directory)try {rmSync(directory,{recursive:true,force:true});}catch(cleanupError){this.failDownload(cleanupError);}
-      this.failDownload(error);this.updateChrome();
+      this.failDownload(error);this.changed();
     }
   };
   private failDownload(error:unknown):void {
@@ -84,101 +89,97 @@ export class WebsiteAccount {
     }
     throw new Error("Browser download filename capacity exceeded.");
   }
-  async ensure(check:()=>void=()=>{}):Promise<void> {
-    check();
-    if(!this.window || this.window.isDestroyed()) {
-      this.window=new BaseWindow({width:1180,height:840,title:"Talos browser",show:true});
-      this.window.on("resize",()=>this.resize());this.window.on("close",event=>{event.preventDefault();this.window?.hide();});
-      this.chrome=new WebContentsView({webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:path.join(resources,"preload.cjs")}});
-      this.chrome.webContents.setWindowOpenHandler(()=>({action:"deny"}));
-      this.chrome.webContents.on("will-navigate",event=>event.preventDefault());
-      this.chrome.webContents.on("did-finish-load",()=>this.updateChrome());
-      ipcMain.on(BROWSER_CHROME_ACTION,this.onChromeAction);
-      this.window.contentView.addChildView(this.chrome);this.resize();
-      await this.chrome.webContents.loadURL(chromeUrl);check();
-    }
-    if(!this.views.size)await this.open("about:blank",check);
-  }
-  show():void {this.window?.show();this.window?.focus();}
+  async ensure(check:()=>void=()=>{}):Promise<void> {check();if(!this.views.size)await this.open("about:blank",check);}
   async tabs(check:()=>void=()=>{}):Promise<WebsiteTab[]> {await this.ensure(check);check();return [...this.views.values()];}
+  snapshot():DesktopBrowserTab[] {
+    return [...this.views.values()].map(tab=>({id:tab.id,title:tab.title()||"New tab",url:tab.url(),back:tab.view?.webContents.navigationHistory.canGoBack()??false,forward:tab.view?.webContents.navigationHistory.canGoForward()??false,loading:tab.view?.webContents.isLoading()??false}));
+  }
   async open(url:string,check:()=>void=()=>{}):Promise<WebsiteTab> {
-    check();
-    if(this.views.size>=MAX_TABS)throw new Error("Browser tab capacity exceeded.");
-    if(!this.window || this.window.isDestroyed()){await this.ensure(check);check();if(url==="about:blank")return [...this.views.values()][0];}
+    check();if(this.views.size>=MAX_TABS)throw new Error("Browser tab capacity exceeded.");
+    checkedUrl(url);
     const browserSession=session.fromPartition(this.partition);
     if(this.downloadSession!==browserSession) {
       this.downloadSession?.removeListener("will-download",this.onDownload);
       browserSession.on("will-download",this.onDownload);this.downloadSession=browserSession;
     }
     browserSession.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
-    const view=new WebContentsView({webPreferences:{partition:this.partition,sandbox:true,contextIsolation:true,nodeIntegration:false}});
+    const view=new WebContentsView({webPreferences:{partition:this.partition,sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,focusOnNavigation:false,disableDialogs:true}});
     const wc=view.webContents,id=String(wc.id);wc.debugger.attach("1.3");
-    const tab:WebsiteTab={id,view,send:trackInputs((method,params)=>wc.debugger.sendCommand(method,params)),url:()=>wc.getURL()===homeUrl?"about:blank":wc.getURL(),title:()=>wc.getTitle()};
+    let keyDispatches=0;
+    const send:Send=async(method,params)=>{
+      // Scope shortcut isolation to synthetic Agent keys. Keeping it enabled
+      // permanently also disables the human's native editing shortcuts.
+      const keyEvent=method==="Input.dispatchKeyEvent";
+      if(keyEvent && keyDispatches++===0)wc.setIgnoreMenuShortcuts(true);
+      try {return await wc.debugger.sendCommand(method,params);}
+      finally {if(keyEvent && --keyDispatches===0 && !wc.isDestroyed())wc.setIgnoreMenuShortcuts(false);}
+    };
+    const tab:WebsiteTab={id,view,send:trackInputs(send),url:()=>wc.getURL()===homeUrl?"about:blank":wc.getURL(),title:()=>wc.getTitle()};
+    view.setBounds({x:0,y:0,width:1180,height:752});
     this.views.set(id,tab);
-    wc.once("destroyed",()=>{this.views.delete(id);this.updateChrome();});
-    wc.on("did-navigate",()=>this.updateChrome());
-    wc.on("did-navigate-in-page",()=>this.updateChrome());
-    wc.on("did-start-loading",()=>this.updateChrome());
-    wc.on("did-stop-loading",()=>this.updateChrome());
-    wc.on("page-title-updated",()=>this.updateChrome());
-    wc.on("did-fail-load",(_event,code)=>{if(code!==-3){this.error="This page could not be loaded. Check your connection or try another address.";this.updateChrome();}});
-    wc.on("before-input-event",(event,input)=>{
-      if(input.type!=="keyDown" || !(input.control || input.meta) || input.alt)return;
-      if(input.key.toLowerCase()==="l"){event.preventDefault();this.chrome?.webContents.focus();this.chrome?.webContents.send(BROWSER_CHROME_STATE,{focusAddress:true});}
-    });
+    if(this.window && !this.detachedWhileMinimized)this.window.contentView.addChildView(view,0);
+    wc.once("destroyed",()=>{this.views.delete(id);this.changed();});
+    // Reapply after navigation so a detached, minimized target can capture its first frame.
+    wc.on("did-finish-load",()=>wc.setBackgroundThrottling(false));
+    wc.on("content-bounds-updated",event=>event.preventDefault());
+    wc.on("did-navigate",()=>this.changed());
+    wc.on("did-navigate-in-page",()=>this.changed());
+    wc.on("did-start-loading",()=>this.changed());
+    wc.on("did-stop-loading",()=>this.changed());
+    wc.on("page-title-updated",()=>this.changed());
+    wc.on("did-fail-load",(_event,code)=>{if(code!==-3){this.error="This page could not be loaded. Check your connection or try another address.";this.changed();}});
     wc.setWindowOpenHandler(({url:target})=>{try{checkedUrl(target);void this.open(target).catch(error=>console.error("Website popup failed",error));}catch{/* Unsupported website popups are denied. */}return {action:"deny"};});
     const navigation=(event:Electron.Event,target:string)=>{try{if(target!==homeUrl)checkedUrl(target);}catch{event.preventDefault();}};
     wc.on("will-navigate",navigation);wc.on("will-redirect",navigation);
-    check();await this.focus(id);check();await wc.loadURL(url==="about:blank"?homeUrl:checkedUrl(url));check();this.updateChrome();return tab;
+    this.changed();check();await wc.loadURL(url==="about:blank"?homeUrl:checkedUrl(url));check();this.changed();return tab;
   }
-  async focus(id:string):Promise<void> {
-    const tab=this.views.get(id);if(!tab?.view || !this.window)throw new Error("Unknown tab.");
-    for(const other of this.views.values())if(other.view)this.window.contentView.removeChildView(other.view);
-    this.window.contentView.addChildView(tab.view);this.active=id;this.resize();tab.view.webContents.focus();this.updateChrome();
+  attach(window:BaseWindow|undefined):void {
+    if(this.window===window)return;
+    this.window?.removeListener("minimize",this.synchronizeViews);
+    this.window?.removeListener("restore",this.synchronizeViews);
+    this.window?.removeListener("closed",this.windowClosed);
+    for(const tab of this.views.values())if(tab.view && this.window && !this.window.isDestroyed())this.window.contentView.removeChildView(tab.view);
+    this.window=window;
+    window?.on("minimize",this.synchronizeViews);window?.on("restore",this.synchronizeViews);window?.once("closed",this.windowClosed);
+    this.synchronizeViews();
   }
-  private resize():void {
-    if(!this.window)return;const [width,height]=this.window.getContentSize();
-    this.chrome?.setBounds({x:0,y:0,width,height:CHROME_HEIGHT});
-    for(const tab of this.views.values())tab.view?.setBounds({x:0,y:CHROME_HEIGHT,width,height:Math.max(0,height-CHROME_HEIGHT)});
+  present(id:string|null,bounds:DesktopBrowserBounds|null):void {
+    this.presentation=id && bounds ? {id,bounds} : undefined;
+    // Background targets stay below the opaque product renderer while attached.
+    // Native setVisible(false) suspends hit-test/compositor surfaces.
+    this.synchronizeViews();
   }
-  private updateChrome():void {
-    if(!this.chrome || this.chrome.webContents.isDestroyed())return;
-    const active=this.views.get(this.active??""),wc=active?.view?.webContents;
-    const state:BrowserChromeState={tabs:[...this.views.values()].map(tab=>({id:tab.id,title:tab.title().slice(0,200)||"New tab",active:tab.id===this.active})),address:active?.url()==="about:blank"?"":(active?.url()??"").slice(0,8192),back:wc?.navigationHistory.canGoBack()??false,forward:wc?.navigationHistory.canGoForward()??false,loading:wc?.isLoading()??false,error:this.error};
-    this.window?.setTitle(`Talos browser${active?.title()?` — ${active.title().slice(0,180)}`:""}`);
-    this.chrome.webContents.send(BROWSER_CHROME_STATE,state);
+  async navigate(id:string,action:"navigate"|"back"|"forward"|"reload",url?:string):Promise<void> {
+    const wc=this.views.get(id)?.view?.webContents;if(!wc)throw new Error("Unknown tab.");
+    this.error=null;
+    if(action==="navigate")await wc.loadURL(checkedUrl(url!));
+    else if(action==="back" && wc.navigationHistory.canGoBack())wc.navigationHistory.goBack();
+    else if(action==="forward" && wc.navigationHistory.canGoForward())wc.navigationHistory.goForward();
+    else if(action==="reload")wc.reload();
+    this.changed();
   }
-  private async navigate(value:unknown):Promise<void> {
-    const action=parseBrowserChromeAction(value);this.error=null;
-    const wc=this.views.get(this.active??"")?.view?.webContents;
-    switch(action.kind) {
-      case "state":break;
-      case "navigate":if(!wc)throw new Error("No browser tab.");await wc.loadURL(checkedUrl(action.url.includes("://")?action.url:`https://${action.url}`));break;
-      case "back":if(wc?.navigationHistory.canGoBack())wc.navigationHistory.goBack();break;
-      case "forward":if(wc?.navigationHistory.canGoForward())wc.navigationHistory.goForward();break;
-      case "reload":wc?.reload();break;
-      case "new":await this.open("about:blank");break;
-      case "focus":await this.focus(action.tabId);break;
-      case "close":await this.remove(action.tabId);if(!this.views.size)await this.open("about:blank");break;
-      case "hide":this.window?.hide();break;
-    }
-    this.updateChrome();
+  async screenshot(id:string):Promise<string> {
+    const wc=this.views.get(id)?.view?.webContents;if(!wc)throw new Error("Unknown tab.");
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    try {
+      const image=await Promise.race([wc.capturePage(undefined,{stayHidden:true,stayAwake:true}),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("Browser capture timed out.")),3000);})]);
+      if(image.isEmpty())throw new Error("Browser page could not be captured.");
+      return image.toPNG().toString("base64");
+    } finally {clearTimeout(timer);}
   }
   async remove(id:string):Promise<void> {
-    const tab=this.views.get(id);if(tab?.view){this.window?.contentView.removeChildView(tab.view);tab.view.webContents.close({waitForBeforeUnload:false});this.views.delete(id);}
-    const next=this.active && this.views.has(this.active) ? this.active : this.views.keys().next().value;
-    if(next && this.active!==next)await this.focus(next);else {this.active=next;this.updateChrome();}
+    const tab=this.views.get(id);if(tab?.view){if(this.window && !this.window.isDestroyed())this.window.contentView.removeChildView(tab.view);tab.view.webContents.close({waitForBeforeUnload:false});this.views.delete(id);}
+    this.changed();
   }
   async releaseInputs():Promise<void> {for(const tab of this.views.values())await release(tab.send);}
   close():void {
+    this.attach(undefined);this.presentation=undefined;
     this.downloadSession?.removeListener("will-download",this.onDownload);this.downloadSession=undefined;
     for(const [item,directory] of this.downloads) {
       this.downloads.delete(item);item.cancel();
       try {rmSync(directory,{recursive:true,force:true});}catch(error){this.failDownload(error);}
     }
-    ipcMain.removeListener(BROWSER_CHROME_ACTION,this.onChromeAction);
-    for(const tab of this.views.values())tab.view?.webContents.close({waitForBeforeUnload:false});this.views.clear();
-    this.chrome?.webContents.close({waitForBeforeUnload:false});this.chrome=undefined;
-    this.window?.removeAllListeners("close");this.window?.close();this.window=undefined;
+    for(const tab of this.views.values())tab.view?.webContents.close({waitForBeforeUnload:false});
+    this.views.clear();this.window=undefined;this.changed();
   }
 }

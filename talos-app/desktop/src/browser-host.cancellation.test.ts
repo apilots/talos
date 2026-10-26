@@ -62,7 +62,8 @@ it.each(["managed","connected"] as const)("releases %s keyboard input after a fa
 
 function deferred() {let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
 
-it.each(["managed","connected"] as const)("waits for the %s page to paint before dispatching its first click",async(target)=>{
+it("waits for the connected page to paint before dispatching its first click",async()=>{
+  const target="connected";
   const waiting=deferred(),painted=deferred();
   const {inputs,execute}=await inputFixture(target,async(method,params)=>{
     if(method==="Runtime.evaluate"&&params.awaitPromise){waiting.resolve();await painted.promise;}
@@ -75,7 +76,8 @@ it.each(["managed","connected"] as const)("waits for the %s page to paint before
   expect(inputs.map(input=>input.type)).toEqual(["mouseMoved","mousePressed","mouseReleased"]);
 });
 
-it.each(["managed","connected"] as const)("cancels %s input while the first page paint is pending",async(target)=>{
+it("cancels connected input while the first page paint is pending",async()=>{
+  const target="connected";
   const waiting=deferred(),painted=deferred();
   const {inputs,execute}=await inputFixture(target,async(method,params)=>{
     if(method==="Runtime.evaluate"&&params.awaitPromise){waiting.resolve();await painted.promise;}

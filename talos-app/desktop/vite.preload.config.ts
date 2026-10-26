@@ -15,10 +15,9 @@ export default defineConfig({
     lib: {
       entry: {
         preload: path.resolve(dirname, "src/preload.ts"),
-        browserNavigation: path.resolve(dirname,"src/browser-navigation-preload.ts"),
       },
       formats: ["cjs"],
-      fileName: (_format,entryName) => entryName === "preload" ? "preload.cjs" : "browser-window/preload.cjs",
+      fileName: () => "preload.cjs",
     },
     rollupOptions: {
       external: ["electron", ...nodeBuiltins],
