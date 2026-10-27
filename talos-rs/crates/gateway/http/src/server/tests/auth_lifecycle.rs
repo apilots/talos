@@ -1,5 +1,43 @@
 use super::*;
 
+struct LocalContextOnlyAuth;
+
+#[async_trait]
+impl AuthService for LocalContextOnlyAuth {
+    async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()> {
+        FakeAuthService.logout(actor).await
+    }
+    async fn verify_access_token(&self, _token: &str) -> TalosResult<RequestIdentity> {
+        panic!("Desktop data admission must not initialize Cloud verification")
+    }
+    fn local_identity(&self, token: &str) -> TalosResult<RequestIdentity> {
+        FakeAuthService.local_identity(token)
+    }
+}
+
+#[tokio::test]
+async fn desktop_stream_uses_only_verified_local_context_when_auth_is_enabled() {
+    let mut state = Arc::try_unwrap(test_state(false).await).ok().unwrap();
+    state.auth_service = Arc::new(LocalContextOnlyAuth);
+    let identity = super::super::desktop::stream_identity(&state, Some("owner")).unwrap();
+    assert_eq!(identity, FakeAuthService.local_identity("owner").unwrap());
+    for token in [None, Some("reject")] {
+        assert!(super::super::desktop::stream_identity(&state, token).is_err());
+    }
+}
+
+#[tokio::test]
+async fn anonymous_desktop_stream_uses_server_policy_and_not_a_supplied_token() {
+    let mut state = Arc::try_unwrap(test_state(true).await).ok().unwrap();
+    state.auth_service = Arc::new(LocalContextOnlyAuth);
+    for token in [None, Some("owner"), Some("reject")] {
+        assert_eq!(
+            super::super::desktop::stream_identity(&state, token).unwrap(),
+            RequestIdentity::auth_disabled()
+        );
+    }
+}
+
 #[tokio::test]
 async fn test_models_require_bearer_when_auth_enabled() {
     let state = test_state(false).await;

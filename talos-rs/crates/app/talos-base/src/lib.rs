@@ -29,6 +29,7 @@ mod agent_node_rpc;
 mod local_resource_rpc;
 pub use agent_node_rpc::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
 mod application_automation;
+mod application_desktop;
 mod application_runtime;
 mod application_storage;
 mod application_sync;

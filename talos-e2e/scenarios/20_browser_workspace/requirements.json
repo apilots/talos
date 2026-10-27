@@ -18,7 +18,7 @@
   "cases": {
     "06_docker_server.sh": {
       "commands": ["docker", "python3"],
-      "python_modules": ["yaml"],
+      "python_modules": ["yaml", "websockets"],
       "checks": ["docker", "server_image"],
       "binaries": []
     },

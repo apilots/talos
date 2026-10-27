@@ -25,6 +25,7 @@ mod connect;
 mod coordinator_rpc;
 #[path = "agent_desktop_rpc.rs"]
 mod desktop;
+pub(crate) use desktop::relay::{guard_transport, DesktopRelay};
 #[path = "agent_peer_file_rpc.rs"]
 mod peer_file_rpc;
 #[path = "agent_resource_routing.rs"]

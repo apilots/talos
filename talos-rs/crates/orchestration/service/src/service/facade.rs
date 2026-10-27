@@ -60,7 +60,7 @@ mod session_deletion;
 
 #[derive(Clone)]
 pub struct TalosService {
-    desktop_ingress: Arc<std::sync::RwLock<Option<agent_client::AgentNodeClient>>>,
+    desktop_ingress: Arc<std::sync::RwLock<Option<Arc<dyn crate::DesktopIngress>>>>,
     desktop_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], desktop::ViewerRoute>>>,
     sync_management: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementSync>>>>,

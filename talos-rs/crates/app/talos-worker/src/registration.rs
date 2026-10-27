@@ -221,14 +221,10 @@ pub(crate) async fn prepare_registered_worker(
         talos_types::BrowserHostKind::Native,
     )
     .await?;
-    let media = resources.clone();
+    worker.use_remote_resource_rpc(resources.clone());
     worker
         .browser()
-        .set_desktop_connector(Arc::new(move |request| {
-            let media = media.clone();
-            Box::pin(async move { media.open_desktop_media(request).await })
-        }))?;
-    worker.use_remote_resource_rpc(resources.clone());
+        .set_desktop_connector(worker.registered_desktop_connector())?;
     let authorization_owner = worker.plugin_manager();
     let browser_owner = worker.browser();
     let adapter = AgentHarnessRpcAdapter::new(

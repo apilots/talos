@@ -283,7 +283,7 @@ has_real_llm_key() { return 1; }
              patch.object(runner, 'executable', side_effect=lambda name: name in {'docker', 'python3', 'ps', 'lsof'}), \
              patch.object(runner, 'probe', side_effect=lambda argv: argv in (
                  ['docker', 'info'], ['docker', 'image', 'inspect', 'owned-server:current'],
-                 [sys.executable, '-c', 'import yaml'])), contextlib.redirect_stdout(io.StringIO()):
+                 [sys.executable, '-c', 'import yaml'], [sys.executable, '-c', 'import websockets'])), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(runner.preflight(root, [case]), 0)
         with patch.object(runner, 'probe', return_value=False):
             self.assertIn('current Server image', runner.check_dependency('checks', 'server_image', root))

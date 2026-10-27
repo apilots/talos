@@ -25,3 +25,9 @@ Use the existing Chromium seccomp profile, `no-new-privileges` and 1 GiB private
 shared memory for either image. Browser resources start lazily. Memory budgets
 must account for the Server, embedded Worker and actual browser workload; the
 Server Compose profiles do not impose a universal 1 GiB process memory limit.
+
+The Server's embedded Docker Worker uses the existing desktop media relay through
+an in-process adapter. Viewing and control follow the deployment's existing
+authentication mode, including anonymous local access when `gateway.auth=false`.
+Registered Worker media retains its user-token and node-lease admission. Neither
+path publishes VNC/CDP ports or bypasses the Browser owner's input/control fencing.

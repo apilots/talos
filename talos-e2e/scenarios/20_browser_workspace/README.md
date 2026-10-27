@@ -18,7 +18,7 @@ talos-e2e/run_e2e.sh --case 20_browser_workspace/01_resource_tabs
 | `03_desktop_browser` | Real Desktop host → bundled browser and explicitly prepared local Chrome | DOM actions, explicit and implicit current-tab close in both browser modes, stale references, separate per-mode screenshot and upload; bundled debugger detach/recovery; both backends deliver different-content same-name downloads without overwrites, never expose an unfinished download, accept UUID names and honor acknowledgement receipts. Only an owned temporary Chrome profile is connected. |
 | `04_desktop_mcp` | Actual Desktop controller/app-server/embedded Worker → model task → Browser MCP → File API | Tool discovery and typed dispatch in both bundled and explicitly prepared Chrome modes: browser state/actions, screenshot and attachment authorization, uploads/downloads; pause/resume followed by a real target switch and first navigation without a preparatory tool; disconnect leaves Chrome alive. Local browser capability remains independent of remote display. |
 | `05_docker_worker` | Outbound Docker Worker → ordinary task/tools → private live desktop → restart/profile recovery | First non-navigation tool opens a task tab while preserving the private HTTP homepage; navigation/DOM/files and forged attachment rejection; default homepage, background after closing all browser windows and working Browser/Terminal/Files launchers; authenticated media, three consecutive rejected Worker admissions release their candidate reservations while preserving the live controller, input/control fencing, held-key release, backpressure, expiry and viewer teardown; replacement Worker reuses its owned profile. |
-| `06_docker_server` | Packaged anonymous Server → shared CLI/PTY TUI → model edit/add → Server process restart → embedded Browser MCP | Local TUI command exercises DEL and Ctrl-H without a model request; correct HTTP config update persists across a Server process restart; seven real Browser actions and a File API screenshot succeed with Chromium sandbox enabled. Runs with Docker networking disabled and local deterministic model/page fixtures. |
+| `06_docker_server` | Packaged anonymous Server → shared CLI/PTY TUI → model edit/add → restart → desktop viewing/control → embedded Browser MCP | Real RFB pixels and X11 key state prove anonymous viewing and input; release clears held input and permits an Agent task; disconnect suspends automation, clears input, and explicit resume permits another task. Each task performs seven real Browser actions and a File API screenshot. Model edits persist across a Server process restart; the TUI exercises DEL and Ctrl-H. Docker networking is disabled and model/page fixtures remain local. |
 
 Case 04 prepares the official MCP snapshot from `build/plugins/official-mcp.json`.
 Case 05 checks the installed source commit, dependency lock and actual browser-use
@@ -86,9 +86,14 @@ or selected through `TALOS_E2E_SERVER_IMAGE`. Its packaged stage consumes the sa
 current-run binaries plus `talos-server`, the `talos` CLI and production WebUI
 under `.release-product/webui/`. CI builds these inputs once and uses
 `PRODUCT_STAGE=packaged` without recompiling Rust inside Docker. This case needs
-only Docker, Python and PyYAML on the host; its image supplies the Browser runtime and
-the pinned official MCP delivery. It validates a Server process restart with
-the same home, and does not exercise Cloud desktop-media admission.
+only Docker, Python, PyYAML and the existing fixture's pinned `websockets` package
+on the host. The case mounts that Python package read-only for its RFB viewer;
+no test dependency is added to the production image. The image supplies the
+Browser runtime and pinned official MCP delivery. It validates a Server process
+restart with the same home and the embedded local media route, independently of
+the registered Worker's authenticated Cloud media route. Actual pixels and
+state records are grouped under `scenarios/01-view`, `02-takeover`,
+`03-release-agent` and `04-disconnect-recover` in the case report directory.
 All profiles, endpoints and containers created by these cases are disposable;
 they must not attach to a user's interactive browser or retained review Worker.
 
