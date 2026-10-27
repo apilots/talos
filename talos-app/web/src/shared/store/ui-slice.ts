@@ -1,5 +1,6 @@
 import { createDefaultProjects, getProjectViewKey } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
+import { createUuid } from "@/shared/lib/uuid";
 import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type WorkspaceWindow } from "./workspace-window";
 import type { DesktopBrowserState } from "@talos/sdk-app-server/desktop";
 
@@ -125,7 +126,7 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
       };
     }),
     createWorkspaceWebpage: () => set((state) => {
-      const window: WorkspaceWindow = { kind: "webpage", id: crypto.randomUUID(), url: "" };
+      const window: WorkspaceWindow = { kind: "webpage", id: createUuid(), url: "" };
       return { workspaceWindows: [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true, workspaceFocusRevision: state.workspaceFocusRevision + 1 };
     }),
     selectWorkspaceWindow: (key) => set((state) => state.workspaceWindows.some(window => workspaceWindowKey(window) === key)

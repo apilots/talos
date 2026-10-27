@@ -4,6 +4,10 @@ services:
     image: ${TALOS_SERVER_IMAGE:-ghcr.io/apilots/talos-server}:${TALOS_SERVER_VERSION:?Set the published release version in .env}
     container_name: talos-server
     restart: unless-stopped
+    shm_size: 1gb
+    security_opt:
+      - seccomp:${TALOS_CHROMIUM_SECCOMP_PROFILE:-../talos-worker/chromium-seccomp.json}
+      - no-new-privileges:true
     env_file:
       - .env
     environment:
@@ -19,7 +23,6 @@ services:
         read_only: true
         bind:
           create_host_path: false
-    mem_limit: 1g
     logging:
       driver: json-file
       options:

@@ -1,6 +1,9 @@
+import io
 import os
 import subprocess
+import tarfile
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -41,3 +44,40 @@ class ReleaseSourceStageTests(unittest.TestCase):
                                     env=dict(env, FAIL_CHECK="1"), capture_output=True, text=True)
             self.assertEqual(failed.returncode, 17, failed.stderr)
             self.assertNotIn("pnpm", log.read_text())
+
+
+class RuntimeImageInputTests(unittest.TestCase):
+    def prepare_server_tui(self, root):
+        source = Path('.github/workflows/release.yml').read_text()
+        step = source.split('      - name: Add the existing TUI binary to the Server image input\n', 1)[1]
+        step = step.split('      - name:', 1)[0]
+        command = textwrap.dedent(step.split('        run: |\n', 1)[1])
+        product = root / 'talos/.release-product'
+        (product / 'bin').mkdir(parents=True)
+        (product / 'conf').mkdir()
+        (product / 'bin/talos-server').write_bytes(b'validated-server')
+        (product / 'conf/talos.yaml').write_bytes(b'server-config')
+        package = root / 'tui-package'
+        package.mkdir()
+        members = {'conf/talos.yaml': b'tui-config', 'bin/talos-server': b'unexpected-server',
+                   'bin/talos': b'validated-tui'}
+        with tarfile.open(package / 'Talos-TUI-1.2.3-linux-arm64.tar.gz', 'w:gz') as archive:
+            for name, content in members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                info.mode = 0o755 if name.startswith('bin/') else 0o644
+                archive.addfile(info, io.BytesIO(content))
+        return subprocess.run(['bash', '-euo', 'pipefail', '-c', command], cwd=root,
+                              env=dict(os.environ, RELEASE_VERSION='1.2.3', PACKAGE_ARCH='arm64'),
+                              capture_output=True, text=True)
+
+    def test_tui_archive_adds_only_management_binary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = self.prepare_server_tui(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            product = root / 'talos/.release-product'
+            self.assertEqual((product / 'bin/talos').read_bytes(), b'validated-tui')
+            self.assertTrue(os.access(product / 'bin/talos', os.X_OK))
+            self.assertEqual((product / 'bin/talos-server').read_bytes(), b'validated-server')
+            self.assertEqual((product / 'conf/talos.yaml').read_bytes(), b'server-config')

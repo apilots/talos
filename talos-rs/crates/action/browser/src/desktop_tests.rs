@@ -18,6 +18,82 @@ fn request(runtime: &BrowserRuntime, viewer_id: &str) -> WorkerDesktopOpen {
 }
 
 #[tokio::test]
+async fn packaged_desktop_requires_trusted_ingress_before_control_admission() {
+    let home = tempfile::tempdir().unwrap();
+    let runtime = BrowserRuntime::new(
+        home.path().into(),
+        BrowserHostKind::Docker,
+        Arc::new(|| Ok(true)),
+    )
+    .unwrap();
+    let backend = Backend::new();
+    backend.desktop.store(true, Ordering::SeqCst);
+    runtime.set_backend(backend).unwrap();
+    let before = runtime.snapshot().unwrap();
+    assert_eq!(
+        before.display,
+        BrowserDisplayCapability::Unavailable {
+            reason: BrowserDisplayUnavailableReason::HostPolicy,
+        }
+    );
+    #[cfg(unix)]
+    assert_eq!(before.targets[0].readiness, BrowserReadiness::Ready);
+    let expected = Some(
+        talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
+            operation: talos_error::BrowserCapabilityOperation::RemoteDesktop,
+            reason: talos_error::BrowserCapabilityReason::HostPolicy,
+        },
+    );
+    let error = runtime
+        .open_desktop(
+            "alice".into(),
+            request(&runtime, &Uuid::new_v4().to_string()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_api_error().localization, expected);
+    let error = runtime
+        .operate(
+            "alice".into(),
+            BrowserOperation::TakeControl {
+                expected_revision: before.control.revision,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_api_error().localization, expected);
+    assert_eq!(runtime.snapshot().unwrap(), before);
+    assert!(runtime.state.lock().unwrap().views.is_empty());
+
+    runtime
+        .set_desktop_connector(crate::tests::desktop_connector())
+        .unwrap();
+    let connected = runtime.snapshot().unwrap();
+    assert_eq!(
+        connected.display,
+        BrowserDisplayCapability::DockerDesktop {
+            target_id: "managed".into(),
+        }
+    );
+    assert_eq!(connected.targets, before.targets);
+    assert_eq!(connected.control, before.control);
+    let handing_over = runtime
+        .operate(
+            "alice".into(),
+            BrowserOperation::TakeControl {
+                expected_revision: connected.control.revision,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        handing_over.control.owner,
+        BrowserControlOwner::HandingOver { .. }
+    ));
+    assert_eq!(handing_over.targets, before.targets);
+}
+
+#[tokio::test]
 async fn failed_candidate_preserves_current_readonly_view_and_bounds_replacement() {
     let home = tempfile::tempdir().unwrap();
     let runtime = BrowserRuntime::new(

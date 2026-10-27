@@ -14,7 +14,10 @@ pub(super) struct ViewerRoute {
 }
 
 impl TalosService {
-    pub fn set_desktop_ingress(&self, client: agent_client::AgentNodeClient) -> TalosResult<()> {
+    pub fn set_desktop_ingress(
+        &self,
+        ingress: std::sync::Arc<dyn crate::DesktopIngress>,
+    ) -> TalosResult<()> {
         let mut current = self
             .desktop_ingress
             .write()
@@ -25,10 +28,10 @@ impl TalosService {
                 "Desktop ingress is already configured.",
             ));
         }
-        *current = Some(client);
+        *current = Some(ingress);
         Ok(())
     }
-    fn desktop_ingress(&self) -> TalosResult<agent_client::AgentNodeClient> {
+    fn desktop_ingress(&self) -> TalosResult<std::sync::Arc<dyn crate::DesktopIngress>> {
         self.desktop_ingress
             .read()
             .map_err(|_| TalosError::internal("Desktop ingress state is poisoned."))?
@@ -45,9 +48,13 @@ impl TalosService {
         actor: &Actor,
         request: DesktopOpenRequest,
     ) -> TalosResult<DesktopViewGrant> {
-        let environment = self
-            .worker_environment(actor, Some(&request.node_id))
+        let node_id = self
+            .connect_selected_computer(actor, &request.node_id)
             .await?;
+        if actor.auth_disabled && node_id != "embedded" {
+            return Err(denied());
+        }
+        let environment = self.access.worker_environment(actor, &node_id).await?;
         let snapshot = environment
             .browser(
                 actor.worker_environment_context(),
@@ -57,21 +64,11 @@ impl TalosService {
                 },
             )
             .await?;
-        if !matches!(
-            snapshot.display,
-            BrowserDisplayCapability::DockerDesktop { .. }
-        ) {
+        if let BrowserDisplayCapability::Unavailable { reason } = snapshot.display {
             return Err(TalosError::localized(
                 talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
                     operation: talos_error::BrowserCapabilityOperation::RemoteDesktop,
-                    reason: if matches!(
-                        snapshot.host,
-                        BrowserHostKind::Desktop | BrowserHostKind::Native
-                    ) {
-                        talos_error::BrowserCapabilityReason::NativeHost
-                    } else {
-                        talos_error::BrowserCapabilityReason::NotBundled
-                    },
+                    reason: reason.into(),
                 },
             ));
         }
@@ -84,12 +81,6 @@ impl TalosService {
                 "Desktop state changed. Refresh before opening its viewer.",
             ));
         }
-        let token = actor.access_token.as_deref().ok_or_else(|| {
-            TalosError::new(
-                ErrorCode::Unauthenticated,
-                "Sign in before opening a remote desktop.",
-            )
-        })?;
         let binding = DesktopStreamBinding {
             stream_id: uuid::Uuid::new_v4().to_string(),
             target_id: request.target_id,
@@ -102,7 +93,7 @@ impl TalosService {
         agent_protocol::desktop_pb::validate_binding(&binding)?;
         let ingress = self.desktop_ingress()?;
         let reservation = ingress
-            .reserve_desktop(token, request.node_id.clone(), binding.clone())
+            .reserve(actor, node_id.clone(), binding.clone())
             .await?;
         let result = async {
             environment
@@ -132,7 +123,7 @@ impl TalosService {
                     key,
                     ViewerRoute {
                         actor: actor.clone(),
-                        node_id: request.node_id.clone(),
+                        node_id: node_id.clone(),
                         binding: binding.clone(),
                         ingress_ticket: reservation.ticket.clone(),
                         expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
@@ -153,9 +144,9 @@ impl TalosService {
         .await;
         if result.is_err() {
             if let Err(error) = ingress
-                .cancel_desktop(
-                    token,
-                    request.node_id,
+                .cancel(
+                    actor,
+                    node_id,
                     binding.stream_id.clone(),
                     reservation.ticket,
                 )
@@ -167,7 +158,7 @@ impl TalosService {
         result
     }
     /// The same-origin WSS handler consumes a ticket once in its first message.
-    /// Ingress rechecks the original account token, node ownership and live lease.
+    /// Ingress rechecks the original identity and the selected host's live authority.
     pub async fn consume_desktop_ticket(
         &self,
         actor: &Actor,
@@ -187,7 +178,8 @@ impl TalosService {
         if route.expires <= std::time::Instant::now()
             || actor.user_id != route.actor.user_id
             || expected_stream.is_some_and(|stream| stream != route.binding.stream_id)
-            || actor.auth_disabled
+            || actor.auth_disabled != route.actor.auth_disabled
+            || (actor.auth_disabled && route.node_id != "embedded")
         {
             return Err(denied());
         }
@@ -211,8 +203,8 @@ impl TalosService {
             return Err(denied());
         }
         self.desktop_ingress()?
-            .view_desktop(
-                actor.access_token.as_deref().ok_or_else(denied)?,
+            .view(
+                actor,
                 route.node_id,
                 route.binding.stream_id,
                 route.ingress_ticket,
@@ -226,3 +218,7 @@ fn denied() -> TalosError {
         "The desktop ticket is invalid or expired.",
     )
 }
+
+#[cfg(test)]
+#[path = "desktop_ticket_tests.rs"]
+mod tests;

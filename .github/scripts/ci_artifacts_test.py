@@ -12,7 +12,7 @@ from unittest.mock import patch
 import ci_artifacts
 import ci_run
 from ci_impact import ROOT
-from ci_plan import plan
+from ci_plan import plan, scenario_task
 
 
 class CompiledArtifactsTests(unittest.TestCase):
@@ -35,6 +35,31 @@ class CompiledArtifactsTests(unittest.TestCase):
         (self.root / 'binary-sandbox.tar.gz').write_bytes(b'corrupt')
         with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
             ci_artifacts.unpack(self.root, ['sandbox'])
+
+    def test_server_image_consumes_current_products_without_a_rust_rebuild(self):
+        task = scenario_task('server', 'case:20_browser_workspace/06_docker_server')
+        products = self.root / 'output/ci-binaries'
+        products.mkdir(parents=True)
+        for name in ('talos', 'talos-server', 'talos-worker', 'talos-linux-sandbox-launcher'):
+            binary = products / name
+            binary.write_text('current run ' + name)
+            binary.chmod(0o755)
+        web = self.root / 'talos-app/web/dist'
+        web.mkdir(parents=True)
+        (web / 'index.html').write_text('current production WebUI')
+        with patch.object(ci_run, 'ROOT', self.root), patch.object(ci_run, 'run') as execute:
+            ci_run.execute(task, self.root / 'cache')
+        commands = [call.args for call in execute.call_args_list]
+        self.assertEqual(commands[:2], [
+            ('pnpm', '--dir', 'talos-app', '--filter', 'talos-web', 'build'),
+            ('docker', 'build', '--build-arg', 'PRODUCT_STAGE=packaged', '-f',
+             'build/server/Dockerfile', '-t', 'talos-server:browser-e2e', '..'),
+        ])
+        self.assertFalse(any(command[0] == 'cargo' or command[:2] == ('just', 'build') for command in commands))
+        for binary in products.iterdir():
+            self.assertEqual((self.root / '.release-product/bin' / binary.name).read_bytes(), binary.read_bytes())
+        self.assertEqual((self.root / '.release-product/webui/index.html').read_text(), 'current production WebUI')
+        self.assertEqual(execute.call_args.kwargs['env']['TALOS_E2E_SERVER_IMAGE'], 'talos-server:browser-e2e')
 
     def test_archive_cannot_escape_destination_or_replace_executable_with_symlink(self):
         path = self.root / 'binary-sandbox.tar.gz'

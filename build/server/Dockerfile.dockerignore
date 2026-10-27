@@ -7,8 +7,15 @@
 !talos/.release-product/
 !talos/.release-product/**
 !talos/build/
+!talos/build/container/
+!talos/build/container/**
+!talos/build/plugins/
+!talos/build/plugins/**
 !talos/build/server/
 !talos/build/server/Dockerfile
+!talos/build/worker/
+!talos/build/worker/browser/
+!talos/build/worker/browser/**
 !talos/conf/
 !talos/conf/**
 !talos/talos-app/

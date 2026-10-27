@@ -3,6 +3,7 @@
 //! Control-plane, Desktop and standalone hosts compose this same runtime.
 //! Network hosts wrap its existing Harnesses with authenticated direct or outbound gRPC.
 
+mod browser_host;
 mod config;
 mod harness;
 mod mcp;

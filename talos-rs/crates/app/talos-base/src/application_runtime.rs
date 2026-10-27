@@ -232,8 +232,6 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             config.talos_paths().talos_home,
         ))?;
     service.set_coordinator_id(sync.peer_id().into());
-    service
-        .set_desktop_ingress(super::application_sync_computers::gateway_client(&config).await?)?;
     let sync_stores = Arc::new(super::application_sync::ApplicationSyncStores {
         storage: storage.clone(),
         sessions: session_store_impl.clone(),
@@ -265,6 +263,33 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     )
     .await?;
     worker.use_local_resource_rpc(resource_client);
+
+    let media = super::agent_node_rpc::DesktopRelay::new(resource_rpc.cancellation_token());
+    service.set_desktop_ingress(Arc::new(
+        super::application_desktop::ApplicationDesktopIngress {
+            local: media.clone(),
+            remote: super::application_sync_computers::gateway_client(&config).await?,
+            auth: auth_service.clone(),
+        },
+    ))?;
+    if worker.browser().snapshot()?.host == talos_types::BrowserHostKind::Docker {
+        let registered = worker.registered_desktop_connector();
+        worker
+            .browser()
+            .set_desktop_connector(Arc::new(move |request| {
+                let local = media.clone();
+                let registered = registered.clone();
+                Box::pin(async move {
+                    // Route by the trusted reservation owner; an invalid local nonce
+                    // must fail locally rather than retry through a different ingress.
+                    if local.contains_reservation(&request.binding.stream_id).await {
+                        local.attach_local_worker(request).await
+                    } else {
+                        registered(request).await
+                    }
+                })
+            }))?;
+    }
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
     let dream_memory_maintenance = crate::dream_memory_maintenance::DreamMemoryMaintenance::new(

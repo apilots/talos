@@ -15,14 +15,14 @@ use axum::{
 };
 use std::{sync::Arc, time::Duration};
 use talos_auth::RequestIdentity;
-use talos_error::{ErrorCode, TalosError};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ticket {
     ticket: String,
     #[serde(rename = "accessToken")]
-    access_token: String,
+    access_token: Option<String>,
 }
 
 pub(super) async fn open(
@@ -57,7 +57,7 @@ pub(super) async fn stream(
                 let Message::Text(text)=message else {return Err(denied());};
                 if text.len()>8192 {return Err(denied());}
                 let ticket:Ticket=serde_json::from_str(&text).map_err(|_|denied())?;
-                let identity=state.auth_service.verify_access_token(&ticket.access_token).await?;
+                let identity=stream_identity(&state,ticket.access_token.as_deref())?;
                 let mut media=state.app.consume_desktop_ticket(&shared_actor(&identity),ticket.ticket,None).await?;
                 loop {
                     tokio::select! {
@@ -86,6 +86,19 @@ pub(super) async fn stream(
             // final flush so dropping the socket actually releases its lease.
             let _=tokio::time::timeout(Duration::from_millis(250),socket.close()).await;
         }))
+}
+/// Stream admission consumes the same verified local identity as other data APIs.
+pub(super) fn stream_identity(
+    state: &HttpApiState,
+    access_token: Option<&str>,
+) -> TalosResult<RequestIdentity> {
+    if state.auth_disabled {
+        Ok(RequestIdentity::auth_disabled())
+    } else {
+        state
+            .auth_service
+            .local_identity(access_token.ok_or_else(denied)?)
+    }
 }
 fn denied() -> TalosError {
     TalosError::new(
