@@ -82,14 +82,11 @@ impl DesktopIngress for ApplicationDesktopIngress {
             }
             let auth = self.auth.clone();
             let actor = actor.clone();
-            Ok(guard_transport(
-                transport,
-                Arc::new(move || {
-                    let auth = auth.clone();
-                    let actor = actor.clone();
-                    Box::pin(async move { authorize_local(auth.as_ref(), &actor) })
-                }),
-            ))
+            Ok(guard_transport(transport, move || {
+                let auth = auth.clone();
+                let actor = actor.clone();
+                async move { authorize_local(auth.as_ref(), &actor) }
+            }))
         })
     }
 }

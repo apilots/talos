@@ -183,20 +183,17 @@ impl pb::agent_desktop_media_server::AgentDesktopMedia for DesktopMediaRpc {
             .await
             .map_err(status)?;
         let nodes = self.management.nodes.clone();
-        let transport = guard_transport(
-            transport,
-            Arc::new(move || {
-                let nodes = nodes.clone();
-                let auth = auth.clone();
-                let owner = owner.clone();
-                Box::pin(async move {
-                    if nodes.authorize_lease_owner(&auth).await? != owner {
-                        return Err(denied());
-                    }
-                    Ok(())
-                })
-            }),
-        );
+        let transport = guard_transport(transport, move || {
+            let nodes = nodes.clone();
+            let auth = auth.clone();
+            let owner = owner.clone();
+            async move {
+                if nodes.authorize_lease_owner(&auth).await? != owner {
+                    return Err(denied());
+                }
+                Ok(())
+            }
+        });
         let input = input.map(|frame| match frame?.body {
             Some(pb::desktop_worker_frame::Body::Chunk(chunk)) => Ok(chunk.data),
             _ => Err(error_pb::encode_status(&invalid())),
@@ -225,25 +222,22 @@ impl pb::agent_desktop_media_server::AgentDesktopMedia for DesktopMediaRpc {
             .await
             .map_err(status)?;
         let rpc = self.clone();
-        let transport = guard_transport(
-            transport,
-            Arc::new(move || {
-                let rpc = rpc.clone();
-                let actor = actor.clone();
-                let node = hello.node_id.clone();
-                Box::pin(async move {
-                    let identity = rpc
-                        .management
-                        .auth_service
-                        .verify_access_token(actor.access_token.as_deref().ok_or_else(denied)?)
-                        .await?;
-                    if identity.user_id != actor.user_id {
-                        return Err(denied());
-                    }
-                    rpc.owner(&actor, &node).await
-                })
-            }),
-        );
+        let transport = guard_transport(transport, move || {
+            let rpc = rpc.clone();
+            let actor = actor.clone();
+            let node = hello.node_id.clone();
+            async move {
+                let identity = rpc
+                    .management
+                    .auth_service
+                    .verify_access_token(actor.access_token.as_deref().ok_or_else(denied)?)
+                    .await?;
+                if identity.user_id != actor.user_id {
+                    return Err(denied());
+                }
+                rpc.owner(&actor, &node).await
+            }
+        });
         let input = input.map(|frame| match frame?.body {
             Some(pb::desktop_viewer_frame::Body::Chunk(chunk)) => Ok(chunk.data),
             _ => Err(error_pb::encode_status(&invalid())),

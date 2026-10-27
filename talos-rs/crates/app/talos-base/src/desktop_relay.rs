@@ -1,9 +1,10 @@
 //! One bounded desktop relay for authenticated RPC and trusted in-process ingress.
 use agent_client::DesktopReservation;
-use agent_protocol::{desktop_pb, AgentFuture};
+use agent_protocol::desktop_pb;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
+    future::Future,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -311,10 +312,11 @@ impl DesktopRelay {
 
 /// Adapters provide their existing identity/lease check. No bytes or extra
 /// queues pass through this watchdog; cancelling the shared token closes both ends.
-pub(crate) fn guard_transport(
-    transport: DesktopTransport,
-    authorize: Arc<dyn Fn() -> AgentFuture<'static, TalosResult<()>> + Send + Sync>,
-) -> DesktopTransport {
+pub(crate) fn guard_transport<F, Fut>(transport: DesktopTransport, authorize: F) -> DesktopTransport
+where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: Future<Output = TalosResult<()>> + Send,
+{
     let stopped = transport.stopped.clone();
     tokio::spawn(async move {
         let mut check = tokio::time::interval(Duration::from_secs(1));
