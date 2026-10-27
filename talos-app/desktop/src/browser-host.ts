@@ -79,7 +79,7 @@ export class DesktopBrowserHost {
       finally {op.stop.signal.removeEventListener("abort",abort);}
     };
     const operation=request.operation;
-    let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined;
+    let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined,fillObjectGroup:string|undefined;
     if(operation.kind==="execute" || operation.kind==="releaseInputs" || operation.kind==="disconnect") {
       previous=this.executing;
       this.executing=new Promise(resolve=>{finished=resolve;});
@@ -212,10 +212,20 @@ export class DesktopBrowserHost {
           if(!["input","textarea"].includes(element.tag)&&element.attributes.contenteditable!=="true")throw new Error("Select a text input or editable element.");
           await prepareInput();
           await send("DOM.focus",{backendNodeId:element.backendNodeId});
-          const modifier=process.platform==="darwin"?4:2;
-          // Command-only shortcuts use raw key events, matching Chromium automation clients.
-          await send("Input.dispatchKeyEvent",{type:"rawKeyDown",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier,commands:["selectAll"]});
-          await send("Input.dispatchKeyEvent",{type:"keyUp",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier});
+          fillObjectGroup=`talos-fill-${id}`;
+          const handle=object((await send("DOM.resolveNode",{backendNodeId:element.backendNodeId,objectGroup:fillObjectGroup})).object);
+          // Select text as browser automation clients do, without an OS editing shortcut.
+          const selected=await send("Runtime.callFunctionOn",{objectId:handle.objectId,returnByValue:true,functionDeclaration:`function() {
+            if (this instanceof HTMLInputElement || this instanceof HTMLTextAreaElement) this.select();
+            else {
+              const range = this.ownerDocument.createRange();
+              range.selectNodeContents(this);
+              const selection = this.ownerDocument.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }`});
+          if(selected.exceptionDetails)throw new Error("Browser text selection failed.");
           await send("Input.insertText",{text:action.text});
         } else {
           const upload=operation.upload;
@@ -264,7 +274,10 @@ export class DesktopBrowserHost {
         // must not reject its own key/button release. Keep admission fenced until
         // the release is acknowledged, or block it explicitly on cleanup failure.
         const sender=input;
-        if(sender)await this.settleInputs(()=>release(sender));
+        if(sender)await this.settleInputs(async()=>{
+          await release(sender);
+          if(fillObjectGroup)await sender("Runtime.releaseObjectGroup",{objectGroup:fillObjectGroup});
+        });
       } finally {this.operations.delete(id);finished?.();}
     }
   }
