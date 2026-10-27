@@ -39,6 +39,15 @@ Electron 42.9.2 or newer in the 42 series (currently locked to 42.11.18), includ
 the upstream hidden-WebContentsView compositor fix. Native views execute behind
 the opaque product renderer rather than being made non-rendering with setVisible.
 
+For unattended iteration, run only the affected numbered case on the existing
+Linux CI runner or in a Linux environment under `xvfb-run -a just e2e-case
+20_browser_workspace/03_desktop_browser` (use case 02 for renderer integration).
+The virtual display isolates real focus/minimize assertions from the user's
+desktop. Native macOS acceptance necessarily changes OS focus and window state;
+reserve it for macOS-specific behavior during an agreed interactive test window.
+Do not hide or remove its focus assertions to make it appear headless. Repeat an
+E2E only after a relevant change or when a failure needs new diagnostic evidence.
+
 `02_desktop_resources` drives the production main, preload, compiled UI and real
 app-server: native tabs, same-URL independent forms, close/disposal, hide/show and
 responsive geometry coexist with Markdown. Electron persistent partitions are not

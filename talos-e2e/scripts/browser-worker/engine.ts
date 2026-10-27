@@ -45,14 +45,15 @@ await app.whenReady();
 console.log('NATIVE_READY');
 const uuidFilename='12345678-1234-1234-1234-123456789abc';
 let finishPendingReport:(()=>void)|undefined;
-const fixture=createServer((req,res)=>{const pathname=new URL(req.url??'/', 'http://127.0.0.1').pathname;trace({phase:'httpRequest',pathname});res.once('finish',()=>trace({phase:'httpResponseFinished',pathname,status:res.statusCode}));if(req.url==='/uuid'){res.writeHead(200,{'content-type':'application/pdf','content-disposition':`attachment; filename="${uuidFilename}"`});res.end('%PDF-1.7 UUID download');return;}if(req.url==='/report.csv'||req.url==='/report.csv?part=2'){res.writeHead(200,{'content-type':'text/csv','content-disposition':'attachment; filename="report.csv"'});if(req.url.endsWith('?part=2')){res.write('name,value\nworker,');finishPendingReport=()=>{res.end('2\n');finishPendingReport=undefined;};}else res.end('name,value\nworker,1\n');return;}res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><title>Talos browser acceptance</title><input id="name" placeholder="Name"><button id="hello" onclick="document.querySelector('h1').textContent='Hello '+document.querySelector('#name').value">Hello</button><h1>Ready</h1><input id="upload" type="file" onchange="document.querySelector('h2').textContent=this.files[0].name"><h2></h2><a id="download" href="/report.csv">Download</a><a id="second-download" href="/report.csv?part=2">Second report</a><a id="uuid-download" href="/uuid">UUID download</a><script>window.events=[];for(const type of ["mousedown","mouseup","click","pointerdown","keydown","wheel"])document.addEventListener(type,event=>window.events.push({type,x:event.clientX,y:event.clientY,target:event.target.id,key:event.key}));</script>`);});
+const fixture=createServer((req,res)=>{const pathname=new URL(req.url??'/', 'http://127.0.0.1').pathname;trace({phase:'httpRequest',pathname});res.once('finish',()=>trace({phase:'httpResponseFinished',pathname,status:res.statusCode}));if(req.url==='/uuid'){res.writeHead(200,{'content-type':'application/pdf','content-disposition':`attachment; filename="${uuidFilename}"`});res.end('%PDF-1.7 UUID download');return;}if(req.url==='/report.csv'||req.url==='/report.csv?part=2'){res.writeHead(200,{'content-type':'text/csv','content-disposition':'attachment; filename="report.csv"'});if(req.url.endsWith('?part=2')){res.write('name,value\nworker,');finishPendingReport=()=>{res.end('2\n');finishPendingReport=undefined;};}else res.end('name,value\nworker,1\n');return;}res.writeHead(200,{'content-type':'text/html'});res.end(`<!doctype html><title>Talos browser acceptance</title><input id="name" placeholder="Name" value="Existing draft"><button id="hello" onclick="document.querySelector('h1').textContent='Hello '+document.querySelector('#name').value">Hello</button><h1>Ready</h1><input id="upload" type="file" onchange="document.querySelector('h2').textContent=this.files[0].name"><h2></h2><a id="download" href="/report.csv">Download</a><a id="second-download" href="/report.csv?part=2">Second report</a><a id="uuid-download" href="/uuid">UUID download</a><script>window.events=[];for(const type of ["mousedown","mouseup","click","pointerdown","keydown","wheel"])document.addEventListener(type,event=>window.events.push({type,x:event.clientX,y:event.clientY,target:event.target.id,key:event.key}));</script>`);});
 await new Promise<void>(resolve=>fixture.listen(0,'127.0.0.1',resolve));
 const address=fixture.address();assert(address&&typeof address!=='string');
 const host=new DesktopBrowserHost(),generation=randomUUID();
 const {window:product,view:productView}=createDesktopWindow({width:1180,height:840,show:false},{sandbox:true,contextIsolation:true,nodeIntegration:false});
 const productContents=productView.webContents;
-await productContents.loadURL('data:text/html,<title>Owned Talos product</title><input id="office" value="office">');
-host.workspace.setWindow(product,productView);host.workspace.bind('alice');
+const rendererUrl=`http://127.0.0.1:${address.port}`;
+await productContents.loadURL(rendererUrl);
+host.workspace.setWindow(product,productView,rendererUrl);assert(host.workspace.accepts(productContents));host.workspace.bind('alice');
 let targetId:string|null=null;let selectedTarget:AppProtocol.BrowserTargetKind='managed';
 const modes:Partial<Record<AppProtocol.BrowserTargetKind,Record<string,unknown>>>={};
 async function operation(operation:AppProtocol.BrowserHostOperation,userId='alice',target=selectedTarget) {
@@ -185,7 +186,7 @@ try {
   await until(()=>{const current=JSON.stringify(product.getBounds());if(current!==lastBounds){lastBounds=current;settledAt=Date.now();}return Date.now()-settledAt>=150;},'Native minimize geometry did not settle');
   const originalBounds=product.getBounds();
   await website.executeJavaScript('alert("No native modal");window.focus();window.resizeTo(400,400);window.moveTo(0,0)');
-  assert.deepEqual(product.getBounds(),originalBounds);assert(office.isFocused());assert(product.isMinimized());
+  assert.deepEqual({bounds:product.getBounds(),officeFocused:office.isFocused(),productFocused:product.isFocused(),minimized:product.isMinimized()}, {bounds:originalBounds,officeFocused:true,productFocused:false,minimized:true});
   const before=(await action({kind:'state'})).page.tabs.length;
   await website.executeJavaScript(`window.open('http://127.0.0.1:${address.port}/popup')`);
   let popupState=await action({kind:'state'});

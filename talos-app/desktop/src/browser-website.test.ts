@@ -42,7 +42,7 @@ import {WebsiteAccount,checkedUrl,downloadRoot} from "./browser-website";
 import {DesktopBrowserHost} from "./browser-host";
 import {BrowserWindow,type WebContentsView} from "electron";
 let host:DesktopBrowserHost;
-beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-website-"));fixture.sessions.clear();fixture.states=[];fixture.load=undefined;fixture.capture=undefined;host=new DesktopBrowserHost();const window=new BrowserWindow();host.workspace.setWindow(window,{webContents:window.webContents} as WebContentsView);host.workspace.bind("alice");});
+beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-website-"));fixture.sessions.clear();fixture.states=[];fixture.load=undefined;fixture.capture=undefined;host=new DesktopBrowserHost();const window=new BrowserWindow();host.workspace.setWindow(window,{webContents:window.webContents} as WebContentsView,"file:///product.html");host.workspace.bind("alice");});
 afterEach(async()=>{vi.useRealTimers();await host.reset();vi.restoreAllMocks();rmSync(fixture.home,{recursive:true,force:true});});
 it("rejects unsafe navigation schemes",()=>{
   for(const url of ["file:///etc/passwd","javascript:alert(1)","https://user:secret@example.test"])expect(()=>checkedUrl(url)).toThrow();

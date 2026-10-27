@@ -54,3 +54,11 @@ it("invalidates the presentation token on reset and withdraws on navigation and 
   const bob = workspace.bind("bob");contents.emit("render-process-gone");
   await expect(workspace.request({ kind: "new", sessionId: bob.sessionId })).rejects.toThrow("changed");
 });
+it("accepts a canonical origin renderer URL while preserving the document boundary", () => {
+  const { workspace, window, contents } = fixture();
+  workspace.setWindow(window as unknown as BaseWindow, { webContents: contents } as unknown as WebContentsView, "http://127.0.0.1:5173");
+  contents.getURL.mockReturnValue("http://127.0.0.1:5173/#/files");
+  expect(workspace.accepts(contents as unknown as WebContents)).toBe(true);
+  contents.getURL.mockReturnValue("http://127.0.0.1:5173/another-document");
+  expect(workspace.accepts(contents as unknown as WebContents)).toBe(false);
+});

@@ -4,6 +4,8 @@ import type { DesktopBrowserRequest, DesktopBrowserState, DesktopBrowserBounds }
 import type { WebsiteAccount } from "./browser-website";
 import { TALOS_IPC } from "./ipc";
 
+const documentAddress = (url: string) => new URL(url.split("#")[0]).href;
+
 /** Presentation of existing account targets; never owns another target registry. */
 export class BrowserWorkspace {
   private window: BaseWindow | undefined;
@@ -18,14 +20,18 @@ export class BrowserWorkspace {
     this.unbind();
     this.window = window;
     this.product = view.webContents;
-    this.documentUrl = documentUrl.split("#")[0];
+    this.documentUrl = documentAddress(documentUrl);
     view.webContents.on("did-start-navigation", event => {
       if (this.window === window && event.isMainFrame && !event.isSameDocument) this.unbind();
     });
     view.webContents.on("render-process-gone", () => { if (this.window === window) this.unbind(); });
     window.once("closed", () => { if (this.window === window) { const user=this.binding?.user;this.unbind();if(user)this.account(user)?.attach(undefined);this.window = undefined;this.product=undefined; } });
   }
-  accepts(contents: WebContents): boolean { return this.product === contents && !contents.isDestroyed() && contents.getURL().split("#")[0] === this.documentUrl; }
+  accepts(contents: WebContents): boolean {
+    if (this.product !== contents || contents.isDestroyed()) return false;
+    const url = contents.getURL();
+    return Boolean(url) && documentAddress(url) === this.documentUrl;
+  }
   bind(user: string): DesktopBrowserState {
     this.unbind();
     this.binding = { user, sessionId: randomUUID() };

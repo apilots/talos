@@ -19,3 +19,11 @@ it("reveals an explicitly requested page, then preserves chat focus through Agen
  act(()=>useAppStore.getState().syncDesktopBrowser(native(3,["2"])));expect(office).toHaveFocus();
  fireEvent.click(within(workspace).getByRole("tab",{name:"Browser 2"}));expect(within(workspace).getByRole("tab",{name:"Browser 2"})).toHaveFocus();
 });
+
+it.each(["tab", "close"])("recovers the surviving tab when Agent removal retires its focused %s", kind => {
+ show();act(()=>useAppStore.getState().syncDesktopBrowser(native(1,["1","2"],"1")));
+ const workspace=screen.getByRole("dialog",{name:"Right workspace"});
+ within(workspace).getByRole(kind==="tab"?"tab":"button",{name:kind==="tab"?"Browser 1":"Close Browser 1"}).focus();
+ act(()=>useAppStore.getState().syncDesktopBrowser(native(2,["2"])));
+ expect(within(workspace).getByRole("tab",{name:"Browser 2"})).toHaveFocus();
+});

@@ -118,6 +118,9 @@ def exercise(page, token, destination, markdown, endpoint):
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown.png'), full_page=True)
 
+    page.evaluate("""() => {
+        window.desktopResourceUnsubscribe = window.talos.browserWorkspace.onState(state => { window.desktopResourceState = state; });
+    }""")
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
     address.fill(destination)
@@ -196,9 +199,16 @@ def exercise(page, token, destination, markdown, endpoint):
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-native-tab-shell.png'), full_page=True)
     native(second, 'screenshot', str(REPORT / 'desktop-resource-native-page.png'))
-    workspace.get_by_role('button', name=re.compile('^Close ')).nth(2).click()
+    # Exercise external host reconciliation without the UI close handler's focus helper.
+    tabs.nth(2).focus()
+    data(page.evaluate("""async () => {
+        const state = window.desktopResourceState;
+        return window.talos.browserWorkspace.request({kind:'close',sessionId:state.sessionId,tabId:state.tabs.at(-1).id});
+    }"""))
+    page.evaluate('window.desktopResourceUnsubscribe()')
     wait_for(lambda: all(target['id'] != second['id'] for target in targets()), 'Native tab destruction')
     expect(tabs).to_have_count(2)
+    expect(tabs.nth(1)).to_be_focused()
     require(native(first)['value'] == 'first Desktop draft', 'First native form state was lost')
     tabs.nth(0).click()
     expect(workspace.get_by_role('heading', name='Desktop resource acceptance', exact=True)).to_be_visible()
@@ -209,7 +219,7 @@ def exercise(page, token, destination, markdown, endpoint):
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown-retained.png'), full_page=True)
     return {'nodeId': node_id, 'nativeBrowserHost': snapshot['host'], 'nativeDisplay': snapshot['display'],
             'fileId': uploaded['fileId'], 'fileSha256': hashlib.sha256(MARKDOWN).hexdigest(),
-            'twoSameUrlNativeTabs': True, 'switchAndHideRetainForms': True, 'closeDestroysNativeTarget': True, 'nativeGeometryResponsive': True,
+            'twoSameUrlNativeTabs': True, 'switchAndHideRetainForms': True, 'closeDestroysNativeTarget': True, 'nativeGeometryResponsive': True, 'hostCloseRecoversFocus': True,
             'nativeRemoteDesktopEntryAbsent': True, 'trustedBridgeAbsentInPreview': True}
 
 

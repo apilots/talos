@@ -213,8 +213,8 @@ export class DesktopBrowserHost {
           await prepareInput();
           await send("DOM.focus",{backendNodeId:element.backendNodeId});
           const modifier=process.platform==="darwin"?4:2;
-          // Explicit Blink editing commands also work when native menu shortcuts are ignored.
-          await send("Input.dispatchKeyEvent",{type:"keyDown",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier,commands:["selectAll"]});
+          // Command-only shortcuts use raw key events, matching Chromium automation clients.
+          await send("Input.dispatchKeyEvent",{type:"rawKeyDown",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier,commands:["selectAll"]});
           await send("Input.dispatchKeyEvent",{type:"keyUp",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier});
           await send("Input.insertText",{text:action.text});
         } else {

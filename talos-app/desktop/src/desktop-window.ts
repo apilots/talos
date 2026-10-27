@@ -12,7 +12,7 @@ export function createDesktopWindow(options:BaseWindowConstructorOptions,webPref
   const product={window,view};desktopWindows.add(product);
   window.contentView.addChildView(view);
   const resize=()=>{const [width,height]=window.getContentSize();view.setBounds({x:0,y:0,width,height});};
-  resize();window.on("resize",resize);
+  resize();window.contentView.on("bounds-changed",resize);
   window.on("close",event=>{
     if(!view.webContents.isDestroyed()){event.preventDefault();view.webContents.close({waitForBeforeUnload:true});}
   });

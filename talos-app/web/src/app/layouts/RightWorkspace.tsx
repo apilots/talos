@@ -1,5 +1,5 @@
 import { selectionClasses } from "@/shared/ui/controlStyles";
-import { useEffect, useRef, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
 import "./RightWorkspace.css";
 import { FileText, Globe2, Monitor, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -68,6 +68,13 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const resizing = useAppStore(state => state.resizingPane !== null);
   const dialog = useRef<HTMLDialogElement>(null);
   const selectedTab = useRef<HTMLButtonElement>(null);
+  const focusedSurface = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    const focused = focusedSurface.current;
+    if (!focused || focused.isConnected) return;
+    focusedSurface.current = null;
+    if (visible && document.activeElement === document.body) selectedTab.current?.focus();
+  }, [windows, visible]);
   const previous = useRef({ visible: false, modal });
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -122,7 +129,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     selectedTab.current?.focus();selectedTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [focusRevision, visible]);
   const modalPresentation = visible ? modal : previous.current.modal;
-  return <dialog style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
+  return <dialog onFocusCapture={event => { focusedSurface.current = event.target; }} onBlurCapture={() => { focusedSurface.current = null; }} style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
     "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-divider bg-surface p-0 text-ink open:flex backdrop:bg-transparent",
     modalPresentation ? "fixed inset-y-0 left-14 right-0 z-40 h-screen w-[calc(100vw-56px)]" : "relative h-full shrink-0",
   )}>
