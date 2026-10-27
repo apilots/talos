@@ -330,7 +330,7 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     require('data:image' not in json.dumps(events) and 'base64' not in json.dumps(events), 'Timeline persisted inline image bytes')
     return session,events,results
 
-def native_media(document,node,server_home):
+def native_media(document,node,server_home,container):
     home=RUN/('desktop-media-'+uuid.uuid4().hex[:8]);home.mkdir()
     (home/'data').mkdir()
     # Seed the owned directory snapshot; G/H routing and media authorization remain real.
@@ -341,6 +341,7 @@ def native_media(document,node,server_home):
     (home/'auth/cloud-session.json').chmod(0o600)
     env={key:os.environ[key] for key in ('PATH','TMPDIR','DISPLAY','XAUTHORITY','XDG_RUNTIME_DIR') if key in os.environ}
     env.update(HOME=str(home),TALOS_HOME=str(home),TALOS_CONFIG=str(conf),TALOS_RESOURCE_DIR=str(ROOT),TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN',str(ROOT/'talos-rs/target/debug/app-server')),TALOS_E2E_REMOTE_NODE=node,TALOS_SCENARIO_REPORT_DIR=str(REPORT),TALOS_E2E_CLI_BIN=os.environ['TALOS_E2E_CLI_BIN'])
+    env['TALOS_E2E_WORKER_CONTAINER']=container
     electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
     if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'
     with (REPORT/'native-docker-media.log').open('wb') as log:
@@ -456,9 +457,10 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
         from media import media,pressure_and_expiry
         media(url,node,name,http,data,wait,REPORT)
         if os.environ.get('TALOS_E2E_NATIVE_MEDIA')=='1':
-            desktop_env = native_media(document,node,home)
+            desktop_env = native_media(document,node,home,name)
             from plugin_cli import remote_cli
             remote_cli(url,node,name,desktop_env,http,data,REPORT)
+            browser_task(url,node,attachment,'desktop-resumed-task')
         pressure_and_expiry(url,node,http,data,wait,REPORT)
         before=data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}}))
         data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'pause','expectedRevision':before['control']['revision']}}))

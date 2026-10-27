@@ -29,7 +29,11 @@ online preparation; another real Browser task must then succeed with the prepare
 environment. Persisted manual pause is resumed explicitly through the public API.
 The native account/directory fixture also runs the real `talos plugin` CLI against
 the outbound Docker Worker for both Skill and MCP lifecycle operations; no remote
-installation may appear in the client home. After online repair, a replacement
+installation may appear in the client home. The same case's production Desktop
+IPC/preload/SDK and noVNC viewer must also take control, apply a key to the real
+X11 display, clear held input on release and disconnect, then resume with actual
+pixels and another Agent Browser task. It shares the HTTP viewer's X11 probe;
+connection status alone is not rendered-frame evidence. After online repair, a replacement
 container removes its packaged environment metadata before Worker startup and
 disables external package DNS while retaining the control-plane hosts entry. It
 must reuse the same home environment and complete another real Browser task.
