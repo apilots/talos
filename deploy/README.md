@@ -12,8 +12,17 @@ deploy/
 |-- caddy/          Caddy reverse-proxy example
 |-- docker/         Docker Compose deployment
 |-- install/        TUI release installer and documentation
-`-- nginx/          Nginx reverse-proxy example
+|-- nginx/          Nginx reverse-proxy example
+`-- ubuntu-offline/ Ubuntu offline Server, embedded Worker and TUI image
 ```
+
+## Offline Ubuntu image
+
+[`ubuntu-offline/`](ubuntu-offline/README.md) builds local `amd64` and `arm64`
+offline bundles with a private deployment profile, packaged Browser resources,
+diagnostic tools and a persistent-volume launcher. It reuses the formal runtime
+resources and configuration upgrades; private profiles and image archives stay
+out of Git.
 
 ## Server deployment
 
