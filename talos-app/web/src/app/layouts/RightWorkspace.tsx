@@ -147,7 +147,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
         }} onClose={() => {
           if (window.kind === "browser") {
             const sessionId = useAppStore.getState().desktopBrowser?.sessionId;
-            if (sessionId) void desktopBrowserRequest({ kind: "close", sessionId, tabId: window.id }).then(() => useAppStore.getState().focusWorkspace()).catch(error => console.error("Browser tab close failed", error));
+            if (sessionId) void desktopBrowserRequest({ kind: "close", sessionId, tabId: window.id }).catch(error => console.error("Browser tab close failed", error));
             return;
           }
           close(key);

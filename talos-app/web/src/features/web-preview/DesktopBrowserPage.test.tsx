@@ -21,10 +21,13 @@ it("withdraws native presentation for collapse, overlays and minimization while 
   const overlay = document.createElement("div");overlay.setAttribute("role", "dialog");document.body.append(overlay);
   await waitFor(() => expect(desktopBrowserRequest).toHaveBeenLastCalledWith({ kind: "present", sessionId: "bound", tabId: null, bounds: null }));
   overlay.remove();await waitFor(() => expect(desktopBrowserRequest).toHaveBeenLastCalledWith(expect.objectContaining({ tabId: "1" })));
-  vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");fireEvent(document, new Event("visibilitychange"));
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");fireEvent(document, new Event("visibilitychange"));
   expect(desktopBrowserRequest).toHaveBeenLastCalledWith(expect.objectContaining({ tabId: null, bounds: null }));
+  visibility.mockReturnValue("visible");fireEvent(document, new Event("visibilitychange"));
+  expect(desktopBrowserRequest).toHaveBeenLastCalledWith(expect.objectContaining({ tabId: "1" }));
+  vi.mocked(desktopBrowserRequest).mockClear();
   rerender(<dialog open><DesktopBrowserPage tab={tab} selected={false} /></dialog>);
-  expect(vi.mocked(desktopBrowserRequest).mock.calls.some(([request]) => request.kind === "close")).toBe(false);
+  expect(desktopBrowserRequest).toHaveBeenLastCalledWith({ kind: "present", sessionId: "bound", tabId: null, bounds: null });
 });
 it("preserves an edited address during host navigation and submits real native navigation controls", async() => {
   const { rerender } = render(<DesktopBrowserPage tab={tab} selected />);

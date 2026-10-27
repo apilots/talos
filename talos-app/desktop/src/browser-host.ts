@@ -274,10 +274,10 @@ export class DesktopBrowserHost {
         // must not reject its own key/button release. Keep admission fenced until
         // the release is acknowledged, or block it explicitly on cleanup failure.
         const sender=input;
-        if(sender)await this.settleInputs(async()=>{
-          await release(sender);
+        if(sender) {
+          await this.settleInputs(()=>release(sender));
           if(fillObjectGroup)await sender("Runtime.releaseObjectGroup",{objectGroup:fillObjectGroup});
-        });
+        }
       } finally {this.operations.delete(id);finished?.();}
     }
   }

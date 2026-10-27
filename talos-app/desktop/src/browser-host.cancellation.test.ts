@@ -14,12 +14,13 @@ let host:DesktopBrowserHost;
 beforeEach(()=>{fixture.home=mkdtempSync(path.join(tmpdir(),"talos-input-"));host=new DesktopBrowserHost();Socket.all=[];Socket.targets=[];Socket.profileRoot=fixture.home;vi.stubGlobal("WebSocket",Socket);});
 afterEach(async()=>{vi.useRealTimers();vi.restoreAllMocks();await host.reset();vi.unstubAllGlobals();rmSync(fixture.home,{recursive:true,force:true});});
 
-async function inputFixture(target:"managed"|"connected",intercept:(method:string,params:RecordValue)=>Promise<void>|void) {
+async function inputFixture(target:"managed"|"connected",intercept:(method:string,params:RecordValue)=>Promise<void>|void,elementTag="button") {
   const inputs:RecordValue[]=[];
   const respond=async(method:string,params:RecordValue={})=>{
     if(method.startsWith("Input.dispatch"))inputs.push({...params});
     await intercept(method,params);
-    if(method==="DOM.describeNode")return {node:{nodeName:"BUTTON",attributes:[]}};
+    if(method==="DOM.describeNode")return {node:{nodeName:elementTag.toUpperCase(),attributes:[]}};
+    if(method==="DOM.resolveNode")return {object:{objectId:"fill-handle"}};
     if(method==="DOM.getContentQuads")return {quads:[[0,0,100,0,100,20,0,20]]};
     if(method==="DOM.querySelectorAll")return {nodeIds:[]};
     return {};
@@ -42,7 +43,7 @@ async function inputFixture(target:"managed"|"connected",intercept:(method:strin
       );
     });
   }
-  const execute=(id:string,action:AppProtocol.BrowserAction)=>host.execute(id,{...request("probe"),target,operation:{kind:"execute",targetId:"input-tab",upload:null,element:action.kind==="click"?{targetId:"input-tab",loaderId:"",backendNodeId:1,tag:"button",attributes:{}}:null,action}});
+  const execute=(id:string,action:AppProtocol.BrowserAction)=>host.execute(id,{...request("probe"),target,operation:{kind:"execute",targetId:"input-tab",upload:null,element:action.kind==="click"||action.kind==="fill"?{targetId:"input-tab",loaderId:"",backendNodeId:1,tag:elementTag,attributes:{}}:null,action}});
   return {inputs,execute,release:()=>host.execute("release",{...request("probe"),target,operation:{kind:"releaseInputs"}})};
 }
 
@@ -195,4 +196,10 @@ it.each(["connect","releaseInputs","disconnect","shutdown"] as const)("recovers 
   await expect(host.execute("recover",{...request("probe"),operation:{kind}})).resolves.toEqual({kind:"done"});
   if(kind!=="connect")await host.execute("reconnect",request("connect"));
   expect(await host.execute("ready",request("probe"))).toEqual({kind:"readiness",connected:true});
+});
+
+it("keeps later browser operations available after a fill handle disposal fails", async()=>{
+ const {execute}=await inputFixture("managed",method=>{if(method==="Runtime.releaseObjectGroup")throw Error("Target context closed");},"input");
+ await expect(execute("retired-fill",{kind:"fill",element:"ref",text:"draft"})).rejects.toThrow("Target context closed");
+ await expect(execute("next",{kind:"state"})).resolves.toMatchObject({kind:"observation"});
 });

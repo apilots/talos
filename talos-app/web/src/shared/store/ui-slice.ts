@@ -13,7 +13,6 @@ export interface UiSlice {
   desktopBrowser: { sessionId: string; revision: number; error: string | null } | null;
   syncDesktopBrowser: (state: DesktopBrowserState | null) => void;
   workspaceFocusRevision: number;
-  focusWorkspace: () => void;
   sidebarWidth: number;
   workspaceWidth: number | null;
   resizingPane: ResizingPane;
@@ -84,7 +83,6 @@ export function normalizeProjects(projects?: ProjectView[]) {
 export function createUiSlice(set: UiSliceSetter): UiSlice {
   return {
     workspaceFocusRevision: 0,
-    focusWorkspace: () => set(state => ({ workspaceFocusRevision: state.workspaceFocusRevision + 1 })),
     desktopBrowser: null,
     syncDesktopBrowser: browser => set(state => {
       if (browser && state.desktopBrowser && browser.revision <= state.desktopBrowser.revision) return {};

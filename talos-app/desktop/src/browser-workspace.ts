@@ -25,7 +25,7 @@ export class BrowserWorkspace {
       if (this.window === window && event.isMainFrame && !event.isSameDocument) this.unbind();
     });
     view.webContents.on("render-process-gone", () => { if (this.window === window) this.unbind(); });
-    window.once("closed", () => { if (this.window === window) { const user=this.binding?.user;this.unbind();if(user)this.account(user)?.attach(undefined);this.window = undefined;this.product=undefined; } });
+    window.once("closed", () => { if (this.window === window) { this.unbind();this.window = undefined;this.product=undefined; } });
   }
   accepts(contents: WebContents): boolean {
     if (this.product !== contents || contents.isDestroyed()) return false;

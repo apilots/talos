@@ -180,6 +180,6 @@ export class WebsiteAccount {
       try {rmSync(directory,{recursive:true,force:true});}catch(error){this.failDownload(error);}
     }
     for(const tab of this.views.values())tab.view?.webContents.close({waitForBeforeUnload:false});
-    this.views.clear();this.window=undefined;this.changed();
+    this.views.clear();this.changed();
   }
 }
