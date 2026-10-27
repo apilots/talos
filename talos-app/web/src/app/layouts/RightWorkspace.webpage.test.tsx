@@ -12,7 +12,7 @@ vi.mock("@/features/computers", () => ({
   useComputer: () => ({ data: { displayName: "Worker" } }),
   ComputerDesktop: () => <section aria-label="Worker media" />,
 }));
-vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: undefined }), MarkdownFilePreview: () => null }));
+vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: undefined }), FilePreview: () => null }));
 function Harness() {
   const toggle=useRef<HTMLButtonElement>(null);
   const windows=useAppStore(state=>state.workspaceWindows);

@@ -12,6 +12,17 @@ from ci_plan import plan
 
 
 class ChangeScopeTests(unittest.TestCase):
+    def test_resource_preview_group_is_gated_for_shared_renderer_and_owning_scenarios(self):
+        selected = plan(['talos-app/web/src/features/files/components/FilePreview.tsx'])
+        for category, case in [('webui', '21_resource_preview/01_web_preview.sh'),
+                               ('desktop', '21_resource_preview/02_desktop_preview.sh')]:
+            cases = [item for task in selected['categories'][category]['scenarios']['include'] for item in task['cases']]
+            self.assertIn(case, cases)
+        selected = impact(['talos-e2e/scripts/resource_preview/preview_fixture.py'])
+        self.assertIn('case:21_resource_preview/01_web_preview', selected.targets['webui'])
+        self.assertIn('case:21_resource_preview/02_desktop_preview', selected.targets['desktop'])
+        self.assertFalse(selected.rust or selected.installer)
+
     def test_tui_leaf_selects_only_tui(self):
         result = impact(['talos-rs/apps/tui/src/render/chat_lines.rs'])
         self.assertEqual(result.rust, {'talos-tui'})

@@ -18,6 +18,7 @@ import { createPersistStorage } from "@/shared/store/persist-storage";
 import { createComputerSlice, type ComputerSlice } from "@/features/computers/store";
 
 import { connectionScope } from "./connection-scope";
+import { restoreWorkspaces } from "./workspace-state";
 
 export interface AppState
   extends ChatSlice,
@@ -46,6 +47,7 @@ export const useAppStore = create<AppState>()(
           sidebarOpen: typedState?.sidebarOpen ?? currentState.sidebarOpen,
           uiTheme: typedState?.uiTheme ?? currentState.uiTheme,
           locale: typedState?.locale ?? currentState.locale,
+          workspaceSnapshots: restoreWorkspaces(typedState?.workspaceSnapshots),
           activeProjectId: currentState.activeProjectId,
           transientStatuses: {},
           streams: {},
@@ -60,6 +62,7 @@ export const useAppStore = create<AppState>()(
         uiTheme: state.uiTheme,
         locale: state.locale,
         sidebarOpen: state.sidebarOpen,
+        workspaceSnapshots: state.workspaceSnapshots,
 
       }),
     },
@@ -76,7 +79,7 @@ useAppStore.subscribe((state, previous) => {
   const oldScope = connectionScope(previous.connection);
   if (scope !== oldScope) {
     const aliases = { ...state.sessionAliasesByScope, [oldScope]: previous.sessionAliases };
-    useAppStore.setState({ sessionAliasesByScope: aliases, sessionAliases: aliases[scope] ?? {}, streams: {}, transientStatuses: {}, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false, sidebarWidth: SIDEBAR_WIDTH.initial, workspaceWidth: null, resizingPane: null, activeProjectId: normalizeProjects()[0].id });
+    useAppStore.setState({ sessionAliasesByScope: aliases, sessionAliases: aliases[scope] ?? {}, streams: {}, transientStatuses: {}, workspaceOwner: null, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false, sidebarWidth: SIDEBAR_WIDTH.initial, workspaceWidth: null, resizingPane: null, activeProjectId: normalizeProjects()[0].id });
   } else if (state.selectedComputers[scope] !== previous.selectedComputers[scope]) {
     useAppStore.setState({ activeProjectId: normalizeProjects()[0].id });
   }

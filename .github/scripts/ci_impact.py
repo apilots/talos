@@ -17,6 +17,8 @@ SERVER_TARGETS = {
 }
 BROWSER_CASES = {f'case:20_browser_workspace/{name}' for name in (
     '01_resource_tabs', '02_desktop_resources', '03_desktop_browser', '04_desktop_mcp', '05_docker_worker')}
+PREVIEW_CASES = {'webui': 'case:21_resource_preview/01_web_preview',
+                 'desktop': 'case:21_resource_preview/02_desktop_preview'}
 TUI_TARGET = 'case:08_tui/controlled_chat'
 MEDIA_OWNERS = ('desktop-media', 'desktop-ipc', 'desktop-server-requests', 'ipc-guard',
                 'ipc.', 'preload.', 'app-server-controller')
@@ -105,6 +107,8 @@ class Impact:
         self.targets['server'].update(SERVER_TARGETS.values())
         self.targets['desktop'].update(BROWSER_CASES - {'case:20_browser_workspace/01_resource_tabs'})
         self.targets['webui'].add('case:20_browser_workspace/01_resource_tabs')
+        for category, case in PREVIEW_CASES.items():
+            self.targets[category].add(case)
         self.targets['tui'].add(TUI_TARGET)
         self.installer = self.mcp = self.harness = True
 
@@ -168,7 +172,14 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             result.full(rust, frontend)
         elif path.startswith('talos-e2e/'):
             result.harness = True
-            if path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
+            if path.startswith(('talos-e2e/scenarios/21_resource_preview/', 'talos-e2e/scripts/resource_preview/')):
+                if path.endswith('.sh'):
+                    category = 'webui' if Path(path).name.startswith('01_') else 'desktop'
+                    result.targets[category].add(PREVIEW_CASES[category])
+                else:
+                    for category, case in PREVIEW_CASES.items():
+                        result.targets[category].add(case)
+            elif path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
                                 'talos-e2e/tests/tui_install_target_test.sh', 'talos-e2e/docker/tui-install-')):
                 result.installer = True
             elif path.startswith(('talos-e2e/scenarios/08_tui/', 'talos-e2e/scripts/tui')):
@@ -216,6 +227,15 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
         # Generated wire contracts have both Rust and TypeScript consumers.
         direct_frontend.update(frontend.roots)
     result.frontend.update(frontend.closure(direct_frontend, reverse=True))
+    if 'talos-web' in result.frontend:
+        result.targets['webui'].add(PREVIEW_CASES['webui'])
+        result.targets['desktop'].add(PREVIEW_CASES['desktop'])
+    elif 'talos-desktop' in result.frontend:
+        result.targets['desktop'].add(PREVIEW_CASES['desktop'])
+    if any(path in ('talos-e2e/scripts/computer_workspace/resources.py',
+                    'talos-e2e/scripts/computer_workspace/desktop_resources.py') for path in paths):
+        for category, case in PREVIEW_CASES.items():
+            result.targets[category].add(case)
     # Expand each owner's acceptance independently, then union the results. A
     # TUI+MCP edit must not accidentally take a broader route than those edits alone.
     for owner in direct_rust:

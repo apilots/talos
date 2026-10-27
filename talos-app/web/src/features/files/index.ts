@@ -13,5 +13,5 @@ export {
   type UploadFileRequest,
 } from "./api";
 export { FileDetailsPanel } from "./components/FileDetailsPanel";
-export { MarkdownFilePreview } from "./components/MarkdownFilePreview";
+export { FilePreview } from "./components/FilePreview";
 export { useFileMetadata } from "./hooks/useFileMetadata";

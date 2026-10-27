@@ -18,13 +18,14 @@ afterEach(() => {
 });
 it("opens the actual Markdown file in the shared right workspace without replacing its detail actions", () => {
   setup();
-  fireEvent.click(screen.getByRole("button", { name: "Preview Markdown" }));
-  expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "markdown", fileId: "notes" }]);
+  fireEvent.click(screen.getByRole("button", { name: "Preview file" }));
+  expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "file", fileId: "notes" }]);
   expect(useAppStore.getState().workspaceOpen).toBe(true);
   expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
 });
-it("does not offer Markdown preview for a PDF", () => {
+it("offers the same right-side preview for PDF and images", () => {
   setup({ ...file, originalFilename: "Guide.pdf", mimeType: "application/pdf" });
-  expect(screen.queryByRole("button", { name: "Preview Markdown" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Preview file" }));
+  expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "file", fileId: "notes" }]);
 });

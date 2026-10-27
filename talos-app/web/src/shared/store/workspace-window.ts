@@ -1,7 +1,7 @@
 /** Account/endpoint-scoped presentation only; never stores credentials or media grants. */
 export type WorkspaceWindow =
   | { kind: "computer"; nodeId: string }
-  | { kind: "markdown"; fileId: string }
+  | { kind: "file"; fileId: string }
   | { kind: "webpage"; id: string; url: string };
 
 export function normalizeWorkspaceWebpageUrl(value: string): string | null {
@@ -14,7 +14,7 @@ export function normalizeWorkspaceWebpageUrl(value: string): string | null {
 export function workspaceWindowKey(window: WorkspaceWindow): string {
   switch (window.kind) {
     case "computer": return JSON.stringify([window.kind, window.nodeId]);
-    case "markdown": return JSON.stringify([window.kind, window.fileId]);
+    case "file": return JSON.stringify([window.kind, window.fileId]);
     case "webpage": return JSON.stringify([window.kind, window.id]);
   }
 }

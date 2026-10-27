@@ -253,7 +253,7 @@ def run(cluster):
             denied = context.request.get(cluster.url + '/v1/files/' + file_id + '/content', headers={'Authorization': 'Bearer ' + cluster.users['bob']['access_token']})
             require(denied.status == 404, 'Non-owner read private Markdown content')
             with page.expect_request(lambda request: '/v1/files/' + file_id + '/content' in request.url) as content_request:
-                page.get_by_role('button', name='Preview Markdown', exact=True).click()
+                page.get_by_role('button', name='Preview file', exact=True).click()
             require(content_request.value.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown content request omitted owner authentication')
             expect(workspace.get_by_role('heading', name='Workspace acceptance', exact=True)).to_be_visible()
             expect(workspace.get_by_role('tab', name='workspace-review.md', exact=True)).to_be_visible()

@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import "@/shared/i18n/setup";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { WebPagePreview } from "./WebPagePreview";
@@ -50,7 +51,6 @@ it("shows a usable new-tab page and visits a local service from its address bar"
   expect(view.container.querySelector("iframe")).toBeNull();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Refresh webpage" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Open in external browser" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Enter an address" }));
   expect(screen.getByRole("textbox", { name: "Web address" })).toHaveFocus();
   fireEvent.change(screen.getByRole("textbox", { name: "Web address" }), { target: { value: "http://127.0.0.1:3000/preview" } });
@@ -61,7 +61,8 @@ it("shows a usable new-tab page and visits a local service from its address bar"
   expect(screen.queryByRole("heading", { name: "New tab" })).not.toBeInTheDocument();
 });
 
-it("contains preview scripts, preserves the address, refreshes, and opens externally", () => {
+it("contains preview scripts, preserves the address, refreshes, and opens externally", async () => {
+  const user = userEvent.setup();
   const { container } = render(<WebPagePreview url="https://example.com/" onNavigate={vi.fn()} />);
   const frame = container.querySelector("iframe")!;
   expect(frame).toHaveAttribute("src", "https://example.com/");
@@ -72,7 +73,8 @@ it("contains preview scripts, preserves the address, refreshes, and opens extern
   expect(screen.queryByText(/connected|loaded successfully/i)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Refresh webpage" }));
   expect(container.querySelector("iframe")).not.toBe(frame);
-  fireEvent.click(screen.getByRole("button", { name: "Open in external browser" }));
+  await user.click(screen.getByRole("button", { name: "Open in options" }));
+  await user.click(screen.getByRole("menuitem", { name: "Open in external browser" }));
   expect(external).toHaveBeenCalledWith("https://example.com/");
 });
 
@@ -101,10 +103,12 @@ it("navigates via the workspace owner and rejects unsupported destinations", () 
 });
 
 it("shows an actual external-browser error while keeping the address and refresh available", async () => {
+  const user = userEvent.setup();
   external.mockRejectedValue(new Error("Bridge rejected request"));
   const { container } = render(<WebPagePreview url="https://example.com/" onNavigate={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Open in external browser" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Unable to open the external browser");
+  await user.click(screen.getByRole("button", { name: "Open in options" }));
+  await user.click(screen.getByRole("menuitem", { name: "Open in external browser" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Unable to complete this action");
   expect(external).toHaveBeenCalledWith("https://example.com/");
   fireEvent.click(screen.getByRole("button", { name: "Refresh webpage" }));
   expect(container.querySelector("iframe")).toBeInTheDocument();

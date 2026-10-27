@@ -1,5 +1,5 @@
 import { selectionClasses } from "@/shared/ui/controlStyles";
-import { useEffect, useRef, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
 import "./RightWorkspace.css";
 import { FileText, Globe2, Monitor, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -9,9 +9,10 @@ import { cn } from "@/shared/lib/cn";
 import { AppResizeHandle } from "./AppResizeHandle";
 import { WORKSPACE_WIDTH } from "@/shared/store/ui-slice";
 import { AppTopBar, WorkspaceControls } from "./AppTopBar";
-import { MarkdownFilePreview, useFileMetadata } from "@/features/files";
+import { FilePreview, useFileMetadata } from "@/features/files";
 import { OpenWebpageButton, WebPagePreview } from "@/features/web-preview";
 import { workspaceWindowKey, type WorkspaceWindow } from "@/shared/store/workspace-window";
+import { workspaceBelongsToScope, workspaceOwnerKey } from "@/shared/store/workspace-state";
 
 type TabProps = {
   selected: boolean; selectedRef: RefObject<HTMLButtonElement | null>;
@@ -19,7 +20,7 @@ type TabProps = {
 };
 function WindowTab({ name, kind, selected, selectedRef, id, onSelect, onClose, onKeyDown }: TabProps & { name: string; kind: WorkspaceWindow["kind"] }) {
   const { t } = useTranslation("common");
-  const Icon = kind === "computer" ? Monitor : kind === "markdown" ? FileText : Globe2;
+  const Icon = kind === "computer" ? Monitor : kind === "file" ? FileText : Globe2;
   return <div className={cn("flex min-w-0 max-w-64 shrink-0 items-center rounded-lg border", selected ? `${selectionClasses.selected} ${selectionClasses.border}` : `border-transparent ${selectionClasses.idle}`)}>
     <button ref={selected ? selectedRef : undefined} id={id} role="tab" type="button" aria-selected={selected} tabIndex={selected ? 0 : -1} aria-controls={`${id}-panel`} onKeyDown={onKeyDown} onClick={onSelect} title={name} className="flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
       <Icon aria-hidden="true" size={13} className="shrink-0" /><span className="truncate">{name}</span>
@@ -31,15 +32,15 @@ function ComputerTab({ nodeId, ...props }: TabProps & { nodeId: string }) {
   const computer = useComputer(nodeId);
   return <WindowTab {...props} kind="computer" name={computer.data?.displayName || `Computer · ${nodeId.slice(0, 8)}`} />;
 }
-function MarkdownTab({ fileId, scope, ...props }: TabProps & { fileId: string; scope: string }) {
+function FileTab({ fileId, scope, ...props }: TabProps & { fileId: string; scope: string }) {
   const file = useFileMetadata(scope, fileId);
-  return <WindowTab {...props} kind="markdown" name={file.data?.originalFilename || `Markdown · ${fileId.slice(0, 8)}`} />;
+  return <WindowTab {...props} kind="file" name={file.data?.originalFilename || `File · ${fileId.slice(0, 8)}`} />;
 }
 function WorkspaceTab({ window, scope, ...props }: TabProps & { window: WorkspaceWindow; scope: string }) {
   const { t } = useTranslation("webPreview");
   switch (window.kind) {
     case "computer": return <ComputerTab {...props} nodeId={window.nodeId} />;
-    case "markdown": return <MarkdownTab {...props} fileId={window.fileId} scope={scope} />;
+    case "file": return <FileTab {...props} fileId={window.fileId} scope={scope} />;
     case "webpage": return <WindowTab {...props} kind="webpage" name={window.url ? new URL(window.url).host : t("newTab")} />;
   }
 }
@@ -53,6 +54,18 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const { t } = useTranslation("common");
   const scope = useProductScope();
   const windows = useAppStore(state => state.workspaceWindows);
+  const owner = useAppStore(state => state.workspaceOwner);
+  const snapshots = useAppStore(state => state.workspaceSnapshots);
+  const ownerKey = owner ? workspaceOwnerKey(owner) : "unbound";
+  const [visited, setVisited] = useState<string[]>([ownerKey]);
+  useEffect(() => { setVisited(keys => keys.includes(ownerKey) ? keys : [...keys, ownerKey]); }, [ownerKey]);
+  const panels = useMemo(() => {
+    // Keep first-visit DOM order: moving an existing iframe resets its browsing
+    // context even when React preserves the element's key and DOM identity.
+    const keys = visited.includes(ownerKey) ? visited : [...visited, ownerKey];
+    return keys.filter(key => key === ownerKey || workspaceBelongsToScope(key, scope))
+      .map(key => ({ key, windows: key === ownerKey ? windows : snapshots[key]?.workspaceWindows ?? [] }));
+  }, [snapshots, scope, ownerKey, windows, visited]);
   const active = useAppStore(state => state.workspaceActiveKey);
   const expanded = useAppStore(state => state.workspaceExpanded);
   const select = useAppStore(state => state.selectWorkspaceWindow);
@@ -65,7 +78,8 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const resizing = useAppStore(state => state.resizingPane !== null);
   const dialog = useRef<HTMLDialogElement>(null);
   const selectedTab = useRef<HTMLButtonElement>(null);
-  const previous = useRef({ visible: false, modal });
+  const previous = useRef({ visible: false, modal, ownerKey });
+  const focusOwner = useRef(ownerKey);
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const panel = dialog.current;
@@ -84,7 +98,8 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     const opening = visible && !previous.current.visible;
     const changingMode = visible && previous.current.visible && previous.current.modal !== modal;
     const closing = !visible && previous.current.visible;
-    previous.current = { visible, modal: visible ? modal : previous.current.modal };
+    const changingContext = previous.current.ownerKey !== ownerKey;
+    previous.current = { visible, modal: visible ? modal : previous.current.modal, ownerKey };
     if (!opening && !changingMode && !closing) return;
     const focus = document.activeElement;
     const inside = focus instanceof HTMLElement && panel.contains(focus);
@@ -103,7 +118,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
             if (focus instanceof HTMLIFrameElement) focus.contentWindow?.focus();
             else focus.focus();
           } else selectedTab.current?.focus();
-        } else if (opening || modal) selectedTab.current?.focus();
+        } else if ((opening || modal) && !changingContext) selectedTab.current?.focus();
         else if (focus instanceof HTMLElement && focus !== document.body && focus.isConnected) focus.focus();
       } else if (restoreFocus) toggleRef.current?.focus();
     } finally {
@@ -111,11 +126,14 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     }
     // Unmount cleanup lives above. Closing during dependency cleanup would let
     // the native dialog restore its opener before this update observes focus.
-  }, [modal, visible, toggleRef]);
+  }, [modal, visible, toggleRef, ownerKey]);
   useEffect(() => {
+    const changingContext = focusOwner.current !== ownerKey;
+    focusOwner.current = ownerKey;
     if (!visible) return;
-    selectedTab.current?.focus();selectedTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [active, visible]);
+    selectedTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    if (!changingContext) selectedTab.current?.focus();
+  }, [active, visible, ownerKey]);
   const modalPresentation = visible ? modal : previous.current.modal;
   return <dialog style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
     "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-divider bg-surface p-0 text-ink open:flex backdrop:bg-transparent",
@@ -142,16 +160,16 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
       {visible ? <WorkspaceControls toggleRef={toggleRef} /> : null}
     </AppTopBar>
     <div className="min-h-0 flex-1 overflow-hidden bg-background">
-      {windows.map(window => {
+      {panels.flatMap(context => context.windows.map(window => {
         const key=workspaceWindowKey(window);
-        const activeWindow=key===active;
+        const activeWindow=context.key === ownerKey && key===active;
         const selected=visible && activeWindow;
-        return <div key={key} id={`${tabId(key)}-panel`} role="tabpanel" aria-labelledby={tabId(key)} hidden={!activeWindow} inert={!selected} className="h-full min-h-0">
+        return <div key={`${context.key}:${key}`} id={activeWindow ? `${tabId(key)}-panel` : undefined} role="tabpanel" aria-labelledby={activeWindow ? tabId(key) : undefined} hidden={!activeWindow} inert={!selected} className="h-full min-h-0">
           {window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={url => navigateWebpage(key,url)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
-            : activeWindow && window.kind === "markdown" ? <MarkdownFilePreview fileId={window.fileId} connectionKey={scope} /> : null}
+            : window.kind === "file" ? <FilePreview fileId={window.fileId} connectionKey={scope} instanceKey={context.key} /> : null}
         </div>;
-      })}
+      }))}
     </div>
   </dialog>;
 }

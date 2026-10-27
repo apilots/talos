@@ -1,0 +1,15 @@
+{
+  "default": {
+    "commands": ["cargo", "curl", "openssl", "protoc", "python3", "node", "pnpm"],
+    "python_modules": ["yaml", "grpc", "google.protobuf", "playwright"],
+    "checks": ["chrome"],
+    "binaries": ["server"]
+  },
+  "cases": {
+    "01_web_preview.sh": { "binaries": ["server", "worker"] },
+    "02_desktop_preview.sh": {
+      "checks": ["chrome", "display", "caddy"],
+      "binaries": ["server", "app_server"]
+    }
+  }
+}

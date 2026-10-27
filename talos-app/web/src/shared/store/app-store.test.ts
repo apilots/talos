@@ -52,15 +52,20 @@ describe("app store persistence", () => {
     expect(persisted.state).not.toHaveProperty("transientStatuses");
   });
 
-  it("does not persist workspace resources, active selection or geometry", () => {
+  it("persists scoped descriptors while excluding credentials, runtime state and modal geometry", () => {
+    useAppStore.getState().setWorkspaceContext({ scope: "actor", context: { kind: "session", sessionId: "one" } }, true);
     useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId: "private-computer" });
-    useAppStore.getState().openWorkspaceWindow({ kind: "markdown", fileId: "private-file" });
+    useAppStore.getState().openWorkspaceWindow({ kind: "file", fileId: "private-file" });
     useAppStore.getState().setWorkspaceExpanded(true);
     useAppStore.getState().setSidebarWidth(340);useAppStore.getState().setWorkspaceWidth(700);useAppStore.getState().setResizingPane("sidebar");
     const persisted = JSON.parse(storage.get("talos-web-ui") ?? "{}") as { state: Record<string, unknown> };
     for (const field of ["workspaceWindows", "workspaceActiveKey", "workspaceOpen", "workspaceExpanded", "sidebarWidth", "workspaceWidth", "resizingPane"]) {
       expect(persisted.state).not.toHaveProperty(field);
     }
+    expect(persisted.state.workspaceSnapshots).toEqual({ '["actor","session","one"]': {
+      workspaceWindows: [{ kind: "computer", nodeId: "private-computer" }, { kind: "file", fileId: "private-file" }],
+      workspaceActiveKey: '["file","private-file"]', workspaceOpen: true,
+    } });
   });
 
   it("does not persist browser auth token or user snapshot", () => {
