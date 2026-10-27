@@ -38,7 +38,7 @@ use talos_types::talos::{
 };
 
 #[derive(Clone)]
-enum TestAgentExecutionMode {
+pub(super) enum TestAgentExecutionMode {
     Accepted,
     AdmissionBlocked {
         reached: Arc<tokio::sync::Notify>,
@@ -70,8 +70,8 @@ mod interrupt_queue_tests;
 #[path = "maintenance_tests.rs"]
 mod maintenance_tests;
 
-struct TestAgentExecution {
-    mode: TestAgentExecutionMode,
+pub(super) struct TestAgentExecution {
+    pub(super) mode: TestAgentExecutionMode,
 }
 
 struct TestExecutionCoordinator {
@@ -107,7 +107,7 @@ impl TalosService {
 
 struct TestAuthService;
 
-fn configured_test_config() -> TalosConfig {
+pub(super) fn configured_test_config() -> TalosConfig {
     let mut config = TalosConfig::default();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
         reasoning_replay: Default::default(),
@@ -567,7 +567,7 @@ impl UserService for TestAuthService {
     }
 }
 
-async fn test_application(
+pub(super) async fn test_application(
     agent_execution: Arc<TestAgentExecution>,
     config: TalosConfig,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {

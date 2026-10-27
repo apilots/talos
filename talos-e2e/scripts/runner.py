@@ -10,7 +10,7 @@ import sys
 
 NUMBERED = re.compile(r"^[0-9]{2}_.+")
 FIELDS = {"commands", "python_modules", "checks", "platforms", "env", "binaries"}
-CHECKS = {"docker", "cloud", "model", "chrome", "display", "caddy", "worker_image", "sandbox", "standalone_docker"}
+CHECKS = {"docker", "cloud", "model", "chrome", "display", "caddy", "worker_image", "server_image", "sandbox", "standalone_docker"}
 
 
 def discover(root):
@@ -109,6 +109,9 @@ def check_dependency(kind, value, root):
     if value == "worker_image":
         image = os.environ.get("TALOS_E2E_WORKER_IMAGE", "talos-worker:browser-e2e")
         return None if probe(["docker", "image", "inspect", image]) else "build the current Worker image; see group20 README / TALOS_E2E_WORKER_IMAGE"
+    if value == "server_image":
+        image = os.environ.get("TALOS_E2E_SERVER_IMAGE", "talos-server:browser-e2e")
+        return None if probe(["docker", "image", "inspect", image]) else "build the current Server image; see group20 README / TALOS_E2E_SERVER_IMAGE"
     if value == "sandbox":
         if platform.system() == "Linux":
             return None if executable("bwrap") else "install bubblewrap for the native Linux sandbox"

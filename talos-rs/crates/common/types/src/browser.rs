@@ -45,6 +45,17 @@ pub enum BrowserDisplayUnavailableReason {
     UnsupportedVersion,
 }
 
+impl From<BrowserDisplayUnavailableReason> for talos_error::BrowserCapabilityReason {
+    fn from(reason: BrowserDisplayUnavailableReason) -> Self {
+        match reason {
+            BrowserDisplayUnavailableReason::NativeHost => Self::NativeHost,
+            BrowserDisplayUnavailableReason::NotBundled => Self::NotBundled,
+            BrowserDisplayUnavailableReason::HostPolicy => Self::HostPolicy,
+            BrowserDisplayUnavailableReason::UnsupportedVersion => Self::UnsupportedVersion,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(
     tag = "kind",

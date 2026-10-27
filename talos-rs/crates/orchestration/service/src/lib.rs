@@ -2,6 +2,7 @@ mod access;
 mod account;
 mod agent_node;
 mod config;
+mod desktop;
 pub mod file;
 mod fs;
 mod history;
@@ -32,6 +33,7 @@ pub use agent_node::{
     NodePrincipal, RotateCredentialRequest, UpdateNodeRequest,
 };
 pub use config::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService};
+pub use desktop::DesktopIngress;
 pub use file::{FileByteStream, FileContent, FileService};
 pub use history::SessionHistoryService;
 pub use inner_model::{

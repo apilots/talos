@@ -57,12 +57,15 @@ impl TalosWorker {
         Self::build_with_browser_host(config, resources, talos_types::BrowserHostKind::Native).await
     }
 
-    /// Host capability is selected by the composition root, never model arguments.
+    /// The composition root selects the unbundled host policy. Protected packaged
+    /// resources extend Server and Native hosts; Desktop keeps its injected backend.
     pub async fn build_with_browser_host(
         config: Config,
         resources: TalosWorkerResources,
         host: talos_types::BrowserHostKind,
     ) -> TalosResult<Self> {
+        let resource_dir = std::env::var_os("TALOS_RESOURCE_DIR").map(std::path::PathBuf::from);
+        let host = crate::browser_host::select_host(host, resource_dir.as_deref());
         let active_config = Arc::new(RwLock::new(config.clone()));
         let provider_config = active_config.clone();
         let provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
@@ -96,8 +99,8 @@ impl TalosWorker {
             talos_plugin::PluginStateStore::new(config.talos_paths().talos_home.join("plugins")),
         )
         .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes);
-        let snapshot = std::env::var_os("TALOS_RESOURCE_DIR")
-            .map(std::path::PathBuf::from)
+        let snapshot = resource_dir
+            .as_ref()
             .map(|root| root.join("plugins/apilots-mcps"))
             .filter(|root| root.join("source.json").is_file());
         match manager.provision_official_browser(snapshot.as_deref()) {
@@ -119,8 +122,8 @@ impl TalosWorker {
             Arc::new(move || enabled_manager.official_browser_enabled()),
         )?;
         if host == talos_types::BrowserHostKind::Docker {
-            let resources = std::env::var_os("TALOS_RESOURCE_DIR")
-                .map(std::path::PathBuf::from)
+            let resources = resource_dir
+                .as_ref()
                 .ok_or_else(|| TalosError::internal("Docker Browser resources are missing."))?;
             browser.configure_managed_resources(&resources.join("browser"))?;
         }
@@ -158,6 +161,12 @@ impl TalosWorker {
                 }),
                 mcp_credentials.clone(),
             );
+        if host == talos_types::BrowserHostKind::Docker {
+            if let Err(error) = plugin_manager.initialize_browser_environment().await {
+                // Optional Browser failure leaves the Worker available for repair.
+                talos_logging::report_error(&error);
+            }
+        }
         let skill_roots_resolver = Arc::new(WorkerSkillRootsResolver {
             plugins: plugin_manager.clone(),
         });

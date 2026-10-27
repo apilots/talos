@@ -31,7 +31,12 @@ impl TuiApp {
         }
     }
 
-    pub async fn handle_input(&mut self, key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
+    pub async fn handle_input(&mut self, mut key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
+        // SSH terminals may encode Backspace as BS (Ctrl-H), rather than DEL.
+        if key_event.code == KeyCode::Char('h') && key_event.modifiers == KeyModifiers::CONTROL {
+            key_event.code = KeyCode::Backspace;
+            key_event.modifiers = KeyModifiers::NONE;
+        }
         if key_event.code == KeyCode::Char('v')
             && key_event
                 .modifiers

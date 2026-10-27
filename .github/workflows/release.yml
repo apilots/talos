@@ -484,6 +484,22 @@ jobs:
           tar -xzf "server-package/Talos-Server-${RELEASE_VERSION}-linux-${PACKAGE_ARCH}.tar.gz" \
             -C talos/.release-product
 
+      - name: Download the validated TUI package for Server management
+        if: matrix.product == 'server'
+        uses: actions/download-artifact@v4
+        with:
+          name: talos-tui-linux-${{ matrix.arch }}
+          path: tui-package
+
+      - name: Add the existing TUI binary to the Server image input
+        if: matrix.product == 'server'
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          tar -xzf "tui-package/Talos-TUI-${RELEASE_VERSION}-linux-${PACKAGE_ARCH}.tar.gz" \
+            -C talos/.release-product bin/talos
+
       - name: Set Docker metadata
         id: docker_metadata
         env:

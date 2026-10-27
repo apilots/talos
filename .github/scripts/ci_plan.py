@@ -31,15 +31,18 @@ def scenario_task(category: str, target: str, root: Path = ROOT) -> dict:
     for case in cases:
         for key, values in requirements.items():
             values.update(runner.requirements(scenario_root, case).get(key, []))
-    docker = 'worker_image' in requirements['checks']
-    binaries = requirements['binaries'] | ({'worker'} if docker else set())
+    images = sorted(check.removesuffix('_image') for check in requirements['checks']
+                    if check in {'worker_image', 'server_image'})
+    binaries = requirements['binaries'] | ({'worker'} if images else set())
+    if 'server' in images:
+        binaries.update({'server', 'cli'})
     if binaries:
         binaries.add('sandbox')
-    node = bool(requirements['commands'] & {'node', 'pnpm', 'npx'})
+    node = 'server' in images or bool(requirements['commands'] & {'node', 'pnpm', 'npx'})
     return dict(name=target.splitlines()[0].split(':', 1)[1].replace('/', ' · '),
                 kind='e2e', category=category, targets=target, cases=sorted(set(cases)),
                 binaries=sorted(binaries), binary_pattern='ci-binary-' + ('{' + ','.join(sorted(binaries)) + '}' if len(binaries) > 1 else next(iter(binaries), 'none')), node=node, chrome='chrome' in requirements['checks'],
-                docker=docker, rust_tests='cargo-nextest' in requirements['commands'],
+                docker=bool(images), images=images, rust_tests='cargo-nextest' in requirements['commands'],
                 rust=['talos-tools'] if 'cargo-nextest' in requirements['commands'] else [], frontend=[])
 
 

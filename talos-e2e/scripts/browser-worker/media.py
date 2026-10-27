@@ -8,6 +8,11 @@ import zlib
 from websockets.sync.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+def shift_pressed(container):
+    """Observe applied input for both HTTP and Desktop IPC viewers."""
+    code="import ctypes,os; os.environ['DISPLAY']=':99'; os.environ['XAUTHORITY']='/home/talos/.talos/browser/Xauthority'; x=ctypes.CDLL('libX11.so.6'); x.XOpenDisplay.restype=ctypes.c_void_p; d=x.XOpenDisplay(None); assert d; x.XKeysymToKeycode.argtypes=[ctypes.c_void_p,ctypes.c_ulong]; k=x.XKeysymToKeycode(d,0xffe1); b=ctypes.create_string_buffer(32); x.XQueryKeymap.argtypes=[ctypes.c_void_p,ctypes.c_void_p]; x.XQueryKeymap(d,b); print(bool(b.raw[k//8] & (1 << (k%8))))"
+    return subprocess.check_output(['docker','exec',container,'python3','-c',code],text=True,timeout=5).strip()=='True'
+
 class Viewer:
     def __init__(self,url,grant,token="browser-contract-alice",max_queue=16):
         self.pending=bytearray()
@@ -124,13 +129,10 @@ def media(url,node,container,http,data,wait,report):
         control.frame()  # The same original RFB socket must remain usable.
         control.key(0xffe1,True)
         time.sleep(.15)
-        def shift():
-            code="import ctypes,os; os.environ['DISPLAY']=':99'; os.environ['XAUTHORITY']='/home/talos/.talos/browser/Xauthority'; x=ctypes.CDLL('libX11.so.6'); x.XOpenDisplay.restype=ctypes.c_void_p; d=x.XOpenDisplay(None); assert d; x.XKeysymToKeycode.argtypes=[ctypes.c_void_p,ctypes.c_ulong]; k=x.XKeysymToKeycode(d,0xffe1); b=ctypes.create_string_buffer(32); x.XQueryKeymap.argtypes=[ctypes.c_void_p,ctypes.c_void_p]; x.XQueryKeymap(d,b); print(bool(b.raw[k//8] & (1 << (k%8))))"
-            return subprocess.check_output(['docker','exec',container,'python3','-c',code],text=True).strip()=='True'
-        wait(shift,'Human Shift reached actual X display')
+        wait(lambda:shift_pressed(container),'Human Shift reached actual X display')
         released=operate('releaseControl',controllerId=controller)
         assert released['control']['owner']['kind']=='idle'
-        assert not shift(),'Held Shift survived handoff ACK'
+        assert not shift_pressed(container),'Held Shift survived handoff ACK'
         # A spectator survives control-epoch changes and continues receiving real pixels.
         b.frame()
         next_handoff=operate('takeControl')

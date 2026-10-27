@@ -1,10 +1,7 @@
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type {
-  LlmConfig,
-  ProviderConfig,
-} from "@talos/sdk-browser";
+import type { CustomProviderConfig, LlmConfig, ProviderConfig } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 
 import { updateLlmConfig, type LlmConfigResponse } from "@/features/settings/api";
@@ -12,10 +9,10 @@ import { llmConfigKey, useLlmConfigQuery } from "@/features/settings/hooks/useLl
 import { chatKeys } from "@/features/chat";
 import { useEnvironmentKey } from "@/features/computers";
 import { Panel } from "@/shared/ui/Panel";
+import { createUuid } from "@/shared/lib/uuid";
 import { CustomProviderMenu } from "./CustomProviderMenu";
 import { CustomProviderModal } from "./CustomProviderModal";
 import { CUSTOM_PROTOCOLS } from "./providerProtocol";
-import type { CustomProviderConfig } from "@talos/sdk-browser";
 
 import { CustomProviderHeader } from "./CustomProviderHeader";
 import { SettingsModelDeleteDialog } from "./SettingsModelDeleteDialog";
@@ -92,7 +89,7 @@ export function SettingsLlmConfigEditor() {
 
   function saveCustomProvider(provider: CustomProviderConfig) {
     if (!draft) return;
-    const id = providerModal === "edit" ? activeProvider : `custom-${crypto.randomUUID()}`;
+    const id = providerModal === "edit" ? activeProvider : `custom-${createUuid()}`;
     setDraft({ ...draft, custom_providers: { ...draft.custom_providers, [id]: provider } });
     setActiveProvider(id);
     setProviderModal(null);

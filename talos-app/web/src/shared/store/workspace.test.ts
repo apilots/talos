@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAppStore } from "./app-store";
 import { normalizeWorkspaceWebpageUrl, workspaceWindowKey } from "./workspace-window";
 
 const computer = (nodeId: string) => ({ kind: "computer" as const, nodeId });
 const key = (nodeId: string) => workspaceWindowKey(computer(nodeId));
+afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   useAppStore.getState().setConnection({ userId: "workspace-review", controlPlaneEndpoint: "http://localhost:8080" });
   useAppStore.setState({ workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false });
@@ -28,7 +29,8 @@ it("keeps the active window when closing a background window and chooses a neigh
   store.closeWorkspaceWindow(key("a"));store.setWorkspaceOpen(true);store.setWorkspaceExpanded(true);
   expect(useAppStore.getState()).toMatchObject({ workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false });
 });
-it("creates independent blank webpage tabs with stable identity through navigation", () => {
+it("creates independent blank webpage tabs with stable identity through navigation on HTTP", () => {
+  vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const store=useAppStore.getState();store.openWorkspaceWindow({kind:"markdown",fileId:"owned-file"});
   store.createWorkspaceWebpage();const first=useAppStore.getState().workspaceActiveKey!;
   store.createWorkspaceWebpage();const second=useAppStore.getState().workspaceActiveKey!;

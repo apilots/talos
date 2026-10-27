@@ -269,8 +269,19 @@ impl BrowserRuntime {
                     .as_ref()
                     .is_some_and(|backend| backend.desktop_available())
             {
-                BrowserDisplayCapability::DockerDesktop {
-                    target_id: "managed".into(),
+                if self
+                    .desktop_connector
+                    .read()
+                    .map_err(|_| poisoned())?
+                    .is_some()
+                {
+                    BrowserDisplayCapability::DockerDesktop {
+                        target_id: "managed".into(),
+                    }
+                } else {
+                    BrowserDisplayCapability::Unavailable {
+                        reason: BrowserDisplayUnavailableReason::HostPolicy,
+                    }
                 }
             } else {
                 BrowserDisplayCapability::Unavailable {
