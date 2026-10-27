@@ -1,4 +1,5 @@
-import { BrowserWindow, type WebContents } from "electron";
+import type { WebContents } from "electron";
+import { isDesktopRenderer } from "./desktop-window";
 import type { AppProtocol } from "@talos/sdk-core";
 import { TALOS_IPC } from "./ipc";
 
@@ -22,7 +23,7 @@ class DesktopMediaHost {
   private readonly closeBackend = new Map<string, () => void>();
 
   own(streamId: string, contents: WebContents, closeBackend?: () => void): void {
-    if (!BrowserWindow.fromWebContents(contents) || contents.isDestroyed()
+    if (!isDesktopRenderer(contents)
       || this.owners.has(streamId) || this.owners.size >= 2) {
       throw new Error("Invalid Desktop media owner.");
     }

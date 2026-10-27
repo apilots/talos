@@ -6,6 +6,13 @@ import { TALOS_IPC } from "./ipc";
 import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
+  browserWorkspace: {
+    request: request => ipcRenderer.invoke(TALOS_IPC.browserRequest, request),
+    onState: handler => {
+      const listener = (_event:IpcRendererEvent, state:import("@talos/sdk-app-server/desktop").DesktopBrowserState) => handler(state);
+      ipcRenderer.on(TALOS_IPC.browserState, listener);return () => ipcRenderer.off(TALOS_IPC.browserState, listener);
+    },
+  },
   onDesktopFrame:(handler)=>{
     const listener=(_event:IpcRendererEvent,frame:AppProtocol.DesktopMediaFrame & {requestId:string})=>{
       handler(frame);

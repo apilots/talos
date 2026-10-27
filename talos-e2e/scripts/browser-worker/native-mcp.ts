@@ -3,6 +3,7 @@ import {mkdirSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {app,webContents} from 'electron';
+import {createDesktopWindow} from '../../../talos-app/desktop/src/desktop-window';
 import {DesktopAppServerController} from '../../../talos-app/desktop/src/app-server-controller';
 import {handleDesktopServerRequest} from '../../../talos-app/desktop/src/desktop-server-requests';
 import {desktopBrowserHost} from '../../../talos-app/desktop/src/browser-host';
@@ -14,10 +15,13 @@ mkdirSync(output,{recursive:true});
 app.on('window-all-closed',()=>{});
 app.setPath('userData',path.join(process.env.TALOS_HOME!,'electron-profile'));
 async function run(){console.log("NATIVE_MCP_START");await app.whenReady();console.log("NATIVE_MCP_READY");
+ const {window:product,view}=createDesktopWindow({show:false},{sandbox:true,contextIsolation:true,nodeIntegration:false});
+ await view.webContents.loadURL('data:text/html,<title>Owned product</title>');desktopBrowserHost.workspace.setWindow(product,view);
  const events:P.TimelineEvent[]=[];
  const controller=new DesktopAppServerController({command:process.env.TALOS_APP_SERVER_BIN,env:{...process.env,TALOS_DESKTOP_HOSTNAME:'native-browser-acceptance'},desktopHost:true,clientKind:"desktop",onRuntimeState:state=>console.log("RUNTIME",state),onEvent:event=>events.push(event),onServerRequest:request=>handleDesktopServerRequest(request)});
  try {
   console.log("CONNECTING");await controller.connect();console.log("CONNECTED");
+  const actor=await controller.invoke<P.UserCurrentResponse>("user/current",{});desktopBrowserHost.workspace.bind(actor.user.user_id);
   console.log('READ_BROWSER');const state=await controller.invoke<P.BrowserSnapshot>('browser/operate',{nodeId:'embedded',operation:{kind:'read'}});
   assert.equal(state.host,'desktop');assert.equal(state.display.kind,'unavailable');assert.equal(state.selectedTargetId,'managed');
   const upload=await controller.invoke<P.FileUploadResponse>('file/upload',{request:{filename:'browser-upload.png',scope:{type:'personal'},tags:[],metadata:{}},dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5n8AAAAASUVORK5CYII='});
@@ -94,6 +98,6 @@ async function run(){console.log("NATIVE_MCP_START");await app.whenReady();conso
    }catch(diagnosticError){console.error('Native MCP failure capture failed',diagnosticError);}
   }
   throw error;
- }finally{await controller.close();await desktopBrowserHost.reset();app.quit();}
+ }finally{await controller.close();await desktopBrowserHost.reset();product.destroy();app.quit();}
 }
 void run().catch(error=>{console.error(error);app.exit(1);});

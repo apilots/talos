@@ -1,11 +1,15 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {EventEmitter} from 'node:events';
-const electron=vi.hoisted(()=>({fromWebContents:vi.fn(()=>({}))}));
-vi.mock('electron',()=>({BrowserWindow:{fromWebContents:electron.fromWebContents}}));
+vi.mock('electron',()=>({}));
+import {desktopWindows} from "./desktop-window";
 import {desktopMediaHost} from './desktop-media';
-import type {WebContents} from 'electron';
-const owner=()=>Object.assign(new EventEmitter(),{send:vi.fn(),isDestroyed:()=>false}) as unknown as WebContents;
-afterEach(()=>{desktopMediaHost.reset();vi.useRealTimers();});
+import type {BaseWindow,WebContents,WebContentsView} from 'electron';
+const owner=()=>{
+ const contents=Object.assign(new EventEmitter(),{send:vi.fn(),isDestroyed:()=>false}) as unknown as WebContents;
+ desktopWindows.add({window:{} as BaseWindow,view:{webContents:contents} as WebContentsView});
+ return contents;
+};
+afterEach(()=>{desktopMediaHost.reset();desktopWindows.clear();vi.useRealTimers();});
 describe('Desktop media frame ownership and backpressure',()=>{
  it('waits for consumption by the exact opening renderer',async()=>{
   const renderer=owner(),other=owner();desktopMediaHost.own('stream',renderer);

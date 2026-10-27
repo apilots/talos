@@ -2,6 +2,7 @@ import { createDefaultProjects, getProjectViewKey } from "@/shared/types/domain"
 import type { ProjectView } from "@/shared/types/ui";
 import { createUuid } from "@/shared/lib/uuid";
 import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type WorkspaceWindow } from "./workspace-window";
+import type { DesktopBrowserState } from "@talos/sdk-app-server/desktop";
 
 export type UiTheme = "dark" | "light";
 export type Locale = "en" | "zh-CN";
@@ -10,6 +11,9 @@ export const WORKSPACE_WIDTH = { initial: 480, min: 360, max: 1040 } as const;
 export type ResizingPane = "sidebar" | "workspace" | null;
 
 export interface UiSlice {
+  desktopBrowser: { sessionId: string; revision: number; error: string | null } | null;
+  syncDesktopBrowser: (state: DesktopBrowserState | null) => void;
+  workspaceFocusRevision: number;
   sidebarWidth: number;
   workspaceWidth: number | null;
   resizingPane: ResizingPane;
@@ -20,7 +24,7 @@ export interface UiSlice {
   workspaceActiveKey: string | null;
   workspaceOpen: boolean;
   workspaceExpanded: boolean;
-  openWorkspaceWindow: (window: Exclude<WorkspaceWindow, { kind: "webpage" }>) => void;
+  openWorkspaceWindow: (window: Exclude<WorkspaceWindow, { kind: "webpage" | "browser" }>) => void;
   createWorkspaceWebpage: () => void;
   selectWorkspaceWindow: (key: string) => void;
   closeWorkspaceWindow: (key: string) => void;
@@ -79,6 +83,28 @@ export function normalizeProjects(projects?: ProjectView[]) {
 
 export function createUiSlice(set: UiSliceSetter): UiSlice {
   return {
+    workspaceFocusRevision: 0,
+    desktopBrowser: null,
+    syncDesktopBrowser: browser => set(state => {
+      if (browser && state.desktopBrowser && browser.revision <= state.desktopBrowser.revision) return {};
+      const byId = new Map(browser?.tabs.map(tab => [tab.id, { ...tab, kind: "browser" as const }]) ?? []);
+      const windows: WorkspaceWindow[] = state.workspaceWindows.flatMap((window): WorkspaceWindow[] => {
+        if (window.kind !== "browser") return [window];
+        const tab = byId.get(window.id);byId.delete(window.id);return tab ? [tab] : [];
+      });
+      windows.push(...byId.values());
+      const reveal = browser?.revealTabId ? windows.find(window => window.kind === "browser" && window.id === browser.revealTabId) : undefined;
+      const selected = windows.find(window => workspaceWindowKey(window) === state.workspaceActiveKey);
+      const neighbor = windows[Math.max(0, Math.min(state.workspaceWindows.findIndex(window => workspaceWindowKey(window) === state.workspaceActiveKey), windows.length - 1))];
+      return {
+        desktopBrowser: browser ? { sessionId: browser.sessionId, revision: browser.revision, error: browser.error } : null,
+        workspaceWindows: windows,
+        workspaceActiveKey: reveal ? workspaceWindowKey(reveal) : selected ? state.workspaceActiveKey : neighbor ? workspaceWindowKey(neighbor) : null,
+        workspaceFocusRevision: state.workspaceFocusRevision + (reveal ? 1 : 0),
+        workspaceOpen: windows.length > 0 && (Boolean(reveal) || state.workspaceOpen),
+        workspaceExpanded: windows.length > 0 && state.workspaceExpanded,
+      };
+    }),
     sidebarWidth: SIDEBAR_WIDTH.initial,
     workspaceWidth: null,
     resizingPane: null,
@@ -96,14 +122,15 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
           ? state.workspaceWindows : [...state.workspaceWindows, window],
         workspaceActiveKey: key,
         workspaceOpen: true,
+        workspaceFocusRevision: state.workspaceFocusRevision + 1,
       };
     }),
     createWorkspaceWebpage: () => set((state) => {
       const window: WorkspaceWindow = { kind: "webpage", id: createUuid(), url: "" };
-      return { workspaceWindows: [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true };
+      return { workspaceWindows: [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true, workspaceFocusRevision: state.workspaceFocusRevision + 1 };
     }),
     selectWorkspaceWindow: (key) => set((state) => state.workspaceWindows.some(window => workspaceWindowKey(window) === key)
-      ? { workspaceActiveKey: key, workspaceOpen: true } : {}),
+      ? { workspaceActiveKey: key, workspaceOpen: true, workspaceFocusRevision: state.workspaceFocusRevision + 1 } : {}),
     closeWorkspaceWindow: (key) => set((state) => {
       const index = state.workspaceWindows.findIndex(window => workspaceWindowKey(window) === key);
       if (index < 0) return {};
@@ -114,6 +141,7 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
         workspaceActiveKey: state.workspaceActiveKey === key ? next ? workspaceWindowKey(next) : null : state.workspaceActiveKey,
         workspaceOpen: windows.length > 0 && state.workspaceOpen,
         workspaceExpanded: windows.length > 0 && state.workspaceExpanded,
+        workspaceFocusRevision: state.workspaceFocusRevision + 1,
       };
     }),
     navigateWorkspaceWebpage: (key, url) => set((state) => {

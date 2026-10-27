@@ -1,19 +1,32 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-core";
-import { BrowserWindow, ipcMain, shell } from "electron";
+import { ipcMain, shell } from "electron";
 
+import {desktopWindows,isDesktopRenderer} from "./desktop-window";
 import {desktopMediaHost} from "./desktop-media";
+import {desktopBrowserHost} from "./browser-host";
+import type { DesktopBrowserRequest } from "@talos/sdk-app-server/desktop";
 import type { DesktopAppServerController } from "./app-server-controller";
 import { assertDesktopRendererInvoke } from "./ipc-guard";
 import { TALOS_IPC, type TalosRuntimeState } from "./ipc";
 
 export function registerDesktopIpcHandlers(runtime: DesktopAppServerController): void {
+  ipcMain.handle(TALOS_IPC.browserRequest, (event,request:DesktopBrowserRequest) => ipcResponse(async()=>{
+    const workspace=desktopBrowserHost.workspace;
+    if(event.senderFrame!==event.sender.mainFrame || !workspace.accepts(event.sender))throw new Error("Only the product renderer may present browser targets.");
+    if(request.kind!=="bind")return workspace.request(request);
+    workspace.unbind();const version=workspace.contextVersion;
+    const options=assertDesktopRendererInvoke("user/current",{}, {actorCredentials:request.actorCredentials});
+    const actor=await runtime.invoke<AppProtocol.UserCurrentResponse>("user/current",{}, {actorCredentials:options.actorCredentials});
+    if(!workspace.accepts(event.sender)||workspace.contextVersion!==version)throw new Error("Browser workspace binding superseded.");
+    return workspace.bind(actor.user.user_id);
+  }));
   ipcMain.handle(TALOS_IPC.desktopFrameAck,(event,requestId:unknown)=>{if(typeof requestId!=="string"||event.senderFrame!==event.sender.mainFrame)throw new Error("Invalid media acknowledgement.");desktopMediaHost.acknowledge(requestId,event.sender);});
   ipcMain.handle(TALOS_IPC.workerIdentity, () => ipcResponse(() => runtime.invoke("desktop/workerIdentity", null)));
   ipcMain.handle(TALOS_IPC.connect, () => ipcResponse(() => runtime.connect()));
   ipcMain.handle(
     TALOS_IPC.invoke,
     (event, method: unknown, params: unknown, options: unknown) => ipcResponse(async () => {
-      if(event.senderFrame!==event.sender.mainFrame || !BrowserWindow.fromWebContents(event.sender))throw new Error("Only the product renderer may invoke Desktop APIs.");
+      if(event.senderFrame!==event.sender.mainFrame || !isDesktopRenderer(event.sender))throw new Error("Only the product renderer may invoke Desktop APIs.");
       const invokeOptions = assertDesktopRendererInvoke(method, params, options);
       const stream=typeof params==="object" && params!==null && "streamId" in params ? String(params.streamId):null;
       if(method==="desktop/streamOpen"&&stream)desktopMediaHost.own(stream,event.sender,()=>{
@@ -56,26 +69,26 @@ async function ipcResponse<T>(operation: () => Promise<T>): Promise<AppProtocol.
 }
 
 export function broadcastTimelineEvent(event: AppProtocol.TimelineEvent): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(TALOS_IPC.event, event);
+  for (const {view} of desktopWindows) {
+    view.webContents.send(TALOS_IPC.event, event);
   }
 }
 
 export function broadcastSubscriptionTerminated(notification: AppProtocol.SubscriptionTerminatedNotification): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(TALOS_IPC.subscriptionTerminated, notification);
+  for (const {view} of desktopWindows) {
+    view.webContents.send(TALOS_IPC.subscriptionTerminated, notification);
   }
 }
 
 export function broadcastRuntimeState(state: TalosRuntimeState): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(TALOS_IPC.runtimeState, state);
+  for (const {view} of desktopWindows) {
+    view.webContents.send(TALOS_IPC.runtimeState, state);
   }
 }
 
 export function broadcastActiveTurnChanged(notification: AppProtocol.SessionActiveTurnChangedNotification): void {
-  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TALOS_IPC.activeTurnChanged, notification);
+  for (const {view} of desktopWindows) view.webContents.send(TALOS_IPC.activeTurnChanged, notification);
 }
 export function broadcastMessageQueueChanged(notification: AppProtocol.MessageQueueChangedNotification): void {
-  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(TALOS_IPC.messageQueueChanged, notification);
+  for (const {view} of desktopWindows) view.webContents.send(TALOS_IPC.messageQueueChanged, notification);
 }

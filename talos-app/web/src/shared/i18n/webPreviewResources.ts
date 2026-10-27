@@ -1,5 +1,7 @@
 export const webPreviewResources = {
   en: {
+    browserTitle: "Browser", browserContent: "Browser page", back: "Back", forward: "Forward",
+    browserFailed: "The browser could not complete the action. Check the address or try again.",
     title: "Web preview",
     newTab: "New webpage tab",
     emptyTitle: "New tab",
@@ -16,6 +18,8 @@ export const webPreviewResources = {
     frameTitle: "Web preview: {{url}}",
   },
   zh: {
+    browserTitle: "浏览器", browserContent: "浏览器网页", back: "后退", forward: "前进",
+    browserFailed: "浏览器未能完成操作，请检查地址或重试。",
     title: "网页预览",
     newTab: "新建网页标签页",
     emptyTitle: "新标签页",

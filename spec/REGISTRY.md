@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 050 |
+| `feat` | 051 |
 | `fix` | 010 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-050 | [Desktop managed browser tabs](feat-050-desktop-browser-tabs/design.md) | active |
 | feat-049 | [Official MCP plugin delivery](feat-049-official-mcp-plugin-delivery/design.md) | implemented |
 | feat-048 | [Custom provider connections and model selection](feat-048-custom-llm-providers/design.md) | implemented |
 | fix-009 | [Bounded tool results and Bash output logs](fix-009-bash-output-logs/design.md) | active |

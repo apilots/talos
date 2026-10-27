@@ -1,6 +1,8 @@
 import {createNativeDesktopStream} from "./desktop-stream";
 export {createNativeDesktopStream} from "./desktop-stream";
 import type { AppProtocol } from "@talos/sdk-core";
+import type { DesktopBrowserBridge } from "./desktop-browser";
+export type { DesktopBrowserBridge, DesktopBrowserState, DesktopBrowserTab, DesktopBrowserRequest, DesktopBrowserBounds } from "./desktop-browser";
 
 import {
   AppServerClient,
@@ -38,6 +40,7 @@ export interface TalosRuntimeState {
 }
 
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
+  browserWorkspace?: DesktopBrowserBridge;
   onDesktopFrame?(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;
   onRuntimeState?(handler: (state: TalosRuntimeState) => void): () => void;
   connect?(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;

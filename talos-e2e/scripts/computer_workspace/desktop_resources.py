@@ -19,7 +19,7 @@ from http.server import ThreadingHTTPServer
 from deletion_auth_fixture import ContractAuthCluster
 from fixture import ROOT, REPORT, data, free_port, require, wait_for
 from registration import configure_desktop, start_ingress
-from resources import PreviewPage, sidebar_focus, workspace_focus_resize, observe_workspace_exit, verify_workspace_exit, settle_workspace
+from resources import PreviewPage, sidebar_focus, observe_workspace_exit, verify_workspace_exit, settle_workspace
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -85,7 +85,7 @@ def cdp_ready(process, endpoint):
     return bool(document.get('webSocketDebuggerUrl'))
 
 
-def exercise(page, token, destination, markdown):
+def exercise(page, token, destination, markdown, endpoint):
     # The production main must initialize its native app-server and restore Auth
     # before the lazy Files route mounts. Match the existing native startup budget.
     expect(page.get_by_role('button', name='Upload', exact=True)).to_be_visible(timeout=45_000)
@@ -118,54 +118,104 @@ def exercise(page, token, destination, markdown):
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown.png'), full_page=True)
 
+    page.evaluate("""() => {
+        window.desktopResourceUnsubscribe = window.talos.browserWorkspace.onState(state => { window.desktopResourceState = state; });
+    }""")
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
     address.fill(destination)
     address.press('Enter')
-    first = workspace.locator('iframe').nth(0).element_handle()
-    first_frame = first.content_frame()
-    expect(first_frame.get_by_role('textbox', name='Draft')).to_be_visible()
-    require(first_frame.evaluate('typeof window.talos') == 'undefined', 'A webpage preview inherited the trusted host bridge')
-    first_frame.get_by_role('textbox', name='Draft').fill('first Desktop draft')
-    workspace_focus_resize(page, workspace, address, first, first_frame.get_by_role('textbox', name='Draft'))
+    def targets():
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(endpoint + '/json/list', timeout=2) as response:
+            return json.load(response)
+
+    def native_page(excluded=None):
+        return wait_for(lambda: next((target for target in targets() if target['url'] == destination
+            and (excluded is None or target['id'] != excluded['id'])), None), 'Native browser target')
+
+    def native(target, kind='read', value=''):
+        result = subprocess.run(['node', str(ROOT / 'talos-e2e/scripts/computer_workspace/native-resource-page.mjs'),
+            target['webSocketDebuggerUrl'], kind, value], capture_output=True, text=True, check=True, timeout=30)
+        return json.loads(result.stdout)
+
+    first = native_page()
+    require(native(first)['bridge'] == 'undefined', 'Website gained product IPC')
+    native(first, 'fill', 'first Desktop draft')
+    # Native view bounds follow keyboard resizing and responsive layout changes.
+    geometry_samples = []
+    def geometry():
+        viewport = workspace.get_by_label('Browser page', exact=True).bounding_box()
+        dimensions = native(first)
+        sample = {'viewport': viewport, 'native': dimensions, 'renderer': page.evaluate('({width:innerWidth,height:innerHeight,visibility:document.visibilityState})')}
+        if not geometry_samples or geometry_samples[-1] != sample:
+            geometry_samples.append(sample)
+            (REPORT / 'desktop-native-geometry.json').write_text(json.dumps(geometry_samples, indent=2))
+        return viewport and abs(dimensions['width'] - viewport['width']) <= 1 and abs(dimensions['height'] - viewport['height']) <= 1
+
+    wait_for(geometry, 'Native initial geometry')
+    handle = workspace.get_by_role('separator', name='Resize workspace', exact=True)
+    handle.focus()
+    handle.press('ArrowLeft')
+    settle_workspace(workspace)
+    wait_for(geometry, 'Native keyboard-resized geometry')
+    # Emulate narrower renderer viewports within the owned 1280px native
+    # window. Wider synthetic viewports would correctly be clamped by main.
+    # Native content-size clamping and physical minimized windows are exercised
+    # separately by the real Electron host scenario.
+    native_height = page.evaluate('innerHeight')
+    for width in (980, 1280):
+        address.click()
+        page.set_viewport_size({'width': width, 'height': native_height})
+        settle_workspace(workspace)
+        wait_for(geometry, 'Native responsive geometry')
+        expect(address).to_be_focused()
+        require(native(first)['value'] == 'first Desktop draft', 'First native form state was lost')
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
+    expect(workspace.get_by_role('tab')).to_have_count(3)
+    expect(workspace.get_by_role('tab').nth(2)).to_have_attribute('aria-selected', 'true')
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
     address.fill(destination)
     address.press('Enter')
-    second = workspace.locator('iframe').nth(1).element_handle()
-    second_frame = second.content_frame()
-    expect(second_frame.get_by_role('textbox', name='Draft')).to_have_value('')
-    second_frame.get_by_role('textbox', name='Draft').fill('second Desktop draft')
+    second = native_page(first)
+    require(native(second)['value'] == '', 'Same-URL native tabs shared a form')
+    native(second, 'fill', 'second Desktop draft')
     tabs = workspace.get_by_role('tab')
     expect(tabs).to_have_count(3)
     tabs.nth(1).click()
-    expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
-    require(first.evaluate('(frame) => frame.isConnected'), 'Switching resources replaced the first Desktop preview')
+    require(native(first)['value'] == 'first Desktop draft', 'First native form state was lost')
     exit_panel = observe_workspace_exit(workspace)
     workspace.get_by_role('button', name='Hide workspace (3 open windows)', exact=True).click()
     expect(workspace).not_to_be_visible()
     verify_workspace_exit(page, exit_panel, 'desktop')
-    require(first.evaluate('(frame) => frame.isConnected'), 'Hiding the Desktop workspace destroyed a webpage')
+    # Both hidden targets remain alive while only the product renderer is shown.
+    require(native(first)['value'] == 'first Desktop draft', 'First native form state was lost')
     page.get_by_role('button', name='Show workspace (3 open windows)', exact=True).click()
-    expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
     tabs.nth(2).click()
-    expect(second_frame.get_by_role('textbox', name='Draft')).to_have_value('second Desktop draft')
+    require(native(second)['value'] == 'second Desktop draft', 'Second native form state was lost')
     settle_workspace(workspace)
-    page.screenshot(path=str(REPORT / 'desktop-resource-same-url-tabs.png'), full_page=True)
-    workspace.get_by_role('button', name=re.compile('^Close ')).nth(2).click()
-    require(not second.evaluate('(frame) => frame.isConnected'), 'Closing a Desktop resource retained its iframe')
+    page.screenshot(path=str(REPORT / 'desktop-resource-native-tab-shell.png'), full_page=True)
+    native(second, 'screenshot', str(REPORT / 'desktop-resource-native-page.png'))
+    # Exercise external host reconciliation through the real preload and IPC.
+    tabs.nth(2).focus()
+    data(page.evaluate("""async () => {
+        const state = window.desktopResourceState;
+        return window.talos.browserWorkspace.request({kind:'close',sessionId:state.sessionId,tabId:state.tabs.at(-1).id});
+    }"""))
+    page.evaluate('window.desktopResourceUnsubscribe()')
+    wait_for(lambda: all(target['id'] != second['id'] for target in targets()), 'Native tab destruction')
     expect(tabs).to_have_count(2)
-    expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
+    expect(tabs.nth(1)).to_be_focused()
+    require(native(first)['value'] == 'first Desktop draft', 'First native form state was lost')
     tabs.nth(0).click()
     expect(workspace.get_by_role('heading', name='Desktop resource acceptance', exact=True)).to_be_visible()
     expect(workspace.get_by_role('tab', name=markdown.name, exact=True)).to_be_visible()
-    require(first.evaluate('(frame) => frame.isConnected'), 'Returning to Markdown destroyed the other Desktop resource')
+    require(any(target['id'] == first['id'] for target in targets()), 'Returning to Markdown disposed another native resource')
     expect(page.get_by_role('button', name='Your computer', exact=True)).to_have_count(0)
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown-retained.png'), full_page=True)
     return {'nodeId': node_id, 'nativeBrowserHost': snapshot['host'], 'nativeDisplay': snapshot['display'],
             'fileId': uploaded['fileId'], 'fileSha256': hashlib.sha256(MARKDOWN).hexdigest(),
-            'twoSameUrlPreviews': True, 'switchAndHideRetainForms': True, 'closeDestroysIframe': True,
+            'twoSameUrlNativeTabs': True, 'switchAndHideRetainForms': True, 'closeDestroysNativeTarget': True, 'nativeGeometryResponsive': True, 'hostCloseRecoversFocus': True,
             'nativeRemoteDesktopEntryAbsent': True, 'trustedBridgeAbsentInPreview': True}
 
 
@@ -223,7 +273,7 @@ def run(cluster):
                 page.wait_for_url(re.compile('^' + re.escape(renderer.as_uri())))
                 page.goto(renderer.as_uri() + '#/files')
                 evidence = exercise(page, cluster.users['alice']['access_token'],
-                    f'http://127.0.0.1:{preview.server_port}/', markdown)
+                    f'http://127.0.0.1:{preview.server_port}/', markdown, endpoint)
                 require(not errors, 'Unexpected production Desktop renderer errors: ' + repr(errors))
                 evidence.update(status='passed', renderer=str(renderer), productionMain=str(main),
                     productionMainSha256=hashlib.sha256(main.read_bytes()).hexdigest(),

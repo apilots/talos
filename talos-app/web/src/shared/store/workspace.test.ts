@@ -68,3 +68,23 @@ it("retains pane preferences through collapse and clears them with the account s
  store.setResizingPane("sidebar");store.setConnection({userId:"new-width-owner"});
  expect(useAppStore.getState()).toMatchObject({sidebarWidth:296,workspaceWidth:null,resizingPane:null});
 });
+
+const nativeState=(revision:number,ids:string[],revealTabId:string|null=null)=>({sessionId:"native-session",revision,revealTabId,error:null,tabs:ids.map(id=>({id,title:`Page ${id}`,url:"https://example.test/",back:false,forward:false,loading:false}))});
+it("reconciles native tabs without changing user selection, drawer visibility or focus intent",()=>{
+ const store=useAppStore.getState();store.openWorkspaceWindow({kind:"markdown",fileId:"review"});
+ const before=useAppStore.getState();store.syncDesktopBrowser(nativeState(1,["1","2"]));
+ expect(useAppStore.getState()).toMatchObject({workspaceActiveKey:before.workspaceActiveKey,workspaceOpen:true,workspaceFocusRevision:before.workspaceFocusRevision});
+ store.setWorkspaceOpen(false);store.syncDesktopBrowser(nativeState(2,["1","2","3"]));
+ expect(useAppStore.getState().workspaceOpen).toBe(false);
+ store.syncDesktopBrowser(nativeState(3,["1","2","3"],"2"));
+ expect(useAppStore.getState()).toMatchObject({workspaceActiveKey:JSON.stringify(["browser","2"]),workspaceOpen:true,workspaceFocusRevision:before.workspaceFocusRevision+1});
+ store.syncDesktopBrowser(nativeState(2,["outdated"]));expect(useAppStore.getState().workspaceWindows).toHaveLength(4);
+});
+it("closes native targets from host state and clears presentation without losing unrelated resources",()=>{
+ const store=useAppStore.getState();store.openWorkspaceWindow({kind:"markdown",fileId:"review"});
+ store.syncDesktopBrowser(nativeState(10,["1","2","3"],"2"));const focus=useAppStore.getState().workspaceFocusRevision;
+ store.syncDesktopBrowser(nativeState(11,["1","3"]));
+ expect(useAppStore.getState()).toMatchObject({workspaceActiveKey:JSON.stringify(["browser","3"]),workspaceFocusRevision:focus});
+ store.syncDesktopBrowser(null);
+ expect(useAppStore.getState().workspaceWindows).toEqual([{kind:"markdown",fileId:"review"}]);expect(useAppStore.getState().desktopBrowser).toBeNull();
+});

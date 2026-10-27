@@ -90,6 +90,36 @@ def owned_chrome(report, profile_root, env):
             stop_owned(process)
 
 
+@contextmanager
+def owned_window_manager(report, env):
+    """Give an isolated Xvfb display real focus/minimize semantics on hosted Linux."""
+    if sys.platform != 'linux':
+        yield
+        return
+    if not shutil.which('openbox') or not shutil.which('xprop'):
+        raise RuntimeError('Native focus acceptance requires openbox and xprop on Linux')
+    def ready():
+        result = subprocess.run(['xprop', '-root', '_NET_SUPPORTING_WM_CHECK'], env=env,
+                                capture_output=True, text=True, timeout=2)
+        return 'window id #' in result.stdout
+    if ready():
+        yield
+        return
+    with (report / 'window-manager.log').open('w') as log:
+        process = subprocess.Popen(['openbox', '--sm-disable'], env=env, stdout=log,
+                                   stderr=log, start_new_session=True)
+        own_process(process)
+        try:
+            deadline = time.monotonic() + 15
+            while not ready():
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError('Owned window manager did not become ready')
+                time.sleep(.05)
+            yield
+        finally:
+            stop_owned(process)
+
+
 def main():
     report = Path(os.environ.get('TALOS_SCENARIO_REPORT_DIR', ROOT / 'output/browser-worker'))
     report.mkdir(parents=True, exist_ok=True)
@@ -101,10 +131,10 @@ def main():
         'PATH', 'TMPDIR', 'DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'SYSTEMROOT',
     ) if key in os.environ}
     with tempfile.TemporaryDirectory(prefix='talos-native-browser-') as temporary:
-        env.update(HOME=temporary, TALOS_ACCEPTANCE_CHROME='1',
+        env.update(HOME=temporary, TALOS_HOME=temporary, TALOS_ACCEPTANCE_CHROME='1',
                    TALOS_RESOURCE_DIR=str(ROOT),
                    TALOS_SCENARIO_REPORT_DIR=str(report))
-        with owned_chrome(report, temporary, env):
+        with owned_window_manager(report, env), owned_chrome(report, temporary, env):
             native = subprocess.Popen(
                 [str(electron), str(Path(os.environ['TALOS_E2E_NATIVE_ROOT']) / 'dist')],
                 env=env, start_new_session=True,
