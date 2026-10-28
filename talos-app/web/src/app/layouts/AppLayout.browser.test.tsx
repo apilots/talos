@@ -68,9 +68,10 @@ it("binds right tabs to sessions and Files while retaining hidden webpage instan
   expect(screen.getByRole("tab", { name: "second-worker" })).toHaveAttribute("aria-selected", "true");
 });
 it("scrolls a restored active tab into view without taking focus from session navigation", () => {
+  let right = 400;
   const original = HTMLElement.prototype.getBoundingClientRect;
   const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-    if (this.getAttribute("role") === "tablist") return { left: 200, right: 400 } as DOMRect;
+    if (this.getAttribute("role") === "tablist") return { left: 200, right } as DOMRect;
     if (this.getAttribute("role") === "tab" && this.title === "first-worker") return { left: 500, right: 600 } as DOMRect;
     return original.call(this);
   });
@@ -82,6 +83,10 @@ it("scrolls a restored active tab into view without taking focus from session na
     navigation.focus();fireEvent.click(navigation);
     expect(navigation).toHaveFocus();
     expect(strip.scrollLeft).toBe(200);
+    right = 300;
+    fireEvent.transitionEnd(screen.getByRole("dialog", { name: "Right workspace" }));
+    expect(strip.scrollLeft).toBe(500);
+    expect(navigation).toHaveFocus();
   } finally { bounds.mockRestore(); }
 });
 

@@ -615,24 +615,9 @@ export type FileReadResponse = { file: FileInfo, };
 
 export type FileContentResponse = { file: FileInfo, dataBase64: string, };
 
-export type FilePreviewDocument = { "kind": "pdf", resourcePath: string, } | { "kind": "archive", entries: Array<FilePreviewEntry>, } | { "kind": "unavailable", reason: FilePreviewDocumentUnavailable, };
+export type FilePreviewDocument = { "kind": "pdf", resourcePath: string, } | { "kind": "unavailable", reason: FilePreviewDocumentUnavailable, };
 
-export type FilePreviewDocumentUnavailable = "converterUnavailable" | "conversionFailed" | "invalidArchive" | "tooLarge";
-
-export type FilePreviewEntry = {
-/**
- * Original member name for display only.
- */
-path: string,
-/**
- * Browser-normalized resource path; pass back unchanged to preview reads.
- */
-resourcePath: string,
-/**
- * Indexed name/size and filename-based MIME hint. Before choosing a member
- * viewer, read this resource with limit zero for its current byte metadata.
- */
-metadata: FilePreviewMetadata, };
+export type FilePreviewDocumentUnavailable = "converterUnavailable" | "conversionFailed" | "tooLarge";
 
 export type FilePreviewSource = { "kind": "file", fileId: string, } | { "kind": "sessionPath", sessionId: string, path: string, };
 

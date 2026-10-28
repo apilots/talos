@@ -19,8 +19,6 @@ futures-util = { workspace = true }
 infer = { workspace = true }
 mime_guess = "2"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
-tar = "0.4"
-flate2 = "1"
 tempfile = "3"
 process-wrap = { version = "9.1.0", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
 opendal = { workspace = true }
@@ -54,6 +52,7 @@ url = "2"
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
+flate2 = "1"
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 opendal = { workspace = true, features = ["services-fs", "services-memory"] }

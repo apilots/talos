@@ -26,7 +26,7 @@ detected MIME and actual rendering/decoding.
   SVG loading is separately covered by the Worker HTML assets scenario.
 - Markdown/CSV/plain text/JSON/TypeScript/XML/HTML: assert visible content and
   format-specific table/form behavior where applicable.
-- ZIP/TAR/TGZ: assert directory listing and decoded member content.
+- ZIP/TAR/TGZ: show package metadata only and assert byte-exact original downloads; no directory/member preview.
 - WAV (PCM), MP3, Ogg (Vorbis), WebM (VP8), MP4 (H.264): assert media metadata,
   video dimensions and advancing playback. These samples establish those codecs
   on the tested browser/platform, not every audio/video codec.

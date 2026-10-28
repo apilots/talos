@@ -148,8 +148,15 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     const tab = selectedTab.current, strip = tab?.closest<HTMLElement>('[role="tablist"]');
     if (!visible || !tab || !strip) return;
     // Only scroll the strip: scrollIntoView can also move the split-pane ancestors.
-    const item = tab.getBoundingClientRect(), viewport = strip.getBoundingClientRect();
-    strip.scrollLeft += item.left < viewport.left ? item.left - viewport.left : Math.max(0, item.right - viewport.right);
+    const reveal = () => {
+      const item = tab.getBoundingClientRect(), viewport = strip.getBoundingClientRect();
+      strip.scrollLeft += item.left < viewport.left ? item.left - viewport.left : Math.max(0, item.right - viewport.right);
+    };
+    reveal();
+    // Width transitions can shrink the strip after the presentation effect runs.
+    const panel = dialog.current;
+    panel?.addEventListener("transitionend", reveal);
+    return () => panel?.removeEventListener("transitionend", reveal);
   }, [active, visible, ownerKey, modal, width]);
   const modalPresentation = visible ? modal : previous.current.modal;
   return <dialog onFocusCapture={event => { focusedSurface.current = event.target; }} onBlurCapture={() => { focusedSurface.current = null; }} style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(

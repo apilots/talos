@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { useState } from "react";
+import type { FilePreviewPosition } from "@/shared/store/workspace-window";
 import "@/shared/i18n/setup";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -7,9 +9,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { resolvePreviewResourcePath, TalosApiError, type FilePreviewDescriptor, type FilePreviewSource } from "@talos/sdk-core";
 import { FilePreview } from "./FilePreview";
 
-const api = vi.hoisted(() => ({ prepare: vi.fn(), content: vi.fn(), readBytes: vi.fn(), close: vi.fn(), resourceUrl: vi.fn(), openResource: vi.fn() }));
+const api = vi.hoisted(() => ({ prepare: vi.fn(), content: vi.fn(), readBytes: vi.fn(), close: vi.fn(), resourceUrl: vi.fn(), openResource: vi.fn(), download: vi.fn() }));
 vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({ files: { preview: { ...api, resolvePath: resolvePreviewResourcePath } } }) }));
 vi.mock("@/shared/lib/open-resource", async importOriginal => ({ ...await importOriginal<typeof import("@/shared/lib/open-resource")>(), openResource: api.openResource }));
+vi.mock("../hooks/useFileContent", () => ({ downloadFile: api.download }));
+vi.mock("./PdfPreview", () => ({ default: () => <p>Converted document</p> }));
 const descriptor: FilePreviewDescriptor = { previewId: "preview", entryPath: "Review.md", resourceBaseUrl: null, document: null,
   metadata: { name: "Review.md", mimeType: "text/markdown", sizeBytes: 20 }, expiresAt: 9999999999 };
 const clients: QueryClient[] = [];
@@ -27,7 +31,7 @@ beforeEach(() => {
   api.close.mockResolvedValue({ closed: true });
   api.resourceUrl.mockImplementation((preview: FilePreviewDescriptor, path = preview.entryPath) => `talos-preview://${preview.previewId}/${path}`);
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); clients.splice(0).forEach(client => client.clear()); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); clients.splice(0).forEach(client => client.clear()); });
 
 it("renders through one prepared resource and releases its grant when the tab closes", async () => {
   const view = setup();
@@ -43,6 +47,7 @@ it("uses the same resource contract for a session path", async () => {
   const session: FilePreviewSource = { kind: "sessionPath", sessionId: "session-1", path: "output/report.md" };
   setup(session);
   await screen.findByRole("heading", { name: "Product" });
+  expect(screen.getByRole("textbox", { name: "File location" })).toHaveValue("output/report.md");
   expect(api.prepare).toHaveBeenCalledWith({ source: session });
 });
 it("uses the SDK URL for native HTML assets without eagerly copying their bytes", async () => {
@@ -91,25 +96,50 @@ it("resolves Markdown links and images from the prepared document and keeps regi
   expect(api.prepare).toHaveBeenCalledWith({ source: { kind: "file", fileId: "image-1" } });
 });
 
-it("inspects the selected archive member through the shared read API before choosing its view", async () => {
-  // jsdom has no text-range geometry; retain the real CodeMirror read flow.
+it("shows package metadata and downloads the original archive", async () => {
+  const metadata = { name: "source-bundle.tar", mimeType: "application/x-tar", sizeBytes: 10240 };
+  const bytes = new Uint8Array([1, 2, 3]);
+  api.prepare.mockResolvedValue({ ...descriptor, entryPath: metadata.name, metadata, document: null });
+  api.content.mockResolvedValue(bytes);
+  setup();
+  expect(await screen.findByRole("heading", { name: metadata.name })).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("Download");
+  expect(screen.getByText("application/x-tar · 10.0 KiB")).toBeInTheDocument();
+  expect(api.content).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Download file" }));
+  await waitFor(() => expect(api.content).toHaveBeenCalledWith(expect.objectContaining({ entryPath: metadata.name }), metadata.name));
+  expect(api.download).toHaveBeenCalledWith(bytes, metadata.name, metadata.mimeType);
+});
+
+it("downloads the original Office source while displaying its derived PDF", async () => {
+  const metadata = { name: "report.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", sizeBytes: 2048 };
+  const bytes = new Uint8Array([4, 5, 6]);
+  api.prepare.mockResolvedValue({ ...descriptor, entryPath: metadata.name, metadata, document: { kind: "pdf", resourcePath: "__preview__/document.pdf" } });
+  api.content.mockResolvedValue(bytes);
+  setup();
+  await screen.findByText("Converted document");
+  fireEvent.click(screen.getByRole("button", { name: "Download file" }));
+  await waitFor(() => expect(api.download).toHaveBeenCalledWith(bytes, metadata.name, metadata.mimeType));
+  expect(api.content).toHaveBeenCalledWith(expect.objectContaining({ entryPath: metadata.name }), metadata.name);
+});
+
+it("switches HTML between browser and shared source view within one resource grant", async () => {
   const createRange = document.createRange.bind(document);
   vi.spyOn(document, "createRange").mockImplementation(() => Object.assign(createRange(), { getClientRects: () => [], getBoundingClientRect: () => new DOMRect() }));
-  const metadata = { name: "source.ts", mimeType: "video/mp2t", sizeBytes: 24 };
-  const resourcePath = "__preview__/entries/docs/source.ts";
-  const archive = { name: "source-bundle.tar", mimeType: "application/x-tar", sizeBytes: 10240 };
-  api.prepare.mockResolvedValue({ ...descriptor, metadata: archive, document: { kind: "archive", entries: [{ path: "./docs/source.ts", resourcePath, metadata }] } });
-  api.readBytes.mockImplementation(async ({ offset, limit }: { offset: number; limit: number }) => ({ metadata: { ...metadata, mimeType: "text/plain" }, offset, data: limit ? new TextEncoder().encode("export const value = 42;") : new Uint8Array() }));
-  const view = setup();
-  fireEvent.click(await screen.findByRole("button", { name: /docs\/source.ts/ }));
-  expect(await screen.findByRole("combobox", { name: "Encoding" })).toBeInTheDocument();
-  await waitFor(() => expect(view.container.querySelector(".cm-content")).toHaveTextContent("export const value = 42;"));
-  expect(api.readBytes).toHaveBeenCalledWith({ previewId: "preview", resourcePath, offset: 0, limit: 0 });
-  expect(view.container.querySelector("iframe")).toBeNull();
-  expect(screen.getByRole("navigation", { name: "Archive navigation" })).toHaveTextContent("source-bundle.tar");
-  expect(screen.getByRole("navigation", { name: "Archive navigation" })).toHaveTextContent("./docs/source.ts");
-  expect(screen.getByRole("textbox", { name: "File location" })).toHaveValue("Files / source-bundle.tar / ./docs/source.ts");
-  fireEvent.click(screen.getByRole("button", { name: "Back to archive" }));
-  expect(await screen.findByRole("heading", { name: "source-bundle.tar" })).toBeInTheDocument();
-  expect(screen.getByRole("list", { name: "Archive contents" })).toHaveTextContent("./docs/source.ts");
+  const body = new TextEncoder().encode("<h1>HTML source</h1>");
+  api.prepare.mockResolvedValue({ ...descriptor, entryPath: "report.html", metadata: { name: "report.html", mimeType: "text/html", sizeBytes: body.byteLength } });
+  api.readBytes.mockResolvedValue({ offset: 0, metadata: { sizeBytes: body.byteLength }, data: body });
+  const client = new QueryClient(); clients.push(client);
+  function Controlled() {
+    const [position, setPosition] = useState<FilePreviewPosition>();
+    return <FilePreview source={source} connectionKey="alice" instanceKey="html" position={position} onPositionChange={setPosition} />;
+  }
+  const view = render(<QueryClientProvider client={client}><Controlled /></QueryClientProvider>);
+  await screen.findByTitle("report.html");
+  fireEvent.click(screen.getByRole("button", { name: "Source" }));
+  await waitFor(() => expect(view.container.querySelector(".cm-content")).toHaveTextContent("<h1>HTML source</h1>"));
+  fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+  expect(await screen.findByTitle("report.html")).toBeInTheDocument();
+  expect(api.prepare).toHaveBeenCalledTimes(1);
+  expect(api.readBytes).toHaveBeenCalledWith({ previewId: "preview", resourcePath: "report.html", offset: 0, limit: 1024 * 1024 });
 });

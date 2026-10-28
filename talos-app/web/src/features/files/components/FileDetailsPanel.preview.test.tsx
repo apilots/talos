@@ -18,7 +18,7 @@ afterEach(() => {
 });
 it("opens the actual Markdown file in the shared right workspace without replacing its detail actions", () => {
   setup();
-  fireEvent.click(screen.getByRole("button", { name: "Preview file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
   expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "file", fileId: "notes" }]);
   expect(useAppStore.getState().workspaceOpen).toBe(true);
   expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
@@ -26,6 +26,6 @@ it("opens the actual Markdown file in the shared right workspace without replaci
 });
 it("offers the same right-side preview for PDF and images", () => {
   setup({ ...file, originalFilename: "Guide.pdf", mimeType: "application/pdf" });
-  fireEvent.click(screen.getByRole("button", { name: "Preview file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
   expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "file", fileId: "notes" }]);
 });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import "@/shared/i18n/setup";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ResourceOpenMenu } from "./ResourceOpenMenu";
@@ -59,4 +59,13 @@ it.each(["context", "selection", "collapse"])("retires a retained menu when its 
   });
   await waitFor(() => expect(screen.queryByRole("menuitem")).not.toBeInTheDocument());
   expect(trigger).not.toHaveFocus();
+});
+
+it("closes the opening menu when its surrounding document scrolls", async () => {
+  const user = userEvent.setup();
+  render(<ResourceOpenMenu resource={{ kind: "file", fileId: "report" }} />);
+  await user.click(screen.getByRole("button", { name: "Open in options" }));
+  expect(screen.getByRole("menuitem", { name: "Talos" })).toBeVisible();
+  fireEvent.scroll(document);
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
 });

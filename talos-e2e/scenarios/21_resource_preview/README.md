@@ -1,7 +1,7 @@
 # Unified resource preview
 
 `01_web_preview` covers authenticated Files HTML/image/text/Markdown/archive files,
-server-detected JSON/source MIME, CodeMirror text previews, ZIP member preview,
+server-detected JSON/source MIME, CodeMirror text previews, archive metadata/download,
 download bytes, real session history image dialogs and non-image attachments,
 file references, Web link routing, session/Files tab restoration, retained HTML
 state, refresh, and narrow modal menu/reload behavior. It also covers the same 31 fixtures through sessionPath prepare/read, a real session presentation render, direct/outbound Worker file reads, relative/root-relative HTML assets through a configured preview origin, source-line/encoding controls and real Office→PDF rendering with reading-position restoration. Auth and model upstreams
@@ -43,11 +43,11 @@ per-format status, detected MIME, assertions and screenshots. See the fixture
 README for codec and SVG limitations. Install LibreOffice Writer, Calc and
 Impress plus CJK fonts (for example fonts-noto-cjk), not Writer alone.
 
-Archive visual acceptance records the directory before opening a member, then
-verifies the source archive and full member path together with distinct bytes.
-Two members with the same basename exercise navigation and return; ZIP/TAR/TGZ
-use different content markers. TAR also captures the narrow layout and Open-in
-menu. PDF evidence includes the first page and the final second-page state;
+Archives show package metadata and download only: no listing, extraction or member
+preview. ZIP/TAR/TGZ assert byte-exact original download; TAR also captures the
+narrow layout and Open-in menu. PDF evidence includes the first page and the final second-page state;
 slide Chinese text is asserted on both pages. Native browser content screenshots
 are referenced explicitly alongside the product shell rather than treating a
 renderer-only screenshot as the complete Desktop composition.
+
+HTML acceptance also switches the existing tab to CodeMirror source and back to browser presentation using the same prepared resource. Explicit view changes may recreate the browser surface; ordinary tab/context retention remains unchanged. Files actions use the neutral Open file label for both readable and information-only resources.

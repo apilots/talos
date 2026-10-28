@@ -6197,27 +6197,6 @@
         },
         {
           "properties": {
-            "entries": {
-              "items": {
-                "$ref": "#/definitions/FilePreviewEntry"
-              },
-              "type": "array"
-            },
-            "kind": {
-              "enum": [
-                "archive"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "entries",
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
             "kind": {
               "enum": [
                 "unavailable"
@@ -6240,36 +6219,9 @@
       "enum": [
         "converterUnavailable",
         "conversionFailed",
-        "invalidArchive",
         "tooLarge"
       ],
       "type": "string"
-    },
-    "FilePreviewEntry": {
-      "properties": {
-        "metadata": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/FilePreviewMetadata"
-            }
-          ],
-          "description": "Indexed name/size and filename-based MIME hint. Before choosing a member viewer, read this resource with limit zero for its current byte metadata."
-        },
-        "path": {
-          "description": "Original member name for display only.",
-          "type": "string"
-        },
-        "resourcePath": {
-          "description": "Browser-normalized resource path; pass back unchanged to preview reads.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "metadata",
-        "path",
-        "resourcePath"
-      ],
-      "type": "object"
     },
     "FilePreviewMetadata": {
       "additionalProperties": false,

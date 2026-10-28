@@ -67,9 +67,6 @@ pub enum FilePreviewDocument {
         #[ts(rename = "resourcePath")]
         resource_path: String,
     },
-    Archive {
-        entries: Vec<FilePreviewEntry>,
-    },
     Unavailable {
         reason: FilePreviewDocumentUnavailable,
     },
@@ -80,22 +77,8 @@ pub enum FilePreviewDocument {
 pub enum FilePreviewDocumentUnavailable {
     ConverterUnavailable,
     ConversionFailed,
-    InvalidArchive,
     TooLarge,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct FilePreviewEntry {
-    /// Original member name for display only.
-    pub path: String,
-    /// Browser-normalized resource path; pass back unchanged to preview reads.
-    pub resource_path: String,
-    /// Indexed name/size and filename-based MIME hint. Before choosing a member
-    /// viewer, read this resource with limit zero for its current byte metadata.
-    pub metadata: FilePreviewMetadata,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FilePreviewReadRequest {

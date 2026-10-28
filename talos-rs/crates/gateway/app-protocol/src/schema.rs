@@ -302,7 +302,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::FileContentResponse>());
     output.push_str(&export::<talos_types::FilePreviewDocument>());
     output.push_str(&export::<talos_types::FilePreviewDocumentUnavailable>());
-    output.push_str(&export::<talos_types::FilePreviewEntry>());
     output.push_str(&export::<talos_types::FilePreviewSource>());
     output.push_str(&export::<talos_types::FilePreviewMetadata>());
     output.push_str(&export::<talos_types::FilePreviewPrepareRequest>());

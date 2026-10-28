@@ -1,6 +1,5 @@
 /** Account/endpoint-scoped presentation only; never stores credentials or media grants. */
 export type FilePreviewPosition =
-  | { kind: "archive"; resourcePath: string | null }
   | { kind: "text"; resourcePath: string | null; line: number; encoding: "utf-8" | "gb18030" | "utf-16le" }
   | { kind: "pdf"; resourcePath: string; page: number; scale: number }
   | { kind: "markdown"; resourcePath: string; scrollTop: number };
@@ -30,7 +29,6 @@ export function workspaceWindowKey(window: WorkspaceWindow): string {
 
 export function restoreFilePreviewPosition(value: unknown): FilePreviewPosition | undefined {
   if (!value || typeof value !== "object" || !("kind" in value) || !("resourcePath" in value)) return;
-  if (value.kind === "archive" && (value.resourcePath === null || typeof value.resourcePath === "string")) return { kind: "archive", resourcePath: value.resourcePath };
   if (value.resourcePath !== null && typeof value.resourcePath !== "string") return;
   const v = value as Record<string, unknown>;
   if (v.kind === "text" && typeof v.line === "number" && Number.isInteger(v.line) && v.line >= 1 && (v.encoding === "utf-8" || v.encoding === "gb18030" || v.encoding === "utf-16le")) return { kind: "text", resourcePath: value.resourcePath, line: v.line, encoding: v.encoding };

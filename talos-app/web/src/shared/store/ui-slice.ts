@@ -34,7 +34,7 @@ export interface UiSlice {
   selectWorkspaceWindow: (key: string) => void;
   closeWorkspaceWindow: (key: string) => void;
   navigateWorkspaceWebpage: (ownerKey: string, key: string, url: string, title?: string) => void;
-  setWorkspacePreviewPosition: (ownerKey: string, key: string, position: FilePreviewPosition) => void;
+  setWorkspacePreviewPosition: (ownerKey: string, key: string, position: FilePreviewPosition | undefined) => void;
   setWorkspaceOpen: (open: boolean) => void;
   setWorkspaceExpanded: (expanded: boolean) => void;
   uiTheme: UiTheme;

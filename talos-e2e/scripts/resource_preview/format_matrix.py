@@ -60,7 +60,7 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
             result['detectedMime'] = file['mimeType']
             require(file['mimeType'] == case['mime'], 'FileService detected a different MIME: ' + repr(file))
             expect(page.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
-            page.get_by_role('button', name='Preview file', exact=True).click()
+            page.get_by_role('button', name='Open file', exact=True).click()
             settle_workspace(workspace)
             viewer = case['viewer']
             if viewer in ('image', 'html', 'audio', 'video'):
@@ -88,6 +88,18 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                     result['duration'] = media.evaluate('(media) => media.duration')
                     media.evaluate('(media) => media.pause()')
                     result['assertion'] = 'decoded media metadata and advancing playback'
+                if viewer == 'html':
+                    workspace.get_by_role('button', name='Source', exact=True).click()
+                    expect(workspace.locator('.cm-content:visible')).to_contain_text(case['text'])
+                    source_capture = 'format-matrix/' + case['name'] + '.source.png'
+                    page.screenshot(path=str(REPORT / source_capture), full_page=True)
+                    result['sourceScreenshot'] = source_capture
+                    workspace.get_by_role('button', name='Preview', exact=True).click()
+                    if native_pages:
+                        surface = wait_for(lambda: next((child for child in native_pages(page)
+                            if child.url.startswith('talos-preview:') and unquote(urlsplit(child.url).path).lstrip('/') == case['name']), None), 'Restored native HTML')
+                    expect(surface.get_by_role('heading', name=case['text'], exact=True)).to_be_visible()
+                    result['assertion'] += ', same-tab HTML source/preview roundtrip'
                 if native_pages:
                     surface.screenshot(path=str(folder / (case['name'] + '.content.png')))
                     result['contentScreenshot'] = 'format-matrix/' + case['name'] + '.content.png'
@@ -95,40 +107,27 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                 assert_pdf(workspace, case)
                 result['firstPageScreenshot'] = 'format-matrix/' + case['name'] + '.page-1.png'
                 result['assertion'] = 'actual PDF canvas, first-page text and second-page text' + (' / Chinese text' if case.get('chineseText') else '')
-            elif viewer == 'archive':
+            elif viewer == 'unsupported':
                 expect(workspace.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
-                directory = 'format-matrix/' + case['name'] + '.directory.png'
-                page.screenshot(path=str(REPORT / directory), full_page=True)
-                result['directoryScreenshot'] = directory
-                workspace.get_by_role('button', name=case['memberPath'], exact=False).click()
-                navigation = workspace.get_by_role('navigation', name='Archive navigation')
-                expect(navigation).to_contain_text(case['name'])
-                expect(navigation).to_contain_text(case['memberPath'])
-                expect(workspace.get_by_role('textbox', name='File location')).to_have_value('Files / ' + case['name'] + ' / ' + case['memberPath'])
-                expect(workspace.locator('.cm-content:visible')).to_contain_text(case['text'])
-                workspace.get_by_role('button', name='Back to archive', exact=True).click()
-                workspace.get_by_role('button', name=case['otherMemberPath'], exact=False).click()
-                expect(navigation).to_contain_text(case['otherMemberPath'])
-                expect(workspace.locator('.cm-content:visible')).to_contain_text(case['otherText'])
-                workspace.get_by_role('button', name='Back to archive', exact=True).click()
-                workspace.get_by_role('button', name=case['memberPath'], exact=False).click()
-                expect(workspace.locator('.cm-content:visible')).to_contain_text(case['text'])
+                expect(workspace.get_by_role('status')).to_contain_text('Download')
+                expect(workspace.locator('p:visible').filter(has_text=case['mime'])).to_be_visible()
+                with page.expect_download() as downloaded:
+                    workspace.get_by_role('button', name='Download original file', exact=True).click()
+                require(downloaded.value.path().read_bytes() == (FIXTURES / case['name']).read_bytes(), 'Package download changed original bytes')
+                result['assertion'] = 'package metadata and byte-exact original download; no member preview'
                 if case['name'].endswith('.tar'):
                     original = page.viewport_size or page.evaluate('({width:innerWidth,height:innerHeight})')
                     page.set_viewport_size({'width': 980 if native_pages else 820, 'height': original['height']})
                     settle_workspace(workspace)
-                    expect(navigation).to_contain_text(case['name'])
-                    expect(navigation).to_contain_text(case['memberPath'])
+                    expect(workspace.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
                     narrow = 'format-matrix/' + case['name'] + '.narrow.png'
                     page.screenshot(path=str(REPORT / narrow), full_page=True);result['narrowScreenshot'] = narrow
-                    options = workspace.get_by_role('button', name='Open in options', exact=True)
-                    options.click()
+                    workspace.get_by_role('button', name='Open in options', exact=True).click()
                     expect(workspace.get_by_role('menuitem', name='Talos', exact=True)).to_be_visible()
                     menu = 'format-matrix/' + case['name'] + '.menu.png'
                     page.screenshot(path=str(REPORT / menu), full_page=True);result['menuScreenshot'] = menu
                     page.keyboard.press('Escape')
                     page.set_viewport_size(original);settle_workspace(workspace)
-                result['assertion'] = 'archive directory, source/member path, distinct member bytes and return navigation'
             elif viewer == 'markdown':
                 expect(workspace.get_by_role('heading', name=case['text'], exact=True)).to_be_visible()
                 expect(workspace.get_by_role('table')).to_be_visible()
@@ -193,8 +192,6 @@ def verify_session_sources(cluster):
             pdf = case['viewer'] == 'pdf' and case['mime'] != 'application/pdf'
             if pdf:
                 require(grant['document']['kind'] == 'pdf', 'Session Office conversion failed for ' + case['name'] + ': ' + repr(grant['document']))
-            if case['viewer'] == 'archive':
-                require(grant['document']['kind'] == 'archive', 'Session archive indexing failed for ' + case['name'])
             path = grant['document']['resourcePath'] if pdf else grant['entryPath']
             part = data(http(cluster.url + '/v1/file-previews/read', {'previewId': grant['previewId'], 'resourcePath': path, 'offset': 0, 'limit': 64}, token))
             expected_bytes = b'%PDF' if pdf else (FIXTURES / case['name']).read_bytes()[:64]

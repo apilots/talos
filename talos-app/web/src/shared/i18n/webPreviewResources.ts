@@ -1,7 +1,7 @@
 export const webPreviewResources = {
   en: {
     openOptions: "Open in options", openIn: "Open in",
-    copyLink: "Copy link", copyArchiveLink: "Copy archive link",
+    copyLink: "Copy link",
     actionFailed: "Unable to complete this action. Try again.",
     linkFailed: "Unable to open this link. Use a registered file reference or a full HTTP(S) address.",
     browserTitle: "Browser", browserContent: "Browser page",
@@ -26,7 +26,7 @@ export const webPreviewResources = {
   },
   zh: {
     openOptions: "选择打开方式", openIn: "打开方式",
-    copyLink: "复制链接", copyArchiveLink: "复制归档链接",
+    copyLink: "复制链接",
     actionFailed: "无法完成此操作，请重试。",
     linkFailed: "无法打开此链接；请使用已注册文件引用或完整 HTTP(S) 地址。",
     browserTitle: "浏览器", browserContent: "浏览器网页",

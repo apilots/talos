@@ -33,6 +33,12 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
   const active = useAppStore(state => state.workspaceActiveKey);
   const visible = useAppStore(state => state.workspaceOpen);
   useEffect(() => { setMenuOpen(false); }, [owner, active, visible]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    document.addEventListener("scroll", close, true);
+    return () => document.removeEventListener("scroll", close, true);
+  }, [menuOpen]);
   const run = async (action: () => Promise<unknown>) => {
     setFailed(false);
     try { await action(); } catch { setFailed(true); }
@@ -49,7 +55,7 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
             {target.icon ? <img src={target.icon} alt="" className="size-4" /> : <ExternalLink aria-hidden="true" size={15} />}{target.id === "system" ? t(resource.kind === "webpage" ? "openExternal" : "openSystemApplication") : target.label}
           </DropdownMenuItem>) : resource.kind === "webpage" ? <DropdownMenuItem onSelect={() => run(() => openResource({ ...resource, intent: "external" }))}><ExternalLink aria-hidden="true" size={15} />{t("openExternal")}</DropdownMenuItem> : null}
           <DropdownMenuSeparator className="my-1 h-px bg-divider" />
-          <DropdownMenuItem onSelect={() => run(() => navigator.clipboard.writeText(resourceReference(resource)))}><Link2 aria-hidden="true" size={15} />{t(prepared?.document?.kind === "archive" ? "copyArchiveLink" : "copyLink")}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => run(() => navigator.clipboard.writeText(resourceReference(resource)))}><Link2 aria-hidden="true" size={15} />{t("copyLink")}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

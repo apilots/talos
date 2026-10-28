@@ -28,7 +28,7 @@ DEST = ROOT / 'talos-e2e/fixtures/resource-preview'
 
 
 def archive_fixtures():
-    """Distinct markers verify that directory/member screenshots have the same source."""
+    """Real packages exercise metadata and byte-exact original downloads."""
     cases = []
     for ext, mime in [('zip', 'application/zip'), ('tar', 'application/x-tar'), ('tgz', 'application/gzip')]:
         text = f'{ext.upper()} archive member preview: 42'
@@ -43,8 +43,7 @@ def archive_fixtures():
                 for path, content in members.items():
                     entry = tarfile.TarInfo(path); entry.size = len(content); entry.mtime = 0
                     archive.addfile(entry, io.BytesIO(content))
-        cases.append(dict(name=name, mime=mime, viewer='archive', admission='opt-in', text=text,
-                          memberPath='docs/readme.txt', otherMemberPath='notes/readme.txt', otherText=other))
+        cases.append(dict(name=name, mime=mime, viewer='unsupported', admission='opt-in'))
     return cases
 
 

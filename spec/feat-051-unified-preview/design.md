@@ -112,7 +112,7 @@ Discover/return only real native opening targets. Opening a registered or sessio
 
 ### P2-R4 — Shared document capability (T5)
 
-Office formats share LibreOffice headless conversion to PDF; PDF output shares the same browser/viewer path. Use mature archive libraries for bounded directory/member reads; member preview reuses the common resource interface. Use a mature text/PDF component where browser-native viewing is insufficient. Support text line location/encoding and bounded reads; persist only controlled reading positions. Never claim restoration of arbitrary cross-origin scripts/forms after restart. Explicitly report unavailable conversion/platform capabilities; no per-format public API or renderer registry.
+Office formats share LibreOffice headless conversion to PDF; PDF output shares the same browser/viewer path. Archives use the common unsupported-file metadata/download view only. Do not index, extract, list or preview archive members. Downloads always return the original package. Use a mature text/PDF component where browser-native viewing is insufficient. Support text line location/encoding and bounded reads; persist only controlled reading positions. Never claim restoration of arbitrary cross-origin scripts/forms after restart. Explicitly report unavailable conversion/platform capabilities; no per-format public API or renderer registry.
 
 ### P2-R5 — Verification and handoff
 
@@ -136,7 +136,7 @@ Additional configured coverage includes ODT/ODS/ODP/PPT, GIF/BMP, plain text,
 JSON/source/XML/HTML, ZIP/TAR/TGZ and representative decoded audio/video
 (WAV PCM, MP3, Ogg Vorbis, WebM VP8, MP4 H.264). Share fixtures and assertions
 between Web/Desktop. Assert actual document text/pages and spreadsheet formula
-values, Chinese Word/slide/PDF text, image decode/dimensions, archive member content and advancing media,
+values, Chinese Word/slide/PDF text, image decode/dimensions, byte-exact original archive downloads and advancing media,
 not only a visible frame or tab. A browser media family does not guarantee every
 codec/container on every platform. Files currently detects SVG as plain text;
 record source display explicitly rather than claiming visual SVG Files preview.
@@ -155,14 +155,32 @@ T1–T6 are now in the authorized expanded plan, not silently deferred. Producti
 
 ### Document resource contract
 
-`FilePreviewDescriptor.document` is either null or an explicit PDF/archive/unavailable capability. `entryPath` still addresses the original source. PDF output and archive entries publish their own resource paths; clients pass those paths back unchanged. Archive entries also provide a display `path`, so UI never parses a reserved transport prefix. Original and derived reads retain the same source authorization and grant lifetime. Archive resource paths use browser-normalized components while the archive owner retains the original member names. Listing uses filename metadata hints; selecting a member performs the common metadata-only read to classify its bounded byte prefix, using the same MIME owner as Worker files. Listing never decompresses all members. The workspace tab and Files selection retain the archive name; directory and member views identify the source archive explicitly. Member navigation displays the complete in-archive path and a return-to-directory action. Toolbar location and download/Open-in targets refer to the currently displayed member.
+`FilePreviewDescriptor.document` is either null or an explicit PDF/unavailable capability. `entryPath` addresses the original source. PDF output publishes its own resource path; clients pass that path back unchanged. Original and derived reads retain the same source authorization and grant lifetime. Archives do not publish a document capability or members. Their shared fallback view shows the source filename, MIME type and size with original-file download; it never reads package contents for presentation, lists members or extracts files. Toolbar location, Open-in and download all refer to the original package. This restores the accepted design and supersedes earlier archive-member behavior.
 
-Office conversion uses the maintained [LibreOffice](https://www.libreoffice.org/release-notes/) stable distribution (`soffice` on PATH; current latest stable line 26.8.1). Talos wraps its CLI and does not implement Office parsing. Each conversion uses an isolated temporary input/output/profile, a bounded process lifetime and the configured upload byte budget; outputs are served by the existing resource adapters. Missing conversion support leaves original-file download available. The conversion environment must provide Writer, Calc and Impress plus fonts needed by its documents (for example Noto CJK for Chinese). Fonts remain a standard converter/deployment dependency, without a Talos font renderer, text rewriting or per-format configuration. Archive indexing uses ZIP/TAR libraries, never extracts into a workspace, limits listing to 10,000 files, and bounds gzip traversal/member bytes to the configured upload budget.
+Office conversion uses the maintained [LibreOffice](https://www.libreoffice.org/release-notes/) stable distribution (`soffice` on PATH; current latest stable line 26.8.1). Talos wraps its CLI and does not implement Office parsing. Each conversion uses an isolated temporary input/output/profile, a bounded process lifetime and the configured upload byte budget; outputs are served by the existing resource adapters. Missing conversion support leaves original-file download available. The conversion environment must provide Writer, Calc and Impress plus fonts needed by its documents (for example Noto CJK for Chinese). Fonts remain a standard converter/deployment dependency, without a Talos font renderer, text rewriting or per-format configuration.
 
 PDF rendering uses [React-PDF 11](https://github.com/wojtekmaj/react-pdf/releases) and [PDF.js 6.4.299](https://github.com/mozilla/pdf.js/releases), with the wrapper and worker resolved to the same PDF.js version. Bundle its CMaps, fonts and WASM locally through the maintained Vite static-copy plugin; documents are not uploaded to an external viewer.
 
 Controlled text/PDF/Markdown position belongs to the existing session/Files window snapshot. CodeMirror owns text layout/line navigation, TextDecoder owns encoding, and React-PDF/PDF.js owns PDF rendering. Browser-native HTML/media remains on the existing browser surface; arbitrary page script/form state is not serialized.
 
+
+## Final design alignment and review contract
+
+### Final-R1 — Archive information only
+
+Restore the accepted design: package name, authoritative MIME/size and original download in the shared unsupported-file view. Do not index, extract, list, navigate or preview archive members. Remove the unused service preparation/reads, public member DTO/schema, UI selection state/components and obsolete member assertions instead of keeping dormant compatibility code. Office-derived PDF viewing remains independent; downloads retain original-source metadata.
+
+### Review-R1–Review-R3 — Design/spec alignment
+
+Independent review compares the accepted design with the current contract, including approved P2 expansions. HTML exposes Source/Preview in the same workspace tab by reusing TextPreview and its existing resource grant; returning to browser presentation clears the optional controlled text position. Explicit presentation changes may recreate their browser surface; ordinary tab/context/collapse retention remains unchanged. Registered Files locations identify the library; session file locations show their saved path without a false Files-library prefix. Files uses a neutral Open file entry for both readable and information-only resources. Open-in closes on surrounding document scroll through its current menu lifecycle. Keep the prototype README linked to this current spec and annotate superseded limits rather than reporting them as missing features.
+
+### Final-R2 — Affected acceptance
+
+Use the shared Web/Desktop format matrix with real packages and byte-exact original downloads. Cover wide/narrow layout, actual Open-in capabilities, multiple tabs and selected-tab visibility after width transitions without moving the outer split pane or stealing focus. Preserve Files/session ownership, history-image dialog and Computer entry. Distinguish initial failures, targeted correction replays and unchanged successful cases; do not repeat the full matrix without new evidence.
+
+### Final-R3 — Consolidated Review artifact
+
+Replace obsolete task output with one self-contained final HTML report under ignored output. Include layered ownership, preview routing and resource/session lifecycle diagrams; design-versus-implementation interactions; paired actual Web/Desktop format captures; explicit test provenance and remaining deployment/platform limits. Native browser content must be identified separately from renderer-only captures. Keep original failure/replay evidence reachable; do not claim report browser layout from source/link checks alone.
 
 ## Deferred website-service exposure — Product decision
 

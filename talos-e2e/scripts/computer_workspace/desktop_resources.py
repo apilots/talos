@@ -111,12 +111,12 @@ def exercise(page, token, destination, markdown, endpoint):
 
     # Select a real local file in the real Files page; upload goes through IPC.
     page.locator('input[type=file]').set_input_files(str(markdown))
-    expect(page.get_by_role('button', name='Preview file', exact=True)).to_be_visible()
+    expect(page.get_by_role('button', name='Open file', exact=True)).to_be_visible()
     uploaded = wait_for(lambda: next((item for item in invoke(page, token, 'file/list', {'limit': 20})['data']
         if item['originalFilename'] == markdown.name), None), 'Native File upload')
     content = invoke(page, token, 'file/content', {'fileId': uploaded['fileId']})
     require(base64.b64decode(content['dataBase64']) == MARKDOWN, 'Native File content differed from the uploaded local file')
-    page.get_by_role('button', name='Preview file', exact=True).click()
+    page.get_by_role('button', name='Open file', exact=True).click()
     workspace = page.get_by_role('dialog', name='Right workspace', exact=True)
     expect(workspace.get_by_role('heading', name='Desktop resource acceptance', exact=True)).to_be_visible()
     expect(workspace.get_by_role('table')).to_be_visible()

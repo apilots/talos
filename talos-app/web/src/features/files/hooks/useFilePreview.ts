@@ -35,13 +35,3 @@ export function usePreviewContent(descriptor: FilePreviewDescriptor | undefined,
     enabled: !!descriptor && enabled, retry: false, refetchOnWindowFocus: false,
   });
 }
-
-/** Archive listings use filename hints; inspect only the selected member through
- * the common metadata-only read, without copying other members into the UI. */
-export function usePreviewMetadata(descriptor: FilePreviewDescriptor | undefined, resourcePath: string | undefined) {
-  return useQuery({
-    queryKey: ["talos", "preview-metadata", descriptor?.previewId, resourcePath],
-    queryFn: async () => (await getTalosClient().files.preview.readBytes({ previewId: descriptor!.previewId, resourcePath: resourcePath!, offset: 0, limit: 0 })).metadata,
-    enabled: !!descriptor && resourcePath !== undefined, retry: false, refetchOnWindowFocus: false,
-  });
-}
