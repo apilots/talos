@@ -80,7 +80,14 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                     result['assertion'] = 'document content and form'
                 else:
                     media = surface.locator('video,audio').first
-                    wait_for(lambda: media.evaluate('(media) => media.readyState >= 2 && Number.isFinite(media.duration) && media.duration > 0'), 'Decoded media ' + case['name'])
+                    try:
+                        wait_for(lambda: media.evaluate('(media) => media.readyState >= 2 && Number.isFinite(media.duration) && media.duration > 0'), 'Decoded media ' + case['name'])
+                    finally:
+                        result['media'] = media.evaluate('''(media, mime) => ({
+                            userAgent: navigator.userAgent, canPlayType: media.canPlayType(mime),
+                            readyState: media.readyState, networkState: media.networkState,
+                            error: media.error && {code: media.error.code, message: media.error.message}
+                        })''', case['mime'])
                     if viewer == 'video':
                         require(media.evaluate('(media) => [media.videoWidth,media.videoHeight]') == [case['width'], case['height']], 'Video dimensions differed')
                     media.evaluate('async (media) => { media.muted = true; await media.play(); }')

@@ -40,6 +40,9 @@ it("resolves Markdown and HTML references from their document directory with sta
   expect(resolvePreviewResourcePath("docs/report.md", "images/chart.png")).toBe("docs/images/chart.png");
   expect(resolvePreviewResourcePath("docs/report.md", "../next.md")).toBe("next.md");
   expect(resolvePreviewResourcePath("docs/report.md", "/assets/a%20b.png")).toBe("assets/a b.png");
+  expect(resolvePreviewResourcePath("docs/report.md", "plots/100%.png")).toBe("docs/plots/100%.png");
+  expect(resolvePreviewResourcePath("docs/report.md", "plots/100%25%20done.png")).toBe("docs/plots/100% done.png");
+  expect(resolvePreviewResourcePath("docs/report.md", "plots/100% done.png")).toBe("docs/plots/100% done.png");
   expect(resolvePreviewResourcePath("docs/report.md", "https://example.com/report")).toBeUndefined();
 });
 
@@ -48,4 +51,8 @@ it("normalizes source citations against their document directory", async () => {
   expect(parseFilePreviewReference("src/worker.rs:27:5")).toEqual({ path: "src/worker.rs", line: 27 });
   expect(parseFilePreviewReference("file:///tmp/report%20one.rs#L12")).toEqual({ path: "/tmp/report one.rs", line: 12 });
   expect(parseFilePreviewReference("a%23b.rs:12", { fromPath: "docs/report.md" })).toEqual({ path: "docs/a#b.rs", line: 12 });
+  expect(parseFilePreviewReference("/workspace/project/src/lib.rs#L27", { fromPath: "docs/report.md" })).toEqual({ path: "/workspace/project/src/lib.rs", line: 27 });
+  expect(parseFilePreviewReference("../src/lib.rs#L27", { fromPath: "docs/report.md" })).toEqual({ path: "src/lib.rs", line: 27 });
+  expect(parseFilePreviewReference("reports/100% done.md")).toEqual({ path: "reports/100% done.md" });
+  expect(parseFilePreviewReference("file:///workspace/reports/100%25%20done.md#L12")).toEqual({ path: "/workspace/reports/100% done.md", line: 12 });
 });

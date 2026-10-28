@@ -87,11 +87,13 @@ it("resolves Markdown links and images from the prepared document and keeps regi
   api.prepare.mockImplementation(async ({ source }: { source: FilePreviewSource }) => source.kind === "sessionPath"
     ? { ...descriptor, entryPath: "docs/report.md" }
     : { ...descriptor, previewId: "picture", entryPath: "attached.png", metadata: { name: "attached.png", mimeType: "image/png", sizeBytes: 4 } });
-  api.content.mockResolvedValue(new TextEncoder().encode("[Next](next.md)\n\n![Chart](images/chart.png)\n\n![Attached](talos-file://image-1)"));
+  api.content.mockResolvedValue(new TextEncoder().encode("[Next](next.md)\n\n[Source](/workspace/project/src/lib.rs#L27)\n\n![Chart](images/100%25%20done.png)\n\n![Attached](talos-file://image-1)"));
   setup({ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" });
   fireEvent.click(await screen.findByRole("link", { name: "Next" }));
   expect(api.openResource).toHaveBeenCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "docs/next.md" });
-  expect(screen.getByAltText("Chart")).toHaveAttribute("src", "talos-preview://preview/docs/images/chart.png");
+  fireEvent.click(screen.getByRole("link", { name: "Source" }));
+  expect(api.openResource).toHaveBeenLastCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "/workspace/project/src/lib.rs", position: { kind: "text", resourcePath: null, line: 27, encoding: "utf-8" } });
+  expect(screen.getByAltText("Chart")).toHaveAttribute("src", "talos-preview://preview/docs/images/100% done.png");
   expect(await screen.findByAltText("Attached")).toHaveAttribute("src", "talos-preview://picture/attached.png");
   expect(api.prepare).toHaveBeenCalledWith({ source: { kind: "file", fileId: "image-1" } });
 });

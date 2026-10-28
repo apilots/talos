@@ -51,3 +51,11 @@ are referenced explicitly alongside the product shell rather than treating a
 renderer-only screenshot as the complete Desktop composition.
 
 HTML acceptance also switches the existing tab to CodeMirror source and back to browser presentation using the same prepared resource. Explicit view changes may recreate the browser surface; ordinary tab/context retention remains unchanged. Files actions use the neutral Open file label for both readable and information-only resources.
+
+Web acceptance also follows an absolute filesystem citation with a line anchor
+from a Worker Markdown document and decodes adjacent images whose names contain
+literal/encoded percent signs and spaces. File citations retain absolute paths;
+document assets keep browser URL-root semantics. Media assertions require actual
+decoding and advancing playback. CI selects official stable Chrome, including
+its media codecs, rather than a Chromium snapshot; per-case evidence records
+the user agent, MIME capability, ready/network state and media error.

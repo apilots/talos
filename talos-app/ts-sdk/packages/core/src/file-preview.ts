@@ -1,4 +1,5 @@
 import { decodeFileBytes } from "./file-content";
+import decodeUriComponent from "decode-uri-component";
 import type { FilePreviewPrepareRequest, FilePreviewDescriptor, FilePreviewReadRequest, FilePreviewContent, FilePreviewCloseRequest, FilePreviewCloseResponse, FilePreviewMetadata } from "./types";
 
 export interface FilePreviewTransport {
@@ -51,7 +52,7 @@ export function createFilePreviewClient(transport: FilePreviewTransport, resourc
 export function resolvePreviewResourcePath(fromPath: string, reference: string): string | undefined {
   if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//")) return undefined;
   const base = new URL(fromPath.split("/").map(encodeURIComponent).join("/"), "https://preview.invalid/");
-  return decodeURIComponent(new URL(reference, base).pathname.slice(1));
+  return decodeUriComponent(new URL(reference, base).pathname.slice(1));
 }
 
 export interface FilePreviewReference { path: string; line?: number }
@@ -64,7 +65,7 @@ export function parseFilePreviewReference(reference: string, options: { fromPath
   if (/^file:\/\//i.test(reference)) {
     const url = new URL(reference);
     if (url.hostname && url.hostname !== "localhost") throw new Error("Remote file URL hosts are unsupported.");
-    path = decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, "$1"); hash = url.hash;
+    path = decodeUriComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, "$1"); hash = url.hash;
   } else {
     const index = reference.indexOf("#");
     if (index >= 0) { path = reference.slice(0, index); hash = reference.slice(index); }
@@ -72,6 +73,7 @@ export function parseFilePreviewReference(reference: string, options: { fromPath
   const suffix = /^(.*?):([1-9]\d*)(?::\d+)?$/.exec(path);
   const line = /^#L([1-9]\d*)$/.exec(hash)?.[1] ?? suffix?.[2];
   const raw = suffix?.[1] ?? path;
-  const resolved = /^file:\/\//i.test(reference) ? raw : options.fromPath !== undefined ? resolvePreviewResourcePath(options.fromPath, raw) ?? raw : decodeURIComponent(raw);
+  // Citations keep filesystem absolute paths; only document assets use URL-root semantics.
+  const resolved = /^file:\/\//i.test(reference) ? raw : raw.startsWith("/") || options.fromPath === undefined ? decodeUriComponent(raw) : resolvePreviewResourcePath(options.fromPath, raw) ?? raw;
   return { path: resolved, ...(line && Number.isSafeInteger(Number(line)) ? { line: Number(line) } : {}) };
 }

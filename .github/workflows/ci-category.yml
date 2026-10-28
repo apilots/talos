@@ -165,6 +165,9 @@ jobs:
       - uses: browser-actions/setup-chrome@v1
         id: chrome
         if: steps.cache.outputs.hit != 'true' && matrix.chrome
+        with:
+          # Media acceptance requires Chrome codecs absent from Chromium snapshots.
+          chrome-version: stable
       - uses: actions/download-artifact@v8
         if: ${{ steps.cache.outputs.hit != 'true' && toJSON(matrix.binaries) != '[]' }}
         with:

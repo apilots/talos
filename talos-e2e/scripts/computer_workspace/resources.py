@@ -252,9 +252,13 @@ def run(cluster):
             require(metadata.get('error', {}).get('code') == 'resourceNotFound', 'Non-owner read private Markdown metadata')
             denied = context.request.get(cluster.url + '/v1/files/' + file_id + '/content', headers={'Authorization': 'Bearer ' + cluster.users['bob']['access_token']})
             require(denied.status == 404, 'Non-owner read private Markdown content')
-            with page.expect_request(lambda request: '/v1/files/' + file_id + '/content' in request.url) as content_request:
+            with page.expect_response(lambda response: response.url.endswith('/v1/file-previews') and response.request.method == 'POST') as prepared, \
+                    page.expect_request(lambda request: request.url.endswith('/v1/file-previews/read') and request.method == 'POST') as content_request:
                 page.get_by_role('button', name='Open file', exact=True).click()
-            require(content_request.value.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown content request omitted owner authentication')
+            require(prepared.value.request.post_data_json == {'source': {'kind': 'file', 'fileId': file_id}}, 'Product prepared a different Markdown source')
+            require(content_request.value.post_data_json['previewId'] == data(prepared.value.json())['previewId'], 'Product read a different preview grant')
+            for request in (prepared.value.request, content_request.value):
+                require(request.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown preview request omitted owner authentication')
             expect(workspace.get_by_role('heading', name='Workspace acceptance', exact=True)).to_be_visible()
             expect(workspace.get_by_role('tab', name='workspace-review.md', exact=True)).to_be_visible()
             settle_workspace(workspace)

@@ -163,6 +163,13 @@ PDF rendering uses [React-PDF 11](https://github.com/wojtekmaj/react-pdf/release
 
 Controlled text/PDF/Markdown position belongs to the existing session/Files window snapshot. CodeMirror owns text layout/line navigation, TextDecoder owns encoding, and React-PDF/PDF.js owns PDF rendering. Browser-native HTML/media remains on the existing browser surface; arbitrary page script/form state is not serialized.
 
+Shared SDK reference parsing preserves absolute filesystem citations and their
+line anchors when opening a session file. Document images/assets continue to
+resolve with browser relative/root-relative URL semantics within the prepared
+resource root. Both paths use the maintained `decode-uri-component` decoder so
+literal percent signs do not throw during Markdown rendering; valid URI escapes
+are decoded once. This does not change rooted authorization or source ownership.
+
 
 ## Final design alignment and review contract
 
