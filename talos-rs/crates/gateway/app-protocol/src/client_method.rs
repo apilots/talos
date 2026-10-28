@@ -119,6 +119,13 @@ pub enum ClientMethod {
     FileRead,
     #[serde(rename = "file/content")]
     FileContent,
+    #[serde(rename = "file/preview/prepare")]
+    FilePreviewPrepare,
+    #[serde(rename = "file/preview/read")]
+    FilePreviewRead,
+    #[serde(rename = "file/preview/close")]
+    FilePreviewClose,
+
     #[serde(rename = "file/update")]
     FileUpdate,
     #[serde(rename = "file/delete")]
@@ -264,6 +271,10 @@ impl ClientMethod {
             Self::FileList => "file/list",
             Self::FileRead => "file/read",
             Self::FileContent => "file/content",
+            Self::FilePreviewPrepare => "file/preview/prepare",
+            Self::FilePreviewRead => "file/preview/read",
+            Self::FilePreviewClose => "file/preview/close",
+
             Self::FileUpdate => "file/update",
             Self::FileDelete => "file/delete",
             Self::MemoryFileList => "memory/file/list",
@@ -377,6 +388,10 @@ impl FromStr for ClientMethod {
             "file/list" => Ok(Self::FileList),
             "file/read" => Ok(Self::FileRead),
             "file/content" => Ok(Self::FileContent),
+            "file/preview/prepare" => Ok(Self::FilePreviewPrepare),
+            "file/preview/read" => Ok(Self::FilePreviewRead),
+            "file/preview/close" => Ok(Self::FilePreviewClose),
+
             "file/update" => Ok(Self::FileUpdate),
             "file/delete" => Ok(Self::FileDelete),
             "memory/file/list" => Ok(Self::MemoryFileList),

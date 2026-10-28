@@ -18,10 +18,24 @@ class ChangeScopeTests(unittest.TestCase):
                                ('desktop', '21_resource_preview/02_desktop_preview.sh')]:
             cases = [item for task in selected['categories'][category]['scenarios']['include'] for item in task['cases']]
             self.assertIn(case, cases)
-        selected = impact(['talos-e2e/scripts/resource_preview/preview_fixture.py'])
-        self.assertIn('case:21_resource_preview/01_web_preview', selected.targets['webui'])
-        self.assertIn('case:21_resource_preview/02_desktop_preview', selected.targets['desktop'])
-        self.assertFalse(selected.rust or selected.installer)
+        for path in ['talos-e2e/scripts/resource_preview/preview_fixture.py',
+                     'talos-e2e/fixtures/resource-preview/manifest.json']:
+            selected = impact([path])
+            self.assertIn('case:21_resource_preview/01_web_preview', selected.targets['webui'])
+            self.assertIn('case:21_resource_preview/02_desktop_preview', selected.targets['desktop'])
+            self.assertFalse(selected.rust or selected.installer)
+
+    def test_file_admission_selects_real_web_and_desktop_preview_acceptance(self):
+        for path in ['talos-rs/crates/orchestration/service/src/file/validation.rs',
+                     'talos-rs/crates/infra/config/src/domains/storage.rs',
+                     'talos-rs/crates/common/fs/src/rooted.rs',
+                     'talos-rs/crates/orchestration/service/src/fs/preview.rs',
+                     'talos-rs/crates/orchestration/service/src/service/file_preview.rs',
+                     'talos-rs/crates/gateway/http/src/server/file_preview.rs',
+                     'talos-rs/crates/orchestration/agent-client/src/environment.rs']:
+            selected = impact([path])
+            self.assertIn('case:21_resource_preview/01_web_preview', selected.targets['webui'])
+            self.assertIn('case:21_resource_preview/02_desktop_preview', selected.targets['desktop'])
 
     def test_tui_leaf_selects_only_tui(self):
         result = impact(['talos-rs/apps/tui/src/render/chat_lines.rs'])

@@ -269,7 +269,7 @@ impl FileService {
         })
     }
 
-    async fn ready_file(&self, actor: &Actor, file_id: &str) -> TalosResult<FileRecord> {
+    pub(super) async fn ready_file(&self, actor: &Actor, file_id: &str) -> TalosResult<FileRecord> {
         self.store
             .get_file_for_owner(&owner_key(actor, file_id))
             .await?

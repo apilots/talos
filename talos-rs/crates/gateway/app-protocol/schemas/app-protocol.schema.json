@@ -3992,6 +3992,60 @@
           "properties": {
             "method": {
               "enum": [
+                "file/preview/prepare"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FilePreviewPrepareRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/preview/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FilePreviewReadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/preview/close"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FilePreviewCloseRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "file/update"
               ],
               "type": "string"
@@ -6029,6 +6083,302 @@
         "data"
       ],
       "type": "object"
+    },
+    "FilePreviewCloseRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "previewId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "previewId"
+      ],
+      "type": "object"
+    },
+    "FilePreviewCloseResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "closed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "closed"
+      ],
+      "type": "object"
+    },
+    "FilePreviewContent": {
+      "additionalProperties": false,
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "metadata": {
+          "$ref": "#/definitions/FilePreviewMetadata"
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "metadata",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "FilePreviewDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FilePreviewDocument"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Additional document capability; absent means browser/text presentation of the source."
+        },
+        "entryPath": {
+          "description": "URL path relative to the preview root; never a host filesystem path.",
+          "type": "string"
+        },
+        "expiresAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "metadata": {
+          "$ref": "#/definitions/FilePreviewMetadata"
+        },
+        "previewId": {
+          "description": "Ephemeral scoped capability. Never persist or share this identifier.",
+          "type": "string"
+        },
+        "resourceBaseUrl": {
+          "description": "Configured per-preview HTTP origin; native transports supply their own URL adapter.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "entryPath",
+        "expiresAt",
+        "metadata",
+        "previewId"
+      ],
+      "type": "object"
+    },
+    "FilePreviewDocument": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "pdf"
+              ],
+              "type": "string"
+            },
+            "resourcePath": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "resourcePath"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/definitions/FilePreviewEntry"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "archive"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "entries",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "unavailable"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/FilePreviewDocumentUnavailable"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FilePreviewDocumentUnavailable": {
+      "enum": [
+        "converterUnavailable",
+        "conversionFailed",
+        "invalidArchive",
+        "tooLarge"
+      ],
+      "type": "string"
+    },
+    "FilePreviewEntry": {
+      "properties": {
+        "metadata": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/FilePreviewMetadata"
+            }
+          ],
+          "description": "Indexed name/size and filename-based MIME hint. Before choosing a member viewer, read this resource with limit zero for its current byte metadata."
+        },
+        "path": {
+          "description": "Original member name for display only.",
+          "type": "string"
+        },
+        "resourcePath": {
+          "description": "Browser-normalized resource path; pass back unchanged to preview reads.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metadata",
+        "path",
+        "resourcePath"
+      ],
+      "type": "object"
+    },
+    "FilePreviewMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "mimeType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mimeType",
+        "name",
+        "sizeBytes"
+      ],
+      "type": "object"
+    },
+    "FilePreviewPrepareRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/FilePreviewSource"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "FilePreviewReadRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "At most one MiB per request. Zero reads metadata only.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "previewId": {
+          "type": "string"
+        },
+        "resourcePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "offset",
+        "previewId",
+        "resourcePath"
+      ],
+      "type": "object"
+    },
+    "FilePreviewSource": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "file_id": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "file_id",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "sessionPath"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "session_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "session_id"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "FileReadRequest": {
       "description": "Selects one file owned by the authenticated user.",
@@ -12547,6 +12897,15 @@
     "file_list_response": {
       "$ref": "#/definitions/FileListResponse"
     },
+    "file_preview_close_response": {
+      "$ref": "#/definitions/FilePreviewCloseResponse"
+    },
+    "file_preview_prepare_response": {
+      "$ref": "#/definitions/FilePreviewDescriptor"
+    },
+    "file_preview_read_response": {
+      "$ref": "#/definitions/FilePreviewContent"
+    },
     "file_read_response": {
       "$ref": "#/definitions/FileReadResponse"
     },
@@ -12687,6 +13046,9 @@
     "file_content_response",
     "file_delete_response",
     "file_list_response",
+    "file_preview_close_response",
+    "file_preview_prepare_response",
+    "file_preview_read_response",
     "file_read_response",
     "file_update_response",
     "file_upload_response",

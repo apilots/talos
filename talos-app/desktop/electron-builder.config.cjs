@@ -50,6 +50,8 @@ module.exports = {
     },
   ],
   asar: true,
+  // Native application tools execute package resources and require a real cwd.
+  asarUnpack: ["node_modules/**/*"],
   mac: {
     icon: path.join(repoRoot, "build/desktop/icons/icon.icns"),
     category: "public.app-category.productivity",

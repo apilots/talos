@@ -19,7 +19,7 @@ from http.server import ThreadingHTTPServer
 from deletion_auth_fixture import ContractAuthCluster
 from fixture import ROOT, REPORT, data, free_port, require, wait_for
 from registration import configure_desktop, start_ingress
-from resources import PreviewPage, sidebar_focus, workspace_focus_resize, observe_workspace_exit, verify_workspace_exit, settle_workspace
+from resources import PreviewPage, sidebar_focus, observe_workspace_exit, verify_workspace_exit, settle_workspace
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -85,6 +85,34 @@ def cdp_ready(process, endpoint):
     return bool(document.get('webSocketDebuggerUrl'))
 
 
+def native_pages(page):
+    # A synchronous property read alone does not pump Playwright CDP events.
+    page.title()
+    return [target for context in page.context.browser.contexts for target in context.pages]
+
+
+def native_page(page, url, exclude=()):
+    """Observe the real WebContentsView target from the owned CDP endpoint."""
+    return wait_for(lambda: next((target for target in native_pages(page)
+        if target not in exclude and target.url == url), None), 'Native browser target ' + url)
+
+
+def native_focus_resize(page, workspace, address, child):
+    original = page.viewport_size or page.evaluate('({width:innerWidth,height:innerHeight})')
+    draft = child.get_by_role('textbox', name='Draft')
+    value = draft.input_value()
+    try:
+        for width in (820, 1560):
+            address.click()
+            page.set_viewport_size({'width': width, 'height': original['height']})
+            settle_workspace(workspace)
+            expect(address).to_be_focused()
+            expect(draft).to_have_value(value)
+            require(not child.is_closed(), 'Passive resize destroyed the native browser')
+    finally:
+        page.set_viewport_size(original)
+
+
 def exercise(page, token, destination, markdown):
     # The production main must initialize its native app-server and restore Auth
     # before the lazy Files route mounts. Match the existing native startup budget.
@@ -122,30 +150,35 @@ def exercise(page, token, destination, markdown):
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
     address.fill(destination)
     address.press('Enter')
-    first = workspace.locator('iframe').nth(0).element_handle()
-    first_frame = first.content_frame()
+    first_frame = native_page(page, destination)
     expect(first_frame.get_by_role('textbox', name='Draft')).to_be_visible()
     require(first_frame.evaluate('typeof window.talos') == 'undefined', 'A webpage preview inherited the trusted host bridge')
     first_frame.get_by_role('textbox', name='Draft').fill('first Desktop draft')
-    workspace_focus_resize(page, workspace, address, first, first_frame.get_by_role('textbox', name='Draft'))
+    native_focus_resize(page, workspace, address, first_frame)
+    address.fill(destination + '?history=1')
+    address.press('Enter')
+    expect(first_frame).to_have_url(destination + '?history=1')
+    expect(workspace.get_by_role('button', name='Back', exact=True)).to_be_enabled()
+    workspace.get_by_role('button', name='Back', exact=True).click()
+    expect(first_frame).to_have_url(destination)
+    expect(address).to_have_value(destination)
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
     address.fill(destination)
     address.press('Enter')
-    second = workspace.locator('iframe').nth(1).element_handle()
-    second_frame = second.content_frame()
+    second_frame = native_page(page, destination, (first_frame,))
     expect(second_frame.get_by_role('textbox', name='Draft')).to_have_value('')
     second_frame.get_by_role('textbox', name='Draft').fill('second Desktop draft')
     tabs = workspace.get_by_role('tab')
     expect(tabs).to_have_count(3)
     tabs.nth(1).click()
     expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
-    require(first.evaluate('(frame) => frame.isConnected'), 'Switching resources replaced the first Desktop preview')
+    require(not first_frame.is_closed(), 'Switching resources replaced the first Desktop preview')
     exit_panel = observe_workspace_exit(workspace)
     workspace.get_by_role('button', name='Hide workspace (3 open windows)', exact=True).click()
     expect(workspace).not_to_be_visible()
     verify_workspace_exit(page, exit_panel, 'desktop')
-    require(first.evaluate('(frame) => frame.isConnected'), 'Hiding the Desktop workspace destroyed a webpage')
+    require(not first_frame.is_closed(), 'Hiding the Desktop workspace destroyed a webpage')
     page.get_by_role('button', name='Show workspace (3 open windows)', exact=True).click()
     expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
     tabs.nth(2).click()
@@ -153,19 +186,19 @@ def exercise(page, token, destination, markdown):
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-same-url-tabs.png'), full_page=True)
     workspace.get_by_role('button', name=re.compile('^Close ')).nth(2).click()
-    require(not second.evaluate('(frame) => frame.isConnected'), 'Closing a Desktop resource retained its iframe')
+    wait_for(lambda: second_frame.is_closed(), 'Closed native resource')
     expect(tabs).to_have_count(2)
     expect(first_frame.get_by_role('textbox', name='Draft')).to_have_value('first Desktop draft')
     tabs.nth(0).click()
     expect(workspace.get_by_role('heading', name='Desktop resource acceptance', exact=True)).to_be_visible()
     expect(workspace.get_by_role('tab', name=markdown.name, exact=True)).to_be_visible()
-    require(first.evaluate('(frame) => frame.isConnected'), 'Returning to Markdown destroyed the other Desktop resource')
+    require(not first_frame.is_closed(), 'Returning to Markdown destroyed the other Desktop resource')
     expect(page.get_by_role('button', name='Your computer', exact=True)).to_have_count(0)
     settle_workspace(workspace)
     page.screenshot(path=str(REPORT / 'desktop-resource-markdown-retained.png'), full_page=True)
     return {'nodeId': node_id, 'nativeBrowserHost': snapshot['host'], 'nativeDisplay': snapshot['display'],
             'fileId': uploaded['fileId'], 'fileSha256': hashlib.sha256(MARKDOWN).hexdigest(),
-            'twoSameUrlPreviews': True, 'switchAndHideRetainForms': True, 'closeDestroysIframe': True,
+            'twoSameUrlPreviews': True, 'switchAndHideRetainForms': True, 'closeDestroysNativeView': True,
             'nativeRemoteDesktopEntryAbsent': True, 'trustedBridgeAbsentInPreview': True}
 
 
@@ -231,8 +264,14 @@ def run(cluster, exercise_resources=exercise):
                     remoteDebuggingPort=debug_port, createdTurn=False, frontendMocks=False)
                 (REPORT / 'desktop-resources-acceptance.json').write_text(json.dumps(evidence, indent=2) + '\n')
             except Exception as error:
-                failure = {'errorType': type(error).__name__, 'pageUrl': page.url, 'rendererErrors': errors,
+                failure = {'errorType': type(error).__name__, 'error': str(error), 'pageUrl': page.url,
+                           'electronExitCode': process.poll(), 'rendererErrors': errors,
                            'consoleErrors': console_errors, 'requestFailures': request_failures}
+                try:
+                    failure['targets'] = browser.new_browser_cdp_session().send('Target.getTargets')
+                    failure['contexts'] = [[target.url for target in context.pages] for context in browser.contexts]
+                except Exception as diagnostics_error:
+                    failure['targetDiagnosticsError'] = str(diagnostics_error)
                 try:
                     page.screenshot(path=str(REPORT / 'desktop-resources-failure.png'), full_page=True)
                 except Exception as screenshot_error:

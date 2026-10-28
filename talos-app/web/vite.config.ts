@@ -1,7 +1,11 @@
-import { defineConfig } from "vite";
+import { defineConfig, normalizePath } from "vite";
+import { createRequire } from "node:module";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 import react from "@vitejs/plugin-react";
 import os from "node:os";
 import path from "node:path";
+
+const pdfjsDirectory = path.dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"));
 
 const defaultProjectRoot =
   process.env.VITE_DEFAULT_PROJECT_ROOT ?? path.join(os.homedir(), ".talos", "workspace-talos");
@@ -12,7 +16,7 @@ export default defineConfig({
   define: {
     __TALOS_DEFAULT_PROJECT_ROOT__: JSON.stringify(defaultProjectRoot),
   },
-  plugins: [react()],
+  plugins: [react(), viteStaticCopy({ targets: ["cmaps", "wasm", "standard_fonts"].map(folder => ({ src: normalizePath(path.join(pdfjsDirectory, folder)), dest: "pdf" })) })],
   build: {
     rollupOptions: {
       output: {

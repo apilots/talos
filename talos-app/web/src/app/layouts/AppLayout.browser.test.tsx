@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { workspaceOwnerKey } from "@/shared/store/workspace-state";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
@@ -45,7 +46,7 @@ it("binds previews opened on a fresh Settings page to the general workspace", ()
 });
 it("binds right tabs to sessions and Files while retaining hidden webpage instances", () => {
   show();
-  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(useAppStore.getState().workspaceActiveKey!, "https://one.test/"); });
+  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),useAppStore.getState().workspaceActiveKey!, "https://one.test/"); });
   const frame = screen.getByTitle("Preview content") as HTMLIFrameElement;
   const document = frame.contentDocument!;
   document.body.innerHTML = '<input value="Retained session draft">';
@@ -121,7 +122,7 @@ it("assembles real Markdown and URL descriptors independently from Computer cont
   act(() => useAppStore.getState().openWorkspaceWindow({ kind: "file", fileId: "owned-file" }));
   expect(screen.getByRole("region", { name: "Markdown preview" })).toBeInTheDocument();
   expect(fixture.closed).toEqual(["worker"]);
-  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(useAppStore.getState().workspaceActiveKey!, "http://localhost:3010/"); });
+  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),useAppStore.getState().workspaceActiveKey!, "http://localhost:3010/"); });
   expect(screen.getByRole("region", { name: "Webpage preview" })).toHaveTextContent("http://localhost:3010/");
   fireEvent.click(screen.getByRole("tab", { name: "review.md" }));
   expect(useAppStore.getState().workspaceActiveKey).toBe(workspaceWindowKey({ kind: "file", fileId: "owned-file" }));

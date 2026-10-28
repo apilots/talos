@@ -12,15 +12,17 @@ interface MarkdownRendererProps {
   className: string;
   text: string;
   renderFileImage?: (fileId: string, label: string) => ReactNode;
+  resolveImageUrl?: (url: string) => string;
+  onOpenLink?: (url: string) => Promise<void>;
 }
 
-export function MarkdownRenderer({ className, text, renderFileImage }: MarkdownRendererProps) {
+export function MarkdownRenderer({ className, text, renderFileImage, resolveImageUrl, onOpenLink }: MarkdownRendererProps) {
   const markdownComponents = useMemo(
     () => ({
-      a: ResourceLink,
+      a: (props: ComponentProps<"a">) => <ResourceLink {...props} onOpenLink={onOpenLink} />,
       img({ src, alt, title }: ComponentProps<"img">) {
         const fileId = typeof src === "string" ? fileReferenceId(src) : undefined;
-        return fileId ? renderFileImage ? renderFileImage(fileId, alt || fileId) : <FileImage fileId={fileId} label={alt || fileId} /> : <img src={src || undefined} alt={alt ?? ""} title={title} />;
+        return fileId ? renderFileImage ? renderFileImage(fileId, alt || fileId) : <FileImage fileId={fileId} label={alt || fileId} /> : <img src={typeof src === "string" && resolveImageUrl ? resolveImageUrl(src) : src || undefined} alt={alt ?? ""} title={title} />;
       },
       table(props: ComponentProps<"table">) {
         return (
@@ -30,12 +32,12 @@ export function MarkdownRenderer({ className, text, renderFileImage }: MarkdownR
         );
       },
     }),
-    [renderFileImage],
+    [renderFileImage, resolveImageUrl, onOpenLink],
   );
 
   return (
     <div className={className}>
-      <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]} remarkPlugins={[remarkGfm]} urlTransform={url => fileReferenceId(url) ? url : defaultUrlTransform(url)}>
+      <ReactMarkdown components={markdownComponents} rehypePlugins={[rehypeHighlight]} remarkPlugins={[remarkGfm]} urlTransform={(url, key) => fileReferenceId(url) || (key === "href" && /^file:\/\//i.test(url)) ? url : defaultUrlTransform(url)}>
         {text}
       </ReactMarkdown>
     </div>

@@ -1,4 +1,4 @@
-import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type WorkspaceWindow } from "./workspace-window";
+import { normalizeWorkspaceWebpageUrl, restoreFilePreviewPosition, workspaceWindowKey, type WorkspaceWindow } from "./workspace-window";
 
 export type WorkspaceContext = { kind: "session"; sessionId: string } | { kind: "files" } | { kind: "general" };
 export interface WorkspaceOwner { scope: string; context: WorkspaceContext }
@@ -40,8 +40,10 @@ export function restoreWorkspaces(value: unknown): Record<string, WorkspaceSnaps
       let window: WorkspaceWindow | null = null;
       if (item.kind === "computer" && typeof item.nodeId === "string" && item.nodeId) window = { kind: "computer", nodeId: item.nodeId };
       if (item.kind === "file" && typeof item.fileId === "string" && item.fileId) window = { kind: "file", fileId: item.fileId };
+      if (item.kind === "sessionFile" && typeof item.sessionId === "string" && item.sessionId && typeof item.path === "string" && item.path) window = { kind: "sessionFile", sessionId: item.sessionId, path: item.path };
       if (item.kind === "webpage" && typeof item.id === "string" && item.id && typeof item.url === "string"
-        && (!item.url || normalizeWorkspaceWebpageUrl(item.url))) window = { kind: "webpage", id: item.id, url: item.url };
+        && (!item.url || normalizeWorkspaceWebpageUrl(item.url))) window = { kind: "webpage", id: item.id, url: item.url, title: typeof item.title === "string" ? item.title : undefined };
+      if (window && (window.kind === "file" || window.kind === "sessionFile")) window.position = restoreFilePreviewPosition(item.position);
       if (window && !windows.some(entry => workspaceWindowKey(entry) === workspaceWindowKey(window))) windows.push(window);
     }
     const active = windows.some(window => workspaceWindowKey(window) === data.workspaceActiveKey)

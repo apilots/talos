@@ -291,6 +291,9 @@ impl AgentEnvironmentClient {
                 Call::ListModels(value) => {
                     unary!(value, environment, list_worker_models, ListModels)
                 }
+                Call::PreviewResource(value) => {
+                    unary!(value, environment, preview_resource, PreviewResource)
+                }
                 Call::ReadDirectory(value) => {
                     unary!(value, environment, read_directory, ReadDirectory)
                 }

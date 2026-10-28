@@ -1,6 +1,6 @@
 {
   "default": {
-    "commands": ["cargo", "curl", "openssl", "protoc", "python3", "node", "pnpm"],
+    "commands": ["cargo", "curl", "openssl", "protoc", "python3", "node", "pnpm", "soffice"],
     "python_modules": ["yaml", "grpc", "google.protobuf", "playwright"],
     "checks": ["chrome"],
     "binaries": ["server"]

@@ -38,7 +38,7 @@ export type TalosWebClient = {
     "list" | "add" | "update" | "delete" | "reorder" | "start"
   >;
   projects: Methods<BrowserTalosClient["projects"], "list" | "create" | "patch" | "delete">;
-  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "content" | "update" | "delete">;
+  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "content" | "update" | "delete" | "preview">;
   fs: {
     directory: Methods<BrowserTalosClient["fs"]["directory"], "read" | "create">;
   };

@@ -585,6 +585,9 @@ storage:
       max_metadata_key_bytes: 64
       max_metadata_value_bytes: 2048
       max_metadata_bytes: 8192
+    # Opt in to generated previews by adding text/html, application/json and/or
+    # text/plain here. Unrecognized UTF-8 source uses text/plain; recognized types
+    # retain their detected MIME and need its allowlist entry. Defaults stay unchanged.
     allowed_mime_types:
       - "application/msword"
       - "application/pdf"

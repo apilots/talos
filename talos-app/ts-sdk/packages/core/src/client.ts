@@ -1,3 +1,4 @@
+import { createFilePreviewClient } from "./file-preview";
 import { decodeFileContent } from "./file-content";
 import type { DesktopStreamAdapter, FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
@@ -500,6 +501,15 @@ export class TalosClient {
   };
 
   files = {
+    preview: createFilePreviewClient({
+      prepare: (request: import("./types").FilePreviewPrepareRequest) =>
+        this.http.request<import("./types").FilePreviewDescriptor>(this.url("/v1/file-previews"), { method: "POST", body: JSON.stringify(request) }),
+      read: (request: import("./types").FilePreviewReadRequest) =>
+        this.http.request<import("./types").FilePreviewContent>(this.url("/v1/file-previews/read"), { method: "POST", body: JSON.stringify(request) }),
+      close: (request: import("./types").FilePreviewCloseRequest) =>
+        this.http.request<import("./types").FilePreviewCloseResponse>(this.url("/v1/file-previews/close"), { method: "POST", body: JSON.stringify(request) }),
+    }, (preview, path) => `${preview.resourceBaseUrl ?? this.url(`/v1/file-previews/resources/${encodeURIComponent(preview.previewId)}/`)}${path.split("/").map(encodeURIComponent).join("/")}`),
+
     upload: (
       request: FileUploadRequest,
       data: FileUploadData,

@@ -627,6 +627,37 @@ impl Gateway for ServiceGateway {
         ServiceGateway::read_file_content(self, actor, request).await
     }
 
+    async fn prepare_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewPrepareRequest,
+    ) -> TalosResult<talos_types::FilePreviewDescriptor> {
+        self.service.prepare_file_preview(actor, request).await
+    }
+
+    async fn read_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewContent> {
+        ServiceGateway::read_file_preview(self, actor, request).await
+    }
+
+    async fn read_file_preview_capability(
+        &self,
+        request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewBytes> {
+        self.service.read_file_preview_capability(request).await
+    }
+
+    async fn close_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewCloseRequest,
+    ) -> TalosResult<talos_types::FilePreviewCloseResponse> {
+        self.service.close_file_preview(actor, request).await
+    }
+
     async fn update_file(
         &self,
         actor: &Actor,

@@ -471,6 +471,15 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
             }),
         }))
     }
+    environment_rpc!(
+        preview_resource,
+        PreviewResourceRequest,
+        PreviewResourceResponse,
+        preview_resource_response,
+        Content,
+        decode_preview_read,
+        encode_preview_content
+    );
     async fn read_directory(
         &self,
         request: Request<pb::ReadDirectoryRequest>,

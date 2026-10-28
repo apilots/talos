@@ -478,6 +478,37 @@ pub trait Gateway: Send + Sync {
         Err(file_gateway_unavailable())
     }
 
+    async fn prepare_file_preview(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::FilePreviewPrepareRequest,
+    ) -> TalosResult<talos_types::FilePreviewDescriptor> {
+        Err(file_gateway_unavailable())
+    }
+
+    async fn read_file_preview(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewContent> {
+        Err(file_gateway_unavailable())
+    }
+
+    /// Resource transports use only a scoped preview grant, never account credentials.
+    async fn read_file_preview_capability(
+        &self,
+        _request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewBytes> {
+        Err(file_gateway_unavailable())
+    }
+    async fn close_file_preview(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::FilePreviewCloseRequest,
+    ) -> TalosResult<talos_types::FilePreviewCloseResponse> {
+        Err(file_gateway_unavailable())
+    }
+
     /// Updates mutable metadata for one actor-owned file.
     async fn update_file(
         &self,

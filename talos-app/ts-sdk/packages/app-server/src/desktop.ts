@@ -38,6 +38,7 @@ export interface TalosRuntimeState {
 }
 
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
+  preview?: import("./preview-shell").DesktopPreviewBridge;
   onDesktopFrame?(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;
   onRuntimeState?(handler: (state: TalosRuntimeState) => void): () => void;
   connect?(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
@@ -102,3 +103,5 @@ export function createElectronAppServerClient(
 ) {
   return new ElectronAppServerClient(bridge, options);
 }
+
+export type { DesktopPreviewBridge, PreviewOpenResource, PreviewOpenTarget, PreviewOpenTargetId, PreviewBrowserBounds, PreviewBrowserOperation, PreviewBrowserState } from "./preview-shell";

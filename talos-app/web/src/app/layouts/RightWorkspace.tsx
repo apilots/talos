@@ -20,7 +20,7 @@ type TabProps = {
 };
 function WindowTab({ name, kind, selected, selectedRef, id, onSelect, onClose, onKeyDown }: TabProps & { name: string; kind: WorkspaceWindow["kind"] }) {
   const { t } = useTranslation("common");
-  const Icon = kind === "computer" ? Monitor : kind === "file" ? FileText : Globe2;
+  const Icon = kind === "computer" ? Monitor : (kind === "file" || kind === "sessionFile") ? FileText : Globe2;
   return <div className={cn("flex min-w-0 max-w-64 shrink-0 items-center rounded-lg border", selected ? `${selectionClasses.selected} ${selectionClasses.border}` : `border-transparent ${selectionClasses.idle}`)}>
     <button ref={selected ? selectedRef : undefined} id={id} role="tab" type="button" aria-selected={selected} tabIndex={selected ? 0 : -1} aria-controls={`${id}-panel`} onKeyDown={onKeyDown} onClick={onSelect} title={name} className="flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand">
       <Icon aria-hidden="true" size={13} className="shrink-0" /><span className="truncate">{name}</span>
@@ -41,7 +41,8 @@ function WorkspaceTab({ window, scope, ...props }: TabProps & { window: Workspac
   switch (window.kind) {
     case "computer": return <ComputerTab {...props} nodeId={window.nodeId} />;
     case "file": return <FileTab {...props} fileId={window.fileId} scope={scope} />;
-    case "webpage": return <WindowTab {...props} kind="webpage" name={window.url ? new URL(window.url).host : t("newTab")} />;
+    case "sessionFile": return <WindowTab {...props} kind="sessionFile" name={window.path.split(/[\\/]/).pop() || window.path} />;
+    case "webpage": return <WindowTab {...props} kind="webpage" name={window.title || (window.url ? new URL(window.url).host : t("newTab"))} />;
   }
 }
 
@@ -70,6 +71,7 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const expanded = useAppStore(state => state.workspaceExpanded);
   const select = useAppStore(state => state.selectWorkspaceWindow);
   const close = useAppStore(state => state.closeWorkspaceWindow);
+  const setPreviewPosition = useAppStore(state => state.setWorkspacePreviewPosition);
   const navigateWebpage = useAppStore(state => state.navigateWorkspaceWebpage);
   const visible = useAppStore(state => state.workspaceOpen);
   const setWidth = useAppStore(state => state.setWorkspaceWidth);
@@ -165,9 +167,9 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
         const activeWindow=context.key === ownerKey && key===active;
         const selected=visible && activeWindow;
         return <div key={`${context.key}:${key}`} id={activeWindow ? `${tabId(key)}-panel` : undefined} role="tabpanel" aria-labelledby={activeWindow ? tabId(key) : undefined} hidden={!activeWindow} inert={!selected} className="h-full min-h-0">
-          {window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={url => navigateWebpage(key,url)} />
+          {window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={(url, title) => navigateWebpage(context.key,key,url,title)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
-            : window.kind === "file" ? <FilePreview fileId={window.fileId} connectionKey={scope} instanceKey={context.key} /> : null}
+            : window.kind === "file" ? <FilePreview source={{ kind: "file", fileId: window.fileId }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : window.kind === "sessionFile" ? <FilePreview source={{ kind: "sessionPath", sessionId: window.sessionId, path: window.path }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : null}
         </div>;
       }))}
     </div>

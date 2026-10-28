@@ -20,5 +20,10 @@
     "check": "pnpm --filter talos-web check",
     "check:repo": "node ./scripts/check-repo.mjs && node --test ./scripts/error-presentation-rule.test.mjs && python3 ../scripts/check_error_contract.py",
     "ci:frontend-app": "pnpm lint && pnpm test && pnpm typecheck && pnpm build && pnpm check:repo"
+  },
+  "pnpm": {
+    "overrides": {
+      "react-pdf>pdfjs-dist": "6.4.299"
+    }
   }
 }

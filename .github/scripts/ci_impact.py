@@ -172,7 +172,7 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             result.full(rust, frontend)
         elif path.startswith('talos-e2e/'):
             result.harness = True
-            if path.startswith(('talos-e2e/scenarios/21_resource_preview/', 'talos-e2e/scripts/resource_preview/')):
+            if path.startswith(('talos-e2e/scenarios/21_resource_preview/', 'talos-e2e/scripts/resource_preview/', 'talos-e2e/fixtures/resource-preview/')):
                 if path.endswith('.sh'):
                     category = 'webui' if Path(path).name.startswith('01_') else 'desktop'
                     result.targets[category].add(PREVIEW_CASES[category])
@@ -232,6 +232,17 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
         result.targets['desktop'].add(PREVIEW_CASES['desktop'])
     elif 'talos-desktop' in result.frontend:
         result.targets['desktop'].add(PREVIEW_CASES['desktop'])
+    if any(path.startswith(('talos-rs/crates/orchestration/service/src/file/',
+                            'talos-rs/crates/orchestration/service/src/fs/preview',
+                            'talos-rs/crates/orchestration/service/src/service/file_preview',
+                            'talos-rs/crates/common/fs/src/rooted',
+                            'talos-rs/crates/gateway/http/src/server/file_preview',
+                            'talos-rs/crates/orchestration/agent-client/src/environment',
+                            'talos-rs/crates/orchestration/agent-protocol/src/environment',
+                            'talos-rs/crates/orchestration/agent-pb/proto/environment',
+                            'talos-rs/crates/infra/config/src/domains/storage')) for path in paths):
+        for category, case in PREVIEW_CASES.items():
+            result.targets[category].add(case)
     if any(path in ('talos-e2e/scripts/computer_workspace/resources.py',
                     'talos-e2e/scripts/computer_workspace/desktop_resources.py') for path in paths):
         for category, case in PREVIEW_CASES.items():

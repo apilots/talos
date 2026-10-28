@@ -677,6 +677,27 @@ impl WorkerEnvironment for AgentEnvironmentClient {
             )
         })
     }
+    fn preview_resource(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPreviewRequest,
+    ) -> AgentFuture<'_, TalosResult<WorkerPreviewResponse>> {
+        Box::pin(async move {
+            invoke!(
+                self,
+                preview_resource,
+                PreviewResource,
+                pb::PreviewResourceRequest {
+                    auth: Some(node_pb::encode_auth(self.auth.clone())),
+                    context: Some(wire::encode_context(context)),
+                    params: Some(wire::encode_preview_read(params)?)
+                },
+                preview_resource_response,
+                Content,
+                decode_preview_content
+            )
+        })
+    }
     fn read_directory(
         &self,
         context: WorkerEnvironmentContext,

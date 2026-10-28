@@ -27,6 +27,15 @@ message ModelCatalog {
   repeated ModelInfo models = 1;
   ModelSelection default_model_selection = 2;
 }
+message PreviewOpenParams { string root = 1; string path = 2; int64 expires_at = 3; }
+message PreviewReadParams { string handle = 1; string path = 2; uint64 offset = 3; uint32 limit = 4; }
+message PreviewOperation { oneof operation { PreviewOpenParams open = 1; PreviewReadParams read = 2; string close = 3; } }
+message PreviewMetadata { string name = 1; string mime_type = 2; uint64 size_bytes = 3; }
+message PreviewOpened { string handle = 1; string resource_path = 2; PreviewMetadata metadata = 3; }
+message PreviewContent { PreviewMetadata metadata = 1; uint64 offset = 2; bytes data = 3; }
+message PreviewResult { oneof result { PreviewOpened opened = 1; PreviewContent content = 2; Empty closed = 3; } }
+message PreviewResourceRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PreviewOperation params = 3; }
+message PreviewResourceResponse { oneof result { PreviewResult content = 1; Failure failure = 2; } }
 message DirectoryReadParams {
   optional string path = 1;
 }
@@ -342,6 +351,7 @@ service WorkerEnvironmentRpc {
   rpc ListWorkspaceDocs(ListWorkspaceDocsRequest) returns (ListWorkspaceDocsResponse);
   rpc GetWorkspaceInfo(GetWorkspaceInfoRequest) returns (GetWorkspaceInfoResponse);
   rpc ListWorkerModels(ListWorkerModelsRequest) returns (ListWorkerModelsResponse);
+  rpc PreviewResource(PreviewResourceRequest) returns (PreviewResourceResponse);
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
   rpc CreateDirectory(CreateDirectoryRequest) returns (CreateDirectoryResponse);
   rpc GetProjectStatus(GetProjectStatusRequest) returns (GetProjectStatusResponse);

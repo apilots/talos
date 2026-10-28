@@ -115,6 +115,9 @@ jobs:
           if [[ "$CATEGORY" == desktop ]]; then
             packages+=(caddy libgtk-3-0 libgbm1 libnss3 libasound2t64)
           fi
+          if [[ "$CATEGORY" == desktop || "$CATEGORY" == webui ]]; then
+            packages+=(libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-cjk)
+          fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends "${packages[@]}"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

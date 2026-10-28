@@ -1,6 +1,6 @@
 import { createDefaultProjects, getProjectViewKey } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
-import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type WorkspaceWindow } from "./workspace-window";
+import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type FilePreviewPosition, type WorkspaceWindow } from "./workspace-window";
 import { emptyWorkspace, snapshotWorkspace, workspaceOwnerKey, type WorkspaceOwner, type WorkspaceSnapshot } from "./workspace-state";
 
 export type UiTheme = "dark" | "light";
@@ -28,7 +28,8 @@ export interface UiSlice {
   openWorkspaceWebpage: (url: string) => void;
   selectWorkspaceWindow: (key: string) => void;
   closeWorkspaceWindow: (key: string) => void;
-  navigateWorkspaceWebpage: (key: string, url: string) => void;
+  navigateWorkspaceWebpage: (ownerKey: string, key: string, url: string, title?: string) => void;
+  setWorkspacePreviewPosition: (ownerKey: string, key: string, position: FilePreviewPosition) => void;
   setWorkspaceOpen: (open: boolean) => void;
   setWorkspaceExpanded: (expanded: boolean) => void;
   uiTheme: UiTheme;
@@ -88,6 +89,13 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
       ...state.workspaceSnapshots, [workspaceOwnerKey(state.workspaceOwner)]: snapshotWorkspace({ ...state, ...next }),
     } } : {}) };
   });
+  const updateOwnedWindows = (ownerKey: string, update: (windows: WorkspaceWindow[]) => WorkspaceWindow[]) => set(state => {
+    const current = !!state.workspaceOwner && workspaceOwnerKey(state.workspaceOwner) === ownerKey;
+    const snapshot = current ? snapshotWorkspace(state) : state.workspaceSnapshots[ownerKey];
+    if (!snapshot) return {};
+    const next = { ...snapshot, workspaceWindows: update(snapshot.workspaceWindows) };
+    return { ...(current ? { workspaceWindows: next.workspaceWindows } : {}), workspaceSnapshots: { ...state.workspaceSnapshots, [ownerKey]: next } };
+  });
   return {
     sidebarWidth: SIDEBAR_WIDTH.initial,
     workspaceWidth: null,
@@ -111,7 +119,7 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
       const key = workspaceWindowKey(window);
       return {
         workspaceWindows: state.workspaceWindows.some(entry => workspaceWindowKey(entry) === key)
-          ? state.workspaceWindows : [...state.workspaceWindows, window],
+          ? (window.kind !== "computer" && window.position ? state.workspaceWindows.map(entry => workspaceWindowKey(entry) === key ? { ...entry, position: window.position } : entry) : state.workspaceWindows) : [...state.workspaceWindows, window],
         workspaceActiveKey: key,
         workspaceOpen: true,
       };
@@ -141,12 +149,12 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
         workspaceExpanded: windows.length > 0 && state.workspaceExpanded,
       };
     }),
-    navigateWorkspaceWebpage: (key, url) => updateWorkspace((state) => {
-      if (!state.workspaceWindows.some(window => window.kind === "webpage" && workspaceWindowKey(window) === key)) return {};
+    setWorkspacePreviewPosition: (ownerKey, key, position) => updateOwnedWindows(ownerKey, windows => windows.map(window => workspaceWindowKey(window) === key && (window.kind === "file" || window.kind === "sessionFile") ? { ...window, position } : window)),
+    navigateWorkspaceWebpage: (ownerKey, key, url, title) => {
       const address = normalizeWorkspaceWebpageUrl(url);
       if (!address) throw new Error("Enter an HTTP or HTTPS address without credentials.");
-      return { workspaceWindows: state.workspaceWindows.map(window => workspaceWindowKey(window) === key ? { ...window, url: address } : window) };
-    }),
+      updateOwnedWindows(ownerKey, windows => windows.map(window => window.kind === "webpage" && workspaceWindowKey(window) === key ? { ...window, url: address, title } : window));
+    },
     setWorkspaceOpen: (open) => updateWorkspace((state) => ({
       workspaceOpen: open && state.workspaceWindows.length > 0,
       ...(!open ? { workspaceExpanded: false } : {}),

@@ -2,19 +2,21 @@ import { useRef, useState } from "react";
 import { ArrowRight, Globe2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useBrowserSurface } from "./useBrowserSurface";
 import { BrowserToolbar, BrowserFrame } from "./BrowserToolbar";
 import { normalizeWorkspaceWebpageUrl } from "@/shared/store/workspace-window";
 
 /** A separate client-side preview, with no Talos credentials or host bridge. */
-export function WebPagePreview({ url, onNavigate }: { url: string; onNavigate: (url: string) => void }) {
+export function WebPagePreview({ url, onNavigate }: { url: string; onNavigate: (url: string, title?: string) => void }) {
   const { t } = useTranslation("webPreview");
   const [revision, setRevision] = useState(0);
   const addressInput = useRef<HTMLInputElement>(null);
   const destination = normalizeWorkspaceWebpageUrl(url);
+  const surface = useBrowserSurface(destination ?? undefined, onNavigate);
 
   return (
     <section aria-label={t("title")} className="flex h-full min-h-0 flex-col bg-background">
-      <BrowserToolbar source={{ kind: "webpage", url, onNavigate, inputRef: addressInput }} onRefresh={() => setRevision(value => value + 1)} refreshDisabled={!destination} />
+      <BrowserToolbar source={{ kind: "webpage", url, onNavigate, inputRef: addressInput }} surface={surface} onRefresh={() => surface.native ? surface.command("reload") : setRevision(value => value + 1)} refreshDisabled={!destination} />
       {destination ? <p className="shrink-0 border-b border-border/50 bg-surface/20 px-4 py-1.5 text-[11px] leading-4 text-muted">{t("previewHint")}</p> : null}
       {!url ? (
         <div className="min-h-0 flex-1 overflow-y-auto bg-background px-7 py-10">
@@ -29,7 +31,7 @@ export function WebPagePreview({ url, onNavigate }: { url: string; onNavigate: (
       ) : !destination ? (
         <div className="m-5 rounded-xl border border-danger/25 bg-danger/5 p-5 text-sm leading-6 text-danger" role="alert">{t("invalidAddress")}</div>
       ) : (
-        <BrowserFrame key={`${destination}:${revision}`} url={destination} title={t("frameTitle", { url: destination })} />
+        <BrowserFrame key={surface.native ? "native" : `${destination}:${revision}`} surface={surface} url={destination} title={t("frameTitle", { url: destination })} />
       )}
     </section>
   );

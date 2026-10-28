@@ -24,7 +24,19 @@ fn file_router(state: Arc<HttpApiState>) -> Router {
                 .patch(update_file_handler)
                 .delete(delete_file_handler),
         )
+        .route(
+            "/v1/file-previews",
+            axum::routing::post(crate::server::file_preview::prepare),
+        )
+        .route(
+            "/v1/file-previews/close",
+            axum::routing::post(crate::server::file_preview::close),
+        )
         .layer(axum::Extension(test_auth()))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::server::file_preview::resource_delivery,
+        ))
         .with_state(state)
 }
 
@@ -377,4 +389,77 @@ async fn response_success_json<T: serde::de::DeserializeOwned>(
 ) -> T {
     let envelope: talos_types::ApiResponse<T> = response_json(response).await;
     expect_success(envelope)
+}
+
+#[tokio::test]
+async fn preview_routes_deliver_browser_ranges_without_account_credentials_on_the_resource_origin()
+{
+    let app = file_router(test_state(false).await);
+    let uploaded: FileUploadResponse = response_success_json(app.clone().oneshot(multipart_request(serde_json::json!({ "filename": "diagram.png", "scope": { "type": "personal" }, "tags": [], "metadata": {} }), b"\x89PNG\r\n\x1a\n", false)).await.unwrap()).await;
+    let response = app.clone().oneshot(Request::builder().method("POST").uri("/v1/file-previews").header(CONTENT_TYPE, "application/json").body(Body::from(serde_json::json!({ "source": { "kind": "file", "fileId": uploaded.file.file_id } }).to_string())).unwrap()).await.unwrap();
+    let prepared: talos_types::FilePreviewDescriptor = response_success_json(response).await;
+    let uri = format!(
+        "/v1/file-previews/resources/{}/{}",
+        prepared.preview_id, prepared.entry_path
+    );
+    let range = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&uri)
+                .header("range", "bytes=1-3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(range.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(range.headers()["content-range"], "bytes 1-3/8");
+    assert_eq!(
+        range.headers()["content-security-policy"],
+        "sandbox allow-scripts allow-forms"
+    );
+    assert_eq!(
+        axum::body::to_bytes(range.into_body(), 16)
+            .await
+            .unwrap()
+            .as_ref(),
+        b"PNG"
+    );
+    let head = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("HEAD")
+                .uri(&uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(head.headers()["content-length"], "8");
+    assert!(axum::body::to_bytes(head.into_body(), 16)
+        .await
+        .unwrap()
+        .is_empty());
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/file-previews/close")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "previewId": prepared.preview_id }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
 }

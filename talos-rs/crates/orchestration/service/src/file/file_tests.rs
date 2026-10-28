@@ -982,3 +982,56 @@ async fn markdown_upload_reads_original_bytes_and_keeps_owner_and_allowlist_chec
         .data
         .is_empty());
 }
+
+#[tokio::test]
+async fn configured_generated_files_round_trip_through_owned_file_storage() {
+    let files = TestFiles::new(|config| {
+        config.allowed_mime_types.extend([
+            "text/html".to_string(),
+            "text/plain".to_string(),
+            "application/json".to_string(),
+        ]);
+    })
+    .await;
+    let actor = Actor::regular("user-1");
+    for (filename, content, mime) in [
+        (
+            "report.html",
+            b"<section>Generated report</section>".as_slice(),
+            "text/html",
+        ),
+        ("result.json", br#"{"preview":true}"#, "application/json"),
+        ("module.ts", b"export const preview = true;", "text/plain"),
+        ("draft.json", b"{incomplete", "text/plain"),
+        ("empty.txt", b"", "text/plain"),
+    ] {
+        let uploaded = files
+            .service
+            .upload(
+                &actor,
+                FileUploadRequest {
+                    filename: filename.to_string(),
+                    scope: FileScope::Personal,
+                    tags: Vec::new(),
+                    metadata: BTreeMap::new(),
+                },
+                bytes_stream(content),
+            )
+            .await
+            .unwrap()
+            .file;
+        assert_eq!(uploaded.mime_type, mime);
+        let stored = files
+            .service
+            .read_content(
+                &actor,
+                FileReadRequest {
+                    file_id: uploaded.file_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored.file, uploaded);
+        assert_eq!(stored.bytes.as_ref(), content);
+    }
+}

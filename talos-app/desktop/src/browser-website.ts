@@ -4,7 +4,7 @@ import path from "node:path";
 import {fileURLToPath,pathToFileURL} from "node:url";
 import {app,BaseWindow,WebContentsView,session,ipcMain,type IpcMainEvent,type DownloadItem,type Session} from "electron";
 import {trackInputs,release,type Send} from "./browser-input";
-import {BROWSER_CHROME_ACTION,BROWSER_CHROME_STATE,parseBrowserChromeAction,type BrowserChromeState} from "./browser-window-contract";
+import {BROWSER_CHROME_ACTION,BROWSER_CHROME_STATE,parseBrowserChromeAction,type BrowserChromeAction,type BrowserChromeState} from "./browser-window-contract";
 export type WebsiteTab={id:string;send:Send;view?:WebContentsView;url:()=>string;title:()=>string};
 export const MAX_TABS=16;
 const resources=path.join(path.dirname(fileURLToPath(import.meta.url)),"browser-window");
@@ -20,6 +20,14 @@ export function downloadRoot(user:string):string {
   const directory=path.join(app.getPath("userData"),"browser",createHash("sha256").update(user).digest("hex").slice(0,32),"downloads");
   mkdirSync(directory,{recursive:true,mode:0o700});return directory;
 }
+export interface EmbeddedWebsitePlacement {
+  window: BaseWindow;
+  partition: string;
+  bounds: Electron.Rectangle;
+  visible: boolean;
+  onState: (state: BrowserChromeState) => void;
+  onPopup: (url: string) => void;
+}
 /** Website/profile owner. The trusted chrome is a sibling view, never an automation target. */
 export class WebsiteAccount {
   private window:BaseWindow|undefined;
@@ -31,7 +39,20 @@ export class WebsiteAccount {
   private downloadSession:Session|undefined;
   private readonly downloads=new Map<DownloadItem,string>();
   readonly downloadDirectory:string;
-  constructor(user:string) {this.downloadDirectory=downloadRoot(user);this.partition=`persist:talos-browser-${createHash("sha256").update(user).digest("hex").slice(0,32)}`;}
+  constructor(user:string, private readonly embedded?: EmbeddedWebsitePlacement) {
+    this.downloadDirectory=downloadRoot(user);
+    this.partition=embedded?.partition ?? `persist:talos-browser-${createHash("sha256").update(user).digest("hex").slice(0,32)}`;
+  }
+  private checkedUrl(url:string):string {
+    if (this.embedded && new URL(url).protocol === "talos-preview:") return new URL(url).href;
+    return checkedUrl(url);
+  }
+  layout(bounds:Electron.Rectangle, visible:boolean):void {
+    if (!this.embedded) return;
+    this.embedded.bounds=bounds; this.embedded.visible=visible; this.resize();
+    for (const tab of this.views.values()) tab.view?.setVisible(visible);
+  }
+  async operate(action:BrowserChromeAction):Promise<BrowserChromeState> { await this.navigate(action); return this.state(); }
   private readonly onChromeAction=(event:IpcMainEvent,value:unknown)=>{
     const contents=this.chrome?.webContents;
     if(!contents || event.sender!==contents || event.senderFrame!==contents.mainFrame || contents.getURL()!==chromeUrl)return;
@@ -86,6 +107,7 @@ export class WebsiteAccount {
   }
   async ensure(check:()=>void=()=>{}):Promise<void> {
     check();
+    if (this.embedded) { this.window=this.embedded.window; return; }
     if(!this.window || this.window.isDestroyed()) {
       this.window=new BaseWindow({width:1180,height:840,title:"Talos browser",show:true});
       this.window.on("resize",()=>this.resize());this.window.on("close",event=>{event.preventDefault();this.window?.hide();});
@@ -104,7 +126,7 @@ export class WebsiteAccount {
   async open(url:string,check:()=>void=()=>{}):Promise<WebsiteTab> {
     check();
     if(this.views.size>=MAX_TABS)throw new Error("Browser tab capacity exceeded.");
-    if(!this.window || this.window.isDestroyed()){await this.ensure(check);check();if(url==="about:blank")return [...this.views.values()][0];}
+    if(!this.window || this.window.isDestroyed()){await this.ensure(check);check();if(url==="about:blank" && this.views.size)return [...this.views.values()][0];}
     const browserSession=session.fromPartition(this.partition);
     if(this.downloadSession!==browserSession) {
       this.downloadSession?.removeListener("will-download",this.onDownload);
@@ -126,25 +148,42 @@ export class WebsiteAccount {
       if(input.type!=="keyDown" || !(input.control || input.meta) || input.alt)return;
       if(input.key.toLowerCase()==="l"){event.preventDefault();this.chrome?.webContents.focus();this.chrome?.webContents.send(BROWSER_CHROME_STATE,{focusAddress:true});}
     });
-    wc.setWindowOpenHandler(({url:target})=>{try{checkedUrl(target);void this.open(target).catch(error=>console.error("Website popup failed",error));}catch{/* Unsupported website popups are denied. */}return {action:"deny"};});
-    const navigation=(event:Electron.Event,target:string)=>{try{if(target!==homeUrl)checkedUrl(target);}catch{event.preventDefault();}};
+    wc.setWindowOpenHandler(({url:target})=>{try{this.checkedUrl(target);if (this.embedded) this.embedded.onPopup(target); else void this.open(target).catch(error=>console.error("Website popup failed",error));}catch{/* Unsupported website popups are denied. */}return {action:"deny"};});
+    const navigation=(event:Electron.Event,target:string)=>{
+      try {
+        if(target!==homeUrl)this.checkedUrl(target);
+        if (this.embedded && wc.getURL().startsWith("talos-preview:") && /^https?:/.test(target)) { event.preventDefault(); this.embedded.onPopup(target); }
+      }catch{event.preventDefault();}
+    };
     wc.on("will-navigate",navigation);wc.on("will-redirect",navigation);
-    check();await this.focus(id);check();await wc.loadURL(url==="about:blank"?homeUrl:checkedUrl(url));check();this.updateChrome();return tab;
+    check();await this.focus(id);check();await wc.loadURL(url==="about:blank"?homeUrl:this.checkedUrl(url));check();this.updateChrome();return tab;
   }
   async focus(id:string):Promise<void> {
     const tab=this.views.get(id);if(!tab?.view || !this.window)throw new Error("Unknown tab.");
     for(const other of this.views.values())if(other.view)this.window.contentView.removeChildView(other.view);
-    this.window.contentView.addChildView(tab.view);this.active=id;this.resize();tab.view.webContents.focus();this.updateChrome();
+    this.window.contentView.addChildView(tab.view);this.active=id;this.resize();if (!this.embedded) tab.view.webContents.focus();this.updateChrome();
   }
   private resize():void {
-    if(!this.window)return;const [width,height]=this.window.getContentSize();
+    if(!this.window)return;
+    if (this.embedded) {
+      for (const tab of this.views.values()) { tab.view?.setBounds(this.embedded.bounds); tab.view?.setVisible(this.embedded.visible); }
+      return;
+    }
+    const [width,height]=this.window.getContentSize();
     this.chrome?.setBounds({x:0,y:0,width,height:CHROME_HEIGHT});
     for(const tab of this.views.values())tab.view?.setBounds({x:0,y:CHROME_HEIGHT,width,height:Math.max(0,height-CHROME_HEIGHT)});
   }
-  private updateChrome():void {
-    if(!this.chrome || this.chrome.webContents.isDestroyed())return;
+  private state():BrowserChromeState {
     const active=this.views.get(this.active??""),wc=active?.view?.webContents;
     const state:BrowserChromeState={tabs:[...this.views.values()].map(tab=>({id:tab.id,title:tab.title().slice(0,200)||"New tab",active:tab.id===this.active})),address:active?.url()==="about:blank"?"":(active?.url()??"").slice(0,8192),back:wc?.navigationHistory.canGoBack()??false,forward:wc?.navigationHistory.canGoForward()??false,loading:wc?.isLoading()??false,error:this.error};
+    return state;
+  }
+  private updateChrome():void {
+    if (!this.embedded && (!this.chrome || this.chrome.webContents.isDestroyed())) return;
+    const state=this.state();
+    if (this.embedded) { this.embedded.onState(state); return; }
+    if(!this.chrome || this.chrome.webContents.isDestroyed())return;
+    const active=this.views.get(this.active??"");
     this.window?.setTitle(`Talos browser${active?.title()?` — ${active.title().slice(0,180)}`:""}`);
     this.chrome.webContents.send(BROWSER_CHROME_STATE,state);
   }
@@ -153,7 +192,7 @@ export class WebsiteAccount {
     const wc=this.views.get(this.active??"")?.view?.webContents;
     switch(action.kind) {
       case "state":break;
-      case "navigate":if(!wc)throw new Error("No browser tab.");await wc.loadURL(checkedUrl(action.url.includes("://")?action.url:`https://${action.url}`));break;
+      case "navigate":if(!wc)throw new Error("No browser tab.");await wc.loadURL(this.checkedUrl(action.url.includes("://")?action.url:`https://${action.url}`));break;
       case "back":if(wc?.navigationHistory.canGoBack())wc.navigationHistory.goBack();break;
       case "forward":if(wc?.navigationHistory.canGoForward())wc.navigationHistory.goForward();break;
       case "reload":wc?.reload();break;
@@ -177,8 +216,13 @@ export class WebsiteAccount {
       try {rmSync(directory,{recursive:true,force:true});}catch(error){this.failDownload(error);}
     }
     ipcMain.removeListener(BROWSER_CHROME_ACTION,this.onChromeAction);
-    for(const tab of this.views.values())tab.view?.webContents.close({waitForBeforeUnload:false});this.views.clear();
+    for(const tab of this.views.values()) {
+      if (tab.view && this.window && !this.window.isDestroyed()) this.window.contentView.removeChildView(tab.view);
+      tab.view?.webContents.close({waitForBeforeUnload:false});
+    }
+    this.views.clear();
     this.chrome?.webContents.close({waitForBeforeUnload:false});this.chrome=undefined;
-    this.window?.removeAllListeners("close");this.window?.close();this.window=undefined;
+    if (!this.embedded) { this.window?.removeAllListeners("close");this.window?.close(); }
+    this.window=undefined;
   }
 }

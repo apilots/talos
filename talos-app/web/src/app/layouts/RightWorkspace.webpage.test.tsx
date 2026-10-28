@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { workspaceOwnerKey } from "@/shared/store/workspace-state";
 import "@testing-library/jest-dom/vitest";
 import { useRef } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -23,7 +24,8 @@ function Harness() {
 beforeEach(()=>{
  HTMLDialogElement.prototype.showModal=function(){this.open=true;};HTMLDialogElement.prototype.close=function(){this.open=false;};
  useAppStore.getState().setConnection({userId:"webpage-owner"});
- useAppStore.setState({workspaceWindows:[],workspaceActiveKey:null,workspaceOpen:false,workspaceExpanded:false});
+ useAppStore.setState({workspaceOwner:null,workspaceSnapshots:{},workspaceWindows:[],workspaceActiveKey:null,workspaceOpen:false,workspaceExpanded:false});
+ useAppStore.getState().setWorkspaceContext({scope:"webpage-test",context:{kind:"general"}}, true);
 });
 afterEach(cleanup);
 it("preserves the actual webpage iframe and address draft across resource switching and collapse",()=>{
@@ -54,10 +56,10 @@ it("preserves the actual webpage iframe and address draft across resource switch
 it("keeps same-URL tabs independent and truly removes their iframes on close or account change",()=>{
  render(<Harness/>);const store=useAppStore.getState();
  act(()=>store.createWorkspaceWebpage());const first=useAppStore.getState().workspaceActiveKey!;
- act(()=>store.navigateWorkspaceWebpage(first,"https://example.test/"));
+ act(()=>store.navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),first,"https://example.test/"));
  const frame=screen.getByTitle("Web preview: https://example.test/");
  act(()=>store.createWorkspaceWebpage());const second=useAppStore.getState().workspaceActiveKey!;
- act(()=>store.navigateWorkspaceWebpage(second,"https://example.test/"));
+ act(()=>store.navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),second,"https://example.test/"));
  expect(screen.getAllByTitle("Web preview: https://example.test/")).toHaveLength(2);
  act(()=>store.closeWorkspaceWindow(first));expect(frame.isConnected).toBe(false);
  const secondFrame=screen.getByTitle("Web preview: https://example.test/");
