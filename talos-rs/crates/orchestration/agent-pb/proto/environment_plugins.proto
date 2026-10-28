@@ -102,10 +102,7 @@ message McpCredentialsUpdateParams {
 message McpDefinitionRefPlugin {
   string install_id = 1;
 }
-message McpDefinitionRefConfig {
-  string name = 1;
-}
-message McpDefinitionRef { oneof value { McpDefinitionRefPlugin plugin = 1; McpDefinitionRefConfig config = 2; } }
+message McpDefinitionRef { oneof value { McpDefinitionRefPlugin plugin = 1; } }
 message McpOAuthConfig {
   optional string client_id = 1;
   optional string client_metadata_url = 2;
@@ -149,7 +146,7 @@ message McpServerSourcePlugin {
   string plugin_id = 1;
   string install_id = 2;
 }
-message McpServerSource { oneof value { Empty config = 1; McpServerSourcePlugin plugin = 2; } }
+message McpServerSource { oneof value { McpServerSourcePlugin plugin = 2; } }
 message McpServerStatusFailed {
   ApiError error = 1;
 }

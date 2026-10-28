@@ -1,9 +1,11 @@
 export const webPreviewResources = {
   en: {
-    openOptions: "Open in options",
-    copyLink: "Copy link",
+    openOptions: "Open in options", openIn: "Open in",
+    copyLink: "Copy link", copyArchiveLink: "Copy archive link",
     actionFailed: "Unable to complete this action. Try again.",
     linkFailed: "Unable to open this link. Use a registered file reference or a full HTTP(S) address.",
+    browserTitle: "Browser", browserContent: "Browser page",
+    browserFailed: "The browser could not complete the action. Check the address or try again.",
     title: "Web preview",
     newTab: "New webpage tab",
     emptyTitle: "New tab",
@@ -23,10 +25,12 @@ export const webPreviewResources = {
     frameTitle: "Web preview: {{url}}",
   },
   zh: {
-    openOptions: "选择打开方式",
-    copyLink: "复制链接",
+    openOptions: "选择打开方式", openIn: "打开方式",
+    copyLink: "复制链接", copyArchiveLink: "复制归档链接",
     actionFailed: "无法完成此操作，请重试。",
     linkFailed: "无法打开此链接；请使用已注册文件引用或完整 HTTP(S) 地址。",
+    browserTitle: "浏览器", browserContent: "浏览器网页",
+    browserFailed: "浏览器未能完成操作，请检查地址或重试。",
     title: "网页预览",
     newTab: "新建网页标签页",
     emptyTitle: "新标签页",

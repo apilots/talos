@@ -10,8 +10,8 @@ from web import HTML, PNG
 from playwright.sync_api import expect
 
 
-def exercise(page, token, destination, markdown):
-    evidence = exercise_workspace(page, token, destination, markdown)
+def exercise(page, token, destination, markdown, endpoint):
+    evidence = exercise_workspace(page, token, destination, markdown, endpoint)
     workspace = page.get_by_role('dialog', name='Right workspace', exact=True)
     home = markdown.parent
     html = home / 'native-report.html'

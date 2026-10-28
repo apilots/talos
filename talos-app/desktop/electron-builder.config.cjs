@@ -27,6 +27,11 @@ module.exports = {
   ],
   extraResources: [
     {
+      from: "resources/plugins",
+      to: "plugins",
+      filter: ["**/*"],
+    },
+    {
       from: "resources/app-server",
       to: "app-server",
       filter: ["**/*"],

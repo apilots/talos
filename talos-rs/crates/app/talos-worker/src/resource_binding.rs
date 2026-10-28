@@ -110,6 +110,28 @@ impl Drop for ResourceGuard {
     }
 }
 impl TalosWorker {
+    /// Connect media only to the current registered ingress. Host composition may
+    /// select this connector after excluding its own local reservations; no local
+    /// or arbitrary endpoint fallback is performed here.
+    pub fn registered_desktop_connector(&self) -> talos_browser::DesktopConnector {
+        let bindings = self.resource_bindings.clone();
+        Arc::new(move |request| {
+            let client = bindings
+                .remote
+                .read()
+                .map_err(|_| TalosError::internal("Worker resource state is poisoned."))
+                .and_then(|client| {
+                    client.clone().ok_or_else(|| {
+                        TalosError::new(
+                            ErrorCode::ServiceUnavailable,
+                            "The registered desktop ingress is unavailable.",
+                        )
+                    })
+                });
+            Box::pin(async move { client?.open_desktop_media(request).await })
+        })
+    }
+
     pub(crate) fn resource_binder(&self) -> talos_agent::AgentInvocationResourceBinder {
         let resources = self.resource_bindings.clone();
         Arc::new(move |auth, session, caller| resources.bind(auth, session, caller))

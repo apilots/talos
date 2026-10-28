@@ -37,7 +37,7 @@ pub(crate) fn scan_source(
     })
 }
 
-fn scan_materialized_plugins(
+pub(crate) fn scan_materialized_plugins(
     source: &MarketplaceSource,
     root: &Path,
 ) -> TalosResult<(Vec<Plugin>, Vec<PluginWarning>)> {

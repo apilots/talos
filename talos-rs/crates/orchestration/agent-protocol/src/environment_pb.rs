@@ -7,6 +7,7 @@ pub use crate::environment_browser_pb::*;
 pub use crate::environment_config_pb::*;
 pub use crate::environment_docs_pb::*;
 pub use crate::environment_memory_pb::*;
+pub use crate::environment_plugin_changes_pb::*;
 pub use crate::environment_plugins_pb::*;
 pub use crate::environment_skills_pb::*;
 use crate::{harness_pb, WorkerEnvironmentContext};

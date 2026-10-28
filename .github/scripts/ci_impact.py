@@ -19,6 +19,7 @@ BROWSER_CASES = {f'case:20_browser_workspace/{name}' for name in (
     '01_resource_tabs', '02_desktop_resources', '03_desktop_browser', '04_desktop_mcp', '05_docker_worker')}
 PREVIEW_CASES = {'webui': 'case:21_resource_preview/01_web_preview',
                  'desktop': 'case:21_resource_preview/02_desktop_preview'}
+SERVER_BROWSER_CASE = 'case:20_browser_workspace/06_docker_server'
 TUI_TARGET = 'case:08_tui/controlled_chat'
 MEDIA_OWNERS = ('desktop-media', 'desktop-ipc', 'desktop-server-requests', 'ipc-guard',
                 'ipc.', 'preload.', 'app-server-controller')
@@ -105,6 +106,7 @@ class Impact:
         if frontend_checks:
             self.frontend.update(frontend.roots)
         self.targets['server'].update(SERVER_TARGETS.values())
+        self.targets['server'].add(SERVER_BROWSER_CASE)
         self.targets['desktop'].update(BROWSER_CASES - {'case:20_browser_workspace/01_resource_tabs'})
         self.targets['webui'].add('case:20_browser_workspace/01_resource_tabs')
         for category, case in PREVIEW_CASES.items():
@@ -124,6 +126,10 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             owner = rust.owner(path)
             if owner:
                 direct_rust.add(owner)
+                if path.startswith('talos-rs/apps/tui/src/cli/'):
+                    result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                if path == 'talos-rs/apps/tui/src/input.rs':
+                    result.targets['server'].add(SERVER_BROWSER_CASE)
 
             else:
                 result.full(rust, frontend, frontend_checks=False)
@@ -166,8 +172,14 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             result.full(rust, frontend)
         elif path.startswith('build/worker/'):
             result.targets['desktop'].add('case:20_browser_workspace/05_docker_worker')
+            if path.startswith('build/worker/browser/'):
+                result.targets['server'].add(SERVER_BROWSER_CASE)
         elif path.startswith('build/server/'):
             result.targets['server'].update(SERVER_TARGETS.values())
+            result.targets['server'].add(SERVER_BROWSER_CASE)
+        elif path.startswith('build/container/'):
+            result.targets['desktop'].add('case:20_browser_workspace/05_docker_worker')
+            result.targets['server'].add(SERVER_BROWSER_CASE)
         elif path.startswith('build/'):
             result.full(rust, frontend)
         elif path.startswith('talos-e2e/'):
@@ -179,6 +191,12 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 else:
                     for category, case in PREVIEW_CASES.items():
                         result.targets[category].add(case)
+            elif path in ('talos-e2e/scripts/plugin_cli.py',
+                        'talos-e2e/scenarios/05_cli/plugin_lifecycle.sh',
+                        'talos-e2e/scenarios/05_cli/requirements.json'):
+                result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                if path == 'talos-e2e/scripts/plugin_cli.py':
+                    result.targets['desktop'].add('case:20_browser_workspace/05_docker_worker')
             elif path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
                                 'talos-e2e/tests/tui_install_target_test.sh', 'talos-e2e/docker/tui-install-')):
                 result.installer = True
@@ -188,11 +206,19 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.targets['webui'].add('case:20_browser_workspace/01_resource_tabs')
             elif path == 'talos-e2e/scripts/computer_workspace/deletion.py':
                 result.targets['webui'].add('case:09_app_server/computer_deletion')
+            elif path == 'talos-e2e/scripts/browser-worker/server.py':
+                result.targets['server'].add(SERVER_BROWSER_CASE)
             elif path.startswith('talos-e2e/scripts/browser-worker/'):
                 result.targets['desktop'].update(BROWSER_CASES - {'case:20_browser_workspace/01_resource_tabs'})
+                result.targets['server'].add(SERVER_BROWSER_CASE)
             elif path.startswith('talos-e2e/scenarios/20_browser_workspace/') and path.endswith('.sh'):
                 target = 'case:' + path.removeprefix('talos-e2e/scenarios/').removesuffix('.sh')
-                result.targets['webui' if '/01_' in path else 'desktop'].add(target)
+                category = 'server' if '/06_' in path else ('webui' if '/01_' in path else 'desktop')
+                result.targets[category].add(target)
+            elif path == 'talos-e2e/scenarios/20_browser_workspace/requirements.json':
+                result.targets['server'].add(SERVER_BROWSER_CASE)
+                result.targets['webui'].add('case:20_browser_workspace/01_resource_tabs')
+                result.targets['desktop'].update(BROWSER_CASES - {'case:20_browser_workspace/01_resource_tabs'})
             elif path.startswith('talos-e2e/scenarios/') and any(
                     path.startswith('talos-e2e/scenarios/' + prefix) for prefix in
                     ('01_models/', '09_app_server/', '12_files/', '14_sandbox/', '06_tools/')):
@@ -263,12 +289,15 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.targets['server'].update(SERVER_TARGETS[k] for k in ('models', 'output-logs', 'sandbox', 'files'))
             if owner in {'talos-skills', 'talos-plugin'}:
                 result.targets['server'].add(SERVER_TARGETS['models'])
+            if owner in {'talos-plugin', 'talos-mcp', 'talos-browser'}:
+                result.targets['server'].add(SERVER_BROWSER_CASE)
             if owner == 'talos-mcp':
                 result.targets['desktop'].add('case:20_browser_workspace/04_desktop_mcp')
             if owner == 'talos-browser':
                 result.targets['desktop'].update(BROWSER_CASES - {'case:20_browser_workspace/01_resource_tabs'})
         elif consumers & {'talos-server', 'talos-worker-bin'}:
             result.targets['server'].update(SERVER_TARGETS.values())
+            result.targets['server'].add(SERVER_BROWSER_CASE)
             result.targets['webui'].add('case:20_browser_workspace/01_resource_tabs')
             result.targets['desktop'].update(BROWSER_CASES - {'case:20_browser_workspace/01_resource_tabs'})
         elif consumers & {'app-server', 'talos-app-server-test-client'}:

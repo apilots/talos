@@ -10,6 +10,7 @@ const rustDir = path.join(repoRoot, "talos-rs");
 const confDir = path.join(repoRoot, "conf");
 const resourcesDir = path.join(desktopDir, "resources", "app-server");
 const resourcesConfDir = path.join(desktopDir, "resources", "conf");
+run("node", [path.join(repoRoot, "build/plugins/snapshot.mjs"), path.join(desktopDir, "resources/plugins/apilots-mcps")], repoRoot);
 const profile = process.env.TALOS_DESKTOP_APP_SERVER_PROFILE ?? process.env.PROFILE ?? "dev";
 const binaryName = process.platform === "win32" ? "app-server.exe" : "app-server";
 const sourceBinary =

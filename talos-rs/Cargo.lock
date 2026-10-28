@@ -6877,6 +6877,7 @@ dependencies = [
  "talos-types",
  "tempfile",
  "url",
+ "uuid",
  "wait-timeout",
 ]
 

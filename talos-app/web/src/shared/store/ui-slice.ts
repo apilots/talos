@@ -1,7 +1,9 @@
 import { createDefaultProjects, getProjectViewKey } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
 import { normalizeWorkspaceWebpageUrl, workspaceWindowKey, type FilePreviewPosition, type WorkspaceWindow } from "./workspace-window";
-import { emptyWorkspace, snapshotWorkspace, workspaceOwnerKey, type WorkspaceOwner, type WorkspaceSnapshot } from "./workspace-state";
+import { emptyWorkspace, snapshotWorkspace, workspaceBelongsToScope, workspaceOwnerKey, type WorkspaceOwner, type WorkspaceSnapshot } from "./workspace-state";
+import { createUuid } from "@/shared/lib/uuid";
+import type { DesktopBrowserState } from "@talos/sdk-app-server/desktop";
 
 export type UiTheme = "dark" | "light";
 export type Locale = "en" | "zh-CN";
@@ -10,6 +12,9 @@ export const WORKSPACE_WIDTH = { initial: 480, min: 360, max: 1040 } as const;
 export type ResizingPane = "sidebar" | "workspace" | null;
 
 export interface UiSlice {
+  desktopBrowser: DesktopBrowserState | null;
+  syncDesktopBrowser: (state: DesktopBrowserState | null) => void;
+  workspaceFocusRevision: number;
   sidebarWidth: number;
   workspaceWidth: number | null;
   resizingPane: ResizingPane;
@@ -23,7 +28,7 @@ export interface UiSlice {
   workspaceOwner: WorkspaceOwner | null;
   workspaceSnapshots: Record<string, WorkspaceSnapshot>;
   setWorkspaceContext: (owner: WorkspaceOwner, restoreOpen: boolean) => void;
-  openWorkspaceWindow: (window: Exclude<WorkspaceWindow, { kind: "webpage" }>) => void;
+  openWorkspaceWindow: (window: Exclude<WorkspaceWindow, { kind: "webpage" | "browser" }>) => void;
   createWorkspaceWebpage: () => void;
   openWorkspaceWebpage: (url: string) => void;
   selectWorkspaceWindow: (key: string) => void;
@@ -97,6 +102,33 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
     return { ...(current ? { workspaceWindows: next.workspaceWindows } : {}), workspaceSnapshots: { ...state.workspaceSnapshots, [ownerKey]: next } };
   });
   return {
+    workspaceFocusRevision: 0,
+    desktopBrowser: null,
+    syncDesktopBrowser: browser => set(state => {
+      const previous = state.desktopBrowser;
+      if (browser && previous?.sessionId === browser.sessionId && browser.revision <= previous.revision) return {};
+      const byId = new Map(browser?.tabs.map(tab => [tab.id, { ...tab, kind: "browser" as const }]) ?? []);
+      const known = new Set(previous?.tabs.map(tab => tab.id));
+      const reconcile = (snapshot: WorkspaceSnapshot, current: boolean): WorkspaceSnapshot => {
+        const windows: WorkspaceWindow[] = snapshot.workspaceWindows.flatMap((window): WorkspaceWindow[] => {
+          if (window.kind !== "browser") return [window];
+          const tab = byId.get(window.id); return tab ? [tab] : [];
+        });
+        if (current) windows.push(...[...byId.values()].filter(tab => !known.has(tab.id) && !windows.some(window => window.kind === "browser" && window.id === tab.id)));
+        const reveal = current && browser?.revealTabId ? windows.find(window => window.kind === "browser" && window.id === browser.revealTabId) : undefined;
+        const selected = windows.find(window => workspaceWindowKey(window) === snapshot.workspaceActiveKey);
+        const neighbor = windows[Math.max(0, Math.min(snapshot.workspaceWindows.findIndex(window => workspaceWindowKey(window) === snapshot.workspaceActiveKey), windows.length - 1))];
+        return { workspaceWindows: windows, workspaceActiveKey: reveal ? workspaceWindowKey(reveal) : selected ? snapshot.workspaceActiveKey : neighbor ? workspaceWindowKey(neighbor) : null,
+          workspaceOpen: windows.length > 0 && (Boolean(reveal) || snapshot.workspaceOpen) };
+      };
+      const next = reconcile(snapshotWorkspace(state), true);
+      const reveal = next.workspaceActiveKey !== state.workspaceActiveKey && browser?.revealTabId && next.workspaceWindows.some(window => window.kind === "browser" && window.id === browser.revealTabId);
+      const snapshots = Object.fromEntries(Object.entries(state.workspaceSnapshots).map(([key, snapshot]) => [key,
+        state.workspaceOwner && workspaceBelongsToScope(key, state.workspaceOwner.scope) ? reconcile(snapshot, false) : snapshot]));
+      if (state.workspaceOwner) snapshots[workspaceOwnerKey(state.workspaceOwner)] = next;
+      return { ...next, workspaceSnapshots: snapshots, desktopBrowser: browser,
+        workspaceFocusRevision: state.workspaceFocusRevision + (reveal ? 1 : 0), workspaceExpanded: next.workspaceWindows.length > 0 && state.workspaceExpanded };
+    }),
     sidebarWidth: SIDEBAR_WIDTH.initial,
     workspaceWidth: null,
     resizingPane: null,
@@ -122,21 +154,22 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
           ? (window.kind !== "computer" && window.position ? state.workspaceWindows.map(entry => workspaceWindowKey(entry) === key ? { ...entry, position: window.position } : entry) : state.workspaceWindows) : [...state.workspaceWindows, window],
         workspaceActiveKey: key,
         workspaceOpen: true,
+        workspaceFocusRevision: state.workspaceFocusRevision + 1,
       };
     }),
     createWorkspaceWebpage: () => updateWorkspace((state) => {
-      const window: WorkspaceWindow = { kind: "webpage", id: crypto.randomUUID(), url: "" };
-      return { workspaceWindows: [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true };
+      const window: WorkspaceWindow = { kind: "webpage", id: createUuid(), url: "" };
+      return { workspaceWindows: [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true, workspaceFocusRevision: state.workspaceFocusRevision + 1 };
     }),
     openWorkspaceWebpage: url => updateWorkspace(state => {
       const address = normalizeWorkspaceWebpageUrl(url);
       if (!address) throw new Error("Enter an HTTP or HTTPS address without credentials.");
       const existing = state.workspaceWindows.find(window => window.kind === "webpage" && window.url === address);
-      const window: WorkspaceWindow = existing ?? { kind: "webpage", id: crypto.randomUUID(), url: address };
-      return { workspaceWindows: existing ? state.workspaceWindows : [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true };
+      const window: WorkspaceWindow = existing ?? { kind: "webpage", id: createUuid(), url: address };
+      return { workspaceWindows: existing ? state.workspaceWindows : [...state.workspaceWindows, window], workspaceActiveKey: workspaceWindowKey(window), workspaceOpen: true, workspaceFocusRevision: state.workspaceFocusRevision + 1 };
     }),
     selectWorkspaceWindow: (key) => updateWorkspace((state) => state.workspaceWindows.some(window => workspaceWindowKey(window) === key)
-      ? { workspaceActiveKey: key, workspaceOpen: true } : {}),
+      ? { workspaceActiveKey: key, workspaceOpen: true, workspaceFocusRevision: state.workspaceFocusRevision + 1 } : {}),
     closeWorkspaceWindow: (key) => updateWorkspace((state) => {
       const index = state.workspaceWindows.findIndex(window => workspaceWindowKey(window) === key);
       if (index < 0) return {};
@@ -147,6 +180,7 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
         workspaceActiveKey: state.workspaceActiveKey === key ? next ? workspaceWindowKey(next) : null : state.workspaceActiveKey,
         workspaceOpen: windows.length > 0 && state.workspaceOpen,
         workspaceExpanded: windows.length > 0 && state.workspaceExpanded,
+        workspaceFocusRevision: state.workspaceFocusRevision + 1,
       };
     }),
     setWorkspacePreviewPosition: (ownerKey, key, position) => updateOwnedWindows(ownerKey, windows => windows.map(window => workspaceWindowKey(window) === key && (window.kind === "file" || window.kind === "sessionFile") ? { ...window, position } : window)),

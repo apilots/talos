@@ -192,21 +192,30 @@
     "mime": "application/zip",
     "viewer": "archive",
     "admission": "opt-in",
-    "text": "Archive member preview: 42"
+    "text": "ZIP archive member preview: 42",
+    "memberPath": "docs/readme.txt",
+    "otherMemberPath": "notes/readme.txt",
+    "otherText": "ZIP notes member: a different file with the same basename"
   },
   {
     "name": "matrix-bundle.tar",
     "mime": "application/x-tar",
     "viewer": "archive",
     "admission": "opt-in",
-    "text": "Archive member preview: 42"
+    "text": "TAR archive member preview: 42",
+    "memberPath": "docs/readme.txt",
+    "otherMemberPath": "notes/readme.txt",
+    "otherText": "TAR notes member: a different file with the same basename"
   },
   {
     "name": "matrix-bundle.tgz",
     "mime": "application/gzip",
     "viewer": "archive",
     "admission": "opt-in",
-    "text": "Archive member preview: 42"
+    "text": "TGZ archive member preview: 42",
+    "memberPath": "docs/readme.txt",
+    "otherMemberPath": "notes/readme.txt",
+    "otherText": "TGZ notes member: a different file with the same basename"
   },
   {
     "name": "matrix-tone.wav",

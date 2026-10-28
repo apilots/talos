@@ -128,7 +128,10 @@ is pushed, or when a maintainer manually retries an existing tag:
    or build volume; missing products and failed installation block image publication
    and release publication.
 5. Assemble Server/Worker runtime images from the validated Linux Server packages
-   for each architecture, reusing their binaries, launcher and WebUI. The Docker
+   for each architecture, reusing their binaries, launcher and WebUI. Server images
+   also reuse `bin/talos` from the same run's validated Linux TUI package; their
+   default process remains Server. Both images share Browser and diagnostic runtime
+   installation from the immutable official MCP snapshot. The Docker
    `PRODUCT_STAGE=packaged` input selects this normal release path; the default
    `source` stage remains available to local source-image builds. Runtime dependency,
    version, launcher and license probes remain in the images before upload.

@@ -19,7 +19,7 @@ pub use action::{BrowserAction, BrowserActionExt, BrowserTabAction};
 pub use runtime::desktop::{DesktopConnector, DesktopTransport};
 pub use runtime::{
     BrowserBackend, BrowserDispatch, BrowserFuture, BrowserInvocationIdentity,
-    BrowserInvocationLease, BrowserRuntime, PluginEnabledReader,
+    BrowserInvocationLease, BrowserRuntime, PluginEnabledReader, PreparedBrowserEnvironment,
 };
 pub use stdio::run_stdio;
 

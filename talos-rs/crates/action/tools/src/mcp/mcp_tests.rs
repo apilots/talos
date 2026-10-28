@@ -192,7 +192,10 @@ async fn registry_observes_live_catalog_and_rejects_retired_dispatch_bindings() 
                 cwd: None,
             },
         },
-        source: McpServerSource::Config,
+        source: McpServerSource::Plugin {
+            plugin_id: talos_types::PluginId("fixture".into()),
+            install_id: talos_types::PluginInstallId("fixture".into()),
+        },
     };
     let runtime = Arc::new(TalosMcpRuntime::new());
     let manager = Arc::new(McpConnectionManager::from_runtime(runtime.clone()));

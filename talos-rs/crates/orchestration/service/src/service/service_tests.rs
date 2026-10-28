@@ -38,7 +38,7 @@ use talos_types::talos::{
 };
 
 #[derive(Clone)]
-enum TestAgentExecutionMode {
+pub(super) enum TestAgentExecutionMode {
     Accepted,
     AdmissionBlocked {
         reached: Arc<tokio::sync::Notify>,
@@ -70,8 +70,8 @@ mod interrupt_queue_tests;
 #[path = "maintenance_tests.rs"]
 mod maintenance_tests;
 
-struct TestAgentExecution {
-    mode: TestAgentExecutionMode,
+pub(super) struct TestAgentExecution {
+    pub(super) mode: TestAgentExecutionMode,
 }
 
 struct TestExecutionCoordinator {
@@ -107,7 +107,7 @@ impl TalosService {
 
 struct TestAuthService;
 
-fn configured_test_config() -> TalosConfig {
+pub(super) fn configured_test_config() -> TalosConfig {
     let mut config = TalosConfig::default();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
         reasoning_replay: Default::default(),
@@ -567,7 +567,7 @@ impl UserService for TestAuthService {
     }
 }
 
-async fn test_application(
+pub(super) async fn test_application(
     agent_execution: Arc<TestAgentExecution>,
     config: TalosConfig,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
@@ -588,6 +588,15 @@ async fn test_application_with_coordinator(
     agent_execution: Arc<TestAgentExecution>,
     coordinator: Arc<dyn AgentCoordinator>,
     config: TalosConfig,
+) -> (TalosService, Arc<DatabaseSessionStore>) {
+    test_application_with_environment(agent_execution, coordinator, config, None).await
+}
+
+async fn test_application_with_environment(
+    agent_execution: Arc<TestAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
+    config: TalosConfig,
+    environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_test_migrations(storage.pool()).await;
@@ -617,7 +626,10 @@ async fn test_application_with_coordinator(
         execution: agent_execution,
         delegate: coordinator,
     });
-    let coordinator = crate::test_support::with_environment(coordinator, config.clone());
+    let coordinator = match environment {
+        Some(environment) => crate::test_support::with_worker_environment(coordinator, environment),
+        None => crate::test_support::with_environment(coordinator, config.clone()),
+    };
     let service = TalosService::new(
         coordinator,
         nodes,
@@ -1028,3 +1040,5 @@ mod session_deletion_tests;
 
 #[path = "file_preview_tests.rs"]
 mod file_preview_tests;
+#[path = "plugin_preparation_tests.rs"]
+mod plugin_preparation_tests;

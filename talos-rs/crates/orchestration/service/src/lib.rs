@@ -2,6 +2,7 @@ mod access;
 mod account;
 mod agent_node;
 mod config;
+mod desktop;
 pub mod file;
 mod fs;
 mod history;
@@ -32,6 +33,7 @@ pub use agent_node::{
     NodePrincipal, RotateCredentialRequest, UpdateNodeRequest,
 };
 pub use config::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService};
+pub use desktop::DesktopIngress;
 pub use file::{FileByteStream, FileContent, FileService};
 pub use history::SessionHistoryService;
 pub use inner_model::{
@@ -39,9 +41,7 @@ pub use inner_model::{
 };
 pub use memory::MemoryService;
 pub use message_queue::SessionMessageQueueService;
-pub use plugin::{
-    mcp_definition_from_config, mcp_relay_callback_uri, McpCredentialStore, PluginManagerService,
-};
+pub use plugin::{mcp_relay_callback_uri, McpCredentialStore, PluginManagerService};
 pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};
 pub use skills::SkillsService;

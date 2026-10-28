@@ -28,7 +28,7 @@ export const filesResources = {
     closeDetails: "Close file details",
     preview: {
       previousPage: "Previous page", nextPage: "Next page", zoomOut: "Zoom out", zoomIn: "Zoom in",
-      source: "Source", rendered: "Preview", encoding: "Encoding", line: "Line", go: "Go", loadMore: "Load more text", backToArchive: "Back to archive",
+      source: "Source", rendered: "Preview", encoding: "Encoding", line: "Line", go: "Go", loadMore: "Load more text", backToArchive: "Back to archive", archiveNavigation: "Archive navigation", archiveContents: "Archive contents", archiveEntries_one: "{{count}} file · Select a file to preview", archiveEntries_other: "{{count}} files · Select a file to preview", archiveEmpty: "This archive contains no previewable files.",
       document: { converterUnavailable: "Office preview needs LibreOffice on this host. Download to open the original file.", conversionFailed: "This document could not be converted. Download to open the original file.", invalidArchive: "This archive could not be listed. Download to open it.", tooLarge: "This document exceeds the preview limit. Download to open it." },
       download: "Download file",
       downloadFailed: "Unable to download this file.",
@@ -86,7 +86,7 @@ export const filesResources = {
     closeDetails: "关闭文件详情",
     preview: {
       previousPage: "上一页", nextPage: "下一页", zoomOut: "缩小", zoomIn: "放大",
-      source: "源码", rendered: "预览", encoding: "编码", line: "行号", go: "跳转", loadMore: "继续加载文本", backToArchive: "返回归档目录",
+      source: "源码", rendered: "预览", encoding: "编码", line: "行号", go: "跳转", loadMore: "继续加载文本", backToArchive: "返回归档目录", archiveNavigation: "归档导航", archiveContents: "归档内容", archiveEntries: "{{count}} 个文件 · 选择文件查看", archiveEmpty: "此归档中没有可预览的文件。",
       document: { converterUnavailable: "当前主机未提供 LibreOffice，可下载原文件打开。", conversionFailed: "文档转换失败，可下载原文件打开。", invalidArchive: "暂时无法列出此归档，可下载后打开。", tooLarge: "文档超过预览大小限制，可下载后打开。" },
       download: "下载文件",
       downloadFailed: "无法下载此文件。",

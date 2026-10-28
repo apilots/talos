@@ -7,8 +7,8 @@ import tomllib
 import unittest
 
 from pr_change_scope import ROOT, SCOPES, VERSION_PATTERNS, is_document, should_run, version_change_only, version_files
-from ci_impact import impact, rust_graph, frontend_graph, SERVER_TARGETS, TUI_TARGET
-from ci_plan import plan
+from ci_impact import impact, rust_graph, frontend_graph, SERVER_TARGETS, SERVER_BROWSER_CASE, TUI_TARGET
+from ci_plan import plan, task_roots
 
 
 class ChangeScopeTests(unittest.TestCase):
@@ -36,6 +36,47 @@ class ChangeScopeTests(unittest.TestCase):
             selected = impact([path])
             self.assertIn('case:21_resource_preview/01_web_preview', selected.targets['webui'])
             self.assertIn('case:21_resource_preview/02_desktop_preview', selected.targets['desktop'])
+    def test_server_container_case_selects_packaged_products_and_web_inputs(self):
+        result = plan(['talos-e2e/scenarios/20_browser_workspace/06_docker_server.sh'])
+        tasks = result['categories']['server']['scenarios']['include']
+        self.assertEqual(len(tasks), 1)
+        task = tasks[0]
+        self.assertEqual(task['cases'], ['20_browser_workspace/06_docker_server.sh'])
+        self.assertEqual(task['images'], ['server'])
+        self.assertEqual(set(task['binaries']), {'server', 'cli', 'worker', 'sandbox'})
+        self.assertTrue(task['docker'] and task['node'])
+        self.assertIn('talos-app/web', task_roots(task))
+        self.assertFalse(result['categories']['desktop']['scenarios']['include'])
+        helper = impact(['talos-e2e/scripts/browser-worker/server.py'])
+        self.assertEqual(helper.targets['server'], {SERVER_BROWSER_CASE})
+        self.assertFalse(helper.targets['desktop'] or helper.rust or helper.frontend)
+
+    def test_shared_container_inputs_select_only_both_packaged_consumers(self):
+        for path in ['build/container/install-runtime.sh', 'build/container/prepare-browser.sh']:
+            selected = impact([path])
+            self.assertEqual(selected.targets['server'], {SERVER_BROWSER_CASE})
+            self.assertEqual(selected.targets['desktop'], {'case:20_browser_workspace/05_docker_worker'})
+            self.assertFalse(selected.rust or selected.frontend or selected.installer)
+        for path in ['build/server/Dockerfile', 'build/worker/browser/desktop/start.sh',
+                     'talos-rs/crates/action/plugin/src/manager/mcp.rs',
+                     'talos-rs/crates/app/talos-worker/src/browser_host.rs',
+                     'talos-rs/apps/tui/src/input.rs']:
+            self.assertIn(SERVER_BROWSER_CASE, impact([path]).targets['server'], path)
+
+    def test_plugin_cli_selects_its_secretless_lifecycle_and_current_binaries(self):
+        result = plan(['talos-rs/apps/tui/src/cli/plugin.rs'])
+        tasks = result['categories']['tui']['scenarios']['include']
+        task = next(task for task in tasks if '05_cli/plugin_lifecycle.sh' in task['cases'])
+        self.assertTrue({'server', 'cli'} <= set(task['binaries']))
+
+    def test_shared_plugin_cli_fixture_selects_both_worker_consumers(self):
+        result = plan(['talos-e2e/scripts/plugin_cli.py'])
+        for category, case in [('tui', '05_cli/plugin_lifecycle.sh'),
+                               ('desktop', '20_browser_workspace/05_docker_worker.sh')]:
+            tasks = result['categories'][category]['scenarios']['include']
+            task = next(task for task in tasks if case in task['cases'])
+            self.assertTrue({'server', 'cli'} <= set(task['binaries']))
+        self.assertTrue(task['docker'])
 
     def test_tui_leaf_selects_only_tui(self):
         result = impact(['talos-rs/apps/tui/src/render/chat_lines.rs'])
@@ -70,7 +111,7 @@ class ChangeScopeTests(unittest.TestCase):
         self.assertIn('talos-server', graph.closure({'talos-service'}, reverse=True))
         self.assertIn('talos-tui', graph.closure({'talos-types'}, reverse=True))
         result = impact(['talos-rs/crates/orchestration/service/src/lib.rs'])
-        self.assertEqual(result.targets['server'], set(SERVER_TARGETS.values()))
+        self.assertEqual(result.targets['server'], set(SERVER_TARGETS.values()) | {SERVER_BROWSER_CASE})
         self.assertIn(TUI_TARGET, result.targets['tui'])
 
     def test_server_submodules_have_focused_scenarios(self):

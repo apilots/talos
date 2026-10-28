@@ -71,8 +71,8 @@ pub use domains::network::{
     TelegramChannelsConfig, TelegramGroupConfig, TelegramMode, TelegramTopicConfig,
 };
 pub use domains::plugins::{
-    PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,
-    PluginsRuntimeConfig,
+    official_mcp_source, PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind,
+    PluginSourceType, PluginsRuntimeConfig,
 };
 pub use domains::prompt::{
     AgentKernelBootstrapPromptConfig, AgentKernelPromptConfig, BootstrapPromptWarningMode,
@@ -85,11 +85,10 @@ pub use domains::storage::{
 };
 pub use domains::sync::SyncConfig;
 pub use domains::tools::{
-    AgentKernelMcpConfig, BashOutputLogConfig, BashToolConfig, DynamicToolConfig,
-    DynamicToolTimeoutBehavior, FileToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig,
-    ToolSandboxModeConfig, ToolSandboxNetworkConfig, ToolSandboxPlatformConfig, ToolSandboxPolicy,
-    ToolUserPermissionModeConfig, ToolsRuntimeConfig, WebSearchProviderConfig,
-    WebSearchProviderRuntimeConfig, WebSearchToolConfig,
+    BashOutputLogConfig, BashToolConfig, DynamicToolConfig, DynamicToolTimeoutBehavior,
+    FileToolConfig, McpToolConfig, ToolSandboxModeConfig, ToolSandboxNetworkConfig,
+    ToolSandboxPlatformConfig, ToolSandboxPolicy, ToolUserPermissionModeConfig, ToolsRuntimeConfig,
+    WebSearchProviderConfig, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv};
 pub use loader::{install_database_migrations, DatabaseMigrationsInstallReport};

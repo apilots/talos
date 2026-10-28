@@ -1,6 +1,7 @@
 //! Actor-authorized target routing; all installation and credential I/O belongs to Worker.
 use super::TalosService;
 use crate::Actor;
+use agent_protocol::{WorkerPluginChange, WorkerPluginInstall, WorkerPluginUpdate};
 use talos_error::TalosResult;
 use talos_types::*;
 impl TalosService {
@@ -121,12 +122,38 @@ impl TalosService {
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
         let node = self.resolve_computer_node(actor, &node).await?;
-        let _guard = self.execution_gate.for_node(&node).write_owned().await;
         let environment = self.worker_environment(actor, Some(&node)).await?;
-        self.sessions.reject_nonterminal_turns(&node).await?;
-        environment
-            .install_plugin(actor.worker_environment_context(), request)
-            .await
+        let prepared = environment
+            .prepare_plugin_change(
+                actor.worker_environment_context(),
+                WorkerPluginChange::Install(request.clone()),
+            )
+            .await?;
+        let result = async {
+            let _guard = self.execution_gate.for_node(&node).write_owned().await;
+            let node = self.resolve_computer_node(actor, &node).await?;
+            let environment = self.worker_environment(actor, Some(&node)).await?;
+            self.sessions.reject_nonterminal_turns(&node).await?;
+            environment
+                .install_plugin(
+                    actor.worker_environment_context(),
+                    WorkerPluginInstall {
+                        request,
+                        preparation_id: prepared.preparation_id.clone(),
+                    },
+                )
+                .await
+        }
+        .await;
+        if result.is_err() {
+            if let Err(error) = environment
+                .cancel_plugin_change(actor.worker_environment_context(), prepared)
+                .await
+            {
+                talos_logging::report_error(&error);
+            }
+        }
+        result
     }
     pub async fn update_plugin(
         &self,
@@ -138,12 +165,38 @@ impl TalosService {
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
         let node = self.resolve_computer_node(actor, &node).await?;
-        let _guard = self.execution_gate.for_node(&node).write_owned().await;
         let environment = self.worker_environment(actor, Some(&node)).await?;
-        self.sessions.reject_nonterminal_turns(&node).await?;
-        environment
-            .update_plugin(actor.worker_environment_context(), request)
-            .await
+        let prepared = environment
+            .prepare_plugin_change(
+                actor.worker_environment_context(),
+                WorkerPluginChange::Update(request.clone()),
+            )
+            .await?;
+        let result = async {
+            let _guard = self.execution_gate.for_node(&node).write_owned().await;
+            let node = self.resolve_computer_node(actor, &node).await?;
+            let environment = self.worker_environment(actor, Some(&node)).await?;
+            self.sessions.reject_nonterminal_turns(&node).await?;
+            environment
+                .update_plugin(
+                    actor.worker_environment_context(),
+                    WorkerPluginUpdate {
+                        request,
+                        preparation_id: prepared.preparation_id.clone(),
+                    },
+                )
+                .await
+        }
+        .await;
+        if result.is_err() {
+            if let Err(error) = environment
+                .cancel_plugin_change(actor.worker_environment_context(), prepared)
+                .await
+            {
+                talos_logging::report_error(&error);
+            }
+        }
+        result
     }
     pub async fn uninstall_plugin(
         &self,
@@ -229,10 +282,7 @@ impl TalosService {
                     },
                 )
                 .await?;
-            if !matches!(
-                snapshot.display,
-                BrowserDisplayCapability::DockerDesktop { .. }
-            ) {
+            if let BrowserDisplayCapability::Unavailable { reason } = snapshot.display {
                 return Err(TalosError::localized(
                     talos_error::ErrorLocalization::BrowserCapabilityUnavailable {
                         operation: if matches!(
@@ -243,14 +293,7 @@ impl TalosService {
                         } else {
                             talos_error::BrowserCapabilityOperation::ReleaseControl
                         },
-                        reason: if matches!(
-                            snapshot.host,
-                            BrowserHostKind::Desktop | BrowserHostKind::Native
-                        ) {
-                            talos_error::BrowserCapabilityReason::NativeHost
-                        } else {
-                            talos_error::BrowserCapabilityReason::NotBundled
-                        },
+                        reason: reason.into(),
                     },
                 ));
             }

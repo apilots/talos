@@ -1,7 +1,8 @@
+import {desktopWindows} from "./desktop-window";
 import type { AppProtocol } from "@talos/sdk-core";
 import { desktopMediaHost } from "./desktop-media";
 import { desktopBrowserHost } from "./browser-host";
-import { BrowserWindow } from "electron";
+import { BrowserWindow,type BaseWindow } from "electron";
 
 export async function handleDesktopServerRequest(
   request: AppProtocol.JsonRpcRequest,
@@ -74,8 +75,8 @@ function requestDesktopUserInput(
   });
 }
 
-function activeWindow(): BrowserWindow | undefined {
-  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+function activeWindow(): BaseWindow | undefined {
+  return [...desktopWindows].find(product=>product.window.isFocused())?.window ?? [...desktopWindows][0]?.window;
 }
 
 function userInputModalUrl(prompt: string): string {

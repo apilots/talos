@@ -1,5 +1,5 @@
 import { selectionClasses } from "@/shared/ui/controlStyles";
-import { useEffect, useMemo, useRef, useState, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type KeyboardEvent, type CSSProperties } from "react";
 import "./RightWorkspace.css";
 import { FileText, Globe2, Monitor, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -10,7 +10,7 @@ import { AppResizeHandle } from "./AppResizeHandle";
 import { WORKSPACE_WIDTH } from "@/shared/store/ui-slice";
 import { AppTopBar, WorkspaceControls } from "./AppTopBar";
 import { FilePreview, useFileMetadata } from "@/features/files";
-import { OpenWebpageButton, WebPagePreview } from "@/features/web-preview";
+import { DesktopBrowserPage, desktopBrowserRequest, OpenWebpageButton, WebPagePreview } from "@/features/web-preview";
 import { workspaceWindowKey, type WorkspaceWindow } from "@/shared/store/workspace-window";
 import { workspaceBelongsToScope, workspaceOwnerKey } from "@/shared/store/workspace-state";
 
@@ -39,6 +39,7 @@ function FileTab({ fileId, scope, ...props }: TabProps & { fileId: string; scope
 function WorkspaceTab({ window, scope, ...props }: TabProps & { window: WorkspaceWindow; scope: string }) {
   const { t } = useTranslation("webPreview");
   switch (window.kind) {
+    case "browser": return <WindowTab {...props} kind="browser" name={window.title} />;
     case "computer": return <ComputerTab {...props} nodeId={window.nodeId} />;
     case "file": return <FileTab {...props} fileId={window.fileId} scope={scope} />;
     case "sessionFile": return <WindowTab {...props} kind="sessionFile" name={window.path.split(/[\\/]/).pop() || window.path} />;
@@ -74,6 +75,8 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const setPreviewPosition = useAppStore(state => state.setWorkspacePreviewPosition);
   const navigateWebpage = useAppStore(state => state.navigateWorkspaceWebpage);
   const visible = useAppStore(state => state.workspaceOpen);
+  const focusRevision = useAppStore(state => state.workspaceFocusRevision);
+  const previousFocusRevision = useRef(focusRevision);
   const setWidth = useAppStore(state => state.setWorkspaceWidth);
   const setResizing = useAppStore(state => state.setResizingPane);
   const setOpen = useAppStore(state => state.setWorkspaceOpen);
@@ -81,7 +84,13 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
   const dialog = useRef<HTMLDialogElement>(null);
   const selectedTab = useRef<HTMLButtonElement>(null);
   const previous = useRef({ visible: false, modal, ownerKey });
-  const focusOwner = useRef(ownerKey);
+  const focusedSurface = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    const focused = focusedSurface.current;
+    if (!focused || focused.isConnected) return;
+    focusedSurface.current = null;
+    if (visible && document.activeElement === document.body) selectedTab.current?.focus();
+  }, [windows, visible]);
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const panel = dialog.current;
@@ -130,14 +139,20 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
     // the native dialog restore its opener before this update observes focus.
   }, [modal, visible, toggleRef, ownerKey]);
   useEffect(() => {
-    const changingContext = focusOwner.current !== ownerKey;
-    focusOwner.current = ownerKey;
+    if (previousFocusRevision.current === focusRevision) return;
+    previousFocusRevision.current = focusRevision;
     if (!visible) return;
-    selectedTab.current?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-    if (!changingContext) selectedTab.current?.focus();
-  }, [active, visible, ownerKey]);
+    selectedTab.current?.focus();
+  }, [focusRevision, visible]);
+  useEffect(() => {
+    const tab = selectedTab.current, strip = tab?.closest<HTMLElement>('[role="tablist"]');
+    if (!visible || !tab || !strip) return;
+    // Only scroll the strip: scrollIntoView can also move the split-pane ancestors.
+    const item = tab.getBoundingClientRect(), viewport = strip.getBoundingClientRect();
+    strip.scrollLeft += item.left < viewport.left ? item.left - viewport.left : Math.max(0, item.right - viewport.right);
+  }, [active, visible, ownerKey, modal, width]);
   const modalPresentation = visible ? modal : previous.current.modal;
-  return <dialog style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
+  return <dialog onFocusCapture={event => { focusedSurface.current = event.target; }} onBlurCapture={() => { focusedSurface.current = null; }} style={{ "--workspace-width": `${width}px` } as CSSProperties} data-presentation={modalPresentation ? "modal" : "split"} data-resizing={resizing} inert={!visible} aria-hidden={!visible} id="talos-right-workspace" ref={dialog} aria-label={t("workspace.title")} onCancel={event => { event.preventDefault(); setOpen(false); }} className={cn(
     "m-0 min-h-0 max-h-none max-w-none overflow-visible flex-col border-0 border-l border-divider bg-surface p-0 text-ink open:flex backdrop:bg-transparent",
     modalPresentation ? "fixed inset-y-0 left-14 right-0 z-40 h-screen w-[calc(100vw-56px)]" : "relative h-full shrink-0",
   )}>
@@ -153,6 +168,11 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
             : event.key === "Home" ? 0 : event.key === "End" ? windows.length - 1 : null;
           if (next !== null) { event.preventDefault(); select(workspaceWindowKey(windows[next])); }
         }} onClose={() => {
+          if (window.kind === "browser") {
+            const sessionId = useAppStore.getState().desktopBrowser?.sessionId;
+            if (sessionId) void desktopBrowserRequest({ kind: "close", sessionId, tabId: window.id }).catch(error => console.error("Browser tab close failed", error));
+            return;
+          }
           close(key);
           if (active !== key) selectedTab.current?.focus();
         }} />;
@@ -167,7 +187,8 @@ export function RightWorkspace({ modal, width, maxWidth, toggleRef }: {
         const activeWindow=context.key === ownerKey && key===active;
         const selected=visible && activeWindow;
         return <div key={`${context.key}:${key}`} id={activeWindow ? `${tabId(key)}-panel` : undefined} role="tabpanel" aria-labelledby={activeWindow ? tabId(key) : undefined} hidden={!activeWindow} inert={!selected} className="h-full min-h-0">
-          {window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={(url, title) => navigateWebpage(context.key,key,url,title)} />
+          {window.kind === "browser" ? activeWindow ? <DesktopBrowserPage tab={window} selected={selected} /> : null
+            : window.kind === "webpage" ? <WebPagePreview url={window.url} onNavigate={(url, title) => navigateWebpage(context.key,key,url,title)} />
             : selected && window.kind === "computer" ? <ComputerDesktop nodeId={window.nodeId} expanded={expanded} onExitInput={() => toggleRef.current?.focus()} />
             : window.kind === "file" ? <FilePreview source={{ kind: "file", fileId: window.fileId }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : window.kind === "sessionFile" ? <FilePreview source={{ kind: "sessionPath", sessionId: window.sessionId, path: window.path }} connectionKey={scope} instanceKey={context.key} position={window.position} onPositionChange={position => setPreviewPosition(context.key, key, position)} /> : null}
         </div>;

@@ -58,6 +58,10 @@ rollout. Nothing in the Server Compose files starts or deploys this Worker.
 See the [Worker image guide](../../../build/worker/README.md) for image/runtime
 details.
 
+The [shared container runtime](../../../build/container/README.md) provides local
+SSH, network, process and file diagnostic clients. These do not add an inbound
+service, credentials, a TUI or extra container privileges.
+
 ### Browser runtime
 
 Keep `chromium-seccomp.json` beside `docker-compose.yml`; the standard image's

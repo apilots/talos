@@ -19,6 +19,17 @@ pub(super) struct Backend {
     cleanup_started: tokio::sync::Notify,
     cleanup_continue: tokio::sync::Notify,
 }
+
+pub(super) fn desktop_connector() -> crate::DesktopConnector {
+    Arc::new(|_| {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "The test desktop ingress is offline.",
+            ))
+        })
+    })
+}
 impl Backend {
     pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -192,6 +203,7 @@ async fn newer_pause_wins_over_waiting_takeover_and_release() {
         let backend = Backend::new();
         backend.desktop.store(true, Ordering::SeqCst);
         runtime.set_backend(backend.clone()).unwrap();
+        runtime.set_desktop_connector(desktop_connector()).unwrap();
         let operation = if release {
             let handoff = runtime
                 .operate(
@@ -535,4 +547,26 @@ async fn ipc_reports_original_source_once_and_shutdown_waits_for_private_socket_
     drop(guard);
     let diagnostic = std::fs::read_to_string(log).unwrap();
     assert_eq!(diagnostic.matches("private-backend-diagnostic").count(), 1);
+}
+
+#[tokio::test]
+async fn native_environment_preparation_never_touches_python_or_a_lock_file() {
+    let home = tempfile::tempdir().unwrap();
+    let runtime = BrowserRuntime::new(
+        home.path().into(),
+        BrowserHostKind::Desktop,
+        Arc::new(|| Ok(true)),
+    )
+    .unwrap();
+    assert!(runtime
+        .prepare_browser_environment(&home.path().join("missing.lock"))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(runtime
+        .reuse_browser_environment(&home.path().join("missing.lock"))
+        .await
+        .unwrap()
+        .is_none());
+    assert!(!home.path().join("browser/environments").exists());
 }

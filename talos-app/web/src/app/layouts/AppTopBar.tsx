@@ -1,3 +1,4 @@
+import { useWorkspaceWebpageCreation } from "@/features/web-preview";
 import type { ReactNode, Ref } from "react";
 import { ArrowLeft, ArrowRight, FileText, Maximize2, Minimize2, PanelLeft, PanelRight, PencilLine, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -63,13 +64,13 @@ export function WorkspaceControls({ toggleRef }: { toggleRef: Ref<HTMLButtonElem
   const expanded = useAppStore(state => state.workspaceExpanded);
   const setOpen = useAppStore(state => state.setWorkspaceOpen);
   const setExpanded = useAppStore(state => state.setWorkspaceExpanded);
-  const createWebpage = useAppStore(state => state.createWorkspaceWebpage);
+  const creation = useWorkspaceWebpageCreation();
   const toggleLabel = windows.length ? t(visible ? "workspace.hide" : "workspace.show", { count: windows.length }) : t("workspace.create");
   return <div role="group" aria-label={t("workspace.controls")} className="ml-auto flex shrink-0 items-center gap-1">
     <Button variant="ghost" className="p-2" disabled={!visible} aria-label={t(expanded ? "workspace.restore" : "workspace.expand")} title={t(expanded ? "workspace.restore" : "workspace.expand")} onClick={() => setExpanded(!expanded)}>
       {expanded ? <Minimize2 aria-hidden="true" size={16} /> : <Maximize2 aria-hidden="true" size={16} />}
     </Button>
-    <Button ref={toggleRef} id="talos-workspace-toggle" variant="ghost" className="gap-1.5 p-2" aria-controls="talos-right-workspace" aria-expanded={visible} aria-label={toggleLabel} title={toggleLabel} onClick={() => windows.length ? setOpen(!visible) : createWebpage()}>
+    <Button ref={toggleRef} id="talos-workspace-toggle" variant="ghost" className="gap-1.5 p-2" disabled={!windows.length && creation.disabled} aria-controls="talos-right-workspace" aria-expanded={visible} aria-label={toggleLabel} title={creation.error ? t("webPreview:browserFailed") : toggleLabel} onClick={() => windows.length ? setOpen(!visible) : creation.create()}>
       {windows.length ? <PanelRight aria-hidden="true" size={17} /> : <Plus aria-hidden="true" size={17} />}
       {windows.length > 0 ? <span className="min-w-4 rounded bg-selected px-1 text-[10px] leading-4 tabular-nums text-ink" aria-hidden="true">{windows.length}</span> : null}
     </Button>

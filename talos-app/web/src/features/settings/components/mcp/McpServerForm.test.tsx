@@ -78,7 +78,7 @@ it.each([
 });
 
 it("replaces an API key, wipes the input after saving, then clears credentials for the same definition", async () => {
-  const server = { type: "config" as const, name: "static" };
+  const server = { type: "plugin" as const, installId: "install-private" };
   api.readAuthentication.mockResolvedValue({ server, authentication: { type: "header", name: "X-API-Key" }, state: { type: "credentialsStored" } });
   api.updateCredentials.mockResolvedValue({});
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -97,7 +97,7 @@ it("replaces an API key, wipes the input after saving, then clears credentials f
 
 
 it("opens a browser grant and refreshes the definition even when authorization completes before polling", async () => {
-  const server = { type: "config" as const, name: "oauth" };
+  const server = { type: "plugin" as const, installId: "install-oauth" };
   api.readAuthentication.mockResolvedValue({ server, authentication: { type: "oauth", config: { scopes: ["read"] } }, state: { type: "authenticated" } });
   api.startAuthentication.mockImplementation(async () => {
     api.readAuthentication.mockResolvedValue({ server, authentication: { type: "oauth", config: { scopes: ["read"] } }, state: { type: "authenticated" } });

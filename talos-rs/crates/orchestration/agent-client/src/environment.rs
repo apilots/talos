@@ -6,7 +6,8 @@ use crate::{
 use agent_pb as pb;
 use agent_protocol::{
     environment_pb as wire, error_pb, node_pb, AgentFuture, NodeAuth, WorkerEnvironment,
-    WorkerEnvironmentContext,
+    WorkerEnvironmentContext, WorkerPluginChange, WorkerPluginInstall, WorkerPluginPrepared,
+    WorkerPluginUpdate,
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -141,6 +142,7 @@ macro_rules! invoke {
             | "start_mcp_authentication"
             | "complete_mcp_authentication" => 60,
             "install_plugin" | "update_plugin" => 300,
+            "prepare_plugin_change" => 600,
             _ => 10,
         };
         request.set_timeout(Duration::from_secs(timeout));
@@ -314,25 +316,47 @@ impl WorkerEnvironment for AgentEnvironmentClient {
         decode_read_plugin_result
     );
     environment_method!(
+        prepare_plugin_change,
+        WorkerPluginChange,
+        WorkerPluginPrepared,
+        PreparePluginChangeRequest,
+        PreparePluginChange,
+        prepare_plugin_change_response,
+        Value,
+        encode_prepare_plugin_change_params,
+        decode_prepare_plugin_change_result
+    );
+    environment_method!(
+        cancel_plugin_change,
+        WorkerPluginPrepared,
+        (),
+        CancelPluginChangeRequest,
+        CancelPluginChange,
+        cancel_plugin_change_response,
+        Value,
+        encode_prepare_plugin_change_result,
+        decode_cancel_plugin_change_result
+    );
+    environment_method!(
         install_plugin,
-        PluginInstallRequest,
+        WorkerPluginInstall,
         PluginInstallResponse,
         InstallPluginRequest,
         InstallPlugin,
         install_plugin_response,
         Value,
-        encode_install_plugin_params,
+        encode_worker_install_plugin_params,
         decode_install_plugin_result
     );
     environment_method!(
         update_plugin,
-        PluginUpdateRequest,
+        WorkerPluginUpdate,
         PluginUpdateResponse,
         UpdatePluginRequest,
         UpdatePlugin,
         update_plugin_response,
         Value,
-        encode_update_plugin_params,
+        encode_worker_update_plugin_params,
         decode_update_plugin_result
     );
     environment_method!(
@@ -677,27 +701,17 @@ impl WorkerEnvironment for AgentEnvironmentClient {
             )
         })
     }
-    fn preview_resource(
-        &self,
-        context: WorkerEnvironmentContext,
-        params: WorkerPreviewRequest,
-    ) -> AgentFuture<'_, TalosResult<WorkerPreviewResponse>> {
-        Box::pin(async move {
-            invoke!(
-                self,
-                preview_resource,
-                PreviewResource,
-                pb::PreviewResourceRequest {
-                    auth: Some(node_pb::encode_auth(self.auth.clone())),
-                    context: Some(wire::encode_context(context)),
-                    params: Some(wire::encode_preview_read(params)?)
-                },
-                preview_resource_response,
-                Content,
-                decode_preview_content
-            )
-        })
-    }
+    environment_method!(
+        preview_resource,
+        WorkerPreviewRequest,
+        WorkerPreviewResponse,
+        PreviewResourceRequest,
+        PreviewResource,
+        preview_resource_response,
+        Content,
+        encode_preview_read,
+        decode_preview_content
+    );
     fn read_directory(
         &self,
         context: WorkerEnvironmentContext,

@@ -323,6 +323,8 @@ service WorkerEnvironmentRpc {
   rpc EnablePlugin(EnablePluginRequest) returns (EnablePluginResponse);
   rpc UninstallPlugin(UninstallPluginRequest) returns (UninstallPluginResponse);
   rpc UpdatePlugin(UpdatePluginRequest) returns (UpdatePluginResponse);
+  rpc PreparePluginChange(PreparePluginChangeRequest) returns (PreparePluginChangeResponse);
+  rpc CancelPluginChange(CancelPluginChangeRequest) returns (CancelPluginChangeResponse);
   rpc InstallPlugin(InstallPluginRequest) returns (InstallPluginResponse);
   rpc ReadPlugin(ReadPluginRequest) returns (ReadPluginResponse);
   rpc ListPlugins(ListPluginsRequest) returns (ListPluginsResponse);
@@ -391,10 +393,10 @@ message ListPluginsResponse { oneof result { PluginListResult value = 1; Failure
 message ReadPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginReadParams params = 3; }
 message ReadPluginResponse { oneof result { PluginReadResult value = 1; Failure failure = 2; } }
 
-message InstallPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginInstallParams params = 3; }
+message InstallPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; WorkerPluginInstallParams params = 3; }
 message InstallPluginResponse { oneof result { PluginInstallResult value = 1; Failure failure = 2; } }
 
-message UpdatePluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginUpdateParams params = 3; }
+message UpdatePluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; WorkerPluginUpdateParams params = 3; }
 message UpdatePluginResponse { oneof result { PluginUpdateResult value = 1; Failure failure = 2; } }
 
 message UninstallPluginRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginUninstallParams params = 3; }
@@ -426,3 +428,12 @@ message BrowserRpcResponse { oneof result { BrowserSnapshot value = 1; Failure f
 
 message DesktopOpenRpcRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; WorkerDesktopOpenParams params = 3; }
 message DesktopOpenRpcResponse { oneof result { Empty value = 1; Failure failure = 2; } }
+
+message PluginPrepareParams { oneof change { PluginInstallParams install = 1; PluginUpdateParams update = 2; } }
+message PluginPreparedResult { string preparation_id = 1; }
+message WorkerPluginInstallParams { PluginInstallParams request = 1; string preparation_id = 2; }
+message WorkerPluginUpdateParams { PluginUpdateParams request = 1; string preparation_id = 2; }
+message PreparePluginChangeRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginPrepareParams params = 3; }
+message PreparePluginChangeResponse { oneof result { PluginPreparedResult value = 1; Failure failure = 2; } }
+message CancelPluginChangeRequest { NodeAuth auth = 1; WorkerEnvironmentContext context = 2; PluginPreparedResult params = 3; }
+message CancelPluginChangeResponse { oneof result { Empty value = 1; Failure failure = 2; } }

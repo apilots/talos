@@ -5,6 +5,7 @@ export type FilePreviewPosition =
   | { kind: "pdf"; resourcePath: string; page: number; scale: number }
   | { kind: "markdown"; resourcePath: string; scrollTop: number };
 export type WorkspaceWindow =
+  | ({ kind: "browser" } & import("@talos/sdk-app-server/desktop").DesktopBrowserTab)
   | { kind: "computer"; nodeId: string }
   | { kind: "file"; fileId: string; position?: FilePreviewPosition }
   | { kind: "sessionFile"; sessionId: string; path: string; position?: FilePreviewPosition }
@@ -19,6 +20,7 @@ export function normalizeWorkspaceWebpageUrl(value: string): string | null {
 
 export function workspaceWindowKey(window: WorkspaceWindow): string {
   switch (window.kind) {
+    case "browser": return JSON.stringify([window.kind, window.id]);
     case "computer": return JSON.stringify([window.kind, window.nodeId]);
     case "file": return JSON.stringify([window.kind, window.fileId]);
     case "sessionFile": return JSON.stringify([window.kind, window.sessionId, window.path]);

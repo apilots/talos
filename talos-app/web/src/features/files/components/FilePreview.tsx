@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { parseFilePreviewReference, type FilePreviewEntry, type FilePreviewSource } from "@talos/sdk-core";
 import type { FilePreviewPosition } from "@/shared/store/workspace-window";
-import { ArrowLeft, Download, FileText, RotateCw } from "lucide-react";
+import { Download, FileText, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getTalosClient } from "@/shared/api/client";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
@@ -13,6 +13,7 @@ import { fileDisplay } from "../file-preview";
 import { useFilePreview, usePreviewContent, usePreviewMetadata } from "../hooks/useFilePreview";
 import { downloadFile } from "../hooks/useFileContent";
 import { formatFileSize } from "../hooks/useFilesPage";
+import { ArchiveContents, ArchiveNavigation } from "./ArchivePreview";
 import { TextPreview } from "./TextPreview";
 const PdfPreview = lazy(() => import("./PdfPreview"));
 
@@ -57,6 +58,7 @@ export function FilePreview({ source, connectionKey, instanceKey, position, onPo
   const error = preview.error ?? (selected ? member.error : null) ?? (markdown ? content.error : null);
   let text: string | null = "";
   if (content.data) { try { text = new TextDecoder("utf-8", { fatal: true }).decode(content.data); } catch { text = null; } }
+  const location = selected && descriptor ? `${descriptor.metadata.name} / ${selected.path}` : source.kind === "sessionPath" ? source.path : descriptor?.metadata.name ?? source.fileId;
   const resource = source.kind === "file" ? source : { kind: "sessionFile" as const, sessionId: source.sessionId, path: source.path };
   const download = async () => {
     if (!descriptor) return;
@@ -86,17 +88,17 @@ export function FilePreview({ source, connectionKey, instanceKey, position, onPo
   };
   const loading = <p role="status" className="px-6 py-8 text-sm text-muted">{t("preview.loading")}</p>;
   return <section aria-label={t("preview.title")} className="flex h-full min-h-0 flex-col bg-background">
-    <BrowserToolbar surface={surface} source={{ kind: "file", label: `${t("pageLabel")} / ${file?.originalFilename ?? (source.kind === "file" ? source.fileId : source.path)}`, resource, preview: selected && descriptor ? { ...descriptor, entryPath: selected.resourcePath } : descriptor }} onRefresh={preview.refresh} refreshDisabled={preview.pending || content.isFetching}>
+    <BrowserToolbar surface={surface} source={{ kind: "file", label: `${t("pageLabel")} / ${location}`, resource, preview: selected && descriptor ? { ...descriptor, entryPath: selected.resourcePath, metadata: metadata ?? selected.metadata } : descriptor }} onRefresh={preview.refresh} refreshDisabled={preview.pending || content.isFetching}>
       {file && fileDisplay(file).kind === "markdown" && resourcePath && onPositionChange ? <button type="button" className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted hover:bg-hover" onClick={() => onPositionChange(display?.kind === "text" ? { kind: "markdown", resourcePath, scrollTop: 0 } : { kind: "text", resourcePath, line: 1, encoding: "utf-8" })}>{t(display?.kind === "text" ? "preview.rendered" : "preview.source")}</button> : null}
-      <button aria-label={t("preview.download")} title={t("preview.download")} disabled={!file || !!error || downloading} onClick={() => void download()} type="button" className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-35"><Download aria-hidden="true" size={15} /></button>
+      <button aria-label={t("preview.download")} title={`${t("preview.download")}: ${file?.originalFilename ?? location}`} disabled={!file || !!error || downloading} onClick={() => void download()} type="button" className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-35"><Download aria-hidden="true" size={15} /></button>
     </BrowserToolbar>
-    {selected ? <button type="button" onClick={() => selectEntry()} className="flex shrink-0 items-center gap-2 border-b border-divider px-4 py-2 text-xs text-brand"><ArrowLeft size={14} />{t("preview.backToArchive")}</button> : null}
+    {selected && descriptor ? <ArchiveNavigation name={descriptor.metadata.name} path={selected.path} onBack={() => selectEntry()} /> : null}
     {downloadError ? <p role="alert" className="px-5 py-2 text-xs text-danger">{userVisibleErrorMessage(downloadError, t("preview.downloadFailed"))}</p> : null}
     {error ? <div className="m-5 rounded-xl border border-danger/25 bg-danger/5 p-4">
       <p role="alert" className="text-sm text-danger">{userVisibleErrorMessage(error, t("preview.loadFailed"))}</p>
       <button type="button" onClick={preview.refresh} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs focus-visible:ring-2 focus-visible:ring-brand/40"><RotateCw aria-hidden="true" size={13} />{t("preview.retry")}</button>
     </div> : preview.pending || (selected && member.isPending) || (markdown && content.isPending) ? loading
-      : entries && !selected ? <div className="min-h-0 flex-1 overflow-auto p-4"><h1 className="mb-3 text-sm font-medium">{descriptor?.metadata.name}</h1><ul className="divide-y divide-divider rounded-lg border border-border">{entries.map(entry => <li key={entry.resourcePath}><button type="button" onClick={() => selectEntry(entry)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-xs hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40"><FileText size={15} className="shrink-0 text-muted" /><span className="min-w-0 flex-1 break-all">{entry.path}</span><span className="shrink-0 text-muted">{formatFileSize(entry.metadata.sizeBytes)}</span></button></li>)}</ul></div>
+      : entries && !selected ? <ArchiveContents name={descriptor?.metadata.name ?? location} entries={entries} onSelect={selectEntry} />
       : document?.kind === "unavailable" || display?.kind === "unsupported" ? <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center"><FileText aria-hidden="true" size={32} className="text-muted" /><h1 className="max-w-full break-all text-base font-medium">{file?.originalFilename}</h1><p className="text-xs text-muted">{file?.mimeType} · {file ? formatFileSize(file.sizeBytes) : ""}</p><p role="status" className="max-w-xs text-sm text-muted">{t(document?.kind === "unavailable" ? `preview.document.${document.reason}` : "preview.unsupported")}</p></div>
       : display?.kind === "text" && descriptor && resourcePath ? <TextPreview key={`${descriptor.previewId}:${resourcePath}`} descriptor={descriptor} resourcePath={resourcePath} position={position} onPositionChange={onPositionChange} />
       : display?.kind === "browser" && display.mimeType === "application/pdf" && url && resourcePath ? <Suspense fallback={loading}><PdfPreview key={`${descriptor?.previewId}:${resourcePath}`} url={url} resourcePath={resourcePath} position={position} onPositionChange={onPositionChange} onOpenLink={openLink} /></Suspense>

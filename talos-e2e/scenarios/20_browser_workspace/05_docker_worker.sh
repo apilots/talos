@@ -25,6 +25,7 @@ identity = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{
 PY
 prepare_binary TALOS_E2E_SERVER_BIN talos-server talos-server
 prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
+build_cli_binary
 [[ -x "${TALOS_E2E_SERVER_BIN}" && -x "${TALOS_E2E_APP_SERVER_BIN}" ]] || { echo "Current Server and app-server binaries are required" >&2; exit 1; }
 pnpm --dir "${TALOS_APP_DIR}/desktop" build:main
 node "${TALOS_E2E_DIR}/scripts/browser-worker/build-native.mjs" media viewer

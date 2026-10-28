@@ -40,7 +40,7 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
   const preview = () => run(() => openResource(resource.kind !== "webpage" ? resource : { ...resource, intent: "preview" }));
   return <div className="relative shrink-0">
     <div className="flex h-8 items-center rounded-lg border border-border bg-card text-xs text-ink">
-      <button type="button" className="h-full rounded-l-lg px-2.5 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" onClick={preview}>Open in</button>
+      <button type="button" className="h-full rounded-l-lg px-2.5 hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand" onClick={preview}>{t("openIn")}</button>
       <DropdownMenu modal={false} open={menuOpen} onOpenChange={open => { setMenuOpen(open); if (open) setContainer(trigger.current?.closest("dialog") ?? null); }}>
         <DropdownMenuTrigger asChild><button ref={trigger} type="button" aria-label={t("openOptions")} className="flex h-full w-6 items-center justify-center rounded-r-lg border-l border-divider bg-hover/40 text-muted hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"><ChevronDown aria-hidden="true" size={13} /></button></DropdownMenuTrigger>
         <DropdownMenuContent container={container} align="end" className="min-w-44" onCloseAutoFocus={event => { if (trigger.current?.closest("[hidden], [inert]")) event.preventDefault(); }}>
@@ -49,7 +49,7 @@ export function ResourceOpenMenu({ resource, preview: prepared }: { resource: Pr
             {target.icon ? <img src={target.icon} alt="" className="size-4" /> : <ExternalLink aria-hidden="true" size={15} />}{target.id === "system" ? t(resource.kind === "webpage" ? "openExternal" : "openSystemApplication") : target.label}
           </DropdownMenuItem>) : resource.kind === "webpage" ? <DropdownMenuItem onSelect={() => run(() => openResource({ ...resource, intent: "external" }))}><ExternalLink aria-hidden="true" size={15} />{t("openExternal")}</DropdownMenuItem> : null}
           <DropdownMenuSeparator className="my-1 h-px bg-divider" />
-          <DropdownMenuItem onSelect={() => run(() => navigator.clipboard.writeText(resourceReference(resource)))}><Link2 aria-hidden="true" size={15} />{t("copyLink")}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => run(() => navigator.clipboard.writeText(resourceReference(resource)))}><Link2 aria-hidden="true" size={15} />{t(prepared?.document?.kind === "archive" ? "copyArchiveLink" : "copyLink")}</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

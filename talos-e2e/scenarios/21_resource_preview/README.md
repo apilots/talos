@@ -42,3 +42,12 @@ opening a tab alone is not success. Each shell emits `format-matrix.json` with
 per-format status, detected MIME, assertions and screenshots. See the fixture
 README for codec and SVG limitations. Install LibreOffice Writer, Calc and
 Impress plus CJK fonts (for example fonts-noto-cjk), not Writer alone.
+
+Archive visual acceptance records the directory before opening a member, then
+verifies the source archive and full member path together with distinct bytes.
+Two members with the same basename exercise navigation and return; ZIP/TAR/TGZ
+use different content markers. TAR also captures the narrow layout and Open-in
+menu. PDF evidence includes the first page and the final second-page state;
+slide Chinese text is asserted on both pages. Native browser content screenshots
+are referenced explicitly alongside the product shell rather than treating a
+renderer-only screenshot as the complete Desktop composition.

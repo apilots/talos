@@ -22,6 +22,7 @@ use talos_types::{
 pub(crate) struct InstallCandidate {
     pub plugin: Plugin,
     pub source: InstallSource,
+    pub prepared_dir: Option<PathBuf>,
 }
 
 pub(crate) enum InstallSource {
@@ -354,7 +355,7 @@ fn ensure_installable_plugin(plugin: &Plugin) -> TalosResult<()> {
     ))
 }
 
-fn plugin_source_dir(
+pub(crate) fn plugin_source_dir(
     state: &PluginStateStore,
     source: &MarketplaceSource,
     plugin: &Plugin,
@@ -488,7 +489,10 @@ fn materialize_install_dir(
     create_plugin_directory(install_dir, "create plugin install dir")?;
     match &candidate.source {
         InstallSource::Marketplace(source) => {
-            let source_dir = plugin_source_dir(state, source, &candidate.plugin)?;
+            let source_dir = match &candidate.prepared_dir {
+                Some(path) => path.clone(),
+                None => plugin_source_dir(state, source, &candidate.plugin)?,
+            };
             copy_dir(&source_dir, install_dir)?;
             if candidate.plugin.kind == PluginKind::McpServer {
                 write_marketplace_mcp_credentials(install_dir, preserved_credentials)?;
@@ -677,7 +681,7 @@ fn validate_install_name(name: &str) -> TalosResult<()> {
     Ok(())
 }
 
-fn copy_dir(source: &Path, target: &Path) -> TalosResult<()> {
+pub(crate) fn copy_dir(source: &Path, target: &Path) -> TalosResult<()> {
     copy_dir_inner(source, source, target)
 }
 

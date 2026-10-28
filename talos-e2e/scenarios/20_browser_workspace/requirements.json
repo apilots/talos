@@ -16,6 +16,12 @@
     "binaries": []
   },
   "cases": {
+    "06_docker_server.sh": {
+      "commands": ["docker", "python3"],
+      "python_modules": ["yaml", "websockets"],
+      "checks": ["docker", "server_image"],
+      "binaries": []
+    },
     "01_resource_tabs.sh": {
       "commands": [
         "cargo",
@@ -81,7 +87,8 @@
       ],
       "binaries": [
         "server",
-        "app_server"
+        "app_server",
+        "cli"
       ]
     },
     "04_desktop_mcp.sh": {

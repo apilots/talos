@@ -16,6 +16,13 @@ const bridge: TalosDesktopBridge = {
     targets: resource => ipcRenderer.invoke(TALOS_IPC.previewTargets, resource).then(response => unwrapTalosApiResponse<import("@talos/sdk-app-server/desktop").PreviewOpenTarget[]>(response)),
     open: request => ipcRenderer.invoke(TALOS_IPC.previewOpen, request).then(response => unwrapTalosApiResponse<void>(response)),
   },
+  browserWorkspace: {
+    request: request => ipcRenderer.invoke(TALOS_IPC.browserRequest, request),
+    onState: handler => {
+      const listener = (_event:IpcRendererEvent, state:import("@talos/sdk-app-server/desktop").DesktopBrowserState) => handler(state);
+      ipcRenderer.on(TALOS_IPC.browserState, listener);return () => ipcRenderer.off(TALOS_IPC.browserState, listener);
+    },
+  },
   onDesktopFrame:(handler)=>{
     const listener=(_event:IpcRendererEvent,frame:AppProtocol.DesktopMediaFrame & {requestId:string})=>{
       handler(frame);

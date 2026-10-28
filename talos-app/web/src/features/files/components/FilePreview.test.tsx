@@ -97,7 +97,8 @@ it("inspects the selected archive member through the shared read API before choo
   vi.spyOn(document, "createRange").mockImplementation(() => Object.assign(createRange(), { getClientRects: () => [], getBoundingClientRect: () => new DOMRect() }));
   const metadata = { name: "source.ts", mimeType: "video/mp2t", sizeBytes: 24 };
   const resourcePath = "__preview__/entries/docs/source.ts";
-  api.prepare.mockResolvedValue({ ...descriptor, document: { kind: "archive", entries: [{ path: "./docs/source.ts", resourcePath, metadata }] } });
+  const archive = { name: "source-bundle.tar", mimeType: "application/x-tar", sizeBytes: 10240 };
+  api.prepare.mockResolvedValue({ ...descriptor, metadata: archive, document: { kind: "archive", entries: [{ path: "./docs/source.ts", resourcePath, metadata }] } });
   api.readBytes.mockImplementation(async ({ offset, limit }: { offset: number; limit: number }) => ({ metadata: { ...metadata, mimeType: "text/plain" }, offset, data: limit ? new TextEncoder().encode("export const value = 42;") : new Uint8Array() }));
   const view = setup();
   fireEvent.click(await screen.findByRole("button", { name: /docs\/source.ts/ }));
@@ -105,4 +106,10 @@ it("inspects the selected archive member through the shared read API before choo
   await waitFor(() => expect(view.container.querySelector(".cm-content")).toHaveTextContent("export const value = 42;"));
   expect(api.readBytes).toHaveBeenCalledWith({ previewId: "preview", resourcePath, offset: 0, limit: 0 });
   expect(view.container.querySelector("iframe")).toBeNull();
+  expect(screen.getByRole("navigation", { name: "Archive navigation" })).toHaveTextContent("source-bundle.tar");
+  expect(screen.getByRole("navigation", { name: "Archive navigation" })).toHaveTextContent("./docs/source.ts");
+  expect(screen.getByRole("textbox", { name: "File location" })).toHaveValue("Files / source-bundle.tar / ./docs/source.ts");
+  fireEvent.click(screen.getByRole("button", { name: "Back to archive" }));
+  expect(await screen.findByRole("heading", { name: "source-bundle.tar" })).toBeInTheDocument();
+  expect(screen.getByRole("list", { name: "Archive contents" })).toHaveTextContent("./docs/source.ts");
 });

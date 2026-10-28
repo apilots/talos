@@ -15,7 +15,6 @@ import urllib.request
 import urllib.error
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import yaml
 
 from lifecycle import container_args, docker_create
 
@@ -134,6 +133,7 @@ def has_download_receipt(value):
     return False
 
 class Fixture(BaseHTTPRequestHandler):
+    browser_page_url = 'http://127.0.0.1:18080/'
     protocol_version = 'HTTP/1.1'
     def log_message(self, *_):
         pass
@@ -208,7 +208,7 @@ class Fixture(BaseHTTPRequestHandler):
                 suffix = sequence[step]
                 name = next((n for n in names if n.endswith(suffix)), None)
                 if suffix == 'browser_navigate':
-                    args = {'url': 'http://127.0.0.1:18080/'}
+                    args = {'url': self.browser_page_url}
                 elif suffix == 'browser_tab':
                     args = {'action': 'open', 'url': 'about:blank'}
                 elif suffix in ('browser_fill', 'browser_click', 'browser_upload'):
@@ -258,7 +258,13 @@ class Fixture(BaseHTTPRequestHandler):
                 'choices': [{'index': 0, 'message': delta, 'finish_reason': finish}], 'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}})
 
 def config(home, http_port, mock_port):
+    import yaml
     document = yaml.safe_load((ROOT / 'conf/talos-dev.yaml').read_text())
+    return configure(document, home, http_port, mock_port)
+
+def configure(document, home, http_port, mock_port):
+    """Bind an already decoded public profile to the local deterministic model."""
+    document = copy.deepcopy(document)
     document['gateway'].update(port=http_port, host='127.0.0.1', auth=True)
     document['cloud'].update(api_base_url=f'http://127.0.0.1:{mock_port}', web_base_url=f'http://127.0.0.1:{mock_port}')
     document['llm'].update(provider='openai', model='browser-fixture')
@@ -268,7 +274,6 @@ def config(home, http_port, mock_port):
     document['llm']['openai'].update(models=[MODEL], api_key='fixture', base_url=f'http://127.0.0.1:{mock_port}/v1', protocol='chat')
     document['agent']['inner_model'] = {'provider': 'openai', 'id': 'browser-fixture'}
     document['agent']['kernel']['plugins'].update(sources=[], roots=[])
-    document['agent']['kernel']['mcp']['servers'] = []
     document['sync']['enabled'] = False
     home.mkdir(parents=True, exist_ok=True)
     (home / '.env').write_text('')
@@ -325,7 +330,7 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     require('data:image' not in json.dumps(events) and 'base64' not in json.dumps(events), 'Timeline persisted inline image bytes')
     return session,events,results
 
-def native_media(document,node,server_home):
+def native_media(document,node,server_home,container):
     home=RUN/('desktop-media-'+uuid.uuid4().hex[:8]);home.mkdir()
     (home/'data').mkdir()
     # Seed the owned directory snapshot; G/H routing and media authorization remain real.
@@ -335,14 +340,38 @@ def native_media(document,node,server_home):
     (home/'auth').mkdir();(home/'auth/cloud-session.json').write_text(json.dumps({'schema_version':2,'cloud_api_base_url':desktop['cloud']['api_base_url'],'access_token':TOKEN,'token_type':'Bearer','expires_at_ms':int(time.time()*1000)+3600000,'last_used_at_ms':int(time.time()*1000),'user':USER}))
     (home/'auth/cloud-session.json').chmod(0o600)
     env={key:os.environ[key] for key in ('PATH','TMPDIR','DISPLAY','XAUTHORITY','XDG_RUNTIME_DIR') if key in os.environ}
-    env.update(HOME=str(home),TALOS_HOME=str(home),TALOS_CONFIG=str(conf),TALOS_RESOURCE_DIR=str(ROOT),TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN',str(ROOT/'talos-rs/target/debug/app-server')),TALOS_E2E_REMOTE_NODE=node,TALOS_SCENARIO_REPORT_DIR=str(REPORT))
+    env.update(HOME=str(home),TALOS_HOME=str(home),TALOS_CONFIG=str(conf),TALOS_RESOURCE_DIR=str(ROOT),TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN',str(ROOT/'talos-rs/target/debug/app-server')),TALOS_E2E_REMOTE_NODE=node,TALOS_SCENARIO_REPORT_DIR=str(REPORT),TALOS_E2E_CLI_BIN=os.environ['TALOS_E2E_CLI_BIN'])
+    env['TALOS_E2E_WORKER_CONTAINER']=container
     electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
     if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'
     with (REPORT/'native-docker-media.log').open('wb') as log:
         subprocess.run([str(electron),str(Path(os.environ['TALOS_E2E_NATIVE_ROOT'])/'media-dist')],env=env,stdout=log,stderr=log,timeout=100,check=True)
     require('NATIVE_DOCKER_MEDIA_ACCEPTANCE_PASS' in (REPORT/'native-docker-media.log').read_text(),'Desktop viewer exited without completing acceptance')
+    return env
+
+def official_delivery(container):
+    script = """import json,hashlib,importlib.metadata
+from pathlib import Path
+root=Path('/home/talos/.talos')
+records=json.loads((root/'plugins/plugin-installs.json').read_text())['installs']
+installed=[row for row in records if row['name']=='talos_browser']
+assert len(installed)==1,installed
+source=json.loads(Path('/opt/talos/plugins/apilots-mcps/source.json').read_text())
+assert installed[0]['source']['commit']==source['commit'],installed
+metadata=json.loads(Path('/opt/talos/browser/environment.json').read_text())
+lock=Path(installed[0]['installed_path'])/'requirements.lock'
+assert hashlib.sha256(lock.read_bytes()).hexdigest()==metadata['lockSha256']
+assert importlib.metadata.version('browser-use')==metadata['browserUseVersion']
+assert not list((root/'browser/environments').glob('**/venv_*')), 'Matching image unnecessarily installed Python dependencies'
+print(json.dumps({'commit':source['commit'],'lockSha256':metadata['lockSha256'],'browserUseVersion':metadata['browserUseVersion'],'preinstallationReused':True,'installId':installed[0]['id']}))
+"""
+    result=json.loads(subprocess.check_output(['docker','exec',container,'/opt/talos/browser/venv/bin/python','-c',script],text=True))
+    expected=json.loads((ROOT/'build/plugins/official-mcp.json').read_text())
+    require(result['commit']==expected['commit'],'Worker did not use the pinned official source')
+    return result
 
 def run():
+    import yaml
     mock = ThreadingHTTPServer(('0.0.0.0', 0), Fixture)
     print('FIXTURE_PORT', mock.server_port, flush=True)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
@@ -408,6 +437,7 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
         wait(lambda: data(http(url + '/v1/computers/' + node)).get('available'), 'Outbound Worker registration')
         snapshot = data(http(url + '/v1/browser', {'nodeId': node, 'operation': {'kind': 'read'}}))
         require(snapshot['host'] == 'docker' and snapshot['enabled'], 'Wrong canonical browser capability')
+        delivery=official_delivery(name)
         from home import desktop_home
         desktop_home(url,node,name,http,data,wait,REPORT)
         png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5n8AAAAASUVORK5CYII=')
@@ -426,7 +456,11 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
         print('PASS real outbound Docker Worker / trusted ToolContext / built-in MCP / browser actions / screenshot / authorized files', flush=True)
         from media import media,pressure_and_expiry
         media(url,node,name,http,data,wait,REPORT)
-        if os.environ.get('TALOS_E2E_NATIVE_MEDIA')=='1':native_media(document,node,home)
+        if os.environ.get('TALOS_E2E_NATIVE_MEDIA')=='1':
+            desktop_env = native_media(document,node,home,name)
+            from plugin_cli import remote_cli
+            remote_cli(url,node,name,desktop_env,http,data,REPORT)
+            browser_task(url,node,attachment,'desktop-resumed-task')
         pressure_and_expiry(url,node,http,data,wait,REPORT)
         before=data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}}))
         data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'pause','expectedRevision':before['control']['revision']}}))
@@ -444,6 +478,78 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
         require(after['control']['owner']['kind']=='suspended','Replacement lost persisted manual pause')
         data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'resume','expectedRevision':after['control']['revision']}}))
         browser_task(url,node,attachment,'replacement-task',verify_cookie=True)
+        require(official_delivery(name)==delivery,'Replacement changed its official install or prepared another environment')
+        # Exercise the original remote Plugin update and preserve the bound environment.
+        data(http(url+'/v1/plugin/update',{'nodeId':node,'install_id':delivery['installId'],
+            'expected_source_commit':delivery['commit'],'conflict_policy':'reject_local_changes'}))
+        require(official_delivery(name)==delivery,'An unchanged dependency update reinstalled its environment')
+        data(http(url+'/v1/plugin/disable',{'nodeId':node,'install_id':delivery['installId']}))
+        disabled_generation=data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}}))['control']['generation']
+        subprocess.run(['docker','restart','--time','15',name],check=True,capture_output=True)
+        def restarted_from(generation):
+            response=http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}})
+            if response.get('error',{}).get('code')=='serviceUnavailable':return None
+            value=data(response)
+            return value if value['control']['generation']!=generation else None
+        disabled=wait(lambda:restarted_from(disabled_generation),'Disabled Worker restart')
+        require(not disabled['enabled'],'Worker restart enabled a disabled Plugin')
+        require(official_delivery(name)==delivery,'Disabled restart changed its official installation')
+        data(http(url+'/v1/plugin/enable',{'nodeId':node,'install_id':delivery['installId']}))
+        (REPORT/'official-plugin-delivery.json').write_text(json.dumps({**delivery,'unchangedUpdateReused':True,'disabledRestartPreserved':True},indent=2))
+        # In this disposable container only, invalidate image metadata to require an online repair.
+        repair_generation=data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}}))['control']['generation']
+        subprocess.run(['docker','exec','--user','0',name,'rm','/opt/talos/browser/environment.json'],check=True,capture_output=True)
+        subprocess.run(['docker','restart','--time','15',name],check=True,capture_output=True)
+        def repaired():
+            value=restarted_from(repair_generation)
+            if not value:return None
+            return value if value['targets'][0]['readiness']['status'] in ('stopped','ready') else None
+        wait(lambda:restarted_from(repair_generation),'Worker available during dependency repair',seconds=45)
+        repaired_snapshot=wait(repaired,'Online exact-lock Browser environment repair',seconds=360)
+        # Registration loss preserves manual hold; resuming remains an explicit user action.
+        if repaired_snapshot['control']['owner']['kind']=='suspended':
+            data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'resume','expectedRevision':repaired_snapshot['control']['revision']}}))
+        probe="""import json,subprocess,hashlib
+from pathlib import Path
+root=Path('/home/talos/.talos')
+locks=list((root/'browser/environments').glob('*/environment.json'))
+assert len(locks)==1,locks
+metadata=json.loads(locks[0].read_text())
+manifest=json.loads((root/'plugins/plugin-installs.json').read_text())['installs']
+install=next(row for row in manifest if row['name']=='talos_browser')
+lock=Path(install['installed_path'])/'requirements.lock'
+assert hashlib.sha256(lock.read_bytes()).hexdigest()==metadata['lockSha256']
+version=subprocess.check_output([metadata['python'],'-I','-c',"import importlib.metadata;print(importlib.metadata.version('browser-use'))"],text=True).strip()
+assert version==metadata['browserUseVersion']
+print(json.dumps({'lockSha256':metadata['lockSha256'],'browserUseVersion':version,'python':metadata['python'],'runtimeEnvironmentPrepared':True,'workerAvailableDuringRepair':True}))
+"""
+        repair=json.loads(subprocess.check_output(['docker','exec',name,'python3','-c',probe],text=True))
+        require(repair['lockSha256']==delivery['lockSha256'],'Online repair used a different dependency lock')
+        browser_task(url,node,attachment,'repaired-task',verify_cookie=True)
+        (REPORT/'online-browser-repair.json').write_text(json.dumps(repair,indent=2))
+        print('PASS online exact-version/hash repair and real Browser task using the prepared environment',flush=True)
+        # Keep the control plane reachable through its hosts entry, but make package DNS unavailable.
+        cached_generation=data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}}))['control']['generation']
+        subprocess.run(['docker','stop','--time','15',name],check=True,capture_output=True)
+        subprocess.run(['docker','rm',name],check=True,capture_output=True)
+        offline_command=worker_command.copy()
+        offline_command.insert(offline_command.index(IMAGE),'--dns=127.0.0.1')
+        offline_command[-1]='while test -f /opt/talos/browser/environment.json; do sleep 0.1; done; '+offline_command[-1]
+        subprocess.run(offline_command,check=True,capture_output=True)
+        subprocess.run(['docker','exec','--user','0',name,'rm','/opt/talos/browser/environment.json'],check=True,capture_output=True)
+        def cached_ready():
+            value=restarted_from(cached_generation)
+            return value if value and value['targets'][0]['readiness']['status'] in ('stopped','ready') else None
+        cached_snapshot=wait(cached_ready,'Prepared Browser cache without package DNS',seconds=45)
+        dns_probe="import socket\ntry: socket.getaddrinfo('pypi.org',443)\nexcept socket.gaierror: print('unavailable')"
+        require(subprocess.check_output(['docker','exec',name,'python3','-c',dns_probe],text=True,timeout=15).strip()=='unavailable','Package DNS was not actually disabled')
+        cached=json.loads(subprocess.check_output(['docker','exec',name,'python3','-c',probe],text=True))
+        require(cached['python']==repair['python'],'Cache restart prepared another environment')
+        if cached_snapshot['control']['owner']['kind']=='suspended':
+            data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'resume','expectedRevision':cached_snapshot['control']['revision']}}))
+        browser_task(url,node,attachment,'cached-task',verify_cookie=True)
+        (REPORT/'offline-browser-cache.json').write_text(json.dumps({**cached,'packageDnsUnavailable':True,'sameEnvironmentReused':True},indent=2))
+        print('PASS prepared environment reused with package DNS disabled and another real Browser task',flush=True)
         (REPORT/'profile-replacement-acceptance.json').write_text(json.dumps({'status':'passed','newGeneration':True,'pausePersisted':True,'cookieRetained':True,'cleanSigterm':True}))
         print('PASS clean SIGTERM, protected-home replacement, persisted pause and browser profile cookie',flush=True)
         print('CONTAINER', name, 'VOLUME', volume, flush=True)

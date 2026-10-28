@@ -1,6 +1,8 @@
 import type { AppProtocol } from "@talos/sdk-core";
 
 export const TALOS_IPC = {
+  browserRequest: "talos:browser-workspace-request",
+  browserState: "talos:browser-workspace-state",
   desktopFrame:"talos:desktop-frame",
   desktopFrameAck:"talos:desktop-frame-ack",
   connect: "talos:connect",
@@ -23,6 +25,7 @@ import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 
 export interface TalosDesktopBridge {
   preview: import("@talos/sdk-app-server/desktop").DesktopPreviewBridge;
+  browserWorkspace: import("@talos/sdk-app-server/desktop").DesktopBrowserBridge;
   onDesktopFrame(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;
   workerIdentity(): Promise<AppProtocol.ApiResponse<AppProtocol.DesktopWorkerIdentityResponse>>;
   connect(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;

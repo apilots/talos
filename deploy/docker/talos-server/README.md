@@ -44,6 +44,42 @@ docker compose -f compose.production.yml up -d
 For the maintained installation at `/opt/talos-server`, install this production
 file as `/opt/talos-server/docker-compose.yml`, not the basic profile.
 
+## Embedded Browser and terminal management
+
+The image includes the embedded Worker's managed Chromium, Browser Use driver,
+official MCP source snapshot and private container desktop resources. These are
+the same runtime inputs as the [standalone Worker](../../../build/worker/README.md#managed-browser-boundary).
+Both Compose profiles set 1 GiB private shared memory, the existing Chromium
+seccomp profile and `no-new-privileges`. Their default profile path refers to
+`../talos-worker/chromium-seccomp.json` in this repository. When copying deployment
+files elsewhere, copy that profile too and set `TALOS_CHROMIUM_SECCOMP_PROFILE`
+to its absolute deployed path. Do not use privileged mode or disable the sandbox.
+
+The profiles do not impose a fixed process memory limit. Set a measured deployment
+budget that accommodates the Server, embedded Worker and browser workload rather
+than the old 1 GiB Server-only allowance. Browser/CDP/VNC listeners remain private;
+installing their resources does not change authentication defaults. The embedded
+Worker supports Browser tools, desktop viewing and control through the existing
+same-origin WebSocket endpoint. Its in-process transport reuses the same bounded
+media relay as registered Workers, without Cloud enrollment or a public VNC port.
+With `gateway.auth=false`, the deployment's anonymous identity can view and control
+only the local embedded desktop. With authentication enabled, viewers need a
+verified local account context; logout closes active media. Registered remote
+Workers continue to require their existing user authorization and live node lease.
+
+The Server image also includes the `talos` CLI/TUI from the validated TUI product:
+
+~~~bash
+docker exec -it talos-server talos
+docker exec talos-server talos status
+~~~
+
+The TUI starts its own embedded runtime using the same persistent Talos home and
+settings. It is not a remote terminal frontend attached to the running Server.
+Only Server starts automatically. Both images share the
+[common diagnostic clients](../../../build/container/README.md); no SSH server,
+cron service or privileged debugging process is started.
+
 ## Secrets and persistent settings
 
 Uncomment only non-empty provider keys intentionally owned by the deployment.

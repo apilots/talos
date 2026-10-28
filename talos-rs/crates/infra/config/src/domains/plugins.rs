@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginsRuntimeConfig {
-    #[serde(default = "default_sources")]
+    #[serde(default = "default_sources", deserialize_with = "deserialize_sources")]
     pub sources: Vec<PluginSourceConfig>,
 
     #[serde(default = "default_roots")]
@@ -64,14 +64,46 @@ pub enum PluginRootKind {
 }
 
 fn default_sources() -> Vec<PluginSourceConfig> {
-    vec![PluginSourceConfig {
+    vec![
+        PluginSourceConfig {
+            source_type: PluginSourceType::Official,
+            display_name: "Apilots Skills".to_string(),
+            kind: PluginSourceKind::Git,
+            url: "https://github.com/apilots/skills".to_string(),
+            reference: "main".to_string(),
+            sparse_paths: vec!["skills".to_string()],
+        },
+        official_mcp_source(),
+    ]
+}
+
+fn deserialize_sources<'de, D>(deserializer: D) -> Result<Vec<PluginSourceConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut sources = Vec::<PluginSourceConfig>::deserialize(deserializer)?;
+    for official in [official_mcp_source()] {
+        if !sources.iter().any(|source| {
+            source.url == official.url
+                && source.reference == official.reference
+                && source.sparse_paths == official.sparse_paths
+        }) {
+            sources.push(official);
+        }
+    }
+    Ok(sources)
+}
+
+/// Product-owned discovery source. A user-supplied source label grants no host authority.
+pub fn official_mcp_source() -> PluginSourceConfig {
+    PluginSourceConfig {
         source_type: PluginSourceType::Official,
-        display_name: "Apilots Skills".to_string(),
+        display_name: "Apilots MCPs".to_string(),
         kind: PluginSourceKind::Git,
-        url: "https://github.com/apilots/skills".to_string(),
+        url: "https://github.com/apilots/mcps".to_string(),
         reference: "main".to_string(),
-        sparse_paths: vec!["skills".to_string()],
-    }]
+        sparse_paths: vec!["mcp".to_string()],
+    }
 }
 
 fn default_roots() -> Vec<PluginRootConfig> {
@@ -89,3 +121,7 @@ fn default_source_type() -> PluginSourceType {
 fn default_true() -> bool {
     true
 }
+
+#[cfg(test)]
+#[path = "plugins_tests.rs"]
+mod tests;

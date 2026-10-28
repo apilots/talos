@@ -90,13 +90,45 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                     result['assertion'] = 'decoded media metadata and advancing playback'
                 if native_pages:
                     surface.screenshot(path=str(folder / (case['name'] + '.content.png')))
+                    result['contentScreenshot'] = 'format-matrix/' + case['name'] + '.content.png'
             elif viewer == 'pdf':
                 assert_pdf(workspace, case)
+                result['firstPageScreenshot'] = 'format-matrix/' + case['name'] + '.page-1.png'
                 result['assertion'] = 'actual PDF canvas, first-page text and second-page text' + (' / Chinese text' if case.get('chineseText') else '')
             elif viewer == 'archive':
-                workspace.get_by_role('button', name='docs/readme.txt', exact=False).click()
+                expect(workspace.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
+                directory = 'format-matrix/' + case['name'] + '.directory.png'
+                page.screenshot(path=str(REPORT / directory), full_page=True)
+                result['directoryScreenshot'] = directory
+                workspace.get_by_role('button', name=case['memberPath'], exact=False).click()
+                navigation = workspace.get_by_role('navigation', name='Archive navigation')
+                expect(navigation).to_contain_text(case['name'])
+                expect(navigation).to_contain_text(case['memberPath'])
+                expect(workspace.get_by_role('textbox', name='File location')).to_have_value('Files / ' + case['name'] + ' / ' + case['memberPath'])
                 expect(workspace.locator('.cm-content:visible')).to_contain_text(case['text'])
-                result['assertion'] = 'archive directory and decoded member bytes'
+                workspace.get_by_role('button', name='Back to archive', exact=True).click()
+                workspace.get_by_role('button', name=case['otherMemberPath'], exact=False).click()
+                expect(navigation).to_contain_text(case['otherMemberPath'])
+                expect(workspace.locator('.cm-content:visible')).to_contain_text(case['otherText'])
+                workspace.get_by_role('button', name='Back to archive', exact=True).click()
+                workspace.get_by_role('button', name=case['memberPath'], exact=False).click()
+                expect(workspace.locator('.cm-content:visible')).to_contain_text(case['text'])
+                if case['name'].endswith('.tar'):
+                    original = page.viewport_size or page.evaluate('({width:innerWidth,height:innerHeight})')
+                    page.set_viewport_size({'width': 980 if native_pages else 820, 'height': original['height']})
+                    settle_workspace(workspace)
+                    expect(navigation).to_contain_text(case['name'])
+                    expect(navigation).to_contain_text(case['memberPath'])
+                    narrow = 'format-matrix/' + case['name'] + '.narrow.png'
+                    page.screenshot(path=str(REPORT / narrow), full_page=True);result['narrowScreenshot'] = narrow
+                    options = workspace.get_by_role('button', name='Open in options', exact=True)
+                    options.click()
+                    expect(workspace.get_by_role('menuitem', name='Talos', exact=True)).to_be_visible()
+                    menu = 'format-matrix/' + case['name'] + '.menu.png'
+                    page.screenshot(path=str(REPORT / menu), full_page=True);result['menuScreenshot'] = menu
+                    page.keyboard.press('Escape')
+                    page.set_viewport_size(original);settle_workspace(workspace)
+                result['assertion'] = 'archive directory, source/member path, distinct member bytes and return navigation'
             elif viewer == 'markdown':
                 expect(workspace.get_by_role('heading', name=case['text'], exact=True)).to_be_visible()
                 expect(workspace.get_by_role('table')).to_be_visible()
@@ -105,6 +137,15 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                 expect(workspace.locator('.cm-content:visible')).to_contain_text(case['text'].replace('\n', ''))
                 result['assertion'] = 'decoded source text'
             expect(workspace.get_by_role('alert')).to_have_count(0)
+            tab = workspace.get_by_role('tab', selected=True)
+            expect(tab).to_have_accessible_name(case['name'])
+            def selected_tab_visible():
+                current = tab.bounding_box(); strip = workspace.get_by_role('tablist').bounding_box()
+                return current and strip and current['x'] >= strip['x'] - 1 and current['x'] + current['width'] <= strip['x'] + strip['width'] + 1
+            wait_for(selected_tab_visible, 'Selected filename remains visible in the tab strip')
+            wait_for(lambda: abs(workspace.bounding_box()['x'] + workspace.bounding_box()['width'] - page.evaluate('innerWidth')) <= 1, 'Workspace stays anchored to the right after passive resize')
+            result['activeTab'] = tab.inner_text()
+            result['location'] = workspace.get_by_role('textbox', name='File location').input_value()
             result['status'] = 'passed'
         except Exception as error:
             result.update(status='failed', error=str(error))
@@ -120,15 +161,19 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
     return results
 
 
-def assert_pdf(workspace, case):
+def assert_pdf(workspace, case, *, evidence_name=None):
     expect(workspace.locator('.react-pdf__Page canvas:visible')).to_be_visible(timeout=90_000)
     expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text(case['text'])
     if case.get('chineseText'):
         expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text(case['chineseText'])
     if case.get('detail'):
         expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text(case['detail'])
+    (REPORT / 'format-matrix').mkdir(exist_ok=True)
+    workspace.page.screenshot(path=str(REPORT / ('format-matrix/' + (evidence_name or case['name']) + '.page-1.png')), full_page=True)
     workspace.get_by_role('button', name='Next page', exact=True).click()
     expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text(case['secondText'])
+    if case.get('chineseText') and 'slides' in case['name']:
+        expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text(case['chineseText'])
 
 
 def verify_session_sources(cluster):

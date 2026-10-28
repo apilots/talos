@@ -178,7 +178,6 @@ pub(super) fn encode_mcp_server_source(
 ) -> TalosResult<pb::McpServerSource> {
     Ok(pb::McpServerSource {
         value: Some(match value {
-            d::McpServerSource::Config => pb::mcp_server_source::Value::Config(pb::Empty {}),
             d::McpServerSource::Plugin {
                 plugin_id,
                 install_id,
@@ -193,7 +192,6 @@ pub(super) fn decode_mcp_server_source(
     value: pb::McpServerSource,
 ) -> TalosResult<d::McpServerSource> {
     Ok(match value.value.ok_or_else(invalid)? {
-        pb::mcp_server_source::Value::Config(_) => d::McpServerSource::Config,
         pb::mcp_server_source::Value::Plugin(value) => d::McpServerSource::Plugin {
             plugin_id: d::PluginId(value.plugin_id),
             install_id: d::PluginInstallId(value.install_id),

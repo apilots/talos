@@ -137,6 +137,8 @@ struct SubscriptionStream {
 }
 
 const APP_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+// Worker preparation and commit have separate 600-second and 300-second budgets.
+const APP_SERVER_PLUGIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
 
 impl AppServerClient {
     pub async fn connect(config: AppServerClientConfig) -> TalosResult<Self> {

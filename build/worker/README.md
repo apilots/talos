@@ -53,13 +53,23 @@ an acceptance candidate, not a published release. See the independent
 
 ## Managed browser boundary
 
-The standard Worker image includes its browser dependencies in both source and
-packaged product builds. It uses Ubuntu 24.04, Chromium supplied by Node
-Playwright 1.64.1 (Chrome for Testing 156.0.8078.4) and Python Browser Use 0.13.11.
-`browser/requirements.lock` pins the complete Python graph with hashes; regenerate
-it with the command in its header and review the resulting versions and licenses.
-The separate Node supplier is pinned by image digest. No package manager runs
-when a task first invokes Browser.
+The standard Worker and Server images share their
+[container runtime installation](../container/README.md) in both source and
+packaged product builds. It uses Ubuntu 24.04 and Chromium supplied by Node
+Playwright 1.64.1 (Chrome for Testing 156.0.8078.4). Browser's manifest and complete
+Python dependency lock come from the official `apilots/mcps` commit recorded in
+`build/plugins/official-mcp.json`. The same source snapshot is packaged for Desktop;
+Desktop uses its native backend and does not install Python. Update the official
+repository lock first, then deliberately advance this build input after acceptance.
+The Node supplier remains pinned by image digest.
+
+Image builds install upstream wheels using exact versions and hashes and generate
+Browser-owned environment metadata from the installed packages. Worker startup
+verifies lock/platform/ABI/API and actual versions; a matching environment is reused
+without a package download. Missing environments are prepared outside execution and
+Plugin commit gates. A dependency-changing update after binding fences Browser until
+that Worker restarts. Optional Browser repair failure leaves the Worker available.
+No package manager runs when a task first invokes Browser.
 
 Browser resources start lazily under UID/GID 10001. Chromium keeps its own
 profile and downloads under the protected Worker home. Xvfb is a virtual X server;
@@ -93,8 +103,9 @@ manager or Dashboard service. It does not capture a physical host screen.
 CDP uses an ephemeral loopback port, RFB uses loopback 5900, and X11
 TCP is disabled. The image does not expose these ports or include a
 websockify/noVNC HTTP server. noVNC belongs to the product Web client and reaches
-the Worker only through the authenticated media relay. Native Desktop and Server
-packages do not gain these container desktop resources.
+the Worker only through the authenticated media relay. The Server image includes
+these resources for its embedded Worker; native Desktop and Server archives do
+not gain the Linux container desktop.
 
 The static home lives in `talos-app/shared/browser-home/` and is also packaged by
 the native Desktop browser build. Its assets have no credentials or runtime

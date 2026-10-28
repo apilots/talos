@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { BrowserWindow, session, shell, type Session, type WebContents } from "electron";
+import { session, shell, type Session, type WebContents } from "electron";
 import type { PreviewBrowserBounds, PreviewBrowserOperation, PreviewBrowserState } from "@talos/sdk-app-server/desktop";
 import { WebsiteAccount } from "./browser-website";
-import type { BrowserChromeState } from "./browser-window-contract";
+import { desktopWindows } from "./desktop-window";
+import { browserBounds } from "./browser-workspace";
 
 type EmbeddedBrowser = { owner: WebContents; browser: WebsiteAccount; state: PreviewBrowserState };
 /** Placement adapter for the existing WebsiteAccount owner. Separate realms
@@ -18,20 +19,24 @@ export class PreviewBrowserHost {
     let view = this.views.get(key);
     if (operation.kind === "close") { if (view) { this.views.delete(key); view.browser.close(); } return null; }
     if (!view && operation.kind === "mount") {
-      const window = BrowserWindow.fromWebContents(owner);
+      const window = [...desktopWindows].find(product => product.view.webContents === owner)?.window;
       if (!window) throw new Error("The preview window is unavailable.");
       const realm = `talos-preview-${createHash("sha256").update(`${this.generation}:${key}`).digest("hex").slice(0, 32)}`;
       this.installResources(session.fromPartition(realm));
       const state: PreviewBrowserState = { id: operation.id, url: operation.url, title: "", back: false, forward: false, loading: true, error: null };
-      const browser = new WebsiteAccount(realm, {
-        window, partition: realm, bounds: boundsFor(owner, operation.bounds), visible: operation.visible,
-        onState: state => { if (this.views.get(key)?.browser === browser) this.publish(key, state); },
+      const browser = new WebsiteAccount(realm, () => {
+        if (this.views.get(key)?.browser === browser) this.publish(key);
+      }, process.platform, {
+        partition: realm,
         onPopup: url => {
           if (this.views.get(key)?.browser !== browser) return;
-          if (new URL(url).protocol === "talos-preview:") void browser.operate({ kind: "navigate", url }).catch(error => console.error("Preview navigation failed", error));
-          else void shell.openExternal(url).catch(error => console.error("Preview external opening failed", error));
+          if (new URL(url).protocol === "talos-preview:") {
+            const tab = browser.snapshot()[0];
+            if (tab) void browser.navigate(tab.id, "navigate", url).catch(error => console.error("Preview navigation failed", error));
+          } else void shell.openExternal(url).catch(error => console.error("Preview external opening failed", error));
         },
       });
+      browser.attach(window);
       view = { owner, browser, state }; this.views.set(key, view);
       if (!this.owners.has(owner)) {
         this.owners.add(owner);
@@ -44,23 +49,23 @@ export class PreviewBrowserHost {
     } else if (!view) throw new Error("The browser preview is unavailable.");
     if (this.views.get(key) !== view) return null;
     if (operation.kind === "layout" || operation.kind === "mount") {
-      view.browser.layout(boundsFor(owner, operation.bounds), operation.visible);
-      if (operation.kind === "mount" && operation.url !== view.state.url) await view.browser.operate({ kind: "navigate", url: operation.url });
-    } else if (operation.kind === "navigate") await view.browser.operate({ kind: "navigate", url: operation.url });
-    else await view.browser.operate({ kind: operation.kind });
+      const window = [...desktopWindows].find(product => product.view.webContents === owner)?.window;
+      const tab = view.browser.snapshot()[0];
+      if (window && tab) view.browser.present(operation.visible ? tab.id : null, operation.visible ? browserBounds(window, owner, operation.bounds) : null);
+      if (operation.kind === "mount" && operation.url !== view.state.url) await view.browser.navigate(view.browser.snapshot()[0].id, "navigate", operation.url);
+    } else if (operation.kind === "navigate") await view.browser.navigate(view.browser.snapshot()[0].id, "navigate", operation.url);
+    else await view.browser.navigate(view.browser.snapshot()[0].id, operation.kind);
     return view.state;
   }
   clear(): void { this.generation++; for (const view of this.views.values()) view.browser.close(); this.views.clear(); }
-  private publish(key: string, state: BrowserChromeState): void {
+  private publish(key: string): void {
     const view = this.views.get(key);
     if (!view || view.owner.isDestroyed()) return;
-    view.state = { id: view.state.id, url: state.address, title: state.tabs.find(tab => tab.active)?.title ?? "", back: state.back, forward: state.forward, loading: state.loading, error: state.error };
+    const tab = view.browser.snapshot()[0];
+    if (!tab) return;
+    view.state = { ...tab, id: view.state.id, error: view.browser.error };
     view.owner.send(this.stateChannel, view.state);
   }
-}
-function boundsFor(owner: WebContents, bounds: PreviewBrowserBounds): Electron.Rectangle {
-  const zoom = owner.getZoomFactor();
-  return { x: Math.round(bounds.x * zoom), y: Math.round(bounds.y * zoom), width: Math.max(0, Math.round(bounds.width * zoom)), height: Math.max(0, Math.round(bounds.height * zoom)) };
 }
 function parseOperation(value: unknown): PreviewBrowserOperation {
   if (!value || typeof value !== "object" || !("kind" in value) || !("id" in value) || typeof value.id !== "string") throw new Error("Invalid preview browser operation.");

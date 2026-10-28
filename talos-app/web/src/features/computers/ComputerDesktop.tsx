@@ -12,6 +12,7 @@ import {useProductScope, useComputers} from "./hooks";
 import {isDesktopRuntime} from "@/shared/api/desktop-client";
 import {ComputerBrowserConfiguration} from "./ComputerBrowserConfiguration";
 import { useAppStore } from "@/shared/store/app-store";
+import { createUuid } from "@/shared/lib/uuid";
 
 import { useBrowser } from "./browser-query";
 
@@ -39,7 +40,7 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
   const remote=browser?.display.kind==="dockerDesktop";
   const selected=browser?.targets.find(target=>target.targetId===browser.selectedTargetId);
   const canOpenLocal=isDesktopRuntime() && local.localId===nodeId && selected?.localOpen==="desktopOwned";
-  const [viewerId] = useState(() => crypto.randomUUID());
+  const [viewerId] = useState(createUuid);
   const [grant, setGrant] = useState<DesktopViewGrant | null>(null);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);

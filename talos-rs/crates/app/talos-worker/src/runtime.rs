@@ -57,12 +57,15 @@ impl TalosWorker {
         Self::build_with_browser_host(config, resources, talos_types::BrowserHostKind::Native).await
     }
 
-    /// Host capability is selected by the composition root, never model arguments.
+    /// The composition root selects the unbundled host policy. Protected packaged
+    /// resources extend Server and Native hosts; Desktop keeps its injected backend.
     pub async fn build_with_browser_host(
         config: Config,
         resources: TalosWorkerResources,
         host: talos_types::BrowserHostKind,
     ) -> TalosResult<Self> {
+        let resource_dir = std::env::var_os("TALOS_RESOURCE_DIR").map(std::path::PathBuf::from);
+        let host = crate::browser_host::select_host(host, resource_dir.as_deref());
         let active_config = Arc::new(RwLock::new(config.clone()));
         let provider_config = active_config.clone();
         let provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
@@ -96,23 +99,34 @@ impl TalosWorker {
             talos_plugin::PluginStateStore::new(config.talos_paths().talos_home.join("plugins")),
         )
         .with_max_skill_md_bytes(config.agent.kernel.skills.max_skill_md_bytes);
-        let executable = std::env::current_exe().map_err(|error| {
-            TalosError::internal_with_source(
-                "Failed to locate the bundled Browser executable.",
-                error,
-            )
-        })?;
-        if manager.provision_builtin_browser(&executable)?
-            == talos_plugin::BuiltinBrowserProvision::NameConflict
-        {
-            tracing::warn!("Built-in Browser unavailable: an existing MCP plugin uses talos_browser. Remove or reimport it under another name in Settings, then restart to provision the built-in Browser.");
+        let snapshot = resource_dir
+            .as_ref()
+            .map(|root| root.join("plugins/apilots-mcps"))
+            .filter(|root| root.join("source.json").is_file());
+        match manager.provision_official_browser(snapshot.as_deref()) {
+            Ok(talos_plugin::OfficialBrowserProvision::Ready) => {}
+            Ok(talos_plugin::OfficialBrowserProvision::NameConflict) => {
+                tracing::warn!(
+                    "Official Browser unavailable: an existing plugin uses talos_browser."
+                );
+            }
+            Ok(talos_plugin::OfficialBrowserProvision::Unavailable) => {
+                tracing::warn!("Official Browser unavailable: install its official source or supply a pinned MCP snapshot.");
+            }
+            Err(error) => talos_logging::report_error(&error),
         }
         let enabled_manager = manager.clone();
         let browser = talos_browser::BrowserRuntime::new(
             config.talos_paths().talos_home.clone(),
             host,
-            Arc::new(move || enabled_manager.builtin_browser_enabled()),
+            Arc::new(move || enabled_manager.official_browser_enabled()),
         )?;
+        if host == talos_types::BrowserHostKind::Docker {
+            let resources = resource_dir
+                .as_ref()
+                .ok_or_else(|| TalosError::internal("Docker Browser resources are missing."))?;
+            browser.configure_managed_resources(&resources.join("browser"))?;
+        }
         #[cfg(unix)]
         let socket = Some(browser.start_ipc(&config.talos_paths().talos_home).await?);
         #[cfg(not(unix))]
@@ -145,9 +159,14 @@ impl TalosWorker {
                     )?;
                     Ok(Box::new(move || prepared.publish()))
                 }),
-                active_config.clone(),
                 mcp_credentials.clone(),
             );
+        if host == talos_types::BrowserHostKind::Docker {
+            if let Err(error) = plugin_manager.initialize_browser_environment().await {
+                // Optional Browser failure leaves the Worker available for repair.
+                talos_logging::report_error(&error);
+            }
+        }
         let skill_roots_resolver = Arc::new(WorkerSkillRootsResolver {
             plugins: plugin_manager.clone(),
         });
@@ -234,6 +253,14 @@ impl TalosWorker {
             },
             crate::output_logs::OutputLogMaintenance::new(active_config.clone()),
         )?;
+        background_tasks.register(
+            talos_guard_task::GuardTaskSpec {
+                name: "official_browser_bootstrap",
+                interval: std::time::Duration::from_secs(300),
+                run_on_start: true,
+            },
+            OfficialBrowserBootstrap(plugin_manager.clone()),
+        )?;
         let config_service = crate::config::service(
             active_config.clone(),
             provider_router.clone(),
@@ -243,7 +270,6 @@ impl TalosWorker {
             providers,
             output_logs_changed.clone(),
         );
-        let plugin_manager = plugin_manager.with_config_service(config_service.clone());
         Ok(Self {
             background_tasks,
             system_info,
@@ -387,5 +413,12 @@ fn sandbox_runtime_paths(config: &Config) -> SandboxRuntimePaths {
     SandboxRuntimePaths {
         macos_sandbox_executable: None,
         linux_helper_executable,
+    }
+}
+
+struct OfficialBrowserBootstrap(PluginManagerService);
+impl talos_guard_task::GuardTask for OfficialBrowserBootstrap {
+    async fn run(&self, context: talos_guard_task::GuardTaskContext) -> TalosResult<()> {
+        tokio::select! { _=context.cancelled()=>Ok(()), result=self.0.bootstrap_official_browser()=>result }
     }
 }

@@ -5,6 +5,7 @@ import { constants, mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, r
 import { WebsiteAccount, checkedUrl, downloadRoot, MAX_TABS, type WebsiteTab as Tab } from "./browser-website";
 import { trackInputs, release, type Send, type RecordValue } from "./browser-input";
 import type { AppProtocol as P } from "@talos/sdk-core";
+import { BrowserWorkspace } from "./browser-workspace";
 
 type Operation = { cancelled: boolean; stop:AbortController; user: string; generation: string; epoch: number };
 const keyCodes: Record<string, number> = { Enter:13, Tab:9, Escape:27, Backspace:8, Delete:46, ArrowLeft:37, ArrowUp:38, ArrowRight:39, ArrowDown:40, Home:36, End:35, PageUp:33, PageDown:34, Space:32 };
@@ -13,6 +14,12 @@ const keyCodes: Record<string, number> = { Enter:13, Tab:9, Escape:27, Backspace
 export class DesktopBrowserHost {
   private readonly operations = new Map<string, Operation>();
   private readonly accounts = new Map<string, WebsiteAccount>();
+  readonly workspace = new BrowserWorkspace((user, create) => this.account(user, create));
+  private account(user:string,create=false):WebsiteAccount|undefined {
+    let account=this.accounts.get(user);
+    if(!account && create){if(this.accounts.size>=2)throw new Error("Browser account capacity exceeded.");account=new WebsiteAccount(user,()=>this.workspace.publish(user));this.accounts.set(user,account);}
+    return account;
+  }
   private chrome: ChromeConnection | undefined;
   private chromeOwner: string | undefined;
   private chromeRevision = 0;
@@ -54,7 +61,7 @@ export class DesktopBrowserHost {
     });
     this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;
     for (const account of this.accounts.values()) account.close();
-    this.accounts.clear(); this.generation=undefined;this.inputFailure=undefined;
+    this.accounts.clear(); this.generation=undefined;this.inputFailure=undefined;this.workspace.reset();
   }
   async execute(id:string, request:P.BrowserHostRequest): Promise<P.BrowserHostResponse> {
     if(this.resetting)await this.resetting;
@@ -72,7 +79,7 @@ export class DesktopBrowserHost {
       finally {op.stop.signal.removeEventListener("abort",abort);}
     };
     const operation=request.operation;
-    let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined;
+    let previous:Promise<void>|undefined,finished:(()=>void)|undefined,input:Send|undefined,fillObjectGroup:string|undefined;
     if(operation.kind==="execute" || operation.kind==="releaseInputs" || operation.kind==="disconnect") {
       previous=this.executing;
       this.executing=new Promise(resolve=>{finished=resolve;});
@@ -131,9 +138,8 @@ export class DesktopBrowserHost {
         await this.settleInputs(async()=>{await this.chrome?.releaseInputs();});
         this.chrome?.close();this.chrome=undefined;this.chromeOwner=undefined;return {kind:"done"};
       }
-      let account=this.accounts.get(request.userId);
-      if (!account) { if(this.accounts.size>=2) throw new Error("Browser account capacity exceeded."); account=new WebsiteAccount(request.userId); this.accounts.set(request.userId,account); }
-      if (operation.kind==="show") {await wait(()=>account.ensure(check));account.show();return {kind:"done"};}
+      const account=this.account(request.userId,true)!;
+      if (operation.kind==="show") {await wait(()=>account.ensure(check));this.workspace.publish(request.userId,account.snapshot()[0]?.id??null);return {kind:"done"};}
       if(operation.kind==="acknowledgeDownloads") {
         if(operation.files.length>5)throw new Error("Too many browser file receipts.");
         if(request.target==="connected"&&(!this.chrome||this.chromeOwner!==request.userId))throw new Error("The connected browser owner changed.");
@@ -164,7 +170,7 @@ export class DesktopBrowserHost {
           if(!tab) throw new Error("Unknown browser tab.");
           const selectedId=tab.id;
           if (action.action==="close") {check();await wait(()=>owner.remove(selectedId));const remaining=await wait(()=>owner.tabs(check));tab=remaining.find(value=>value.id===operation.targetId)??remaining[0];}
-          else {check();await wait(()=>owner.focus(selectedId));}
+          else if (connected) {check();await wait(()=>this.chrome!.focus(selectedId));}
         }
       }
       if (!tab) {check();tab=await wait(()=>owner.open("about:blank",check));}
@@ -174,10 +180,10 @@ export class DesktopBrowserHost {
       const prepareInput=async()=>{
         await send("Input.setIgnoreInputEvents",{ignore:false});
         await send("Emulation.setFocusEmulationEnabled",{enabled:true});
-        await send("Page.bringToFront");
+        if(connected)await send("Page.bringToFront");
         // The first document can be loaded before its input hit-test surface is
         // presented. Let it paint before dispatching input, not only afterward.
-        await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
+        if(connected)await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
       };
       await send("Page.enable");
       if (action.kind==="navigate") {
@@ -201,14 +207,25 @@ export class DesktopBrowserHost {
           await send("Input.dispatchMouseEvent",{type:"mouseMoved",x,y});
           await send("Input.dispatchMouseEvent",{type:"mousePressed",x,y,button:"left",buttons:1,clickCount:1});
           await send("Input.dispatchMouseEvent",{type:"mouseReleased",x,y,button:"left",buttons:0,clickCount:1});
-          await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
+          if(connected)await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
         } else if(action.kind==="fill") {
           if(!["input","textarea"].includes(element.tag)&&element.attributes.contenteditable!=="true")throw new Error("Select a text input or editable element.");
           await prepareInput();
           await send("DOM.focus",{backendNodeId:element.backendNodeId});
-          const modifier=process.platform==="darwin"?4:2;
-          await send("Input.dispatchKeyEvent",{type:"keyDown",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier});
-          await send("Input.dispatchKeyEvent",{type:"keyUp",key:"a",code:"KeyA",windowsVirtualKeyCode:65,modifiers:modifier});
+          fillObjectGroup=`talos-fill-${id}`;
+          const handle=object((await send("DOM.resolveNode",{backendNodeId:element.backendNodeId,objectGroup:fillObjectGroup})).object);
+          // Select text as browser automation clients do, without an OS editing shortcut.
+          const selected=await send("Runtime.callFunctionOn",{objectId:handle.objectId,returnByValue:true,functionDeclaration:`function() {
+            if (this instanceof HTMLInputElement || this instanceof HTMLTextAreaElement) this.select();
+            else {
+              const range = this.ownerDocument.createRange();
+              range.selectNodeContents(this);
+              const selection = this.ownerDocument.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }`});
+          if(selected.exceptionDetails)throw new Error("Browser text selection failed.");
           await send("Input.insertText",{text:action.text});
         } else {
           const upload=operation.upload;
@@ -247,7 +264,7 @@ export class DesktopBrowserHost {
       }
       const textResult=object((await send("Runtime.evaluate",{expression:"(document.body?.innerText ?? '').slice(0,16000)",returnByValue:true})).result);
       const titleResult=object((await send("Runtime.evaluate",{expression:"document.title.slice(0,512)",returnByValue:true})).result);
-      const screenshot=action.kind==="screenshot" ? String((await send("Page.captureScreenshot",{format:"png",captureBeyondViewport:false})).data) : null;
+      const screenshot=action.kind==="screenshot" ? connected ? String((await send("Page.captureScreenshot",{format:"png",captureBeyondViewport:false})).data) : await wait(()=>account.screenshot(current.id)) : null;
       if(screenshot && screenshot.length>6*1024*1024)throw new Error("Browser screenshot is too large.");
       tabs=await wait(()=>owner.tabs(check));
       return {kind:"observation",page:{targetId:current.id,url:current.url()==="about:blank"?"about:blank":String(frame.url??current.url()),title:String(titleResult.value??current.title()),text:String(textResult.value??""),tabs:tabs.slice(0,32).map(t=>({tabId:t.id,title:t.title(),url:t.url()}))},loaderId,elements,screenshot,downloads};
@@ -257,7 +274,10 @@ export class DesktopBrowserHost {
         // must not reject its own key/button release. Keep admission fenced until
         // the release is acknowledged, or block it explicitly on cleanup failure.
         const sender=input;
-        if(sender)await this.settleInputs(()=>release(sender));
+        if(sender) {
+          await this.settleInputs(()=>release(sender));
+          if(fillObjectGroup)await sender("Runtime.releaseObjectGroup",{objectGroup:fillObjectGroup});
+        }
       } finally {this.operations.delete(id);finished?.();}
     }
   }

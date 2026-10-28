@@ -27,6 +27,27 @@ ROOT = Path(__file__).resolve().parents[3]
 DEST = ROOT / 'talos-e2e/fixtures/resource-preview'
 
 
+def archive_fixtures():
+    """Distinct markers verify that directory/member screenshots have the same source."""
+    cases = []
+    for ext, mime in [('zip', 'application/zip'), ('tar', 'application/x-tar'), ('tgz', 'application/gzip')]:
+        text = f'{ext.upper()} archive member preview: 42'
+        other = f'{ext.upper()} notes member: a different file with the same basename'
+        members = {'docs/readme.txt': (text + '\n').encode(), 'notes/readme.txt': (other + '\n').encode()}
+        name = 'matrix-bundle.' + ext
+        if ext == 'zip':
+            with zipfile.ZipFile(DEST / name, 'w', zipfile.ZIP_DEFLATED) as archive:
+                for path, content in members.items(): archive.writestr(path, content)
+        else:
+            with tarfile.open(DEST / name, 'w:gz' if ext == 'tgz' else 'w') as archive:
+                for path, content in members.items():
+                    entry = tarfile.TarInfo(path); entry.size = len(content); entry.mtime = 0
+                    archive.addfile(entry, io.BytesIO(content))
+        cases.append(dict(name=name, mime=mime, viewer='archive', admission='opt-in', text=text,
+                          memberPath='docs/readme.txt', otherMemberPath='notes/readme.txt', otherText=other))
+    return cases
+
+
 def generate(ffmpeg):
     DEST.mkdir(parents=True, exist_ok=True)
     cases = []
@@ -101,17 +122,7 @@ def generate(ffmpeg):
         name = 'matrix-content.' + ext; (DEST / name).write_text(body)
         add(name, mime, viewer, ext in ('md', 'csv'), text='Markdown format preview' if viewer == 'markdown' else 'HTML format preview' if viewer == 'html' else body.strip())
 
-    member = b'Archive member preview: 42\n'
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('docs/readme.txt', member)
-    (DEST / 'matrix-bundle.zip').write_bytes(buffer.getvalue())
-    for suffix, mode in [('tar', 'w'), ('tgz', 'w:gz')]:
-        with tarfile.open(DEST / ('matrix-bundle.' + suffix), mode) as archive:
-            entry = tarfile.TarInfo('docs/readme.txt'); entry.size = len(member); entry.mtime = 0
-            archive.addfile(entry, io.BytesIO(member))
-    for ext, mime in [('zip', 'application/zip'), ('tar', 'application/x-tar'), ('tgz', 'application/gzip')]:
-        add('matrix-bundle.' + ext, mime, 'archive', text=member.decode().strip())
+    cases.extend(archive_fixtures())
 
     wav = DEST / 'matrix-tone.wav'
     with wave.open(str(wav), 'wb') as audio:

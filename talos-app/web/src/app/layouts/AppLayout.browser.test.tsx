@@ -68,21 +68,23 @@ it("binds right tabs to sessions and Files while retaining hidden webpage instan
   expect(screen.getByRole("tab", { name: "second-worker" })).toHaveAttribute("aria-selected", "true");
 });
 it("scrolls a restored active tab into view without taking focus from session navigation", () => {
-  const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
-  const scroll = vi.fn();
-  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.getAttribute("role") === "tablist") return { left: 200, right: 400 } as DOMRect;
+    if (this.getAttribute("role") === "tab" && this.title === "first-worker") return { left: 500, right: 600 } as DOMRect;
+    return original.call(this);
+  });
   try {
     show();open("first-worker");
     fireEvent.click(screen.getByRole("link", { name: "Second session" }));open("second-worker");
+    const strip = screen.getByRole("tablist");strip.scrollLeft = 0;
     const navigation = screen.getByRole("link", { name: "First session" });
     navigation.focus();fireEvent.click(navigation);
     expect(navigation).toHaveFocus();
-    expect(scroll.mock.contexts.at(-1)).toBe(screen.getByRole("tab", { name: "first-worker" }));
-  } finally {
-    if (previous) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previous);
-    else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
-  }
+    expect(strip.scrollLeft).toBe(200);
+  } finally { bounds.mockRestore(); }
 });
+
 it("counts retained windows honestly, deduplicates openings, selects and closes them", () => {
   show();expect(screen.getByRole("button", { name: "New workspace tab" })).toBeEnabled();
   open("a");open("b");open("a");

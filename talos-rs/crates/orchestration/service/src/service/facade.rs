@@ -66,7 +66,7 @@ pub struct TalosService {
     file_preview_base_url: Option<String>,
     file_previews:
         Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<file_preview::PreviewGrant>>>>,
-    desktop_ingress: Arc<std::sync::RwLock<Option<agent_client::AgentNodeClient>>>,
+    desktop_ingress: Arc<std::sync::RwLock<Option<Arc<dyn crate::DesktopIngress>>>>,
     desktop_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], desktop::ViewerRoute>>>,
     sync_management: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn ManagementSync>>>>,

@@ -226,7 +226,7 @@ def run(cluster):
             session_formats = verify_session_sources(cluster)
             page.goto(url + '/sessions/' + session_formats)
             page.get_by_role('link', name='Session presentation', exact=True).click()
-            assert_pdf(workspace, next(case for case in CASES if case['name'] == 'matrix-slides.pptx'))
+            assert_pdf(workspace, next(case for case in CASES if case['name'] == 'matrix-slides.pptx'), evidence_name='session-matrix-slides.pptx')
             page.screenshot(path=str(REPORT / 'session-presentation.png'), full_page=True)
             require(not errors, 'Product runtime errors: ' + repr(errors))
             (REPORT / 'resource-preview.json').write_text(json.dumps({'status': 'passed', 'sessions': [a, b], 'fileIds': [html, image, text, archive], 'frontendMocks': False, 'upstreams': ['contract-auth', 'controlled-chat-model']}, indent=2) + '\n')
