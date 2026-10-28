@@ -2,7 +2,8 @@
 
 `01_web_preview` covers authenticated Files HTML/image/text/Markdown/archive files,
 server-detected JSON/source MIME, CodeMirror text previews, archive metadata/download,
-download bytes, real session history image dialogs and non-image attachments,
+download bytes, session-message image thumbnails that open the original image in
+a dialog on click, and non-image attachments in their session's right-workspace tabs,
 file references, Web link routing, session/Files tab restoration, retained HTML
 state, refresh, and narrow modal menu/reload behavior. It also covers the same 31 fixtures through sessionPath prepare/read, a real session presentation render, direct/outbound Worker file reads, relative/root-relative HTML assets through a configured preview origin, source-line/encoding controls and real Office→PDF rendering with reading-position restoration. Auth and model upstreams
 are controlled loopback fixtures; product services, history and storage remain real.

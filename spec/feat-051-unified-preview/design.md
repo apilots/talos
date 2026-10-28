@@ -33,7 +33,7 @@ The following R1–R5 describe the Phase 1 baseline. Expanded P2-R1–P2-R5 supe
 
 | Entry | Result |
 | --- | --- |
-| Session history image/attachment image | Existing thumbnail + FileImage dialog on every client; unchanged |
+| Session message image (inline or attachment) | Show the existing inline thumbnail on every client; click it to view the original image in the FileImage dialog, without opening a right-workspace tab |
 | Files list/grid or details, any type including image | Open/reuse registered file in Files right workspace |
 | Session non-image attachment or `talos-file://fileId` link | Open/reuse file in current session right workspace |
 | Ordinary HTTP(S) chat/document link | Desktop default browser through existing bridge; Web right browser |
