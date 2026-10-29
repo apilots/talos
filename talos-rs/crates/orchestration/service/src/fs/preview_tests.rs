@@ -93,7 +93,7 @@ async fn preview_directory_is_released_at_expiry_without_another_request() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("file.txt"), b"preview").unwrap();
     let resources = PreviewRoots::default();
-    resources
+    let WorkerPreviewResponse::Opened { handle, .. } = resources
         .operate(
             "owner".into(),
             WorkerPreviewRequest::Open {
@@ -103,11 +103,60 @@ async fn preview_directory_is_released_at_expiry_without_another_request() {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("expected open")
+    };
+    let WorkerPreviewResponse::Opened {
+        handle: valid_handle,
+        ..
+    } = resources
+        .operate(
+            "owner".into(),
+            WorkerPreviewRequest::Open {
+                root: temp.path().to_owned(),
+                path: "file.txt".into(),
+                expires_at: chrono::Utc::now().timestamp() + 60,
+            },
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("expected open")
+    };
+    // Expiry must reject reads even before the scheduled cleanup gets to run.
+    resources
+        .0
+        .lock()
+        .unwrap()
+        .get_mut(&handle)
+        .unwrap()
+        .expires_at = chrono::Utc::now().timestamp() - 1;
+    let read = |handle| WorkerPreviewRequest::Read {
+        handle,
+        path: "file.txt".into(),
+        offset: 0,
+        limit: 7,
+    };
+    assert!(resources
+        .operate("owner".into(), read(handle.clone()))
+        .await
+        .unwrap_err()
+        .is_code(ErrorCode::ResourceNotFound));
+    let WorkerPreviewResponse::Content(content) = resources
+        .operate("owner".into(), read(valid_handle.clone()))
+        .await
+        .unwrap()
+    else {
+        panic!("expected content")
+    };
+    assert_eq!(content.data.as_ref(), b"preview");
     tokio::task::yield_now().await;
     tokio::time::advance(std::time::Duration::from_secs(2)).await;
     tokio::task::yield_now().await;
-    assert!(resources.0.lock().unwrap().is_empty());
+    let roots = resources.0.lock().unwrap();
+    assert!(!roots.contains_key(&handle));
+    assert!(roots.contains_key(&valid_handle));
 }
 
 #[test]

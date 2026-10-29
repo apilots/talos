@@ -12,7 +12,7 @@ pub(super) struct PreviewGrant {
     actor: Actor,
     descriptor: FilePreviewDescriptor,
     source: PreviewBinding,
-    document: Option<Arc<crate::file::preview::PreparedDocument>>,
+    document: Option<crate::file::preview::PreparedDocument>,
 }
 
 enum PreviewBinding {
@@ -180,13 +180,12 @@ impl TalosService {
             };
             descriptor.document = Some(document.0);
             grant.descriptor = descriptor.clone();
-            grant.document = document.1.map(Arc::new);
+            grant.document = document.1;
         }
         let mut previews = self
             .file_previews
             .lock()
             .map_err(|_| preview_state_error())?;
-        previews.retain(|_, grant| grant.descriptor.expires_at > chrono::Utc::now().timestamp());
         previews.insert(descriptor.preview_id.clone(), Arc::new(grant));
         let weak = Arc::downgrade(&self.file_previews);
         let expired_id = descriptor.preview_id.clone();
@@ -259,14 +258,7 @@ impl TalosService {
                     self.access.load_session(actor, session_id).await?;
                 }
             }
-            let document = document.clone();
-            return tokio::task::spawn_blocking(move || {
-                document.read(&request.resource_path, request.offset, request.limit)
-            })
-            .await
-            .map_err(|error| {
-                TalosError::internal_with_source("Read the prepared document.", error)
-            })?;
+            return Ok(document.read(request.offset, request.limit));
         }
         self.read_preview_source(grant, actor, request).await
     }

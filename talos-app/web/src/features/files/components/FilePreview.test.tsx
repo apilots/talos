@@ -83,19 +83,34 @@ it("refreshes only the owning context when two contexts preview the same file", 
   expect(two.getByTitle("report.html")).toBe(second);
 });
 
-it("resolves Markdown links and images from the prepared document and keeps registered images on preview", async () => {
+it("resolves Markdown resources and retains their images until an explicit refresh", async () => {
+  let documents = 0; let images = 0;
   api.prepare.mockImplementation(async ({ source }: { source: FilePreviewSource }) => source.kind === "sessionPath"
-    ? { ...descriptor, entryPath: "docs/report.md" }
-    : { ...descriptor, previewId: "picture", entryPath: "attached.png", metadata: { name: "attached.png", mimeType: "image/png", sizeBytes: 4 } });
+    ? { ...descriptor, previewId: `preview-${++documents}`, entryPath: "docs/report.md" }
+    : { ...descriptor, previewId: `picture-${++images}`, entryPath: "attached.png", metadata: { name: "attached.png", mimeType: "image/png", sizeBytes: 4 } });
   api.content.mockResolvedValue(new TextEncoder().encode("[Next](next.md)\n\n[Source](/workspace/project/src/lib.rs#L27)\n\n![Chart](images/100%25%20done.png)\n\n![Attached](talos-file://image-1)"));
-  setup({ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" });
+  const view = setup({ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" });
   fireEvent.click(await screen.findByRole("link", { name: "Next" }));
   expect(api.openResource).toHaveBeenCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "docs/next.md" });
   fireEvent.click(screen.getByRole("link", { name: "Source" }));
   expect(api.openResource).toHaveBeenLastCalledWith({ kind: "sessionFile", sessionId: "session-1", path: "/workspace/project/src/lib.rs", position: { kind: "text", resourcePath: null, line: 27, encoding: "utf-8" } });
-  expect(screen.getByAltText("Chart")).toHaveAttribute("src", "talos-preview://preview/docs/images/100% done.png");
-  expect(await screen.findByAltText("Attached")).toHaveAttribute("src", "talos-preview://picture/attached.png");
+  const chart = screen.getByAltText("Chart"); const attached = await screen.findByAltText("Attached");
+  expect(chart).toHaveAttribute("src", "talos-preview://preview-1/docs/images/100% done.png");
+  expect(attached).toHaveAttribute("src", "talos-preview://picture-1/attached.png");
   expect(api.prepare).toHaveBeenCalledWith({ source: { kind: "file", fileId: "image-1" } });
+  view.rerender(<QueryClientProvider client={view.client}><FilePreview source={{ kind: "sessionPath", sessionId: "session-1", path: "docs/report.md" }} instanceKey="session-one" connectionKey="alice" position={{ kind: "markdown", resourcePath: "docs/report.md", scrollTop: 120 }} /></QueryClientProvider>);
+  expect(screen.getByAltText("Chart")).toBe(chart);
+  expect(screen.getByAltText("Attached")).toBe(attached);
+  expect(api.prepare).toHaveBeenCalledTimes(2);
+  expect(api.close).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh webpage" }));
+  await waitFor(() => expect(screen.getByAltText("Attached")).toHaveAttribute("src", "talos-preview://picture-2/attached.png"));
+  expect(screen.getByAltText("Chart")).toHaveAttribute("src", "talos-preview://preview-2/docs/images/100% done.png");
+  expect(screen.getByAltText("Chart")).not.toBe(chart);
+  expect(screen.getByAltText("Attached")).not.toBe(attached);
+  expect(api.prepare).toHaveBeenCalledTimes(4);
+  expect(api.close).toHaveBeenCalledWith({ previewId: "preview-1" });
+  expect(api.close).toHaveBeenCalledWith({ previewId: "picture-1" });
 });
 
 it("shows package metadata and downloads the original archive", async () => {

@@ -40,7 +40,6 @@ impl PreviewRoots {
                 let metadata = content(resource, 0).metadata;
                 let handle = uuid::Uuid::new_v4().to_string();
                 let mut roots = self.0.lock().map_err(|_| state_error())?;
-                roots.retain(|_, root| root.expires_at > now);
                 roots.insert(
                     handle.clone(),
                     PreviewRoot {
@@ -83,11 +82,10 @@ impl PreviewRoots {
                     ));
                 }
                 let directory = {
-                    let mut roots = self.0.lock().map_err(|_| state_error())?;
-                    roots.retain(|_, root| root.expires_at > now);
+                    let roots = self.0.lock().map_err(|_| state_error())?;
                     roots
                         .get(&handle)
-                        .filter(|root| root.owner == owner)
+                        .filter(|root| root.owner == owner && root.expires_at > now)
                         .map(|root| root.directory.clone())
                         .ok_or_else(not_found)?
                 };

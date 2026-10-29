@@ -3,7 +3,6 @@
 use bytes::Bytes;
 use process_wrap::tokio::{CommandWrap, KillOnDrop};
 use std::{path::Path, process::Stdio, time::Duration};
-use talos_error::TalosResult;
 use talos_types::{
     FilePreviewBytes, FilePreviewDocument, FilePreviewDocumentUnavailable as Unavailable,
     FilePreviewMetadata,
@@ -11,8 +10,8 @@ use talos_types::{
 
 const PDF_PATH: &str = "__preview__/document.pdf";
 
-pub(crate) enum PreparedDocument {
-    Pdf(Bytes),
+pub(crate) struct PreparedDocument {
+    pdf: Bytes,
 }
 
 pub(crate) fn needs_document(metadata: &FilePreviewMetadata) -> bool {
@@ -28,7 +27,7 @@ pub(crate) async fn prepare(
             FilePreviewDocument::Pdf {
                 resource_path: PDF_PATH.into(),
             },
-            Some(PreparedDocument::Pdf(pdf)),
+            Some(PreparedDocument { pdf }),
         ),
         Err(reason) => (FilePreviewDocument::Unavailable { reason }, None),
     }
@@ -37,18 +36,13 @@ impl PreparedDocument {
     pub(crate) fn handles(&self, path: &str) -> bool {
         path == PDF_PATH
     }
-    pub(crate) fn read(
-        &self,
-        _path: &str,
-        offset: u64,
-        limit: u32,
-    ) -> TalosResult<FilePreviewBytes> {
-        let Self::Pdf(bytes) = self;
+    pub(crate) fn read(&self, offset: u64, limit: u32) -> FilePreviewBytes {
+        let bytes = &self.pdf;
         let start = offset.min(bytes.len() as u64) as usize;
         let end = offset
             .saturating_add(u64::from(limit))
             .min(bytes.len() as u64) as usize;
-        Ok(FilePreviewBytes {
+        FilePreviewBytes {
             metadata: FilePreviewMetadata {
                 name: "preview.pdf".into(),
                 mime_type: "application/pdf".into(),
@@ -56,7 +50,7 @@ impl PreparedDocument {
             },
             offset,
             data: bytes.slice(start..end),
-        })
+        }
     }
 }
 fn office(metadata: &FilePreviewMetadata) -> bool {

@@ -1,17 +1,5 @@
-"""Small real document/source fixtures shared by Web and Desktop acceptance."""
-import io
+"""Real source fixtures in the execution Worker's authorized directory."""
 from pathlib import Path
-import zipfile
-
-
-def office_document():
-    """A two-page OOXML document; production LibreOffice performs conversion."""
-    result = io.BytesIO()
-    with zipfile.ZipFile(result, 'w', zipfile.ZIP_DEFLATED) as package:
-        package.writestr('[Content_Types].xml', '''<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>''')
-        package.writestr('_rels/.rels', '''<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>''')
-        package.writestr('word/document.xml', '''<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Office preview first page</w:t><w:br w:type="page"/></w:r></w:p><w:p><w:r><w:t>Office preview second page</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:body></w:document>''')
-    return result.getvalue()
 
 
 def workspace_files(root):

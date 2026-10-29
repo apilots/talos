@@ -114,6 +114,11 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                 assert_pdf(workspace, case)
                 result['firstPageScreenshot'] = 'format-matrix/' + case['name'] + '.page-1.png'
                 result['assertion'] = 'actual PDF canvas, first-page text and second-page text' + (' / Chinese text' if case.get('chineseText') else '')
+                if not native_pages and case['name'] == 'matrix-word.docx':
+                    page.reload()
+                    expect(workspace.locator('.react-pdf__Page canvas:visible')).to_be_visible(timeout=90_000)
+                    expect(workspace.locator('.react-pdf__Page__textContent:visible')).to_contain_text(case['secondText'])
+                    result['assertion'] += ', second-page restoration after reload'
             elif viewer == 'unsupported':
                 expect(workspace.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
                 expect(workspace.get_by_role('status')).to_contain_text('Download')
@@ -124,17 +129,25 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
                 result['assertion'] = 'package metadata and byte-exact original download; no member preview'
                 if case['name'].endswith('.tar'):
                     original = page.viewport_size or page.evaluate('({width:innerWidth,height:innerHeight})')
-                    page.set_viewport_size({'width': 980 if native_pages else 820, 'height': original['height']})
-                    settle_workspace(workspace)
-                    expect(workspace.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
-                    narrow = 'format-matrix/' + case['name'] + '.narrow.png'
-                    page.screenshot(path=str(REPORT / narrow), full_page=True);result['narrowScreenshot'] = narrow
-                    workspace.get_by_role('button', name='Open in options', exact=True).click()
-                    expect(workspace.get_by_role('menuitem', name='Talos', exact=True)).to_be_visible()
-                    menu = 'format-matrix/' + case['name'] + '.menu.png'
-                    page.screenshot(path=str(REPORT / menu), full_page=True);result['menuScreenshot'] = menu
-                    page.keyboard.press('Escape')
-                    page.set_viewport_size(original);settle_workspace(workspace)
+                    tab = workspace.get_by_role('tab', selected=True)
+                    def selected_tab_visible():
+                        current = tab.bounding_box(); strip = workspace.get_by_role('tablist').bounding_box()
+                        return current and strip and current['x'] >= strip['x'] - 1 and current['x'] + current['width'] <= strip['x'] + strip['width'] + 1
+                    for narrow in (True, False):
+                        page.set_viewport_size({'width': 980 if native_pages else 820, 'height': original['height']} if narrow else original)
+                        settle_workspace(workspace)
+                        expect(workspace.get_by_role('heading', name=case['name'], exact=True)).to_be_visible()
+                        expect(tab).to_have_accessible_name(case['name'])
+                        wait_for(selected_tab_visible, 'Selected filename remains visible after width transition')
+                        wait_for(lambda: abs(workspace.bounding_box()['x'] + workspace.bounding_box()['width'] - page.evaluate('innerWidth')) <= 1, 'Workspace stays anchored to the right after passive resize')
+                        if narrow:
+                            capture = 'format-matrix/' + case['name'] + '.narrow.png'
+                            page.screenshot(path=str(REPORT / capture), full_page=True);result['narrowScreenshot'] = capture
+                            workspace.get_by_role('button', name='Open in options', exact=True).click()
+                            expect(workspace.get_by_role('menuitem', name='Talos', exact=True)).to_be_visible()
+                            menu = 'format-matrix/' + case['name'] + '.menu.png'
+                            page.screenshot(path=str(REPORT / menu), full_page=True);result['menuScreenshot'] = menu
+                            page.keyboard.press('Escape')
             elif viewer == 'markdown':
                 expect(workspace.get_by_role('heading', name=case['text'], exact=True)).to_be_visible()
                 expect(workspace.get_by_role('table')).to_be_visible()
@@ -145,11 +158,6 @@ def exercise_formats(page, upload, *, native_pages=None, cases=CASES):
             expect(workspace.get_by_role('alert')).to_have_count(0)
             tab = workspace.get_by_role('tab', selected=True)
             expect(tab).to_have_accessible_name(case['name'])
-            def selected_tab_visible():
-                current = tab.bounding_box(); strip = workspace.get_by_role('tablist').bounding_box()
-                return current and strip and current['x'] >= strip['x'] - 1 and current['x'] + current['width'] <= strip['x'] + strip['width'] + 1
-            wait_for(selected_tab_visible, 'Selected filename remains visible in the tab strip')
-            wait_for(lambda: abs(workspace.bounding_box()['x'] + workspace.bounding_box()['width'] - page.evaluate('innerWidth')) <= 1, 'Workspace stays anchored to the right after passive resize')
             result['activeTab'] = tab.inner_text()
             result['location'] = workspace.get_by_role('textbox', name='File location').input_value()
             result['status'] = 'passed'

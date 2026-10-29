@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { parseFilePreviewReference, type FilePreviewSource } from "@talos/sdk-core";
 import type { FilePreviewPosition } from "@/shared/store/workspace-window";
 import { Download, FileText, RotateCw } from "lucide-react";
@@ -61,20 +61,22 @@ export function FilePreview({ source, connectionKey, instanceKey, position, onPo
   const url = descriptor && resourcePath ? getTalosClient().files.preview.resourceUrl(descriptor, resourcePath) : undefined;
   const browserUrl = display?.kind === "browser" && display.mimeType !== "application/pdf" ? url : undefined;
   const surface = useBrowserSurface(browserUrl);
-  const resolveImageUrl = (reference: string) => {
+  const resolveImageUrl = useCallback((reference: string) => {
     if (!descriptor || !resourcePath) return reference;
     const path = getTalosClient().files.preview.resolvePath(resourcePath, reference);
     return path === undefined ? reference : getTalosClient().files.preview.resourceUrl(descriptor, path);
-  };
-  const openLink = async (reference: string) => {
+  }, [descriptor, resourcePath]);
+  const sessionId = source.kind === "sessionPath" ? source.sessionId : null;
+  const openLink = useCallback(async (reference: string) => {
     if (/^[a-z][a-z\d+.-]*:/i.test(reference) || reference.startsWith("//")) { await openResourceLink(reference); return; }
     const citation = parseFilePreviewReference(reference, { fromPath: resourcePath });
     const path = resourcePath ? citation.path : undefined;
     if (path !== undefined) {
-      if (source.kind === "sessionPath") await openResource({ kind: "sessionFile", sessionId: source.sessionId, path, ...(citation.line ? { position: { kind: "text", resourcePath: null, line: citation.line, encoding: "utf-8" } as const } : {}) });
+      if (sessionId !== null) await openResource({ kind: "sessionFile", sessionId, path, ...(citation.line ? { position: { kind: "text", resourcePath: null, line: citation.line, encoding: "utf-8" } as const } : {}) });
       else throw new Error("This registered file has no adjacent file source.");
     } else await openResourceLink(reference);
-  };
+  }, [resourcePath, sessionId]);
+  const renderFileImage = useCallback((id: string, label: string) => <DocumentImage fileId={id} label={label} scope={connectionKey} instanceKey={instanceKey} />, [connectionKey, instanceKey]);
   const loading = <p role="status" className="px-6 py-8 text-sm text-muted">{t("preview.loading")}</p>;
   return <section aria-label={t("preview.title")} className="flex h-full min-h-0 flex-col bg-background">
     <BrowserToolbar surface={browserUrl ? surface : undefined} source={{ kind: "file", label: source.kind === "file" ? `${t("pageLabel")} / ${location}` : location, resource, preview: descriptor }} onRefresh={preview.refresh} refreshDisabled={preview.pending || content.isFetching}>
@@ -94,6 +96,6 @@ export function FilePreview({ source, connectionKey, instanceKey, position, onPo
       : display?.kind === "browser" && display.mimeType === "application/pdf" && url && resourcePath ? <Suspense fallback={loading}><PdfPreview key={`${descriptor?.previewId}:${resourcePath}`} url={url} resourcePath={resourcePath} position={position} onPositionChange={onPositionChange} onOpenLink={openLink} /></Suspense>
       : display?.kind === "browser" ? <><p className="shrink-0 border-b border-divider px-4 py-1.5 text-[11px] text-muted">{t(display.mimeType === "text/html" ? "preview.htmlHint" : "preview.nativeHint")}</p>{url ? <BrowserFrame key={surface.native ? "native" : url} surface={surface} url={url} title={file?.originalFilename ?? t("preview.title")} /> : loading}</>
       : text === null && descriptor && resourcePath ? <TextPreview key={`${descriptor.previewId}:${resourcePath}`} descriptor={descriptor} resourcePath={resourcePath} position={position} onPositionChange={onPositionChange} />
-      : <DocumentScroll key={`${descriptor?.previewId}:${resourcePath}`} resourcePath={resourcePath ?? ""} position={position} onPositionChange={onPositionChange}>{!text?.trim() ? <p className="text-sm text-muted">{t("preview.empty")}</p> : <MarkdownRenderer className="markdown-body prose prose-sm max-w-none break-words" text={text ?? ""} onOpenLink={openLink} resolveImageUrl={resolveImageUrl} renderFileImage={(id, label) => <DocumentImage fileId={id} label={label} scope={connectionKey} instanceKey={instanceKey} />} />}</DocumentScroll>}
+      : <DocumentScroll key={`${descriptor?.previewId}:${resourcePath}`} resourcePath={resourcePath ?? ""} position={position} onPositionChange={onPositionChange}>{!text?.trim() ? <p className="text-sm text-muted">{t("preview.empty")}</p> : <MarkdownRenderer className="markdown-body prose prose-sm max-w-none break-words" text={text ?? ""} onOpenLink={openLink} resolveImageUrl={resolveImageUrl} renderFileImage={renderFileImage} />}</DocumentScroll>}
   </section>;
 }

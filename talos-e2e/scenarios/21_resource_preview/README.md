@@ -9,7 +9,7 @@ state, refresh, and narrow modal menu/reload behavior. It also covers the same 3
 are controlled loopback fixtures; product services, history and storage remain real.
 
 `02_desktop_preview` reuses the production main/preload/app-server harness and
-existing workspace regressions, then covers registered HTML in a real WebContentsView with protocol isolation, Files
+covers registered HTML in a real WebContentsView with protocol isolation, Files
 images in the right pane, state retention, supported Open in actions and Desktop
 ordinary-link dispatch without adding a preview tab, real generated JSON upload/preview and Office→PDF rendering. OS default-application
 rendering is outside the harness; exact URL/policy branches have deterministic
@@ -17,6 +17,14 @@ frontend unit coverage. Session scoping uses the shared renderer and is exercise
 through real sessions in the Web case. Live Computer media remains covered by
 group 20 Browser Worker scenarios; Computer lifecycle and original session image
 behavior also retain their owning component tests.
+
+Group 20 independently owns ordinary native-browser tab, geometry, collapse and
+host-close focus regressions; group 21 does not replay that complete scenario.
+The shared format matrix owns document conversion and content checks, with Web
+reload restoration exercised once on its existing two-page DOCX. TAR owns the
+representative narrow/wide selected-tab visibility and right-edge checks. The
+Web setup's seven Files tabs also support session/Files restoration and this
+many-tab width transition.
 
 Run `talos-e2e/run_e2e.sh --group 21_resource_preview`. Install LibreOffice (`soffice` on PATH) for document conversion. Requirements are declared
 alongside the cases; use system Chrome and an isolated Electron profile. Reports,

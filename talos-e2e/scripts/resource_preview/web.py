@@ -10,7 +10,7 @@ import zipfile
 from preview_fixture import PreviewCluster
 from fixture import ROOT, REPORT, data, free_port, require, wait_for, http
 from urllib.parse import urlencode
-from document_fixture import office_document, workspace_files
+from document_fixture import workspace_files
 from format_matrix import CASES, FIXTURES, exercise_formats, verify_default_admission, verify_session_sources, assert_pdf
 from resources import seed, settle_workspace
 from playwright.sync_api import sync_playwright, expect
@@ -213,15 +213,6 @@ def run(cluster):
             expect(workspace.locator('.cm-content:visible')).to_contain_text('000027 Worker source line')
             page.screenshot(path=str(REPORT / 'worker-absolute-citation.png'), full_page=True)
             page.get_by_role('link', name='Files', exact=True).click()
-            upload(page, 'office.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', office_document())
-            page.get_by_role('button', name=re.compile('^office.docx')).click()
-            expect(workspace.locator('.react-pdf__Page canvas')).to_be_visible(timeout=90_000)
-            expect(workspace.get_by_text('Office preview first page', exact=True)).to_be_visible()
-            workspace.get_by_role('button', name='Next page', exact=True).click()
-            expect(workspace.get_by_text('Office preview second page', exact=True)).to_be_visible()
-            page.screenshot(path=str(REPORT / 'office-pdf-render.png'), full_page=True)
-            page.reload()
-            expect(workspace.get_by_text('Office preview second page', exact=True)).to_be_visible(timeout=90_000)
             # Existing outbound transport carries the same source contract without a source reader on Server.
             cluster.start_preview_worker('outbound-preview', 'outbound')
             outbound = cluster.nodes['outbound-preview']['node_id']
