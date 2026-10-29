@@ -7,6 +7,7 @@ No product store, business event, desktop bridge or component is replaced.
 import base64
 import hashlib
 import json
+import sys
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,8 @@ import time
 import urllib.request
 from http.server import ThreadingHTTPServer
 
+# Reuse the existing Computer/Auth fixture; workspace acceptance lives in its own group.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "computer_workspace"))
 from deletion_auth_fixture import ContractAuthCluster
 from fixture import ROOT, REPORT, data, free_port, require, wait_for
 from registration import configure_desktop, start_ingress
@@ -141,7 +144,7 @@ def exercise(page, token, destination, markdown, endpoint):
             and (excluded is None or target['id'] != excluded['id'])), None), 'Native browser target')
 
     def native(target, kind='read', value=''):
-        result = subprocess.run(['node', str(ROOT / 'talos-e2e/scripts/computer_workspace/native-resource-page.mjs'),
+        result = subprocess.run(['node', str(ROOT / 'talos-e2e/scripts/workspace_resources/native-resource-page.mjs'),
             target['webSocketDebuggerUrl'], kind, value], capture_output=True, text=True, check=True, timeout=30)
         return json.loads(result.stdout)
 

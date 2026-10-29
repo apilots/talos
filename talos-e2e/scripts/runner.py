@@ -108,10 +108,10 @@ def check_dependency(kind, value, root):
         return None if platform.system() != "Linux" or os.environ.get("DISPLAY") else "run native Desktop under xvfb-run -a or provide DISPLAY"
     if value == "worker_image":
         image = os.environ.get("TALOS_E2E_WORKER_IMAGE", "talos-worker:browser-e2e")
-        return None if probe(["docker", "image", "inspect", image]) else "build the current Worker image; see group20 README / TALOS_E2E_WORKER_IMAGE"
+        return None if probe(["docker", "image", "inspect", image]) else "build the current Worker image; see group23 README / TALOS_E2E_WORKER_IMAGE"
     if value == "server_image":
         image = os.environ.get("TALOS_E2E_SERVER_IMAGE", "talos-server:browser-e2e")
-        return None if probe(["docker", "image", "inspect", image]) else "build the current Server image; see group20 README / TALOS_E2E_SERVER_IMAGE"
+        return None if probe(["docker", "image", "inspect", image]) else "build the current Server image; see group23 README / TALOS_E2E_SERVER_IMAGE"
     if value == "sandbox":
         if platform.system() == "Linux":
             return None if executable("bwrap") else "install bubblewrap for the native Linux sandbox"

@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'computer_workspace'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'workspace_resources'))
 from deletion_auth_fixture import ContractAuthCluster
 from fixture import data, http, free_port, require
 

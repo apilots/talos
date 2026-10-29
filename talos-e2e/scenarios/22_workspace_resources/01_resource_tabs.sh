@@ -7,4 +7,4 @@ for command in cargo curl openssl protoc python3 pnpm; do require_command "${com
 python3 -c 'import grpc, yaml, playwright; from google.protobuf import descriptor_pool'
 build_server_binary
 export TALOS_SCENARIO_REPORT_DIR="${SCENARIO_REPORT_DIR}"
-python3 "${SCRIPT_DIR}/../../scripts/computer_workspace/resources.py"
+python3 "${SCRIPT_DIR}/../../scripts/workspace_resources/resources.py"

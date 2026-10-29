@@ -1,0 +1,44 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc",
+      "curl",
+      "openssl",
+      "node",
+      "pnpm"
+    ],
+    "python_modules": [
+      "yaml",
+      "grpc",
+      "google.protobuf",
+      "playwright"
+    ],
+    "checks": [
+      "chrome"
+    ],
+    "binaries": [
+      "server"
+    ]
+  },
+  "cases": {
+    "02_desktop_resources.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "checks": [
+        "chrome",
+        "display",
+        "caddy"
+      ],
+      "binaries": [
+        "server",
+        "app_server"
+      ]
+    }
+  }
+}

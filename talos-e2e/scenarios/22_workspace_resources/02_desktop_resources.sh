@@ -11,4 +11,4 @@ build_server_binary
 prepare_binary TALOS_E2E_APP_SERVER_BIN app-server app-server
 [[ -x "${TALOS_E2E_APP_SERVER_BIN}" ]] || { echo "Current app-server binary is required" >&2; exit 1; }
 pnpm --dir "${TALOS_APP_DIR}/desktop" build:main
-python3 "${TALOS_E2E_DIR}/scripts/computer_workspace/desktop_resources.py"
+python3 "${TALOS_E2E_DIR}/scripts/workspace_resources/desktop_resources.py"
