@@ -129,8 +129,9 @@ def exercise(page, token, destination, markdown, endpoint):
     }""")
     workspace.get_by_role('button', name='New webpage tab', exact=True).click()
     address = workspace.get_by_role('textbox', name='Web address', exact=True).last
-    address.fill(destination)
+    address.fill(destination.removeprefix('http://'))
     address.press('Enter')
+    expect(address).to_have_value(destination)
     def targets():
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(endpoint + '/json/list', timeout=2) as response:
             return json.load(response)

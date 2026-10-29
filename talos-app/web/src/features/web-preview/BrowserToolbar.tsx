@@ -6,6 +6,7 @@ import type { FilePreviewDescriptor } from "@talos/sdk-core";
 import type { PreviewResource } from "@/shared/lib/open-resource";
 import type { BrowserSurface } from "./useBrowserSurface";
 import { ResourceOpenMenu } from "./ResourceOpenMenu";
+import { parseBrowserAddress } from "./browser-address";
 
 export type BrowserAddress = { kind: "webpage"; url: string; onNavigate: (url: string) => void; inputRef?: RefObject<HTMLInputElement | null> }
   | { kind: "file"; label: string; resource: PreviewResource; preview?: FilePreviewDescriptor };
@@ -32,7 +33,7 @@ export function BrowserToolbar({ source, onRefresh, refreshDisabled, children, s
       <form className="flex h-9 min-w-0 flex-1 items-center rounded-full border border-border/75 bg-card shadow-sm focus-within:border-brand/35 focus-within:ring-2 focus-within:ring-brand/10" onSubmit={event => {
         event.preventDefault();
         if (source.kind !== "webpage") return;
-        const next = normalizeWorkspaceWebpageUrl(address.trim());
+        const next = parseBrowserAddress(address);
         setInvalidAddress(!next);
         if (next) { if (next === destination) onRefresh(); source.onNavigate(next); }
       }}>

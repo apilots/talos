@@ -24,6 +24,7 @@ The following R1–R5 describe the Phase 1 baseline. Expanded P2-R1–P2-R5 supe
 ## R2 — One browser shell, registered file content
 
 - Generalize the existing embedded browser shell for webpages and Files. File address is read-only and identifies `Files / filename`; webpages retain validated HTTP(S) navigation. Share refresh, supported Open in actions and document lifecycle.
+- Both browser address bars trim input and default missing protocols to `http://`, preserving explicit HTTP(S). Reuse the existing complete-URL validator for navigation.
 - File metadata/content use existing query/client owners and current credentials. Fetch content only for supported display formats; revoke temporary Blob URLs on replacement/unmount. No credentials in addresses, copied references or persistence.
 - Browser-native HTML, images, PDF and media use sandboxed embedded content, classified by server-detected MIME (with the existing Markdown convention). Reuse the existing Markdown renderer and generic UTF-8 text for supported text MIME types. No custom PDF reader, image editor, spreadsheet or Office renderer. Unknown/unsupported content shows metadata and download in the same right tab.
 - Render HTML without host bridge, same-origin access or top navigation privileges. Self-contained HTML is supported; related local files are deferred. Display that limitation. Do not guess filesystem paths or create resource endpoints.

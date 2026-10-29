@@ -61,6 +61,23 @@ it("shows a usable new-tab page and visits a local service from its address bar"
   expect(screen.queryByRole("heading", { name: "New tab" })).not.toBeInTheDocument();
 });
 
+it.each([
+  ["talos.love", "http://talos.love/"],
+  [" localhost:3000/preview?next=https://other.test/#section ", "http://localhost:3000/preview?next=https://other.test/#section"],
+])("submits %s through Enter and the address button as %s", async (input, expected) => {
+  const user = userEvent.setup();
+  const navigate = vi.fn();
+  render(<WebPagePreview url="" onNavigate={navigate} />);
+  const address = screen.getByRole("textbox", { name: "Web address" });
+  fireEvent.change(address, { target: { value: input } });
+  await user.type(address, "{Enter}");
+  expect(navigate).toHaveBeenLastCalledWith(expected);
+  navigate.mockClear();
+  await user.click(screen.getByRole("button", { name: "Go to address" }));
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(expected);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
 it("contains preview scripts, preserves the address, refreshes, and opens externally", async () => {
   const user = userEvent.setup();
   const { container } = render(<WebPagePreview url="https://example.com/" onNavigate={vi.fn()} />);
@@ -93,7 +110,7 @@ it("navigates via the workspace owner and rejects unsupported destinations", () 
   for (const value of ["data:text/html,unsafe", "javascript:alert(1)", "file:///tmp/index.html", "https://user:password@example.com/"]) {
     fireEvent.change(screen.getByRole("textbox", { name: "Web address" }), { target: { value } });
     fireEvent.click(screen.getByRole("button", { name: "Go to address" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("full http:// or https://");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a website or local service address");
     expect(navigate).not.toHaveBeenCalled();
     expect(container.querySelector("iframe")).toHaveAttribute("src", "https://example.com/");
   }
