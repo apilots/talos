@@ -1,11 +1,10 @@
 """Turn additive ownership into named, dependency-complete executable CI tasks."""
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 
-from ci_impact import CATEGORIES, ROOT, SERVER_TARGETS, frontend_graph, impact, rust_graph
+from ci_impact import CATEGORIES, ROOT, SERVER_TARGETS, frontend_graph, impact, rust_graph, scenario_runner
 
 BINARIES = {
     'server': ('talos-server', 'talos-server', 'TALOS_E2E_SERVER_BIN'),
@@ -18,9 +17,7 @@ BINARIES = {
 
 
 def scenario_task(category: str, target: str, root: Path = ROOT) -> dict:
-    spec = importlib.util.spec_from_file_location('ci_runner', root / 'talos-e2e/scripts/runner.py')
-    runner = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(runner)
+    runner = scenario_runner(root)
     cases, requirements = [], {key: set() for key in ('commands', 'checks', 'binaries')}
     scenario_root = root / 'talos-e2e/scenarios'
     for item in target.splitlines():
@@ -41,7 +38,7 @@ def scenario_task(category: str, target: str, root: Path = ROOT) -> dict:
     node = 'server' in images or bool(requirements['commands'] & {'node', 'pnpm', 'npx'})
     return dict(name=target.splitlines()[0].split(':', 1)[1].replace('/', ' · '),
                 kind='e2e', category=category, targets=target, cases=sorted(set(cases)),
-                binaries=sorted(binaries), binary_pattern='ci-binary-' + ('{' + ','.join(sorted(binaries)) + '}' if len(binaries) > 1 else next(iter(binaries), 'none')), node=node, chrome='chrome' in requirements['checks'],
+                binaries=sorted(binaries), binary_pattern='ci-binary-' + ('{' + ','.join(sorted(binaries)) + '}' if len(binaries) > 1 else next(iter(binaries), 'none')), node=node, chrome='chrome' in requirements['checks'], office='soffice' in requirements['commands'],
                 docker=bool(images), images=images, rust_tests='cargo-nextest' in requirements['commands'],
                 rust=['talos-tools'] if 'cargo-nextest' in requirements['commands'] else [], frontend=[])
 

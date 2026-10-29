@@ -7,7 +7,7 @@ import tomllib
 import unittest
 
 from pr_change_scope import ROOT, SCOPES, VERSION_PATTERNS, is_document, should_run, version_change_only, version_files
-from ci_impact import impact, rust_graph, frontend_graph, SERVER_TARGETS, SERVER_BROWSER_CASE, TUI_TARGET
+from ci_impact import impact, rust_graph, frontend_graph, client_group_targets, SERVER_TARGETS, CONTAINER_CASES, TUI_TARGET
 from ci_plan import plan, task_roots
 
 
@@ -37,31 +37,78 @@ class ChangeScopeTests(unittest.TestCase):
             self.assertIn('case:21_resource_preview/01_web_preview', selected.targets['webui'])
             self.assertIn('case:21_resource_preview/02_desktop_preview', selected.targets['desktop'])
     def test_server_container_case_selects_packaged_products_and_web_inputs(self):
-        result = plan(['talos-e2e/scenarios/20_browser_workspace/06_docker_server.sh'])
+        result = plan(['talos-e2e/scenarios/23_browser_container/02_docker_server.sh'])
         tasks = result['categories']['server']['scenarios']['include']
         self.assertEqual(len(tasks), 1)
         task = tasks[0]
-        self.assertEqual(task['cases'], ['20_browser_workspace/06_docker_server.sh'])
+        self.assertEqual(task['cases'], ['23_browser_container/02_docker_server.sh'])
         self.assertEqual(task['images'], ['server'])
         self.assertEqual(set(task['binaries']), {'server', 'cli', 'worker', 'sandbox'})
         self.assertTrue(task['docker'] and task['node'])
         self.assertIn('talos-app/web', task_roots(task))
-        self.assertFalse(result['categories']['desktop']['scenarios']['include'])
+        self.assertEqual(result['categories']['desktop']['scenarios']['include'][0]['cases'],
+                         ['23_browser_container/01_docker_worker.sh'])
         helper = impact(['talos-e2e/scripts/browser-worker/server.py'])
-        self.assertEqual(helper.targets['server'], {SERVER_BROWSER_CASE})
-        self.assertFalse(helper.targets['desktop'] or helper.rust or helper.frontend)
+        self.assertEqual(helper.targets['server'], CONTAINER_CASES['server'])
+        self.assertEqual(helper.targets['desktop'],
+                         client_group_targets('20_browser_workspace')['desktop'] |
+                         client_group_targets('23_browser_container')['desktop'])
+        self.assertFalse(helper.rust or helper.frontend)
+
+    def test_workspace_helper_directory_and_frontend_changes_keep_their_consumers(self):
+        paths = ['talos-app/web/src/features/web-preview/BrowserToolbar.tsx',
+                 'talos-e2e/scripts/workspace_resources/new_helper.py']
+        selected = plan(paths)
+        cases = {case for category in selected['categories'].values()
+                 for task in category['scenarios']['include'] for case in task['cases']}
+        self.assertEqual(cases, {'22_workspace_resources/01_resource_tabs.sh',
+                                '22_workspace_resources/02_desktop_resources.sh',
+                                '21_resource_preview/01_web_preview.sh',
+                                '21_resource_preview/02_desktop_preview.sh',
+                                '09_app_server/computer_deletion.sh'})
+        self.assertEqual(selected['test_build']['tests'], {})
+        self.assertFalse(selected['installer'] or selected['mcp'])
+
+    def test_workspace_case_directory_selects_only_its_group(self):
+        selected = impact(['talos-e2e/scenarios/22_workspace_resources/new_case.sh'])
+        self.assertEqual(selected.targets, client_group_targets('22_workspace_resources'))
+        self.assertFalse(selected.rust or selected.frontend or selected.installer)
+
+    def test_office_installation_follows_group_requirements(self):
+        for group, expected in [('21_resource_preview', True), ('22_workspace_resources', False),
+                                ('23_browser_container', False)]:
+            selected = plan([f'talos-e2e/scenarios/{group}/requirements.json'])
+            tasks = [task for category in selected['categories'].values()
+                     for task in category['scenarios']['include']]
+            self.assertTrue(tasks)
+            self.assertEqual({task['office'] for task in tasks}, {expected})
+
+    def test_client_group_discovers_new_cases_using_existing_requirements(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runner = root / 'talos-e2e/scripts/runner.py'
+            runner.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT / 'talos-e2e/scripts/runner.py', runner)
+            group = root / 'talos-e2e/scenarios/22_workspace_resources'
+            shutil.copytree(ROOT / 'talos-e2e/scenarios/22_workspace_resources', group)
+            (group / '07_new_workspace.sh').write_text('#!/bin/sh\n')
+            selected = client_group_targets('22_workspace_resources', root)
+            self.assertEqual(selected['webui'], {'case:22_workspace_resources/01_resource_tabs',
+                                                'case:22_workspace_resources/07_new_workspace'})
+            self.assertEqual(selected['desktop'], {'case:22_workspace_resources/02_desktop_resources'})
 
     def test_shared_container_inputs_select_only_both_packaged_consumers(self):
         for path in ['build/container/install-runtime.sh', 'build/container/prepare-browser.sh']:
             selected = impact([path])
-            self.assertEqual(selected.targets['server'], {SERVER_BROWSER_CASE})
-            self.assertEqual(selected.targets['desktop'], {'case:20_browser_workspace/05_docker_worker'})
+            self.assertEqual(selected.targets['server'], CONTAINER_CASES['server'])
+            self.assertEqual(selected.targets['desktop'], {'case:23_browser_container/01_docker_worker'})
             self.assertFalse(selected.rust or selected.frontend or selected.installer)
         for path in ['build/server/Dockerfile', 'build/worker/browser/desktop/start.sh',
                      'talos-rs/crates/action/plugin/src/manager/mcp.rs',
                      'talos-rs/crates/app/talos-worker/src/browser_host.rs',
                      'talos-rs/apps/tui/src/input.rs']:
-            self.assertIn(SERVER_BROWSER_CASE, impact([path]).targets['server'], path)
+            self.assertTrue(CONTAINER_CASES['server'] <= impact([path]).targets['server'], path)
 
     def test_plugin_cli_selects_its_secretless_lifecycle_and_current_binaries(self):
         result = plan(['talos-rs/apps/tui/src/cli/plugin.rs'])
@@ -72,7 +119,7 @@ class ChangeScopeTests(unittest.TestCase):
     def test_shared_plugin_cli_fixture_selects_both_worker_consumers(self):
         result = plan(['talos-e2e/scripts/plugin_cli.py'])
         for category, case in [('tui', '05_cli/plugin_lifecycle.sh'),
-                               ('desktop', '20_browser_workspace/05_docker_worker.sh')]:
+                               ('desktop', '23_browser_container/01_docker_worker.sh')]:
             tasks = result['categories'][category]['scenarios']['include']
             task = next(task for task in tasks if case in task['cases'])
             self.assertTrue({'server', 'cli'} <= set(task['binaries']))
@@ -86,18 +133,22 @@ class ChangeScopeTests(unittest.TestCase):
         self.assertFalse(result.targets['desktop'] or result.targets['server'] or result.targets['webui'])
 
     def test_web_config_helper_and_desktop_union_stay_bounded(self):
-        paths = ['talos-app/web/tailwind.config.ts', 'talos-e2e/scripts/computer_workspace/resources.py',
+        paths = ['talos-app/web/tailwind.config.ts', 'talos-e2e/scripts/workspace_resources/resources.py',
                  'talos-app/desktop/src/browser-host.ts']
         selected = impact(paths)
         self.assertFalse(selected.rust or selected.installer or selected.targets['server'])
         self.assertEqual(selected.frontend, {'talos-web', 'talos-desktop'})
-        self.assertFalse(any('05_docker' in t for t in selected.targets['desktop']))
+        self.assertEqual(selected.targets['desktop'], {
+            'case:20_browser_workspace/03_desktop_browser',
+            'case:20_browser_workspace/04_desktop_mcp',
+            'case:21_resource_preview/02_desktop_preview',
+            'case:22_workspace_resources/02_desktop_resources'})
 
     def test_mixed_inputs_equal_individual_unions(self):
         paths = ['talos-rs/apps/tui/src/render/chat_lines.rs',
                  'talos-rs/crates/action/skills/src/lib.rs',
                  'talos-app/web/tailwind.config.ts', 'talos-app/desktop/src/preload.ts',
-                 'talos-e2e/scripts/computer_workspace/resources.py']
+                 'talos-e2e/scripts/workspace_resources/resources.py']
         combined = impact(paths)
         separate = [impact([p]) for p in paths]
         for field in ('rust', 'frontend'):
@@ -111,7 +162,7 @@ class ChangeScopeTests(unittest.TestCase):
         self.assertIn('talos-server', graph.closure({'talos-service'}, reverse=True))
         self.assertIn('talos-tui', graph.closure({'talos-types'}, reverse=True))
         result = impact(['talos-rs/crates/orchestration/service/src/lib.rs'])
-        self.assertEqual(result.targets['server'], set(SERVER_TARGETS.values()) | {SERVER_BROWSER_CASE})
+        self.assertEqual(result.targets['server'], set(SERVER_TARGETS.values()) | CONTAINER_CASES['server'])
         self.assertIn(TUI_TARGET, result.targets['tui'])
 
     def test_server_submodules_have_focused_scenarios(self):
@@ -138,7 +189,7 @@ class ChangeScopeTests(unittest.TestCase):
         result = impact(['talos-app/ts-sdk/packages/core/src/client.ts'])
         self.assertIn('talos-desktop', result.frontend)
         self.assertFalse(result.rust or result.installer)
-        self.assertIn('case:20_browser_workspace/05_docker_worker', result.targets['desktop'])
+        self.assertIn('case:23_browser_container/01_docker_worker', result.targets['desktop'])
 
     def test_docs_templates_skip_heavy_but_unknown_product_does_not(self):
         for path in ['docs/guide.md', 'talos-rs/README.md', '.github/ISSUE_TEMPLATE/agent-task.yml']:
@@ -333,7 +384,7 @@ class GitScopeTests(unittest.TestCase):
 
     def test_ci_diff_exports_bounded_union(self):
         self.write('talos-app/web/tailwind.config.ts', 'export default {};\n')
-        self.write('talos-e2e/scripts/computer_workspace/resources.py', '# changed\n')
+        self.write('talos-e2e/scripts/workspace_resources/resources.py', '# changed\n')
         head = self.commit('fix(web): adjust build and acceptance')
         self.classify('pull_request', head, 'ci')
         values = dict(line.split('=', 1) for line in (self.root / 'scope.outputs').read_text().splitlines())
@@ -361,8 +412,13 @@ class GitScopeTests(unittest.TestCase):
 
     def prepare_hook(self):
         for path in ['scripts/run-pre-push-checks.sh', 'scripts/check-release-version.sh',
-                     '.github/scripts/pr_change_scope.py', '.github/scripts/ci_impact.py']:
+                     '.github/scripts/pr_change_scope.py', '.github/scripts/ci_impact.py',
+                     'talos-e2e/scripts/runner.py']:
             self.write(path, (ROOT / path).read_text())
+        for group in ['20_browser_workspace', '21_resource_preview', '22_workspace_resources', '23_browser_container']:
+            for path in (ROOT / 'talos-e2e/scenarios' / group).iterdir():
+                if path.suffix in {'.sh', '.json'}:
+                    self.write(path.relative_to(ROOT).as_posix(), path.read_text())
         for name in ['check_changed_files', 'check_error_contract', 'check_error_contract_tests']:
             self.write(f'scripts/{name}.py', 'print("File/error policy checked")\n')
         self.write('scripts/check-commit-message.sh', '#!/bin/sh\nexit 0\n').chmod(0o755)

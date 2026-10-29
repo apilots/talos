@@ -5,12 +5,16 @@ page; no models, Workers, external sites, frontend mocks or store injection are 
 Computer media lifecycle remains in Browser Worker acceptance and component tests.
 """
 import json
+import sys
+from pathlib import Path
 import os
 import re
 import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Reuse the existing Computer/Auth fixture; workspace acceptance lives in its own group.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "computer_workspace"))
 from deletion_auth_fixture import ContractAuthCluster
 from deletion import public
 from fixture import ROOT, REPORT, data, free_port, require, wait_for

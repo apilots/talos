@@ -278,7 +278,7 @@ has_real_llm_key() { return 1; }
 
     def test_packaged_server_requires_only_host_docker_python_and_current_image(self):
         root = E2E / 'scenarios'
-        case = '20_browser_workspace/06_docker_server.sh'
+        case = '23_browser_container/02_docker_server.sh'
         with patch.dict(os.environ, {'TALOS_E2E_SERVER_IMAGE': 'owned-server:current'}), \
              patch.object(runner, 'executable', side_effect=lambda name: name in {'docker', 'python3', 'ps', 'lsof'}), \
              patch.object(runner, 'probe', side_effect=lambda argv: argv in (

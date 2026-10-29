@@ -40,11 +40,11 @@ Docker CLI shim, or scenario registry is introduced.
 | --- | --- |
 | 01–03,05–08,12,13 | common case shell group/home/temp; existing stop_server/TUI/native S3 gateway traps; private tmux server cleanup |
 | 09 | case shell group and private temp cover inline subprocess/Chrome; existing app-server helpers keep graceful shutdown |
-| 11,17,18,19/04,20/01–02 | multi_node Cluster, Desktop and UI fixtures; private case roots and registered detached processes |
+| 11,17,18,19/04,22/01–02 | multi_node Cluster, Desktop and UI fixtures; private case roots and registered detached processes |
 | 14,15 | sandbox/TUI helpers; owned Docker containers and once-per-run built images |
 | 19 except04 | SyncCluster/NAT Docker containers/networks; run-owned candidate images; immutable Sync image remains external |
 | 20/03–04 | prepared Chrome/Electron private process groups, registered at creation; temporary profiles are case-owned |
-| 20/05 | Browser container/volume and media/native processes registered; supplied Worker image remains external |
+| 23/01 | Browser container/volume and media/native processes registered; supplied Worker image remains external |
 
 Binary preparation uses explicit executable overrides first, then the existing
 Cargo build functions, once per selected invocation. The sandbox launcher follows

@@ -37,7 +37,7 @@ class CompiledArtifactsTests(unittest.TestCase):
             ci_artifacts.unpack(self.root, ['sandbox'])
 
     def test_server_image_consumes_current_products_without_a_rust_rebuild(self):
-        task = scenario_task('server', 'case:20_browser_workspace/06_docker_server')
+        task = scenario_task('server', 'case:23_browser_container/02_docker_server')
         products = self.root / 'output/ci-binaries'
         products.mkdir(parents=True)
         for name in ('talos', 'talos-server', 'talos-worker', 'talos-linux-sandbox-launcher'):

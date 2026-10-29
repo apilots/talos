@@ -221,13 +221,16 @@ locked Cargo 流程构建。Linux 优先复用所选二进制旁的 sandbox laun
 
 `06_tools/cli_bash` 接受上游没有思考文本的响应，即使请求已开启思考；仍要求 Bash 成功执行及工具调用身份一致，不要求伪造思考事件。空思考正常结束、非空思考和工具参数原样传递，由确定性的 Provider 传输回归验证。`13_interaction/user_action_http` 保留精确命令、审批、副作用及终态历史检查，不把实体转义后的命令视为等价命令。
 
-## 20 浏览器与资源工作区
+## 浏览器、工作区与格式预览
 
-`20_browser_workspace` 包含 Web 公共资源、Desktop 公共资源、Desktop 浏览器宿主、Desktop
-MCP、Docker Worker 五个用例，分别验证独立产品边界。完整运行使用 `just e2e-group 20_browser_workspace`。Web 改动选择 01、Computer 删除和共享 renderer 的 Desktop 资源
-验收 02；仅 Desktop 源码/资源改动选择 02、03、04；媒体、preload、IPC、controller 和
-打包输入增加 05 与同次运行的 Worker 镜像。共享 SDK/runtime/build 输入沿消费者展开，
-混合变更取并集，每个用例只执行一次。WebUI 与 Desktop 由不同命名入口共享基础 workflow，
-固定汇总门禁验证实际选中的任务。
+`20_browser_workspace` 保留原生 Desktop 浏览器和 MCP；`22_workspace_resources`
+负责轻量 Web/Desktop 工作区、HTTP 网页及 Markdown；`23_browser_container` 负责
+Docker Worker/Server 的浏览器和媒体集成。`21_resource_preview` 保留完整格式预览。
+现有 runner 和 `.sh` 入口不变，脚本目录与 Group 对齐；CI 根据组的现有依赖声明
+确定 Chrome、原生显示和容器执行环境，不按具体脚本名分流。工作区辅助脚本也被
+格式预览复用，因此改动时选择 21 和 22，不再扩为所有 Rust/TUI/安装器检查。LibreOffice 和 CJK 字体仅为声明 `soffice` 的
+场景安装，轻量工作区和容器任务不再重复安装。
 
-前置条件、断言、隔离清理、截图归档和真实模型验收边界见[组说明](scenarios/20_browser_workspace/README.md)。公共网页与本地 Markdown 同时覆盖 Web/Desktop；远程电脑 Tab 只由 Docker Worker 能力提供。受控模型链路验证不等同于真实模型自主浏览与产品分析。
+前置条件与断言分别见[原生组](scenarios/20_browser_workspace/README.md)、
+[工作区组](scenarios/22_workspace_resources/README.md)及
+[容器组](scenarios/23_browser_container/README.md)。真实模型质量验收仍单独进行。

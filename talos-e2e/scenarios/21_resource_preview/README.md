@@ -15,11 +15,12 @@ ordinary-link dispatch without adding a preview tab, real generated JSON upload/
 rendering is outside the harness; exact URL/policy branches have deterministic
 frontend unit coverage. Session scoping uses the shared renderer and is exercised
 through real sessions in the Web case. Live Computer media remains covered by
-group 20 Browser Worker scenarios; Computer lifecycle and original session image
+group 23 Browser Worker scenarios; Computer lifecycle and original session image
 behavior also retain their owning component tests.
 
-Group 20 independently owns ordinary native-browser tab, geometry, collapse and
-host-close focus regressions; group 21 does not replay that complete scenario.
+Group 22 independently owns workspace tab, geometry, collapse and host-close focus
+regressions; group 20 owns native Browser/MCP. Group 21 does not replay those
+complete scenarios.
 The shared format matrix owns document conversion and content checks, with Web
 reload restoration exercised once on its existing two-page DOCX. TAR owns the
 representative narrow/wide selected-tab visibility and right-edge checks. The
