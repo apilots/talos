@@ -21,10 +21,13 @@ it("owns a real trusted view with native geometry and excludes other contents",(
  product.window.contentView.emit("bounds-changed");expect(product.view.setBounds).toHaveBeenLastCalledWith({x:0,y:0,width:1100,height:673});
 });
 it("allows the product document to cancel closing and destroys the native window after unload",()=>{
- const {window,view}=createDesktopWindow({},{}),event={preventDefault:vi.fn()};
+ const {window,view}=createDesktopWindow({},{}),contents=view.webContents,event={preventDefault:vi.fn()};
  window.emit("close",event);expect(event.preventDefault).toHaveBeenCalledOnce();
  expect(view.webContents.close).toHaveBeenCalledWith({waitForBeforeUnload:true});expect(window.isDestroyed()).toBe(false);
- view.webContents.emit("destroyed");expect(window.isDestroyed()).toBe(true);expect(desktopWindows.size).toBe(0);
+ vi.spyOn(contents,"isDestroyed").mockReturnValue(true);
+ Object.defineProperty(view,"webContents",{value:undefined});
+ contents.emit("destroyed");expect(window.isDestroyed()).toBe(true);expect(desktopWindows.size).toBe(0);
+ expect(contents.close).toHaveBeenCalledOnce();
 });
 it("closes its trusted contents when the native window is destroyed directly",()=>{
  const {window,view}=createDesktopWindow({},{});window.destroy();

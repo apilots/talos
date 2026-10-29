@@ -112,7 +112,7 @@ app.on("before-quit", (event) => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" || quitState !== "running") {
     app.quit();
   }
 });
