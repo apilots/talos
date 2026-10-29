@@ -61,7 +61,7 @@ it("does not treat bare IDs, paths, links or malformed references as authorized 
   expect(screen.getByAltText("Remote")).toHaveAttribute("src", "https://example.com/photo.png");
   expect(screen.getByAltText("Bad")).not.toHaveAttribute("src");
   expect(screen.getByAltText("Unsafe")).not.toHaveAttribute("src");
-  expect(container.querySelector("a")).toHaveAttribute("href", "");
+  expect(container.querySelector("a")).toHaveAttribute("href", "talos-file://private-image");
 });
 
 it("releases a pending File request without publishing a URL after unmount", async () => {

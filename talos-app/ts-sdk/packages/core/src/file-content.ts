@@ -4,6 +4,10 @@ import type { FileDownloadResponse } from "./types";
 export function decodeFileContent(response: FileContentResponse): FileDownloadResponse {
   return {
     file: response.file,
-    data: Uint8Array.from(atob(response.dataBase64), (character) => character.charCodeAt(0)),
+    data: decodeFileBytes(response.dataBase64),
   };
+}
+
+export function decodeFileBytes(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
 }

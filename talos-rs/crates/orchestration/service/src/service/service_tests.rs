@@ -1038,5 +1038,7 @@ async fn assert_session_creation_rolled_back(
 #[path = "session_deletion_tests.rs"]
 mod session_deletion_tests;
 
+#[path = "file_preview_tests.rs"]
+mod file_preview_tests;
 #[path = "plugin_preparation_tests.rs"]
 mod plugin_preparation_tests;

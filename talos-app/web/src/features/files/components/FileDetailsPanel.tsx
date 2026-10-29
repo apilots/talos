@@ -6,8 +6,7 @@ import type { FileInfo } from "@talos/sdk-browser";
 
 import { formatFileMeta, formatFileSize } from "../hooks/useFilesPage";
 import { Panel } from "@/shared/ui/Panel";
-import { useAppStore } from "@/shared/store/app-store";
-import { isMarkdownFile } from "../api";
+import { openResource } from "@/shared/lib/open-resource";
 
 interface FileDetailsPanelProps {
   file: FileInfo;
@@ -49,7 +48,6 @@ export function FileDetailsPanel({
 }: FileDetailsPanelProps) {
   const { i18n, t } = useTranslation("files");
   const locale = i18n.resolvedLanguage ?? i18n.language;
-  const openWorkspaceWindow = useAppStore((state) => state.openWorkspaceWindow);
   const [tags, setTags] = useState(file.tags.join(", "));
   const [metadataInput, setMetadataInput] = useState(
     JSON.stringify(file.metadata, null, 2),
@@ -88,16 +86,14 @@ export function FileDetailsPanel({
         </button>
       </div>
 
-      {isMarkdownFile(file) ? (
-        <button
-          className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm text-ink outline-none transition hover:border-brand/30 hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40"
-          onClick={() => openWorkspaceWindow({ kind: "markdown", fileId: file.fileId })}
-          type="button"
-        >
-          <PanelRightOpen aria-hidden="true" size={15} />
-          {t("preview.open")}
-        </button>
-      ) : null}
+      <button
+        className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-sm text-ink outline-none transition hover:border-brand/30 hover:bg-hover focus-visible:ring-2 focus-visible:ring-brand/40"
+        onClick={() => void openResource({ kind: "file", fileId: file.fileId })}
+        type="button"
+      >
+        <PanelRightOpen aria-hidden="true" size={15} />
+        {t("preview.open")}
+      </button>
 
       <div className="mt-5 grid gap-4">
         <label className="text-xs text-muted">

@@ -183,7 +183,7 @@ export class DesktopBrowserHost {
         if(connected)await send("Page.bringToFront");
         // The first document can be loaded before its input hit-test surface is
         // presented. Let it paint before dispatching input, not only afterward.
-        if(connected)await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
+        await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
       };
       await send("Page.enable");
       if (action.kind==="navigate") {
@@ -207,7 +207,7 @@ export class DesktopBrowserHost {
           await send("Input.dispatchMouseEvent",{type:"mouseMoved",x,y});
           await send("Input.dispatchMouseEvent",{type:"mousePressed",x,y,button:"left",buttons:1,clickCount:1});
           await send("Input.dispatchMouseEvent",{type:"mouseReleased",x,y,button:"left",buttons:0,clickCount:1});
-          if(connected)await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
+          await send("Runtime.evaluate",{expression:"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(0))))",awaitPromise:true,returnByValue:true});
         } else if(action.kind==="fill") {
           if(!["input","textarea"].includes(element.tag)&&element.attributes.contenteditable!=="true")throw new Error("Select a text input or editable element.");
           await prepareInput();

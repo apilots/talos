@@ -9,7 +9,7 @@ import { desktopBrowserRequest } from "./desktop-browser";
 vi.mock("./desktop-browser", () => ({ desktopBrowserRequest: vi.fn(async() => null) }));
 const tab = { id: "1", title: "Page", url: "https://example.test/", back: true, forward: false, loading: false };
 beforeEach(() => {
-  vi.clearAllMocks();useAppStore.setState({ desktopBrowser: { sessionId: "bound", revision: 1, error: null } });
+  vi.clearAllMocks();useAppStore.setState({ desktopBrowser: { sessionId: "bound", revision: 1, error: null, tabs: [], revealTabId: null } });
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 500, y: 100, width: 480, height: 600 } as DOMRect);
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{}] as unknown as DOMRectList);

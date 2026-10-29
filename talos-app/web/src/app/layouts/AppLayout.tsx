@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { ComputerRail, useComputers, useSelectedComputerId, useProductScope } from "@/features/computers";
 import { SidebarContainer } from "@/features/chat";
@@ -11,6 +11,7 @@ import { AppMainContent } from "./AppMainContent";
 import { AppBusinessRegion } from "./AppBusinessRegion";
 import { layoutWidths } from "./layout-sizing";
 import { SidebarComputerEntry } from "./SidebarComputerEntry";
+import { workspaceBelongsToScope, workspaceContextForPath } from "@/shared/store/workspace-state";
 import { useDesktopBrowserWorkspace } from "@/features/web-preview";
 
 /** Five areas: app navigation, rail, project/sidebar, route content, workspace. */
@@ -25,6 +26,7 @@ export function AppLayout() {
   const workspaceOpen = useAppStore(state => state.workspaceOpen);
   const workspaceExpanded = useAppStore(state => state.workspaceExpanded);
   const windows = useAppStore(state => state.workspaceWindows);
+  const hasWorkspace = useAppStore(state => state.workspaceWindows.length > 0 || Object.entries(state.workspaceSnapshots).some(([key, snapshot]) => workspaceBelongsToScope(key, scope) && snapshot.workspaceWindows.length > 0));
   const sidebarWidth = useAppStore(state => state.sidebarWidth);
   const workspaceWidth = useAppStore(state => state.workspaceWidth);
   const setWorkspaceWidth = useAppStore(state => state.setWorkspaceWidth);
@@ -32,6 +34,11 @@ export function AppLayout() {
   const [viewport, setViewport] = useState(() => ({ wide: window.matchMedia("(min-width: 1024px)").matches, width: window.innerWidth }));
   const [sidebarDrawerOpen, setSidebarDrawerOpen] = useState(false);
   const { wide } = viewport;
+  const setWorkspaceContext = useAppStore(state => state.setWorkspaceContext);
+  useLayoutEffect(() => {
+    if (location.pathname.startsWith("/settings") && useAppStore.getState().workspaceOwner?.scope === scope) return;
+    setWorkspaceContext({ scope, context: workspaceContextForPath(location.pathname) }, window.matchMedia("(min-width: 1024px)").matches);
+  }, [scope, location.pathname, setWorkspaceContext]);
   const standalonePage = location.pathname === "/computers" || location.pathname.startsWith("/settings");
   const choosingComputer = !computerId && !standalonePage && !location.pathname.startsWith("/sessions/");
   const sidebarAvailable = !choosingComputer && !standalonePage;
@@ -71,6 +78,6 @@ export function AppLayout() {
       </AppMainContent>
     </AppBusinessRegion>
     {sidebarModal ? sidebarRegion : null}
-    {windows.length > 0 ? <RightWorkspace modal={workspaceModal} width={sizes.workspace} maxWidth={sizes.workspaceMax} toggleRef={workspaceToggle} /> : null}
+    {hasWorkspace ? <RightWorkspace modal={workspaceModal} width={sizes.workspace} maxWidth={sizes.workspaceMax} toggleRef={workspaceToggle} /> : null}
   </div>;
 }

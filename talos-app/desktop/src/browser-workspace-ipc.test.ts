@@ -4,7 +4,7 @@ const fixture = vi.hoisted(() => ({
   handlers: new Map<string, (...args:unknown[])=>Promise<unknown>>(),
   workspace: { accepts: vi.fn(), contextVersion: 0, unbind: vi.fn(), bind: vi.fn(), request: vi.fn() },
 }));
-vi.mock("electron", () => ({ ipcMain: { handle: (name:string, handler:(...args:unknown[])=>Promise<unknown>) => fixture.handlers.set(name,handler) }, BrowserWindow: {}, shell: {} }));
+vi.mock("electron", () => ({ ipcMain: { handle: (name:string, handler:(...args:unknown[])=>Promise<unknown>) => fixture.handlers.set(name,handler) }, BrowserWindow: {}, shell: {}, protocol: { handle: vi.fn() } }));
 vi.mock("./browser-host", () => ({ desktopBrowserHost: { workspace: fixture.workspace } }));
 import {desktopWindows} from "./desktop-window";
 import type {BaseWindow,WebContentsView} from "electron";

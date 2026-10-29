@@ -58,8 +58,14 @@ mod project_fs;
 #[path = "session_deletion.rs"]
 mod session_deletion;
 
+#[path = "file_preview.rs"]
+mod file_preview;
+
 #[derive(Clone)]
 pub struct TalosService {
+    file_preview_base_url: Option<String>,
+    file_previews:
+        Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<file_preview::PreviewGrant>>>>,
     desktop_ingress: Arc<std::sync::RwLock<Option<Arc<dyn crate::DesktopIngress>>>>,
     desktop_routes:
         Arc<std::sync::Mutex<std::collections::HashMap<[u8; 32], desktop::ViewerRoute>>>,
@@ -178,6 +184,8 @@ impl TalosService {
         );
 
         Self {
+            file_preview_base_url: base_config.storage.files.preview_base_url.clone(),
+            file_previews: Default::default(),
             sync_management: Default::default(),
             active_commands: Default::default(),
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),

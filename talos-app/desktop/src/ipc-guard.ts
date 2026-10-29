@@ -236,6 +236,11 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     agentUserInput(params.input) &&
     (params.clientRequestId === null || hasString(params, "clientRequestId")),
   "user/current": emptyParams,
+  "file/preview/prepare": params => isRecord(params) && isRecord(params.source)
+    && (params.source.kind === "file" ? hasString(params.source, "fileId")
+      : params.source.kind === "sessionPath" && hasString(params.source, "sessionId") && hasString(params.source, "path")),
+  "file/preview/read": params => hasString(params, "previewId") && hasString(params, "resourcePath"),
+  "file/preview/close": params => hasString(params, "previewId"),
   "workspace/info": emptyParams,
   "workspace/doc/list": emptyParams,
   "workspace/doc/read": (params) => hasString(params, "kind"),

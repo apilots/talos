@@ -252,9 +252,24 @@ def run(cluster):
             require(metadata.get('error', {}).get('code') == 'resourceNotFound', 'Non-owner read private Markdown metadata')
             denied = context.request.get(cluster.url + '/v1/files/' + file_id + '/content', headers={'Authorization': 'Bearer ' + cluster.users['bob']['access_token']})
             require(denied.status == 404, 'Non-owner read private Markdown content')
-            with page.expect_request(lambda request: '/v1/files/' + file_id + '/content' in request.url) as content_request:
-                page.get_by_role('button', name='Preview Markdown', exact=True).click()
-            require(content_request.value.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown content request omitted owner authentication')
+            prepared_responses = []
+            def record_prepared(response):
+                if response.url.endswith('/v1/file-previews') and response.request.method == 'POST':
+                    prepared_responses.append(response)
+            page.on('response', record_prepared)
+            try:
+                with page.expect_request(lambda request: request.url.endswith('/v1/file-previews/read') and request.method == 'POST') as content_request:
+                    page.get_by_role('button', name='Open file', exact=True).click()
+            finally:
+                page.remove_listener('response', record_prepared)
+            # StrictMode can prepare and retire a grant before the live mount reads.
+            # Correlate the actual read, independent of preparation response order.
+            prepared = next((response for response in prepared_responses if data(response.json())['previewId'] == content_request.value.post_data_json['previewId']), None)
+            require(prepared is not None, 'Product read a different preview grant')
+            require(prepared.request.post_data_json == {'source': {'kind': 'file', 'fileId': file_id}}, 'Product prepared a different Markdown source')
+            for request in (prepared.request, content_request.value):
+                require(request.headers.get('authorization') == 'Bearer ' + cluster.users['alice']['access_token'], 'Product Markdown preview request omitted owner authentication')
+            (REPORT / 'workspace-preview-auth.json').write_text(json.dumps({'preparedGrants': [data(response.json())['previewId'] for response in prepared_responses], 'readGrant': content_request.value.post_data_json['previewId'], 'source': prepared.request.post_data_json['source'], 'ownerAuthenticated': True}, indent=2) + '\n')
             expect(workspace.get_by_role('heading', name='Workspace acceptance', exact=True)).to_be_visible()
             expect(workspace.get_by_role('tab', name='workspace-review.md', exact=True)).to_be_visible()
             settle_workspace(workspace)

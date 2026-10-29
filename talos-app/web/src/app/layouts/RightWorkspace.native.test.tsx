@@ -11,7 +11,7 @@ it("does not open or focus the workspace when Agent pages arrive in the backgrou
  expect(screen.getByRole("button",{name:"Show workspace (1 open windows)"})).toBeInTheDocument();
 });
 it("reveals an explicitly requested page, then preserves chat focus through Agent close and navigation",()=>{
- show();act(()=>useAppStore.getState().openWorkspaceWindow({kind:"markdown",fileId:"review"}));
+ show();act(()=>useAppStore.getState().openWorkspaceWindow({kind:"file",fileId:"review"}));
  act(()=>useAppStore.getState().syncDesktopBrowser(native(1,["1"],"1")));
  const workspace=screen.getByRole("dialog",{name:"Right workspace"});expect(within(workspace).getByRole("tab",{name:"Browser 1"})).toHaveFocus();
  const office=screen.getByRole("link",{name:"Files page"});office.focus();

@@ -62,3 +62,18 @@ impl ServiceGateway {
         self.service.files.delete(actor, request).await
     }
 }
+
+impl ServiceGateway {
+    pub(crate) async fn read_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewContent> {
+        let content = self.service.read_file_preview(actor, request).await?;
+        Ok(talos_types::FilePreviewContent {
+            metadata: content.metadata,
+            offset: content.offset,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(content.data),
+        })
+    }
+}

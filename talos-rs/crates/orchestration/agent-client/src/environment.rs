@@ -701,6 +701,17 @@ impl WorkerEnvironment for AgentEnvironmentClient {
             )
         })
     }
+    environment_method!(
+        preview_resource,
+        WorkerPreviewRequest,
+        WorkerPreviewResponse,
+        PreviewResourceRequest,
+        PreviewResource,
+        preview_resource_response,
+        Content,
+        encode_preview_read,
+        decode_preview_content
+    );
     fn read_directory(
         &self,
         context: WorkerEnvironmentContext,

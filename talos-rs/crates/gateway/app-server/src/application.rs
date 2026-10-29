@@ -39,11 +39,9 @@ where
 pub type ApplicationResult<T> = Result<T, ApiError>;
 pub type ProtocolResult<T> = Result<T, AppServerErrorBody>;
 
-/// Internal result of one typed application dispatch.
-///
-/// The body is already serialized for the JSON-RPC transport. `started_turn`
-/// carries the canonical identity needed by connection-owned lifecycle control;
-/// transports must not recover that identity by inspecting JSON fields.
+/// Serialized result of one typed application dispatch for JSON-RPC.
+/// `started_turn` carries the canonical identity for connection-owned lifecycle
+/// control; transports must not recover that identity by inspecting JSON fields.
 pub struct ApplicationResponse {
     pub body: Value,
     pub started_turn: Option<AgentTurnRef>,
@@ -439,6 +437,24 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::FileContent(params) => to_value(
                 self.gateway
                     .read_file_content(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::FilePreviewPrepare(params) => to_value(
+                self.gateway
+                    .prepare_file_preview(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::FilePreviewRead(params) => to_value(
+                self.gateway
+                    .read_file_preview(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::FilePreviewClose(params) => to_value(
+                self.gateway
+                    .close_file_preview(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),

@@ -73,6 +73,10 @@ pub struct AppProtocolSchemaRoot {
     pub file_list_response: talos_types::FileListResponse,
     pub file_read_response: talos_types::FileReadResponse,
     pub file_content_response: talos_types::FileContentResponse,
+    pub file_preview_prepare_response: talos_types::FilePreviewDescriptor,
+    pub file_preview_read_response: talos_types::FilePreviewContent,
+    pub file_preview_close_response: talos_types::FilePreviewCloseResponse,
+
     pub file_update_response: talos_types::FileUpdateResponse,
     pub file_delete_response: talos_types::FileDeleteResponse,
 }
@@ -296,6 +300,17 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::FileReadRequest>());
     output.push_str(&export::<talos_types::FileReadResponse>());
     output.push_str(&export::<talos_types::FileContentResponse>());
+    output.push_str(&export::<talos_types::FilePreviewDocument>());
+    output.push_str(&export::<talos_types::FilePreviewDocumentUnavailable>());
+    output.push_str(&export::<talos_types::FilePreviewSource>());
+    output.push_str(&export::<talos_types::FilePreviewMetadata>());
+    output.push_str(&export::<talos_types::FilePreviewPrepareRequest>());
+    output.push_str(&export::<talos_types::FilePreviewDescriptor>());
+    output.push_str(&export::<talos_types::FilePreviewReadRequest>());
+    output.push_str(&export::<talos_types::FilePreviewContent>());
+    output.push_str(&export::<talos_types::FilePreviewCloseRequest>());
+    output.push_str(&export::<talos_types::FilePreviewCloseResponse>());
+
     output.push_str(&export::<talos_types::FileUpdateRequest>());
     output.push_str(&export::<talos_types::FileUpdateResponse>());
     output.push_str(&export::<talos_types::FileDeleteRequest>());

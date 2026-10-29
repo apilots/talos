@@ -14,6 +14,7 @@ fn default_config_resolves_the_local_file_root() {
     assert_eq!(
         config.storage.files,
         FileStorageConfig {
+            preview_base_url: None,
             default: "local".to_string(),
             backends: BTreeMap::from([(
                 "local".to_string(),
@@ -187,7 +188,25 @@ fn file_storage_accepts_suffix_and_parser_validated_mime_types() {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string(),
         "text/csv".to_string(),
         "text/markdown".to_string(),
+        "text/plain".to_string(),
+        "application/json".to_string(),
     ]);
 
     config.validate_runtime().unwrap();
+}
+
+#[test]
+fn preview_origin_requires_a_domain_origin_and_preserves_the_existing_storage_defaults() {
+    let mut config = FileStorageConfig::default();
+    config.preview_base_url = Some("https://preview.example.com:8443/".into());
+    config.validate().unwrap();
+    for origin in [
+        "file:///workspace",
+        "https://127.0.0.1",
+        "https://user:pass@preview.example.com",
+        "https://preview.example.com/assets/",
+    ] {
+        config.preview_base_url = Some(origin.into());
+        assert!(config.validate().is_err(), "{origin}");
+    }
 }

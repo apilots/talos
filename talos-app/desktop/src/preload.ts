@@ -1,3 +1,4 @@
+import { unwrapTalosApiResponse } from "@talos/sdk-core";
 import type { IpcRendererEvent } from "electron";
 import { contextBridge, ipcRenderer } from "electron";
 
@@ -6,6 +7,15 @@ import { TALOS_IPC } from "./ipc";
 import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
+  preview: {
+    browser: operation => ipcRenderer.invoke(TALOS_IPC.previewBrowser, operation).then(response => unwrapTalosApiResponse<import("@talos/sdk-app-server/desktop").PreviewBrowserState | null>(response)),
+    onBrowserState: handler => {
+      const listener = (_event: IpcRendererEvent, state: import("@talos/sdk-app-server/desktop").PreviewBrowserState) => handler(state);
+      ipcRenderer.on(TALOS_IPC.previewBrowserState, listener); return () => ipcRenderer.off(TALOS_IPC.previewBrowserState, listener);
+    },
+    targets: resource => ipcRenderer.invoke(TALOS_IPC.previewTargets, resource).then(response => unwrapTalosApiResponse<import("@talos/sdk-app-server/desktop").PreviewOpenTarget[]>(response)),
+    open: request => ipcRenderer.invoke(TALOS_IPC.previewOpen, request).then(response => unwrapTalosApiResponse<void>(response)),
+  },
   browserWorkspace: {
     request: request => ipcRenderer.invoke(TALOS_IPC.browserRequest, request),
     onState: handler => {

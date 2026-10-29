@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = { workspace = true }
+futures-util = { workspace = true }
+http-range-header = "0.4"
+percent-encoding = "2"
 agent-protocol = { workspace = true }
 url = "2"
 talos-logging = { workspace = true }

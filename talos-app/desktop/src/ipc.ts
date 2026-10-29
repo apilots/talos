@@ -12,6 +12,10 @@ export const TALOS_IPC = {
   messageQueueChanged: "talos:message-queue-changed",
   invoke: "talos:invoke",
   openExternal: "talos:open-external",
+  previewTargets: "talos:preview-targets",
+  previewOpen: "talos:preview-open",
+  previewBrowser: "talos:preview-browser",
+  previewBrowserState: "talos:preview-browser-state",
   runtimeState: "talos:runtime-state",
   subscriptionTerminated: "talos:subscription-terminated",
 } as const;
@@ -20,6 +24,7 @@ export type { TalosRuntimeStateKind, TalosRuntimeState } from "@talos/sdk-app-se
 import type { TalosRuntimeState } from "@talos/sdk-app-server/desktop";
 
 export interface TalosDesktopBridge {
+  preview: import("@talos/sdk-app-server/desktop").DesktopPreviewBridge;
   browserWorkspace: import("@talos/sdk-app-server/desktop").DesktopBrowserBridge;
   onDesktopFrame(handler:(frame:AppProtocol.DesktopMediaFrame)=>void):()=>void;
   workerIdentity(): Promise<AppProtocol.ApiResponse<AppProtocol.DesktopWorkerIdentityResponse>>;

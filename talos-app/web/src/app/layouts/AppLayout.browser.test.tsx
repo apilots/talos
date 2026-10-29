@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
+import { workspaceOwnerKey } from "@/shared/store/workspace-state";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { useAppStore } from "@/shared/store/app-store";
 import { fixture, show, open } from "./AppLayout.test-utils";
 import { workspaceWindowKey } from "@/shared/store/workspace-window";
@@ -34,6 +35,61 @@ it("retains opened workspace content on Settings without adding an MCP business 
   fireEvent.click(screen.getByRole("button", { name: "Hide workspace (1 open windows)" }));
   expect(screen.getByRole("button", { name: "Show workspace (1 open windows)" })).toBeEnabled();
 });
+it("binds previews opened on a fresh Settings page to the general workspace", () => {
+  show("/settings/mcp-servers");
+  act(() => useAppStore.getState().createWorkspaceWebpage());
+  const state = useAppStore.getState();
+  expect(state.workspaceOwner).toEqual({ scope: "account", context: { kind: "general" } });
+  expect(Object.values(state.workspaceSnapshots)).toContainEqual({
+    workspaceWindows: state.workspaceWindows, workspaceActiveKey: state.workspaceActiveKey, workspaceOpen: true,
+  });
+});
+it("binds right tabs to sessions and Files while retaining hidden webpage instances", () => {
+  show();
+  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),useAppStore.getState().workspaceActiveKey!, "https://one.test/"); });
+  const frame = screen.getByTitle("Preview content") as HTMLIFrameElement;
+  const document = frame.contentDocument!;
+  document.body.innerHTML = '<input value="Retained session draft">';
+  fireEvent.click(screen.getByRole("link", { name: "Second session" }));
+  expect(useAppStore.getState().workspaceWindows).toEqual([]);
+  expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  expect(frame.isConnected).toBe(true);
+  open("second-worker");
+  fireEvent.click(screen.getByRole("link", { name: "Files page" }));
+  expect(useAppStore.getState().workspaceWindows).toEqual([]);
+  open("library-worker");
+  fireEvent.click(screen.getByRole("link", { name: "First session" }));
+  expect(screen.getByRole("region", { name: "Webpage preview" })).toContainElement(frame);
+  expect(frame.contentDocument).toBe(document);
+  expect(frame.contentDocument?.querySelector("input")).toHaveValue("Retained session draft");
+  expect(useAppStore.getState().workspaceWindows).toHaveLength(1);
+  expect(screen.queryByRole("tab", { name: "library-worker" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Second session" }));
+  expect(screen.getByRole("tab", { name: "second-worker" })).toHaveAttribute("aria-selected", "true");
+});
+it("scrolls a restored active tab into view without taking focus from session navigation", () => {
+  let right = 400;
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (this.getAttribute("role") === "tablist") return { left: 200, right } as DOMRect;
+    if (this.getAttribute("role") === "tab" && this.title === "first-worker") return { left: 500, right: 600 } as DOMRect;
+    return original.call(this);
+  });
+  try {
+    show();open("first-worker");
+    fireEvent.click(screen.getByRole("link", { name: "Second session" }));open("second-worker");
+    const strip = screen.getByRole("tablist");strip.scrollLeft = 0;
+    const navigation = screen.getByRole("link", { name: "First session" });
+    navigation.focus();fireEvent.click(navigation);
+    expect(navigation).toHaveFocus();
+    expect(strip.scrollLeft).toBe(200);
+    right = 300;
+    fireEvent.transitionEnd(screen.getByRole("dialog", { name: "Right workspace" }));
+    expect(strip.scrollLeft).toBe(500);
+    expect(navigation).toHaveFocus();
+  } finally { bounds.mockRestore(); }
+});
+
 it("counts retained windows honestly, deduplicates openings, selects and closes them", () => {
   show();expect(screen.getByRole("button", { name: "New workspace tab" })).toBeEnabled();
   open("a");open("b");open("a");
@@ -70,13 +126,13 @@ it("collapses from a modal with Escape, keeping count and returning focus outsid
 });
 it("assembles real Markdown and URL descriptors independently from Computer content", () => {
   show();open("worker");
-  act(() => useAppStore.getState().openWorkspaceWindow({ kind: "markdown", fileId: "owned-file" }));
+  act(() => useAppStore.getState().openWorkspaceWindow({ kind: "file", fileId: "owned-file" }));
   expect(screen.getByRole("region", { name: "Markdown preview" })).toBeInTheDocument();
   expect(fixture.closed).toEqual(["worker"]);
-  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(useAppStore.getState().workspaceActiveKey!, "http://localhost:3010/"); });
+  act(() => { useAppStore.getState().createWorkspaceWebpage(); useAppStore.getState().navigateWorkspaceWebpage(workspaceOwnerKey(useAppStore.getState().workspaceOwner!),useAppStore.getState().workspaceActiveKey!, "http://localhost:3010/"); });
   expect(screen.getByRole("region", { name: "Webpage preview" })).toHaveTextContent("http://localhost:3010/");
   fireEvent.click(screen.getByRole("tab", { name: "review.md" }));
-  expect(useAppStore.getState().workspaceActiveKey).toBe(workspaceWindowKey({ kind: "markdown", fileId: "owned-file" }));
+  expect(useAppStore.getState().workspaceActiveKey).toBe(workspaceWindowKey({ kind: "file", fileId: "owned-file" }));
   expect(screen.getByRole("region", { name: "Markdown preview" })).toBeInTheDocument();
 });
 

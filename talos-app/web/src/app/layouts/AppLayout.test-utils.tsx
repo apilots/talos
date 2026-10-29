@@ -23,7 +23,7 @@ vi.mock("@/features/chat", () => ({
   useSessionQuery: (id: string) => ({ data: id ? { title: "Bound session", projectId: "bound-project", nodeId: "session-worker" } : undefined }),
   useProjectsQuery: () => ({ data: [{ id: "bound-project", name: "Bound project", origin: "remote", updatedAt: 1 }] }),
 }));
-vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: { originalFilename: "review.md" } }), MarkdownFilePreview: () => <section aria-label="Markdown preview">Actual file</section> }));
+vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: { originalFilename: "review.md" } }), FilePreview: () => <section aria-label="Markdown preview">Actual file</section> }));
 vi.mock("@/features/web-preview", () => ({ DesktopBrowserPage: () => <section aria-label="Native webpage" />, desktopBrowserRequest: fixture.browserRequest, useDesktopBrowserWorkspace: () => {}, useWorkspaceWebpageCreation: () => ({create: useAppStore.getState().createWorkspaceWebpage, disabled:false,error:false}), OpenWebpageButton: ({ icon }: { icon: string }) => <button>{icon === "plus" ? "New webpage tab" : "Open webpage preview"}</button>, WebPagePreview: ({ url }: { url: string }) => <section aria-label="Webpage preview">{url}<input aria-label="Preview address" /><iframe title="Preview content" /></section> }));
 beforeEach(() => {
   fixture.browserRequest.mockReset().mockResolvedValue(null);
@@ -32,11 +32,11 @@ beforeEach(() => {
   HTMLElement.prototype.setPointerCapture=vi.fn();HTMLElement.prototype.hasPointerCapture=vi.fn(()=>true);HTMLElement.prototype.releasePointerCapture=vi.fn();
   HTMLDialogElement.prototype.showModal = function () { this.open = true;this.querySelector<HTMLElement>("button,input,[tabindex]")?.focus(); };
   HTMLDialogElement.prototype.close = function () { this.open = false;if(this.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); };
-  useAppStore.setState({ sidebarOpen: false, desktopBrowser: null, workspaceFocusRevision: 0, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false,sidebarWidth:296,workspaceWidth:null,resizingPane:null });
+  useAppStore.setState({ workspaceOwner: null, workspaceSnapshots: {}, sidebarOpen: false, desktopBrowser: null, workspaceFocusRevision: 0, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false, workspaceExpanded: false,sidebarWidth:296,workspaceWidth:null,resizingPane:null });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals();vi.restoreAllMocks(); });
 export function show(path = "/sessions/session", strict = false) {
-  const content=<MemoryRouter initialEntries={[path]}><Routes><Route element={<AppLayout />}><Route path="*" element={<div>Page content<Link to="/settings/mcp-servers">Settings</Link><Link to="/files">Files page</Link></div>} /></Route></Routes></MemoryRouter>;
+  const content=<MemoryRouter initialEntries={[path]}><Routes><Route element={<AppLayout />}><Route path="*" element={<div>Page content<Link to="/settings/mcp-servers">Settings</Link><Link to="/files">Files page</Link><Link to="/sessions/second">Second session</Link><Link to="/sessions/session">First session</Link></div>} /></Route></Routes></MemoryRouter>;
   return render(strict ? <StrictMode>{content}</StrictMode> : content);
 }
 export function open(nodeId: string) { act(() => useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId })); }

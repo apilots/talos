@@ -146,6 +146,13 @@ pub enum ClientRequestParams {
     FileRead(FileReadRequest),
     #[serde(rename = "file/content")]
     FileContent(FileReadRequest),
+    #[serde(rename = "file/preview/prepare")]
+    FilePreviewPrepare(talos_types::FilePreviewPrepareRequest),
+    #[serde(rename = "file/preview/read")]
+    FilePreviewRead(talos_types::FilePreviewReadRequest),
+    #[serde(rename = "file/preview/close")]
+    FilePreviewClose(talos_types::FilePreviewCloseRequest),
+
     #[serde(rename = "file/update")]
     FileUpdate(FileUpdateRequest),
     #[serde(rename = "file/delete")]
@@ -373,6 +380,16 @@ impl ClientRequest {
             ClientMethod::FileList => ClientRequestParams::FileList(decode(params_value)?),
             ClientMethod::FileRead => ClientRequestParams::FileRead(decode(params_value)?),
             ClientMethod::FileContent => ClientRequestParams::FileContent(decode(params_value)?),
+            ClientMethod::FilePreviewPrepare => {
+                ClientRequestParams::FilePreviewPrepare(decode(params_value)?)
+            }
+            ClientMethod::FilePreviewRead => {
+                ClientRequestParams::FilePreviewRead(decode(params_value)?)
+            }
+            ClientMethod::FilePreviewClose => {
+                ClientRequestParams::FilePreviewClose(decode(params_value)?)
+            }
+
             ClientMethod::FileUpdate => ClientRequestParams::FileUpdate(decode(params_value)?),
             ClientMethod::FileDelete => ClientRequestParams::FileDelete(decode(params_value)?),
             ClientMethod::MemoryFileList => {

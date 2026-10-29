@@ -110,7 +110,8 @@ service AgentPeerFileRpc {
 message FileScope { oneof scope { Empty personal = 1; string project_id = 2; } }
 message OptionalTags { repeated string values = 1; }
 message OptionalFileMetadata { map<string, string> values = 1; }
-message PeerFileReadParams { string file_id = 1; }
+message FileByteRange { uint64 offset = 1; uint32 limit = 2; }
+message PeerFileReadParams { string file_id = 1; FileByteRange range = 2; }
 message PeerFileUpdateParams { string file_id = 1; OptionalTags tags = 2; OptionalFileMetadata metadata = 3; }
 message PeerFileDeleteParams { string file_id = 1; }
 message PeerFileReadRequest { NodeAuth auth = 1; PeerFileReadParams params = 2; string source_peer_id = 3; }

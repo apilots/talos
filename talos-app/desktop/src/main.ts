@@ -1,3 +1,4 @@
+import { registerFilePreviewScheme } from "./file-preview-protocol";
 import path from "node:path";
 import { hostname } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -81,6 +82,8 @@ async function createMainWindow(): Promise<BaseWindow> {
 
   return window;
 }
+
+registerFilePreviewScheme();
 
 app.whenReady().then(async () => {
   controller = await createController();
