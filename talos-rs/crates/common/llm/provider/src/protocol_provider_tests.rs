@@ -13,14 +13,7 @@ fn provider(protocol: LlmProtocol, replay: ReasoningReplay) -> ProtocolProvider 
     let config: ProviderConfig = serde_json::from_value(json!({
         "base_url":"http://127.0.0.1:9/private-prefix/v1", "models":[{"id":"same-model","reasoning":true,"reasoning_replay":replay}]
     })).unwrap();
-    ProtocolProvider::new(
-        "user-connection",
-        protocol,
-        &config,
-        "same-model",
-        &ProviderHttpTimeouts::default(),
-    )
-    .unwrap()
+    ProtocolProvider::new("user-connection", protocol, &config, "same-model").unwrap()
 }
 
 fn tool_history(continuation: ReasoningContinuation) -> ChatRequest {
@@ -295,14 +288,8 @@ async fn three_protocols_use_real_http_nonstream_stream_tools_and_protocol_auth(
             json!({"base_url":url,"api_key":"loopback-only-key","models":[{"id":"same-model"}]}),
         )
         .unwrap();
-        let provider = ProtocolProvider::new(
-            "custom-service",
-            protocol,
-            &config,
-            "same-model",
-            &ProviderHttpTimeouts::default(),
-        )
-        .unwrap();
+        let provider =
+            ProtocolProvider::new("custom-service", protocol, &config, "same-model").unwrap();
         let first = provider
             .chat_with_tools(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -382,14 +369,8 @@ fn unconfigured_reasoning_capability_does_not_inject_thinking_into_any_protocol(
         LlmProtocol::Responses,
     ] {
         let config: ProviderConfig = serde_json::from_value(json!({"base_url":"http://127.0.0.1:9/v1","models":[{"id":"opaque-7f82","reasoning":false}]})).unwrap();
-        let provider = ProtocolProvider::new(
-            "opaque-service",
-            protocol,
-            &config,
-            "opaque-7f82",
-            &ProviderHttpTimeouts::default(),
-        )
-        .unwrap();
+        let provider =
+            ProtocolProvider::new("opaque-service", protocol, &config, "opaque-7f82").unwrap();
         let request = ChatRequest::new_user("hello", "opaque-7f82");
         let (_, body) = provider.body(request, false).unwrap();
         for key in [
@@ -447,14 +428,9 @@ async fn streamed_chat_reasoning_survives_tool_continuation_for_every_replay_pol
         ])
         .await;
         let config: ProviderConfig = serde_json::from_value(json!({"base_url":url,"models":[{"id":"same-model","reasoning":true,"reasoning_replay":replay}]})).unwrap();
-        let provider = ProtocolProvider::new(
-            "opaque-service",
-            LlmProtocol::Chat,
-            &config,
-            "same-model",
-            &ProviderHttpTimeouts::default(),
-        )
-        .unwrap();
+        let provider =
+            ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model")
+                .unwrap();
         let mut stream = provider
             .stream_model_blocks(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -537,14 +513,9 @@ async fn custom_chat_stream_preserves_the_same_structured_reasoning_as_nonstream
             json!({"base_url":url,"models":[{"id":"same-model","reasoning":true}]}),
         )
         .unwrap();
-        let connection = ProtocolProvider::new(
-            "opaque-service",
-            LlmProtocol::Chat,
-            &config,
-            "same-model",
-            &ProviderHttpTimeouts::default(),
-        )
-        .unwrap();
+        let connection =
+            ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model")
+                .unwrap();
         let nonstream = connection
             .chat(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -624,14 +595,9 @@ async fn custom_chat_auto_keeps_plain_alias_fallback_and_plain_structured_bounda
         let (url, server) = capture(vec![("text/event-stream", sse)]).await;
         let config: ProviderConfig =
             serde_json::from_value(json!({"base_url":url,"models":[{"id":"same-model"}]})).unwrap();
-        let connection = ProtocolProvider::new(
-            "opaque-service",
-            LlmProtocol::Chat,
-            &config,
-            "same-model",
-            &ProviderHttpTimeouts::default(),
-        )
-        .unwrap();
+        let connection =
+            ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model")
+                .unwrap();
         let mut stream = connection
             .stream_model_blocks(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -661,14 +627,8 @@ async fn custom_chat_auto_keeps_plain_alias_fallback_and_plain_structured_bounda
     let (url, server) = capture(vec![("text/event-stream", sse)]).await;
     let config: ProviderConfig =
         serde_json::from_value(json!({"base_url":url,"models":[{"id":"same-model"}]})).unwrap();
-    let connection = ProtocolProvider::new(
-        "opaque-service",
-        LlmProtocol::Chat,
-        &config,
-        "same-model",
-        &ProviderHttpTimeouts::default(),
-    )
-    .unwrap();
+    let connection =
+        ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model").unwrap();
     let mut stream = connection
         .stream_model_blocks(ChatRequest::new_user("hello", "same-model"))
         .await

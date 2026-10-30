@@ -76,6 +76,13 @@ Models declared without reasoning support do not receive generated thinking/effo
 
 Explicit KV values take precedence over generated request defaults. Retain protected runtime fields: models, messages/input/system, tools/tool choice, stream settings and credentials cannot be replaced by request KV. Keys are nonempty and unique. The existing secret store and redacted read/save/clear lifecycle remain authoritative.
 
+HTTP deadlines belong to canonical ProviderConfig for both built-in slots and
+custom connections. All HTTP adapters reuse the same client builder and typed
+request/body error handling; omitted native policies retain existing defaults.
+Chat, Messages and Responses are API dialects. Current transports use HTTP/SSE,
+including Responses; choosing Responses does not select WebSocket. Future WS
+transport must own connection reuse and per-response deadlines separately.
+
 ### Thinking switches and KV examples
 
 The current session selection controls only explicitly recognized binary extension paths: enable_thinking, chat_template_kwargs.enable_thinking, and thinking.type=enabled/disabled. Unrelated sibling KV values survive the update. Multiple explicit binary defaults must agree. Nonbinary modes such as a configured adaptive value remain explicit static wire configuration; do not silently reinterpret their semantics as a generic boolean binding.

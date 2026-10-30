@@ -22,6 +22,7 @@ case_dir = Path(sys.argv[1])
 config = json.loads((case_dir / "initial.json").read_text())["config"]
 config["provider"] = "llm-gateway"
 config["model"] = "model"
+config["openai"]["http_timeouts"] = {"connect_secs": 5, "response_secs": 10, "stream_idle_secs": 30, "stream_total_secs": 120}
 config["custom_providers"] = {}
 for provider_id, name, route, thinking in [
     ("llm-gateway", "LLM Gateway", "gateway", True),
@@ -73,7 +74,6 @@ import yaml
 case_dir = Path(sys.argv[1])
 read = lambda name: json.loads((case_dir / f"{name}.json").read_text())
 expected = read("update")["value"]
-initial = read("initial")["config"]
 assert read("reloaded")["success"] is True, "configuration reload failed"
 for stage in ["updated", "read"]:
     response = read(stage)
@@ -84,10 +84,11 @@ for stage in ["updated", "read"]:
     for provider_id in expected["custom_providers"]:
         assert "chat" in response["provider_capabilities"][provider_id]["protocols"]
     for provider_id in ["anthropic", "openai", "bailian", "deepseek", "ollama", "openrouter"]:
-        assert config[provider_id] == initial[provider_id], f"modified built-in {provider_id}"
+        assert config[provider_id] == expected[provider_id], f"lost built-in settings {provider_id}"
 
 persisted = yaml.safe_load(Path(sys.argv[2]).read_text())["llm"]
 assert persisted["custom_providers"] == expected["custom_providers"], "persistence mismatch"
+assert persisted["openai"]["http_timeouts"] == expected["openai"]["http_timeouts"], "built-in timeout persistence mismatch"
 model_response = read("models")
 catalog = model_response["models"]
 custom_models = [model for model in catalog if model["provider"] in expected["custom_providers"]]
@@ -114,5 +115,5 @@ assert model_response["defaultModelSelection"] == {
     "reasoningEffort": "medium",
 }, model_response["defaultModelSelection"]
 print("CASE configured_model_selection_capabilities PASS thinking=independent effort=declared fast=explicit defaults=canonical")
-print("CASE custom_provider_persistence PASS save=read=reload=disk builtins=unchanged optional_key=ready")
+print("CASE custom_provider_persistence PASS save=read=reload=disk builtins=preserved native_timeouts=persisted optional_key=ready")
 PY

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{model_readiness_for_llm, ConfigStore, YamlConfigStore};
+use crate::{model_readiness_for_llm, ConfigStore, ProviderHttpTimeouts, YamlConfigStore};
 
 fn configured() -> LlmConfig {
     serde_yaml::from_str(
@@ -157,19 +157,23 @@ fn replay_overrides_are_model_owned_and_restricted_to_custom_chat() {
 #[test]
 fn custom_http_timeout_policy_accepts_independent_deadlines() {
     let mut config = configured();
-    let policy = &mut config
+    let policy = config
         .custom_providers
         .get_mut("llm-gateway")
         .unwrap()
-        .http_timeouts;
+        .config
+        .http_timeouts
+        .get_or_insert_with(ProviderHttpTimeouts::default);
     policy.response_secs = 5;
     policy.stream_total_secs = 30;
     config.validate_providers().unwrap();
-    let policy = &mut config
+    let policy = config
         .custom_providers
         .get_mut("llm-gateway")
         .unwrap()
-        .http_timeouts;
+        .config
+        .http_timeouts
+        .get_or_insert_with(ProviderHttpTimeouts::default);
     policy.stream_total_secs = 90_000;
     config.validate_providers().unwrap();
 }

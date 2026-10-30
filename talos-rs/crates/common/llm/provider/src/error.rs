@@ -72,7 +72,7 @@ pub(crate) fn stream_response_error(error_type: Option<&str>) -> TalosError {
 
 /// Preserve dependency timeout classification without leaking the request URL.
 #[track_caller]
-pub(crate) fn transport_error(operation: &'static str, error: reqwest::Error) -> TalosError {
+pub fn transport_error(operation: &'static str, error: reqwest::Error) -> TalosError {
     let (code, reason) = if error.is_timeout() {
         (ErrorCode::Timeout, "timed out")
     } else {
@@ -85,8 +85,11 @@ pub(crate) fn transport_error(operation: &'static str, error: reqwest::Error) ->
 }
 
 /// Consume only a bounded rejection envelope. Arbitrary remote text is discarded.
-pub(crate) async fn protocol_response_error(mut response: reqwest::Response) -> TalosError {
-    let mut error = http_response_error("Model protocol", &response);
+pub async fn http_rejection_error(
+    provider: &'static str,
+    mut response: reqwest::Response,
+) -> TalosError {
+    let mut error = http_response_error(provider, &response);
     let status_source = response
         .error_for_status_ref()
         .err()
@@ -125,7 +128,7 @@ pub(crate) async fn protocol_response_error(mut response: reqwest::Response) -> 
                 let status = response.status().as_u16();
                 error = TalosError::new(
                     code,
-                    format!("Model protocol request failed (HTTP {status}): {reason}."),
+                    format!("{provider} request failed (HTTP {status}): {reason}."),
                 )
                 .context(format!("upstream_code={identifier}"));
                 if let Some(source) = status_source {

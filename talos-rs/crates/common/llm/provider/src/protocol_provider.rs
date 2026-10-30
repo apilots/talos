@@ -1,5 +1,5 @@
 //! HTTP transport for explicitly configured wire protocols, without vendor routing.
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use reqwest::{header, Client, Response};
@@ -15,6 +15,7 @@ use crate::{
     protocols::{chat, messages, responses},
     serialize_with_parameters, validate_inline_attachments, Attachment, AttachmentKind,
     AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream,
+    ProviderHttpClients,
 };
 
 /// A custom connection whose only wire contract is its selected protocol.
@@ -25,8 +26,7 @@ pub struct ProtocolProvider {
     api_key: Option<String>,
     default_model: String,
     models: BTreeMap<String, ProviderModelConfig>,
-    client: Client,
-    stream_client: Client,
+    clients: ProviderHttpClients,
 }
 
 impl ProtocolProvider {
@@ -35,7 +35,6 @@ impl ProtocolProvider {
         protocol: LlmProtocol,
         config: &ProviderConfig,
         default_model: &str,
-        timeouts: &ProviderHttpTimeouts,
     ) -> TalosResult<Self> {
         let base_url = config.base_url.clone().ok_or_else(|| {
             TalosError::new(
@@ -43,27 +42,11 @@ impl ProtocolProvider {
                 "Custom provider Base URL is required",
             )
         })?;
-        timeouts.validate()?;
-        let build = |stream: bool| {
-            let mut builder = Client::builder()
-                .connect_timeout(Duration::from_secs(timeouts.connect_secs))
-                .timeout(Duration::from_secs(if stream {
-                    timeouts.stream_total_secs
-                } else {
-                    timeouts.response_secs
-                }));
-            if stream {
-                builder = builder.read_timeout(Duration::from_secs(timeouts.stream_idle_secs));
-            }
-            builder.build().map_err(|error| {
-                TalosError::internal_with_source(
-                    "Failed to initialize protocol HTTP client.",
-                    error.without_url(),
-                )
-            })
-        };
-        let client = build(/*stream*/ false)?;
-        let stream_client = build(/*stream*/ true)?;
+        let defaults = ProviderHttpTimeouts::default();
+        let clients = ProviderHttpClients::new(
+            Client::builder,
+            Some(config.http_timeouts.as_ref().unwrap_or(&defaults)),
+        )?;
         Ok(Self {
             name: name.to_owned(),
             protocol,
@@ -75,8 +58,7 @@ impl ProtocolProvider {
                 .iter()
                 .map(|model| (model.id.clone(), model.clone()))
                 .collect(),
-            client,
-            stream_client,
+            clients,
         })
     }
 
@@ -237,12 +219,9 @@ impl ProtocolProvider {
     async fn send(&self, request: ChatRequest, stream: bool) -> TalosResult<Response> {
         let model = request.model.clone();
         let (endpoint, body) = self.body(request, stream)?;
-        let client = if stream {
-            &self.stream_client
-        } else {
-            &self.client
-        };
-        let mut response = client
+        let mut response = self
+            .clients
+            .for_request(stream)
             .post(format!(
                 "{}/{}",
                 self.base_url.trim_end_matches('/'),
@@ -265,9 +244,11 @@ impl ProtocolProvider {
                 )));
             Ok(response)
         } else {
-            Err(crate::error::protocol_response_error(response)
-                .await
-                .context(format!("provider={} model={model}", self.name)))
+            Err(
+                crate::error::http_rejection_error("Model protocol", response)
+                    .await
+                    .context(format!("provider={} model={model}", self.name)),
+            )
         }
     }
 }
@@ -389,6 +370,9 @@ impl LlmProvider for ProtocolProvider {
 #[cfg(test)]
 #[path = "protocol_provider_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+use std::time::Duration;
 
 #[cfg(test)]
 #[path = "protocol_timeout_tests.rs"]

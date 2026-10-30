@@ -3,7 +3,9 @@
 pub(crate) mod api;
 mod attachment;
 mod error;
-pub use error::http_response_error;
+pub use error::{http_rejection_error, http_response_error, transport_error};
+mod http;
+pub use http::{ProviderHttpClients, ProviderHttpTimeouts};
 pub mod protocols;
 mod router;
 

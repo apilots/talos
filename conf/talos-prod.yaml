@@ -301,7 +301,14 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
+  # All built-in and custom connections accept the same optional HTTP policy.
+  # Omit it to retain the provider's existing defaults. Responses uses HTTP/SSE here.
   openai:
+    # http_timeouts:
+    #   connect_secs: 10
+    #   response_secs: 120
+    #   stream_idle_secs: 90
+    #   stream_total_secs: 900
     api_key: ${TALOS_LLM_OPENAI_API_KEY}
     base_url: "https://api.openai.com/v1"
     protocol: "chat"

@@ -55,7 +55,6 @@ pub use domains::automation::{
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::custom_provider::{
     custom_provider_key_env, is_managed_request_parameter, CustomProviderConfig,
-    ProviderHttpTimeouts,
 };
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
@@ -67,9 +66,10 @@ pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
     llm_provider_supports_protocol, provider_protocol_capabilities, ChannelConfig, ChannelsConfig,
     DmPolicy, DmScope, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCostConfig,
-    ModelInputKind, ModelRef, ModelSpeed, ProviderConfig, ProviderModelConfig,
-    ProviderProtocolCapabilities, ReasoningEffort, ReasoningReplay, TelegramAccountConfig,
-    TelegramChannelsConfig, TelegramGroupConfig, TelegramMode, TelegramTopicConfig,
+    ModelInputKind, ModelRef, ModelSpeed, ProviderConfig, ProviderHttpTimeouts,
+    ProviderModelConfig, ProviderProtocolCapabilities, ReasoningEffort, ReasoningReplay,
+    TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig, TelegramMode,
+    TelegramTopicConfig,
 };
 pub use domains::plugins::{
     official_mcp_source, PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind,

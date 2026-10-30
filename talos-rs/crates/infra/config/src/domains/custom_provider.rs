@@ -14,53 +14,8 @@ use super::network::{
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct CustomProviderConfig {
     pub name: String,
-    #[serde(default)]
-    #[ts(as = "Option<ProviderHttpTimeouts>", optional)]
-    pub http_timeouts: ProviderHttpTimeouts,
     #[serde(flatten)]
     pub config: ProviderConfig,
-}
-
-/// Deadlines for custom protocol HTTP requests, in seconds.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
-pub struct ProviderHttpTimeouts {
-    #[ts(type = "number")]
-    pub connect_secs: u64,
-    #[ts(type = "number")]
-    pub response_secs: u64,
-    #[ts(type = "number")]
-    pub stream_idle_secs: u64,
-    #[ts(type = "number")]
-    pub stream_total_secs: u64,
-}
-
-impl Default for ProviderHttpTimeouts {
-    fn default() -> Self {
-        Self {
-            connect_secs: 10,
-            response_secs: 120,
-            stream_idle_secs: 90,
-            stream_total_secs: 900,
-        }
-    }
-}
-
-impl ProviderHttpTimeouts {
-    pub fn validate(&self) -> TalosResult<()> {
-        if [
-            self.connect_secs,
-            self.response_secs,
-            self.stream_idle_secs,
-            self.stream_total_secs,
-        ]
-        .into_iter()
-        .any(|secs| secs == 0)
-        {
-            return Err(invalid("HTTP timeouts must be positive seconds"));
-        }
-        Ok(())
-    }
 }
 
 impl LlmConfig {
@@ -103,7 +58,6 @@ impl LlmConfig {
     /// Validates user-owned instance metadata and provider request extensions.
     pub fn validate_providers(&self) -> TalosResult<()> {
         for (id, entry) in &self.custom_providers {
-            entry.http_timeouts.validate()?;
             let valid_id = id.len() <= 64
                 && id.starts_with(|c: char| c.is_ascii_lowercase())
                 && id
@@ -140,6 +94,9 @@ impl LlmConfig {
             }
         }
         for (id, provider) in self.providers() {
+            if let Some(timeouts) = &provider.http_timeouts {
+                timeouts.validate()?;
+            }
             if let Some(protocol) = provider.protocol {
                 if !self.custom_providers.contains_key(id)
                     && !allowed_llm_protocols(id).is_some_and(|allowed| allowed.contains(&protocol))

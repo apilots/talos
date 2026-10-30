@@ -10,7 +10,8 @@ use talos_llm_provider::{
         chat as chat_protocol, messages as messages_protocol, responses as responses_protocol,
     },
     validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatRequest,
-    ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
+    ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ProviderHttpClients,
+    ProviderHttpTimeouts, ReasoningEffort,
 };
 use tracing::info;
 
@@ -28,6 +29,7 @@ pub struct OpenRouterConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
     pub protocol: OpenRouterProtocol,
 }
@@ -38,6 +40,7 @@ impl OpenRouterConfig {
             api_key: api_key.into(),
             base_url: "https://openrouter.ai/api/v1".to_string(),
             timeout_secs: 60,
+            http_timeouts: None,
             default_model: "openrouter/auto".to_string(),
             protocol: OpenRouterProtocol::Chat,
         }
@@ -45,6 +48,12 @@ impl OpenRouterConfig {
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
+        self.http_timeouts = timeouts;
         self
     }
 
@@ -67,16 +76,17 @@ impl OpenRouterConfig {
 /// OpenRouter LLM provider.
 pub struct OpenRouterProvider {
     config: OpenRouterConfig,
-    client: Client,
+    clients: ProviderHttpClients,
 }
 
 impl OpenRouterProvider {
     pub fn new(config: OpenRouterConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build OpenRouter HTTP client");
-        Self { config, client }
+        let clients = ProviderHttpClients::new(
+            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
+            config.http_timeouts.as_ref(),
+        )
+        .expect("Failed to build model HTTP clients");
+        Self { config, clients }
     }
 
     pub(crate) fn build_chat_request(
@@ -211,9 +221,10 @@ impl OpenRouterProvider {
         Ok((endpoint, body))
     }
 
-    async fn post(&self, endpoint: &str, body: Value) -> TalosResult<Response> {
+    async fn post(&self, endpoint: &str, body: Value, stream: bool) -> TalosResult<Response> {
         let response = self
-            .client
+            .clients
+            .for_request(stream)
             .post(self.endpoint_url(endpoint))
             .headers(self.build_headers()?)
             .json(&body)
@@ -221,33 +232,29 @@ impl OpenRouterProvider {
             .await
             .map_err(|error| {
                 let diagnostic = format!("OpenRouter {endpoint} request failed");
-                TalosError::internal_with_source(
-                    "OpenRouter request failed; technical details were withheld.",
-                    error.without_url(),
-                )
-                .context(diagnostic)
+                talos_llm_provider::transport_error("OpenRouter request", error).context(diagnostic)
             })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        Err(talos_llm_provider::http_response_error(
-            "OpenRouter",
-            &response,
-        ))
+        Err(talos_llm_provider::http_rejection_error("OpenRouter", response).await)
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         let protocol = self.config.protocol;
         let (endpoint, body) = self.request_body(request, false)?;
-        let response = self.post(endpoint, body).await?;
+        let response = self.post(endpoint, body, false).await?;
         match protocol {
             OpenRouterProtocol::Chat => {
                 let response = response
                     .json::<chat_protocol::ChatCompletionResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("OpenRouter Chat response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error(
+                            "OpenRouter Chat response parsing",
+                            error,
+                        )
                     })?;
                 chat_protocol::chat_response(response, "OpenRouter")
             }
@@ -256,7 +263,10 @@ impl OpenRouterProvider {
                     .json::<responses_protocol::ResponsesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("OpenRouter Responses response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error(
+                            "OpenRouter Responses response parsing",
+                            error,
+                        )
                     })?;
                 Ok(responses_protocol::chat_response(response))
             }
@@ -265,7 +275,10 @@ impl OpenRouterProvider {
                     .json::<messages_protocol::MessagesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("OpenRouter Messages response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error(
+                            "OpenRouter Messages response parsing",
+                            error,
+                        )
                     })?;
                 messages_protocol::chat_response(response)
             }
@@ -274,7 +287,7 @@ impl OpenRouterProvider {
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<Response> {
         let (endpoint, body) = self.request_body(request, true)?;
-        self.post(endpoint, body).await
+        self.post(endpoint, body, true).await
     }
 }
 

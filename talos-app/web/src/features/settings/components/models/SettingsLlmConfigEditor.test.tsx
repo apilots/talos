@@ -43,7 +43,7 @@ function createWrapper() {
 }
 
 function customProviderFixture() {
-  const connection = { api_key: "", base_url: "http://localhost:8000/v1", protocol: "chat" as const, models: [] };
+  const connection = { api_key: "", base_url: "http://localhost:8000/v1", protocol: "chat" as const, models: [], http_timeouts: { connect_secs: 5, response_secs: 30, stream_idle_secs: 45, stream_total_secs: 120 } };
   const capabilities = { default_protocol: "chat", protocols: ["chat"] };
   return {
     config: {
@@ -93,6 +93,7 @@ describe("SettingsLlmConfigEditor", () => {
     expect(id).toMatch(/^custom-[0-9a-f-]{36}$/);
     expect(providers[id]).toMatchObject({ name: "HTTP gateway", base_url: "http://inference.test/v1" });
     expect(providers["llm-gateway"]).toEqual(response.config.custom_providers["llm-gateway"]);
+    expect(updateLlmConfig.mock.calls[0][0].deepseek.http_timeouts).toEqual(response.config.deepseek.http_timeouts);
   });
 
   it("shows config read errors instead of staying in loading state", async () => {

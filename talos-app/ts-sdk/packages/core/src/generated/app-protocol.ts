@@ -516,7 +516,11 @@ ollama: ProviderConfig,
  */
 openrouter: ProviderConfig, };
 
-export type CustomProviderConfig = { name: string, http_timeouts?: ProviderHttpTimeouts,
+export type CustomProviderConfig = { name: string,
+/**
+ * Optional HTTP policy; native adapters retain their defaults when absent.
+ */
+http_timeouts?: ProviderHttpTimeouts | null,
 /**
  * API key
  */
@@ -534,9 +538,29 @@ protocol?: LlmProtocol,
  */
 models: Array<ProviderModelConfig>, };
 
-export type ProviderHttpTimeouts = { connect_secs: number, response_secs: number, stream_idle_secs: number, stream_total_secs: number, };
+export type ProviderHttpTimeouts = {
+/**
+ * Maximum connection establishment time.
+ */
+connect_secs: number,
+/**
+ * Total nonstream request time, including headers and response body.
+ */
+response_secs: number,
+/**
+ * Maximum time without incoming HTTP bytes, including initial headers.
+ */
+stream_idle_secs: number,
+/**
+ * Total lifetime of one streaming HTTP request, not a persistent connection.
+ */
+stream_total_secs: number, };
 
 export type ProviderConfig = {
+/**
+ * Optional HTTP policy; native adapters retain their defaults when absent.
+ */
+http_timeouts?: ProviderHttpTimeouts | null,
 /**
  * API key
  */

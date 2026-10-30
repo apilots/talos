@@ -46,7 +46,6 @@ pub fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>>
             protocol,
             &custom.config,
             &config.llm.model,
-            &custom.http_timeouts,
         )?) as Arc<dyn LlmProvider>
     } else {
         create_adapter(config)?
@@ -76,6 +75,7 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .clone()
                 .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
             let anthropic_config = talos_llm_anthropic::AnthropicConfig::new(&api_key)
+                .with_http_timeouts(config.llm.anthropic.http_timeouts.clone())
                 .with_base_url(&base_url)
                 .with_default_model(&config.llm.model);
             Ok(Arc::new(AnthropicProvider::new(anthropic_config)))
@@ -88,6 +88,7 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 )
             })?;
             let mut openai_config = talos_llm_openai::OpenAIConfig::new(&api_key)
+                .with_http_timeouts(config.llm.openai.http_timeouts.clone())
                 .with_default_model(&config.llm.model)
                 .with_protocol(openai_protocol("openai", &config.llm.openai)?);
             if let Some(base_url) = config.llm.openai.base_url.as_deref() {
@@ -108,8 +109,9 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                     "llm.bailian.base_url is required".to_string(),
                 )
             })?;
-            let bailian_config =
-                talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
+            let bailian_config = talos_llm_bailian::BailianConfig::new(&api_key)
+                .with_http_timeouts(config.llm.bailian.http_timeouts.clone())
+                .with_base_url(&base_url);
             Ok(Arc::new(BailianProvider::new(bailian_config)))
         }
         "deepseek" => {
@@ -126,6 +128,7 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .clone()
                 .unwrap_or_else(|| "https://api.deepseek.com".to_string());
             let deepseek_config = DeepSeekConfig::new(&api_key)
+                .with_http_timeouts(config.llm.deepseek.http_timeouts.clone())
                 .with_base_url(&base_url)
                 .with_default_model(&config.llm.model)
                 .with_protocol(deepseek_protocol(&config.llm.deepseek)?);
@@ -138,7 +141,8 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                     "llm.ollama.base_url is required".to_string(),
                 )
             })?;
-            let mut ollama_config = OllamaConfig::new(&base_url, &config.llm.model);
+            let mut ollama_config = OllamaConfig::new(&base_url, &config.llm.model)
+                .with_http_timeouts(config.llm.ollama.http_timeouts.clone());
             if let Some(api_key) = config.llm.ollama.api_key.as_deref() {
                 ollama_config = ollama_config.with_api_key(api_key);
             }
@@ -158,6 +162,7 @@ fn create_adapter(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .clone()
                 .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string());
             let openrouter_config = OpenRouterConfig::new(&api_key)
+                .with_http_timeouts(config.llm.openrouter.http_timeouts.clone())
                 .with_base_url(&base_url)
                 .with_default_model(&config.llm.model)
                 .with_protocol(openrouter_protocol(&config.llm.openrouter)?);

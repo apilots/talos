@@ -52,16 +52,11 @@ async fn server(
 }
 
 fn connection(url: &str, timeouts: ProviderHttpTimeouts) -> ProtocolProvider {
-    let config =
-        serde_json::from_value(json!({"base_url":url,"models":[{"id":"opaque"}]})).unwrap();
-    ProtocolProvider::new(
-        "test-connection",
-        LlmProtocol::Chat,
-        &config,
-        "opaque",
-        &timeouts,
+    let config = serde_json::from_value(
+        json!({"base_url":url,"http_timeouts":timeouts,"models":[{"id":"opaque"}]}),
     )
-    .unwrap()
+    .unwrap();
+    ProtocolProvider::new("test-connection", LlmProtocol::Chat, &config, "opaque").unwrap()
 }
 
 fn short_timeouts() -> ProviderHttpTimeouts {

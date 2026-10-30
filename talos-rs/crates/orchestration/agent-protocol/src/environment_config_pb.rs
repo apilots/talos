@@ -25,6 +25,12 @@ fn decode_protocol(value: i32) -> TalosResult<LlmProtocol> {
 }
 fn encode_provider(name: &str, value: ProviderConfig) -> pb::ProviderConfig {
     pb::ProviderConfig {
+        http_timeouts: value.http_timeouts.map(|value| pb::ProviderHttpTimeouts {
+            connect_secs: value.connect_secs,
+            response_secs: value.response_secs,
+            stream_idle_secs: value.stream_idle_secs,
+            stream_total_secs: value.stream_total_secs,
+        }),
         api_key: value.api_key,
         base_url: value.base_url,
         protocol: value.protocol.map(protocol),
@@ -38,6 +44,19 @@ fn encode_provider(name: &str, value: ProviderConfig) -> pb::ProviderConfig {
 fn decode_provider(value: Option<pb::ProviderConfig>) -> TalosResult<ProviderConfig> {
     let value = value.ok_or_else(invalid)?;
     Ok(ProviderConfig {
+        http_timeouts: value
+            .http_timeouts
+            .map(|value| -> TalosResult<_> {
+                let timeouts = ProviderHttpTimeouts {
+                    connect_secs: value.connect_secs,
+                    response_secs: value.response_secs,
+                    stream_idle_secs: value.stream_idle_secs,
+                    stream_total_secs: value.stream_total_secs,
+                };
+                timeouts.validate()?;
+                Ok(timeouts)
+            })
+            .transpose()?,
         api_key: value.api_key,
         base_url: value.base_url,
         protocol: value.protocol.map(decode_protocol).transpose()?,
@@ -62,12 +81,6 @@ fn encode_llm(value: LlmConfig) -> pb::LlmConfig {
                     pb::CustomProviderConfig {
                         name: entry.name,
                         config: Some(config),
-                        http_timeouts: Some(pb::ProviderHttpTimeouts {
-                            connect_secs: entry.http_timeouts.connect_secs,
-                            response_secs: entry.http_timeouts.response_secs,
-                            stream_idle_secs: entry.http_timeouts.stream_idle_secs,
-                            stream_total_secs: entry.http_timeouts.stream_total_secs,
-                        }),
                     },
                 )
             })
@@ -91,19 +104,6 @@ fn decode_llm(value: pb::LlmConfig) -> TalosResult<LlmConfig> {
                     CustomProviderConfig {
                         name: entry.name,
                         config: decode_provider(entry.config)?,
-                        http_timeouts: match entry.http_timeouts {
-                            Some(value) => {
-                                let timeouts = talos_config::ProviderHttpTimeouts {
-                                    connect_secs: value.connect_secs,
-                                    response_secs: value.response_secs,
-                                    stream_idle_secs: value.stream_idle_secs,
-                                    stream_total_secs: value.stream_total_secs,
-                                };
-                                timeouts.validate()?;
-                                timeouts
-                            }
-                            None => talos_config::ProviderHttpTimeouts::default(),
-                        },
                     },
                 ))
             })
