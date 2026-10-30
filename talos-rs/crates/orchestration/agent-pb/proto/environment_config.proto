@@ -6,7 +6,10 @@ enum LlmProtocol { LLM_PROTOCOL_UNSPECIFIED = 0; LLM_PROTOCOL_CHAT = 1; LLM_PROT
 enum WebSearchProvider { WEB_SEARCH_PROVIDER_UNSPECIFIED = 0; WEB_SEARCH_PROVIDER_FIRECRAWL = 1; WEB_SEARCH_PROVIDER_BRAVE = 2; WEB_SEARCH_PROVIDER_TAVILY = 3; }
 message ProviderConfig {
   optional string api_key = 1; optional string base_url = 2; optional LlmProtocol protocol = 3;
-  repeated ModelInfo models = 4;
+  repeated ModelInfo models = 4; ProviderHttpTimeouts http_timeouts = 5;
+}
+message ProviderHttpTimeouts {
+  uint64 connect_secs = 1; uint64 response_secs = 2; uint64 stream_idle_secs = 3; uint64 stream_total_secs = 4;
 }
 message CustomProviderConfig {
   string name = 1; ProviderConfig config = 3;

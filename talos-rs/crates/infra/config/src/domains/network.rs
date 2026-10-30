@@ -416,9 +416,63 @@ pub fn llm_provider_supports_protocol(provider: &str, protocol: LlmProtocol) -> 
     allowed_llm_protocols(provider).is_some_and(|allowed| allowed.contains(&protocol))
 }
 
+/// Deadlines for model HTTP requests, in seconds.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProviderHttpTimeouts {
+    /// Maximum connection establishment time.
+    #[ts(type = "number")]
+    pub connect_secs: u64,
+    /// Total nonstream request time, including headers and response body.
+    #[ts(type = "number")]
+    pub response_secs: u64,
+    /// Maximum time without incoming HTTP bytes, including initial headers.
+    #[ts(type = "number")]
+    pub stream_idle_secs: u64,
+    /// Total lifetime of one streaming HTTP request, not a persistent connection.
+    #[ts(type = "number")]
+    pub stream_total_secs: u64,
+}
+
+impl Default for ProviderHttpTimeouts {
+    fn default() -> Self {
+        Self {
+            connect_secs: 10,
+            response_secs: 120,
+            stream_idle_secs: 90,
+            stream_total_secs: 900,
+        }
+    }
+}
+
+impl ProviderHttpTimeouts {
+    pub fn validate(&self) -> talos_error::TalosResult<()> {
+        if [
+            self.connect_secs,
+            self.response_secs,
+            self.stream_idle_secs,
+            self.stream_total_secs,
+        ]
+        .into_iter()
+        .any(|secs| secs == 0)
+        {
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "HTTP timeouts must be positive seconds",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Provider config
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ProviderConfig {
+    /// Optional HTTP policy; native adapters retain their defaults when absent.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub http_timeouts: Option<ProviderHttpTimeouts>,
+
     /// API key
     #[serde(default)]
     #[ts(optional)]
@@ -470,6 +524,11 @@ pub struct ProviderModelConfig {
     pub reasoning: bool,
     #[serde(default)]
     pub reasoning_effort: ReasoningEffort,
+    /// Accepted effort levels, independent of configured thinking switches.
+    /// Omitted/null permits standard levels; [] explicitly disables graded effort.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub reasoning_efforts: Option<Vec<ReasoningEffort>>,
     #[serde(default)]
     pub speed: ModelSpeed,
     #[serde(default)]

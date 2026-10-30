@@ -1,17 +1,21 @@
 //! HTTP transport for explicitly configured wire protocols, without vendor routing.
-use std::{collections::BTreeMap, time::Duration};
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use reqwest::{header, Client, Response};
 use serde_json::Value;
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_types::{LlmProtocol, ProviderConfig, ReasoningEffort, ReasoningReplay};
+use talos_types::{
+    LlmProtocol, ProviderConfig, ProviderHttpTimeouts, ProviderModelConfig, ReasoningEffort,
+    ReasoningReplay,
+};
 
 use crate::{
     has_boolean_thinking_control,
     protocols::{chat, messages, responses},
     serialize_with_parameters, validate_inline_attachments, Attachment, AttachmentKind,
     AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream,
+    ProviderHttpClients,
 };
 
 /// A custom connection whose only wire contract is its selected protocol.
@@ -21,13 +25,8 @@ pub struct ProtocolProvider {
     base_url: String,
     api_key: Option<String>,
     default_model: String,
-    models: BTreeMap<String, ProtocolModelOptions>,
-    client: Client,
-}
-
-struct ProtocolModelOptions {
-    replay: ReasoningReplay,
-    reasoning: bool,
+    models: BTreeMap<String, ProviderModelConfig>,
+    clients: ProviderHttpClients,
 }
 
 impl ProtocolProvider {
@@ -43,15 +42,11 @@ impl ProtocolProvider {
                 "Custom provider Base URL is required",
             )
         })?;
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Failed to initialize protocol HTTP client.",
-                    error,
-                )
-            })?;
+        let defaults = ProviderHttpTimeouts::default();
+        let clients = ProviderHttpClients::new(
+            Client::builder,
+            Some(config.http_timeouts.as_ref().unwrap_or(&defaults)),
+        )?;
         Ok(Self {
             name: name.to_owned(),
             protocol,
@@ -61,17 +56,9 @@ impl ProtocolProvider {
             models: config
                 .models
                 .iter()
-                .map(|model| {
-                    (
-                        model.id.clone(),
-                        ProtocolModelOptions {
-                            replay: model.reasoning_replay,
-                            reasoning: model.reasoning,
-                        },
-                    )
-                })
+                .map(|model| (model.id.clone(), model.clone()))
                 .collect(),
-            client,
+            clients,
         })
     }
 
@@ -127,9 +114,19 @@ impl ProtocolProvider {
         }
         let effort = request.reasoning_effort;
         let options = self.models.get(&request.model);
+        if let Some(options) = options {
+            options.validate_reasoning_effort(effort)?;
+        }
         let reasoning = options.is_some_and(|model| model.reasoning);
-        // Only recognized binary extensions replace effort controls. An opaque
-        // thinking object must not apply Messages semantics to other protocols.
+        let supports_effort = reasoning
+            && options.is_some_and(|model| {
+                model
+                    .reasoning_efforts
+                    .as_ref()
+                    .is_none_or(|efforts| !efforts.is_empty())
+            });
+        // Detect an explicit enable/disable operation independently of effort.
+        // Opaque thinking objects retain their protocol-specific semantics.
         let explicit_thinking = has_boolean_thinking_control(&parameters)
             || matches!(
                 parameters
@@ -138,9 +135,15 @@ impl ProtocolProvider {
                     .and_then(Value::as_str),
                 Some("enabled" | "disabled")
             );
+        // A thinking switch never determines effort support. For Off, omit the
+        // effort when an explicit switch already carries the disable operation.
+        let send_effort = supports_effort && (effort.is_some() || !explicit_thinking);
         let (endpoint, body) = match self.protocol {
             LlmProtocol::Chat => {
-                let replay = match options.map(|model| model.replay).unwrap_or_default() {
+                let replay = match options
+                    .map(|model| model.reasoning_replay)
+                    .unwrap_or_default()
+                {
                     ReasoningReplay::ProtocolDefault | ReasoningReplay::Reasoning => {
                         chat::ChatReasoningContinuationFormat::Reasoning
                     }
@@ -153,7 +156,7 @@ impl ProtocolProvider {
                     request,
                     stream,
                     chat::ChatCompletionRequestOptions {
-                        reasoning_effort: (reasoning && !explicit_thinking)
+                        reasoning_effort: send_effort
                             .then(|| wire_effort(effort, LlmProtocol::Chat)),
                         reasoning_continuation: replay,
                         ..Default::default()
@@ -170,12 +173,10 @@ impl ProtocolProvider {
                     request,
                     stream.then_some(true),
                     responses::ResponsesRequestOptions {
-                        reasoning: (reasoning && !explicit_thinking).then(|| {
-                            responses::ResponsesReasoning {
-                                effort: wire_effort(effort, LlmProtocol::Responses),
-                            }
+                        reasoning: send_effort.then(|| responses::ResponsesReasoning {
+                            effort: wire_effort(effort, LlmProtocol::Responses),
                         }),
-                        include: (reasoning && !explicit_thinking && effort.is_some())
+                        include: (send_effort && effort.is_some())
                             .then(|| vec!["reasoning.encrypted_content".to_owned()]),
                     },
                 )?;
@@ -200,7 +201,7 @@ impl ProtocolProvider {
                             .to_owned(),
                             budget_tokens: None,
                         }),
-                        output_config: if !reasoning || explicit_thinking {
+                        output_config: if !send_effort {
                             None
                         } else {
                             effort.map(|effort| messages::MessagesOutputConfig {
@@ -216,9 +217,11 @@ impl ProtocolProvider {
     }
 
     async fn send(&self, request: ChatRequest, stream: bool) -> TalosResult<Response> {
+        let model = request.model.clone();
         let (endpoint, body) = self.body(request, stream)?;
-        let response = self
-            .client
+        let mut response = self
+            .clients
+            .for_request(stream)
             .post(format!(
                 "{}/{}",
                 self.base_url.trim_end_matches('/'),
@@ -229,15 +232,23 @@ impl ProtocolProvider {
             .send()
             .await
             .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Model protocol request failed; technical details were withheld.",
-                    error.without_url(),
-                )
+                crate::error::transport_error("Model protocol request", error)
+                    .context(format!("provider={} model={model}", self.name))
             })?;
         if response.status().is_success() {
+            response
+                .extensions_mut()
+                .insert(crate::error::ModelRequestContext(format!(
+                    "provider={} model={model}",
+                    self.name
+                )));
             Ok(response)
         } else {
-            Err(crate::http_response_error("Model protocol", &response))
+            Err(
+                crate::error::http_rejection_error("Model protocol", response)
+                    .await
+                    .context(format!("provider={} model={model}", self.name)),
+            )
         }
     }
 }
@@ -297,10 +308,7 @@ impl LlmProvider for ProtocolProvider {
                     .json::<chat::ChatCompletionResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source(
-                            "Chat protocol response parsing failed.",
-                            error.without_url(),
-                        )
+                        crate::error::transport_error("Chat protocol response decoding", error)
                     })?,
                 &self.name,
             ),
@@ -309,10 +317,7 @@ impl LlmProvider for ProtocolProvider {
                     .json::<messages::MessagesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source(
-                            "Messages protocol response parsing failed.",
-                            error.without_url(),
-                        )
+                        crate::error::transport_error("Messages protocol response decoding", error)
                     })?,
             ),
             LlmProtocol::Responses => Ok(responses::chat_response(
@@ -320,10 +325,7 @@ impl LlmProvider for ProtocolProvider {
                     .json::<responses::ResponsesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source(
-                            "Responses protocol response parsing failed.",
-                            error.without_url(),
-                        )
+                        crate::error::transport_error("Responses protocol response decoding", error)
                     })?,
             )),
         }
@@ -368,3 +370,10 @@ impl LlmProvider for ProtocolProvider {
 #[cfg(test)]
 #[path = "protocol_provider_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+use std::time::Duration;
+
+#[cfg(test)]
+#[path = "protocol_timeout_tests.rs"]
+mod timeout_tests;

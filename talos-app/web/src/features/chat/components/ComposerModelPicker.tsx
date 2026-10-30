@@ -57,6 +57,11 @@ export function ComposerModelPicker({ disabled, models, selectedModel, reasoning
         {fastPreview && <Zap aria-hidden className={styles.triggerFast} fill="currentColor" size={12} strokeWidth={1} />}<span className={styles.triggerName}>{modelName}</span><span className={styles.triggerEffort}>· {effortLabel}</span><ChevronDown aria-hidden size={11} />
       </button></Popover.Trigger>
       <Popover.Portal><Popover.Content align="end" aria-label={t("modelPicker.dialog")} className={styles.picker} collisionPadding={12} data-view={view}
+        onOpenAutoFocus={(event) => {
+          const control = contentRef.current?.querySelector<HTMLElement>('[role="slider"]:not([aria-disabled="true"])')
+            ?? contentRef.current?.querySelector<HTMLElement>('button:not(:disabled):not([aria-disabled="true"])');
+          if (control) { event.preventDefault(); control.focus({ preventScroll: true }); }
+        }}
         onEscapeKeyDown={(event) => { if (view !== "overview") { event.preventDefault(); navigate(view === "providers" ? "models" : "overview"); } }} ref={contentRef} side="top" sideOffset={10}>
         {view === "overview" && <ModelPickerOverview effort={reasoningLevel} fast={fastPreview} model={activeModel} modelName={modelName}
           onEffortChange={onReasoningLevelChange ? (level) => { if (level !== reasoningLevel) onReasoningLevelChange(level); } : undefined}

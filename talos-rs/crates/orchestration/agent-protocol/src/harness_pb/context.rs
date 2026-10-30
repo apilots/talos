@@ -213,6 +213,9 @@ pub fn encode_model(value: ModelInfo) -> pb::ModelInfo {
         context_window: model.context_window,
         reasoning: model.reasoning,
         reasoning_effort: encode_reasoning(model.reasoning_effort),
+        reasoning_efforts: model.reasoning_efforts.map(|values| pb::ReasoningEfforts {
+            values: values.into_iter().map(encode_reasoning).collect(),
+        }),
         speed: match model.speed {
             ModelSpeed::Standard => pb::ModelSpeed::Standard as i32,
             ModelSpeed::Fast => pb::ModelSpeed::Fast as i32,
@@ -242,6 +245,16 @@ pub fn decode_model(value: Option<pb::ModelInfo>) -> TalosResult<ModelInfo> {
     let mut info = ModelInfo::from_provider_model(
         value.provider,
         ProviderModelConfig {
+            reasoning_efforts: value
+                .reasoning_efforts
+                .map(|values| {
+                    values
+                        .values
+                        .into_iter()
+                        .map(decode_reasoning)
+                        .collect::<TalosResult<Vec<_>>>()
+                })
+                .transpose()?,
             reasoning_replay: match value.reasoning_replay {
                 0 => talos_types::ReasoningReplay::ProtocolDefault,
                 1 => talos_types::ReasoningReplay::Omit,
@@ -363,6 +376,7 @@ mod tests {
                 "openai",
                 ProviderModelConfig {
                     reasoning_replay: Default::default(),
+                    reasoning_efforts: None,
                     request_parameters: Default::default(),
                     id: "model-1".into(),
                     name: "Model".into(),

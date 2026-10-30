@@ -5474,6 +5474,18 @@
             "null"
           ]
         },
+        "http_timeouts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderHttpTimeouts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional HTTP policy; native adapters retain their defaults when absent."
+        },
         "models": {
           "default": [],
           "description": "Provider-specific model metadata",
@@ -6755,6 +6767,7 @@
           "default": {
             "api_key": null,
             "base_url": null,
+            "http_timeouts": null,
             "models": [],
             "protocol": null
           },
@@ -6769,6 +6782,7 @@
           "default": {
             "api_key": null,
             "base_url": null,
+            "http_timeouts": null,
             "models": [],
             "protocol": null
           },
@@ -6791,6 +6805,7 @@
           "default": {
             "api_key": null,
             "base_url": null,
+            "http_timeouts": null,
             "models": [],
             "protocol": null
           },
@@ -6810,6 +6825,7 @@
           "default": {
             "api_key": null,
             "base_url": null,
+            "http_timeouts": null,
             "models": [],
             "protocol": null
           },
@@ -6824,6 +6840,7 @@
           "default": {
             "api_key": null,
             "base_url": null,
+            "http_timeouts": null,
             "models": [],
             "protocol": null
           },
@@ -6838,6 +6855,7 @@
           "default": {
             "api_key": null,
             "base_url": null,
+            "http_timeouts": null,
             "models": [],
             "protocol": null
           },
@@ -9165,6 +9183,18 @@
             "null"
           ]
         },
+        "http_timeouts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderHttpTimeouts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional HTTP policy; native adapters retain their defaults when absent."
+        },
         "models": {
           "default": [],
           "description": "Provider-specific model metadata",
@@ -9184,6 +9214,41 @@
           ],
           "default": null,
           "description": "Wire protocol used for this provider."
+        }
+      },
+      "type": "object"
+    },
+    "ProviderHttpTimeouts": {
+      "additionalProperties": false,
+      "description": "Deadlines for model HTTP requests, in seconds.",
+      "properties": {
+        "connect_secs": {
+          "default": 10,
+          "description": "Maximum connection establishment time.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "response_secs": {
+          "default": 120,
+          "description": "Total nonstream request time, including headers and response body.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stream_idle_secs": {
+          "default": 90,
+          "description": "Maximum time without incoming HTTP bytes, including initial headers.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stream_total_secs": {
+          "default": 900,
+          "description": "Total lifetime of one streaming HTTP request, not a persistent connection.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -9235,6 +9300,17 @@
             }
           ],
           "default": "medium"
+        },
+        "reasoning_efforts": {
+          "default": null,
+          "description": "Accepted effort levels, independent of configured thinking switches. Omitted/null permits standard levels; [] explicitly disables graded effort.",
+          "items": {
+            "$ref": "#/definitions/ReasoningEffort"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "reasoning_replay": {
           "allOf": [

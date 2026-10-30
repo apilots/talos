@@ -453,7 +453,12 @@ reasoning_replay?: ReasoningReplay,
 /**
  * Optional JSON request-body extensions; never credentials or runtime history.
  */
-request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
+request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
+/**
+ * Accepted effort levels, independent of configured thinking switches.
+ * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ */
+reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type ModelRef = {
 /**
@@ -467,7 +472,7 @@ id: string, };
 
 export type ModelSelection = { modelRef: ModelRef, reasoningEffort: ReasoningEffort | null, };
 
-export type ModelSelectionCapabilities = { reasoning: ReasoningControl, fast: boolean, default_fast: boolean, default_reasoning_effort: ReasoningEffort | null, };
+export type ModelSelectionCapabilities = { reasoning: ReasoningControl, reasoning_efforts: Array<ReasoningEffort>, fast: boolean, default_fast: boolean, default_reasoning_effort: ReasoningEffort | null, };
 
 export type ReasoningControl = "none" | "toggle" | "effort";
 
@@ -513,6 +518,10 @@ openrouter: ProviderConfig, };
 
 export type CustomProviderConfig = { name: string,
 /**
+ * Optional HTTP policy; native adapters retain their defaults when absent.
+ */
+http_timeouts?: ProviderHttpTimeouts | null,
+/**
  * API key
  */
 api_key?: string,
@@ -529,7 +538,29 @@ protocol?: LlmProtocol,
  */
 models: Array<ProviderModelConfig>, };
 
+export type ProviderHttpTimeouts = {
+/**
+ * Maximum connection establishment time.
+ */
+connect_secs: number,
+/**
+ * Total nonstream request time, including headers and response body.
+ */
+response_secs: number,
+/**
+ * Maximum time without incoming HTTP bytes, including initial headers.
+ */
+stream_idle_secs: number,
+/**
+ * Total lifetime of one streaming HTTP request, not a persistent connection.
+ */
+stream_total_secs: number, };
+
 export type ProviderConfig = {
+/**
+ * Optional HTTP policy; native adapters retain their defaults when absent.
+ */
+http_timeouts?: ProviderHttpTimeouts | null,
 /**
  * API key
  */
@@ -555,7 +586,12 @@ reasoning_replay?: ReasoningReplay,
 /**
  * Optional JSON request-body extensions; never credentials or runtime history.
  */
-request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
+request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
+/**
+ * Accepted effort levels, independent of configured thinking switches.
+ * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ */
+reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 

@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sys
 import threading
+import time
 import urllib.request
 
 MODEL = "opaque-7f82"
@@ -18,11 +19,16 @@ REPLAYS = ("protocol_default", "omit", "reasoning", "reasoning_content")
 PROVIDERS = {f"chat-{replay.replace('_', '-')}": ("chat", replay) for replay in REPLAYS}
 PROVIDERS.update({"response-fixture": ("responses", "protocol_default"),
                   "message-fixture": ("messages", "protocol_default"),
-                  "message-adaptive-fixture": ("messages", "protocol_default")})
+                  "message-adaptive-fixture": ("messages", "protocol_default"),
+                  "chat-progress-fixture": ("chat", "protocol_default"),
+                  "chat-idle-fixture": ("chat", "protocol_default"),
+                  "chat-total-fixture": ("chat", "protocol_default")})
 MARKER = re.compile(r"PROTOCOL_CASE=([a-z_-]+):(on|off|medium|high)")
 
 
 def modes(provider):
+    if provider in ("chat-idle-fixture", "chat-total-fixture"):
+        return ("on",)
     return ("medium", "high") if provider == "message-adaptive-fixture" else ("on", "off")
 
 
@@ -60,6 +66,7 @@ def prepare(template, destination, port, plan):
     config["llm"]["custom_providers"] = {
         provider: {"name": provider, "protocol": protocol, "api_key": KEY,
             "base_url": f"http://127.0.0.1:{port}/{provider}/v1",
+            "http_timeouts": {"connect_secs": 1, "response_secs": 1, "stream_idle_secs": 1, "stream_total_secs": 3},
             "models": [model(protocol, replay, adaptive=provider == "message-adaptive-fixture")]}
         for provider, (protocol, replay) in PROVIDERS.items()}
     Path(destination).write_text(yaml.safe_dump(config, sort_keys=False))
@@ -106,7 +113,7 @@ def check_request(body, headers, provider, mode):
             else:
                 assert body["chat_template_kwargs"] == {"enable_thinking": mode == "on", "fixture_flag": "preserved"}
                 assert "enable_thinking" not in body, "nested control duplicated at root"
-            assert "reasoning_effort" not in body, "binary control must not also send effort"
+            assert body.get("reasoning_effort") == ("medium" if mode == "on" else None), "thinking switch suppressed effort or Off sent an effort"
         else:
             assert body.get("reasoning", {}).get("effort") == ("medium" if mode == "on" else "none"), body
     items = history(body, protocol)
@@ -239,9 +246,21 @@ def serve(directory):
                 encoded = data.encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Content-Length", str(len(encoded)))
+                heartbeat_count = 3 if provider == "chat-progress-fixture" else 15 if provider == "chat-total-fixture" else 0
+                heartbeat = b": heartbeat\n\n"
+                self.send_header("Content-Length", str(len(encoded) + heartbeat_count * len(heartbeat)))
                 self.end_headers()
+                self.wfile.flush()
+                if provider == "chat-idle-fixture":
+                    time.sleep(2)
+                for _ in range(heartbeat_count):
+                    time.sleep(0.4)
+                    self.wfile.write(heartbeat)
+                    self.wfile.flush()
                 self.wfile.write(encoded)
+            except (BrokenPipeError, ConnectionResetError):
+                if provider not in ("chat-idle-fixture", "chat-total-fixture"):
+                    raise
             except Exception as error:
                 with lock:
                     with (directory / "errors.jsonl").open("a") as output:
@@ -268,8 +287,16 @@ def verify(base, directory):
     for provider, (protocol, replay) in PROVIDERS.items():
         for mode in modes(provider):
             selected = [request for request in requests if request["provider"] == provider and request["mode"] == mode]
-            assert len(selected) == 2 and [request["followup"] for request in selected] == [False, True], (provider, mode, selected)
             result = json.loads((directory / f"{provider}-{mode}.json").read_text())
+            if provider in ("chat-idle-fixture", "chat-total-fixture"):
+                assert len(selected) == 1, (provider, selected)
+                assert result["stop_reason"] == "error", result
+                stored = http(base, f"/v1/sessions/{result['session_id']}/history?limit=100")
+                (directory / f"{provider}-history.json").write_text(json.dumps(stored, indent=2))
+                assert any(turn["result"]["status"] == "failed" and turn["result"]["result"]["failure"]["error"]["code"] == "timeout" for turn in stored["data"]), stored
+                print(f"CASE stream_timeout_replay PASS provider={provider} code=timeout upstream_requests=1")
+                continue
+            assert len(selected) == 2 and [request["followup"] for request in selected] == [False, True], (provider, mode, selected)
             assert result["stop_reason"] != "error", result
             assert any(item.get("type") == "output_text" and f"PROTOCOL_OK:call_{provider}_{mode}" in item.get("text", "") for item in result["output"]), result
             assert sum(item.get("type") == "tool_call" and item.get("name") == "Bash" for item in result["output"]) == 1, result
@@ -277,6 +304,8 @@ def verify(base, directory):
             if mode != "off":
                 assert result["reasoning"], "omit policy must preserve canonical reasoning display/history"
             print(f"CASE protocol_agent_tool_loop PASS protocol={protocol} replay={replay} thinking={mode} upstream_requests=2")
+        if provider in ("chat-idle-fixture", "chat-total-fixture"):
+            continue
         stored = http(base, f"/v1/sessions/{result['session_id']}/history?limit=100")
         (directory / f"{provider}-history.json").write_text(json.dumps(stored, indent=2))
         assert f"private:call_{provider}_{modes(provider)[0]}" in json.dumps(stored), "reasoning replay policy changed canonical stored history"

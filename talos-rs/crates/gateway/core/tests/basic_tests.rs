@@ -283,6 +283,7 @@ fn test_config() -> TalosConfig {
     config.llm.model = "claude-3-5-sonnet".to_string();
     config.llm.anthropic.models = vec![ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: config.llm.model.clone(),
         name: "Claude 3.5 Sonnet".to_string(),

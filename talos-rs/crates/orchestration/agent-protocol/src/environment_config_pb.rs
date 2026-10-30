@@ -25,6 +25,12 @@ fn decode_protocol(value: i32) -> TalosResult<LlmProtocol> {
 }
 fn encode_provider(name: &str, value: ProviderConfig) -> pb::ProviderConfig {
     pb::ProviderConfig {
+        http_timeouts: value.http_timeouts.map(|value| pb::ProviderHttpTimeouts {
+            connect_secs: value.connect_secs,
+            response_secs: value.response_secs,
+            stream_idle_secs: value.stream_idle_secs,
+            stream_total_secs: value.stream_total_secs,
+        }),
         api_key: value.api_key,
         base_url: value.base_url,
         protocol: value.protocol.map(protocol),
@@ -38,6 +44,19 @@ fn encode_provider(name: &str, value: ProviderConfig) -> pb::ProviderConfig {
 fn decode_provider(value: Option<pb::ProviderConfig>) -> TalosResult<ProviderConfig> {
     let value = value.ok_or_else(invalid)?;
     Ok(ProviderConfig {
+        http_timeouts: value
+            .http_timeouts
+            .map(|value| -> TalosResult<_> {
+                let timeouts = ProviderHttpTimeouts {
+                    connect_secs: value.connect_secs,
+                    response_secs: value.response_secs,
+                    stream_idle_secs: value.stream_idle_secs,
+                    stream_total_secs: value.stream_total_secs,
+                };
+                timeouts.validate()?;
+                Ok(timeouts)
+            })
+            .transpose()?,
         api_key: value.api_key,
         base_url: value.base_url,
         protocol: value.protocol.map(decode_protocol).transpose()?,

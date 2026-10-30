@@ -180,6 +180,7 @@ fn test_save_then_load_raw_roundtrip() {
     llm.model = "qwen-max".to_string();
     llm.anthropic.models.push(ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: "test-model".to_string(),
         name: "Test Model".to_string(),

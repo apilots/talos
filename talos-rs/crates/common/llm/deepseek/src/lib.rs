@@ -8,7 +8,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
     validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatMessage,
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort, Role,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ProviderHttpClients,
+    ProviderHttpTimeouts, ReasoningEffort, Role,
 };
 use tracing::info;
 
@@ -37,6 +38,7 @@ pub struct DeepSeekConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
     pub protocol: DeepSeekProtocol,
 }
@@ -47,6 +49,7 @@ impl DeepSeekConfig {
             api_key: api_key.into(),
             base_url: "https://api.deepseek.com".to_string(),
             timeout_secs: 60,
+            http_timeouts: None,
             default_model: "deepseek-chat".to_string(),
             protocol: DeepSeekProtocol::Chat,
         }
@@ -54,6 +57,12 @@ impl DeepSeekConfig {
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
+        self.http_timeouts = timeouts;
         self
     }
 
@@ -76,16 +85,17 @@ impl DeepSeekConfig {
 /// DeepSeek LLM provider.
 pub struct DeepSeekProvider {
     config: DeepSeekConfig,
-    client: Client,
+    clients: ProviderHttpClients,
 }
 
 impl DeepSeekProvider {
     pub fn new(config: DeepSeekConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build DeepSeek HTTP client");
-        Self { config, client }
+        let clients = ProviderHttpClients::new(
+            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
+            config.http_timeouts.as_ref(),
+        )
+        .expect("Failed to build model HTTP clients");
+        Self { config, clients }
     }
 
     pub(crate) fn build_chat_request(
@@ -245,9 +255,10 @@ impl DeepSeekProvider {
         Ok((endpoint, body))
     }
 
-    async fn post(&self, endpoint: &str, body: Value) -> TalosResult<Response> {
+    async fn post(&self, endpoint: &str, body: Value, stream: bool) -> TalosResult<Response> {
         let response = self
-            .client
+            .clients
+            .for_request(stream)
             .post(self.endpoint_url(endpoint))
             .headers(self.build_headers()?)
             .json(&body)
@@ -255,32 +266,26 @@ impl DeepSeekProvider {
             .await
             .map_err(|error| {
                 let diagnostic = format!("DeepSeek {endpoint} request failed");
-                TalosError::internal_with_source(
-                    "DeepSeek request failed; technical details were withheld.",
-                    error.without_url(),
-                )
-                .context(diagnostic)
+                talos_llm_provider::transport_error("DeepSeek request", error).context(diagnostic)
             })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        Err(talos_llm_provider::http_response_error(
-            "DeepSeek", &response,
-        ))
+        Err(talos_llm_provider::http_rejection_error("DeepSeek", response).await)
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         let protocol = self.config.protocol;
         let (endpoint, body) = self.request_body(request, false)?;
-        let response = self.post(endpoint, body).await?;
+        let response = self.post(endpoint, body, false).await?;
         match protocol {
             DeepSeekProtocol::Chat => {
                 let response = response
                     .json::<chat_protocol::ChatCompletionResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("DeepSeek Chat response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error("DeepSeek Chat response parsing", error)
                     })?;
                 chat_protocol::chat_response(response, "DeepSeek")
             }
@@ -289,7 +294,10 @@ impl DeepSeekProvider {
                     .json::<messages_protocol::MessagesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("DeepSeek Messages response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error(
+                            "DeepSeek Messages response parsing",
+                            error,
+                        )
                     })?;
                 messages_protocol::chat_response(response)
             }
@@ -298,7 +306,7 @@ impl DeepSeekProvider {
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<Response> {
         let (endpoint, body) = self.request_body(request, true)?;
-        self.post(endpoint, body).await
+        self.post(endpoint, body, true).await
     }
 }
 

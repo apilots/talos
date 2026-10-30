@@ -10,6 +10,7 @@ fn model_info(id: &str, context_window: u32) -> ModelInfo {
         "test",
         talos_types::ProviderModelConfig {
             reasoning_replay: Default::default(),
+            reasoning_efforts: None,
             request_parameters: Default::default(),
             id: id.to_string(),
             name: id.to_string(),

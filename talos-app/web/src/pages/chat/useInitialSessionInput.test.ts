@@ -57,7 +57,7 @@ describe("useInitialSessionInput", () => {
   });
 
   it("waits for catalog capabilities and carries the qualified model plus Off from navigation into the first turn", async () => {
-    const models = [{ provider: "llm-gateway", id: "model", name: "Local", reasoning: true, reasoning_effort: "high", selection_capabilities: { reasoning: "toggle", fast: true, default_fast: false, default_reasoning_effort: null } }] as ModelInfo[];
+    const models = [{ provider: "llm-gateway", id: "model", name: "Local", context_window: 131072, speed: "standard", input: ["text"], cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 }, request_parameters: {}, reasoning: true, reasoning_effort: "high", selection_capabilities: { reasoning: "toggle", reasoning_efforts: [], fast: true, default_fast: false, default_reasoning_effort: null } }] as ModelInfo[];
     const sendText = vi.fn(() => new Promise<void>(() => undefined));
     const navigate = vi.fn();
     const { rerender } = renderHook(({ catalog }: { catalog?: ModelInfo[] }) => useInitialSessionInput({

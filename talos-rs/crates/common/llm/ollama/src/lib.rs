@@ -6,7 +6,7 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
-    ModelBlockStream, ReasoningEffort,
+    ModelBlockStream, ProviderHttpClients, ProviderHttpTimeouts, ReasoningEffort,
 };
 
 /// Ollama API configuration.
@@ -15,6 +15,7 @@ pub struct OllamaConfig {
     pub api_key: Option<String>,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
 }
 
@@ -24,12 +25,19 @@ impl OllamaConfig {
             api_key: None,
             base_url: base_url.into(),
             timeout_secs: 60,
+            http_timeouts: None,
             default_model: default_model.into(),
         }
     }
 
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
+        self
+    }
+
+    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
+        self.http_timeouts = timeouts;
         self
     }
 
@@ -42,16 +50,17 @@ impl OllamaConfig {
 /// Ollama LLM provider.
 pub struct OllamaProvider {
     config: OllamaConfig,
-    client: Client,
+    clients: ProviderHttpClients,
 }
 
 impl OllamaProvider {
     pub fn new(config: OllamaConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build Ollama HTTP client");
-        Self { config, client }
+        let clients = ProviderHttpClients::new(
+            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
+            config.http_timeouts.as_ref(),
+        )
+        .expect("Failed to build model HTTP clients");
+        Self { config, clients }
     }
 
     fn endpoint_url(&self) -> String {
@@ -110,7 +119,8 @@ impl OllamaProvider {
         let request_parameters = request.request_parameters.clone();
         let body = Self::build_request(request, stream)?;
         let response = self
-            .client
+            .clients
+            .for_request(stream)
             .post(self.endpoint_url())
             .headers(self.build_headers()?)
             .json(&talos_llm_provider::serialize_with_parameters(
@@ -119,17 +129,12 @@ impl OllamaProvider {
             )?)
             .send()
             .await
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Ollama Chat request failed; technical details were withheld.",
-                    error.without_url(),
-                )
-            })?;
+            .map_err(|error| talos_llm_provider::transport_error("Ollama Chat request", error))?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        Err(talos_llm_provider::http_response_error("Ollama", &response))
+        Err(talos_llm_provider::http_rejection_error("Ollama", response).await)
     }
 }
 
@@ -149,10 +154,7 @@ impl LlmProvider for OllamaProvider {
             .json::<chat_protocol::ChatCompletionResponse>()
             .await
             .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Ollama Chat response parsing failed; technical details were withheld.",
-                    error.without_url(),
-                )
+                talos_llm_provider::transport_error("Ollama Chat response parsing", error)
             })?;
         chat_protocol::chat_response(response, "Ollama")
     }
