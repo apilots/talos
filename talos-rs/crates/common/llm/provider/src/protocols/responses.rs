@@ -563,20 +563,13 @@ fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
 }
 
 fn function_call(item: &Value) -> FunctionCall {
-    let arguments = item
-        .get("arguments")
-        .and_then(Value::as_str)
-        .and_then(|text| serde_json::from_str::<Value>(text).ok())
-        .or_else(|| item.get("arguments").cloned())
-        .unwrap_or(Value::Null);
-
-    FunctionCall::new(
+    FunctionCall::from_response(
         item.get("call_id")
             .or_else(|| item.get("id"))
             .and_then(Value::as_str)
             .unwrap_or_default(),
         item.get("name").and_then(Value::as_str).unwrap_or_default(),
-        arguments,
+        item.get("arguments").cloned().unwrap_or(Value::Null),
     )
 }
 

@@ -1,9 +1,9 @@
-use crate::{Attachment, AttachmentKind, CacheControl};
+use crate::{Attachment, AttachmentKind, CacheControl, FunctionCall};
 use talos_error::{TalosError, TalosResult};
 
 use super::{
     ChatCompletionContentBlock, ChatCompletionFile, ChatCompletionImageUrl,
-    ChatCompletionMessageContent,
+    ChatCompletionMessageContent, ChatCompletionToolCall,
 };
 
 pub(super) fn message_content(
@@ -84,4 +84,19 @@ pub fn content_text(
         }
         None => Ok(String::new()),
     }
+}
+
+pub fn tool_calls(tool_calls: Option<Vec<ChatCompletionToolCall>>) -> Option<Vec<FunctionCall>> {
+    tool_calls.map(|calls| {
+        calls
+            .into_iter()
+            .map(|call| {
+                FunctionCall::from_response(
+                    call.id,
+                    call.function.name,
+                    call.function.arguments.into(),
+                )
+            })
+            .collect()
+    })
 }

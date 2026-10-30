@@ -309,6 +309,9 @@ def verify(base, directory):
         stored = http(base, f"/v1/sessions/{result['session_id']}/history?limit=100")
         (directory / f"{provider}-history.json").write_text(json.dumps(stored, indent=2))
         assert f"private:call_{provider}_{modes(provider)[0]}" in json.dumps(stored), "reasoning replay policy changed canonical stored history"
+        if provider == "chat-protocol-default":
+            from trajectory_fixture import verify as verify_trajectory
+            verify_trajectory(base, directory, stored)
     catalog = http(base, "/v1/models")["models"]
     adaptive_model = next(item for item in catalog if item["provider"] == "message-adaptive-fixture")
     assert adaptive_model["selection_capabilities"]["reasoning"] == "effort", adaptive_model

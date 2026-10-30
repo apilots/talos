@@ -37,3 +37,5 @@ pub use turn_api::{
     AgentInterruptOutcome, InterruptTurnRequest, InterruptTurnResponse, SubmitTurnInput,
     SubmitTurnInputRequest, SubmitTurnInputResponse,
 };
+
+pub mod trajectory;

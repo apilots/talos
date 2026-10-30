@@ -124,6 +124,7 @@ impl AgentEnvironmentClient {
                 | Call::PeerFileRead(_)
                 | Call::PeerFileUpdate(_)
                 | Call::PeerFileDelete(_)
+                | Call::AppendSessionHistorySupplement(_)
                 | Call::ReadSessionHistory(_)
                 | Call::ResolveAttachments(_)
                 | Call::ReadMemoryProgress(_)

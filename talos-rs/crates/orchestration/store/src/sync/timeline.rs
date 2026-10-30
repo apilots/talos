@@ -41,7 +41,7 @@ pub(super) async fn export(
     let mut changes = Vec::new();
     let mut cursor = after;
     loop {
-        let rows = tx.query("SELECT * FROM agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq LIMIT 128", &[session_id, &cursor.to_string()]).await?;
+        let rows = tx.query("SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq LIMIT 128", &[session_id, &cursor.to_string()]).await?;
         if rows.is_empty() {
             break;
         }

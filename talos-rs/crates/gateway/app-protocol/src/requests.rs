@@ -70,6 +70,16 @@ pub enum ClientRequestParams {
     ComputerRotateCredential(talos_types::RotateCredentialRequest),
     #[serde(rename = "profile/read")]
     ProfileRead(ProfileReadRequest),
+    #[serde(rename = "trajectory/capabilities")]
+    TrajectoryCapabilities(Option<()>),
+    #[serde(rename = "trajectory/readTurn")]
+    TrajectoryReadTurn(talos_agent_api::trajectory::TrajectoryReadTurnRequest),
+    #[serde(rename = "trajectory/readRequest")]
+    TrajectoryReadRequest(talos_agent_api::trajectory::TrajectoryReadModelRequestRequest),
+    #[serde(rename = "trajectory/readTool")]
+    TrajectoryReadTool(talos_agent_api::trajectory::TrajectoryReadToolRequest),
+    #[serde(rename = "trajectory/readPayload")]
+    TrajectoryReadPayload(talos_agent_api::trajectory::TrajectoryReadPayloadRequest),
     #[serde(rename = "session/list")]
     SessionList(SessionListRequest),
     #[serde(rename = "session/get")]
@@ -306,6 +316,21 @@ impl ClientRequest {
                 ClientRequestParams::ComputerRotateCredential(decode(params_value)?)
             }
             ClientMethod::ProfileRead => ClientRequestParams::ProfileRead(decode(params_value)?),
+            ClientMethod::TrajectoryCapabilities => {
+                ClientRequestParams::TrajectoryCapabilities(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadTurn => {
+                ClientRequestParams::TrajectoryReadTurn(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadRequest => {
+                ClientRequestParams::TrajectoryReadRequest(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadTool => {
+                ClientRequestParams::TrajectoryReadTool(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadPayload => {
+                ClientRequestParams::TrajectoryReadPayload(decode(params_value)?)
+            }
             ClientMethod::SessionList => ClientRequestParams::SessionList(decode(params_value)?),
             ClientMethod::SessionGet => ClientRequestParams::SessionGet(decode(params_value)?),
             ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),

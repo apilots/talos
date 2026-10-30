@@ -145,3 +145,128 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
     ));
     host.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn history_supplement_stream_round_trips_large_invocation_and_uses_original_history() {
+    use talos_agent_api::{trajectory::*, AgentTurnRef};
+    use talos_storage::Storage;
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .unwrap(),
+    );
+    talos_store::migration::run_migrations(
+        storage.pool(),
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
+    )
+    .await
+    .unwrap();
+    let nodes = AgentNodeService::new(Arc::new(DatabaseAgentNodeStore::new(
+        storage.pool().clone(),
+    )));
+    let sessions = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
+    let record = session_record();
+    sessions.insert_session_record(&record).await.unwrap();
+    let event = serde_json::to_string(&talos_agent_api::AgentEventPayload::TurnStarted(
+        talos_agent_api::AgentTurnStarted {},
+    ))
+    .unwrap();
+    storage.execute("INSERT INTO agent_events(session_id,turn_id,sequence,occurred_at,persisted_at,payload_json) VALUES (?, 't',1,1,1,?)", &[&record.id,&event]).await.unwrap();
+    let history = Arc::new(talos_service::SessionHistoryService::new(Arc::new(
+        talos_service::TimelineEventService::new(sessions.clone()),
+    )));
+    let data = NodeSessionDataRpc::new(
+        nodes.clone(),
+        sessions.clone(),
+        history,
+        Arc::new(TestAttachments),
+        Arc::new(TestMemoryProgress::default()),
+    );
+    let auth = NodeAuth {
+        node_id: record.execution_node_id.clone(),
+        token: "private-host-token".into(),
+    };
+    let (host, resources) = crate::local_resource_rpc::LocalResourceRpc::start(
+        auth.clone(),
+        data,
+        NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
+        Arc::new(TestAgentControl),
+    )
+    .await
+    .unwrap();
+    let context = agent_protocol::AgentSessionContext {
+        agent_id: record.agent_id.clone(),
+        session_id: record.id.clone(),
+        workspace: talos_config::Config::default()
+            .resolve_workspace("default", "user-1")
+            .unwrap(),
+    };
+    let resources = resources.for_invocation(auth, &context, None).unwrap();
+    let identity = AgentTurnRef::new(&record.id, "t");
+    let mut supplement = SessionHistorySupplement {
+        identity: identity.clone(),
+        clock_segments: vec![],
+        requests: vec![],
+        tools: vec![],
+        payloads: Default::default(),
+    };
+    for n in 0..2 {
+        let payload_id = format!("body-{n}");
+        let call_record_id = format!("attempt-{n}");
+        supplement.payloads.insert(
+            payload_id.clone(),
+            TrajectoryPayload::Response {
+                parts: vec![ResponsePart::Text {
+                    text: format!("{n}你好").repeat(400000),
+                }],
+            },
+        );
+        supplement
+            .requests
+            .push(TrajectoryReadModelRequestResponse {
+                identity: identity.clone(),
+                request: ModelRequestTrace {
+                    model_request_id: format!("request-{n}"),
+                    ordinal: n + 1,
+                    purpose: ModelRequestPurpose::Working,
+                    connection_id: "configured".into(),
+                    model_id: "fixture".into(),
+                    call_records: vec![ModelCallRecord {
+                        call_record_id: call_record_id.clone(),
+                        ordinal: 1,
+                        observed_state: ModelCallState::Completed,
+                        timing: None,
+                        usage: None,
+                        finish_reason: Some("stop".into()),
+                        error: None,
+                    }],
+                },
+                prompt: None,
+                tools: None,
+                parameters: None,
+                outputs: vec![ModelCallOutput {
+                    call_record_id,
+                    response: Some(PayloadRef {
+                        payload_id,
+                        complete: Some(true),
+                    }),
+                }],
+            });
+    }
+    assert!(serde_json::to_vec(&supplement).unwrap().len() > 4 * 1024 * 1024);
+    SessionHistoryReader::append_supplement(&resources, supplement.clone())
+        .await
+        .unwrap();
+    let row = storage.query("SELECT payload_json, execution_capture_json FROM agent_events WHERE session_id=? AND turn_id='t' AND sequence=1", &[&record.id]).await.unwrap();
+    assert_eq!(row[0].get_string("payload_json").unwrap(), event);
+    let saved: SessionHistorySupplement =
+        serde_json::from_str(&row[0].get_string("execution_capture_json").unwrap()).unwrap();
+    assert_eq!(saved, supplement);
+    sessions.delete_session_record(&record.id).await.unwrap();
+    assert!(
+        SessionHistoryReader::append_supplement(&resources, supplement)
+            .await
+            .is_err()
+    );
+    host.shutdown().await.unwrap();
+}

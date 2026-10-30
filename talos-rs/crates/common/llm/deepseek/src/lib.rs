@@ -8,8 +8,9 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
     validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatMessage,
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ProviderHttpClients,
-    ProviderHttpTimeouts, ReasoningEffort, Role,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, MessageInputKind, MessageInputOrigin,
+    MessageInputSource, ModelBlockStream, ProviderHttpClients, ProviderHttpTimeouts,
+    ReasoningEffort, Role,
 };
 use tracing::info;
 
@@ -205,12 +206,11 @@ impl DeepSeekProvider {
         Ok(headers)
     }
 
-    fn request_body(
-        &self,
-        mut request: ChatRequest,
-        stream: bool,
-    ) -> TalosResult<(&'static str, Value)> {
-        self.validate_request_attachments(&request)?;
+    fn prepare_request(&self, mut request: ChatRequest) -> ChatRequest {
+        if self.config.protocol == DeepSeekProtocol::Chat && request.reasoning_effort.is_some() {
+            request.temperature = None;
+            request.top_p = None;
+        }
         if matches!(
             request.model.as_str(),
             "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp"
@@ -224,10 +224,33 @@ impl DeepSeekProvider {
                 .iter()
                 .position(|message| message.role != Role::System)
                 .unwrap_or(request.messages.len());
-            request
-                .messages
-                .insert(index, ChatMessage::system(TOOL_ARGUMENT_FIDELITY_GUIDANCE));
+            // Binding may run before observation and again at the transport boundary.
+            // Keep the existing provider instruction exactly once in the final input.
+            if !request.messages[..index]
+                .iter()
+                .any(|message| message.content == TOOL_ARGUMENT_FIDELITY_GUIDANCE)
+            {
+                request.messages.insert(
+                    index,
+                    ChatMessage::system(TOOL_ARGUMENT_FIDELITY_GUIDANCE).with_input_origin(
+                        MessageInputOrigin {
+                            kind: MessageInputKind::System,
+                            source: MessageInputSource::Runtime,
+                        },
+                    ),
+                );
+            }
         }
+        request
+    }
+
+    fn request_body(
+        &self,
+        request: ChatRequest,
+        stream: bool,
+    ) -> TalosResult<(&'static str, Value)> {
+        self.validate_request_attachments(&request)?;
+        let request = self.prepare_request(request);
         // TODO(PR #50): Recheck empty reasoning_content on future Flash revisions.
         // Preserve upstream emptiness in both transports; never synthesize reasoning
         // or retry a successful response merely to obtain a thinking block.
@@ -312,6 +335,10 @@ impl DeepSeekProvider {
 
 #[async_trait]
 impl LlmProvider for DeepSeekProvider {
+    fn bind_request(&self, request: ChatRequest) -> TalosResult<ChatRequest> {
+        Ok(self.prepare_request(request))
+    }
+
     fn name(&self) -> &str {
         "deepseek"
     }

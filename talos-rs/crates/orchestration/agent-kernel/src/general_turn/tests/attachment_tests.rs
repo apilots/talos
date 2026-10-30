@@ -134,11 +134,30 @@ fn active_turn_input_reuses_ordered_attachment_validation() {
 
     assert_eq!(active_input.input, ctx.input);
     assert_eq!(
+        active_input.message.input_origin,
+        Some(talos_llm_provider::MessageInputOrigin {
+            kind: talos_llm_provider::MessageInputKind::User,
+            source: talos_llm_provider::MessageInputSource::User,
+        })
+    );
+    assert_eq!(
+        active_input
+            .message
+            .attachments
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|a| a.file_id.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("image-1"), Some("document-1")]
+    );
+    assert_eq!(
         active_input.message.attachments,
         Some(
             ctx.resolved_attachments
                 .iter()
                 .map(|resolved| Attachment {
+                    file_id: Some(resolved.file_id.clone()),
                     kind: if resolved.media_type.starts_with("image/") {
                         AttachmentKind::Image
                     } else {
@@ -196,11 +215,29 @@ async fn attachment_only_turn_sends_ordered_files_and_persists_only_references()
             .expect("current user message should exist");
         assert_eq!(user_message.content, "");
         assert_eq!(
+            user_message.input_origin,
+            Some(talos_llm_provider::MessageInputOrigin {
+                kind: talos_llm_provider::MessageInputKind::User,
+                source: talos_llm_provider::MessageInputSource::User,
+            })
+        );
+        assert_eq!(
+            user_message
+                .attachments
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|a| a.file_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("image-1"), Some("document-1")]
+        );
+        assert_eq!(
             user_message.attachments.as_ref(),
             Some(
                 &ctx.resolved_attachments
                     .iter()
                     .map(|resolved| Attachment {
+                        file_id: Some(resolved.file_id.clone()),
                         kind: if resolved.media_type.starts_with("image/") {
                             talos_llm_provider::AttachmentKind::Image
                         } else {

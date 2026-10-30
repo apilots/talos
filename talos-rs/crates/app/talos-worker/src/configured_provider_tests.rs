@@ -83,13 +83,25 @@ async fn custom_protocol_sends_session_thinking_controls_without_auth() {
         config.llm.validate_providers().unwrap();
         let provider = crate::create_llm_provider(&config).unwrap();
         assert_eq!(provider.name(), "llm-gateway");
+        if static_effort.is_some() {
+            let mut invalid = ChatRequest::new_user("unsupported", "model");
+            invalid.reasoning_effort = Some(ReasoningEffort::High);
+            assert!(provider
+                .bind_request(invalid)
+                .unwrap_err()
+                .is_code(talos_error::ErrorCode::InvalidRequest));
+        }
         provider
             .chat(ChatRequest::new_user("Off", "model"))
             .await
             .unwrap();
         let mut enabled = ChatRequest::new_user("On", "model");
         enabled.reasoning_effort = Some(ReasoningEffort::Medium);
-        provider.chat(enabled).await.unwrap();
+        let bound = provider.bind_request(enabled).unwrap();
+        let repeated = provider.bind_request(bound.clone()).unwrap();
+        assert_eq!(bound.reasoning_effort, repeated.reasoning_effort);
+        assert_eq!(bound.request_parameters, repeated.request_parameters);
+        provider.chat(repeated).await.unwrap();
     }
     let requests = server.await.unwrap();
     for ((headers, body), (thinking, effort)) in requests.into_iter().zip([

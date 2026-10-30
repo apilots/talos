@@ -22,6 +22,7 @@ use tokio::task::JoinSet;
 
 #[derive(Clone)]
 pub struct ToolExecutionContext {
+    pub trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,
     pub turn_id: String,
@@ -235,6 +236,8 @@ async fn execute_single_tool_call(
                 execute_tool_invocation(
                     registry,
                     &execution_context.run_tasks,
+                    execution_context.trajectory.clone(),
+                    call.call_id.clone(),
                     invocation,
                     tool_context,
                 )
@@ -271,6 +274,8 @@ async fn execute_single_tool_call(
 async fn execute_tool_invocation(
     registry: Arc<dyn ToolExecutorPort>,
     run_tasks: &RunTaskGroup,
+    trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
+    call_id: String,
     invocation: ToolInvocation,
     tool_context: talos_tools::ToolContext,
 ) -> ToolDispatchResult<ToolDispatchOutcome> {
@@ -278,9 +283,22 @@ async fn execute_tool_invocation(
         let tool_context = tool_context.with_cancellation(
             talos_tools::InvocationCancellation::new(cancellation.requested()),
         );
+        if let Some(observer) = &trajectory {
+            observer.tool_started(&call_id);
+        }
         let result = registry
             .execute_invocation_with_context(invocation, tool_context)
             .await;
+        if let Some(observer) = &trajectory {
+            observer.tool_finished(
+                &call_id,
+                if matches!(&result, Ok(ToolDispatchOutcome::Pending { .. })) {
+                    crate::trajectory::KernelToolEnd::Waiting
+                } else {
+                    crate::trajectory::KernelToolEnd::Completed
+                },
+            );
+        }
         if result.as_ref().is_err_and(|failure| {
             failure
                 .error()
@@ -696,6 +714,9 @@ impl StreamingToolScheduler {
     }
 
     async fn emit_queued_event(&self, scheduled: &ScheduledStreamingToolCall) {
+        if let Some(observer) = &self.execution_context.trajectory {
+            observer.tool_queued(&scheduled.input.call_id);
+        }
         emit_stream_event(
             self.stream_tx.as_ref(),
             crate::AgentKernelEventPayload::ToolQueued(crate::ToolQueuedStreamData {

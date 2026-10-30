@@ -1,4 +1,4 @@
-use talos_agent_api::SessionHistoryTurn;
+use talos_agent_api::{trajectory::SessionHistorySupplement, SessionHistoryTurn};
 
 use crate::{AgentFuture, AgentResult};
 
@@ -17,12 +17,31 @@ pub struct SessionHistoryReadParams {
     pub limit: usize,
 }
 
-/// Read-only canonical history capability injected into Agent implementations.
+/// Existing canonical history capability injected into Agent implementations.
 ///
 /// Implementations must return completed Turns in chronological order and must
 /// bound every read by `limit`. This port never exposes Store records, Timeline
-/// envelopes, Provider transcripts, or transport cursors.
+/// envelopes, Provider transcripts, or transport cursors. Optional private execution
+/// supplementation uses this same history owner without changing canonical JSON.
 pub trait SessionHistoryReader: Send + Sync {
+    /// Actual node identity when this history capability is invocation-bound.
+    fn source_node_id(&self) -> Option<String> {
+        None
+    }
+
+    /// Optional execution facts on the existing Turn history owner. Implementations
+    /// must reject late writes after terminal history and retain prior wait segments.
+    fn append_supplement(
+        &self,
+        _supplement: SessionHistorySupplement,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async {
+            Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "Execution history supplementation is unavailable.",
+            ))
+        })
+    }
     fn read(
         &self,
         params: SessionHistoryReadParams,

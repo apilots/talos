@@ -170,6 +170,52 @@ pub trait Gateway: Send + Sync {
         request: RecoverTimelineRequest,
     ) -> TalosResult<RecoverTimelineResponse>;
 
+    async fn trajectory_capabilities(
+        &self,
+        _actor: &Actor,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryCapabilitiesResponse> {
+        Ok(talos_agent_api::trajectory::TrajectoryCapabilitiesResponse { supported: false })
+    }
+    async fn read_turn_trajectory(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadTurnRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadTurnResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
+    async fn read_request_trajectory(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadModelRequestRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadModelRequestResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
+    async fn read_tool_trajectory(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadToolRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadToolResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
+    async fn read_trajectory_payload(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadPayloadRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadPayloadResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
     async fn list_sessions(
         &self,
         actor: &Actor,

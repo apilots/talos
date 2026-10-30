@@ -356,7 +356,7 @@ async fn import_event(
     if let Some(seq) = local_seq(tx, batch, &entry.key).await? {
         let row = tx
             .query(
-                "SELECT * FROM agent_events WHERE event_seq = ? AND session_id = ?",
+                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE event_seq = ? AND session_id = ?",
                 &[&seq.to_string(), batch.resource.id()],
             )
             .await?;

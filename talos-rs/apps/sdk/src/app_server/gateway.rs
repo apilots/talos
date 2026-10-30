@@ -182,6 +182,43 @@ impl GatewayClient for AppServerClient {
         self.request_typed("session/get", request).await
     }
 
+    async fn trajectory_capabilities(
+        &mut self,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryCapabilitiesResponse> {
+        match self
+            .request_typed("trajectory/capabilities", None::<()>)
+            .await
+        {
+            Err(error) if super::response::trajectory_method_absent(&error) => Ok(
+                talos_agent_api::trajectory::TrajectoryCapabilitiesResponse { supported: false },
+            ),
+            result => result,
+        }
+    }
+    async fn read_turn_trajectory(
+        &mut self,
+        request: talos_agent_api::trajectory::TrajectoryReadTurnRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadTurnResponse> {
+        self.request_typed("trajectory/readTurn", request).await
+    }
+    async fn read_request_trajectory(
+        &mut self,
+        request: talos_agent_api::trajectory::TrajectoryReadModelRequestRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadModelRequestResponse> {
+        self.request_typed("trajectory/readRequest", request).await
+    }
+    async fn read_tool_trajectory(
+        &mut self,
+        request: talos_agent_api::trajectory::TrajectoryReadToolRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadToolResponse> {
+        self.request_typed("trajectory/readTool", request).await
+    }
+    async fn read_trajectory_payload(
+        &mut self,
+        request: talos_agent_api::trajectory::TrajectoryReadPayloadRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadPayloadResponse> {
+        self.request_typed("trajectory/readPayload", request).await
+    }
     async fn get_session_history(
         &mut self,
         request: SessionHistoryRequest,

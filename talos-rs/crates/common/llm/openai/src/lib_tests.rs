@@ -94,12 +94,14 @@ fn openai_accepts_normal_sized_images_and_configured_file_types() {
     let provider = OpenAIProvider::new(OpenAIConfig::new("test-api-key"));
     let attachments = vec![
         Attachment {
+            file_id: None,
             kind: AttachmentKind::Image,
             filename: "fire.png".to_string(),
             media_type: "image/png".to_string(),
             bytes: vec![0_u8; 218 * 1024].into(),
         },
         Attachment {
+            file_id: None,
             kind: AttachmentKind::File,
             filename: "report.docx".to_string(),
             media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -107,12 +109,14 @@ fn openai_accepts_normal_sized_images_and_configured_file_types() {
             bytes: vec![1_u8; 16 * 1024].into(),
         },
         Attachment {
+            file_id: None,
             kind: AttachmentKind::File,
             filename: "data.csv".to_string(),
             media_type: "text/csv".to_string(),
             bytes: b"a,b\n1,2\n".to_vec().into(),
         },
         Attachment {
+            file_id: None,
             kind: AttachmentKind::File,
             filename: "sheet.xlsx".to_string(),
             media_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -120,6 +124,7 @@ fn openai_accepts_normal_sized_images_and_configured_file_types() {
             bytes: vec![2_u8; 16 * 1024].into(),
         },
         Attachment {
+            file_id: None,
             kind: AttachmentKind::File,
             filename: "paper.pdf".to_string(),
             media_type: "application/pdf".to_string(),

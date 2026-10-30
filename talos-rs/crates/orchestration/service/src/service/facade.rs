@@ -60,6 +60,8 @@ mod session_deletion;
 
 #[path = "file_preview.rs"]
 mod file_preview;
+#[path = "trajectory.rs"]
+mod trajectory;
 
 #[derive(Clone)]
 pub struct TalosService {

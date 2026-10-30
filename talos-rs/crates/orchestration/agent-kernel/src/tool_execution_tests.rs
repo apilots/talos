@@ -309,6 +309,7 @@ async fn tool_execution_context_propagates_the_trusted_agent_id() {
         observed_agent_id: observed_agent_id.clone(),
     }));
     let execution_context = ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -354,6 +355,7 @@ async fn tool_execution_context_propagates_resolved_permission_mode() {
     kernel_config.tools.sandbox_policy.user_permission_mode =
         talos_config::ToolUserPermissionModeConfig::AskForApproval;
     let execution_context = ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -442,6 +444,7 @@ async fn streaming_scheduler_stops_queued_calls_after_pending_user_action() {
 
 fn test_execution_context() -> ToolExecutionContext {
     ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -659,6 +662,7 @@ async fn test_parallel_tool_executor_preserves_input_order() {
     }));
     let executor = ParallelToolExecutor;
     let execution_context = ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -723,6 +727,7 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
 
     let executor = ParallelToolExecutor;
     let execution_context = ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -773,6 +778,7 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
     register_core_local_tools(&registry);
     let (stream_tx, mut stream_rx) = mpsc::channel(16);
     let execution_context = ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -837,6 +843,7 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
         max_concurrent: max_concurrent.clone(),
     }));
     let execution_context = ToolExecutionContext {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),

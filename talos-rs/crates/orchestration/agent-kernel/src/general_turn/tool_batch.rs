@@ -334,7 +334,11 @@ fn collect_bounded_tool_batch(
             output.call_id,
             output.tool_name.clone(),
             build_model_tool_result_text(&reduced, max_output_bytes),
-        );
+        )
+        .with_input_origin(talos_llm_provider::MessageInputOrigin {
+            kind: talos_llm_provider::MessageInputKind::Context,
+            source: talos_llm_provider::MessageInputSource::Runtime,
+        });
         message.image_file_ids = reduced
             .content_items
             .iter()
@@ -415,6 +419,7 @@ pub async fn execute_general_turn_tool_batch(
     stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
+        trajectory: prepared.trajectory.clone(),
         browser_uploads: prepared
             .browser_uploads
             .iter()

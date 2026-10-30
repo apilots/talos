@@ -65,6 +65,7 @@ export function createDesktopTalosClient(
   };
 
   return {
+    trajectory: client.trajectory,
     sync: client.sync,
     computers: client.computers,
     auth: {
