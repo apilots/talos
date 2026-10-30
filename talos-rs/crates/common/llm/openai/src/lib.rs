@@ -119,13 +119,7 @@ impl OpenAIProvider {
 
     fn request_options(request: &ChatRequest) -> chat_protocol::ChatCompletionRequestOptions {
         chat_protocol::ChatCompletionRequestOptions {
-            reasoning_effort: if talos_llm_provider::has_boolean_thinking_control(
-                &request.request_parameters,
-            ) {
-                None
-            } else {
-                Self::effective_reasoning_effort(request.reasoning_effort)
-            },
+            reasoning_effort: Self::effective_reasoning_effort(request.reasoning_effort),
             reasoning_continuation: chat_protocol::ChatReasoningContinuationFormat::Reasoning,
             ..Default::default()
         }

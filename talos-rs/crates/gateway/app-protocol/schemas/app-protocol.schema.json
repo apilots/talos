@@ -5474,6 +5474,19 @@
             "null"
           ]
         },
+        "http_timeouts": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderHttpTimeouts"
+            }
+          ],
+          "default": {
+            "connect_secs": 10,
+            "response_secs": 120,
+            "stream_idle_secs": 90,
+            "stream_total_secs": 900
+          }
+        },
         "models": {
           "default": [],
           "description": "Provider-specific model metadata",
@@ -9188,6 +9201,37 @@
       },
       "type": "object"
     },
+    "ProviderHttpTimeouts": {
+      "additionalProperties": false,
+      "description": "Deadlines for custom protocol HTTP requests, in seconds.",
+      "properties": {
+        "connect_secs": {
+          "default": 10,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "response_secs": {
+          "default": 120,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stream_idle_secs": {
+          "default": 90,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stream_total_secs": {
+          "default": 900,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "ProviderModelConfig": {
       "additionalProperties": false,
       "properties": {
@@ -9235,6 +9279,17 @@
             }
           ],
           "default": "medium"
+        },
+        "reasoning_efforts": {
+          "default": null,
+          "description": "Accepted effort levels, independent of configured thinking switches. Omitted/null permits standard levels; [] explicitly disables graded effort.",
+          "items": {
+            "$ref": "#/definitions/ReasoningEffort"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "reasoning_replay": {
           "allOf": [

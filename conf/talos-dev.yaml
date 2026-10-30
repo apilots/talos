@@ -231,12 +231,19 @@ llm:
   #     protocol: chat
   #     base_url: https://llm.example.invalid/v1
   #     api_key: ${TALOS_LLM_CUSTOM_EXAMPLE_CONNECTION_API_KEY}
+  #     http_timeouts:
+  #       connect_secs: 10
+  #       response_secs: 120
+  #       stream_idle_secs: 90
+  #       stream_total_secs: 900
   #     models:
   #       - id: example-model
   #         name: Example Model
   #         context_window: 131072
   #         reasoning: true
   #         reasoning_effort: medium
+  #         # Accepted effort values; independent of enable_thinking. [] means no graded effort.
+  #         reasoning_efforts: [light, medium, high]
   #         speed: standard
   #         input: [text]
   #         # Chat-only outgoing reasoning projection; this is not request KV.

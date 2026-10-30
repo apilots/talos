@@ -46,6 +46,7 @@ pub fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>>
             protocol,
             &custom.config,
             &config.llm.model,
+            &custom.http_timeouts,
         )?) as Arc<dyn LlmProvider>
     } else {
         create_adapter(config)?

@@ -453,7 +453,12 @@ reasoning_replay?: ReasoningReplay,
 /**
  * Optional JSON request-body extensions; never credentials or runtime history.
  */
-request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
+request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
+/**
+ * Accepted effort levels, independent of configured thinking switches.
+ * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ */
+reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type ModelRef = {
 /**
@@ -467,7 +472,7 @@ id: string, };
 
 export type ModelSelection = { modelRef: ModelRef, reasoningEffort: ReasoningEffort | null, };
 
-export type ModelSelectionCapabilities = { reasoning: ReasoningControl, fast: boolean, default_fast: boolean, default_reasoning_effort: ReasoningEffort | null, };
+export type ModelSelectionCapabilities = { reasoning: ReasoningControl, reasoning_efforts: Array<ReasoningEffort>, fast: boolean, default_fast: boolean, default_reasoning_effort: ReasoningEffort | null, };
 
 export type ReasoningControl = "none" | "toggle" | "effort";
 
@@ -511,7 +516,7 @@ ollama: ProviderConfig,
  */
 openrouter: ProviderConfig, };
 
-export type CustomProviderConfig = { name: string,
+export type CustomProviderConfig = { name: string, http_timeouts?: ProviderHttpTimeouts,
 /**
  * API key
  */
@@ -528,6 +533,8 @@ protocol?: LlmProtocol,
  * Provider-specific model metadata
  */
 models: Array<ProviderModelConfig>, };
+
+export type ProviderHttpTimeouts = { connect_secs: number, response_secs: number, stream_idle_secs: number, stream_total_secs: number, };
 
 export type ProviderConfig = {
 /**
@@ -555,7 +562,12 @@ reasoning_replay?: ReasoningReplay,
 /**
  * Optional JSON request-body extensions; never credentials or runtime history.
  */
-request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
+request_parameters: Record<string, unknown>, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort,
+/**
+ * Accepted effort levels, independent of configured thinking switches.
+ * Omitted/null permits standard levels; [] explicitly disables graded effort.
+ */
+reasoning_efforts?: Array<ReasoningEffort> | null, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 

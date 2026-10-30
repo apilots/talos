@@ -28,6 +28,7 @@ export interface ModelFormState {
   context_window: string;
   reasoning: boolean;
   reasoning_effort: ReasoningEffort;
+  reasoning_efforts?: ReasoningEffort[];
   speed: ModelSpeed;
   input: ModelInputKind[];
   request_parameters: RequestParameterRow[];
@@ -55,6 +56,7 @@ export function modelToForm(model: ProviderModelConfig): ModelFormState {
     context_window: String(model.context_window),
     reasoning: model.reasoning,
     reasoning_effort: model.reasoning_effort ?? "medium",
+    reasoning_efforts: model.reasoning_efforts ?? undefined,
     speed: model.speed ?? "standard",
     input: model.input,
   };
@@ -85,6 +87,7 @@ export function formToModel(
     context_window: parseInt(form.context_window, 10) || 0,
     reasoning: form.reasoning,
     reasoning_effort: form.reasoning_effort,
+    reasoning_efforts: form.reasoning ? form.reasoning_efforts : undefined,
     speed: form.speed,
     input: form.input.length > 0 ? form.input : ["text"],
   };

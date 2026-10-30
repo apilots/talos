@@ -470,6 +470,11 @@ pub struct ProviderModelConfig {
     pub reasoning: bool,
     #[serde(default)]
     pub reasoning_effort: ReasoningEffort,
+    /// Accepted effort levels, independent of configured thinking switches.
+    /// Omitted/null permits standard levels; [] explicitly disables graded effort.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub reasoning_efforts: Option<Vec<ReasoningEffort>>,
     #[serde(default)]
     pub speed: ModelSpeed,
     #[serde(default)]

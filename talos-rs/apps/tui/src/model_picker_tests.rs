@@ -94,9 +94,11 @@ fn configured_model(parameters: serde_json::Value) -> ModelInfo {
 
 #[test]
 fn configured_binary_reasoning_has_only_off_and_on_and_honors_off_default() {
-    let model = configured_model(serde_json::json!({
+    let mut model = configured_model(serde_json::json!({
         "chat_template_kwargs": { "enable_thinking": false }
     }));
+    model.model.reasoning_efforts = Some(vec![]);
+    model.selection_capabilities = model.model.selection_capabilities();
     let selection = ModelSelection::from_model(
         ModelRef {
             provider: model.provider.clone(),
@@ -141,4 +143,36 @@ fn identical_model_ids_keep_provider_specific_reasoning_defaults() {
     assert_eq!(selected.model_ref.provider, "custom-test");
     assert_eq!(selected.model_ref.id, "model");
     assert_eq!(selected.reasoning_effort, None);
+}
+
+#[test]
+fn declared_effort_list_filters_picker_independently_of_thinking_switch() {
+    let mut model = configured_model(serde_json::json!({"enable_thinking":true}));
+    model.model.reasoning_efforts = Some(vec![
+        ReasoningEffort::Light,
+        ReasoningEffort::Medium,
+        ReasoningEffort::XHigh,
+    ]);
+    model.selection_capabilities = model.model.selection_capabilities();
+    let selection = ModelSelection::from_model(
+        ModelRef {
+            provider: model.provider.clone(),
+            id: model.model.id.clone(),
+        },
+        &model.model,
+    );
+    let picker = ModelPickerState::new(&[model], &selection).unwrap();
+    assert_eq!(
+        picker
+            .reasoning_options()
+            .iter()
+            .map(|option| option.effort)
+            .collect::<Vec<_>>(),
+        vec![
+            None,
+            Some(ReasoningEffort::Light),
+            Some(ReasoningEffort::Medium),
+            Some(ReasoningEffort::XHigh)
+        ]
+    );
 }

@@ -153,3 +153,23 @@ fn replay_overrides_are_model_owned_and_restricted_to_custom_chat() {
         .insert("reasoning_replay".into(), serde_json::json!("omit"));
     assert!(config.validate_providers().is_err());
 }
+
+#[test]
+fn custom_http_timeout_policy_accepts_independent_deadlines() {
+    let mut config = configured();
+    let policy = &mut config
+        .custom_providers
+        .get_mut("llm-gateway")
+        .unwrap()
+        .http_timeouts;
+    policy.response_secs = 5;
+    policy.stream_total_secs = 30;
+    config.validate_providers().unwrap();
+    let policy = &mut config
+        .custom_providers
+        .get_mut("llm-gateway")
+        .unwrap()
+        .http_timeouts;
+    policy.stream_total_secs = 90_000;
+    config.validate_providers().unwrap();
+}

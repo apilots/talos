@@ -8,8 +8,11 @@ message ProviderConfig {
   optional string api_key = 1; optional string base_url = 2; optional LlmProtocol protocol = 3;
   repeated ModelInfo models = 4;
 }
+message ProviderHttpTimeouts {
+  uint64 connect_secs = 1; uint64 response_secs = 2; uint64 stream_idle_secs = 3; uint64 stream_total_secs = 4;
+}
 message CustomProviderConfig {
-  string name = 1; ProviderConfig config = 3;
+  string name = 1; ProviderConfig config = 3; ProviderHttpTimeouts http_timeouts = 4;
 }
 message LlmConfig {
   string provider = 1; string model = 2;

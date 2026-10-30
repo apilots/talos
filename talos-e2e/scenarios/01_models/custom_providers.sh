@@ -30,6 +30,7 @@ for provider_id, name, route, thinking in [
     config["custom_providers"][provider_id] = {
         "name": name,
         "api_key": None,
+        "http_timeouts": {"connect_secs": 5, "response_secs": 120, "stream_idle_secs": 30, "stream_total_secs": 600},
         "protocol": "chat",
         "base_url": f"http://127.0.0.1:9/{route}/v1",
         "models": [{
@@ -38,6 +39,7 @@ for provider_id, name, route, thinking in [
             "context_window": 131072,
             "reasoning": True,
             "reasoning_effort": "medium",
+            "reasoning_efforts": ["light", "medium", "xhigh"] if thinking else [],
             "reasoning_replay": "protocol_default",
             "speed": "fast" if thinking else "standard",
             "input": ["text"],
@@ -100,7 +102,8 @@ for model in custom_models:
         assert model[key] == value, (model["provider"], key)
     thinking = model["request_parameters"]["chat_template_kwargs"]["enable_thinking"]
     assert model["selection_capabilities"] == {
-        "reasoning": "toggle",
+        "reasoning": "effort" if thinking else "toggle",
+        "reasoning_efforts": ["light", "medium", "xhigh"] if thinking else [],
         "default_reasoning_effort": "medium" if thinking else None,
         "fast": True,
         "default_fast": thinking,
@@ -110,6 +113,6 @@ assert model_response["defaultModelSelection"] == {
     "modelRef": {"provider": "llm-gateway", "id": "model"},
     "reasoningEffort": "medium",
 }, model_response["defaultModelSelection"]
-print("CASE configured_model_selection_capabilities PASS thinking=toggle fast=explicit defaults=canonical")
+print("CASE configured_model_selection_capabilities PASS thinking=independent effort=declared fast=explicit defaults=canonical")
 print("CASE custom_provider_persistence PASS save=read=reload=disk builtins=unchanged optional_key=ready")
 PY

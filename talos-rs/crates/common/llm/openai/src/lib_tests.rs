@@ -538,13 +538,9 @@ fn test_convert_tools() {
 }
 
 #[test]
-fn configured_boolean_thinking_omits_effort_but_preserves_tool_reasoning_replay() {
+fn configured_boolean_thinking_preserves_effort_and_tool_reasoning_replay() {
     let mut request = ChatRequest::new_user("Continue", "model");
     request.reasoning_effort = Some(ReasoningEffort::High);
-    request.request_parameters.insert(
-        "chat_template_kwargs".to_owned(),
-        serde_json::json!({"enable_thinking":true}),
-    );
     let mut message = ChatMessage::assistant_with_tool_calls(
         "",
         vec![talos_llm_provider::FunctionCall::new(
@@ -559,19 +555,24 @@ fn configured_boolean_thinking_omits_effort_but_preserves_tool_reasoning_replay(
     request
         .messages
         .push(ChatMessage::tool("call-1", "echo", "hello"));
-    let parameters = request.request_parameters.clone();
-    let body = talos_llm_provider::serialize_with_parameters(
-        OpenAIProvider::build_request(request, false).unwrap(),
-        &parameters,
-    )
-    .unwrap();
-    assert!(body.get("reasoning_effort").is_none());
-    assert_eq!(
-        body["chat_template_kwargs"],
-        serde_json::json!({"enable_thinking":true})
-    );
-    assert_eq!(body["messages"][1]["reasoning"], "Call echo first");
-    assert_eq!(body["messages"][2]["tool_call_id"], "call-1");
+    for enabled in [false, true] {
+        request.request_parameters.insert(
+            "chat_template_kwargs".to_owned(),
+            serde_json::json!({"enable_thinking":enabled}),
+        );
+        let body = talos_llm_provider::serialize_with_parameters(
+            OpenAIProvider::build_request(request.clone(), false).unwrap(),
+            &request.request_parameters,
+        )
+        .unwrap();
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(
+            body["chat_template_kwargs"],
+            serde_json::json!({"enable_thinking":enabled})
+        );
+        assert_eq!(body["messages"][1]["reasoning"], "Call echo first");
+        assert_eq!(body["messages"][2]["tool_call_id"], "call-1");
+    }
 }
 
 #[tokio::test]

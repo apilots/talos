@@ -11,7 +11,7 @@ async fn custom_protocol_sends_session_thinking_controls_without_auth() {
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let server = tokio::spawn(async move {
         let mut requests = Vec::new();
-        for _ in 0..2 {
+        for _ in 0..6 {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut bytes = Vec::new();
             let body_start = loop {
@@ -53,17 +53,47 @@ async fn custom_protocol_sends_session_thinking_controls_without_auth() {
             "llm-gateway":{"name":"LLM Gateway","protocol":"chat","base_url":url,"models":[{"id":"model","reasoning":true,"request_parameters":{"chat_template_kwargs":{"enable_thinking":true,"other":7}}}]}
         }
     })).unwrap();
-    let provider = crate::create_llm_provider(&config).unwrap();
-    assert_eq!(provider.name(), "llm-gateway");
-    provider
-        .chat(ChatRequest::new_user("Off", "model"))
-        .await
-        .unwrap();
-    let mut enabled = ChatRequest::new_user("On", "model");
-    enabled.reasoning_effort = Some(ReasoningEffort::High);
-    provider.chat(enabled).await.unwrap();
+    for (efforts, static_effort) in [
+        (None, None),
+        (Some(vec![]), None),
+        (
+            Some(vec![ReasoningEffort::Light, ReasoningEffort::Medium]),
+            Some("light"),
+        ),
+    ] {
+        let model = &mut config
+            .llm
+            .custom_providers
+            .get_mut("llm-gateway")
+            .unwrap()
+            .config
+            .models[0];
+        model.reasoning_efforts = efforts;
+        if let Some(effort) = static_effort {
+            model
+                .request_parameters
+                .insert("reasoning_effort".into(), serde_json::json!(effort));
+        }
+        config.llm.validate_providers().unwrap();
+        let provider = crate::create_llm_provider(&config).unwrap();
+        assert_eq!(provider.name(), "llm-gateway");
+        provider
+            .chat(ChatRequest::new_user("Off", "model"))
+            .await
+            .unwrap();
+        let mut enabled = ChatRequest::new_user("On", "model");
+        enabled.reasoning_effort = Some(ReasoningEffort::Medium);
+        provider.chat(enabled).await.unwrap();
+    }
     let requests = server.await.unwrap();
-    for ((headers, body), thinking) in requests.into_iter().zip([false, true]) {
+    for ((headers, body), (thinking, effort)) in requests.into_iter().zip([
+        (false, None),
+        (true, Some("medium")),
+        (false, None),
+        (true, None),
+        (false, Some("light")),
+        (true, Some("light")),
+    ]) {
         assert!(headers.starts_with("POST /v1/chat/completions"));
         assert!(!headers.to_ascii_lowercase().contains("authorization:"));
         assert_eq!(body["model"], "model");
@@ -71,6 +101,9 @@ async fn custom_protocol_sends_session_thinking_controls_without_auth() {
             body["chat_template_kwargs"],
             serde_json::json!({"enable_thinking":thinking,"other":7})
         );
-        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(
+            body.get("reasoning_effort"),
+            effort.map(serde_json::Value::from).as_ref()
+        );
     }
 }

@@ -11,10 +11,10 @@ import { renderComposer } from "../__tests__/ChatComposer.test-utils";
 import type { ComposerModelOption } from "../model-selection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 
-const effortCapabilities = { reasoning: "effort", fast: false, default_fast: false, default_reasoning_effort: "high" } as const;
+const effortCapabilities = { reasoning: "effort", reasoning_efforts: ["light", "medium", "high", "xhigh"] as import("@talos/sdk-browser").ReasoningEffort[], fast: false, default_fast: false, default_reasoning_effort: "high" } as const;
 const models: ComposerModelOption[] = [
   { id: "llm-gateway:model", provider: "llm-gateway", providerName: "LLM Gateway", customProvider: true, name: "Qwen3 32B", reasoningEffort: "high", selectionCapabilities: effortCapabilities },
-  { id: "local-inference:model", provider: "local-inference", providerName: "Local Inference", customProvider: true, name: "Qwen3.5 27B", reasoningEffort: "medium", selectionCapabilities: { ...effortCapabilities, reasoning: "toggle", default_reasoning_effort: null } },
+  { id: "local-inference:model", provider: "local-inference", providerName: "Local Inference", customProvider: true, name: "Qwen3.5 27B", reasoningEffort: "medium", selectionCapabilities: { ...effortCapabilities, reasoning: "toggle", reasoning_efforts: [], default_reasoning_effort: null } },
 ];
 const captures = new Set<number>();
 const originalCapture = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "setPointerCapture");
@@ -133,7 +133,7 @@ describe("ComposerModelPicker", () => {
   });
 
   it("disables undeclared controls rather than guessing capabilities from names", () => {
-    renderComposer({ models: [{ ...models[0], name: "Fast Reasoner", selectionCapabilities: { reasoning: "none", fast: false, default_fast: false, default_reasoning_effort: null } }], selectedModel: models[0].id });
+    renderComposer({ models: [{ ...models[0], name: "Fast Reasoner", selectionCapabilities: { reasoning: "none", reasoning_efforts: [], fast: false, default_fast: false, default_reasoning_effort: null } }], selectedModel: models[0].id });
     fireEvent.click(screen.getByRole("button", { name: "Fast Reasoner · Off" }));
     expect(screen.getByRole("slider", { name: "This model does not support reasoning" })).toHaveAttribute("aria-disabled", "true");
     const fast = screen.getByRole("button", { name: "Fast" });
@@ -166,7 +166,7 @@ describe("ComposerModelPicker", () => {
   });
 
   it("preserves focus on passive updates and on an outside control after dismissal", async () => {
-    const props = { models, selectedModel: models[0].id, reasoningLevel: "high" as const };
+    const props = { models, selectedModel: models[0].id, reasoningLevel: "high" as const, onReasoningLevelChange: vi.fn() };
     const show = (level: "high" | "light") => <><input aria-label="Outside" /><ComposerModelPicker {...props} reasoningLevel={level} /></>;
     const view = render(show("high"));
     expect(document.activeElement).toBe(document.body);
@@ -176,7 +176,7 @@ describe("ComposerModelPicker", () => {
     expect(outside).toHaveFocus();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Qwen3 32B · Light" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Fast" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("slider", { name: "Reasoning depth" })).toHaveFocus());
     outside.focus();
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(outside).toHaveFocus());
@@ -196,4 +196,15 @@ describe("ComposerModelPicker", () => {
     expect(screen.getByRole("button", { name: chinese ? "返回" : "Back" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: chinese ? "切换 Provider：Local Inference" : "Change Provider: Local Inference" })).toBeInTheDocument();
   });
+});
+
+it("uses only the declared effort stops and skips an unsupported High", () => {
+  const onReasoningLevelChange = vi.fn();
+  const declared: ComposerModelOption = { ...models[0], reasoningEffort: "medium", selectionCapabilities: { ...effortCapabilities, default_reasoning_effort: "medium", reasoning_efforts: ["light", "medium", "xhigh"] } };
+  renderComposer({ models: [declared], selectedModel: declared.id, reasoningLevel: "medium", onReasoningLevelChange });
+  fireEvent.click(screen.getByRole("button", { name: "Qwen3 32B · Medium" }));
+  const slider = screen.getByRole("slider", { name: "Reasoning depth" });
+  expect(slider).toHaveAttribute("aria-valuemax", "3");
+  fireEvent.keyDown(slider, { key: "ArrowRight" });
+  expect(onReasoningLevelChange).toHaveBeenCalledExactlyOnceWith("extra_high");
 });

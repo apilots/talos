@@ -366,6 +366,7 @@ pub(super) fn context(identity: AgentTurnRef) -> AgentContext {
             "test".to_string(),
             ProviderModelConfig {
                 reasoning_replay: Default::default(),
+                reasoning_efforts: None,
                 request_parameters: Default::default(),
                 id: "model".to_string(),
                 name: "Model".to_string(),

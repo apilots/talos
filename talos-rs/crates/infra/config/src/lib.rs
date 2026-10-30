@@ -55,6 +55,7 @@ pub use domains::automation::{
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::custom_provider::{
     custom_provider_key_env, is_managed_request_parameter, CustomProviderConfig,
+    ProviderHttpTimeouts,
 };
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{

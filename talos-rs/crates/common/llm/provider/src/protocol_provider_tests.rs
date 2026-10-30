@@ -13,7 +13,14 @@ fn provider(protocol: LlmProtocol, replay: ReasoningReplay) -> ProtocolProvider 
     let config: ProviderConfig = serde_json::from_value(json!({
         "base_url":"http://127.0.0.1:9/private-prefix/v1", "models":[{"id":"same-model","reasoning":true,"reasoning_replay":replay}]
     })).unwrap();
-    ProtocolProvider::new("user-connection", protocol, &config, "same-model").unwrap()
+    ProtocolProvider::new(
+        "user-connection",
+        protocol,
+        &config,
+        "same-model",
+        &ProviderHttpTimeouts::default(),
+    )
+    .unwrap()
 }
 
 fn tool_history(continuation: ReasoningContinuation) -> ChatRequest {
@@ -90,7 +97,7 @@ fn chat_replay_policies_change_only_outgoing_reasoning_and_preserve_tool_history
 }
 
 #[test]
-fn thinking_defaults_and_explicit_parameters_do_not_inject_incompatible_effort() {
+fn thinking_switches_and_effort_are_serialized_independently() {
     for protocol in [
         LlmProtocol::Chat,
         LlmProtocol::Responses,
@@ -146,7 +153,7 @@ fn thinking_defaults_and_explicit_parameters_do_not_inject_incompatible_effort()
         let (_, body) = provider(LlmProtocol::Chat, ReasoningReplay::ProtocolDefault)
             .body(request, false)
             .unwrap();
-        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["reasoning_effort"], "high");
     }
     for enabled in [false, true] {
         let mut request = ChatRequest::new_user("hello", "same-model");
@@ -288,8 +295,14 @@ async fn three_protocols_use_real_http_nonstream_stream_tools_and_protocol_auth(
             json!({"base_url":url,"api_key":"loopback-only-key","models":[{"id":"same-model"}]}),
         )
         .unwrap();
-        let provider =
-            ProtocolProvider::new("custom-service", protocol, &config, "same-model").unwrap();
+        let provider = ProtocolProvider::new(
+            "custom-service",
+            protocol,
+            &config,
+            "same-model",
+            &ProviderHttpTimeouts::default(),
+        )
+        .unwrap();
         let first = provider
             .chat_with_tools(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -369,21 +382,24 @@ fn unconfigured_reasoning_capability_does_not_inject_thinking_into_any_protocol(
         LlmProtocol::Responses,
     ] {
         let config: ProviderConfig = serde_json::from_value(json!({"base_url":"http://127.0.0.1:9/v1","models":[{"id":"opaque-7f82","reasoning":false}]})).unwrap();
-        let provider =
-            ProtocolProvider::new("opaque-service", protocol, &config, "opaque-7f82").unwrap();
-        for effort in [None, Some(ReasoningEffort::High)] {
-            let mut request = ChatRequest::new_user("hello", "opaque-7f82");
-            request.reasoning_effort = effort;
-            let (_, body) = provider.body(request, false).unwrap();
-            for key in [
-                "reasoning",
-                "reasoning_effort",
-                "thinking",
-                "output_config",
-                "include",
-            ] {
-                assert!(body.get(key).is_none(), "{protocol} injected {key}");
-            }
+        let provider = ProtocolProvider::new(
+            "opaque-service",
+            protocol,
+            &config,
+            "opaque-7f82",
+            &ProviderHttpTimeouts::default(),
+        )
+        .unwrap();
+        let request = ChatRequest::new_user("hello", "opaque-7f82");
+        let (_, body) = provider.body(request, false).unwrap();
+        for key in [
+            "reasoning",
+            "reasoning_effort",
+            "thinking",
+            "output_config",
+            "include",
+        ] {
+            assert!(body.get(key).is_none(), "{protocol} injected {key}");
         }
         let headers = provider.headers().unwrap();
         assert!(!headers.contains_key("authorization"));
@@ -395,7 +411,7 @@ fn unconfigured_reasoning_capability_does_not_inject_thinking_into_any_protocol(
 }
 
 #[test]
-fn responses_bound_binary_thinking_does_not_add_another_control() {
+fn responses_thinking_switch_does_not_suppress_effort() {
     let mut request = ChatRequest::new_user("hello", "same-model");
     request.reasoning_effort = Some(ReasoningEffort::High);
     request.request_parameters =
@@ -403,8 +419,8 @@ fn responses_bound_binary_thinking_does_not_add_another_control() {
     let (_, body) = provider(LlmProtocol::Responses, ReasoningReplay::ProtocolDefault)
         .body(request, false)
         .unwrap();
-    assert!(body.get("reasoning").is_none());
-    assert!(body.get("include").is_none());
+    assert_eq!(body["reasoning"], json!({"effort":"high"}));
+    assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
     assert_eq!(
         body["chat_template_kwargs"],
         json!({"enable_thinking":true})
@@ -431,9 +447,14 @@ async fn streamed_chat_reasoning_survives_tool_continuation_for_every_replay_pol
         ])
         .await;
         let config: ProviderConfig = serde_json::from_value(json!({"base_url":url,"models":[{"id":"same-model","reasoning":true,"reasoning_replay":replay}]})).unwrap();
-        let provider =
-            ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model")
-                .unwrap();
+        let provider = ProtocolProvider::new(
+            "opaque-service",
+            LlmProtocol::Chat,
+            &config,
+            "same-model",
+            &ProviderHttpTimeouts::default(),
+        )
+        .unwrap();
         let mut stream = provider
             .stream_model_blocks(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -516,9 +537,14 @@ async fn custom_chat_stream_preserves_the_same_structured_reasoning_as_nonstream
             json!({"base_url":url,"models":[{"id":"same-model","reasoning":true}]}),
         )
         .unwrap();
-        let connection =
-            ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model")
-                .unwrap();
+        let connection = ProtocolProvider::new(
+            "opaque-service",
+            LlmProtocol::Chat,
+            &config,
+            "same-model",
+            &ProviderHttpTimeouts::default(),
+        )
+        .unwrap();
         let nonstream = connection
             .chat(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -598,9 +624,14 @@ async fn custom_chat_auto_keeps_plain_alias_fallback_and_plain_structured_bounda
         let (url, server) = capture(vec![("text/event-stream", sse)]).await;
         let config: ProviderConfig =
             serde_json::from_value(json!({"base_url":url,"models":[{"id":"same-model"}]})).unwrap();
-        let connection =
-            ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model")
-                .unwrap();
+        let connection = ProtocolProvider::new(
+            "opaque-service",
+            LlmProtocol::Chat,
+            &config,
+            "same-model",
+            &ProviderHttpTimeouts::default(),
+        )
+        .unwrap();
         let mut stream = connection
             .stream_model_blocks(ChatRequest::new_user("hello", "same-model"))
             .await
@@ -630,8 +661,14 @@ async fn custom_chat_auto_keeps_plain_alias_fallback_and_plain_structured_bounda
     let (url, server) = capture(vec![("text/event-stream", sse)]).await;
     let config: ProviderConfig =
         serde_json::from_value(json!({"base_url":url,"models":[{"id":"same-model"}]})).unwrap();
-    let connection =
-        ProtocolProvider::new("opaque-service", LlmProtocol::Chat, &config, "same-model").unwrap();
+    let connection = ProtocolProvider::new(
+        "opaque-service",
+        LlmProtocol::Chat,
+        &config,
+        "same-model",
+        &ProviderHttpTimeouts::default(),
+    )
+    .unwrap();
     let mut stream = connection
         .stream_model_blocks(ChatRequest::new_user("hello", "same-model"))
         .await
@@ -652,4 +689,32 @@ async fn custom_chat_auto_keeps_plain_alias_fallback_and_plain_structured_bounda
     assert!(matches!(&blocks[1],ReasoningBlock::Encrypted(block) if block.data=="opaque"));
     assert!(matches!(&blocks[2],ReasoningBlock::Text(block) if block.text=="suffix"));
     server.await.unwrap();
+}
+
+#[test]
+fn declared_efforts_preserve_independent_thinking_switch() {
+    let mut provider = provider(LlmProtocol::Chat, ReasoningReplay::ProtocolDefault);
+    provider
+        .models
+        .get_mut("same-model")
+        .unwrap()
+        .reasoning_efforts = Some(vec![
+        ReasoningEffort::Light,
+        ReasoningEffort::Medium,
+        ReasoningEffort::XHigh,
+    ]);
+    for enabled in [false, true] {
+        let mut request = ChatRequest::new_user("hello", "same-model");
+        request.reasoning_effort = Some(ReasoningEffort::XHigh);
+        request.request_parameters = serde_json::from_value(
+            json!({"chat_template_kwargs":{"enable_thinking":enabled,"sibling":7}}),
+        )
+        .unwrap();
+        let (_, body) = provider.body(request, false).unwrap();
+        assert_eq!(body["reasoning_effort"], "xhigh");
+        assert_eq!(
+            body["chat_template_kwargs"],
+            json!({"enable_thinking":enabled,"sibling":7})
+        );
+    }
 }
