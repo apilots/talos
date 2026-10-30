@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use std::{env, path::Path};
 use unicode_width::UnicodeWidthChar;
 
-pub(crate) const APP_VERSION: &str = "v0.1.13-SNAPSHOT";
+pub(crate) const APP_VERSION: &str = "v0.1.13";
 
 // ── Event labels ────────────────────────────────────────────────────────────
 

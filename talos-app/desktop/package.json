@@ -1,7 +1,7 @@
 {
   "name": "talos-desktop",
   "private": true,
-  "version": "0.1.13-SNAPSHOT",
+  "version": "0.1.13",
   "license": "Apache-2.0",
   "description": "Talos desktop shell for the shared WebUI and local app-server runtime.",
   "author": "Talos",
