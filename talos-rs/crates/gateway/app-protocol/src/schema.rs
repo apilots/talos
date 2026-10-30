@@ -51,6 +51,14 @@ pub struct AppProtocolSchemaRoot {
     pub timeline_event: talos_agent_api::TimelineEvent,
     pub collaboration_tool_result: talos_types::CollaborationToolResult,
     pub initialize_response: InitializeResponse,
+    pub trajectory_capabilities_response:
+        talos_agent_api::trajectory::TrajectoryCapabilitiesResponse,
+    pub trajectory_readturn_response: talos_agent_api::trajectory::TrajectoryReadTurnResponse,
+    pub trajectory_readrequest_response:
+        talos_agent_api::trajectory::TrajectoryReadModelRequestResponse,
+    pub trajectory_readtool_response: talos_agent_api::trajectory::TrajectoryReadToolResponse,
+    pub trajectory_readpayload_response: talos_agent_api::trajectory::TrajectoryReadPayloadResponse,
+    pub trajectory_payload: talos_agent_api::trajectory::TrajectoryPayload,
     pub session_history_response: talos_agent_api::SessionHistoryResponse,
     pub pending_user_action: talos_types::PendingUserAction,
     pub timeline_recovery_response: talos_agent_api::RecoverTimelineResponse,
@@ -170,6 +178,71 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_agent_api::SessionActiveTurnResponse>());
     output.push_str(&export::<
         talos_agent_api::SessionActiveTurnChangedNotification,
+    >());
+    output.push_str(&export::<talos_agent_api::trajectory::PayloadRef>());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryCapabilitiesResponse,
+    >());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadTurnRequest,
+    >());
+    output.push_str(&export::<talos_agent_api::trajectory::ClockSegment>());
+    output.push_str(&export::<talos_agent_api::trajectory::ClockRelation>());
+    output.push_str(&export::<talos_agent_api::trajectory::ExecutionInterval>());
+    output.push_str(&export::<talos_agent_api::trajectory::ModelCallTiming>());
+    output.push_str(&export::<talos_agent_api::trajectory::ModelCallState>());
+    output.push_str(&export::<talos_agent_api::trajectory::ModelCallRecord>());
+    output.push_str(&export::<talos_agent_api::trajectory::ModelRequestPurpose>());
+    output.push_str(&export::<talos_agent_api::trajectory::ModelRequestTrace>());
+    output.push_str(&export::<talos_agent_api::trajectory::ToolIntervalKind>());
+    output.push_str(&export::<talos_agent_api::trajectory::ToolInterval>());
+    output.push_str(&export::<talos_agent_api::trajectory::TrajectoryTool>());
+    output.push_str(&export::<talos_agent_api::trajectory::TrajectoryEntry>());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadTurnResponse,
+    >());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadModelRequestRequest,
+    >());
+    output.push_str(&export::<talos_agent_api::trajectory::ModelCallOutput>());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadModelRequestResponse,
+    >());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadToolRequest,
+    >());
+    output.push_str(&export::<talos_agent_api::trajectory::ToolInputUsageKind>());
+    output.push_str(&export::<talos_agent_api::trajectory::ToolInputUsage>());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadToolResponse,
+    >());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotAttachmentKind>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotAvailability>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotAttachment>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotCacheControl>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotToolCall>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotInputKind>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotInputSource>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotInputAdmission>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotInputOrigin>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotRole>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotReasoningPart>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotMessage>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotToolDefinition>());
+    output.push_str(&export::<talos_agent_api::trajectory::SnapshotToolChoice>());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::NormalizedRequestOptions,
+    >());
+    output.push_str(&export::<talos_agent_api::trajectory::ResponsePart>());
+    output.push_str(&export::<talos_agent_api::trajectory::TrajectoryPayload>());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadPayloadRequest,
+    >());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryReadPayloadResponse,
+    >());
+    output.push_str(&export::<
+        talos_agent_api::trajectory::TrajectoryPayloadEncoding,
     >());
     output.push_str(&export::<talos_types::SessionHistoryRequest>());
     output.push_str(&export::<talos_agent_api::SessionHistoryResponse>());

@@ -44,6 +44,7 @@ message WorkerRpcCall {
     PeerFileReadRequest peer_file_read = 111;
     PeerFileUpdateRequest peer_file_update = 112;
     PeerFileDeleteRequest peer_file_delete = 113;
+    AppendSessionHistorySupplementRequest append_session_history_supplement = 125;
     ReadSessionHistoryRequest read_session_history = 100;
     ResolveAttachmentsRequest resolve_attachments = 101;
     ReadMemoryProgressRequest read_memory_progress = 102;
@@ -125,6 +126,7 @@ message WorkerRpcResult {
     PeerFileReadResponse peer_file_read = 111;
     PeerFileUpdateResponse peer_file_update = 112;
     PeerFileDeleteResponse peer_file_delete = 113;
+    AppendSessionHistorySupplementResponse append_session_history_supplement = 125;
     ReadSessionHistoryResponse read_session_history = 100;
     ResolveAttachmentsResponse resolve_attachments = 101;
     ReadMemoryProgressResponse read_memory_progress = 102;

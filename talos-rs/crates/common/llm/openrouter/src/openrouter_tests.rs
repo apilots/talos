@@ -102,6 +102,7 @@ fn messages_maps_reasoning_effort_to_output_config() {
 #[test]
 fn openrouter_applies_file_media_policy_for_the_selected_protocol() {
     let docx = Attachment {
+        file_id: None,
         kind: AttachmentKind::File,
         filename: "report.docx".to_string(),
         media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

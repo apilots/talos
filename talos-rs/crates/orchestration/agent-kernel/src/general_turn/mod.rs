@@ -58,6 +58,7 @@ mod prepare_load_policy;
 mod prepare_tests;
 mod run;
 mod step_execute;
+mod step_output;
 mod step_request;
 #[cfg(test)]
 mod tests;
@@ -95,7 +96,7 @@ pub use run::run_general_turn_with_resume;
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;
 pub use step_execute::{apply_general_turn_step, execute_general_turn_step};
-pub(crate) use step_execute::{emit_assistant_text_stream_item, emit_stream_event};
+pub(crate) use step_output::{emit_assistant_text_stream_item, emit_stream_event};
 pub use step_request::build_general_turn_step_request;
 #[cfg(test)]
 pub(crate) use tool_batch::parse_retrieved_memory_items;

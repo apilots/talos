@@ -8,12 +8,14 @@ fn request_encodes_ordered_text_image_and_document_blocks() {
         "inspect",
         vec![
             Attachment {
+                file_id: Some("local-observation-id".into()),
                 kind: AttachmentKind::Image,
                 filename: "pixel.png".to_string(),
                 media_type: "image/png".to_string(),
                 bytes: Bytes::from_static(&[1, 2, 3]),
             },
             Attachment {
+                file_id: Some("local-observation-id".into()),
                 kind: AttachmentKind::File,
                 filename: "note.pdf".to_string(),
                 media_type: "application/pdf".to_string(),

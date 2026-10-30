@@ -166,6 +166,7 @@ impl GeneralTurnResult {
 
 #[derive(Debug, Clone)]
 pub struct PreparedGeneralTurn {
+    pub trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,
     pub user_id: String,
@@ -399,6 +400,7 @@ impl GeneralTurnLoopState {
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnStepRequest {
+    pub trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     pub round: u32,
     pub call_mode: KernelModelCallMode,
     pub model: String,

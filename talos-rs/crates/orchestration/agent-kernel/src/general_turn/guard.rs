@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::{Map, Value};
+use talos_llm_provider::{MessageInputKind, MessageInputOrigin, MessageInputSource};
 
 const FORCED_FINALIZATION_INSTRUCTION: &str = r#"Tool investigation must stop now.
 
@@ -83,14 +84,21 @@ pub(crate) fn should_inject_read_only_nudge(guard: &ToolLoopGuardState) -> bool 
 }
 
 pub(crate) fn build_read_only_nudge_message() -> ChatMessage {
-    ChatMessage::system(LOW_GAIN_READ_ONLY_NUDGE)
+    ChatMessage::system(LOW_GAIN_READ_ONLY_NUDGE).with_input_origin(MessageInputOrigin {
+        kind: MessageInputKind::Context,
+        source: MessageInputSource::Runtime,
+    })
 }
 
 pub(crate) fn build_tool_failure_recovery_nudge_message(
     batch: &GeneralTurnToolBatch,
 ) -> Option<ChatMessage> {
-    batch_has_recoverable_tool_failure(batch)
-        .then(|| ChatMessage::system(TOOL_FAILURE_RECOVERY_NUDGE))
+    batch_has_recoverable_tool_failure(batch).then(|| {
+        ChatMessage::system(TOOL_FAILURE_RECOVERY_NUDGE).with_input_origin(MessageInputOrigin {
+            kind: MessageInputKind::Context,
+            source: MessageInputSource::Runtime,
+        })
+    })
 }
 
 fn batch_has_recoverable_tool_failure(batch: &GeneralTurnToolBatch) -> bool {
@@ -137,6 +145,7 @@ pub(crate) async fn run_forced_finalization_step(
     stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
     pre_final_execution_summary: Option<String>,
     cause: ForcedFinalizationCause,
+    trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
 ) -> TalosResult<GeneralTurnStepResult> {
     let cause_note = match cause {
         ForcedFinalizationCause::RepeatedReadOnlyInvestigation => {
@@ -146,13 +155,20 @@ pub(crate) async fn run_forced_finalization_step(
             "Reason: the model returned an empty final response after using tools."
         }
     };
-    messages.push(ChatMessage::user(format!(
-        "{}\n{}",
-        FORCED_FINALIZATION_INSTRUCTION, cause_note
-    )));
+    messages.push(
+        ChatMessage::user(format!(
+            "{}\n{}",
+            FORCED_FINALIZATION_INSTRUCTION, cause_note
+        ))
+        .with_input_origin(MessageInputOrigin {
+            kind: MessageInputKind::Context,
+            source: MessageInputSource::Runtime,
+        }),
+    );
 
     let step = execute_general_turn_step(
         GeneralTurnStepRequest {
+            trajectory: trajectory.clone(),
             round: 0,
             call_mode: KernelModelCallMode::Finalization,
             model: model.clone(),
@@ -181,6 +197,7 @@ pub(crate) async fn run_forced_finalization_step(
         llm_provider,
         stream_tx,
         pre_final_execution_summary,
+        trajectory,
     )
     .await
 }
@@ -192,14 +209,26 @@ async fn run_salvage_finalization_step(
     llm_provider: Arc<dyn LlmProvider>,
     stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
     pre_final_execution_summary: Option<String>,
+    trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
 ) -> TalosResult<GeneralTurnStepResult> {
-    messages.push(ChatMessage::user(SALVAGE_FINALIZATION_INSTRUCTION));
+    messages.push(
+        ChatMessage::user(SALVAGE_FINALIZATION_INSTRUCTION).with_input_origin(MessageInputOrigin {
+            kind: MessageInputKind::Context,
+            source: MessageInputSource::Runtime,
+        }),
+    );
     if !prior_step.text.trim().is_empty() {
-        messages.push(ChatMessage::assistant(prior_step.text.clone()));
+        messages.push(
+            ChatMessage::assistant(prior_step.text.clone()).with_input_origin(MessageInputOrigin {
+                kind: MessageInputKind::Context,
+                source: MessageInputSource::Runtime,
+            }),
+        );
     }
 
     let mut salvage_step = execute_general_turn_step(
         GeneralTurnStepRequest {
+            trajectory,
             round: 0,
             call_mode: KernelModelCallMode::Finalization,
             model,

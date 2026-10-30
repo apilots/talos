@@ -15,6 +15,7 @@ pub(crate) mod notice;
 pub(crate) mod record;
 mod settlement;
 mod sqlite;
+mod supplement;
 
 /// Store metadata for either execution or product facts; Service owns wire IDs.
 #[derive(Debug, Clone, PartialEq)]
@@ -164,6 +165,45 @@ pub struct CommitTerminalSettlementParams {
 /// Narrow atomic Store commands for canonical Agent execution facts.
 #[async_trait]
 pub trait AgentExecutionStore: Send + Sync {
+    /// Whether this existing execution-history owner supports private supplements.
+    fn supports_history_supplements(&self) -> bool {
+        false
+    }
+
+    /// Append bounded facts before the canonical terminal event, never a new event.
+    async fn append_history_supplement(
+        &self,
+        _supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> TalosResult<()> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution history supplementation is unavailable.",
+        ))
+    }
+
+    /// Read a terminal Turn's private facts; None means its column is NULL.
+    async fn read_terminal_history_supplement(
+        &self,
+        _identity: &AgentTurnRef,
+    ) -> TalosResult<Option<talos_agent_api::trajectory::SessionHistorySupplement>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution history supplementation is unavailable.",
+        ))
+    }
+
+    /// Read one frozen payload without loading other Turn bodies.
+    async fn read_execution_payload(
+        &self,
+        _identity: &AgentTurnRef,
+        _payload_id: &str,
+    ) -> TalosResult<Option<String>> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "Execution history supplementation is unavailable.",
+        ))
+    }
+
     /// Append a product notice for an existing Turn without mutating its lifecycle.
     async fn append_timeline_notice(
         &self,
@@ -221,7 +261,7 @@ pub trait AgentExecutionStore: Send + Sync {
     ) -> TalosResult<AgentEventCommit>;
 
     /// Atomically append a nonempty contiguous progress batch and CAS the active tail.
-    /// All events retain their original identity and sequence; capture shares this transaction.
+    /// All events retain their original identity and sequence.
     async fn commit_progress_events(
         &self,
         events: Vec<AgentEvent>,

@@ -43,7 +43,10 @@ impl AgentExecutionConnection {
             .await
             .transpose()?
             .ok_or_else(|| error_pb::encode_status(&closed()))?;
-        let mode = if matches!(&first, Call::SaveToolImage(_)) {
+        let mode = if matches!(
+            &first,
+            Call::SaveToolImage(_) | Call::AppendSessionHistorySupplement(_)
+        ) {
             RequestMode::Streaming
         } else {
             RequestMode::Unary

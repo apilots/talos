@@ -17,6 +17,7 @@ void i18n.use(initReactI18next).init({
     "errors",
     "sidebar",
     "chat",
+    "tracing",
     "memory",
     "files",
     "webPreview",

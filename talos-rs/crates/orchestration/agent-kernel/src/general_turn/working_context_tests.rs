@@ -2,6 +2,7 @@ use super::*;
 
 fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
     PreparedGeneralTurn {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),

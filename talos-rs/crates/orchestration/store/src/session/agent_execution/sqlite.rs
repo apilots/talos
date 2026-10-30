@@ -15,6 +15,32 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    fn supports_history_supplements(&self) -> bool {
+        true
+    }
+
+    async fn append_history_supplement(
+        &self,
+        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> TalosResult<()> {
+        super::supplement::append(self, supplement).await
+    }
+
+    async fn read_terminal_history_supplement(
+        &self,
+        identity: &AgentTurnRef,
+    ) -> TalosResult<Option<talos_agent_api::trajectory::SessionHistorySupplement>> {
+        super::supplement::read_terminal(self, identity).await
+    }
+
+    async fn read_execution_payload(
+        &self,
+        identity: &AgentTurnRef,
+        payload_id: &str,
+    ) -> TalosResult<Option<String>> {
+        super::supplement::read_payload(self, identity, payload_id).await
+    }
+
     async fn get_shared_active_turn(
         &self,
         session_id: &str,
@@ -33,7 +59,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
             tx.commit().await?;
             return Ok(None);
         };
-        let rows = tx.query("SELECT * FROM agent_events WHERE session_id = ? AND sequence IS NOT NULL ORDER BY event_seq DESC LIMIT 1", &[session_id]).await?;
+        let rows = tx.query("SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND sequence IS NOT NULL ORDER BY event_seq DESC LIMIT 1", &[session_id]).await?;
         let Some(row) = rows.first() else {
             tx.commit().await?;
             return Ok(None);
@@ -94,7 +120,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
     ) -> TalosResult<Vec<super::TimelineEventRecord>> {
         let after = after_event_seq.to_string();
         let limit = limit.clamp(1, MAX_EVENT_READ_LIMIT).to_string();
-        self.storage.query("SELECT * FROM agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq ASC LIMIT ?", &[session_id, &after, &limit]).await?
+        self.storage.query("SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND event_seq > ? ORDER BY event_seq ASC LIMIT ?", &[session_id, &after, &limit]).await?
             .iter().map(super::notice::parse).collect()
     }
 
@@ -104,7 +130,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
     ) -> TalosResult<Option<super::TimelineEventRecord>> {
         self.storage
             .query(
-                "SELECT * FROM agent_events WHERE event_seq = ?",
+                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE event_seq = ?",
                 &[&event_seq.to_string()],
             )
             .await?

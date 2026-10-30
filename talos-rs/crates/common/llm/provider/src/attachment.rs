@@ -40,8 +40,10 @@ impl ChatMessage {
 }
 
 /// Binary input attached to one user or tool message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub struct Attachment {
+    /// Local FileService identity when known; never part of provider wire payloads.
+    pub file_id: Option<String>,
     /// Wire representation selected by the shared protocol encoders.
     pub kind: AttachmentKind,
     /// Original filename sent to providers that accept file names.
@@ -50,6 +52,16 @@ pub struct Attachment {
     pub media_type: String,
     /// Complete file bytes; provider adapters must not persist or log this value.
     pub bytes: Bytes,
+}
+
+// Local observation identity does not change provider message equality.
+impl PartialEq for Attachment {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.filename == other.filename
+            && self.media_type == other.media_type
+            && self.bytes == other.bytes
+    }
 }
 
 impl Attachment {
@@ -61,6 +73,7 @@ impl Attachment {
         bytes: Bytes,
     ) -> Self {
         Self {
+            file_id: None,
             kind,
             filename: filename.into(),
             media_type: media_type.into(),

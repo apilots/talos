@@ -1,8 +1,8 @@
 use crate::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
-    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningContinuation,
-    ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice, Usage,
+    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, ModelBlockCompleted,
+    ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
+    ModelOutputPhase, ModelToolCallStart, ReasoningContinuation, ReasoningEffort, ReasoningOutput,
+    Role, SseLineDecoder, ToolChoice, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -19,7 +19,7 @@ mod types;
 #[path = "chat/chat_tests.rs"]
 mod tests;
 
-pub use content::content_text;
+pub use content::{content_text, tool_calls};
 use reasoning::{reasoning_fields, response_reasoning};
 pub use tool_definitions::tools;
 pub use types::*;
@@ -183,19 +183,6 @@ pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ChatCompletionToolChoic
         }),
         None => None,
     }
-}
-
-pub fn tool_calls(tool_calls: Option<Vec<ChatCompletionToolCall>>) -> Option<Vec<FunctionCall>> {
-    tool_calls.map(|calls| {
-        calls
-            .into_iter()
-            .map(|call| {
-                let parsed = serde_json::from_str::<Value>(&call.function.arguments)
-                    .unwrap_or_else(|_| Value::String(call.function.arguments.clone()));
-                FunctionCall::new(call.id, call.function.name, parsed)
-            })
-            .collect()
-    })
 }
 
 pub fn usage(usage: ChatCompletionUsage) -> TalosResult<Usage> {

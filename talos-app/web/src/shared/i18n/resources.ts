@@ -1,3 +1,4 @@
+import { tracingResources } from "./tracingResources";
 import { computerResources } from "./computerResources";
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
@@ -10,6 +11,7 @@ import { webPreviewResources } from "./webPreviewResources";
 
 export const resources = {
   en: {
+    tracing: tracingResources.en,
     computers: computerResources.en,
     common: {
       navigation: {
@@ -466,6 +468,7 @@ export const resources = {
     },
   },
   "zh-CN": {
+    tracing: tracingResources.zh,
     computers: computerResources["zh-CN"],
     common: {
       navigation: {

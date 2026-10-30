@@ -23,11 +23,7 @@ fn tool_history(continuation: ReasoningContinuation) -> ChatRequest {
             ChatMessage::user("use echo"),
             ChatMessage::assistant_with_tool_calls(
                 "",
-                vec![FunctionCall {
-                    id: "call-1".into(),
-                    name: "echo".into(),
-                    arguments: json!({"text":"hello"}),
-                }],
+                vec![FunctionCall::new("call-1", "echo", json!({"text":"hello"}))],
             )
             .with_reasoning_continuation(continuation),
             ChatMessage::tool("call-1", "echo", "hello"),
@@ -51,9 +47,17 @@ fn chat_replay_policies_change_only_outgoing_reasoning_and_preserve_tool_history
         (ReasoningReplay::ReasoningContent, Some("reasoning_content")),
         (ReasoningReplay::Omit, None),
     ] {
-        let (_, body) = provider(LlmProtocol::Chat, replay)
-            .body(request.clone(), false)
-            .unwrap();
+        let provider = provider(LlmProtocol::Chat, replay);
+        let bound = provider.bind_request(request.clone()).unwrap();
+        assert_eq!(
+            bound.messages[1].reasoning_continuation,
+            field.map(|_| ReasoningContinuation::Text("private thought".into()))
+        );
+        assert_eq!(
+            provider.bind_request(bound.clone()).unwrap().messages,
+            bound.messages
+        );
+        let (_, body) = provider.body(bound, false).unwrap();
         let mut assistant = body["messages"][1].clone();
         if let Some(field) = field {
             assert_eq!(

@@ -293,6 +293,7 @@ pub enum StopReason {
 
 #[derive(Clone)]
 pub struct InvocationContext {
+    pub trajectory: Option<std::sync::Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     pub session_id: String,
     pub user_id: String,
     pub invocation_id: String,

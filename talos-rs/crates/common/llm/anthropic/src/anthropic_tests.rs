@@ -81,12 +81,14 @@ fn anthropic_accepts_normal_sized_image_and_pdf_inputs() {
     let provider = AnthropicProvider::new(AnthropicConfig::new("test-api-key"));
     let attachments = [
         Attachment {
+            file_id: None,
             kind: AttachmentKind::Image,
             filename: "fire.png".to_string(),
             media_type: "image/png".to_string(),
             bytes: vec![0_u8; 218 * 1024].into(),
         },
         Attachment {
+            file_id: None,
             kind: AttachmentKind::File,
             filename: "paper.pdf".to_string(),
             media_type: "application/pdf".to_string(),

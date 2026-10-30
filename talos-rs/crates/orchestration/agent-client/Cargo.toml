@@ -7,6 +7,7 @@ license.workspace = true
 description = "Concrete Agent node and remote Harness clients"
 
 [dependencies]
+serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 sha2 = { workspace = true }
 subtle = { workspace = true }

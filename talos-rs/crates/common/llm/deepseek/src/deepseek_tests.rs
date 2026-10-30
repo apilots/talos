@@ -376,6 +376,36 @@ fn guidance_leaves_other_models_and_requests_without_tools_unchanged() {
     }
 }
 
+#[test]
+fn final_binding_includes_provider_guidance_without_changing_or_duplicating_wire_input() {
+    for protocol in [DeepSeekProtocol::Chat, DeepSeekProtocol::Messages] {
+        let provider =
+            DeepSeekProvider::new(DeepSeekConfig::new("test-key").with_protocol(protocol));
+        let mut request = argument_fidelity_request("deepseek-v4-flash");
+        request.temperature = Some(0.25);
+        request.top_p = Some(0.8);
+        let (_, expected) = provider.request_body(request.clone(), true).unwrap();
+        let bound = provider.bind_request(request.clone()).unwrap();
+        assert_eq!(bound.messages.len(), request.messages.len() + 1);
+        assert_eq!(bound.messages[2].content, TOOL_ARGUMENT_FIDELITY_GUIDANCE);
+        assert_eq!(
+            bound.messages[2].input_origin,
+            Some(MessageInputOrigin {
+                kind: MessageInputKind::System,
+                source: MessageInputSource::Runtime,
+            })
+        );
+        assert_eq!(bound.messages[3], request.messages[2]);
+        if protocol == DeepSeekProtocol::Chat {
+            assert_eq!(bound.temperature, None);
+            assert_eq!(bound.top_p, None);
+        }
+        let rebound = provider.bind_request(bound).unwrap();
+        let (_, actual) = provider.request_body(rebound, true).unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
 #[tokio::test]
 async fn chat_response_preserves_empty_or_nonempty_reasoning_and_literal_tool_arguments() {
     let arguments = serde_json::json!({

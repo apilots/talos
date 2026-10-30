@@ -25,6 +25,7 @@ mod projects;
 mod sessions;
 mod skills;
 mod state;
+mod trajectory;
 mod user_profile;
 mod workspace_docs;
 
@@ -206,6 +207,26 @@ impl HttpServer {
             )
             .merge(computers::routes())
             .merge(sync::routes())
+            .route(
+                "/v1/trajectory/capabilities",
+                get(trajectory::trajectory_capabilities),
+            )
+            .route(
+                "/v1/trajectory/turn/read",
+                post(trajectory::read_turn_trajectory),
+            )
+            .route(
+                "/v1/trajectory/request/read",
+                post(trajectory::read_request_trajectory),
+            )
+            .route(
+                "/v1/trajectory/tool/read",
+                post(trajectory::read_tool_trajectory),
+            )
+            .route(
+                "/v1/trajectory/payload/read",
+                post(trajectory::read_trajectory_payload),
+            )
             .route("/v1/sessions", get(list_sessions_handler))
             .route(
                 "/v1/projects",

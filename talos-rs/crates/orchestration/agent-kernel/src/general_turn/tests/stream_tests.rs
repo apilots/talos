@@ -292,6 +292,7 @@ async fn assistant_delta_without_block_fails() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect_err("orphan assistant delta should fail");
@@ -318,6 +319,7 @@ async fn reasoning_delta_without_block_fails() {
         ChatRequest::new_user("test", "test-model"),
         0,
         KernelModelCallMode::WorkingLoop,
+        None,
         None,
         None,
         None,
@@ -350,6 +352,7 @@ async fn tool_args_delta_without_block_fails() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect_err("orphan tool args should fail");
@@ -373,6 +376,7 @@ async fn completed_tool_call_without_name_fails() {
         ChatRequest::new_user("test", "test-model"),
         0,
         KernelModelCallMode::WorkingLoop,
+        None,
         None,
         None,
         None,
@@ -405,6 +409,7 @@ async fn assistant_delta_with_wrong_model_item_id_fails() {
         ChatRequest::new_user("test", "test-model"),
         0,
         KernelModelCallMode::WorkingLoop,
+        None,
         None,
         None,
         None,
@@ -450,6 +455,7 @@ async fn multiple_assistant_blocks_keep_separate_lifecycle() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect("multiple assistant blocks should stream");
@@ -480,6 +486,7 @@ async fn final_answer_then_tool_call_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        None,
         None,
         None,
     )
@@ -514,6 +521,7 @@ async fn final_answer_then_commentary_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        None,
         None,
         None,
     )
@@ -555,6 +563,7 @@ async fn final_answer_then_tool_args_fails_in_kernel() {
         Some("Summary".to_string()),
         None,
         None,
+        None,
     )
     .await
     .expect_err("tool args after final answer should fail");
@@ -587,6 +596,7 @@ async fn final_answer_then_reasoning_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        None,
         None,
         None,
     )
@@ -632,6 +642,7 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
         Some("Summary".to_string()),
         Some(&tx),
         None,
+        None,
     )
     .await
     .expect("explicit final after reasoning should stream");
@@ -662,6 +673,7 @@ async fn unknown_model_block_completion_fails() {
         ChatRequest::new_user("test", "test-model"),
         0,
         KernelModelCallMode::WorkingLoop,
+        None,
         None,
         None,
         None,
@@ -708,6 +720,7 @@ async fn repeated_completion_for_known_closed_reasoning_is_ignored() {
         KernelModelCallMode::WorkingLoop,
         None,
         Some(&tx),
+        None,
         None,
     )
     .await
@@ -757,6 +770,7 @@ async fn explicit_final_with_pending_tool_args_fails_by_policy() {
         Some("Summary".to_string()),
         None,
         None,
+        None,
     )
     .await
     .expect_err("final with active tool args should fail");
@@ -798,6 +812,7 @@ async fn explicit_final_closes_active_commentary_before_summary() {
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
         Some(&tx),
+        None,
         None,
     )
     .await
@@ -852,6 +867,7 @@ async fn tool_progress_delta_maps_to_kernel_tool_progress() {
         None,
         Some(&tx),
         None,
+        None,
     )
     .await
     .expect("tool progress should stream");
@@ -890,6 +906,7 @@ async fn tool_progress_without_active_tool_fails() {
         None,
         None,
         None,
+        None,
     )
     .await
     .expect_err("orphan tool progress should fail");
@@ -912,6 +929,7 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
         KernelModelCallMode::WorkingLoop,
         None,
         Some(&tx),
+        None,
         None,
     )
     .await
@@ -989,6 +1007,7 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
             execution_mode: ToolExecutionMode::Sequential,
             max_parallelism: 1,
             execution_context: ToolExecutionContext {
+                trajectory: None,
                 browser_uploads: Vec::new(),
                 session_id: "ordered-stream".to_string(),
                 turn_id: "turn-ordered-stream".to_string(),
@@ -1005,6 +1024,7 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
             },
             tool_registry: registry,
         }),
+        None,
     )
     .await
     .expect("streamed tools should execute");
@@ -1027,6 +1047,7 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
 
     let step = execute_general_turn_step(
         GeneralTurnStepRequest {
+            trajectory: None,
             round: 3,
             call_mode: KernelModelCallMode::WorkingLoop,
             model: "streaming-tool-execution".to_string(),
@@ -1080,6 +1101,7 @@ async fn test_execute_step_streams_direct_answer_as_final_answer_after_round_don
 
     let step = execute_general_turn_step(
         GeneralTurnStepRequest {
+            trajectory: None,
             round: 4,
             call_mode: KernelModelCallMode::WorkingLoop,
             model: "direct-streaming-answer".to_string(),
@@ -1136,6 +1158,7 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
 
     let step = execute_general_turn_step(
         GeneralTurnStepRequest {
+            trajectory: None,
             round: 5,
             call_mode: KernelModelCallMode::WorkingLoop,
             model: "explicit-final-model-block".to_string(),
@@ -1231,74 +1254,4 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     assert_eq!(phases, vec![AssistantTextPhase::Unknown]);
     assert_eq!(committed_phases, vec![AssistantTextPhase::FinalAnswer]);
     assert_eq!(deltas, vec!["Working answer."]);
-}
-
-#[tokio::test]
-async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_events() {
-    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let file_path = workspace_dir.join("sample.txt");
-    std::fs::write(&file_path, "streamed content").expect("sample file should exist");
-
-    let provider = Arc::new(StreamingToolExecutionProvider {
-        path: file_path.to_string_lossy().to_string(),
-    });
-    let request = ChatRequest::new_user("Read the sample file", "streaming-tool-execution");
-    let registry = Arc::new(ToolRegistry::new());
-    register_core_local_tools(registry.as_ref());
-    let execution_context = ToolExecutionContext {
-        browser_uploads: Vec::new(),
-        session_id: "agent-a1".to_string(),
-        turn_id: "turn-1".to_string(),
-        agent_id: "agent-a1".to_string(),
-        workspace_id: "default".to_string(),
-        user_id: "talos".to_string(),
-        project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
-        dynamic_tool_results: std::collections::HashMap::new(),
-        user_action_responses: std::collections::HashMap::new(),
-        sandbox_approval_fingerprints: std::collections::HashMap::new(),
-        command_risk_assessor: None,
-        run_tasks: crate::test_run_tasks(),
-    };
-    let (tx, mut rx) = mpsc::channel(16);
-
-    let result = stream_round(
-        provider,
-        request,
-        0,
-        KernelModelCallMode::WorkingLoop,
-        None,
-        Some(&tx),
-        Some(StreamingToolExecutionConfig {
-            execution_mode: ToolExecutionMode::Parallel,
-            max_parallelism: 3,
-            execution_context,
-            tool_registry: registry,
-        }),
-    )
-    .await
-    .expect("stream round should succeed");
-
-    assert_eq!(result.tool_calls.len(), 1);
-    assert_eq!(result.streamed_tool_outputs.len(), 1);
-
-    let mut saw_args_delta = false;
-    let mut saw_queued = false;
-    let mut saw_executing = false;
-    let mut saw_result = false;
-    while let Ok(event) = rx.try_recv() {
-        match event.payload {
-            AgentKernelEventPayload::ToolArgsDelta(_) => saw_args_delta = true,
-            AgentKernelEventPayload::ToolQueued(_) => saw_queued = true,
-            AgentKernelEventPayload::ToolExecuting(_) => saw_executing = true,
-            AgentKernelEventPayload::ToolResult(_) => saw_result = true,
-            _ => {}
-        }
-    }
-
-    assert!(saw_args_delta);
-    assert!(saw_queued);
-    assert!(saw_executing);
-    assert!(saw_result);
 }

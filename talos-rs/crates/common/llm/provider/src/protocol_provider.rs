@@ -267,6 +267,20 @@ fn wire_effort(effort: Option<ReasoningEffort>, protocol: LlmProtocol) -> String
 
 #[async_trait]
 impl LlmProvider for ProtocolProvider {
+    fn bind_request(&self, mut request: ChatRequest) -> TalosResult<ChatRequest> {
+        if self.protocol == LlmProtocol::Chat
+            && self
+                .models
+                .get(&request.model)
+                .is_some_and(|model| model.reasoning_replay == ReasoningReplay::Omit)
+        {
+            for message in &mut request.messages {
+                message.reasoning_continuation = None;
+            }
+        }
+        Ok(request)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }

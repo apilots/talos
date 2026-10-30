@@ -43,6 +43,16 @@ pub enum ClientMethod {
     ComputerRotateCredential,
     #[serde(rename = "profile/read")]
     ProfileRead,
+    #[serde(rename = "trajectory/capabilities")]
+    TrajectoryCapabilities,
+    #[serde(rename = "trajectory/readTurn")]
+    TrajectoryReadTurn,
+    #[serde(rename = "trajectory/readRequest")]
+    TrajectoryReadRequest,
+    #[serde(rename = "trajectory/readTool")]
+    TrajectoryReadTool,
+    #[serde(rename = "trajectory/readPayload")]
+    TrajectoryReadPayload,
     #[serde(rename = "session/list")]
     SessionList,
     #[serde(rename = "session/get")]
@@ -233,6 +243,11 @@ impl ClientMethod {
             Self::ComputerSetStatus => "computer/setStatus",
             Self::ComputerRotateCredential => "computer/rotateCredential",
             Self::ProfileRead => "profile/read",
+            Self::TrajectoryCapabilities => "trajectory/capabilities",
+            Self::TrajectoryReadTurn => "trajectory/readTurn",
+            Self::TrajectoryReadRequest => "trajectory/readRequest",
+            Self::TrajectoryReadTool => "trajectory/readTool",
+            Self::TrajectoryReadPayload => "trajectory/readPayload",
             Self::SessionList => "session/list",
             Self::SessionGet => "session/get",
             Self::SessionPatch => "session/patch",
@@ -350,6 +365,11 @@ impl FromStr for ClientMethod {
             "computer/setStatus" => Ok(Self::ComputerSetStatus),
             "computer/rotateCredential" => Ok(Self::ComputerRotateCredential),
             "profile/read" => Ok(Self::ProfileRead),
+            "trajectory/capabilities" => Ok(Self::TrajectoryCapabilities),
+            "trajectory/readTurn" => Ok(Self::TrajectoryReadTurn),
+            "trajectory/readRequest" => Ok(Self::TrajectoryReadRequest),
+            "trajectory/readTool" => Ok(Self::TrajectoryReadTool),
+            "trajectory/readPayload" => Ok(Self::TrajectoryReadPayload),
             "session/list" => Ok(Self::SessionList),
             "session/get" => Ok(Self::SessionGet),
             "session/patch" => Ok(Self::SessionPatch),

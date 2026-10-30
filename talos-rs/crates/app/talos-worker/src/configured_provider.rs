@@ -27,6 +27,9 @@ impl ConfiguredProvider {
     }
 
     fn prepare(&self, mut request: ChatRequest) -> TalosResult<ChatRequest> {
+        if request.configured_parameters_applied {
+            return Ok(request);
+        }
         let model = self.models.get(&request.model);
         if let Some(model) = model {
             model.validate_reasoning_effort(request.reasoning_effort)?;
@@ -43,12 +46,17 @@ impl ConfiguredProvider {
         if model.is_some_and(|model| model.reasoning_efforts.as_ref().is_some_and(Vec::is_empty)) {
             request.reasoning_effort = None;
         }
+        request.configured_parameters_applied = true;
         Ok(request)
     }
 }
 
 #[async_trait::async_trait]
 impl LlmProvider for ConfiguredProvider {
+    fn bind_request(&self, request: ChatRequest) -> TalosResult<ChatRequest> {
+        self.inner.bind_request(self.prepare(request)?)
+    }
+
     fn name(&self) -> &str {
         &self.id
     }

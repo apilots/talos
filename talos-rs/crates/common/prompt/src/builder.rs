@@ -338,6 +338,12 @@ pub fn render_retrieved_memories(
     max_items: usize,
     max_chars: usize,
 ) -> Option<ChatMessage> {
-    assembler::build_retrieved_memories_section(memories, max_items, max_chars)
-        .map(|section| ChatMessage::system(renderer::render_section_text(&section)))
+    assembler::build_retrieved_memories_section(memories, max_items, max_chars).map(|section| {
+        ChatMessage::system(renderer::render_section_text(&section)).with_input_origin(
+            talos_llm_provider::MessageInputOrigin {
+                kind: talos_llm_provider::MessageInputKind::Context,
+                source: talos_llm_provider::MessageInputSource::Memory,
+            },
+        )
+    })
 }

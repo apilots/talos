@@ -1,4 +1,5 @@
 use super::*;
+use talos_llm_provider::{MessageInputKind, MessageInputOrigin, MessageInputSource};
 
 #[tokio::test]
 
@@ -18,6 +19,13 @@ async fn test_prepended_user_context_message_renders_as_user_message() {
         .expect("prepended user context should render as user message");
 
     assert!(prepended.content.contains("<system-reminder>"));
+    assert_eq!(
+        prepended.input_origin,
+        Some(MessageInputOrigin {
+            kind: MessageInputKind::Context,
+            source: MessageInputSource::Runtime,
+        })
+    );
 }
 
 #[tokio::test]
@@ -36,6 +44,13 @@ async fn test_dynamic_suffix_renders_as_system_message() {
         .expect("dynamic suffix message should exist");
 
     assert_eq!(dynamic.role, Role::System);
+    assert_eq!(
+        dynamic.input_origin,
+        Some(MessageInputOrigin {
+            kind: MessageInputKind::Context,
+            source: MessageInputSource::Mixed,
+        })
+    );
 }
 
 #[tokio::test]
@@ -53,6 +68,13 @@ async fn test_appended_system_context_renders_as_system_message() {
         .expect("appended system context should exist");
 
     assert_eq!(appended.role, Role::System);
+    assert_eq!(
+        appended.input_origin,
+        Some(MessageInputOrigin {
+            kind: MessageInputKind::Context,
+            source: MessageInputSource::Runtime,
+        })
+    );
 }
 
 #[tokio::test]
@@ -84,6 +106,13 @@ async fn test_rendered_cache_breakpoints_stay_before_user_input() {
         rendered.last().expect("user message should exist").role,
         Role::User
     );
+    assert_eq!(
+        rendered.last().unwrap().input_origin,
+        Some(MessageInputOrigin {
+            kind: MessageInputKind::User,
+            source: MessageInputSource::User,
+        })
+    );
 }
 
 #[tokio::test]
@@ -108,6 +137,24 @@ async fn test_static_prefix_and_bootstrap_blocks_are_cacheable() {
         .find(|block| block.kind == PromptBlockKind::StaticPrefix)
         .expect("static prefix should exist");
     assert!(static_block.cache_scope.is_cacheable());
+    assert_eq!(
+        static_block.input_origin,
+        Some(MessageInputOrigin {
+            kind: MessageInputKind::System,
+            source: MessageInputSource::Prompt,
+        })
+    );
+    let bootstrap = blocks
+        .iter()
+        .find(|block| block.cache_scope == PromptBlockCacheScope::ScopedReusable)
+        .expect("workspace bootstrap should keep its own cache group");
+    assert_eq!(
+        bootstrap.input_origin,
+        Some(MessageInputOrigin {
+            kind: MessageInputKind::System,
+            source: MessageInputSource::Workspace,
+        })
+    );
 }
 
 #[tokio::test]

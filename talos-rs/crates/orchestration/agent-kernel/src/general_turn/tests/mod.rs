@@ -1114,6 +1114,7 @@ fn build_ctx_with_stream_for_session(
     let session_id = session_id.into();
     let kernel_state = Arc::new(TestMemoryStore::new());
     InvocationContext {
+        trajectory: None,
         session_id: session_id.clone(),
         user_id: "u1".to_string(),
         invocation_id: "i1".to_string(),

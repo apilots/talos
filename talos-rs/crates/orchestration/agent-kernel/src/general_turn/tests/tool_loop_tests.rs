@@ -736,6 +736,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let provider = Arc::new(PolicyStepProvider::default());
     let policy = Arc::new(RecordingStepPolicy::default());
     let prepared = PreparedGeneralTurn {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
@@ -817,7 +818,9 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
     let provider = Arc::new(DynamicResumeProvider::default());
+    let recorder = Arc::new(PreparedToolRecorder::default());
     let prepared = PreparedGeneralTurn {
+        trajectory: Some(recorder.clone()),
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
@@ -910,6 +913,10 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
             if call_id == "call_dynamic" && tool_name == "echo_test"
     )));
     assert_eq!(provider.round.load(Ordering::SeqCst), 1);
+    let prepared = recorder.0.lock().unwrap();
+    assert_eq!(prepared.len(), 1);
+    assert_eq!(prepared[0].tool_call_id.as_deref(), Some("call_dynamic"));
+    assert!(prepared[0].content.contains("dynamic pong"));
 }
 
 #[tokio::test]
@@ -954,6 +961,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
     ));
 
     let prepared = PreparedGeneralTurn {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s-question".to_string(),
         user_id: "u1".to_string(),
@@ -1118,4 +1126,20 @@ fn question_resume(
         replay_dynamic_tool_results: HashMap::new(),
         execution_metrics,
     })
+}
+
+#[derive(Debug, Default)]
+struct PreparedToolRecorder(Mutex<Vec<ChatMessage>>);
+impl crate::trajectory::KernelTrajectoryRecorder for PreparedToolRecorder {
+    fn prepared_tool_result(&self, message: &ChatMessage) {
+        self.0.lock().unwrap().push(message.clone());
+    }
+    fn start_model(
+        &self,
+        _: crate::trajectory::KernelObservedPurpose,
+        _: &str,
+        _: &ChatRequest,
+    ) -> Option<Arc<dyn crate::trajectory::KernelModelObservation>> {
+        None
+    }
 }

@@ -79,6 +79,7 @@ fn test_bailian_config_builder() {
 fn test_bailian_attachment_validation_accepts_images_and_rejects_files() {
     let provider = BailianProvider::new(BailianConfig::new("test-key"));
     let image = Attachment {
+        file_id: None,
         kind: AttachmentKind::Image,
         filename: "pixel.png".to_string(),
         media_type: "image/png".to_string(),
@@ -92,6 +93,7 @@ fn test_bailian_attachment_validation_accepts_images_and_rejects_files() {
         .validate_attachments(
             "qwen3.7-plus",
             &[Attachment {
+                file_id: None,
                 kind: AttachmentKind::File,
                 filename: "note.pdf".to_string(),
                 media_type: "application/pdf".to_string(),

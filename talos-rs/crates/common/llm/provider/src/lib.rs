@@ -6,11 +6,13 @@ mod error;
 pub use error::{http_rejection_error, http_response_error, transport_error};
 mod http;
 pub use http::{ProviderHttpClients, ProviderHttpTimeouts};
+mod message;
 pub mod protocols;
 mod router;
 
 pub use api::*;
 pub use attachment::*;
+pub use message::*;
 pub use router::*;
 
 #[cfg(test)]

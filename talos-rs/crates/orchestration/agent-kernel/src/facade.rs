@@ -50,13 +50,27 @@ pub struct AgentKernelDependencies {
 /// terminal Agent event, product Session lifecycle, or persistence API.
 #[derive(Clone)]
 pub struct AgentKernel {
+    trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     dependencies: AgentKernelDependencies,
 }
 
 impl AgentKernel {
     /// Create one Kernel facade from already validated execution dependencies.
     pub fn new(dependencies: AgentKernelDependencies) -> Self {
-        Self { dependencies }
+        Self {
+            dependencies,
+            trajectory: None,
+        }
+    }
+
+    /// Install invocation-local observation without changing canonical events.
+    #[must_use]
+    pub fn with_trajectory_recorder(
+        mut self,
+        recorder: Arc<dyn crate::trajectory::KernelTrajectoryRecorder>,
+    ) -> Self {
+        self.trajectory = Some(recorder);
+        self
     }
 
     /// Start one Kernel invocation and return its event/result channels.
@@ -68,6 +82,7 @@ impl AgentKernel {
         let (event_tx, event_rx) = mpsc::channel(KERNEL_EVENT_CAPACITY);
         let (kernel_event_tx, mut kernel_event_rx) = mpsc::channel(KERNEL_EVENT_CAPACITY);
 
+        let trajectory = self.trajectory.clone();
         let dependencies = self.dependencies.clone();
         let llm_provider = dependencies
             .llm_provider_router
@@ -86,6 +101,7 @@ impl AgentKernel {
                     Ok(execution) => execution,
                     Err(error) => return RunTaskCompletion::Confirmed(Err(error)),
                 };
+                context.trajectory = trajectory;
                 let input = context.input.clone();
                 let mut emitted_tool_calls = HashSet::new();
                 let mut emitted_tool_results = HashSet::new();
@@ -229,6 +245,7 @@ impl AgentKernelRequest {
             .load_session(&session_id, None, None)
             .await?;
         let context = InvocationContext {
+            trajectory: None,
             session_id: session_id.clone(),
             user_id,
             invocation_id: turn_id,
