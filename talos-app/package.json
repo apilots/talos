@@ -1,6 +1,6 @@
 {
   "name": "talos-app",
-  "version": "0.1.15-SNAPSHOT",
+  "version": "0.1.15",
   "license": "Apache-2.0",
   "private": true,
   "packageManager": "pnpm@9.14.4",

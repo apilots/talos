@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-client"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-pb",
  "agent-protocol",
@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "agent-pb"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "prost",
  "tonic",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "agent-protocol"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-pb",
  "prost",
@@ -167,7 +167,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app-server"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "talos-base",
  "tempfile",
@@ -6184,7 +6184,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 
 [[package]]
 name = "talos-agent"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-client",
  "agent-pb",
@@ -6217,7 +6217,7 @@ dependencies = [
 
 [[package]]
 name = "talos-agent-api"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -6229,7 +6229,7 @@ dependencies = [
 
 [[package]]
 name = "talos-agent-kernel"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6253,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "talos-agent-provider-kernel"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6279,7 +6279,7 @@ dependencies = [
 
 [[package]]
 name = "talos-app-protocol"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -6295,7 +6295,7 @@ dependencies = [
 
 [[package]]
 name = "talos-app-server"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6324,7 +6324,7 @@ dependencies = [
 
 [[package]]
 name = "talos-app-server-test-client"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6339,7 +6339,7 @@ dependencies = [
 
 [[package]]
 name = "talos-auth"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -6362,7 +6362,7 @@ dependencies = [
 
 [[package]]
 name = "talos-automation"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6376,7 +6376,7 @@ dependencies = [
 
 [[package]]
 name = "talos-base"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-client",
  "agent-pb",
@@ -6437,7 +6437,7 @@ dependencies = [
 
 [[package]]
 name = "talos-browser"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6463,7 +6463,7 @@ dependencies = [
 
 [[package]]
 name = "talos-channel"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6507,7 +6507,7 @@ dependencies = [
 
 [[package]]
 name = "talos-config"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "chrono-tz",
  "config",
@@ -6529,7 +6529,7 @@ dependencies = [
 
 [[package]]
 name = "talos-coordinator"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-protocol",
  "async-trait",
@@ -6546,7 +6546,7 @@ dependencies = [
 
 [[package]]
 name = "talos-error"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
@@ -6557,7 +6557,7 @@ dependencies = [
 
 [[package]]
 name = "talos-fs"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "atomic-write-file",
  "cap-std",
@@ -6572,7 +6572,7 @@ dependencies = [
 
 [[package]]
 name = "talos-gateway"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6605,7 +6605,7 @@ dependencies = [
 
 [[package]]
 name = "talos-gateway-http"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-protocol",
  "async-trait",
@@ -6653,7 +6653,7 @@ dependencies = [
 
 [[package]]
 name = "talos-guard-task"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "talos-error",
  "talos-logging",
@@ -6664,7 +6664,7 @@ dependencies = [
 
 [[package]]
 name = "talos-knowledge-format"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "okf-core",
  "okf-validator",
@@ -6674,7 +6674,7 @@ dependencies = [
 
 [[package]]
 name = "talos-linux-sandbox"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "libc",
  "seccompiler",
@@ -6686,7 +6686,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-anthropic"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6701,7 +6701,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-bailian"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6716,7 +6716,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-deepseek"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -6729,7 +6729,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-ollama"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -6741,7 +6741,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-openai"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6756,7 +6756,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-openrouter"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -6769,7 +6769,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-provider"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6789,7 +6789,7 @@ dependencies = [
 
 [[package]]
 name = "talos-logging"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6804,7 +6804,7 @@ dependencies = [
 
 [[package]]
 name = "talos-macos-sandbox"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "talos-sandbox-spi",
  "tempfile",
@@ -6812,7 +6812,7 @@ dependencies = [
 
 [[package]]
 name = "talos-mcp"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6837,7 +6837,7 @@ dependencies = [
 
 [[package]]
 name = "talos-memory"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6852,7 +6852,7 @@ dependencies = [
 
 [[package]]
 name = "talos-plugin"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "http 1.4.0",
@@ -6873,7 +6873,7 @@ dependencies = [
 
 [[package]]
 name = "talos-prompt"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6894,7 +6894,7 @@ dependencies = [
 
 [[package]]
 name = "talos-router"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6909,7 +6909,7 @@ dependencies = [
 
 [[package]]
 name = "talos-run-control"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "talos-types",
  "tokio",
@@ -6919,7 +6919,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sandbox-spi"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -6927,7 +6927,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sdk"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6946,7 +6946,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sdk-embedded"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6963,7 +6963,7 @@ dependencies = [
 
 [[package]]
 name = "talos-server"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "talos-base",
  "tokio",
@@ -6971,7 +6971,7 @@ dependencies = [
 
 [[package]]
 name = "talos-service"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-client",
  "agent-protocol",
@@ -7025,7 +7025,7 @@ dependencies = [
 
 [[package]]
 name = "talos-skills"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "serde",
  "serde_json",
@@ -7038,7 +7038,7 @@ dependencies = [
 
 [[package]]
 name = "talos-storage"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "serde",
@@ -7053,7 +7053,7 @@ dependencies = [
 
 [[package]]
 name = "talos-store"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-protocol",
  "async-trait",
@@ -7082,7 +7082,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sync"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "futures-util",
  "loro",
@@ -7145,7 +7145,7 @@ dependencies = [
 
 [[package]]
 name = "talos-system-info"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "sysinfo",
  "talos-error",
@@ -7156,7 +7156,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tools"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7194,7 +7194,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tools-policy"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "async-trait",
  "serde",
@@ -7207,7 +7207,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tools-sandbox"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "libc",
  "serde",
@@ -7225,7 +7225,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tui"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "arboard",
  "async-trait",
@@ -7253,7 +7253,7 @@ dependencies = [
 
 [[package]]
 name = "talos-types"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "bytes",
  "chrono",
@@ -7270,7 +7270,7 @@ dependencies = [
 
 [[package]]
 name = "talos-upgrade"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "chrono",
  "semver",
@@ -7295,14 +7295,14 @@ dependencies = [
 
 [[package]]
 name = "talos-windows-sandbox"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "talos-sandbox-spi",
 ]
 
 [[package]]
 name = "talos-worker"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-client",
  "agent-pb",
@@ -7347,7 +7347,7 @@ dependencies = [
 
 [[package]]
 name = "talos-worker-bin"
-version = "0.1.15-SNAPSHOT"
+version = "0.1.15"
 dependencies = [
  "agent-client",
  "agent-protocol",
