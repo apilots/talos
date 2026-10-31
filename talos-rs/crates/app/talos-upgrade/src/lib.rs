@@ -9,6 +9,7 @@ use runner::UpgradeRunner;
 
 mod database_migration;
 mod dream_memory;
+mod execution_metrics;
 mod history_repair_0_1_8;
 mod preparation;
 mod runner;
@@ -99,6 +100,7 @@ async fn run_startup_upgrades_for_version(
         dream_memory::upgrade_task(),
         workspace_layout::upgrade_task(),
         history_repair_0_1_8::upgrade_task(),
+        execution_metrics::upgrade_task(),
     ];
     let paths = params.config.talos_paths();
     let context = runner::UpgradeContext {

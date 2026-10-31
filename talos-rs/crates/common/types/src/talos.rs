@@ -10,6 +10,20 @@ pub use crate::event_api::{
     ContextCompactionTrigger,
 };
 
+/// Framework-owned tool task facts, persisted with the canonical tool result.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolExecutionMetrics {
+    #[ts(type = "number | null")]
+    pub queued_at_ms: Option<i64>,
+    #[ts(type = "number | null")]
+    pub started_at_ms: Option<i64>,
+    #[ts(type = "number | null")]
+    pub finished_at_ms: Option<i64>,
+    pub queue_duration_ms: Option<f64>,
+    pub execution_duration_ms: Option<f64>,
+}
+
 /// Talos gateway protocol types shared by server and client components.
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema, TS)]

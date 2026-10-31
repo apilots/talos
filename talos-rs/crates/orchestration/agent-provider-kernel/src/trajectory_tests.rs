@@ -52,6 +52,7 @@ fn done(observation: &dyn KernelModelObservation) {
         }),
     });
 }
+
 #[tokio::test]
 async fn invocation_handoff_saves_each_response_once_and_reuses_equal_options() {
     let (history, capture) = setup();
@@ -128,6 +129,9 @@ async fn refused_input_body_still_records_real_terminal_usage_and_timing() {
     assert!(detail.parameters.is_some());
     assert_eq!(
         detail.request.call_records[0]
+            .metrics
+            .as_ref()
+            .unwrap()
             .usage
             .as_ref()
             .unwrap()
@@ -135,11 +139,10 @@ async fn refused_input_body_still_records_real_terminal_usage_and_timing() {
         12
     );
     assert!(detail.request.call_records[0]
-        .timing
+        .metrics
         .as_ref()
         .unwrap()
-        .interval
-        .ended_offset_ms
+        .finished_at_ms
         .is_some());
 }
 #[tokio::test]

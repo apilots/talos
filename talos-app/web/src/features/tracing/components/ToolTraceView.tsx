@@ -117,25 +117,21 @@ export function ToolTraceView({
     return (
       <>
         {association}
-        {detail?.tool.intervals?.length ? (
-          detail.tool.intervals.map((p, index) => (
-            <dl className="tracing-timing" key={index}>
-              <dt>{t(p.kind)}</dt>
-              <dd>{milliseconds(p.interval.elapsedMs, i18n.language)}</dd>
-              <dt>{t("segment")}</dt>
-              <dd>{p.interval.segmentId}</dd>
-              <dt>{t("intervalOffsets")}</dt>
-              <dd>
-                +{milliseconds(p.interval.startedOffsetMs, i18n.language)} →{" "}
-                {p.interval.endedOffsetMs == null
-                  ? "—"
-                  : `+${milliseconds(p.interval.endedOffsetMs, i18n.language)}`}
-              </dd>
-            </dl>
-          ))
-        ) : (
-          <p>{t("noTiming")}</p>
-        )}
+        {canonical.result?.metrics ? (
+          <dl className="tracing-timing">
+            <dt>{t("execution")}</dt>
+            <dd>{milliseconds(canonical.result.metrics.executionDurationMs, i18n.language)}</dd>
+            <dt>{t("queue")}</dt>
+            <dd>{milliseconds(canonical.result.metrics.queueDurationMs, i18n.language)}</dd>
+            <dt>{t("queuedAt")}</dt>
+            <dd>{canonical.result.metrics.queuedAtMs == null ? "—" : new Date(canonical.result.metrics.queuedAtMs).toLocaleString(i18n.language)}</dd>
+            <dt>{t("clockStartedAt")}</dt>
+            <dd>{canonical.result.metrics.startedAtMs == null ? "—" : new Date(canonical.result.metrics.startedAtMs).toLocaleString(i18n.language)}</dd>
+            <dt>{t("callEnd")}</dt>
+            <dd>{canonical.result.metrics.finishedAtMs == null ? "—" : new Date(canonical.result.metrics.finishedAtMs).toLocaleString(i18n.language)}</dd>
+          </dl>
+        ) : <p>{t("noTiming")}</p>}
+
       </>
     );
   const usage = detail?.usages?.find((u) => u.modelRequestId === consumerId);

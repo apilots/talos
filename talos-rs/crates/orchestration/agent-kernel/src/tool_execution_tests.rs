@@ -309,7 +309,6 @@ async fn tool_execution_context_propagates_the_trusted_agent_id() {
         observed_agent_id: observed_agent_id.clone(),
     }));
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -355,7 +354,6 @@ async fn tool_execution_context_propagates_resolved_permission_mode() {
     kernel_config.tools.sandbox_policy.user_permission_mode =
         talos_config::ToolUserPermissionModeConfig::AskForApproval;
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -408,6 +406,12 @@ async fn sequential_executor_stops_after_pending_user_action() {
 
     assert_eq!(outputs.len(), 1);
     assert!(outputs[0].outcome.pending().is_some());
+    assert!(outputs[0]
+        .metrics
+        .as_ref()
+        .unwrap()
+        .execution_duration_ms
+        .is_some());
     assert_eq!(executions.load(Ordering::SeqCst), 0);
 }
 
@@ -437,6 +441,13 @@ async fn streaming_scheduler_stops_queued_calls_after_pending_user_action() {
 
     assert_eq!(outputs.len(), 1);
     assert!(outputs[0].output.outcome.pending().is_some());
+    assert!(outputs[0]
+        .output
+        .metrics
+        .as_ref()
+        .unwrap()
+        .execution_duration_ms
+        .is_some());
     assert_eq!(executions.load(Ordering::SeqCst), 0);
     assert_eq!(scheduler.pending_calls.len(), 1);
     assert_eq!(scheduler.pending_calls[0].input.call_id, "call-counting");
@@ -444,7 +455,6 @@ async fn streaming_scheduler_stops_queued_calls_after_pending_user_action() {
 
 fn test_execution_context() -> ToolExecutionContext {
     ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -662,7 +672,6 @@ async fn test_parallel_tool_executor_preserves_input_order() {
     }));
     let executor = ParallelToolExecutor;
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -707,6 +716,14 @@ async fn test_parallel_tool_executor_preserves_input_order() {
     assert_eq!(outputs[0].tool_name, "Read");
     assert_eq!(outputs[1].tool_name, "Read");
     assert!(max_concurrent.load(Ordering::SeqCst) >= 2);
+    for output in &outputs {
+        let metrics = output.metrics.as_ref().expect("completed task metrics");
+        assert!(metrics.queued_at_ms.is_some());
+        assert!(metrics.started_at_ms.is_some());
+        assert!(metrics.finished_at_ms.is_some());
+        assert!(metrics.queue_duration_ms.is_some());
+        assert!(metrics.execution_duration_ms.unwrap() > 0.0);
+    }
 }
 
 #[tokio::test]
@@ -727,7 +744,6 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
 
     let executor = ParallelToolExecutor;
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -778,7 +794,6 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
     register_core_local_tools(&registry);
     let (stream_tx, mut stream_rx) = mpsc::channel(16);
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -843,7 +858,6 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
         max_concurrent: max_concurrent.clone(),
     }));
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),

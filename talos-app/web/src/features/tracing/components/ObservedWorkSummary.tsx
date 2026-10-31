@@ -1,17 +1,19 @@
 import type { AppProtocol as API } from "@talos/sdk-core";
 import { useTranslation } from "react-i18next";
-import { observedTotals } from "../model/selectors";
+import { observedTotals, type TraceTurn } from "../model/selectors";
 import { milliseconds, number } from "../model/formatters";
 export function ObservedWorkSummary({
   entries,
   ordinal,
+  turn,
 }: {
   entries: API.TrajectoryEntry[];
   ordinal: number;
+  turn: TraceTurn;
 }) {
   const { t, i18n } = useTranslation("tracing");
   if (!entries.length) return null;
-  const totals = observedTotals(entries),
+  const totals = observedTotals(entries, turn),
     partial = totals.partial;
   return (
     <div className="tracing-original-metrics tracing-observed-metrics">

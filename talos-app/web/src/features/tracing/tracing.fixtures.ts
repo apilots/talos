@@ -67,19 +67,11 @@ export const request: API.ModelRequestTrace = {
       callRecordId: "a",
       ordinal: 1,
       observedState: "completed",
-      timing: {
-        interval: {
-          segmentId: "seg",
-          startedOffsetMs: 0,
-          endedOffsetMs: 1000,
-          elapsedMs: 1000,
-        },
-        firstOutputOffsetMs: 100,
-        lastOutputOffsetMs: 900,
-        ttftMs: 100,
-        generationMs: 800,
+      metrics: {
+        segmentId: "seg", startedAtMs: 100000, finishedAtMs: 101000,
+        executionDurationMs: 1000, firstOutputAtMs: 100100, lastOutputAtMs: 100900,
+        ttftMs: 100, generationMs: 800, usage,
       },
-      usage,
       finishReason: "stop",
       error: null,
     },

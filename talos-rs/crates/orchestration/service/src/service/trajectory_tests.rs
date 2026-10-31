@@ -134,8 +134,7 @@ async fn terminal_pages_preserve_utf8_raw_arguments_scope_and_immutable_position
         call_record_id: "attempt".into(),
         ordinal: 1,
         observed_state: ModelCallState::Completed,
-        timing: None,
-        usage: None,
+        metrics: None,
         finish_reason: None,
         error: None,
     }];

@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use talos_config::{AgentKernelConfig, TalosPaths};
 use talos_error::{TalosError, TalosResult};
 use talos_memory::MemoryScope;
@@ -16,13 +17,12 @@ use talos_tools::{
     ToolExecutorPort, ToolInvocation, ToolProgressEmitter, ToolProgressEvent,
     ToolSandboxEnvironment,
 };
-use talos_types::UserActionResponse;
+use talos_types::{ToolExecutionMetrics, UserActionResponse};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 #[derive(Clone)]
 pub struct ToolExecutionContext {
-    pub trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,
     pub turn_id: String,
@@ -73,6 +73,23 @@ pub struct ToolExecutionOutput {
     pub outcome: ToolDispatchOutcome,
     #[serde(default)]
     pub is_error: bool,
+    #[serde(default)]
+    pub metrics: Option<ToolExecutionMetrics>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ToolQueuedAt {
+    timestamp_ms: i64,
+    instant: Instant,
+}
+
+impl ToolQueuedAt {
+    fn now() -> Self {
+        Self {
+            timestamp_ms: chrono::Utc::now().timestamp_millis(),
+            instant: Instant::now(),
+        }
+    }
 }
 
 #[async_trait]
@@ -223,7 +240,10 @@ async fn execute_single_tool_call(
     execution_context: &ToolExecutionContext,
     call: ToolExecutionInput,
     progress_emitter: Option<ToolProgressEmitter>,
+    queued_at: ToolQueuedAt,
 ) -> ToolExecutionOutput {
+    let started = Instant::now();
+    let started_at_ms = chrono::Utc::now().timestamp_millis();
     let tool_context = build_tool_context(
         execution_context,
         registry.as_ref(),
@@ -236,8 +256,6 @@ async fn execute_single_tool_call(
                 execute_tool_invocation(
                     registry,
                     &execution_context.run_tasks,
-                    execution_context.trajectory.clone(),
-                    call.call_id.clone(),
                     invocation,
                     tool_context,
                 )
@@ -247,6 +265,13 @@ async fn execute_single_tool_call(
         },
         Err(error) => Err(error.into()),
     };
+    let metrics = Some(ToolExecutionMetrics {
+        queued_at_ms: Some(queued_at.timestamp_ms),
+        started_at_ms: Some(started_at_ms),
+        finished_at_ms: Some(chrono::Utc::now().timestamp_millis()),
+        queue_duration_ms: Some(started.duration_since(queued_at.instant).as_secs_f64() * 1000.0),
+        execution_duration_ms: Some(started.elapsed().as_secs_f64() * 1000.0),
+    });
     match result {
         Ok(payload) => ToolExecutionOutput {
             call_id: call.call_id,
@@ -257,6 +282,7 @@ async fn execute_single_tool_call(
                 .map(|item| item.is_error())
                 .unwrap_or(false),
             outcome: payload,
+            metrics,
         },
         Err(error) => {
             talos_logging::report_error(error.error());
@@ -266,6 +292,7 @@ async fn execute_single_tool_call(
                 arguments: call.arguments,
                 outcome: error.into_outcome(),
                 is_error: true,
+                metrics,
             }
         }
     }
@@ -274,8 +301,6 @@ async fn execute_single_tool_call(
 async fn execute_tool_invocation(
     registry: Arc<dyn ToolExecutorPort>,
     run_tasks: &RunTaskGroup,
-    trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
-    call_id: String,
     invocation: ToolInvocation,
     tool_context: talos_tools::ToolContext,
 ) -> ToolDispatchResult<ToolDispatchOutcome> {
@@ -283,22 +308,9 @@ async fn execute_tool_invocation(
         let tool_context = tool_context.with_cancellation(
             talos_tools::InvocationCancellation::new(cancellation.requested()),
         );
-        if let Some(observer) = &trajectory {
-            observer.tool_started(&call_id);
-        }
         let result = registry
             .execute_invocation_with_context(invocation, tool_context)
             .await;
-        if let Some(observer) = &trajectory {
-            observer.tool_finished(
-                &call_id,
-                if matches!(&result, Ok(ToolDispatchOutcome::Pending { .. })) {
-                    crate::trajectory::KernelToolEnd::Waiting
-                } else {
-                    crate::trajectory::KernelToolEnd::Completed
-                },
-            );
-        }
         if result.as_ref().is_err_and(|failure| {
             failure
                 .error()
@@ -335,10 +347,16 @@ impl ToolExecutor for SequentialToolExecutor {
         calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
         let mut outputs = Vec::with_capacity(calls.len());
+        let queued_at = ToolQueuedAt::now();
         for call in calls {
-            let output =
-                execute_single_tool_call(registry.clone(), execution_context, call.clone(), None)
-                    .await;
+            let output = execute_single_tool_call(
+                registry.clone(),
+                execution_context,
+                call.clone(),
+                None,
+                queued_at,
+            )
+            .await;
             let is_pending = output.outcome.pending().is_some();
             outputs.push(output);
             if is_pending {
@@ -379,12 +397,14 @@ impl ToolExecutor for ParallelToolExecutor {
         }
 
         let mut join_set = JoinSet::new();
+        let queued_at = ToolQueuedAt::now();
         for (index, call) in calls.iter().cloned().enumerate() {
             let registry = registry.clone();
             let execution_context = execution_context.clone();
             join_set.spawn(async move {
                 let output =
-                    execute_single_tool_call(registry, &execution_context, call, None).await;
+                    execute_single_tool_call(registry, &execution_context, call, None, queued_at)
+                        .await;
                 (index, output)
             });
         }
@@ -449,6 +469,7 @@ struct ScheduledStreamingToolCall {
     stream_key: crate::ToolStreamKey,
     input: ToolExecutionInput,
     scheduling_class: StreamingToolSchedulingClass,
+    queued_at: ToolQueuedAt,
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +536,7 @@ impl StreamingToolScheduler {
             return Ok(());
         }
         let scheduled = ScheduledStreamingToolCall {
+            queued_at: ToolQueuedAt::now(),
             stream_key: stream_key.clone(),
             scheduling_class: self.classify_call(&input.tool_name),
             input,
@@ -666,6 +688,7 @@ impl StreamingToolScheduler {
                 &execution_context,
                 scheduled.input,
                 progress_emitter,
+                scheduled.queued_at,
             )
             .await;
             (running_call, output)
@@ -714,9 +737,6 @@ impl StreamingToolScheduler {
     }
 
     async fn emit_queued_event(&self, scheduled: &ScheduledStreamingToolCall) {
-        if let Some(observer) = &self.execution_context.trajectory {
-            observer.tool_queued(&scheduled.input.call_id);
-        }
         emit_stream_event(
             self.stream_tx.as_ref(),
             crate::AgentKernelEventPayload::ToolQueued(crate::ToolQueuedStreamData {

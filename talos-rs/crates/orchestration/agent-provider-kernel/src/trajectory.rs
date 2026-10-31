@@ -23,6 +23,7 @@ pub(crate) struct Capture {
     identity: AgentTurnRef,
     clock: ClockSegment,
     started: Instant,
+    started_at_ms: i64,
     next_request: AtomicU32,
     tools: Mutex<BTreeMap<String, TrajectoryReadToolResponse>>,
     supplement: Mutex<SessionHistorySupplement>,
@@ -58,13 +59,14 @@ impl Capture {
             },
             identity,
             started: Instant::now(),
+            started_at_ms: chrono::Utc::now().timestamp_millis(),
             next_request: AtomicU32::new(1),
             tools: Mutex::new(BTreeMap::new()),
             reservations: Mutex::new(None),
         })
     }
     fn now(&self) -> f64 {
-        self.started.elapsed().as_secs_f64() * 1000.0
+        self.started_at_ms as f64 + self.started.elapsed().as_secs_f64() * 1000.0
     }
     fn reserve(&self, bytes: usize) -> bool {
         static PROCESS_BUDGET: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -191,7 +193,7 @@ impl Capture {
             return None;
         }
         let mut clock = self.clock.clone();
-        clock.observed_through_offset_ms = self.now();
+        clock.observed_through_offset_ms = self.now() - self.clock.started_at as f64 * 1000.0;
         supplement.clock_segments.push(clock);
         Some(supplement)
     }
@@ -210,23 +212,6 @@ fn tool_call(call: &FunctionCall, raw: Option<String>) -> SnapshotToolCall {
     }
 }
 impl KernelTrajectoryRecorder for InvocationRecorder {
-    fn tool_queued(&self, call_id: &str) {
-        self.0.phase(call_id, ToolIntervalKind::Queue, false);
-    }
-    fn tool_started(&self, call_id: &str) {
-        self.0.phase(call_id, ToolIntervalKind::Execution, false);
-    }
-    fn tool_finished(&self, call_id: &str, end: talos_agent_kernel::trajectory::KernelToolEnd) {
-        self.0.phase(
-            call_id,
-            if matches!(end, talos_agent_kernel::trajectory::KernelToolEnd::Waiting) {
-                ToolIntervalKind::WaitingForInput
-            } else {
-                ToolIntervalKind::Execution
-            },
-            true,
-        );
-    }
     fn prepared_tool_result(&self, message: &ChatMessage) {
         if let Some(call_id) = &message.tool_call_id {
             self.0.prepare_tool(call_id, message);
@@ -319,7 +304,6 @@ impl KernelTrajectoryRecorder for InvocationRecorder {
                 )
             })
             .flatten();
-        let started = capture.now();
         let detail = TrajectoryReadModelRequestResponse {
             identity: capture.identity.clone(),
             request: ModelRequestTrace {
@@ -335,19 +319,17 @@ impl KernelTrajectoryRecorder for InvocationRecorder {
                     call_record_id: Uuid::new_v4().to_string(),
                     ordinal: 1,
                     observed_state: ModelCallState::InProgress,
-                    timing: Some(ModelCallTiming {
-                        interval: ExecutionInterval {
-                            segment_id: capture.clock.segment_id.clone(),
-                            started_offset_ms: started,
-                            ended_offset_ms: None,
-                            elapsed_ms: None,
-                        },
-                        first_output_offset_ms: None,
-                        last_output_offset_ms: None,
+                    metrics: Some(LlmCallMetrics {
+                        segment_id: capture.clock.segment_id.clone(),
+                        started_at_ms: Some(capture.now()),
+                        finished_at_ms: None,
+                        execution_duration_ms: None,
+                        first_output_at_ms: None,
+                        last_output_at_ms: None,
                         ttft_ms: None,
                         generation_ms: None,
+                        usage: None,
                     }),
-                    usage: None,
                     finish_reason: None,
                     error: None,
                 }],
@@ -420,7 +402,6 @@ impl Capture {
                     call_id: call_id.into(),
                     source_model_request_id: None,
                     source_call_record_id: None,
-                    intervals: Some(vec![]),
                 },
                 prepared_result: None,
                 usages: Some(vec![]),
@@ -431,30 +412,6 @@ impl Capture {
         self.update_tool(call_id, |tool| {
             tool.tool.source_model_request_id = Some(model_request_id.into());
             tool.tool.source_call_record_id = Some(call_record_id.into());
-        });
-    }
-    fn phase(&self, call_id: &str, kind: ToolIntervalKind, ended: bool) {
-        let now = self.now();
-        self.update_tool(call_id, |tool| {
-            let intervals = tool.tool.intervals.get_or_insert_with(Vec::new);
-            if let Some(open) = intervals
-                .last_mut()
-                .filter(|i| i.interval.ended_offset_ms.is_none())
-            {
-                open.interval.ended_offset_ms = Some(now);
-                open.interval.elapsed_ms = Some(now - open.interval.started_offset_ms);
-            }
-            if !ended || kind == ToolIntervalKind::WaitingForInput {
-                intervals.push(ToolInterval {
-                    kind,
-                    interval: ExecutionInterval {
-                        segment_id: self.clock.segment_id.clone(),
-                        started_offset_ms: now,
-                        ended_offset_ms: None,
-                        elapsed_ms: None,
-                    },
-                });
-            }
         });
     }
     fn prepare_tool(&self, call_id: &str, message: &ChatMessage) {

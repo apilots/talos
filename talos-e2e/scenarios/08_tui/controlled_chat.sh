@@ -38,7 +38,7 @@ export TALOS_TEST_INNER_MODEL_PROVIDER=chat-protocol-default TALOS_TEST_INNER_MO
 prepare_talos_home
 mkdir -p "${case_dir}/workspace"
 tmux new-session -d -s "${TUI_SESSION_NAME}" -x 110 -y 38 \
-  "cd '${case_dir}/workspace' && '${TALOS_E2E_CLI_BIN}'"
+  "cd '${case_dir}/workspace' && '${TALOS_E2E_CLI_BIN}' 2>'${SCENARIO_REPORT_DIR}/stderr.txt'"
 tui_wait_for_text "${TUI_SESSION_NAME}" 'Type a message' 120 0.25
 # The existing controlled provider exercises the actual Agent/Bash streaming loop.
 tui_send_input "${TUI_SESSION_NAME}" 'PROTOCOL_CASE=chat-protocol-default:on. Run the controlled Bash tool and return its result.'
@@ -57,10 +57,18 @@ assert len(requests)==2 and [r['followup'] for r in requests]==[False,True], req
 with sqlite3.connect(sys.argv[2]) as db:
     payloads=[json.loads(row[0]) for row in db.execute('SELECT payload_json FROM agent_events WHERE sequence IS NOT NULL')]
     events=json.dumps(payloads)
+results=[block['content']['data'] for event in payloads if event['type']=='messageCompleted'
+         for block in event['data']['blocks'] if block['content']['type']=='toolResult']
+assert results, 'Tool result not persisted'
+assert all(r['metrics']['finishedAtMs'] is not None and r['metrics']['executionDurationMs'] is not None for r in results), results
 assert any(event['type']=='turnCompleted' for event in payloads), 'Turn not completed'
 assert 'PROTOCOL_OK:call_chat-protocol-default_on' in events, 'Completed answer not persisted'
 assert 'TOOL_chat-protocol-default_on' in events, 'Bash result not persisted'
 PY
 tui_send_command "${TUI_SESSION_NAME}" '/quit'
 tui_wait_for_exit "${TUI_SESSION_NAME}"
+if grep -Fq '[tracing-subscriber] Unable to write an event' "${SCENARIO_REPORT_DIR}/stderr.txt"; then
+  cat "${SCENARIO_REPORT_DIR}/stderr.txt" >&2
+  exit 1
+fi
 echo 'CASE controlled_tui_chat PASS streaming=real tool=Bash persistence=verified resize=verified'

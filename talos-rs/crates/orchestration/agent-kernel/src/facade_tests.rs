@@ -28,6 +28,10 @@ fn missing_tool_events_only_fill_unstreamed_result_items() {
                     arguments: ToolArguments::from(serde_json::json!({"query": "Talos"})),
                 },
                 KernelRunItem::ToolResult {
+                    metrics: Some(talos_types::ToolExecutionMetrics {
+                        execution_duration_ms: Some(2.0),
+                        ..Default::default()
+                    }),
                     call_id: "call-1".to_owned(),
                     tool_name: "search".to_owned(),
                     content: Vec::new(),
@@ -49,6 +53,6 @@ fn missing_tool_events_only_fill_unstreamed_result_items() {
     ));
     assert!(matches!(
         events[1].payload,
-        AgentKernelEventPayload::ToolResult(_)
+        AgentKernelEventPayload::ToolResult(ref output) if output.metrics.as_ref().unwrap().execution_duration_ms == Some(2.0)
     ));
 }

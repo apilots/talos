@@ -184,23 +184,19 @@ export type ClockSegment = { segmentId: string, sourceNodeId: string, startedAt:
 
 export type ClockRelation = "turnStart" | "resumed" | "unanchored";
 
-export type ExecutionInterval = { segmentId: string, startedOffsetMs: number, endedOffsetMs: number | null, elapsedMs: number | null, };
+export type ToolExecutionMetrics = { queuedAtMs: number | null, startedAtMs: number | null, finishedAtMs: number | null, queueDurationMs: number | null, executionDurationMs: number | null, };
 
-export type ModelCallTiming = { interval: ExecutionInterval, firstOutputOffsetMs: number | null, lastOutputOffsetMs: number | null, ttftMs: number | null, generationMs: number | null, };
+export type LlmCallMetrics = { segmentId: string, startedAtMs: number | null, finishedAtMs: number | null, executionDurationMs: number | null, firstOutputAtMs: number | null, lastOutputAtMs: number | null, ttftMs: number | null, generationMs: number | null, usage: TokenUsage | null, };
 
 export type ModelCallState = "inProgress" | "completed" | "failed" | "cancelled" | "incomplete";
 
-export type ModelCallRecord = { callRecordId: string, ordinal: number, observedState: ModelCallState, timing: ModelCallTiming | null, usage: TokenUsage | null, finishReason: string | null, error: ApiError | null, };
+export type ModelCallRecord = { callRecordId: string, ordinal: number, observedState: ModelCallState, metrics: LlmCallMetrics | null, finishReason: string | null, error: ApiError | null, };
 
 export type ModelRequestPurpose = "working" | "finalAnswer";
 
 export type ModelRequestTrace = { modelRequestId: string, ordinal: number, purpose: ModelRequestPurpose, connectionId: string, modelId: string, callRecords: Array<ModelCallRecord>, };
 
-export type ToolIntervalKind = "execution" | "waitingForInput" | "queue";
-
-export type ToolInterval = { kind: ToolIntervalKind, interval: ExecutionInterval, };
-
-export type TrajectoryTool = { callId: string, sourceModelRequestId: string | null, sourceCallRecordId: string | null, intervals: Array<ToolInterval> | null, };
+export type TrajectoryTool = { callId: string, sourceModelRequestId: string | null, sourceCallRecordId: string | null, };
 
 export type TrajectoryEntry = { "type": "modelRequest", request: ModelRequestTrace, } | { "type": "tool", tool: TrajectoryTool, };
 
@@ -1291,7 +1287,7 @@ export type AgentToolCallArguments = { "state": "streaming", jsonFragment: strin
 
 export type AgentToolProgress = { kind: TalosToolProgressKind, text: string, occurredAt: number, };
 
-export type AgentToolResult = { callId: string, toolName: string, content: Array<TalosContentItem>, isError: boolean, };
+export type AgentToolResult = { metrics: ToolExecutionMetrics | null, callId: string, toolName: string, content: Array<TalosContentItem>, isError: boolean, };
 
 export type AgentExecutionSummary = { text: string, };
 

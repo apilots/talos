@@ -318,6 +318,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 })
                 .expect("continued test Turn should contain a waiting block");
             let tool_result = AgentToolResult {
+                metrics: None,
                 call_id: "call-1".to_string(),
                 tool_name: "AskUser".to_string(),
                 content: vec![talos_types::talos::TalosContentItem::Text {

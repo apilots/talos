@@ -110,6 +110,7 @@ export function SessionTracingPanel(props: SessionTracingPanelProps) {
               />
             ) : null}
             <ObservedWorkSummary
+              turn={turn}
               ordinal={turn.ordinal}
               entries={data.entries}
             />

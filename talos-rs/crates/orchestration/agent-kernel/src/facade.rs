@@ -423,6 +423,7 @@ fn missing_tool_events(
                 ));
             }
             KernelRunItem::ToolResult {
+                metrics,
                 call_id,
                 tool_name,
                 content,
@@ -430,6 +431,7 @@ fn missing_tool_events(
             } if !emitted_results.contains(call_id) => {
                 events.push(AgentKernelEvent::new(AgentKernelEventPayload::ToolResult(
                     ToolResultStreamData {
+                        metrics: metrics.clone(),
                         call_id: call_id.clone(),
                         tool_name: tool_name.clone(),
                         content: content.clone(),

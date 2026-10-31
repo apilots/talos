@@ -80,6 +80,7 @@ fn tool_result_completes_the_call_identified_by_call_id() {
         block_id: "result-1".to_string(),
         status: AgentMessageBlockStatus::Completed,
         content: AgentMessageBlockContent::ToolResult(AgentToolResult {
+            metrics: None,
             call_id: "call-1".to_string(),
             tool_name: "Read".to_string(),
             content: vec![TalosContentItem::Text {

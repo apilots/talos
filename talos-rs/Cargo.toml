@@ -184,8 +184,8 @@ talos-agent = { path = "crates/orchestration/agent" }
 talos-run-control = { path = "crates/orchestration/run-control" }
 talos-store = { path = "crates/orchestration/store" }
 talos-sync = { path = "crates/orchestration/sync" }
-talos-sync-types = "=0.1.4"
-talos-sync-sdk = "=0.1.4"
+talos-sync-types = "=0.1.5"
+talos-sync-sdk = "=0.1.5"
 talos-service = { path = "crates/orchestration/service" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }

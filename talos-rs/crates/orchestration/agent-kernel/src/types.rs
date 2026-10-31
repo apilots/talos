@@ -39,6 +39,7 @@ pub(crate) enum KernelRunItem {
         arguments: ToolArguments,
     },
     ToolResult {
+        metrics: Option<talos_types::ToolExecutionMetrics>,
         call_id: String,
         tool_name: String,
         content: Vec<TalosContentItem>,
@@ -258,6 +259,7 @@ pub struct ToolProgressDeltaStreamData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResultStreamData {
+    pub metrics: Option<talos_types::ToolExecutionMetrics>,
     pub call_id: String,
     pub tool_name: String,
     #[serde(default)]

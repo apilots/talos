@@ -92,7 +92,7 @@ export function canonicalTool(turn: TraceTurn | undefined, callId: string) {
   };
 }
 /** Each observation contributes once; never combine these with canonical Turn totals. */
-export function observedTotals(entries: API.TrajectoryEntry[]) {
+export function observedTotals(entries: API.TrajectoryEntry[], turn?: TraceTurn) {
   const requests = entries.flatMap((e) =>
     e.type === "modelRequest" ? [e.request] : [],
   );
@@ -102,19 +102,16 @@ export function observedTotals(entries: API.TrajectoryEntry[]) {
     values.some((v) => v != null)
       ? values.reduce<number>((n, v) => n + (v ?? 0), 0)
       : null;
-  const execution = tools.flatMap(
-    (t) => t.intervals?.filter((i) => i.kind === "execution") ?? [],
-  );
+  const execution = tools.map((tool) => canonicalTool(turn, tool.callId).result?.metrics);
   return {
     requests: requests.length,
-    llmMs: sum(callRecords.map((a) => a.timing?.interval.elapsedMs)),
-    toolMs: sum(execution.map((i) => i.interval.elapsedMs)),
-    tokens: sum(callRecords.map((a) => a.usage?.total_tokens)),
+    llmMs: sum(callRecords.map((a) => a.metrics?.executionDurationMs)),
+    toolMs: sum(execution.map((i) => i?.executionDurationMs)),
+    tokens: sum(callRecords.map((a) => a.metrics?.usage?.total_tokens)),
     partial:
       callRecords.some(
-        (a) => a.usage == null || a.timing?.interval.elapsedMs == null,
+        (a) => a.metrics?.usage == null || a.metrics?.executionDurationMs == null,
       ) ||
-      tools.some((t) => t.intervals == null) ||
-      execution.some((i) => i.interval.elapsedMs == null),
+      execution.some((i) => i?.executionDurationMs == null),
   };
 }

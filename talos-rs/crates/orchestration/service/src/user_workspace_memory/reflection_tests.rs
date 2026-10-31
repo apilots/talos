@@ -20,12 +20,14 @@ fn reflection_runs_only_for_successful_end_turn_without_a_successful_memory_tool
         }),
     };
     let successful_tool = message(AgentMessageBlockContent::ToolResult(AgentToolResult {
+        metrics: None,
         call_id: "call-1".to_string(),
         tool_name: MEMORY_TOOL_PUBLIC_NAME.to_string(),
         content: Vec::new(),
         is_error: false,
     }));
     let failed_tool = message(AgentMessageBlockContent::ToolResult(AgentToolResult {
+        metrics: None,
         call_id: "call-2".to_string(),
         tool_name: MEMORY_TOOL_PUBLIC_NAME.to_string(),
         content: Vec::new(),

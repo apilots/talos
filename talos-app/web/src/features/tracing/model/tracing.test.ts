@@ -34,7 +34,7 @@ it("copies ledger order regardless of detail read order and marks unloaded snaps
           callId: "call-between-requests",
           sourceModelRequestId: request.modelRequestId,
           sourceCallRecordId: "a",
-          intervals: null,
+
         },
       },
     ],
@@ -64,7 +64,7 @@ it("keeps observed totals separate and marks missing callRecords partial", () =>
         ...request,
         modelRequestId: "second",
         callRecords: [
-          { ...request.callRecords[0], callRecordId: "b", usage: null, timing: null },
+          { ...request.callRecords[0], callRecordId: "b", metrics: null },
         ],
       },
     },

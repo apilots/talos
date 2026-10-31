@@ -57,11 +57,15 @@ def verify(base, directory, history):
     message = inputs[1]["messages"][consumed["messageIndex"]]
     assert message["role"] == "tool" and message["toolCallId"] == call["callId"] and "TOOL_" in message["content"]
     assert message["name"] == call["name"] and message["inputOrigin"]["source"] == "runtime", message
-    assert any(i["kind"] == "execution" and i["interval"]["elapsedMs"] is not None for i in tool["tool"]["intervals"])
+    result = next(block["content"]["data"]
+        for message in history["data"][0]["result"]["result"]["messages"] for block in message["blocks"]
+        if block["content"]["type"] == "toolResult" and block["content"]["data"]["callId"] == call["callId"])
+    assert all(result["metrics"][field] is not None for field in
+        ("queuedAtMs", "startedAtMs", "finishedAtMs", "queueDurationMs", "executionDurationMs")), result
     for request in requests:
         attempt = request["callRecords"][0]
-        assert attempt["observedState"] == "completed" and attempt["usage"]["total_tokens"] == 110, request
-        assert attempt["timing"]["interval"]["elapsedMs"] is not None and attempt["timing"]["ttftMs"] is not None
+        assert attempt["observedState"] == "completed" and attempt["metrics"]["usage"]["total_tokens"] == 110, request
+        assert attempt["metrics"]["executionDurationMs"] is not None and attempt["metrics"]["ttftMs"] is not None
     evidence = {"turn": page, "requests": details, "inputs": inputs, "outputs": outputs, "tool": tool, "parameters": options}
     serialized = json.dumps(evidence)
     assert "controlled-loopback-key" not in serialized and "encrypted:" not in serialized and "signature:" not in serialized

@@ -208,7 +208,7 @@ describe("Session tracing", () => {
       data: [{ type: "modelRequest", request: {
         ...request, callRecords: [...request.callRecords, {
           ...request.callRecords[0], callRecordId: "unfinished", ordinal: 2, observedState: "incomplete",
-          timing: { ...request.callRecords[0].timing!, interval: { ...request.callRecords[0].timing!.interval, endedOffsetMs: null, elapsedMs: null } },
+          metrics: { ...request.callRecords[0].metrics!, finishedAtMs: null, executionDurationMs: null },
         }],
       } }],
       nextCursor: null,

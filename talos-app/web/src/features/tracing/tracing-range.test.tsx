@@ -57,12 +57,10 @@ beforeEach(async () => {
                 ordinal: cursor ? 2 : 1,
                 callRecords: request.callRecords.map((a) => ({
                   ...a,
-                  timing: {
-                    ...a.timing!,
-                    interval: {
-                      ...a.timing!.interval,
-                      segmentId: identity.turnId,
-                    },
+                  metrics: {
+                    ...a.metrics!, segmentId: identity.turnId,
+                    startedAtMs: (100 + Number(identity.turnId.split("-").at(-1) || 1) * 5) * 1000,
+                    finishedAtMs: (100 + Number(identity.turnId.split("-").at(-1) || 1) * 5) * 1000 + 1000,
                   },
                 })),
               },

@@ -24,14 +24,15 @@ export const ExecutionAxis = memo(function ExecutionAxis({ spanMs, ticks = 4 }: 
   );
 });
 
-/** Place execution-side intervals on the Session overview axis. */
-export const ExecutionIntervals = memo(function ExecutionIntervals({
-  clock, turnId, entries, lane, selection, onSelect,
+/** Draw task-owned Metrics on the existing Session axis. */
+export const ExecutionBars = memo(function ExecutionBars({
+  clock, turnId, entries, tools = [], lane, selection, onSelect,
   offsetMs = 0, spanMs, labelPrefix = "",
 }: {
   clock: API.ClockSegment;
   turnId: string;
   entries: API.TrajectoryEntry[];
+  tools?: API.AgentToolResult[];
   lane: string;
   selection: TraceSelection | null;
   onSelect: (selection: TraceSelection, button: HTMLButtonElement) => void;
@@ -41,106 +42,45 @@ export const ExecutionIntervals = memo(function ExecutionIntervals({
 }) {
   const { t, i18n } = useTranslation("tracing");
   const span = Math.max(1, spanMs ?? clock.observedThroughOffsetMs);
-  return (
-    <>
-      {entries.flatMap((entry) =>
-        entry.type === "modelRequest"
-          ? entry.request.callRecords.flatMap((a) => {
-              const interval = a.timing?.interval;
-              if (
-                !interval ||
-                interval.segmentId !== clock.segmentId ||
-                lane === "tools"
-              )
-                return [];
-              const start = interval.startedOffsetMs,
-                end = interval.endedOffsetMs,
-                first = a.timing?.firstOutputOffsetMs;
-              const wait =
-                first == null
-                  ? 100
-                  : Math.max(
-                      0,
-                      Math.min(
-                        100,
-                        ((first - start) / Math.max(1, (end ?? start) - start)) *
-                          100,
-                      ),
-                    );
-              return [
-                <button
-                  key={`${entry.request.modelRequestId}/${a.callRecordId}`}
-                  className={`tracing-bar ${lane === "inputAnchor" ? "anchor" : "model"} ${a.observedState === "failed" ? "failed" : ""}`}
-                  style={{
-                    left: `${Math.max(0, ((offsetMs + start) / span) * 100)}%`,
-                    width:
-                      lane === "inputAnchor" || end == null
-                        ? "3px"
-                        : `${Math.max(0, Math.min(100, ((end - start) / span) * 100))}%`,
-                  }}
-                  title={`${labelPrefix}${t("request", { number: entry.request.ordinal })} · ${milliseconds(interval.elapsedMs, i18n.language)} · TTFT ${milliseconds(a.timing?.ttftMs, i18n.language)}${end == null ? ` · ${t("endUnknown")}` : ""}`}
-                  aria-label={`${labelPrefix}${t(lane)} · ${t("request", { number: entry.request.ordinal })} · ${t("callRecord", { number: a.ordinal })}${end == null ? ` · ${t("endUnknown")}` : ""}`}
-                  data-tracing-turn-id={turnId}
-                  aria-pressed={
-                    (selection?.turnId === turnId && selection.kind === "request" &&
-                    selection.modelRequestId === entry.request.modelRequestId &&
-                    selection.callRecordId === a.callRecordId)
-                  }
-                  onClick={(e) =>
-                    onSelect(
-                      {
-                        kind: "request",
-                        turnId,
-                        modelRequestId: entry.request.modelRequestId,
-                        callRecordId: a.callRecordId,
-                      },
-                      e.currentTarget,
-                    )
-                  }
-                >
-                  {lane === "llm" && end != null ? (
-                    <span
-                      className="tracing-preoutput"
-                      style={{ width: `${wait}%` }}
-                    />
-                  ) : null}
-                </button>,
-              ];
-            })
-          : lane !== "tools"
-            ? []
-            : (entry.tool.intervals ?? [])
-                .filter((p) => p.interval.segmentId === clock.segmentId)
-                .map((phase, index) => (
-                  <button
-                    key={`${entry.tool.callId}/${index}`}
-                    className={`tracing-bar ${phase.kind === "execution" ? "tool" : "waiting"}`}
-                    style={{
-                      left: `${Math.max(0, ((offsetMs + phase.interval.startedOffsetMs) / span) * 100)}%`,
-                      width: phase.interval.endedOffsetMs == null ? "3px" : `${Math.max(0, Math.min(100, ((phase.interval.endedOffsetMs - phase.interval.startedOffsetMs) / span) * 100))}%`,
-                    }}
-                    title={`${labelPrefix}${entry.tool.callId} · ${t(phase.kind)} · ${milliseconds(phase.interval.elapsedMs, i18n.language)}${phase.interval.endedOffsetMs == null ? ` · ${t("endUnknown")}` : ""}`}
-                    aria-label={`${labelPrefix}${entry.tool.callId} · ${t(phase.kind)}${phase.interval.endedOffsetMs == null ? ` · ${t("endUnknown")}` : ""}`}
-                    data-tracing-turn-id={turnId}
-                  aria-pressed={
-                      (selection?.turnId === turnId && selection.kind === "tool" &&
-                      selection.callId === entry.tool.callId)
-                    }
-                    onClick={(e) =>
-                      onSelect(
-                        {
-                          kind: "tool",
-                          turnId,
-                          callId: entry.tool.callId,
-                        },
-                        e.currentTarget,
-                      )
-                    }
-                  />
-                )),
-      )}
-    </>
-  );
+  const origin = clock.startedAt * 1000;
+  type Bar = { key: string; start: number; end: number | null; elapsed: number | null;
+    first?: number | null; kind: string; failed?: boolean; label: string; selected: boolean; target: TraceSelection };
+  const bars: Bar[] = lane === "tools"
+    ? tools.flatMap((tool) => {
+        const m = tool.metrics;
+        if (m?.startedAtMs == null) return [];
+        const target: TraceSelection = { kind: "tool", turnId, callId: tool.callId };
+        const selected = selection?.kind === "tool" && selection.turnId === turnId && selection.callId === tool.callId;
+        const execution: Bar = { key: tool.callId, start: m.startedAtMs, end: m.finishedAtMs,
+          elapsed: m.executionDurationMs, kind: "tool", label: tool.callId, selected, target };
+        return m.queuedAtMs == null || !m.queueDurationMs ? [execution] : [
+          { ...execution, key: `${tool.callId}/queue`, start: m.queuedAtMs, end: m.startedAtMs,
+            elapsed: m.queueDurationMs, kind: "waiting" }, execution,
+        ];
+      })
+    : entries.flatMap((entry) => entry.type !== "modelRequest" ? [] : entry.request.callRecords.flatMap((call) => {
+        const m = call.metrics;
+        if (m?.startedAtMs == null || m.segmentId !== clock.segmentId) return [];
+        return [{ key: `${entry.request.modelRequestId}/${call.callRecordId}`, start: m.startedAtMs, end: m.finishedAtMs,
+          elapsed: m.executionDurationMs, first: m.firstOutputAtMs,
+          kind: lane === "inputAnchor" ? "anchor" : "model", failed: call.observedState === "failed",
+          label: `${t("request", { number: entry.request.ordinal })} · ${t("callRecord", { number: call.ordinal })}`,
+          selected: selection?.kind === "request" && selection.turnId === turnId && selection.modelRequestId === entry.request.modelRequestId && selection.callRecordId === call.callRecordId,
+          target: { kind: "request", turnId, modelRequestId: entry.request.modelRequestId, callRecordId: call.callRecordId } as TraceSelection,
+        }];
+      }));
+  return <>{bars.map((bar) => (
+    <button key={bar.key}
+      className={`tracing-bar ${bar.kind} ${bar.failed ? "failed" : ""}`}
+      style={{ left: `${Math.max(0, ((offsetMs + bar.start - origin) / span) * 100)}%`,
+        width: lane === "inputAnchor" || bar.end == null ? "3px" : `${Math.max(0, Math.min(100, (bar.end - bar.start) / span * 100))}%` }}
+      title={`${labelPrefix}${bar.label} · ${milliseconds(bar.elapsed, i18n.language)}${bar.end == null ? ` · ${t("endUnknown")}` : ""}`}
+      aria-label={`${labelPrefix}${t(lane)} · ${bar.label}${bar.end == null ? ` · ${t("endUnknown")}` : ""}`}
+      data-tracing-turn-id={turnId} aria-pressed={bar.selected}
+      onClick={(event) => onSelect(bar.target, event.currentTarget)}>
+      {lane === "llm" && bar.end != null ? <span className="tracing-preoutput" style={{ width: `${bar.first == null ? 100 : Math.max(0, Math.min(100, (bar.first - bar.start) / Math.max(1, bar.end - bar.start) * 100))}%` }} /> : null}
+    </button>
+  ))}</>;
 });
 
 export function TimingLegend() {

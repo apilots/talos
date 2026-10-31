@@ -188,14 +188,12 @@ pub fn generate_typescript() -> String {
     >());
     output.push_str(&export::<talos_agent_api::trajectory::ClockSegment>());
     output.push_str(&export::<talos_agent_api::trajectory::ClockRelation>());
-    output.push_str(&export::<talos_agent_api::trajectory::ExecutionInterval>());
-    output.push_str(&export::<talos_agent_api::trajectory::ModelCallTiming>());
+    output.push_str(&export::<talos_types::ToolExecutionMetrics>());
+    output.push_str(&export::<talos_agent_api::trajectory::LlmCallMetrics>());
     output.push_str(&export::<talos_agent_api::trajectory::ModelCallState>());
     output.push_str(&export::<talos_agent_api::trajectory::ModelCallRecord>());
     output.push_str(&export::<talos_agent_api::trajectory::ModelRequestPurpose>());
     output.push_str(&export::<talos_agent_api::trajectory::ModelRequestTrace>());
-    output.push_str(&export::<talos_agent_api::trajectory::ToolIntervalKind>());
-    output.push_str(&export::<talos_agent_api::trajectory::ToolInterval>());
     output.push_str(&export::<talos_agent_api::trajectory::TrajectoryTool>());
     output.push_str(&export::<talos_agent_api::trajectory::TrajectoryEntry>());
     output.push_str(&export::<
