@@ -272,6 +272,7 @@ impl ClientRequest {
         let method_kind = ClientMethod::from_str(method)?;
         let params_value = params.unwrap_or_else(|| match method_kind {
             ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::TrajectoryCapabilities
             | ClientMethod::SyncMetrics
             | ClientMethod::SyncStatus
             | ClientMethod::SyncDisable => serde_json::Value::Null,

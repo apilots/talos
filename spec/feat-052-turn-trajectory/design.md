@@ -193,3 +193,9 @@ Tracing 命名统一：模型请求使用 ModelRequestTrace/modelRequestId，实
 概览沿用 Input / LLM / Tools 三泳道与时间轴，在一张固定高度图中按时序展示整个 Session 的全部历史 Turn。元数据通过现有 readTurn 接口读取所有页并共用查询缓存，Prompt、模型输出和工具正文仍按需读取；每页读取前检查取消信号。保留原概览在上、账本和详情在下的布局，不增加总耗时条形图、逐 Turn 导航标签或第二张单轮下钻图。区间标识所属 Turn，直接查看具体模型或工具详情；账本原 Turn 展开和选择保持原行为。
 
 Session 概览默认按原 Turn 顺序连接执行段，明确标识“轮间空闲已折叠”，只去除 Turn 之间的显示空闲；各 Turn 内的恢复段、并行和等待间隔保留。取消勾选“折叠轮间空闲”后，按各 ClockSegment.startedAt 的已保存墙钟起点近似对齐，显示轮次间隔。这是保存到秒的时间戳分辨率，不代表不同执行节点已经校时，不能保证跨节点一秒准确度。区间长度和详情耗时仍取执行侧真实 interval/elapsedMs，不拿绝对时间差重算。LLM 图条按“首输出前 / 首输出后”分色，后者包含首输出至调用结束；详情的生成跨度单独使用首输出至末输出，不能与图条后段混用。缺时序的旧 Turn 不推算虚拟区间，原事实仍在账本；恢复段使用各自已保存起点。概览始终三条泳道，不随 Turn 数量增加纵向布局。调用密集时使用原生横向滚动和固定泳道标签，宽度不再强压在屏幕内；图条不设百分比最小宽度，真实区间比例不变，短事件只保留像素级点击目标。仅挂载可视范围及一屏预留范围的图条，并有界保留最后交互 Turn 以恢复关闭详情后的焦点。折叠 Turn 仅挂载摘要，展开后使用原 History 消息，不依赖补充数据成功。历史与时序查询共用稳定派生结果，详情切换不重算全 Session 正文；不引入额外框架或持久化缓存。
+
+RPC integration: `trajectory/capabilities` accepts no parameters. Explicit JSON
+`null` becomes an absent optional value when the JSON-RPC envelope is decoded;
+the existing no-parameter dispatch branch must retain null instead of defaulting
+to an empty object. Verify the envelope-to-typed-request boundary, not only a
+mock SDK invocation.

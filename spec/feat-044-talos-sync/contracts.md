@@ -121,3 +121,15 @@ Computer定义只由中心G原AgentNodeService创建/变更，Desktop节点表�
 Worker通过原RegisterParams的可选systemInfo上报，G验证固定结构/限长、与注册租约事务更新原agent_nodes.system_info列；SQLx编码typed JSON并按原Computer事实同步。租约/心跳仍为实时状态，不把健康状态变成CRDT权威。本机未云注册时由管理组装引用同Worker采集结果填充原Computer视图；其他端不重采集远端信息。原PB、原SDK、sync生成投影同源更新，无新详情协议/存储。
 
 采集实现：Talos `crates/infra/system-info` 独立lib `talos-system-info::collect()`；使用最新[sysinfo 0.39.6](https://docs.rs/sysinfo/0.39.6/sysinfo/)和[wgpu 30.0.1](https://docs.rs/wgpu/30.0.1/wgpu/)（仅std/Metal/Vulkan，无窗口、设备申请或着色器编译）。不自写/proc/sysfs/system_profiler解析；GPU无驱动/容器未透传时为空。sysinfo给出Linux cgroup可见内存上限；不声明物理宿主配置。每个Worker启动采集一次，注册复用；本机未注册展示同一份信息。
+
+## Bounded tool output records
+
+Sync uses the current canonical tool-result schema, including optional
+`BashOutput.outputLog`, `FileRead.nextByteOffset` and nullable `total_lines`.
+The log reference and bounded preview remain ordinary Session history facts.
+The Session's existing immutable Computer binding determines execution and file
+access from every controller; Sync does not copy the log body, rewrite its path
+or create a separate cross-machine log service. Older results without these
+optional fields retain their original semantics. Matching public SDK/types and
+service support must precede use by Talos; closed older schemas reject these
+fields rather than preserving them.

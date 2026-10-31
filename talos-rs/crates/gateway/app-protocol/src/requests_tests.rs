@@ -5,6 +5,19 @@ use talos_agent_api::{SubmitTurnInput, SubmitTurnInputRequest};
 use talos_types::{AgentTurnRef, QuestionAnswer, UserActionResponse};
 
 #[test]
+fn trajectory_capabilities_decodes_null_params_from_jsonrpc() {
+    let wire: crate::JsonRpcRequest = serde_json::from_value(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "trajectory/capabilities", "params": null
+    }))
+    .unwrap();
+    let request = ClientRequest::decode(&wire.method, wire.params).unwrap();
+    assert_eq!(
+        request.params,
+        ClientRequestParams::TrajectoryCapabilities(None)
+    );
+}
+
+#[test]
 fn decodes_typed_request_params() {
     let request = ClientRequest::decode(
         "session/get",
