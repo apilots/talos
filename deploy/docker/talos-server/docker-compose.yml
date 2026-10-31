@@ -1,6 +1,6 @@
 services:
   talos-server:
-    image: ${TALOS_SERVER_IMAGE:-ghcr.io/apilots/talos-server}:${TALOS_SERVER_VERSION:-v0.1.14}
+    image: ${TALOS_SERVER_IMAGE:-ghcr.io/apilots/talos-server}:${TALOS_SERVER_VERSION:-v0.1.15}
     container_name: talos-server
     restart: unless-stopped
     shm_size: 1gb
