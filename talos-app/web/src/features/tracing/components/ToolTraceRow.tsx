@@ -21,11 +21,7 @@ export function ToolTraceRow({
 }) {
   const { t, i18n } = useTranslation("tracing");
   const canonical = canonicalTool(turn, tool.callId),
-    intervals = tool.intervals?.filter((i) => i.kind === "execution"),
-    elapsed =
-      intervals?.length && intervals.every((i) => i.interval.elapsedMs != null)
-        ? intervals.reduce((n, i) => n + i.interval.elapsedMs!, 0)
-        : null;
+    elapsed = canonical.result?.metrics?.executionDurationMs;
   return (
     <TraceRow
       kind="toolCall"

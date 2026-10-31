@@ -15,26 +15,26 @@ export function RequestMetricsView({
 }) {
   const { t, i18n } = useTranslation("tracing"),
     clock = clocks.find(
-      (c) => c.segmentId === callRecord?.timing?.interval.segmentId,
+      (c) => c.segmentId === callRecord?.metrics?.segmentId,
     );
   const statistics = [
-    [t("llm"), callRecord?.timing?.interval.elapsedMs],
-    [t("ttft"), callRecord?.timing?.ttftMs],
-    [t("generation"), callRecord?.timing?.generationMs],
+    [t("llm"), callRecord?.metrics?.executionDurationMs],
+    [t("ttft"), callRecord?.metrics?.ttftMs],
+    [t("generation"), callRecord?.metrics?.generationMs],
   ] as const;
   const offset = (value: number | null | undefined) =>
-    value == null ? "—" : `+${milliseconds(value, i18n.language)}`;
+    value == null ? "—" : new Date(value).toLocaleString(i18n.language);
   const rows = timing
     ? [
         [
           t("dispatchOffset"),
-          offset(callRecord?.timing?.interval.startedOffsetMs),
+          offset(callRecord?.metrics?.startedAtMs),
         ],
-        [t("firstOutput"), offset(callRecord?.timing?.firstOutputOffsetMs)],
-        [t("lastOutput"), offset(callRecord?.timing?.lastOutputOffsetMs)],
-        [t("callEnd"), offset(callRecord?.timing?.interval.endedOffsetMs)],
+        [t("firstOutput"), offset(callRecord?.metrics?.firstOutputAtMs)],
+        [t("lastOutput"), offset(callRecord?.metrics?.lastOutputAtMs)],
+        [t("callEnd"), offset(callRecord?.metrics?.finishedAtMs)],
         [t("node"), clock?.sourceNodeId ?? "—"],
-        [t("segment"), callRecord?.timing?.interval.segmentId ?? "—"],
+        [t("segment"), callRecord?.metrics?.segmentId ?? "—"],
         [
           t("clockStartedAt"),
           clock?.startedAt == null
@@ -65,9 +65,9 @@ export function RequestMetricsView({
       </dl>
       <div className="tracing-usage">
         {[
-          [t("input"), callRecord?.usage?.input_tokens],
-          [t("output"), callRecord?.usage?.output_tokens],
-          [t("total"), callRecord?.usage?.total_tokens],
+          [t("input"), callRecord?.metrics?.usage?.input_tokens],
+          [t("output"), callRecord?.metrics?.usage?.output_tokens],
+          [t("total"), callRecord?.metrics?.usage?.total_tokens],
         ].map(([label, value]) => (
           <span key={label}>
             {label}{" "}
@@ -108,13 +108,13 @@ export function RequestMetricsView({
         <span>
           {t("cacheRead")}{" "}
           <b>
-            {number(callRecord?.usage?.cache_read_input_tokens, i18n.language)}
+            {number(callRecord?.metrics?.usage?.cache_read_input_tokens, i18n.language)}
           </b>
         </span>
         <span>
           {t("cacheWrite")}{" "}
           <b>
-            {number(callRecord?.usage?.cache_creation_input_tokens, i18n.language)}
+            {number(callRecord?.metrics?.usage?.cache_creation_input_tokens, i18n.language)}
           </b>
         </span>
       </div>

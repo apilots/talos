@@ -68,6 +68,13 @@ pub(super) fn session_and_events(
             block_id: "result".into(),
             status: AgentMessageBlockStatus::Completed,
             content: AgentMessageBlockContent::ToolResult(AgentToolResult {
+                metrics: Some(talos_types::ToolExecutionMetrics {
+                    queued_at_ms: Some(10000),
+                    started_at_ms: Some(10001),
+                    finished_at_ms: Some(10003),
+                    queue_duration_ms: Some(1.0),
+                    execution_duration_ms: Some(2.0),
+                }),
                 call_id: "call-1".into(),
                 tool_name: "Read".into(),
                 content: vec![

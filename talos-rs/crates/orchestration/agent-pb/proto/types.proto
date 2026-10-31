@@ -327,7 +327,11 @@ message ToolCall {
   repeated ToolProgress progress = 5;
 }
 message ToolProgress { ProgressKind kind = 1; string text = 2; int64 occurred_at = 3; }
-message ToolResult { string call_id = 1; string tool_name = 2; repeated ToolContent content = 3; bool is_error = 4; }
+message ToolExecutionMetrics {
+  optional int64 queued_at_ms = 1; optional int64 started_at_ms = 2; optional int64 finished_at_ms = 3;
+  optional double queue_duration_ms = 4; optional double execution_duration_ms = 5;
+}
+message ToolResult { string call_id = 1; string tool_name = 2; repeated ToolContent content = 3; bool is_error = 4; ToolExecutionMetrics metrics = 5; }
 message ContextCompaction {
   CompactionTrigger trigger = 1; CompactionStage stage = 2;
   optional CompactionOutcome outcome = 3; CompactionMetrics metrics = 4; optional string message = 5;

@@ -10,16 +10,7 @@ use talos_llm_provider::{
     ChatMessage, ChatRequest, ChatResponse, FunctionCall, ModelBlockStreamEvent,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub enum KernelToolEnd {
-    Completed,
-    Waiting,
-}
-
 pub trait KernelTrajectoryRecorder: Send + Sync + Debug {
-    fn tool_queued(&self, _call_id: &str) {}
-    fn tool_started(&self, _call_id: &str) {}
-    fn tool_finished(&self, _call_id: &str, _end: KernelToolEnd) {}
     fn prepared_tool_result(&self, _message: &ChatMessage) {}
     fn start_model(
         &self,

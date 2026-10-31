@@ -221,6 +221,7 @@ pub(crate) async fn emit_tool_result_stream_event(
     emit_stream_event(
         stream_tx,
         AgentKernelEventPayload::ToolResult(ToolResultStreamData {
+            metrics: output.metrics.clone(),
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items,
@@ -319,6 +320,7 @@ fn collect_bounded_tool_batch(
             error_count += 1;
         }
         output_items.push(KernelRunItem::ToolResult {
+            metrics: output.metrics.clone(),
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items.clone(),
@@ -419,7 +421,6 @@ pub async fn execute_general_turn_tool_batch(
     stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
-        trajectory: prepared.trajectory.clone(),
         browser_uploads: prepared
             .browser_uploads
             .iter()

@@ -27,14 +27,18 @@ async fn provider_terminal_event_keeps_following_validation_error_and_known_usag
     let attempt = &last.requests[0].request.call_records[0];
     assert_eq!(attempt.observed_state, ModelCallState::Failed);
     assert_eq!(attempt.error, Some(error.to_api_error()));
-    assert_eq!(attempt.usage.as_ref().unwrap().total_tokens, 12);
-    assert!(attempt
-        .timing
-        .as_ref()
-        .unwrap()
-        .interval
-        .ended_offset_ms
-        .is_some());
+    assert_eq!(
+        attempt
+            .metrics
+            .as_ref()
+            .unwrap()
+            .usage
+            .as_ref()
+            .unwrap()
+            .total_tokens,
+        12
+    );
+    assert!(attempt.metrics.as_ref().unwrap().finished_at_ms.is_some());
     assert_eq!(
         last.requests[0].outputs[0]
             .response

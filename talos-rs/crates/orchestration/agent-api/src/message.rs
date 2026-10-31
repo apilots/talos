@@ -146,6 +146,7 @@ pub struct AgentToolProgress {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentToolResult {
+    pub metrics: Option<talos_types::ToolExecutionMetrics>,
     pub call_id: String,
     pub tool_name: String,
     pub content: Vec<TalosContentItem>,

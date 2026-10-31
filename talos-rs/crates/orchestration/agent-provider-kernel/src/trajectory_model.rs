@@ -61,10 +61,10 @@ impl ModelCapture {
         let completed = done && error.is_none() && !interrupted;
         let attempt = &mut s.detail.request.call_records[0];
         if !done {
-            if let Some(timing) = &mut attempt.timing {
+            if let Some(timing) = &mut attempt.metrics {
                 if !interrupted {
-                    timing.interval.ended_offset_ms = Some(now);
-                    timing.interval.elapsed_ms = Some(now - timing.interval.started_offset_ms);
+                    timing.finished_at_ms = Some(now);
+                    timing.execution_duration_ms = timing.started_at_ms.map(|start| now - start);
                 }
             }
         }
@@ -192,14 +192,15 @@ impl KernelModelObservation for ModelCapture {
                 };
                 if let Some(text) = text {
                     if !text.is_empty() {
-                        if let Some(timing) = &mut s.detail.request.call_records[0].timing {
-                            timing.first_output_offset_ms.get_or_insert(now);
-                            timing.last_output_offset_ms = Some(now);
+                        if let Some(timing) = &mut s.detail.request.call_records[0].metrics {
+                            timing.first_output_at_ms.get_or_insert(now);
+                            timing.last_output_at_ms = Some(now);
                             timing.ttft_ms = timing
-                                .first_output_offset_ms
-                                .map(|first| first - timing.interval.started_offset_ms);
+                                .first_output_at_ms
+                                .zip(timing.started_at_ms)
+                                .map(|(first, start)| first - start);
                             timing.generation_ms =
-                                timing.first_output_offset_ms.map(|first| now - first);
+                                timing.first_output_at_ms.map(|first| now - first);
                         }
                     }
                     if s.complete_body
@@ -240,10 +241,10 @@ impl KernelModelObservation for ModelCapture {
                 s.done = true;
                 let a = &mut s.detail.request.call_records[0];
                 a.finish_reason = finish_reason.clone();
-                a.usage = usage.as_ref().map(TokenUsage::from);
-                if let Some(t) = &mut a.timing {
-                    t.interval.ended_offset_ms = Some(now);
-                    t.interval.elapsed_ms = Some(now - t.interval.started_offset_ms);
+                if let Some(t) = &mut a.metrics {
+                    t.usage = usage.as_ref().map(TokenUsage::from);
+                    t.finished_at_ms = Some(now);
+                    t.execution_duration_ms = t.started_at_ms.map(|start| now - start);
                 }
             }
             ModelBlockStreamEvent::ReasoningCompleted { .. } => {}
@@ -291,11 +292,11 @@ impl KernelModelObservation for ModelCapture {
         s.done = true;
         let now = self.capture.now();
         let a = &mut s.detail.request.call_records[0];
-        a.usage = Some(TokenUsage::from(&response.usage));
         a.finish_reason = response.finish_reason.clone();
-        if let Some(t) = &mut a.timing {
-            t.interval.ended_offset_ms = Some(now);
-            t.interval.elapsed_ms = Some(now - t.interval.started_offset_ms);
+        if let Some(t) = &mut a.metrics {
+            t.usage = Some(TokenUsage::from(&response.usage));
+            t.finished_at_ms = Some(now);
+            t.execution_duration_ms = t.started_at_ms.map(|start| now - start);
         }
     }
     fn finished(&self, error: Option<&TalosError>) {

@@ -150,18 +150,6 @@ pub(super) fn append(
                 .source_call_record_id
                 .or(saved.tool.source_call_record_id.take());
             saved.prepared_result = detail.prepared_result.or(saved.prepared_result.take());
-            for interval in detail.tool.intervals.into_iter().flatten() {
-                let intervals = saved.tool.intervals.get_or_insert_default();
-                if let Some(existing) = intervals.iter_mut().find(|i| {
-                    i.kind == interval.kind
-                        && i.interval.segment_id == interval.interval.segment_id
-                        && i.interval.started_offset_ms == interval.interval.started_offset_ms
-                }) {
-                    *existing = interval;
-                } else {
-                    intervals.push(interval);
-                }
-            }
             for usage in detail.usages.into_iter().flatten() {
                 let usages = saved.usages.get_or_insert_default();
                 if let Some(existing) = usages
@@ -209,26 +197,6 @@ fn snapshot(
     }
     Ok(())
 }
-fn interval(value: &ExecutionInterval) -> TalosResult<()> {
-    if value.segment_id.is_empty()
-        || !value.started_offset_ms.is_finite()
-        || value.started_offset_ms < 0.0
-    {
-        return Err(invalid());
-    }
-    match (value.ended_offset_ms, value.elapsed_ms) {
-        (None, None) => Ok(()),
-        (Some(end), Some(elapsed))
-            if end.is_finite()
-                && elapsed.is_finite()
-                && end >= value.started_offset_ms
-                && (end - value.started_offset_ms - elapsed).abs() < 0.001 =>
-        {
-            Ok(())
-        }
-        _ => Err(invalid()),
-    }
-}
 fn validate(value: &SessionHistorySupplement) -> TalosResult<()> {
     let mut requests = HashSet::new();
     let mut calls = HashSet::new();
@@ -267,9 +235,6 @@ fn validate(value: &SessionHistorySupplement) -> TalosResult<()> {
             if attempt.call_record_id.is_empty() || !call_records.insert(&attempt.call_record_id) {
                 return Err(invalid());
             }
-            if let Some(timing) = &attempt.timing {
-                interval(&timing.interval)?;
-            }
         }
         for output in &detail.outputs {
             if !call_records.contains(&output.call_record_id) {
@@ -290,9 +255,6 @@ fn validate(value: &SessionHistorySupplement) -> TalosResult<()> {
         snapshot(value, &detail.prepared_result, |p| {
             matches!(p, TrajectoryPayload::PreparedResult { .. })
         })?;
-        for phase in detail.tool.intervals.iter().flatten() {
-            interval(&phase.interval)?;
-        }
         if let Some(id) = &detail.tool.source_model_request_id {
             let source = value
                 .requests

@@ -68,10 +68,10 @@ export function RequestTraceRows({
               status={a.observedState}
               time={
                 <>
-                  {milliseconds(a.timing?.interval.elapsedMs, i18n.language)}
+                  {milliseconds(a.metrics?.executionDurationMs, i18n.language)}
                   <small>
-                    {number(a.usage?.input_tokens, i18n.language)} /{" "}
-                    {number(a.usage?.output_tokens, i18n.language)}
+                    {number(a.metrics?.usage?.input_tokens, i18n.language)} /{" "}
+                    {number(a.metrics?.usage?.output_tokens, i18n.language)}
                     <br />
                     {t("tokenInOut")}
                   </small>

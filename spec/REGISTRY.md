@@ -7,7 +7,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | Type | Next ID |
 | --- | ---: |
 | `feat` | 053 |
-| `fix` | 012 |
+| `fix` | 013 |
 | `refactor` | 045 |
 | `docs` | 001 |
 
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| fix-012 | [Capture contention and terminal logging lifetime](fix-012-capture-and-tui-shutdown/design.md) | active |
 | feat-052 | [Turn trajectory and model request inspection](feat-052-turn-trajectory/design.md) | active |
 | fix-011 | [Custom model stream reliability and reasoning controls](fix-011-qwen-stream-reliability/design.md) | implemented |
 | feat-051 | [Session-bound unified resource preview](feat-051-unified-preview/design.md) | verified |

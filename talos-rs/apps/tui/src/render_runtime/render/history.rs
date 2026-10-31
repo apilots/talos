@@ -174,6 +174,7 @@ mod tests {
                 block_id: "result-1".to_string(),
                 status: AgentMessageBlockStatus::Completed,
                 content: AgentMessageBlockContent::ToolResult(AgentToolResult {
+                    metrics: None,
                     call_id: "call-1".to_string(),
                     tool_name: "read".to_string(),
                     content: vec![TalosContentItem::Text {

@@ -99,7 +99,6 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
     let registry = Arc::new(ToolRegistry::new());
     registry.register(Arc::new(DelayedTextTool));
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "agent-a1".to_string(),
         turn_id: "turn-1".to_string(),
@@ -168,7 +167,6 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     let registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(registry.as_ref());
     let execution_context = ToolExecutionContext {
-        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "agent-a1".to_string(),
         turn_id: "turn-1".to_string(),

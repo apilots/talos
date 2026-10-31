@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useEffect, useCallback, type CSSProperties }
 import { useTranslation } from "react-i18next";
 import type { useSessionTracing } from "../hooks/useSessionTracing";
 import type { TraceSelection, TraceTurn } from "../model/selectors";
-import { ExecutionAxis, ExecutionIntervals, TimingLegend } from "./ExecutionClock";
+import { ExecutionAxis, ExecutionBars, TimingLegend } from "./ExecutionClock";
 
 export function SessionExecutionOverview({
   turns, timelines, selection, onSelect, onRetry,
@@ -25,7 +25,10 @@ export function SessionExecutionOverview({
   }, [onSelect]);
   const [viewport, setViewport] = useState({ left: 0, width: 760 });
   const segments = useMemo(() => {
-    const ordinals = new Map(turns.map((turn) => [turn.identity.turnId, turn.ordinal]));
+    const metadata = new Map(turns.map((turn) => [turn.identity.turnId, {
+      ordinal: turn.ordinal,
+      tools: turn.messages.flatMap((message) => message.blocks.flatMap((block) => block.content.type === "toolResult" ? [block.content.data] : [])),
+    }]));
     let compactOffset = 0;
     const savedStart = Math.min(...timelines.flatMap((timeline) =>
       timeline.clocks.filter((clock) => Number.isFinite(clock.startedAt)).map((clock) => clock.startedAt * 1000),
@@ -36,8 +39,13 @@ export function SessionExecutionOverview({
       const turnSpan = Math.max(0, ...clocks.map((clock) =>
         clock.startedAt * 1000 - turnStart + clock.observedThroughOffsetMs,
       ));
-      const result = clocks.map((clock) => ({
-        ...timeline, clock, ordinal: ordinals.get(timeline.turnId),
+      const result = clocks.map((clock, index) => ({
+        ...timeline, clock, ordinal: metadata.get(timeline.turnId)?.ordinal,
+        tools: (metadata.get(timeline.turnId)?.tools ?? []).filter((tool) => {
+          const start = tool.metrics?.startedAtMs;
+          return start != null && start >= clock.startedAt * 1000 &&
+            (index === clocks.length - 1 || start < clocks[index + 1].startedAt * 1000);
+        }),
         offsetMs: compact
           ? compactOffset + clock.startedAt * 1000 - turnStart
           : clock.startedAt * 1000 - savedStart,
@@ -105,9 +113,9 @@ export function SessionExecutionOverview({
           {["inputAnchor", "llm", "tools"].map((lane) => (
             <div className="tracing-lane" key={lane}>
               <span>{lane === "inputAnchor" ? t("input") : t(lane)}</span>
-              <div>{visibleSegments.map(({ turnId: id, ordinal, entries, clock, offsetMs }) => (
-                <ExecutionIntervals key={`${id}/${clock.segmentId}`} clock={clock}
-                  turnId={id} entries={entries} lane={lane} selection={selection?.turnId === id ? selection : null}
+              <div>{visibleSegments.map(({ turnId: id, ordinal, entries, tools, clock, offsetMs }) => (
+                <ExecutionBars key={`${id}/${clock.segmentId}`} clock={clock}
+                  turnId={id} entries={entries} tools={tools} lane={lane} selection={selection?.turnId === id ? selection : null}
                   onSelect={selectInterval}
                   offsetMs={offsetMs} spanMs={span}
                   labelPrefix={`Turn ${ordinal} · `} />

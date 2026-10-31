@@ -1247,6 +1247,16 @@
         "isError": {
           "type": "boolean"
         },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolExecutionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "toolName": {
           "type": "string"
         }
@@ -6066,37 +6076,6 @@
       ],
       "type": "object"
     },
-    "ExecutionInterval": {
-      "additionalProperties": false,
-      "properties": {
-        "elapsedMs": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "endedOffsetMs": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "segmentId": {
-          "type": "string"
-        },
-        "startedOffsetMs": {
-          "format": "double",
-          "type": "number"
-        }
-      },
-      "required": [
-        "segmentId",
-        "startedOffsetMs"
-      ],
-      "type": "object"
-    },
     "FileContentResponse": {
       "description": "Wire response for authenticated file content; SDKs decode bytes for callers.",
       "properties": {
@@ -6911,6 +6890,78 @@
         "id",
         "jsonrpc",
         "result"
+      ],
+      "type": "object"
+    },
+    "LlmCallMetrics": {
+      "additionalProperties": false,
+      "description": "Model-call facts; timestamps locate the call, durations use the execution clock.",
+      "properties": {
+        "executionDurationMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "finishedAtMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "firstOutputAtMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "generationMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "lastOutputAtMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "segmentId": {
+          "type": "string"
+        },
+        "startedAtMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ttftMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TokenUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "segmentId"
       ],
       "type": "object"
     },
@@ -8246,6 +8297,16 @@
             "null"
           ]
         },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LlmCallMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "observedState": {
           "$ref": "#/definitions/ModelCallState"
         },
@@ -8253,26 +8314,6 @@
           "format": "uint32",
           "minimum": 0.0,
           "type": "integer"
-        },
-        "timing": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ModelCallTiming"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "usage": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TokenUsage"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "required": [
@@ -8291,46 +8332,6 @@
         "incomplete"
       ],
       "type": "string"
-    },
-    "ModelCallTiming": {
-      "additionalProperties": false,
-      "properties": {
-        "firstOutputOffsetMs": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "generationMs": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "interval": {
-          "$ref": "#/definitions/ExecutionInterval"
-        },
-        "lastOutputOffsetMs": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "ttftMs": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "interval"
-      ],
-      "type": "object"
     },
     "ModelCostConfig": {
       "properties": {
@@ -13328,6 +13329,48 @@
     "ToolArguments": {
       "type": "object"
     },
+    "ToolExecutionMetrics": {
+      "additionalProperties": false,
+      "description": "Framework-owned tool task facts, persisted with the canonical tool result.",
+      "properties": {
+        "executionDurationMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "finishedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "queueDurationMs": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "queuedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ToolInputUsage": {
       "additionalProperties": false,
       "properties": {
@@ -13358,30 +13401,6 @@
         "transformed",
         "notIncluded",
         "unknown"
-      ],
-      "type": "string"
-    },
-    "ToolInterval": {
-      "additionalProperties": false,
-      "properties": {
-        "interval": {
-          "$ref": "#/definitions/ExecutionInterval"
-        },
-        "kind": {
-          "$ref": "#/definitions/ToolIntervalKind"
-        }
-      },
-      "required": [
-        "interval",
-        "kind"
-      ],
-      "type": "object"
-    },
-    "ToolIntervalKind": {
-      "enum": [
-        "execution",
-        "waitingForInput",
-        "queue"
       ],
       "type": "string"
     },
@@ -13787,15 +13806,6 @@
       "properties": {
         "callId": {
           "type": "string"
-        },
-        "intervals": {
-          "items": {
-            "$ref": "#/definitions/ToolInterval"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
         },
         "sourceCallRecordId": {
           "type": [

@@ -31,7 +31,10 @@ const toolBlocks: API.AgentMessageBlock[] = [
   },
   {
     blockId: "tool-result", status: "failed", startedAt: 1, completedAt: 2,
-    content: { type: "toolResult", data: {
+    content: { type: "toolResult", data: { metrics: {
+      queuedAtMs: 100000, startedAtMs: 100010, finishedAtMs: 100045,
+      queueDurationMs: 10, executionDurationMs: 35,
+    },
       callId: "call-read", toolName: "Read", isError: true,
       content: [{ type: "text", text: "permission refused" }],
     } },
@@ -43,7 +46,7 @@ beforeEach(async () => {
   installTracingDom({ narrow: true });
   mocks.capabilities.mockResolvedValue({ supported: true, });
   const tool: API.TrajectoryTool = {
-    callId: "call-read", sourceModelRequestId: "r", sourceCallRecordId: "a", intervals: null,
+    callId: "call-read", sourceModelRequestId: "r", sourceCallRecordId: "a",
   };
   mocks.readTurn.mockResolvedValue({
     identity, clockSegments: [],
@@ -112,6 +115,9 @@ it("reads exact tool arguments, canonical error status and the chosen consuming 
   fireEvent.click(screen.getByRole("tab", { name: "实际执行" }));
   expect(within(panel).getByText("状态: 错误结果")).toBeTruthy();
   expect(within(panel).getByText("permission refused")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Timing" }));
+  expect(await within(panel).findByText("35 ms")).toBeTruthy();
+  expect(within(panel).getByText("10 ms")).toBeTruthy();
   fireEvent.click(screen.getByRole("tab", { name: "模型结果" }));
   expect(await within(panel).findByText("prepared tool body")).toBeTruthy();
   expect(within(panel).getByText("Read")).toBeTruthy();
@@ -201,7 +207,7 @@ it("shows linked tools once without hiding canonical tools from legacy or missin
     })),
   };
   const tool: API.TrajectoryEntry = { type: "tool", tool: {
-    callId: "call-read", sourceModelRequestId: "r", sourceCallRecordId: "a", intervals: null,
+    callId: "call-read", sourceModelRequestId: "r", sourceCallRecordId: "a",
   } };
   for (const scenario of ["linked", "unknownSource", "partialMissing", "readFailure", "legacy"]) {
     mocks.readTool.mockClear();

@@ -46,23 +46,19 @@ pub enum ClockRelation {
     Unanchored,
 }
 
+/// Model-call facts; timestamps locate the call, durations use the execution clock.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ExecutionInterval {
+pub struct LlmCallMetrics {
     pub segment_id: String,
-    pub started_offset_ms: f64,
-    pub ended_offset_ms: Option<f64>,
-    pub elapsed_ms: Option<f64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ModelCallTiming {
-    pub interval: ExecutionInterval,
-    pub first_output_offset_ms: Option<f64>,
-    pub last_output_offset_ms: Option<f64>,
+    pub started_at_ms: Option<f64>,
+    pub finished_at_ms: Option<f64>,
+    pub execution_duration_ms: Option<f64>,
+    pub first_output_at_ms: Option<f64>,
+    pub last_output_at_ms: Option<f64>,
     pub ttft_ms: Option<f64>,
     pub generation_ms: Option<f64>,
+    pub usage: Option<TokenUsage>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -80,8 +76,7 @@ pub struct ModelCallRecord {
     pub call_record_id: String,
     pub ordinal: u32,
     pub observed_state: ModelCallState,
-    pub timing: Option<ModelCallTiming>,
-    pub usage: Option<TokenUsage>,
+    pub metrics: Option<LlmCallMetrics>,
     pub finish_reason: Option<String>,
     pub error: Option<ApiError>,
 }
@@ -101,26 +96,12 @@ pub struct ModelRequestTrace {
     pub model_id: String,
     pub call_records: Vec<ModelCallRecord>,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum ToolIntervalKind {
-    Execution,
-    WaitingForInput,
-    Queue,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ToolInterval {
-    pub kind: ToolIntervalKind,
-    pub interval: ExecutionInterval,
-}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TrajectoryTool {
     pub call_id: String,
     pub source_model_request_id: Option<String>,
     pub source_call_record_id: Option<String>,
-    pub intervals: Option<Vec<ToolInterval>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
