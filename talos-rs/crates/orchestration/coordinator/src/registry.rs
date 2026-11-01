@@ -73,12 +73,36 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Acquire both indexes before publishing so cancellation cannot expose half a node.
+    pub(crate) async fn replace_node(
+        &self,
+        node_id: String,
+        agents: Vec<(String, Arc<dyn AgentHarness>)>,
+        environment: Arc<dyn agent_protocol::WorkerEnvironment>,
+    ) -> AgentResult<()> {
+        if node_id.trim().is_empty() || agents.iter().any(|(id, _)| id.trim().is_empty()) {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "node_id and agent_id cannot be empty",
+            ));
+        }
+        let mut environments = self.environments.write().await;
+        let mut registrations = self.registrations.write().await;
+        registrations.retain(|(registered_node, _), _| registered_node != &node_id);
+        registrations.extend(
+            agents
+                .into_iter()
+                .map(|(id, agent)| ((node_id.clone(), id), agent)),
+        );
+        environments.insert(node_id, environment);
+        Ok(())
+    }
+
     pub(crate) async fn unregister_node(&self, node_id: &str) {
-        self.environments.write().await.remove(node_id);
-        self.registrations
-            .write()
-            .await
-            .retain(|(registered_node, _), _| registered_node != node_id);
+        let mut environments = self.environments.write().await;
+        let mut registrations = self.registrations.write().await;
+        environments.remove(node_id);
+        registrations.retain(|(registered_node, _), _| registered_node != node_id);
     }
 
     pub(crate) async fn register_environment(

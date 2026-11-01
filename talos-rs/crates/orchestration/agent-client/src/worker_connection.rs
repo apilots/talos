@@ -50,6 +50,7 @@ impl AgentNodeClient {
                 pb::ConnectNodeRequest {
                     auth: Some(node_pb::encode_auth(auth)),
                     params: Some(pb::Empty {}),
+                    stream_heartbeat: true,
                 },
             )),
         })?;
@@ -75,16 +76,25 @@ impl AgentNodeClient {
             })?
             .map_err(crate::decode_rpc_status)?
             .ok_or_else(closed)?;
-        match first.body {
+        let stream_heartbeat = match first.body {
             Some(pb::control_to_node_frame::Body::Connected(pb::ConnectNodeResponse {
                 result: Some(pb::connect_node_response::Result::Ready(_)),
-            })) => {}
+                stream_heartbeat,
+            })) => stream_heartbeat,
             Some(pb::control_to_node_frame::Body::Connected(pb::ConnectNodeResponse {
                 result: Some(pb::connect_node_response::Result::Failure(error)),
+                ..
             })) => return Err(error_pb::decode_failure(error)?),
             _ => return Err(invalid_frame()),
-        }
-        serve_calls(Box::pin(input), writer, stop, Dispatcher::Worker(adapter)).await
+        };
+        serve_calls(
+            Box::pin(input),
+            writer,
+            stop,
+            Dispatcher::Worker(adapter),
+            stream_heartbeat,
+        )
+        .await
     }
 }
 
@@ -201,6 +211,7 @@ pub(crate) async fn serve_calls(
     writer: Arc<Writer<pb::NodeToControlFrame>>,
     stop: CancellationToken,
     dispatcher: Dispatcher,
+    stream_heartbeat: bool,
 ) -> TalosResult<()> {
     let dispatcher = Arc::new(dispatcher);
     let mut calls = HashMap::<u64, Pending>::new();
@@ -220,6 +231,9 @@ pub(crate) async fn serve_calls(
                     frame = input.next() => frame.ok_or_else(closed)?.map_err(crate::decode_rpc_status)?,
                 };
                 match frame.body {
+                    Some(pb::control_to_node_frame::Body::Ping(nonce)) if stream_heartbeat => {
+                        writer.control(pb::NodeToControlFrame { body: Some(pb::node_to_control_frame::Body::Pong(nonce)) })?;
+                    }
                     Some(pb::control_to_node_frame::Body::Acknowledge(acknowledgement)) => {
                         dispatcher.authorize(&node_pb::decode_auth(acknowledgement.auth)?)?;
                         if let Some(pending) = calls.get(&acknowledgement.call_id) { pending.response_window.acknowledge(acknowledgement.sequence)?; }

@@ -58,6 +58,7 @@ talos-upgrade = { workspace = true }
 talos-worker = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 axum = "0.7"
 talos-fs = { workspace = true }
 talos-plugin = { workspace = true }

@@ -214,6 +214,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
             first.peer_id.clone(),
             input,
             stop.clone(),
+            first.stream_heartbeat,
         )
         .await;
         self.publisher

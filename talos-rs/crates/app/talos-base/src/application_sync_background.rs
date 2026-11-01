@@ -149,6 +149,11 @@ impl ApplicationSyncHost {
             .closed
     }
 
+    pub(crate) fn account_connections_allowed(&self, account_id: &str) -> bool {
+        let background = self.background.lock().expect("Sync refresh tasks lock");
+        !background.closed && !background.suspended.contains_key(account_id)
+    }
+
     pub(crate) fn resume_login(&self, actor: &Actor) {
         self.background
             .lock()

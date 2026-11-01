@@ -58,6 +58,7 @@ impl AgentNodeClient {
                     pb::ConnectCoordinatorRequest {
                         peer_id: peer_id.into(),
                         computer_id: computer_id.into(),
+                        stream_heartbeat: true,
                         serves_files: resources
                             .as_ref()
                             .is_some_and(|handler| handler.serves_files()),
@@ -93,16 +94,13 @@ impl AgentNodeClient {
             })?
             .map_err(crate::decode_rpc_status)?
             .ok_or_else(closed)?;
-        if !matches!(
-            first.body,
-            Some(pb::control_to_coordinator_frame::Body::Connected(
-                pb::ConnectNodeResponse {
-                    result: Some(pb::connect_node_response::Result::Ready(_))
-                }
-            ))
-        ) {
-            return Err(invalid());
-        }
+        let stream_heartbeat = match first.body {
+            Some(pb::control_to_coordinator_frame::Body::Connected(pb::ConnectNodeResponse {
+                result: Some(pb::connect_node_response::Result::Ready(_)),
+                stream_heartbeat,
+            })) => stream_heartbeat,
+            _ => return Err(invalid()),
+        };
         let stop = CancellationToken::new();
         let (callback_sender, callback_input) = mpsc::channel(CALL_CAPACITY);
         let input = input.filter_map(move |frame| {
@@ -114,6 +112,11 @@ impl AgentNodeClient {
                 };
                 use pb::control_to_coordinator_frame::Body;
                 let body = match frame.body {
+                    Some(Body::Pong(nonce)) => {
+                        return Some(Ok(pb::NodeToControlFrame {
+                            body: Some(pb::node_to_control_frame::Body::Pong(nonce)),
+                        }))
+                    }
                     Some(Body::Result(result)) => {
                         return Some(Ok(pb::NodeToControlFrame {
                             body: Some(pb::node_to_control_frame::Body::Result(result)),
@@ -141,6 +144,9 @@ impl AgentNodeClient {
             }
         });
         let (connection, mut calls) = AgentExecutionConnection::accept(auth.clone(), input);
+        if stream_heartbeat {
+            connection.enable_stream_heartbeat();
+        }
         let (writer, mut replies) = Writer::new(stop.clone());
         let callback_task = tokio::spawn(crate::worker_connection::serve_calls(
             Box::pin(ReceiverStream::new(callback_input)),
@@ -151,6 +157,7 @@ impl AgentNodeClient {
                 auth: auth.clone(),
                 invocation: Arc::downgrade(&connection),
             },
+            /* stream_heartbeat */ false,
         ));
         let task_connection = connection.clone();
         tokio::spawn(async move {
@@ -158,6 +165,7 @@ impl AgentNodeClient {
                 let body = tokio::select! {
                     _ = task_connection.ended() => break,
                     frame = calls.recv() => match frame.and_then(|frame| frame.body) {
+                        Some(pb::control_to_node_frame::Body::Ping(nonce)) => pb::coordinator_to_control_frame::Body::Ping(nonce),
                         Some(pb::control_to_node_frame::Body::Call(value)) => pb::coordinator_to_control_frame::Body::Call(value),
                         Some(pb::control_to_node_frame::Body::Cancel(value)) => pb::coordinator_to_control_frame::Body::Cancel(value),
                         Some(pb::control_to_node_frame::Body::Acknowledge(value)) => pb::coordinator_to_control_frame::Body::Acknowledge(value),
@@ -210,6 +218,7 @@ pub async fn serve_coordinator_connection<S>(
     coordinator_id: String,
     input: S,
     stop: CancellationToken,
+    stream_heartbeat: bool,
 ) -> (
     Pin<Box<dyn Stream<Item = Result<pb::ControlToCoordinatorFrame, Status>> + Send>>,
     tokio::task::JoinHandle<TalosResult<()>>,
@@ -228,6 +237,7 @@ where
             };
             use pb::coordinator_to_control_frame::Body;
             let body = match frame.body {
+                Some(Body::Ping(nonce)) => pb::control_to_node_frame::Body::Ping(nonce),
                 Some(Body::Call(value)) => pb::control_to_node_frame::Body::Call(value),
                 Some(Body::Cancel(value)) => pb::control_to_node_frame::Body::Cancel(value),
                 Some(Body::Acknowledge(value)) => {
@@ -265,6 +275,7 @@ where
             peer_id,
             coordinator_id,
         },
+        stream_heartbeat,
     ));
     let (sender, output) = mpsc::channel(CALL_CAPACITY);
     let resource_lifetime = resources.clone();
@@ -275,6 +286,7 @@ where
                 _ = relay_stop.cancelled() => break,
                 _ = sender.closed() => break,
                 frame = results.recv() => match frame.and_then(|frame| frame.body) {
+                    Some(pb::node_to_control_frame::Body::Pong(nonce)) => pb::control_to_coordinator_frame::Body::Pong(nonce),
                     Some(pb::node_to_control_frame::Body::Result(value)) => pb::control_to_coordinator_frame::Body::Result(value),
                     _ => break,
                 },
@@ -308,6 +320,7 @@ where
         body: Some(pb::control_to_coordinator_frame::Body::Connected(
             pb::ConnectNodeResponse {
                 result: Some(pb::connect_node_response::Result::Ready(pb::Empty {})),
+                stream_heartbeat,
             },
         )),
     }));
