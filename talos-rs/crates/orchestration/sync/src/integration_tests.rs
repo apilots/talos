@@ -16,6 +16,9 @@ mod transcript;
 #[path = "runner_wss_tests.rs"]
 mod runner_wss;
 
+#[path = "runner_reconnect_tests.rs"]
+mod runner_reconnect;
+
 #[path = "runner_tests.rs"]
 mod runner;
 
