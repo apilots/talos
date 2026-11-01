@@ -17,8 +17,7 @@ use crate::{
 
 use super::{operations, FailedUpload, RunnerChannels};
 
-const UPLOAD_RETRY_DELAY: Duration = Duration::from_secs(60);
-const MAX_UPLOAD_RETRY_DELAY: Duration = Duration::from_secs(3600);
+const UPLOAD_RETRY_DELAY: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
 pub(super) enum ConnectionPhase {
@@ -477,26 +476,17 @@ async fn upload_pending<A: SyncDataAdapter>(
             {
                 talos_logging::report_error(&error);
                 // Remote limits/conflicts may recover without new local facts.
-                // Back off repeated rejections of the same cut to limit replay.
                 // InvalidRequest stays parked until the local cut changes.
-                let retry_delay = channels
-                    .failed_uploads
-                    .get(&resource)
-                    .filter(|failure| failure.cut == cut)
-                    .map_or(UPLOAD_RETRY_DELAY, |failure| {
-                        (failure.retry_delay * 2).min(MAX_UPLOAD_RETRY_DELAY)
-                    });
                 let retry_at = matches!(
                     error.error_code(),
                     ErrorCode::UploadTooLarge | ErrorCode::Conflict
                 )
-                .then(|| tokio::time::Instant::now() + retry_delay);
+                .then(|| tokio::time::Instant::now() + UPLOAD_RETRY_DELAY);
                 channels.failed_uploads.insert(
                     resource,
                     FailedUpload {
                         cut,
                         error: error.to_api_error(),
-                        retry_delay,
                         retry_at,
                     },
                 );
