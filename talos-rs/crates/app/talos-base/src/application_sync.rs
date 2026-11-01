@@ -48,7 +48,12 @@ pub(crate) struct ApplicationSyncHost {
     pub worker_failures: tokio::sync::watch::Sender<Option<talos_error::ApiError>>,
     pub trusted_local_host: bool,
     pub local_owner: std::sync::RwLock<Option<String>>,
-    pub tokens: std::sync::RwLock<HashMap<String, Arc<std::sync::RwLock<String>>>>,
+    pub tokens: std::sync::RwLock<
+        HashMap<
+            String,
+            Arc<std::sync::RwLock<super::application_sync_management::AccountCredential>>,
+        >,
+    >,
     pub lifecycle: tokio::sync::Mutex<()>,
     pub background: std::sync::Mutex<super::application_sync_background::RefreshTasks>,
     pub failures: std::sync::RwLock<HashMap<String, talos_error::ApiError>>,

@@ -37,6 +37,67 @@ async fn issuer() -> (Arc<AuthContexts>, TalosCloudClient, Issuer, JoinHandle<()
 }
 
 #[tokio::test]
+async fn full_cache_reclaims_idle_contexts_but_preserves_retained_and_recent_users() {
+    let (service, client, issuer, server) = issuer().await;
+    let oldest_token = format!("token-{}", MAX_CONTEXTS - 1);
+    for index in 0..MAX_CONTEXTS {
+        service
+            .verify(&client, &format!("token-{index}"))
+            .await
+            .unwrap();
+    }
+    let lease = service.retain("token-0").unwrap();
+    assert_eq!(
+        service
+            .verify(&client, "new-token")
+            .await
+            .unwrap_err()
+            .error_code(),
+        ErrorCode::ServiceUnavailable
+    );
+    let old_task = {
+        let contexts = service.sessions.lock().unwrap();
+        for context in contexts.values() {
+            *context.last_used.lock().unwrap() = Instant::now() - VALIDITY;
+        }
+        // The retained connection is oldest; a more recent local request also
+        // keeps its context while another unused credential is reclaimed.
+        *contexts[&fingerprint("token-0")].last_used.lock().unwrap() -= Duration::from_secs(1);
+        *contexts[&fingerprint(&oldest_token)]
+            .last_used
+            .lock()
+            .unwrap() -= Duration::from_millis(1);
+        let task = contexts[&fingerprint(&oldest_token)]
+            .task
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .abort_handle();
+        task
+    };
+    service.identity("token-1").unwrap();
+    assert_eq!(
+        service.verify(&client, "new-token").await.unwrap().user_id,
+        "account-a"
+    );
+    assert_eq!(service.identity("token-0").unwrap().user_id, "account-a");
+    assert!(service.identity("token-1").is_ok());
+    assert!(service.identity(&oldest_token).is_err());
+    assert_eq!(issuer.calls.load(Ordering::SeqCst), MAX_CONTEXTS + 1);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !old_task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(lease);
+    service.shutdown().await;
+    server.abort();
+}
+
+#[tokio::test]
 async fn local_context_is_network_free_during_shared_refresh_and_rejects_revocation() {
     let (service, client, issuer, server) = issuer().await;
     assert_eq!(
@@ -149,8 +210,12 @@ async fn hard_deadline_and_token_expiry_fail_locally_without_network_fallback() 
         ErrorCode::Unauthenticated
     );
     assert_eq!(issuer.calls.load(Ordering::SeqCst), 1);
-    service.invalidate("token");
+    // Pruning must stop maintenance even while an external owner retains Context.
+    service.verify(&client, "other-token").await.unwrap();
     assert!(context.task.lock().unwrap().is_none());
+    let other = service.sessions.lock().unwrap()[&fingerprint("other-token")].clone();
+    service.invalidate("other-token");
+    assert!(other.task.lock().unwrap().is_none());
     server.abort();
 }
 
