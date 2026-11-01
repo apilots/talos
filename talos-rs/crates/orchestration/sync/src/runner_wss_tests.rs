@@ -419,6 +419,28 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     );
     if presence_rejection == PresenceRejection::None {
         let before_retry = uploads.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(61)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while uploads.load(std::sync::atomic::Ordering::SeqCst) != before_retry + 8 {
+                status.changed().await.unwrap();
+            }
+            // Observe the runner after the last rejection has been handled.
+            status.borrow_and_update();
+            status.changed().await.unwrap();
+        })
+        .await
+        .unwrap();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(61)).await;
+        tokio::time::resume();
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(
+            uploads.load(std::sync::atomic::Ordering::SeqCst),
+            before_retry + 8,
+            "Repeated rejection must extend the cooldown beyond another minute"
+        );
         // Only the remote limit changes: no new local cut or explicit flush.
         upload_limit.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
         tokio::time::pause();
@@ -433,7 +455,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
         .expect("unchanged rejected uploads must recover after the cooldown");
         assert_eq!(
             uploads.load(std::sync::atomic::Ordering::SeqCst),
-            before_retry + 8
+            before_retry + 16
         );
         assert_eq!(sync.pending_resources(&binding, 32).await.unwrap().len(), 2);
         assert!(sync

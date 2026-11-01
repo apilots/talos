@@ -23,6 +23,7 @@ use control::ControlCommand;
 struct FailedUpload {
     cut: Option<i64>,
     error: talos_error::ApiError,
+    retry_delay: Duration,
     retry_at: Option<tokio::time::Instant>,
 }
 
