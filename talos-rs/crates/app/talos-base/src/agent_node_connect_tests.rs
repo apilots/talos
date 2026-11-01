@@ -6,6 +6,7 @@ use tonic::transport::{Channel, ClientTlsConfig};
 
 struct Ingress {
     client: pb::agent_node_control_client::AgentNodeControlClient<Channel>,
+    coordinators: pb::agent_coordinator_rpc_client::AgentCoordinatorRpcClient<Channel>,
     endpoint: String,
     trust: agent_client::AgentTlsTrust,
     stop: CancellationToken,
@@ -14,6 +15,10 @@ struct Ingress {
 
 impl Ingress {
     async fn new(control: NodeControlRpc) -> Self {
+        Self::with_auth(control, Arc::new(TestAuth)).await
+    }
+
+    async fn with_auth(control: NodeControlRpc, auth: Arc<dyn AuthService>) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = certificate.cert.pem();
@@ -26,6 +31,11 @@ impl Ingress {
         });
         let stop = control.shutdown.clone();
         let server_stop = stop.clone();
+        let coordinators = super::super::super::coordinator_rpc::CoordinatorRpc::new(
+            NodeManagementRpc::new(control.nodes.clone(), auth),
+            control.remote_publisher.clone(),
+            stop.clone(),
+        );
         let task = tokio::spawn(async move {
             Server::builder()
                 .tls_config(ServerTlsConfig::new().identity(identity))
@@ -33,6 +43,9 @@ impl Ingress {
                 .add_service(pb::agent_node_control_server::AgentNodeControlServer::new(
                     control,
                 ))
+                .add_service(
+                    pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(coordinators),
+                )
                 .serve_with_incoming_shutdown(incoming, server_stop.cancelled_owned())
                 .await
                 .unwrap();
@@ -50,6 +63,9 @@ impl Ingress {
         Self {
             endpoint: format!("https://{address}"),
             trust: agent_client::AgentTlsTrust::Certificate(pem.into_bytes()),
+            coordinators: pb::agent_coordinator_rpc_client::AgentCoordinatorRpcClient::new(
+                channel.clone(),
+            ),
             client: pb::agent_node_control_client::AgentNodeControlClient::new(channel),
             stop,
             task,
@@ -93,6 +109,71 @@ impl Ingress {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    async fn connect_coordinator(
+        &self,
+        user: &str,
+        computer_id: &str,
+    ) -> Result<
+        (
+            mpsc::Sender<pb::CoordinatorToControlFrame>,
+            tonic::Streaming<pb::ControlToCoordinatorFrame>,
+        ),
+        Status,
+    > {
+        let (sender, receiver) = mpsc::channel(1);
+        sender
+            .send(pb::CoordinatorToControlFrame {
+                body: Some(pb::coordinator_to_control_frame::Body::Connect(
+                    pb::ConnectCoordinatorRequest {
+                        peer_id: uuid::Uuid::new_v4().to_string(),
+                        computer_id: computer_id.into(),
+                        serves_files: false,
+                    },
+                )),
+            })
+            .await
+            .unwrap();
+        let mut request = Request::new(ReceiverStream::new(receiver));
+        request
+            .metadata_mut()
+            .insert("authorization", format!("Bearer {user}").parse().unwrap());
+        let mut stream = self
+            .coordinators
+            .clone()
+            .connect(request)
+            .await?
+            .into_inner();
+        assert!(matches!(
+            stream.message().await.unwrap().unwrap().body,
+            Some(pb::control_to_coordinator_frame::Body::Connected(
+                pb::ConnectNodeResponse {
+                    result: Some(pb::connect_node_response::Result::Ready(_)),
+                }
+            ))
+        ));
+        Ok((sender, stream))
+    }
+}
+
+struct StalledAuth {
+    entered: tokio::sync::Semaphore,
+    release: CancellationToken,
+}
+
+#[tonic::async_trait]
+impl AuthService for StalledAuth {
+    async fn logout(&self, _: &RequestIdentity) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+        if token == "pending" {
+            self.entered.add_permits(1);
+            self.release.cancelled().await;
+        }
+        TestAuth.verify_access_token(token).await
     }
 }
 
@@ -226,6 +307,113 @@ async fn server_shutdown_closes_live_connect_without_waiting_for_worker_eof() {
         .ensure_agent("talos")
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn coordinator_account_capacity_isolated_and_reclaimed_after_disconnect() {
+    let fixture = Fixture::new(/* endpoint */ None).await;
+    let lease = registered(
+        fixture
+            .control
+            .register(fixture.registration(&["talos"]))
+            .await
+            .unwrap()
+            .into_inner(),
+    );
+    fixture.heartbeat(lease.clone()).await;
+    let auth = Arc::new(StalledAuth {
+        entered: tokio::sync::Semaphore::new(0),
+        release: CancellationToken::new(),
+    });
+    let ingress = Ingress::with_auth(fixture.control.clone(), auth.clone()).await;
+    let node_id = fixture.credential.node_id.clone();
+    let (_worker_sender, mut worker) = ingress
+        .connect(pb::NodeAuth {
+            node_id: node_id.clone(),
+            token: lease,
+        })
+        .await
+        .unwrap();
+    ready(&mut worker).await;
+    let mut pending = tokio::task::JoinSet::new();
+    let agent_client::AgentTlsTrust::Certificate(certificate) = &ingress.trust else {
+        panic!("controlled TLS fixture requires its CA");
+    };
+    for _ in 0..2 {
+        let channel = tonic::transport::Endpoint::from_shared(ingress.endpoint.clone())
+            .unwrap()
+            .tls_config(
+                ClientTlsConfig::new()
+                    .ca_certificate(tonic::transport::Certificate::from_pem(certificate)),
+            )
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        for _ in 0..128 {
+            let mut client =
+                pb::agent_coordinator_rpc_client::AgentCoordinatorRpcClient::new(channel.clone());
+            let request = management_request(
+                "pending",
+                tokio_stream::pending::<pb::CoordinatorToControlFrame>(),
+            );
+            pending.spawn(async move { client.connect(request).await });
+        }
+    }
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        auth.entered.acquire_many(256),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .forget();
+    let mut connections = Vec::new();
+    for _ in 0..16 {
+        connections.push(
+            ingress
+                .connect_coordinator("user-1", &node_id)
+                .await
+                .unwrap(),
+        );
+    }
+    let full = ingress
+        .connect_coordinator("user-1", &node_id)
+        .await
+        .err()
+        .unwrap();
+    assert!(error_pb::decode_status(full).is_code(ErrorCode::ServiceUnavailable));
+    // Another account still reaches Computer ownership authorization.
+    let other = ingress
+        .connect_coordinator("user-2", &node_id)
+        .await
+        .err()
+        .unwrap();
+    assert!(error_pb::decode_status(other).is_code(ErrorCode::ResourceNotFound));
+    drop(connections.pop());
+    let replacement = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match ingress.connect_coordinator("user-1", &node_id).await {
+                Ok(connection) => break connection,
+                Err(error) => {
+                    assert!(error_pb::decode_status(error).is_code(ErrorCode::ServiceUnavailable))
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+    connections.push(replacement);
+    auth.release.cancel();
+    while let Some(result) = pending.join_next().await {
+        let error = result.unwrap().err().unwrap();
+        assert!(error_pb::decode_status(error).is_code(ErrorCode::Unauthenticated));
+    }
+    ingress.close().await;
+    for (_, mut stream) in connections {
+        assert!(stream.message().await.unwrap().is_none());
+    }
+    assert!(worker.message().await.unwrap().is_none());
 }
 
 #[path = "worker_environment_rpc_tests.rs"]
