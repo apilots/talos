@@ -71,7 +71,7 @@ async fn web_fetch_bounds_chunked_body_without_waiting_for_eof() {
     response.extend_from_slice(b"\r\n"); // Deliberately omit the final zero-length chunk.
     let fixture = HttpFixture::start(response).await;
     let response = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(5), // Includes synchronous HTTP client initialization.
         run(&WebFetchRequest {
             url: fixture.url.clone(),
             prompt: None,

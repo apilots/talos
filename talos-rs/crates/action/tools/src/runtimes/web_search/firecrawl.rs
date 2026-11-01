@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use firecrawl::{Client, SearchOptions, SearchResultOrDocument, SearchSource};
+use std::time::Duration;
 use talos_config::{RuntimeEnv, WebSearchProviderRuntimeConfig};
 use talos_error::{TalosError, TalosResult};
 
@@ -54,16 +55,24 @@ impl SearchProvider for FirecrawlSearchProvider {
             options.include_domains = Some(request.allowed_domains.clone());
         }
 
-        let response = self
-            .client
-            .search(request.query.trim(), options)
-            .await
-            .map_err(|err| {
-                TalosError::new(
-                    talos_error::ErrorCode::ToolExecutionFailed,
-                    format!("Firecrawl search failed: {err}"),
-                )
-            })?;
+        let response = tokio::time::timeout(
+            Duration::from_millis(self.timeout_ms.max(1)),
+            self.client.search(request.query.trim(), options),
+        )
+        .await
+        .map_err(|err| {
+            TalosError::from_source(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "Firecrawl search timed out.",
+                err,
+            )
+        })?
+        .map_err(|err| {
+            TalosError::new(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("Firecrawl search failed: {err}"),
+            )
+        })?;
         if !response.success {
             return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,

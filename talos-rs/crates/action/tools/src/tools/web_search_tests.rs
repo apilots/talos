@@ -28,6 +28,26 @@ async fn spawn_json_server(body: &'static str) -> String {
     format!("http://{addr}")
 }
 
+async fn spawn_incomplete_response(response: Vec<u8>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0; 4096];
+        assert!(socket.read(&mut request).await.unwrap() > 0);
+        if let Err(error) = socket.write_all(&response).await {
+            assert!(matches!(
+                error.kind(),
+                std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+            ));
+            return;
+        }
+        // Withhold EOF so the adapter must enforce its own deadline or byte limit.
+        std::future::pending::<()>().await;
+    });
+    (url, task)
+}
+
 #[test]
 fn parameters_schema_exposes_the_provider_neutral_contract() {
     let schema = WebSearchTool
@@ -200,4 +220,67 @@ async fn execute_payload_reads_api_key_from_context_runtime_env() {
             .get("provider"),
         Some(&serde_json::json!("brave"))
     );
+}
+
+#[tokio::test]
+async fn execute_payload_enforces_firecrawl_configured_deadline() {
+    let (url, task) = spawn_incomplete_response(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"
+            .to_vec(),
+    )
+    .await;
+    let mut config = AgentKernelConfig::default();
+    config.tools.web_search.firecrawl.base_url = Some(url);
+    config.tools.web_search.firecrawl.timeout_ms = 50;
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        WebSearchTool.execute_payload(
+            serde_json::json!({"query": "rust tools"}),
+            ToolContext::new_with_kernel_config("search", "user-1", Some(Arc::new(config))),
+        ),
+    )
+    .await
+    .expect("Firecrawl must enforce the configured deadline without EOF")
+    .expect_err("incomplete Firecrawl body must time out");
+    assert_eq!(
+        error.error_code(),
+        talos_error::ErrorCode::ToolExecutionFailed
+    );
+    assert!(std::error::Error::source(&error)
+        .unwrap()
+        .is::<tokio::time::error::Elapsed>());
+    task.abort();
+    if let Err(error) = task.await {
+        assert!(error.is_cancelled());
+    }
+}
+
+#[tokio::test]
+async fn execute_payload_rejects_oversized_brave_body_without_eof() {
+    let mut response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n100001\r\n".to_vec();
+    response.resize(response.len() + 1024 * 1024 + 1, b' ');
+    response.extend_from_slice(b"\r\n");
+    let (url, task) = spawn_incomplete_response(response).await;
+    let mut config = AgentKernelConfig::default();
+    config.tools.web_search.provider = WebSearchProviderConfig::Brave;
+    config.tools.web_search.brave.base_url = Some(url);
+    config.tools.web_search.brave.api_key = Some("brave-key".to_string());
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        WebSearchTool.execute_payload(
+            serde_json::json!({"query": "rust tools", "limit": 1}),
+            ToolContext::new_with_kernel_config("search", "user-1", Some(Arc::new(config))),
+        ),
+    )
+    .await
+    .expect("Brave must reject excess bytes without waiting for EOF")
+    .expect_err("oversized search response must fail");
+    assert_eq!(
+        error.error_code(),
+        talos_error::ErrorCode::ToolExecutionFailed
+    );
+    task.abort();
+    if let Err(error) = task.await {
+        assert!(error.is_cancelled());
+    }
 }
