@@ -102,6 +102,24 @@ pub(crate) async fn append(
     Ok(())
 }
 
+pub(crate) async fn has_outbox(
+    tx: &mut dyn StorageTransaction,
+    scope: &SyncScope,
+    resource: &SyncResourceKey,
+) -> TalosResult<bool> {
+    let rows = tx.query("SELECT 1 FROM sync_outbox WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? LIMIT 1", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    Ok(!rows.is_empty())
+}
+
+pub(crate) async fn has_document(
+    tx: &mut dyn StorageTransaction,
+    scope: &SyncScope,
+    resource: &SyncResourceKey,
+) -> TalosResult<bool> {
+    let rows = tx.query("SELECT 1 FROM sync_documents WHERE hub_id = ? AND account_id = ? AND kind = ? AND resource_id = ? LIMIT 1", &[&scope.hub_id, &scope.account_id, resource.kind().as_str(), resource.id()]).await?;
+    Ok(!rows.is_empty())
+}
+
 pub(crate) async fn outbox(
     tx: &mut dyn StorageTransaction,
     scope: &SyncScope,
