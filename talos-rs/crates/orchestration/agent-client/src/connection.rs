@@ -13,7 +13,8 @@ use std::{
     },
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
+use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 
@@ -45,6 +46,7 @@ pub struct AgentExecutionConnection {
     next_id: AtomicU64,
     stop: CancellationToken,
     auth: NodeAuth,
+    heartbeat: watch::Sender<bool>,
 }
 
 impl AgentExecutionConnection {
@@ -60,22 +62,46 @@ impl AgentExecutionConnection {
         let mut inbound = Box::pin(inbound);
         let stop = CancellationToken::new();
         let (writer, output) = Writer::new(stop.clone());
+        let (heartbeat, mut heartbeat_enabled) = watch::channel(false);
         let connection = Arc::new(Self {
             writer,
             calls: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             stop,
             auth,
+            heartbeat,
         });
         let reader = connection.clone();
         tokio::spawn(async move {
+            let mut interval = tokio::time::interval_at(
+                Instant::now() + Duration::from_secs(15),
+                Duration::from_secs(15),
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut nonce = 0_u64;
+            let mut pending_probe: Option<(u64, Instant)> = None;
             loop {
                 let frame = tokio::select! {
                     biased;
                     _ = reader.stop.cancelled() => break,
+                    _ = heartbeat_enabled.changed() => { interval.reset(); continue; }
+                    _ = tokio::time::sleep_until(pending_probe.map_or_else(Instant::now, |(_, deadline)| deadline)), if pending_probe.is_some() => break,
+                    _ = interval.tick(), if *heartbeat_enabled.borrow() && pending_probe.is_none() => {
+                        nonce = nonce.wrapping_add(1);
+                        if reader.writer.control(pb::ControlToNodeFrame { body: Some(pb::control_to_node_frame::Body::Ping(nonce)) }).is_err() { break; }
+                        pending_probe = Some((nonce, Instant::now() + Duration::from_secs(30)));
+                        continue;
+                    }
                     frame = inbound.next() => frame,
                 };
                 match frame {
+                    Some(Ok(pb::NodeToControlFrame {
+                        body: Some(pb::node_to_control_frame::Body::Pong(received)),
+                    })) => {
+                        if pending_probe.is_some_and(|(nonce, _)| nonce == received) {
+                            pending_probe = None;
+                        }
+                    }
                     Some(Ok(pb::NodeToControlFrame {
                         body: Some(pb::node_to_control_frame::Body::Result(result)),
                     })) => {
@@ -95,10 +121,27 @@ impl AgentExecutionConnection {
 
     /// Acknowledge only after all advertised Harnesses have been installed.
     pub fn ready(&self) -> TalosResult<()> {
+        self.send_ready(/* stream_heartbeat */ false)
+    }
+
+    /// Queue an opted-in peer's Ready before enabling stream liveness.
+    /// Call only when its Connect request advertised stream_heartbeat.
+    pub fn ready_with_heartbeat(&self) -> TalosResult<()> {
+        self.send_ready(/* stream_heartbeat */ true)?;
+        self.enable_stream_heartbeat();
+        Ok(())
+    }
+
+    pub(crate) fn enable_stream_heartbeat(&self) {
+        self.heartbeat.send_replace(true);
+    }
+
+    fn send_ready(&self, stream_heartbeat: bool) -> TalosResult<()> {
         self.writer.control(pb::ControlToNodeFrame {
             body: Some(pb::control_to_node_frame::Body::Connected(
                 pb::ConnectNodeResponse {
                     result: Some(pb::connect_node_response::Result::Ready(pb::Empty {})),
+                    stream_heartbeat,
                 },
             )),
         })

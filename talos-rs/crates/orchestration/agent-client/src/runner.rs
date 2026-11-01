@@ -126,23 +126,8 @@ impl AgentNodeRunner {
                 return Ok(Some(lease.auth));
             }
             self.publish_lease(Some(lease.clone()))?;
-            let connection_started = Instant::now();
-            connection = self.execution_adapter.as_ref().map(|adapter| {
-                let stop = shutdown.child_token();
-                let task_stop = stop.clone();
-                let client = self.client.clone();
-                let auth = lease.auth.clone();
-                let adapter = adapter.clone();
-                let handle = tokio::spawn(async move {
-                    client
-                        .run_execution_connection(auth, adapter, task_stop)
-                        .await
-                });
-                ExecutionConnectionTask {
-                    stop,
-                    handle: Some(handle),
-                }
-            });
+            let mut connection_started = Instant::now();
+            connection = self.connect_execution(&lease.auth, shutdown);
             tracing::info!(node_id = %self.node_id, "Agent node registered");
             let mut heartbeat =
                 interval_at(Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
@@ -157,12 +142,41 @@ impl AgentNodeRunner {
                         match &mut connection { Some(connection) => connection.wait().await, None => futures_util::future::pending().await }
                     } => {
                         if let Err(error) = result? {
+                            if error.is_code(ErrorCode::ResourceExpired) {
+                                self.publish_lease(None)?;
+                                continue 'registered;
+                            }
                             if !is_transient(&error) { return Err(error); }
                             self.report_failure(NodeOperation::ExecutionConnection, connection_started, &error);
                         }
                         self.publish_lease(None)?;
+                        if let Some(adapter) = &self.execution_adapter {
+                            adapter.drain_disconnected().await?;
+                        }
                         tokio::select! { _ = shutdown.cancelled() => return Ok(Some(lease.auth)), _ = sleep(RETRY_INTERVAL) => {} }
-                        continue 'registered;
+                        if Instant::now() >= lease.deadline {
+                            continue 'registered;
+                        }
+                        let sent_at = Instant::now();
+                        let heartbeat = tokio::select! {
+                            _ = shutdown.cancelled() => return Ok(Some(lease.auth)),
+                            result = self.heartbeat(&lease) => result,
+                        };
+                        match heartbeat {
+                            Ok(result) if result.registration_required => continue 'registered,
+                            Ok(_) => {}
+                            Err(error) if error.is_code(ErrorCode::ResourceExpired) => continue 'registered,
+                            Err(error) if is_transient(&error) => {
+                                self.report_failure(NodeOperation::Heartbeat, sent_at, &error);
+                                continue;
+                            }
+                            Err(error) => return Err(error),
+                        }
+                        // A broken carrier does not revoke its lease. Reuse it so
+                        // Connect rejects a replaced Worker instead of taking over again.
+                        self.publish_lease(Some(lease.clone()))?;
+                        connection_started = Instant::now();
+                        connection = self.connect_execution(&lease.auth, shutdown);
                     }
                     _ = sleep_until(lease.deadline) => {
                         self.publish_lease(None)?;
@@ -174,10 +188,7 @@ impl AgentNodeRunner {
                         let result = tokio::select! {
                             biased;
                             _ = shutdown.cancelled() => return Ok((Instant::now() < lease.deadline).then_some(lease.auth.clone())),
-                            result = tokio::time::timeout_at(lease.deadline, self.client.heartbeat(NodeRequest {
-                                auth: lease.auth.clone(),
-                                params: HeartbeatParams { health: NodeHealth::Healthy },
-                            })) => result.unwrap_or_else(|_| Err(TalosError::new(ErrorCode::ResourceExpired, "Agent node lease expired locally"))),
+                            result = self.heartbeat(&lease) => result,
                         };
                         match result {
                             Ok(result) if result.registration_required => {
@@ -224,6 +235,50 @@ impl AgentNodeRunner {
                 }
             }
         }
+    }
+
+    async fn heartbeat(
+        &self,
+        lease: &AgentNodeLeaseUpdate,
+    ) -> TalosResult<agent_protocol::HeartbeatResult> {
+        tokio::time::timeout_at(
+            lease.deadline,
+            self.client.heartbeat(NodeRequest {
+                auth: lease.auth.clone(),
+                params: HeartbeatParams {
+                    health: NodeHealth::Healthy,
+                },
+            }),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(TalosError::new(
+                ErrorCode::ResourceExpired,
+                "Agent node lease expired locally",
+            ))
+        })
+    }
+
+    fn connect_execution(
+        &self,
+        auth: &NodeAuth,
+        shutdown: &CancellationToken,
+    ) -> Option<ExecutionConnectionTask> {
+        self.execution_adapter.as_ref().map(|adapter| {
+            let stop = shutdown.child_token();
+            let task_stop = stop.clone();
+            let client = self.client.clone();
+            let auth = auth.clone();
+            let adapter = adapter.clone();
+            ExecutionConnectionTask {
+                stop,
+                handle: Some(tokio::spawn(async move {
+                    client
+                        .run_execution_connection(auth, adapter, task_stop)
+                        .await
+                })),
+            }
+        })
     }
 
     fn publish_lease(&self, update: Option<AgentNodeLeaseUpdate>) -> TalosResult<()> {
