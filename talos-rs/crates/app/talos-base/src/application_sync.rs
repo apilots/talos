@@ -59,6 +59,20 @@ pub(crate) struct ApplicationSyncHost {
     pub failures: std::sync::RwLock<HashMap<String, talos_error::ApiError>>,
 }
 
+/// Closing an unpublished stream also stops its reader/resource tasks on cancellation.
+struct UnpublishedConnection {
+    connection: Arc<agent_client::AgentExecutionConnection>,
+    published: bool,
+}
+
+impl Drop for UnpublishedConnection {
+    fn drop(&mut self) {
+        if !self.published {
+            self.connection.close();
+        }
+    }
+}
+
 impl Drop for ApplicationSyncHost {
     fn drop(&mut self) {
         // Resource callbacks also retain the Stores. Break observer captures here
@@ -100,7 +114,19 @@ impl ApplicationSyncHost {
         for account_id in self.sync_stores.handles.lock().await.keys() {
             self.service.remove_sync_handle(account_id);
         }
-        self.tokens.write().expect("management tokens lock").clear();
+        {
+            let mut connections = self.sync_stores.connections.lock().await;
+            self.tokens.write().expect("management tokens lock").clear();
+            let removed = connections.drain().collect::<Vec<_>>();
+            for (_, (_, connection)) in &removed {
+                if let Some(connection) = connection.upgrade() {
+                    connection.close();
+                }
+            }
+            for (computer, _) in removed {
+                self.coordinator.unregister_remote_node(&computer).await;
+            }
+        }
         self.sync_stores.shutdown().await
     }
 
@@ -312,15 +338,30 @@ impl ApplicationSyncHost {
             .runner
             .as_ref()
             .is_some_and(|runner| runner.node_id == computer_id);
-        let mut connections = self.sync_stores.connections.lock().await;
-        if connections
-            .get(computer_id)
-            .filter(|(owner, _)| owner == &actor.user_id)
-            .and_then(|(_, connection)| connection.upgrade())
-            .is_some_and(|connection| !connection.is_closed())
-        {
-            return Ok(());
-        }
+        let generation = {
+            let connections = self.sync_stores.connections.lock().await;
+            if !self.account_connections_allowed(&actor.user_id) {
+                return Err(account_stopped());
+            }
+            if connections
+                .get(computer_id)
+                .filter(|(owner, _)| owner == &actor.user_id)
+                .and_then(|(_, connection)| connection.upgrade())
+                .is_some_and(|connection| !connection.is_closed())
+            {
+                return Ok(());
+            }
+            let existing = self
+                .tokens
+                .read()
+                .expect("management tokens lock")
+                .get(&actor.user_id)
+                .cloned();
+            match existing {
+                Some(credential) => credential,
+                None => self.account_credential(actor)?,
+            }
+        };
         let trust = self
             .config
             .cloud
@@ -350,38 +391,70 @@ impl ApplicationSyncHost {
                 self.coordinator_resource_handler(computer_id.into()),
             )
             .await?;
+        let mut pending = UnpublishedConnection {
+            connection,
+            published: false,
+        };
+        let mut agents = Vec::new();
         if !local {
             for deployment in deployments {
                 let harness = agent_client::RemoteAgentClient::from_connection(
-                    connection.clone(),
+                    pending.connection.clone(),
                     deployment.agent_id.clone(),
                     auth.clone(),
                 )
                 .with_coordinator_id(self.sync.peer_id().into())?;
-                self.coordinator
-                    .replace_remote_agent(
-                        computer_id.into(),
-                        deployment.agent_id,
-                        Arc::new(harness),
-                    )
-                    .await?;
+                agents.push((
+                    deployment.agent_id,
+                    Arc::new(harness) as Arc<dyn talos_agent::AgentHarness>,
+                ));
             }
+        }
+        let mut connections = self.sync_stores.connections.lock().await;
+        if !self.account_connections_allowed(&actor.user_id)
+            || !self
+                .tokens
+                .read()
+                .expect("management tokens lock")
+                .get(&actor.user_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &generation))
+        {
+            return Err(account_stopped());
+        }
+        if connections
+            .get(computer_id)
+            .filter(|(owner, _)| owner == &actor.user_id)
+            .and_then(|(_, connection)| connection.upgrade())
+            .is_some_and(|connection| !connection.is_closed())
+        {
+            return Ok(());
+        }
+        if !local {
             self.coordinator
-                .register_environment(
+                .replace_remote_node(
                     computer_id.into(),
+                    agents,
                     Arc::new(agent_client::AgentEnvironmentClient::from_connection(
-                        connection.clone(),
+                        pending.connection.clone(),
                         auth,
                     )),
                 )
-                .await;
+                .await?;
         }
         connections.insert(
             computer_id.into(),
-            (actor.user_id.clone(), Arc::downgrade(&connection)),
+            (actor.user_id.clone(), Arc::downgrade(&pending.connection)),
         );
+        pending.published = true;
         Ok(())
     }
+}
+
+fn account_stopped() -> TalosError {
+    TalosError::new(
+        ErrorCode::Unauthenticated,
+        "Computer account is no longer active.",
+    )
 }
 
 /// Recover a bounded notification gap from the original durable projections.
