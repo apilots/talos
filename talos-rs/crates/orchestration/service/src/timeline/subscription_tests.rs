@@ -347,6 +347,94 @@ async fn subscription_after_high_water_receives_one_terminal_then_closes() {
 }
 
 #[tokio::test]
+async fn completion_between_subscription_reads_delivers_terminal_before_idle_close() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("timeline.db");
+    let writer = Arc::new(SqliteStorage::new(path.to_str().unwrap()).await.unwrap());
+    run_test_migrations(writer.pool()).await;
+    let store = Arc::new(DatabaseSessionStore::new(writer).await.unwrap());
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let admission =
+        commit_test_running_turn(store.as_ref(), identity.clone(), user_message(&identity)).await;
+    let reader = Arc::new(
+        SqliteStorage::new_with_max_connections(path.to_str().unwrap(), 1)
+            .await
+            .unwrap(),
+    );
+    let events = Arc::new(TimelineEventService::new(Arc::new(
+        DatabaseSessionStore::new(reader.clone()).await.unwrap(),
+    )));
+    let subscriptions = TimelineSubscriptionService::new(events.clone());
+
+    // Queue one connection acquisition behind the subscription's first read.
+    // The pool's FIFO admission pauses its next read without timing sleeps.
+    let connection = reader.pool().acquire().await.unwrap();
+    let mut subscribing = std::pin::pin!(subscriptions.subscribe(TimelineSubscribeCommand {
+        session_id: identity.session_id.clone(),
+        turn_id: Some(identity.turn_id.clone()),
+        after_event_id: None,
+        replay_limit: 10,
+        close_when_idle: true,
+        close_on_terminal: true,
+    }));
+    assert!(futures_util::poll!(subscribing.as_mut()).is_pending());
+    let mut barrier = std::pin::pin!(reader.pool().acquire());
+    assert!(futures_util::poll!(barrier.as_mut()).is_pending());
+    drop(connection);
+    let connection = tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::select! {
+            biased;
+            connection = &mut barrier => connection.unwrap(),
+            _ = &mut subscribing => panic!("subscription must pause before its second read"),
+        }
+    })
+    .await
+    .expect("the first subscription read should complete");
+
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity,
+                sequence: admission.events.last().unwrap().sequence + 1,
+                occurred_at: 11,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq: admission.active_turn.last_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .unwrap();
+    let terminal_seq = terminal.event_seq;
+    events.publish_committed([terminal]);
+    drop(connection);
+
+    let mut subscription = subscribing.await.unwrap();
+    let mut terminal_count = 0;
+    loop {
+        let message = tokio::time::timeout(Duration::from_secs(2), subscription.events.recv())
+            .await
+            .expect("subscription should deliver terminal and close")
+            .expect("subscription should explicitly close");
+        match message {
+            TimelineSubscriptionMessage::Event(event) => {
+                if event.event_seq == terminal_seq {
+                    terminal_count += 1;
+                }
+            }
+            TimelineSubscriptionMessage::Closed(closed) => {
+                assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Completed);
+                assert_eq!(terminal_count, 1);
+                assert!(subscription.events.recv().await.is_none());
+                break;
+            }
+            _ => panic!("expected only canonical facts and terminal closure"),
+        }
+    }
+}
+
+#[tokio::test]
 async fn idle_subscription_closes_without_fabricating_a_terminal_event() {
     let (_store, _events, subscriptions) = fixture().await;
     let mut subscription = subscriptions

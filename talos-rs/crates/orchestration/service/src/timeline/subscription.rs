@@ -44,6 +44,8 @@ impl TimelineSubscriptionService {
     ) -> TalosResult<TimelineSubscription> {
         let live_events = self.subscribe_live_events();
         let active_changes = self.inner.active_tx.subscribe();
+        // An idle snapshot must precede the replay cut so it cannot hide a terminal fact.
+        let has_live_turn = self.has_live_turn(&params.session_id).await?;
         let high_water_mark_event_id = self.latest_event_id(&params.session_id).await?;
         let last_consumed_seq = params
             .after_event_id
@@ -64,7 +66,6 @@ impl TimelineSubscriptionService {
                 .events
                 .retain(|record| record.event.identity().turn_id == turn_id);
         }
-        let has_live_turn = self.has_live_turn(&params.session_id).await?;
         let events = spawn_subscription_stream(SubscriptionStreamParams {
             subscriptions: self.clone(),
             session_id: params.session_id.clone(),
