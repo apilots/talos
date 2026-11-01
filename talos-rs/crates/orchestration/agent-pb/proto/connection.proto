@@ -8,14 +8,17 @@ import "types.proto";
 import "resources.proto";
 import "coordinator.proto";
 
-message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; }
+// Heartbeat frames are enabled only when Connect and Ready both opt in.
+message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; bool stream_heartbeat = 3; }
 message ConnectNodeResponse {
   oneof result { Empty ready = 1; Failure failure = 2; }
+  bool stream_heartbeat = 3;
 }
 message NodeToControlFrame {
   oneof body {
     ConnectNodeRequest connect = 1;
     WorkerRpcResult result = 2;
+    uint64 pong = 3;
   }
 }
 message ControlToNodeFrame {
@@ -24,6 +27,7 @@ message ControlToNodeFrame {
     WorkerRpcCall call = 2;
     CancelWorkerRpcCall cancel = 3;
     AcknowledgeWorkerRpcResult acknowledge = 4;
+    uint64 ping = 5;
   }
 }
 message WorkerRpcCall {
@@ -214,7 +218,7 @@ service AgentCoordinatorRpc {
   rpc InvokeActiveCommand(ActiveSessionCommandRequest) returns (ActiveSessionCommandResponse);
   rpc Connect(stream CoordinatorToControlFrame) returns (stream ControlToCoordinatorFrame);
 }
-message ConnectCoordinatorRequest { string peer_id = 1; string computer_id = 2; bool serves_files = 3; }
+message ConnectCoordinatorRequest { string peer_id = 1; string computer_id = 2; bool serves_files = 3; bool stream_heartbeat = 4; }
 message CoordinatorToControlFrame {
   oneof body {
     ConnectCoordinatorRequest connect = 1;
@@ -222,6 +226,7 @@ message CoordinatorToControlFrame {
     CancelWorkerRpcCall cancel = 3;
     AcknowledgeWorkerRpcResult acknowledge = 4;
     WorkerRpcResult resource_result = 5;
+    uint64 ping = 6;
   }
 }
 message ControlToCoordinatorFrame {
@@ -231,5 +236,6 @@ message ControlToCoordinatorFrame {
     WorkerRpcCall resource_call = 3;
     CancelWorkerRpcCall resource_cancel = 4;
     AcknowledgeWorkerRpcResult resource_acknowledge = 5;
+    uint64 pong = 6;
   }
 }

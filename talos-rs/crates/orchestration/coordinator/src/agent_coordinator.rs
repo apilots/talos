@@ -76,6 +76,21 @@ impl CoordinatorImpl {
             .await;
     }
 
+    /// Replace one remote Computer's complete deployment and environment publication.
+    /// Supply the complete deployment snapshot. Repeated deployment ids use the last
+    /// harness, matching consecutive `replace_remote_agent` calls. Both indexes change
+    /// after their local locks are acquired; no I/O is performed.
+    pub async fn replace_remote_node(
+        &self,
+        node_id: String,
+        agents: Vec<(String, Arc<dyn AgentHarness>)>,
+        environment: Arc<dyn agent_protocol::WorkerEnvironment>,
+    ) -> TalosResult<()> {
+        self.registry
+            .replace_node(node_id, agents, environment)
+            .await
+    }
+
     pub async fn unregister_remote_node(&self, node_id: &str) {
         if node_id != "embedded" {
             self.registry.unregister_node(node_id).await;

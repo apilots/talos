@@ -20,13 +20,21 @@ impl Ingress {
     }
 
     async fn with_auth(control: NodeControlRpc, auth: Arc<dyn AuthService>) -> Self {
+        Self::with_coordinator_output(control, auth, liveness_tests::CoordinatorOutput::Live).await
+    }
+
+    async fn with_coordinator_output(
+        control: NodeControlRpc,
+        auth: Arc<dyn AuthService>,
+        output: liveness_tests::CoordinatorOutput,
+    ) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = certificate.cert.pem();
         let identity = Identity::from_pem(&pem, certificate.signing_key.serialize_pem());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let (stop, task) = Self::serve(control, auth, listener, identity.clone());
+        let (stop, task) = Self::serve(control, auth, listener, identity.clone(), output);
         let channel = tonic::transport::Endpoint::from_shared(format!("https://{address}"))
             .unwrap()
             .tls_config(
@@ -55,6 +63,7 @@ impl Ingress {
         auth: Arc<dyn AuthService>,
         listener: tokio::net::TcpListener,
         identity: Identity,
+        output: liveness_tests::CoordinatorOutput,
     ) -> (CancellationToken, tokio::task::JoinHandle<()>) {
         let incoming = futures_util::stream::unfold(listener, |listener| async {
             let result = listener.accept().await.map(|(stream, _)| stream);
@@ -75,7 +84,12 @@ impl Ingress {
                     control,
                 ))
                 .add_service(
-                    pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(coordinators),
+                    pb::agent_coordinator_rpc_server::AgentCoordinatorRpcServer::new(
+                        liveness_tests::CoordinatorOutputRpc {
+                            inner: coordinators,
+                            output,
+                        },
+                    ),
                 )
                 .serve_with_incoming_shutdown(incoming, server_stop.cancelled_owned())
                 .await
@@ -94,8 +108,13 @@ impl Ingress {
             tokio::net::TcpListener::bind(self.endpoint.strip_prefix("https://").unwrap())
                 .await
                 .unwrap();
-        (self.stop, self.task) =
-            Self::serve(control, Arc::new(TestAuth), listener, self.identity.clone());
+        (self.stop, self.task) = Self::serve(
+            control,
+            Arc::new(TestAuth),
+            listener,
+            self.identity.clone(),
+            liveness_tests::CoordinatorOutput::Live,
+        );
     }
 
     async fn connect(
@@ -115,6 +134,7 @@ impl Ingress {
                     pb::ConnectNodeRequest {
                         auth: Some(auth),
                         params: Some(pb::Empty {}),
+                        stream_heartbeat: false,
                     },
                 )),
             })
@@ -156,6 +176,7 @@ impl Ingress {
                         peer_id: uuid::Uuid::new_v4().to_string(),
                         computer_id: computer_id.into(),
                         serves_files: false,
+                        stream_heartbeat: false,
                     },
                 )),
             })
@@ -176,6 +197,7 @@ impl Ingress {
             Some(pb::control_to_coordinator_frame::Body::Connected(
                 pb::ConnectNodeResponse {
                     result: Some(pb::connect_node_response::Result::Ready(_)),
+                    ..
                 }
             ))
         ));
@@ -210,6 +232,7 @@ async fn ready(stream: &mut tonic::Streaming<pb::ControlToNodeFrame>) {
         Some(pb::control_to_node_frame::Body::Connected(
             pb::ConnectNodeResponse {
                 result: Some(pb::connect_node_response::Result::Ready(_)),
+                ..
             }
         ))
     ));
@@ -598,3 +621,6 @@ async fn coordinator_account_capacity_isolated_and_reclaimed_after_disconnect() 
 
 #[path = "worker_environment_rpc_tests.rs"]
 mod environment_tests;
+
+#[path = "agent_node_liveness_tests.rs"]
+mod liveness_tests;

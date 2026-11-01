@@ -4,7 +4,7 @@ use std::time::Duration;
 use talos_error::TalosResult;
 use talos_storage::StorageTransaction;
 
-struct EmptyAdapter;
+pub(super) struct EmptyAdapter;
 impl SyncDataAdapter for EmptyAdapter {
     async fn scan(&self, _: SyncScanParams) -> TalosResult<SyncScanPage> {
         Ok(SyncScanPage {
@@ -22,6 +22,30 @@ impl SyncDataAdapter for EmptyAdapter {
     async fn apply(&self, _: &mut dyn StorageTransaction, _: &SyncImportBatch) -> TalosResult<()> {
         Ok(())
     }
+}
+
+pub(super) async fn tls_listener() -> (tokio::net::TcpListener, tokio_rustls::TlsAcceptor, Vec<u8>)
+{
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let tls = tokio_rustls::rustls::ServerConfig::builder_with_provider(Arc::new(
+        tokio_rustls::rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(
+        vec![cert.der().clone()],
+        tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der())
+            .into(),
+    )
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    (
+        listener,
+        tokio_rustls::TlsAcceptor::from(Arc::new(tls)),
+        cert.pem().into_bytes(),
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -59,25 +83,11 @@ async fn silent_presence_update_keeps_document_sync_and_commands_responsive() {
 }
 
 async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
-    let rcgen::CertifiedKey { cert, signing_key } =
-        rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     use futures_util::{SinkExt, StreamExt};
     use talos_sync_sdk::loro_protocol::{self, Permission, ProtocolMessage, UpdateStatusCode};
     use talos_sync_types::{SyncControlFrame, SyncControlMessage, SyncErrorTarget, SyncPage};
     use tokio_tungstenite::tungstenite::Message;
-    let tls = tokio_rustls::rustls::ServerConfig::builder_with_provider(Arc::new(
-        tokio_rustls::rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .unwrap()
-    .with_no_client_auth()
-    .with_single_cert(
-        vec![cert.der().clone()],
-        tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der())
-            .into(),
-    )
-    .unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (listener, acceptor, trusted_ca) = tls_listener().await;
     let endpoint = format!(
         "wss://localhost:{}/v1/sync",
         listener.local_addr().unwrap().port()
@@ -105,10 +115,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     let blocked_presence = silent_presence.clone();
     let peer = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
-        let tls = tokio_rustls::TlsAcceptor::from(Arc::new(tls))
-            .accept(tcp)
-            .await
-            .unwrap();
+        let tls = acceptor.accept(tcp).await.unwrap();
         let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
         while let Some(message) = socket.next().await {
             let response = match message.unwrap() {
@@ -281,7 +288,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                         })
                     })
                 }),
-                trusted_ca_pem: Some(cert.pem().into_bytes()),
+                trusted_ca_pem: Some(trusted_ca),
                 reconnect_delay: Duration::from_millis(20),
             },
         )

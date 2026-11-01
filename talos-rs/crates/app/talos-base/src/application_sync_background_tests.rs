@@ -472,3 +472,6 @@ fn snapshot_config(home: &Path) -> Config {
     .unwrap();
     config
 }
+
+#[path = "application_sync_connection_tests.rs"]
+mod connection_tests;
