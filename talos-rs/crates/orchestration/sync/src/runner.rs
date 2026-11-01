@@ -20,11 +20,17 @@ mod transport;
 
 use control::ControlCommand;
 
+struct FailedUpload {
+    cut: Option<i64>,
+    error: talos_error::ApiError,
+    retry_at: Option<tokio::time::Instant>,
+}
+
 struct RunnerChannels {
     presence_computers: watch::Receiver<Vec<String>>,
     upload_cursor: i64,
     upload_cut: i64,
-    failed_uploads: HashMap<crate::SyncResourceKey, (Option<i64>, talos_error::ApiError)>,
+    failed_uploads: HashMap<crate::SyncResourceKey, FailedUpload>,
     wake: mpsc::Receiver<()>,
     commands: mpsc::Receiver<ControlCommand>,
     status: watch::Sender<SyncStatus>,
