@@ -15,6 +15,10 @@ struct Ingress {
 
 impl Ingress {
     async fn new(control: NodeControlRpc) -> Self {
+        Self::with_auth(control, Arc::new(TestAuth)).await
+    }
+
+    async fn with_auth(control: NodeControlRpc, auth: Arc<dyn AuthService>) -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
         let pem = certificate.cert.pem();
@@ -28,7 +32,7 @@ impl Ingress {
         let stop = control.shutdown.clone();
         let server_stop = stop.clone();
         let coordinators = super::super::super::coordinator_rpc::CoordinatorRpc::new(
-            NodeManagementRpc::new(control.nodes.clone(), Arc::new(TestAuth)),
+            NodeManagementRpc::new(control.nodes.clone(), auth),
             control.remote_publisher.clone(),
             stop.clone(),
         );
@@ -150,6 +154,26 @@ impl Ingress {
             ))
         ));
         Ok((sender, stream))
+    }
+}
+
+struct StalledAuth {
+    entered: tokio::sync::Semaphore,
+    release: CancellationToken,
+}
+
+#[tonic::async_trait]
+impl AuthService for StalledAuth {
+    async fn logout(&self, _: &RequestIdentity) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+        if token == "pending" {
+            self.entered.add_permits(1);
+            self.release.cancelled().await;
+        }
+        TestAuth.verify_access_token(token).await
     }
 }
 
@@ -297,7 +321,11 @@ async fn coordinator_account_capacity_isolated_and_reclaimed_after_disconnect() 
             .into_inner(),
     );
     fixture.heartbeat(lease.clone()).await;
-    let ingress = Ingress::new(fixture.control.clone()).await;
+    let auth = Arc::new(StalledAuth {
+        entered: tokio::sync::Semaphore::new(0),
+        release: CancellationToken::new(),
+    });
+    let ingress = Ingress::with_auth(fixture.control.clone(), auth.clone()).await;
     let node_id = fixture.credential.node_id.clone();
     let (_worker_sender, mut worker) = ingress
         .connect(pb::NodeAuth {
@@ -307,6 +335,39 @@ async fn coordinator_account_capacity_isolated_and_reclaimed_after_disconnect() 
         .await
         .unwrap();
     ready(&mut worker).await;
+    let mut pending = tokio::task::JoinSet::new();
+    let agent_client::AgentTlsTrust::Certificate(certificate) = &ingress.trust else {
+        panic!("controlled TLS fixture requires its CA");
+    };
+    for _ in 0..2 {
+        let channel = tonic::transport::Endpoint::from_shared(ingress.endpoint.clone())
+            .unwrap()
+            .tls_config(
+                ClientTlsConfig::new()
+                    .ca_certificate(tonic::transport::Certificate::from_pem(certificate)),
+            )
+            .unwrap()
+            .connect()
+            .await
+            .unwrap();
+        for _ in 0..128 {
+            let mut client =
+                pb::agent_coordinator_rpc_client::AgentCoordinatorRpcClient::new(channel.clone());
+            let request = management_request(
+                "pending",
+                tokio_stream::pending::<pb::CoordinatorToControlFrame>(),
+            );
+            pending.spawn(async move { client.connect(request).await });
+        }
+    }
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        auth.entered.acquire_many(256),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .forget();
     let mut connections = Vec::new();
     for _ in 0..16 {
         connections.push(
@@ -343,6 +404,11 @@ async fn coordinator_account_capacity_isolated_and_reclaimed_after_disconnect() 
     .await
     .unwrap();
     connections.push(replacement);
+    auth.release.cancel();
+    while let Some(result) = pending.join_next().await {
+        let error = result.unwrap().err().unwrap();
+        assert!(error_pb::decode_status(error).is_code(ErrorCode::Unauthenticated));
+    }
     ingress.close().await;
     for (_, mut stream) in connections {
         assert!(stream.message().await.unwrap().is_none());
