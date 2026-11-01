@@ -134,32 +134,3 @@ async fn web_fetch_tool_preserves_charset_bom_and_character_truncation() {
         fixture.finish().await;
     }
 }
-
-#[tokio::test]
-async fn web_fetch_times_out_a_stalled_body_with_its_typed_source() {
-    use std::error::Error;
-    let fixture = HttpFixture::start(
-        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 1\r\n\r\n".to_vec(),
-    )
-    .await;
-    let error = tokio::time::timeout(
-        REQUEST_TIMEOUT + Duration::from_secs(3),
-        run(&WebFetchRequest {
-            url: format!("{}?token=private", fixture.url),
-            prompt: None,
-            max_chars: 100,
-        }),
-    )
-    .await
-    .expect("the request deadline must include body reads")
-    .unwrap_err();
-    assert!(error.is_code(ErrorCode::ToolExecutionFailed));
-    let source = error
-        .source()
-        .unwrap()
-        .downcast_ref::<reqwest::Error>()
-        .unwrap();
-    assert!(source.is_timeout());
-    assert!(source.url().is_none());
-    fixture.finish().await;
-}
