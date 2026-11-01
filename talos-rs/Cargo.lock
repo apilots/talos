@@ -7166,6 +7166,7 @@ dependencies = [
  "futures-util",
  "globset",
  "html2text",
+ "http 1.4.0",
  "regex",
  "reqwest 0.12.28",
  "schemars 0.8.22",

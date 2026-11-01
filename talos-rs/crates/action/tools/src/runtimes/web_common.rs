@@ -1,6 +1,8 @@
 use reqwest::Url;
 use talos_error::{TalosError, TalosResult};
 
+pub(crate) const TRUNCATION_MARKER: &str = "...[truncated]";
+
 pub(crate) const DEFAULT_WEB_USER_AGENT: &str = "Talos/0.1 (+https://github.com/xiliu/talos)";
 
 pub(crate) fn parse_http_url(raw: &str) -> TalosResult<Url> {
@@ -80,6 +82,7 @@ pub(crate) fn html_to_text(html: &str) -> String {
                     }
                 }
                 tracking_tag = false;
+                tag_name.clear();
             }
             _ if inside_tag => {
                 if tracking_tag {
@@ -128,7 +131,7 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> (String, bool) {
     for ch in text.chars().take(max_chars) {
         output.push(ch);
     }
-    output.push_str("...[truncated]");
+    output.push_str(TRUNCATION_MARKER);
     (output, true)
 }
 
