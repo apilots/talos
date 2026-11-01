@@ -70,9 +70,9 @@ impl VerifiedContext {
 }
 
 impl Context {
-    fn stop(&self) {
+    fn stop(&self, error: TalosError) {
         self.initialized.store(true, Ordering::SeqCst);
-        let _ = self.state.send_replace(Err(unauthenticated()));
+        let _ = self.state.send_replace(Err(error));
         if let Some(task) = self.task.lock().expect("Auth task lock").take() {
             task.abort();
         }
@@ -106,7 +106,7 @@ impl AuthContexts {
             .drain()
             .map(|(_, context)| context)
         {
-            context.stop();
+            context.stop(unauthenticated());
         }
         self.tasks.wait().await;
     }
@@ -139,7 +139,7 @@ impl AuthContexts {
             .expect("Auth contexts lock")
             .remove(&fingerprint(token))
         {
-            context.stop();
+            context.stop(unauthenticated());
         }
     }
 
@@ -155,12 +155,19 @@ impl AuthContexts {
                 return Err(unauthenticated());
             }
             sessions.retain(|_, context| {
-                let keep =
-                    !context.initialized.load(Ordering::SeqCst) || context.identity().is_ok();
-                if !keep {
-                    context.stop();
+                if !context.initialized.load(Ordering::SeqCst) {
+                    return true;
                 }
-                keep
+                if let Err(error) = context.identity() {
+                    // Keep known outage proofs for their existing refresh owner.
+                    // Local readers still reject them at the original deadline.
+                    if error.is_code(ErrorCode::ServiceUnavailable) {
+                        return true;
+                    }
+                    context.stop(error);
+                    return false;
+                }
+                true
             });
             if let Some(context) = sessions.get(&key) {
                 context.clone()
@@ -180,7 +187,7 @@ impl AuthContexts {
                         .filter(|(_, last_used)| last_used.elapsed() >= VALIDITY)
                         .min_by_key(|(_, last_used)| *last_used);
                     if let Some(context) = oldest.and_then(|(key, _)| sessions.remove(&key)) {
-                        context.stop();
+                        context.stop(unauthenticated());
                     }
                 }
                 if sessions.len() >= MAX_CONTEXTS {
@@ -278,6 +285,8 @@ impl AuthContexts {
                                             deadline,
                                             REQUEST_TIMEOUT,
                                         ));
+                                    } else {
+                                        refresh.reset_at(Instant::now() + Duration::from_secs(15));
                                     }
                                     // Publish attempt completion without extending the proof.
                                     state.send_modify(|_| {});
@@ -308,7 +317,7 @@ struct PendingAdmission<'a> {
 impl Drop for PendingAdmission<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.context.stop();
+            self.context.stop(unauthenticated());
             let mut sessions = self.contexts.sessions.lock().expect("Auth contexts lock");
             if sessions
                 .get(&self.key)
