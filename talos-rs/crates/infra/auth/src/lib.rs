@@ -8,6 +8,7 @@ pub use cloud::{
     CloudLoginService, CloudLoginStartRequest, CloudLoginStartResponse, CloudLoginStatusRequest,
     CloudLoginStatusResponse,
 };
+pub use context::AccessTokenLease;
 pub use service::{AuthService, OpenModeUserService, UserService};
 pub use session_cache::{
     CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager, CloudSessionUserSnapshot,

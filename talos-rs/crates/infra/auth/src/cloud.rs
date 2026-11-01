@@ -388,6 +388,10 @@ impl AuthService for CloudAuthService {
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         self.contexts.verify(&self.client, token).await
     }
+
+    fn retain_access_token(&self, token: &str) -> TalosResult<crate::AccessTokenLease> {
+        self.contexts.retain(token)
+    }
 }
 
 fn map_client_kind(value: CloudLoginClientKind) -> DeviceClientKindDto {
