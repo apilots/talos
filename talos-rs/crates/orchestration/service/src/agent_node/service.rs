@@ -13,8 +13,8 @@ use talos_auth::UserRole;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::node::{
     AgentNodeStore, CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams,
-    NodeListScope, NodeRecord, RegisterNodeParams, RenewNodeParams, RotateCredentialParams,
-    UpdateNodeParams,
+    NodeAuthenticationRecord, NodeListScope, NodeRecord, RegisterNodeParams, RenewNodeParams,
+    RotateCredentialParams, UpdateNodeParams,
 };
 use talos_store::session::SessionRecord;
 use tokio::sync::Mutex;
@@ -255,13 +255,13 @@ impl AgentNodeService {
         &self,
         auth: &NodeAuth,
         kind: CredentialKind,
-    ) -> TalosResult<NodeRecord> {
+    ) -> TalosResult<NodeAuthenticationRecord> {
         if auth.node_id.trim().is_empty() || auth.token.is_empty() {
             return Err(unauthenticated());
         }
         let node = self
             .store
-            .get(&auth.node_id)
+            .get_authentication(&auth.node_id)
             .await?
             .ok_or_else(unauthenticated)?;
         let expected = match kind {
