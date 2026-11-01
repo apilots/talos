@@ -15,7 +15,9 @@ use crate::{
     SyncDataAdapter, SyncExportParams, SyncImportBatch, SyncScanParams, SyncStartParams, TalosSync,
 };
 
-use super::{operations, RunnerChannels};
+use super::{operations, FailedUpload, RunnerChannels};
+
+const UPLOAD_RETRY_DELAY: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
 pub(super) enum ConnectionPhase {
@@ -169,7 +171,7 @@ async fn session<A: SyncDataAdapter>(
             .failed_uploads
             .values()
             .next()
-            .map(|(_, error)| error.clone());
+            .map(|failure| failure.error.clone());
     });
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     loop {
@@ -224,7 +226,7 @@ async fn session<A: SyncDataAdapter>(
                 .failed_uploads
                 .values()
                 .next()
-                .map(|(_, error)| error.clone());
+                .map(|failure| failure.error.clone());
         });
     }
 }
@@ -456,7 +458,12 @@ async fn upload_pending<A: SyncDataAdapter>(
         if channels
             .failed_uploads
             .get(&resource)
-            .is_some_and(|(failed_cut, _)| *failed_cut == cut)
+            .is_some_and(|failure| {
+                failure.cut == cut
+                    && failure
+                        .retry_at
+                        .is_none_or(|deadline| tokio::time::Instant::now() < deadline)
+            })
         {
             continue;
         }
@@ -476,9 +483,21 @@ async fn upload_pending<A: SyncDataAdapter>(
                 ) =>
             {
                 talos_logging::report_error(&error);
-                channels
-                    .failed_uploads
-                    .insert(resource, (cut, error.to_api_error()));
+                // Remote limits/conflicts may recover without new local facts.
+                // InvalidRequest stays parked until the local cut changes.
+                let retry_at = matches!(
+                    error.error_code(),
+                    ErrorCode::UploadTooLarge | ErrorCode::Conflict
+                )
+                .then(|| tokio::time::Instant::now() + UPLOAD_RETRY_DELAY);
+                channels.failed_uploads.insert(
+                    resource,
+                    FailedUpload {
+                        cut,
+                        error: error.to_api_error(),
+                        retry_at,
+                    },
+                );
             }
             Err(error) => return Err(error),
         }
@@ -488,7 +507,7 @@ async fn upload_pending<A: SyncDataAdapter>(
             .failed_uploads
             .values()
             .next()
-            .map(|(_, error)| error.clone());
+            .map(|failure| failure.error.clone());
     });
     Ok(())
 }
