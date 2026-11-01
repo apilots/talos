@@ -32,8 +32,16 @@ pub(crate) struct AuthContexts {
 struct Context {
     admission: tokio::sync::Mutex<()>,
     initialized: AtomicBool,
+    last_used: Mutex<Instant>,
     state: watch::Sender<TalosResult<VerifiedContext>>,
     task: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Keeps an admitted credential's maintenance alive while a connection owns it.
+/// Services without cached authorization maintenance use the default lease.
+#[derive(Default)]
+pub struct AccessTokenLease {
+    _context: Option<Arc<Context>>,
 }
 
 #[derive(Clone)]
@@ -105,10 +113,23 @@ impl AuthContexts {
 
     pub(crate) fn identity(&self, token: &str) -> TalosResult<RequestIdentity> {
         let sessions = self.sessions.lock().expect("Auth contexts lock");
-        sessions
+        let context = sessions
             .get(&fingerprint(token))
-            .ok_or_else(unauthenticated)?
-            .identity()
+            .ok_or_else(unauthenticated)?;
+        let identity = context.identity()?;
+        *context.last_used.lock().expect("Auth usage lock") = Instant::now();
+        Ok(identity)
+    }
+
+    pub(crate) fn retain(&self, token: &str) -> TalosResult<AccessTokenLease> {
+        let sessions = self.sessions.lock().expect("Auth contexts lock");
+        let context = sessions
+            .get(&fingerprint(token))
+            .ok_or_else(unauthenticated)?;
+        context.identity()?;
+        Ok(AccessTokenLease {
+            _context: Some(context.clone()),
+        })
     }
 
     pub(crate) fn invalidate(&self, token: &str) {
@@ -134,11 +155,34 @@ impl AuthContexts {
                 return Err(unauthenticated());
             }
             sessions.retain(|_, context| {
-                !context.initialized.load(Ordering::SeqCst) || context.identity().is_ok()
+                let keep =
+                    !context.initialized.load(Ordering::SeqCst) || context.identity().is_ok();
+                if !keep {
+                    context.stop();
+                }
+                keep
             });
             if let Some(context) = sessions.get(&key) {
                 context.clone()
             } else {
+                if sessions.len() >= MAX_CONTEXTS {
+                    // In-flight admissions and retained connections have another Arc.
+                    // Recent local users keep their proof even without a connection lease.
+                    let oldest = sessions
+                        .iter()
+                        .filter(|(_, context)| {
+                            context.initialized.load(Ordering::SeqCst)
+                                && Arc::strong_count(context) == 1
+                        })
+                        .map(|(key, context)| {
+                            (*key, *context.last_used.lock().expect("Auth usage lock"))
+                        })
+                        .filter(|(_, last_used)| last_used.elapsed() >= VALIDITY)
+                        .min_by_key(|(_, last_used)| *last_used);
+                    if let Some(context) = oldest.and_then(|(key, _)| sessions.remove(&key)) {
+                        context.stop();
+                    }
+                }
                 if sessions.len() >= MAX_CONTEXTS {
                     return Err(TalosError::new(
                         ErrorCode::ServiceUnavailable,
@@ -149,6 +193,7 @@ impl AuthContexts {
                 let context = Arc::new(Context {
                     admission: Default::default(),
                     initialized: AtomicBool::new(false),
+                    last_used: Mutex::new(Instant::now()),
                     state,
                     task: Mutex::new(None),
                 });
@@ -160,7 +205,9 @@ impl AuthContexts {
         // behind a held issuer request. Local readers never take this lock.
         let _admission = context.admission.lock().await;
         if context.initialized.load(Ordering::SeqCst) {
-            return context.identity();
+            let identity = context.identity()?;
+            *context.last_used.lock().expect("Auth usage lock") = Instant::now();
+            return Ok(identity);
         }
         let mut pending = PendingAdmission {
             contexts: self,
@@ -180,6 +227,7 @@ impl AuthContexts {
         match verified {
             Ok(verified) => {
                 let identity = verified.identity()?;
+                *context.last_used.lock().expect("Auth usage lock") = Instant::now();
                 let _ = context.state.send_replace(Ok(verified));
                 let client = client.clone();
                 let token = token.to_owned();

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
 
-use crate::{RequestIdentity, UserDto, UserType};
+use crate::{AccessTokenLease, RequestIdentity, UserDto, UserType};
 
 #[async_trait]
 pub trait AuthService: Send + Sync {
@@ -9,7 +9,7 @@ pub trait AuthService: Send + Sync {
     async fn shutdown(&self) {}
 
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()>;
-    /// Read an already verified context without network fallback or side effects.
+    /// Read an already verified context without network fallback or refreshing its proof.
     fn local_identity(&self, _token: &str) -> TalosResult<RequestIdentity> {
         Err(talos_error::TalosError::new(
             talos_error::ErrorCode::Unauthenticated,
@@ -22,6 +22,12 @@ pub trait AuthService: Send + Sync {
 
     /// Explicit account admission; reuses an existing context or verifies remotely.
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity>;
+
+    /// Retain an already admitted credential while a long-lived connection owns it.
+    /// Implementations without cached maintenance need no lease state.
+    fn retain_access_token(&self, _token: &str) -> TalosResult<AccessTokenLease> {
+        Ok(AccessTokenLease::default())
+    }
 }
 
 #[async_trait]

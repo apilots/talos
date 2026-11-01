@@ -19,6 +19,11 @@ pub(crate) enum RefreshPhase {
     ObserveWorker,
 }
 
+pub(crate) struct AccountCredential {
+    token: String,
+    _lease: talos_auth::AccessTokenLease,
+}
+
 impl ApplicationSyncHost {
     pub(crate) async fn verified_actor(&self, actor: &Actor) -> TalosResult<RequestIdentity> {
         let token = actor.access_token.as_deref().ok_or_else(|| {
@@ -37,25 +42,38 @@ impl ApplicationSyncHost {
         Ok(verified)
     }
 
-    fn credentials(&self, actor: &RequestIdentity) -> talos_sync_sdk::CredentialCallback {
-        let token = self
+    fn credentials(
+        &self,
+        actor: &RequestIdentity,
+    ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
+        let token = actor.access_token.as_deref().expect("verified token");
+        let credential = AccountCredential {
+            token: token.to_owned(),
+            _lease: self.auth_service.retain_access_token(token)?,
+        };
+        let token = match self
             .tokens
             .write()
             .expect("management tokens lock")
             .entry(actor.user_id.clone())
-            .or_insert_with(|| Arc::new(std::sync::RwLock::new(String::new())))
-            .clone();
-        *token.write().expect("management token lock") =
-            actor.access_token.clone().expect("verified token");
+        {
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                *entry.get().write().expect("management token lock") = credential;
+                entry.get().clone()
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => entry
+                .insert(Arc::new(std::sync::RwLock::new(credential)))
+                .clone(),
+        };
         let account_id = actor.user_id.clone();
         let auth = self.auth_service.clone();
-        Arc::new(move || {
+        Ok(Arc::new(move || {
             let account_id = account_id.clone();
             let token = token.clone();
             let auth = auth.clone();
             Box::pin(async move {
-                let token = token.read().expect("management token lock").clone();
-                let verified = auth.local_identity(&token).map_err(|error| {
+                let credential = token.read().expect("management token lock");
+                let verified = auth.local_identity(&credential.token).map_err(|error| {
                     talos_logging::report_error(&error);
                     let code = match error.error_code() {
                         ErrorCode::Unauthenticated => {
@@ -79,10 +97,10 @@ impl ApplicationSyncHost {
                 }
                 Ok(talos_sync_sdk::VerifiedCredential {
                     account_id,
-                    access_token: token,
+                    access_token: credential.token.clone(),
                 })
             })
-        })
+        }))
     }
 
     /// Read identity and durable removal locally; retirement belongs to maintenance.
@@ -260,7 +278,7 @@ impl ApplicationSyncHost {
                 }
             }
         }
-        let credentials = self.credentials(actor);
+        let credentials = self.credentials(actor)?;
         let owns_local = self.config.agent_node.control_plane.is_none()
             && self
                 .owns_local_computer(&Actor::regular(&actor.user_id))
@@ -486,7 +504,7 @@ impl ApplicationSyncHost {
                         source_user_id: binding.source_user_id,
                         computers: binding.computers,
                     },
-                    self.credentials(&verified),
+                    self.credentials(&verified)?,
                 )
                 .await?;
             }
