@@ -42,10 +42,10 @@ impl ApplicationSyncHost {
         Ok(verified)
     }
 
-    fn credentials(
+    pub(crate) fn account_credential(
         &self,
         actor: &RequestIdentity,
-    ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
+    ) -> TalosResult<Arc<std::sync::RwLock<AccountCredential>>> {
         let token = actor.access_token.as_deref().expect("verified token");
         let credential = AccountCredential {
             token: token.to_owned(),
@@ -65,6 +65,14 @@ impl ApplicationSyncHost {
                 .insert(Arc::new(std::sync::RwLock::new(credential)))
                 .clone(),
         };
+        Ok(token)
+    }
+
+    fn credentials(
+        &self,
+        actor: &RequestIdentity,
+    ) -> TalosResult<talos_sync_sdk::CredentialCallback> {
+        let token = self.account_credential(actor)?;
         let account_id = actor.user_id.clone();
         let auth = self.auth_service.clone();
         Ok(Arc::new(move || {
@@ -442,20 +450,21 @@ impl ApplicationSyncHost {
             .write()
             .expect("Sync credentials lock")
             .remove(account_id);
+        let mut connections = self.sync_stores.connections.lock().await;
         self.tokens
             .write()
             .expect("management tokens lock")
             .remove(account_id);
-        let mut connections = self.sync_stores.connections.lock().await;
         let removed = connections
             .extract_if(|_, (owner, _)| owner == account_id)
             .map(|(computer, (_, connection))| (computer, connection))
             .collect::<Vec<_>>();
-        drop(connections);
-        for (computer, connection) in removed {
+        for (_, connection) in &removed {
             if let Some(connection) = connection.upgrade() {
                 connection.close();
             }
+        }
+        for (computer, _) in removed {
             self.coordinator.unregister_remote_node(&computer).await;
         }
         Ok(())
