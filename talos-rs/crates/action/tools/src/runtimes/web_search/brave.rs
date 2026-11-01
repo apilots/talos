@@ -11,6 +11,8 @@ use super::{
     WebSearchRequest,
 };
 
+const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
 pub(super) struct BraveSearchProvider {
     api_key: String,
     base_url: String,
@@ -54,7 +56,7 @@ impl SearchProvider for BraveSearchProvider {
         if let Some(freshness) = brave_freshness(request.recency_days) {
             query.push(("freshness", freshness.to_string()));
         }
-        let response: BraveSearchResponse = self
+        let mut response = self
             .client
             .get(&self.base_url)
             .header("X-Subscription-Token", &self.api_key)
@@ -73,15 +75,30 @@ impl SearchProvider for BraveSearchProvider {
                     talos_error::ErrorCode::ToolExecutionFailed,
                     format!("Brave search failed: {err}"),
                 )
-            })?
-            .json()
-            .await
-            .map_err(|err| {
-                TalosError::new(
-                    talos_error::ErrorCode::ToolExecutionFailed,
-                    format!("parse Brave search response: {err}"),
-                )
             })?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|err| {
+            TalosError::from_source(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "Read Brave search response failed.",
+                err.without_url(),
+            )
+        })? {
+            if chunk.len() > MAX_RESPONSE_BYTES - bytes.len() {
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "Brave search response exceeds the 1 MiB limit.",
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let response: BraveSearchResponse = serde_json::from_slice(&bytes).map_err(|err| {
+            TalosError::from_source(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "Parse Brave search response failed.",
+                err,
+            )
+        })?;
 
         Ok(response
             .web
