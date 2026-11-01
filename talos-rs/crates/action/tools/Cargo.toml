@@ -29,6 +29,7 @@ talos-memory = { workspace = true }
 async-trait = "0.1"
 dashmap = "5.5"
 reqwest.workspace = true
+http = "1"
 firecrawl.workspace = true
 tavily.workspace = true
 tokio-util = { workspace = true }
