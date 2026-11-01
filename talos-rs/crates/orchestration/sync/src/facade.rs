@@ -153,9 +153,7 @@ impl TalosSync {
         let resource = projection::resource(binding, resource);
         let mut tx = self.storage.begin_transaction().await?;
         self.require_binding(&mut *tx, binding).await?;
-        let version = store::document(&mut *tx, &binding.scope, &resource)
-            .await?
-            .map(|record| record.version);
+        let version = store::document_version(&mut *tx, &binding.scope, &resource).await?;
         tx.commit().await?;
         Ok(version)
     }

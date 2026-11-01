@@ -6,6 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 require_command curl
+require_command git
+require_command node
+# Provision the pinned Browser before configuration writes can race its startup install.
+node "${REPO_ROOT}/build/plugins/snapshot.mjs" "${REPO_ROOT}/plugins/apilots-mcps"
 start_server
 trap stop_server EXIT
 

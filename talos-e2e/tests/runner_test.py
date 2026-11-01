@@ -316,7 +316,10 @@ has_real_llm_key() { return 1; }
                 requirements = runner.requirements(root, case)
                 self.assertEqual(requirements["binaries"], ["server"])
                 self.assertEqual(requirements["python_modules"], ["yaml"])
-                self.assertEqual(set(requirements["commands"]), {"cargo", "protoc", "curl"})
+                commands = {"cargo", "protoc", "curl"}
+                if case == "01_models/custom_providers.sh":
+                    commands.update({"git", "node"})
+                self.assertEqual(set(requirements["commands"]), commands)
                 self.assertFalse(requirements.get("checks"))
                 self.assertFalse(requirements.get("env"))
         self.assertIn("model", runner.requirements(root, "03_messages_http_sse.sh")["checks"])

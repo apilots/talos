@@ -11,5 +11,16 @@
     "binaries": [
       "server"
     ]
+  },
+  "cases": {
+    "custom_providers.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "curl",
+        "git",
+        "node"
+      ]
+    }
   }
 }

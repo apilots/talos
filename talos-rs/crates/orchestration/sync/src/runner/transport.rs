@@ -97,11 +97,8 @@ async fn bootstrap<A: SyncDataAdapter>(
         for source_resource in page.resources {
             let resource = crate::projection::resource(binding, &source_resource);
             let mut tx = sync.storage.begin_transaction().await?;
-            let pending = store::outbox(&mut *tx, &binding.scope, &resource, 1).await?;
-            if pending.is_empty()
-                && store::document(&mut *tx, &binding.scope, &resource)
-                    .await?
-                    .is_none()
+            if !store::has_outbox(&mut *tx, &binding.scope, &resource).await?
+                && !store::has_document(&mut *tx, &binding.scope, &resource).await?
             {
                 let changes = adapter
                     .export(
