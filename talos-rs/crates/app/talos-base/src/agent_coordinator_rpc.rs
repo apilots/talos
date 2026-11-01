@@ -1,13 +1,106 @@
 //! Gateway-only relay. Business admission and persistence stay at the caller.
 use super::*;
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Mutex;
+use std::task::{Context, Poll};
 use tokio_stream::Stream;
 use tonic::Streaming;
+
+const MAX_CONNECTIONS: usize = 256;
+const MAX_ACCOUNT_CONNECTIONS: usize = 16;
+
+#[derive(Default)]
+struct Admission {
+    total: usize,
+    accounts: HashMap<String, usize>,
+}
+
+struct ConnectionPermit {
+    admission: Arc<Mutex<Admission>>,
+    account: Option<String>,
+}
+
+impl ConnectionPermit {
+    fn acquire(admission: &Arc<Mutex<Admission>>) -> TalosResult<Self> {
+        let mut counts = admission
+            .lock()
+            .expect("Coordinator admission lock poisoned");
+        if counts.total >= MAX_CONNECTIONS {
+            return Err(capacity_full());
+        }
+        counts.total += 1;
+        Ok(Self {
+            admission: admission.clone(),
+            account: None,
+        })
+    }
+
+    fn admit_account(&mut self, user_id: &str) -> TalosResult<()> {
+        let mut counts = self
+            .admission
+            .lock()
+            .expect("Coordinator admission lock poisoned");
+        let count = counts.accounts.entry(user_id.to_owned()).or_default();
+        if *count >= MAX_ACCOUNT_CONNECTIONS {
+            return Err(capacity_full());
+        }
+        *count += 1;
+        self.account = Some(user_id.to_owned());
+        Ok(())
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        let mut counts = self
+            .admission
+            .lock()
+            .expect("Coordinator admission lock poisoned");
+        counts.total -= 1;
+        if let Some(account) = &self.account {
+            let count = counts.accounts.get_mut(account).expect("admitted account");
+            *count -= 1;
+            if *count == 0 {
+                counts.accounts.remove(account);
+            }
+        }
+    }
+}
+
+// Both carrier input and response retain admission and cancel their shared relay on drop.
+struct AdmittedStream<S> {
+    inner: S,
+    _permit: Arc<ConnectionPermit>,
+    stop: CancellationToken,
+}
+
+impl<S: Stream + Unpin> Stream for AdmittedStream<S> {
+    type Item = S::Item;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
+
+impl<S> Drop for AdmittedStream<S> {
+    fn drop(&mut self) {
+        self.stop.cancel();
+    }
+}
+
+fn capacity_full() -> TalosError {
+    TalosError::new(
+        ErrorCode::ServiceUnavailable,
+        "Coordinator connection capacity is full",
+    )
+}
 
 pub(super) struct CoordinatorRpc {
     management: NodeManagementRpc,
     publisher: RemoteNodePublisher,
     shutdown: CancellationToken,
+    admission: Arc<Mutex<Admission>>,
 }
 impl CoordinatorRpc {
     pub(super) fn new(
@@ -19,6 +112,7 @@ impl CoordinatorRpc {
             management,
             publisher,
             shutdown,
+            admission: Arc::default(),
         }
     }
 }
@@ -76,7 +170,10 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
         &self,
         request: Request<Streaming<pb::CoordinatorToControlFrame>>,
     ) -> Result<Response<Self::ConnectStream>, Status> {
+        let mut permit = ConnectionPermit::acquire(&self.admission).map_err(status)?;
         let actor = self.management.actor(&request).await.map_err(status)?;
+        permit.admit_account(&actor.user_id).map_err(status)?;
+        let permit = Arc::new(permit);
         let mut input = request.into_inner();
         let first = tokio::time::timeout(std::time::Duration::from_secs(10), input.message())
             .await
@@ -141,6 +238,11 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
                 .ok_or_else(|| status(invalid()))?,
         };
         let connection_id = uuid::Uuid::new_v4().to_string();
+        let input = AdmittedStream {
+            inner: input,
+            _permit: permit.clone(),
+            stop: stop.clone(),
+        };
         let (output, mut task, resource_connection) = agent_client::serve_coordinator_connection(
             target.clone(),
             auth.clone(),
@@ -150,6 +252,11 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
             stop.clone(),
         )
         .await;
+        let output = AdmittedStream {
+            inner: output,
+            _permit: permit.clone(),
+            stop: stop.clone(),
+        };
         self.publisher
             .resource_routes
             .install(
@@ -169,6 +276,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
         let resource_routes = self.publisher.resource_routes.clone();
         let management = self.management.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let mut check = tokio::time::interval(std::time::Duration::from_secs(1));
             loop {
                 tokio::select! {
@@ -204,7 +312,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
                 ));
             }
         });
-        Ok(Response::new(output))
+        Ok(Response::new(Box::pin(output)))
     }
 }
 fn invalid() -> TalosError {
@@ -217,3 +325,7 @@ fn status(error: TalosError) -> Status {
     talos_logging::report_error(&error);
     error_pb::encode_status(&error)
 }
+
+#[cfg(test)]
+#[path = "agent_coordinator_rpc_tests.rs"]
+mod tests;
