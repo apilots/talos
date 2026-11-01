@@ -89,7 +89,7 @@ service AgentNodeControl {
 The first Worker frame is exactly one ConnectNodeRequest with the current lease. The control plane validates
 node status, lease and ownership, installs advertised clients, then returns ConnectNodeResponse.ready.
 Register records identity/lease/deployments but does not independently make an outbound Worker executable.
-Heartbeats and lease renewal remain ordinary outbound gRPC calls; do not add a second heartbeat in Connect.
+Heartbeats and lease renewal remain ordinary outbound gRPC calls owned by registration; they do not prove Connect-stream liveness. A typed `stream_heartbeat` request/Ready opt-in enables one nonce-bearing Ping owner per physical stream: the Worker control plane or Coordinator client. Probing starts fifteen seconds after Ready, allows at most one outstanding Ping, and requires its matching Pong within thirty seconds. The shared carrier only echoes; business/unary traffic cannot extend that deadline and resource callbacks use the same owner. Timeout reuses connection close, cancellation and existing task/route cleanup; no additional TCP/HTTP2 keepalive is added. If either endpoint omits the capability neither sends new frames, so stream-level detection requires both endpoints upgraded.
 Registration credentials are only valid at Register, never at execution or resource ingress. Each finite RPC deadline
 is enforced by both the control-side client and the Worker. A stopped or unreachable Worker cannot postpone a client
 Timeout indefinitely; expiry cancels only that invocation through the existing call cancellation path.
@@ -99,14 +99,16 @@ harness.proto, memory.proto and types.proto. Environment method fields are added
 projections are introduced in the environment slice; this sketch defines the full existing Harness coverage.
 
 ```protobuf
-message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; }
+message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; bool stream_heartbeat = 3; }
 message ConnectNodeResponse {
   oneof result { Empty ready = 1; Failure failure = 2; }
+  bool stream_heartbeat = 3;
 }
 message NodeToControlFrame {
   oneof body {
     ConnectNodeRequest connect = 1;
     WorkerRpcResult result = 2;
+    uint64 pong = 3;
   }
 }
 message ControlToNodeFrame {
@@ -115,6 +117,7 @@ message ControlToNodeFrame {
     WorkerRpcCall call = 2;
     CancelWorkerRpcCall cancel = 3;
     AcknowledgeWorkerRpcResult acknowledge = 4;
+    uint64 ping = 5;
   }
 }
 message WorkerRpcCall {
