@@ -111,6 +111,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for Gateway {
                 body: Some(pb::control_to_coordinator_frame::Body::Connected(
                     pb::ConnectNodeResponse {
                         result: Some(pb::connect_node_response::Result::Ready(pb::Empty {})),
+                        stream_heartbeat: false,
                     },
                 )),
             }))
