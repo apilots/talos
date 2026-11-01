@@ -79,7 +79,7 @@ async fn failed_desktop_admission_cancellation_releases_only_its_owned_reservati
             .await
             .err()
             .expect("capacity should reject a third candidate")
-            .is_code(ErrorCode::ServiceUnavailable));
+            .is_code(ErrorCode::Conflict));
         for (token, ticket, code) in [
             (
                 "user-2",

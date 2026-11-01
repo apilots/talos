@@ -143,7 +143,7 @@ async fn failed_candidate_isolated_until_worker_admission_replaces_the_current_v
         .await
         .err()
         .unwrap()
-        .is_code(ErrorCode::ServiceUnavailable));
+        .is_code(ErrorCode::Conflict));
     assert!(relay
         .attach_local_worker(WorkerDesktopOpen {
             binding: candidate.clone(),

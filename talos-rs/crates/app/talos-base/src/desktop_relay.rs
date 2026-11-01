@@ -91,6 +91,8 @@ impl DesktopRelay {
             .map(|entry| &entry.binding.viewer_id)
             .collect();
         if entries.contains_key(&binding.stream_id)
+            || (same_viewer == 0 && viewers.len() >= 2)
+            || same_viewer >= 2
             || node_entries.iter().any(|entry| {
                 entry.binding.viewer_id != binding.viewer_id
                     && entry.binding.input_mode == BrowserInputMode::Control
@@ -99,7 +101,7 @@ impl DesktopRelay {
         {
             return Err(TalosError::new(
                 ErrorCode::Conflict,
-                "Desktop stream identity or control ownership conflicts.",
+                "Desktop viewer or stream admission conflicts.",
             ));
         }
         if entries.len() >= 64
@@ -108,8 +110,6 @@ impl DesktopRelay {
                 .filter(|entry| entry.owner == owner)
                 .count()
                 >= 16
-            || (same_viewer == 0 && viewers.len() >= 2)
-            || same_viewer >= 2
         {
             return Err(TalosError::new(
                 ErrorCode::ServiceUnavailable,
