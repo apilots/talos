@@ -243,7 +243,7 @@ async fn shutdown_joins_held_refresh_and_prevents_restart() {
 }
 
 #[tokio::test]
-async fn transient_refresh_retries_before_the_original_verified_window_expires() {
+async fn transient_outage_preserves_classification_and_recovers_after_the_proof_deadline() {
     let (service, client, issuer, server) = issuer().await;
     let token = "test-token-a";
     assert!(fingerprint(token)[0] > 127);
@@ -270,15 +270,36 @@ async fn transient_refresh_retries_before_the_original_verified_window_expires()
         context.state.borrow().as_ref().unwrap().verified_at,
         original
     );
+    issuer.blocked.store(true, Ordering::SeqCst);
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(40)).await;
+    tokio::time::advance(Duration::from_secs(70)).await;
     tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(3), issuer.entered.notified())
+        .await
+        .unwrap();
+    assert!(Instant::now() >= original + VALIDITY);
+    assert_eq!(
+        service
+            .verify(&client, token)
+            .await
+            .unwrap_err()
+            .error_code(),
+        ErrorCode::ServiceUnavailable
+    );
+    issuer.blocked.store(false, Ordering::SeqCst);
+    service.verify(&client, "other-token").await.unwrap();
+    assert_eq!(
+        service.identity(token).unwrap_err().error_code(),
+        ErrorCode::ServiceUnavailable
+    );
+    // An unrelated admission must not stop the original refresh. Only a fresh
+    // Cloud proof may restore access, including when no caller retries verify.
+    issuer.resume.notify_waiters();
     tokio::time::timeout(Duration::from_secs(3), changes.changed())
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(issuer.calls.load(Ordering::SeqCst), 3);
-    assert!(Instant::now() < original + VALIDITY);
+    assert_eq!(issuer.calls.load(Ordering::SeqCst), 4);
     assert!(context.state.borrow().as_ref().unwrap().verified_at > original);
     assert!(service.identity(token).is_ok());
     service.shutdown().await;
