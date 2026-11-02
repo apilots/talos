@@ -21,7 +21,7 @@ use crate::types::RenderedChatLine;
 use crate::utils::{build_welcome_card, APP_VERSION};
 use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, SPINNER_FRAMES, WELCOME_TIP_LINE};
 
-const SESSION_INIT_MAX_ATTEMPTS: usize = 5;
+const SESSION_INIT_MAX_ATTEMPTS: usize = 4;
 const SESSION_INIT_RETRY_DELAY_MS: u64 = 250;
 
 impl TuiApp {
@@ -238,15 +238,11 @@ impl TuiApp {
                         attempt + 1,
                         SESSION_INIT_MAX_ATTEMPTS
                     ));
-                    tokio::time::sleep(Self::session_init_retry_delay(attempt)).await;
+                    tokio::time::sleep(Duration::from_millis(SESSION_INIT_RETRY_DELAY_MS)).await;
                 }
             }
         }
         Err(last_error.expect("retry loop should capture the final model load error"))
-    }
-
-    fn session_init_retry_delay(attempt: usize) -> Duration {
-        Duration::from_millis(SESSION_INIT_RETRY_DELAY_MS.saturating_mul(attempt as u64))
     }
 
     pub(crate) fn is_agent_working(&self) -> bool {

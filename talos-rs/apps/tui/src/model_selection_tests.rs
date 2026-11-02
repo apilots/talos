@@ -1,6 +1,14 @@
 use super::*;
 use crate::test_support::mock_model_info;
 
+#[tokio::test]
+async fn test_app_server_initialize_reports_error_after_three_model_load_retries() {
+    let mut app = crate::test_support::create_app_server_app_with_model_list_failures(4);
+    app.initialize_session().await;
+    assert_eq!(app.connection_status, "error");
+    assert_eq!(app.session_id, None);
+}
+
 #[test]
 fn selects_duplicate_model_id_by_provider_key() {
     let mut openai = mock_model_info("shared-model", 128_000);

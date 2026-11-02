@@ -28,7 +28,6 @@ struct FailedUpload {
 
 struct RunnerChannels {
     presence_computers: watch::Receiver<Vec<String>>,
-    connected_for: Duration,
     upload_cursor: i64,
     upload_cut: i64,
     failed_uploads: HashMap<crate::SyncResourceKey, FailedUpload>,
@@ -194,7 +193,6 @@ impl TalosSync {
         );
         let channels = RunnerChannels {
             presence_computers: observed_computers,
-            connected_for: Duration::ZERO,
             upload_cursor: 0,
             upload_cut: 0,
             failed_uploads: HashMap::new(),
@@ -234,8 +232,7 @@ async fn run<A: SyncDataAdapter>(
         .ok()
         .map(|url| url.origin().ascii_serialization());
     tracing::info!(account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, "Sync transport runner started");
-    let base_delay = params.reconnect_delay.min(Duration::from_secs(30));
-    let mut retry_window = base_delay;
+    let retry_delay = params.reconnect_delay.min(Duration::from_secs(30));
     loop {
         let enabled = match sync.enabled(&params.binding.scope.account_id).await {
             Ok(enabled) => enabled,
@@ -257,34 +254,13 @@ async fn run<A: SyncDataAdapter>(
             value.connection = SyncConnectionState::Connecting;
         });
         let started = tokio::time::Instant::now();
-        channels.connected_for = Duration::ZERO;
         let mut phase = transport::ConnectionPhase::Bootstrap;
         let result =
             transport::connected(&sync, &*adapter, &params, &stop, &mut channels, &mut phase).await;
         if stop.is_cancelled() {
             break;
         }
-        // Only a stable subscribed session clears accumulated failures. Slow
-        // bootstrap/connect attempts and immediately dropped feeds do not.
-        if result.is_ok() || channels.connected_for >= Duration::from_secs(30) {
-            retry_window = base_delay;
-        }
-        let mut retry_delay = base_delay;
         if let Err(error) = result {
-            retry_window = retry_window.saturating_mul(2).min(Duration::from_secs(30));
-            if matches!(
-                error.error_code(),
-                ErrorCode::Unauthenticated
-                    | ErrorCode::PermissionDenied
-                    | ErrorCode::MessageQueueFull
-            ) {
-                // Poll current credentials again after cooldown, including after
-                // a later login. Ordinary data wakes cannot shorten this wait.
-                retry_window = retry_window.max(Duration::from_secs(10));
-            }
-            // UUID v4 already supplies random bytes; no separate RNG owner is needed.
-            let jitter = f64::from(uuid::Uuid::new_v4().as_bytes()[0]) / 255.0;
-            retry_delay = retry_window.mul_f64(0.5 + jitter / 2.0);
             let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, ?phase, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_ms = retry_delay.as_millis() as u64);
             let _entered = span.enter();
             talos_logging::report_error(&error);

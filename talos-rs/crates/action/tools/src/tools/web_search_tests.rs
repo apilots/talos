@@ -284,3 +284,84 @@ async fn execute_payload_rejects_oversized_brave_body_without_eof() {
         assert!(error.is_cancelled());
     }
 }
+
+async fn spawn_rate_limited_server() -> (String, tokio::task::JoinHandle<Vec<std::time::Instant>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let mut attempts = Vec::new();
+        for _ in 0..4 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            attempts.push(std::time::Instant::now());
+            socket.write_all(b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+        }
+        attempts
+    });
+    (url, task)
+}
+
+#[tokio::test]
+async fn execute_payload_retries_tavily_three_times_at_a_fixed_interval() {
+    let (url, server) = spawn_rate_limited_server().await;
+    let mut config = AgentKernelConfig::default();
+    config.tools.web_search.provider = WebSearchProviderConfig::Tavily;
+    config.tools.web_search.tavily.base_url = Some(url);
+    config.tools.web_search.tavily.api_key = Some("test-key".into());
+    config.tools.web_search.tavily.timeout_ms = 4_500;
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        WebSearchTool.execute_payload(
+            serde_json::json!({"query": "rust tools"}),
+            ToolContext::new_with_kernel_config("search", "user-1", Some(Arc::new(config))),
+        ),
+    )
+    .await
+    .unwrap()
+    .expect_err("persistent rate limiting must fail after three retries");
+    assert_eq!(
+        error.error_code(),
+        talos_error::ErrorCode::ToolExecutionFailed
+    );
+    assert!(std::error::Error::source(&error).is_none());
+    let attempts = tokio::time::timeout(std::time::Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(attempts.len(), 4);
+    assert!(attempts
+        .windows(2)
+        .all(|pair| pair[1].duration_since(pair[0]) >= std::time::Duration::from_secs(1)));
+}
+
+#[tokio::test]
+async fn execute_payload_bounds_tavily_retry_wait_by_the_configured_deadline() {
+    let (url, server) = spawn_rate_limited_server().await;
+    let mut config = AgentKernelConfig::default();
+    config.tools.web_search.provider = WebSearchProviderConfig::Tavily;
+    config.tools.web_search.tavily.base_url = Some(url);
+    config.tools.web_search.tavily.api_key = Some("test-key".into());
+    config.tools.web_search.tavily.timeout_ms = 50;
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        WebSearchTool.execute_payload(
+            serde_json::json!({"query": "rust tools"}),
+            ToolContext::new_with_kernel_config("search", "user-1", Some(Arc::new(config))),
+        ),
+    )
+    .await
+    .unwrap()
+    .expect_err("the deadline must cancel the retry wait");
+    assert_eq!(
+        error.error_code(),
+        talos_error::ErrorCode::ToolExecutionFailed
+    );
+    assert!(std::error::Error::source(&error)
+        .unwrap()
+        .is::<tokio::time::error::Elapsed>());
+    server.abort();
+    if let Err(error) = server.await {
+        assert!(error.is_cancelled());
+    }
+}

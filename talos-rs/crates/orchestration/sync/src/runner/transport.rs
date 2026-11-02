@@ -54,7 +54,6 @@ pub(super) async fn connected<A: SyncDataAdapter>(
         _ = stop.cancelled() => return Ok(()),
         client = SyncClient::connect(options, params.credentials.clone()) => client.map_err(sync_error)?,
     };
-    let mut connected_since = None;
     let result = if client.scope().await != params.binding.scope {
         Err(TalosError::new(
             ErrorCode::Conflict,
@@ -67,12 +66,9 @@ pub(super) async fn connected<A: SyncDataAdapter>(
         tokio::select! {
             _ = presence => Ok(()),
             _ = stop.cancelled() => Ok(()),
-            result = session(sync, adapter, &params.binding, &client, channels, phase, &mut connected_since) => result,
+            result = session(sync, adapter, &params.binding, &client, channels, phase) => result,
         }
     };
-    channels.connected_for = connected_since
-        .map(|since: tokio::time::Instant| since.elapsed())
-        .unwrap_or_default();
     if result.is_ok() {
         *phase = ConnectionPhase::Shutdown;
     }
@@ -143,7 +139,6 @@ async fn session<A: SyncDataAdapter>(
     client: &SyncClient,
     channels: &mut RunnerChannels,
     phase: &mut ConnectionPhase,
-    connected_since: &mut Option<tokio::time::Instant>,
 ) -> TalosResult<()> {
     *phase = ConnectionPhase::CatchUp;
     let cursor = match sync.download_cursor(binding).await? {
@@ -161,7 +156,6 @@ async fn session<A: SyncDataAdapter>(
         }
         Err(error) => return Err(sync_error(error)),
     };
-    *connected_since = Some(tokio::time::Instant::now());
     channels.status.send_modify(|value| {
         value.connection = SyncConnectionState::Connected;
         value.last_error = channels

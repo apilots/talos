@@ -163,7 +163,7 @@ pub struct SyncStartParams {
     pub binding: SyncBinding,
     pub credentials: talos_sync_sdk::CredentialCallback,
     pub trusted_ca_pem: Option<Vec<u8>>,
-    /// Initial reconnect backoff, capped at 30 seconds; retries include jitter.
+    /// Fixed reconnect interval, capped at 30 seconds; recovery continues until stopped.
     pub reconnect_delay: Duration,
 }
 

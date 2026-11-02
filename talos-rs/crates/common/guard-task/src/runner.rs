@@ -50,7 +50,6 @@ pub(super) async fn supervise<T: GuardTask>(
     let task = Arc::new(task);
     let mut reason = spec.run_on_start.then_some(GuardTaskReason::Startup);
     let mut next = Instant::now() + spec.interval;
-    let mut backoff = Duration::from_secs(1);
     let mut request = 0;
     loop {
         if reason.is_none() {
@@ -112,20 +111,15 @@ pub(super) async fn supervise<T: GuardTask>(
             break;
         }
         if panicked {
-            if started.elapsed() >= Duration::from_secs(60) {
-                backoff = Duration::from_secs(1);
-            }
             tracing::warn!(target: "talos::guard_task", task_name = spec.name,
-                retry_after_secs = backoff.as_secs(), "guard task restarting after failure");
+                retry_after_secs = 1, "guard task restarting after failure");
             tokio::select! {
                 biased;
                 _ = stop.cancelled() => break,
-                _ = tokio::time::sleep(backoff) => {},
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
             }
-            backoff = (backoff * 2).min(Duration::from_secs(60));
             reason = Some(GuardTaskReason::Restart);
         } else {
-            backoff = Duration::from_secs(1);
             // Skip missed periods rather than queueing catch-up rounds.
             next = started + current.interval;
             if next <= Instant::now() {
