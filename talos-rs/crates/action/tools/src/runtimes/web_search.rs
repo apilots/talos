@@ -7,6 +7,7 @@ use crate::runtimes::web_common::{normalize_domain, parse_http_url, truncate_cha
 
 mod brave;
 mod firecrawl;
+mod http;
 mod tavily;
 
 const DEFAULT_RESULT_LIMIT: usize = 5;

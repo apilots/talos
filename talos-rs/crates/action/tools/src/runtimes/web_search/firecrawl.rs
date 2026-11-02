@@ -1,16 +1,20 @@
 use async_trait::async_trait;
-use firecrawl::{Client, SearchOptions, SearchResultOrDocument, SearchSource};
+use firecrawl::{SearchOptions, SearchResponse, SearchResultOrDocument, SearchSource};
+use serde::Serialize;
 use std::time::Duration;
 use talos_config::{RuntimeEnv, WebSearchProviderRuntimeConfig};
 use talos_error::{TalosError, TalosResult};
 
 use super::{
-    configured_api_key, firecrawl_time_range, provider_result_limit, SearchCandidate,
-    SearchProvider, WebSearchRequest,
+    configured_api_key, firecrawl_time_range,
+    http::{search_client, search_json},
+    provider_result_limit, SearchCandidate, SearchProvider, WebSearchRequest,
 };
 
 pub(super) struct FirecrawlSearchProvider {
-    client: Client,
+    client: reqwest::Client,
+    url: String,
+    api_key: Option<String>,
     timeout_ms: u64,
 }
 
@@ -24,14 +28,11 @@ impl FirecrawlSearchProvider {
             .as_deref()
             .unwrap_or("https://api.firecrawl.dev");
         let api_key = configured_api_key(&config, runtime_env);
-        let client = Client::new_selfhosted(base_url, api_key.as_deref()).map_err(|err| {
-            TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                format!("build Firecrawl search client: {err}"),
-            )
-        })?;
+        let client = search_client(Duration::from_millis(config.timeout_ms.max(1)))?;
         Ok(Self {
             client,
+            url: format!("{}/v2/search", base_url.trim_end_matches('/')),
+            api_key,
             timeout_ms: config.timeout_ms,
         })
     }
@@ -55,9 +56,17 @@ impl SearchProvider for FirecrawlSearchProvider {
             options.include_domains = Some(request.allowed_domains.clone());
         }
 
-        let response = tokio::time::timeout(
+        let body = FirecrawlSearchRequest {
+            query: request.query.trim(),
+            options,
+        };
+        let mut search = self.client.post(&self.url).json(&body);
+        if let Some(api_key) = &self.api_key {
+            search = search.bearer_auth(api_key);
+        }
+        let response: SearchResponse = tokio::time::timeout(
             Duration::from_millis(self.timeout_ms.max(1)),
-            self.client.search(request.query.trim(), options),
+            search_json(search),
         )
         .await
         .map_err(|err| {
@@ -66,13 +75,7 @@ impl SearchProvider for FirecrawlSearchProvider {
                 "Firecrawl search timed out.",
                 err,
             )
-        })?
-        .map_err(|err| {
-            TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("Firecrawl search failed: {err}"),
-            )
-        })?;
+        })??;
         if !response.success {
             return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
@@ -102,4 +105,11 @@ impl SearchProvider for FirecrawlSearchProvider {
     fn supports_recency(&self) -> bool {
         true
     }
+}
+
+#[derive(Serialize)]
+struct FirecrawlSearchRequest<'a> {
+    query: &'a str,
+    #[serde(flatten)]
+    options: SearchOptions,
 }
