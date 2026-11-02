@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 use talos_config::{RuntimeEnv, WebSearchProviderRuntimeConfig};
 use talos_error::{TalosError, TalosResult};
-use tavily::{SearchRequest, Tavily};
+use tavily::{SearchRequest, Tavily, TavilyError};
 
 use super::{
     provider_result_limit, resolve_api_key, SearchCandidate, SearchProvider, WebSearchRequest,
@@ -11,6 +11,7 @@ use super::{
 pub(super) struct TavilySearchProvider {
     api_key: String,
     client: Tavily,
+    timeout: Duration,
 }
 
 impl TavilySearchProvider {
@@ -23,9 +24,11 @@ impl TavilySearchProvider {
             .base_url
             .as_deref()
             .unwrap_or("https://api.tavily.com");
+        let timeout = Duration::from_millis(config.timeout_ms.max(1));
         let client = Tavily::builder(&api_key)
             .base_url(base_url)
-            .timeout(Duration::from_millis(config.timeout_ms.max(1)))
+            .timeout(timeout)
+            .max_retries(0)
             .build()
             .map_err(|err| {
                 TalosError::new(
@@ -33,7 +36,11 @@ impl TavilySearchProvider {
                     format!("build Tavily search client: {err}"),
                 )
             })?;
-        Ok(Self { api_key, client })
+        Ok(Self {
+            api_key,
+            client,
+            timeout,
+        })
     }
 }
 
@@ -51,7 +58,26 @@ impl SearchProvider for TavilySearchProvider {
             search = search.exclude_domains(request.blocked_domains.clone());
         }
 
-        let response = self.client.call(&search).await.map_err(|err| {
+        let response = tokio::time::timeout(self.timeout, async {
+            let mut response = self.client.call(&search).await;
+            for _ in 0..3 {
+                if !matches!(response, Err(TavilyError::RateLimit(_))) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                response = self.client.call(&search).await;
+            }
+            response
+        })
+        .await
+        .map_err(|err| {
+            TalosError::from_source(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "Tavily search timed out.",
+                err,
+            )
+        })?
+        .map_err(|err| {
             TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("Tavily search failed: {err}"),
