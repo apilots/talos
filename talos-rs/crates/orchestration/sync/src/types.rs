@@ -164,6 +164,7 @@ pub struct SyncStartParams {
     pub credentials: talos_sync_sdk::CredentialCallback,
     pub trusted_ca_pem: Option<Vec<u8>>,
     /// Fixed reconnect interval, capped at 30 seconds; recovery continues until stopped.
+    /// Authentication, permission and queue-full rejections wait at least 10 seconds.
     pub reconnect_delay: Duration,
 }
 
