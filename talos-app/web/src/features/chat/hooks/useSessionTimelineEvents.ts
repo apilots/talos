@@ -9,7 +9,7 @@ import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
-const RECONNECT_DELAY_MS = 500;
+const RECONNECT_DELAY_MS = 2_000;
 const EVENT_CURSOR_EXPIRED_CODE = AppProtocol.ErrorCode.EventCursorExpired;
 
 export function useSessionTimelineEvents(
