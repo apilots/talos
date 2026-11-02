@@ -19,7 +19,7 @@ async fn wait_connection(handle: &SyncHandle, expected: SyncConnectionState) {
 }
 
 #[tokio::test]
-async fn rejected_credentials_use_the_configured_fixed_reconnect_interval() {
+async fn rejected_attempts_cool_down_and_transient_failures_keep_the_configured_interval() {
     let fixture = fixture().await;
     let (attempts, mut received) = mpsc::unbounded_channel();
     let (errors, code) = tokio::sync::watch::channel(SyncErrorCode::Unauthenticated);
@@ -40,25 +40,44 @@ async fn rejected_credentials_use_the_configured_fixed_reconnect_interval() {
         .unwrap();
     assert_eq!(received.recv().await, Some(SyncErrorCode::Unauthenticated));
     wait_connection(&handle, SyncConnectionState::Disconnected).await;
-    errors.send_replace(SyncErrorCode::ServiceUnavailable);
+    for next_error in [
+        SyncErrorCode::PermissionDenied,
+        SyncErrorCode::MessageQueueFull,
+        SyncErrorCode::ServiceUnavailable,
+    ] {
+        errors.send_replace(next_error);
+        // Local commits must not bypass the rejection cooldown.
+        handle.notify_committed();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(9)).await;
+        tokio::time::resume();
+        // Let local SQLite I/O finish if an incorrect early retry started.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(received.try_recv().is_err());
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::time::resume();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), received.recv())
+                .await
+                .unwrap(),
+            Some(next_error)
+        );
+        wait_connection(&handle, SyncConnectionState::Disconnected).await;
+        // No SDK-internal retry may run inside one durable attempt.
+        assert!(received.try_recv().is_err());
+    }
+    errors.send_replace(SyncErrorCode::Unauthenticated);
     tokio::time::pause();
-    tokio::time::advance(Duration::from_millis(500)).await;
-    tokio::time::resume();
-    // Let local SQLite I/O finish if an incorrect early retry started.
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    assert!(received.try_recv().is_err());
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_millis(500)).await;
+    tokio::time::advance(Duration::from_secs(1)).await;
     tokio::time::resume();
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), received.recv())
             .await
             .unwrap(),
-        Some(SyncErrorCode::ServiceUnavailable)
+        Some(SyncErrorCode::Unauthenticated)
     );
     wait_connection(&handle, SyncConnectionState::Disconnected).await;
-    // No SDK-internal retry may run inside one durable attempt.
-    assert!(received.try_recv().is_err());
     handle.shutdown().await.unwrap();
 }
 
@@ -184,9 +203,10 @@ async fn fixed_reconnect_interval_recovers_short_feeds_and_refreshed_credentials
     // A later callback supplies the refreshed login. It must recover through a
     // real TLS handshake, without a special wake or restarting the runner.
     tokio::time::pause();
-    tokio::time::advance(Duration::from_millis(100)).await;
+    tokio::time::advance(Duration::from_secs(10)).await;
     tokio::time::resume();
-    received.recv().await.unwrap();
+    let fifth = received.recv().await.unwrap();
+    assert!(fifth.duration_since(fourth) >= Duration::from_secs(10));
     wait_connection(&handle, SyncConnectionState::Connected).await;
     // Advance only an already subscribed real connection, never bootstrap or
     // a failed authentication attempt. Resume before waiting on local I/O.
