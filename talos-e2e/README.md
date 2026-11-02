@@ -110,7 +110,10 @@ Python3.9+ is required for discovery. `--help` requires only Bash.
 | `17` | Three Workers: public registration, owner isolation, routing, lease renewal, collaboration and Workspace ownership |
 | `18` | Computer workspace: real Desktop device login, durable UUID, outbound registration and renewal |
 | `19` | Multi-control-plane sync: two native Mac Desktop runtimes, native and Docker Workers, Docker WSS hub, real auth and model tasks |
-| `20` | Browser MCP and resource workspace: shared Web/Desktop tabs and local Markdown, native browser host/MCP, Docker desktop/media/control and profile recovery |
+| `20` | Native Desktop browser engine and Browser MCP |
+| `21` | Registered/session file previews and real document-format rendering |
+| `22` | Lightweight Web/Desktop workspace tabs, local HTTP and Markdown |
+| `23` | Docker Worker/Server browser, media/control and profile recovery |
 
 Inspect `scenarios/` for the current case list; it is the source of truth.
 Groups `04` and `10` are not assigned; use the scenario directory rather than assuming
@@ -187,7 +190,7 @@ This case does not exercise a multi-manager Sync deployment; that topology
 remains local group 19 acceptance, with deletion/history covered separately by
 owning-package two-peer Store/CRDT tests.
 
-`20_browser_workspace/01_resource_tabs` mounts the actual product layout in an isolated
+`22_workspace_resources/01_resource_tabs` mounts the actual product layout in an isolated
 system Chrome instance against real Server/File APIs. Only upstream Auth is a
 contract fixture. Deterministic local previews cover independent same-URL tabs,
 retained form state across switching/collapse, keyboard selection, native modal
@@ -195,14 +198,23 @@ and Escape focus, close/account-scope destruction, and authenticated Markdown
 rendering with non-owner metadata/content rejection. It also checks the compact
 workspace opening width, retained drag width and transparent expanded/narrow
 backdrops. Web-only changes select this case, Computer deletion, and the shared
-renderer's Desktop resource integration (`20/02`). Desktop-only source/resource
-changes select `20/02`, `20/03`, and `20/04`. Media, preload, IPC, controller and
-packaging inputs also select Docker case `20/05` with the current-run Worker image.
+renderer's Desktop resource integration (`22/02`). Desktop-only source/resource
+changes select `22/02` and native Browser/MCP group 20. Media, preload, IPC, controller and
+packaging inputs also select Docker Worker case `23/01` with the current-run Worker image.
 Shared SDK/runtime/build inputs expand to affected consumers; mixed changes take
 the union and execute each selected case once. WebUI and Desktop use separate
 named wrappers over the common module workflow. See the numbered
-[group 20](scenarios/20_browser_workspace/README.md) and
+[native Browser group 20](scenarios/20_browser_workspace/README.md),
+[workspace group 22](scenarios/22_workspace_resources/README.md),
+[container group 23](scenarios/23_browser_container/README.md), and
 [development validation](../docs/development/DEVELOPMENT.md#validation-by-delivery-stage).
+Client scenario/helper directories select their owning groups. CI uses the existing
+requirements declarations to place native-display and image consumers; case names
+do not encode execution categories. Workspace helpers also select group 21 because
+it reuses their harness. LibreOffice and CJK fonts are installed only for scenarios
+that declare `soffice`, rather than every Web/Desktop job. Unknown shared
+infrastructure remains conservative.
+
 Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
 does not claim a live remote desktop connection.

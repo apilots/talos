@@ -1,10 +1,12 @@
 mod cursor;
 mod peer;
+pub(crate) mod preview;
 mod reader;
 pub use peer::FilePeerAccess;
 mod service;
 mod upload;
 mod validation;
+pub(crate) use validation::is_utf8_text;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;

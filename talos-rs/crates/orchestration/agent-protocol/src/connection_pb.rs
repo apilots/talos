@@ -14,6 +14,7 @@ pub fn auth(request: &pb::worker_rpc_call::Request) -> Option<&pb::NodeAuth> {
         PeerFileRead,
         PeerFileUpdate,
         PeerFileDelete,
+        AppendSessionHistorySupplement,
         ReadSessionHistory,
         ResolveAttachments,
         ReadMemoryProgress,
@@ -73,6 +74,7 @@ pub fn auth(request: &pb::worker_rpc_call::Request) -> Option<&pb::NodeAuth> {
         ResolveSkills,
         WorkspaceInfo,
         ListModels,
+        PreviewResource,
         ReadDirectory,
         CreateDirectory,
         ProjectStatus,
@@ -94,6 +96,7 @@ pub fn replace_auth(request: &mut pb::worker_rpc_call::Request, auth: &pb::NodeA
         PeerFileRead,
         PeerFileUpdate,
         PeerFileDelete,
+        AppendSessionHistorySupplement,
         ReadSessionHistory,
         ResolveAttachments,
         ReadMemoryProgress,
@@ -153,6 +156,7 @@ pub fn replace_auth(request: &mut pb::worker_rpc_call::Request, auth: &pb::NodeA
         ResolveSkills,
         WorkspaceInfo,
         ListModels,
+        PreviewResource,
         ReadDirectory,
         CreateDirectory,
         ProjectStatus,
@@ -250,6 +254,7 @@ pub fn resource_caller(
 ) -> Option<&pb::CoordinatorCallContext> {
     use pb::worker_rpc_call::Request as Call;
     match request {
+        Call::AppendSessionHistorySupplement(value) => value.caller.as_ref(),
         Call::ReadSessionHistory(value) => value.caller.as_ref(),
         Call::ResolveAttachments(value) => value.caller.as_ref(),
         Call::ReadMemoryProgress(value) => value.caller.as_ref(),

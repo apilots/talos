@@ -73,3 +73,5 @@ pub use artifacts::{
     KernelArtifactHeader, KernelMemoryProgressStore, KernelSessionArtifactStore,
     KernelSessionSummary,
 };
+
+pub mod trajectory;

@@ -318,6 +318,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 })
                 .expect("continued test Turn should contain a waiting block");
             let tool_result = AgentToolResult {
+                metrics: None,
                 call_id: "call-1".to_string(),
                 tool_name: "AskUser".to_string(),
                 content: vec![talos_types::talos::TalosContentItem::Text {
@@ -885,6 +886,7 @@ fn test_config() -> TalosConfig {
     config.llm.model = "test-model".to_string();
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: "test-model".to_string(),
         name: "Test model".to_string(),

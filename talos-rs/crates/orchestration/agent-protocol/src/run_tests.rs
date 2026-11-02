@@ -55,6 +55,7 @@ fn run_params() -> AgentRunParams {
                 "test".to_owned(),
                 ProviderModelConfig {
                     reasoning_replay: Default::default(),
+                    reasoning_efforts: None,
                     request_parameters: Default::default(),
                     id: "model".to_owned(),
                     name: "Model".to_owned(),

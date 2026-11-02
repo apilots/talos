@@ -47,6 +47,73 @@ impl FileService {
         })
     }
 
+    /// Range reads for the unified preview transport; authorization stays here.
+    pub async fn read_preview_range(
+        &self,
+        actor: &crate::Actor,
+        file_id: &str,
+        range: std::ops::Range<u64>,
+    ) -> TalosResult<super::FileContent> {
+        if range.end.saturating_sub(range.start)
+            > u64::from(talos_types::FILE_PREVIEW_MAX_READ_BYTES)
+        {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "Preview reads are limited to one MiB per request.",
+            ));
+        }
+        let record = self.ready_file(actor, file_id).await?;
+        let info = super::service::file_info(record.clone())?;
+        let end = range.end.min(info.size_bytes);
+        let start = range.start.min(end);
+        let bytes = match &record.location {
+            talos_store::file::FileLocation::Local {
+                storage_id,
+                object_key,
+            } => {
+                if start == end {
+                    bytes::Bytes::new()
+                } else {
+                    self.operator(storage_id)?
+                        .read_with(object_key)
+                        .range(start..end)
+                        .await
+                        .map_err(|error| opendal_error("read preview range", error))?
+                        .to_bytes()
+                }
+            }
+            talos_store::file::FileLocation::Peer { peer_id } => {
+                if start == end {
+                    bytes::Bytes::new()
+                } else {
+                    let content = self
+                        .peer_access()?
+                        .read_range(
+                            &record.owner_user_id,
+                            peer_id,
+                            talos_types::FileReadRequest {
+                                file_id: file_id.to_owned(),
+                            },
+                            start..end,
+                        )
+                        .await?;
+                    if content.file.file_id != info.file_id
+                        || content.file.scope != info.scope
+                        || content.file.size_bytes != info.size_bytes
+                        || content.bytes.len() as u64 != end - start
+                    {
+                        return Err(TalosError::new(
+                            ErrorCode::Conflict,
+                            "Source file does not match the authorized metadata",
+                        ));
+                    }
+                    content.bytes
+                }
+            }
+        };
+        Ok(super::FileContent { file: info, bytes })
+    }
+
     async fn read_attachments(
         &self,
         scope: &TurnFileScope,

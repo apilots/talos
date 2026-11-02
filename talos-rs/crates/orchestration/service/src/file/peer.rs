@@ -17,6 +17,13 @@ pub trait FilePeerAccess: Send + Sync {
         request: FileReadRequest,
         max_bytes: u64,
     ) -> agent_protocol::AgentFuture<'a, TalosResult<FileContent>>;
+    fn read_range<'a>(
+        &'a self,
+        owner: &'a str,
+        peer: &'a str,
+        request: FileReadRequest,
+        range: std::ops::Range<u64>,
+    ) -> agent_protocol::AgentFuture<'a, TalosResult<FileContent>>;
     fn update<'a>(
         &'a self,
         owner: &'a str,

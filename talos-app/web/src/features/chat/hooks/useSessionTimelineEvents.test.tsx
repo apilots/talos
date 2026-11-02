@@ -126,7 +126,7 @@ describe("useSessionTimelineEvents", () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(result.current.error).toBe("queue unavailable");
-    await act(() => vi.advanceTimersByTimeAsync(500));
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect({ queue: result.current.queue, error: result.current.error }).toEqual({ queue, error: undefined });
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
   });
@@ -159,7 +159,7 @@ describe("useSessionTimelineEvents", () => {
     renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true, undefined, undefined, historyOptions));
     await Promise.resolve();
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(1);
-    await act(() => vi.advanceTimersByTimeAsync(500));
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
 
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
     expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-7");
@@ -261,15 +261,20 @@ describe("useSessionTimelineEvents", () => {
     expect(useAppStore.getState().streams["sess-1"]?.isStreaming).toBe(true);
   });
 
-  it("continues reconnecting with the maximum delay after the initial attempts", async () => {
+  it("continues reconnecting at a fixed interval after the initial attempts", async () => {
     vi.useFakeTimers();
     apiMocks.subscribeTimelineEvents.mockRejectedValue(new Error("stream disconnected"));
 
-    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, historyOptions));
-    for (const delay of [500, 1_000, 2_000, 4_000, 8_000, 12_000, 12_000]) {
-      await act(() => vi.advanceTimersByTimeAsync(delay));
+    const { unmount } = renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, historyOptions));
+    await act(async () => { await Promise.resolve(); });
+    for (let retry = 1; retry <= 7; retry += 1) {
+      await act(() => vi.advanceTimersByTimeAsync(1_999));
+      expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(retry);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(retry + 1);
     }
-
-    expect(apiMocks.subscribeTimelineEvents.mock.calls.length).toBeGreaterThan(7);
+    unmount();
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(8);
   });
 });

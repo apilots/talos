@@ -74,6 +74,22 @@ impl FilePeerAccess for GatewayPeerAccess {
             Ok(FileContent { file, bytes })
         })
     }
+    fn read_range<'a>(
+        &'a self,
+        owner: &'a str,
+        peer: &'a str,
+        request: FileReadRequest,
+        range: std::ops::Range<u64>,
+    ) -> AgentFuture<'a, TalosResult<FileContent>> {
+        Box::pin(async move {
+            let (file, bytes) = self
+                .gateway()
+                .await?
+                .read_peer_file_range(&self.token(owner).await?, peer, request, range)
+                .await?;
+            Ok(FileContent { file, bytes })
+        })
+    }
     fn update<'a>(
         &'a self,
         owner: &'a str,

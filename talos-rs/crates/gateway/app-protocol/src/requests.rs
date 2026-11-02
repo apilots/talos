@@ -70,6 +70,16 @@ pub enum ClientRequestParams {
     ComputerRotateCredential(talos_types::RotateCredentialRequest),
     #[serde(rename = "profile/read")]
     ProfileRead(ProfileReadRequest),
+    #[serde(rename = "trajectory/capabilities")]
+    TrajectoryCapabilities(Option<()>),
+    #[serde(rename = "trajectory/readTurn")]
+    TrajectoryReadTurn(talos_agent_api::trajectory::TrajectoryReadTurnRequest),
+    #[serde(rename = "trajectory/readRequest")]
+    TrajectoryReadRequest(talos_agent_api::trajectory::TrajectoryReadModelRequestRequest),
+    #[serde(rename = "trajectory/readTool")]
+    TrajectoryReadTool(talos_agent_api::trajectory::TrajectoryReadToolRequest),
+    #[serde(rename = "trajectory/readPayload")]
+    TrajectoryReadPayload(talos_agent_api::trajectory::TrajectoryReadPayloadRequest),
     #[serde(rename = "session/list")]
     SessionList(SessionListRequest),
     #[serde(rename = "session/get")]
@@ -146,6 +156,13 @@ pub enum ClientRequestParams {
     FileRead(FileReadRequest),
     #[serde(rename = "file/content")]
     FileContent(FileReadRequest),
+    #[serde(rename = "file/preview/prepare")]
+    FilePreviewPrepare(talos_types::FilePreviewPrepareRequest),
+    #[serde(rename = "file/preview/read")]
+    FilePreviewRead(talos_types::FilePreviewReadRequest),
+    #[serde(rename = "file/preview/close")]
+    FilePreviewClose(talos_types::FilePreviewCloseRequest),
+
     #[serde(rename = "file/update")]
     FileUpdate(FileUpdateRequest),
     #[serde(rename = "file/delete")]
@@ -255,6 +272,7 @@ impl ClientRequest {
         let method_kind = ClientMethod::from_str(method)?;
         let params_value = params.unwrap_or_else(|| match method_kind {
             ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::TrajectoryCapabilities
             | ClientMethod::SyncMetrics
             | ClientMethod::SyncStatus
             | ClientMethod::SyncDisable => serde_json::Value::Null,
@@ -299,6 +317,21 @@ impl ClientRequest {
                 ClientRequestParams::ComputerRotateCredential(decode(params_value)?)
             }
             ClientMethod::ProfileRead => ClientRequestParams::ProfileRead(decode(params_value)?),
+            ClientMethod::TrajectoryCapabilities => {
+                ClientRequestParams::TrajectoryCapabilities(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadTurn => {
+                ClientRequestParams::TrajectoryReadTurn(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadRequest => {
+                ClientRequestParams::TrajectoryReadRequest(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadTool => {
+                ClientRequestParams::TrajectoryReadTool(decode(params_value)?)
+            }
+            ClientMethod::TrajectoryReadPayload => {
+                ClientRequestParams::TrajectoryReadPayload(decode(params_value)?)
+            }
             ClientMethod::SessionList => ClientRequestParams::SessionList(decode(params_value)?),
             ClientMethod::SessionGet => ClientRequestParams::SessionGet(decode(params_value)?),
             ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),
@@ -373,6 +406,16 @@ impl ClientRequest {
             ClientMethod::FileList => ClientRequestParams::FileList(decode(params_value)?),
             ClientMethod::FileRead => ClientRequestParams::FileRead(decode(params_value)?),
             ClientMethod::FileContent => ClientRequestParams::FileContent(decode(params_value)?),
+            ClientMethod::FilePreviewPrepare => {
+                ClientRequestParams::FilePreviewPrepare(decode(params_value)?)
+            }
+            ClientMethod::FilePreviewRead => {
+                ClientRequestParams::FilePreviewRead(decode(params_value)?)
+            }
+            ClientMethod::FilePreviewClose => {
+                ClientRequestParams::FilePreviewClose(decode(params_value)?)
+            }
+
             ClientMethod::FileUpdate => ClientRequestParams::FileUpdate(decode(params_value)?),
             ClientMethod::FileDelete => ClientRequestParams::FileDelete(decode(params_value)?),
             ClientMethod::MemoryFileList => {

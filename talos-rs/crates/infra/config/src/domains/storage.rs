@@ -119,6 +119,9 @@ impl Default for FileStorageLimits {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct FileStorageConfig {
+    /// Optional dedicated wildcard preview origin, e.g. https://preview.example.com.
+    #[serde(default)]
+    pub preview_base_url: Option<String>,
     #[serde(default = "default_file_storage_id")]
     pub default: String,
     #[serde(default = "default_file_storage_backends")]
@@ -132,6 +135,7 @@ pub struct FileStorageConfig {
 impl Default for FileStorageConfig {
     fn default() -> Self {
         Self {
+            preview_base_url: None,
             default: default_file_storage_id(),
             backends: default_file_storage_backends(),
             limits: FileStorageLimits::default(),
@@ -143,6 +147,26 @@ impl Default for FileStorageConfig {
 impl FileStorageConfig {
     /// Validates backend identities, credentials, limits, and accepted media types.
     pub(crate) fn validate(&self) -> TalosResult<()> {
+        if let Some(value) = &self.preview_base_url {
+            let origin = url::Url::parse(value).map_err(|error| {
+                TalosError::from_source(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "storage.files.preview_base_url must be an HTTP(S) origin.",
+                    error,
+                )
+            })?;
+            if !matches!(origin.scheme(), "http" | "https")
+                || !matches!(origin.host(), Some(url::Host::Domain(_)))
+                || !origin.username().is_empty()
+                || origin.password().is_some()
+                || origin.path() != "/"
+                || origin.query().is_some()
+                || origin.fragment().is_some()
+            {
+                return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
+                    "storage.files.preview_base_url must be a dedicated HTTP(S) domain origin supporting wildcard preview subdomains."));
+            }
+        }
         if self.default.trim().is_empty() || self.default.trim() != self.default {
             return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest,
                 "storage.files.default must be a non-empty backend id without surrounding whitespace"
@@ -173,6 +197,8 @@ impl FileStorageConfig {
                             | "application/vnd.ms-excel"
                             | "text/csv"
                             | "text/markdown"
+                            | "text/plain"
+                            | "application/json"
                     ))
             {
                 return Err(TalosError::new(

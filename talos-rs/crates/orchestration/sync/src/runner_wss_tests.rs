@@ -4,7 +4,7 @@ use std::time::Duration;
 use talos_error::TalosResult;
 use talos_storage::StorageTransaction;
 
-struct EmptyAdapter;
+pub(super) struct EmptyAdapter;
 impl SyncDataAdapter for EmptyAdapter {
     async fn scan(&self, _: SyncScanParams) -> TalosResult<SyncScanPage> {
         Ok(SyncScanPage {
@@ -24,6 +24,30 @@ impl SyncDataAdapter for EmptyAdapter {
     }
 }
 
+pub(super) async fn tls_listener() -> (tokio::net::TcpListener, tokio_rustls::TlsAcceptor, Vec<u8>)
+{
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let tls = tokio_rustls::rustls::ServerConfig::builder_with_provider(Arc::new(
+        tokio_rustls::rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(
+        vec![cert.der().clone()],
+        tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der())
+            .into(),
+    )
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    (
+        listener,
+        tokio_rustls::TlsAcceptor::from(Arc::new(tls)),
+        cert.pem().into_bytes(),
+    )
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PresenceRejection {
     None,
@@ -34,7 +58,7 @@ enum PresenceRejection {
 }
 
 #[tokio::test]
-async fn permanent_upload_rejection_preserves_outbox_without_starving_later_resources() {
+async fn parked_upload_recovers_after_limit_changes_without_starving_other_resources() {
     upload_rejection_scenario(PresenceRejection::None).await;
 }
 
@@ -59,31 +83,30 @@ async fn silent_presence_update_keeps_document_sync_and_commands_responsive() {
 }
 
 async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
-    let rcgen::CertifiedKey { cert, signing_key } =
-        rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     use futures_util::{SinkExt, StreamExt};
     use talos_sync_sdk::loro_protocol::{self, Permission, ProtocolMessage, UpdateStatusCode};
     use talos_sync_types::{SyncControlFrame, SyncControlMessage, SyncErrorTarget, SyncPage};
     use tokio_tungstenite::tungstenite::Message;
-    let tls = tokio_rustls::rustls::ServerConfig::builder_with_provider(Arc::new(
-        tokio_rustls::rustls::crypto::ring::default_provider(),
-    ))
-    .with_safe_default_protocol_versions()
-    .unwrap()
-    .with_no_client_auth()
-    .with_single_cert(
-        vec![cert.der().clone()],
-        tokio_rustls::rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der())
-            .into(),
-    )
-    .unwrap();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (listener, acceptor, trusted_ca) = tls_listener().await;
     let endpoint = format!(
         "wss://localhost:{}/v1/sync",
         listener.local_addr().unwrap().port()
     );
     let uploads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = uploads.clone();
+    let upload_limit = Arc::new(std::sync::atomic::AtomicUsize::new(4096));
+    let remote_limit = upload_limit.clone();
+    let invalid_resource = SyncResourceKey::Computer {
+        computer_id: uuid::Uuid::new_v4().to_string(),
+    };
+    let invalid_room = talos_sync_types::room_id(
+        &SyncScope {
+            hub_id: "hub-1".into(),
+            account_id: "account-1".into(),
+        },
+        &invalid_resource,
+    )
+    .unwrap();
     let presences = Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed_presence = presences.clone();
     let presence_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -92,10 +115,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     let blocked_presence = silent_presence.clone();
     let peer = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
-        let tls = tokio_rustls::TlsAcceptor::from(Arc::new(tls))
-            .accept(tcp)
-            .await
-            .unwrap();
+        let tls = acceptor.accept(tcp).await.unwrap();
         let mut socket = tokio_tungstenite::accept_async(tls).await.unwrap();
         while let Some(message) = socket.next().await {
             let response = match message.unwrap() {
@@ -190,16 +210,21 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                                 blocked_presence.notify_one();
                                 continue;
                             }
-                            // Payload size alone determines the controlled remote refusal.
-                            let too_large = updates.iter().map(Vec::len).sum::<usize>() > 4096;
-                            if too_large {
+                            let invalid_request = room_id == invalid_room;
+                            let too_large = updates.iter().map(Vec::len).sum::<usize>()
+                                > remote_limit.load(std::sync::atomic::Ordering::SeqCst);
+                            if too_large || invalid_request {
                                 socket
                                     .send(Message::Text(
                                         serde_json::to_string(&SyncControlFrame {
                                             request_id: None,
                                             body: SyncControlMessage::Error {
                                                 error: talos_sync_types::SyncError::new(
-                                                    talos_sync_types::SyncErrorCode::UploadTooLarge,
+                                                    if invalid_request {
+                                                        talos_sync_types::SyncErrorCode::InvalidRequest
+                                                    } else {
+                                                        talos_sync_types::SyncErrorCode::UploadTooLarge
+                                                    },
                                                 ),
                                                 target: SyncErrorTarget::Document {
                                                     room_id: room_id.clone(),
@@ -217,8 +242,9 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                                 crdt,
                                 room_id,
                                 ref_id: batch_id,
-                                status: if crdt == loro_protocol::CrdtType::LoroEphemeralStore
-                                    && presence_rejection == PresenceRejection::Update
+                                status: if invalid_request
+                                    || (crdt == loro_protocol::CrdtType::LoroEphemeralStore
+                                        && presence_rejection == PresenceRejection::Update)
                                 {
                                     UpdateStatusCode::AppError
                                 } else if too_large {
@@ -262,7 +288,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
                         })
                     })
                 }),
-                trusted_ca_pem: Some(cert.pem().into_bytes()),
+                trusted_ca_pem: Some(trusted_ca),
                 reconnect_delay: Duration::from_millis(20),
             },
         )
@@ -314,6 +340,8 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     for index in 0..10 {
         let resource = if index == 0 {
             failed.clone()
+        } else if index == 8 {
+            invalid_resource.clone()
         } else {
             SyncResourceKey::Computer {
                 computer_id: uuid::Uuid::new_v4().to_string(),
@@ -356,7 +384,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     assert_eq!(handle.status().connection, SyncConnectionState::Connected);
     assert!(matches!(
         handle.status().last_error.unwrap().code,
-        ErrorCode::UploadTooLarge | ErrorCode::Conflict
+        ErrorCode::UploadTooLarge | ErrorCode::Conflict | ErrorCode::InvalidRequest
     ));
     assert_eq!(
         sync.pending_resources(&binding, 32).await.unwrap().len(),
@@ -366,7 +394,7 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
     assert_eq!(
         uploads.load(std::sync::atomic::Ordering::SeqCst),
         10,
-        "Permanent rejections must not automatically retry unchanged facts"
+        "Parked rejections must not busy-retry unchanged facts"
     );
 
     {
@@ -396,6 +424,39 @@ async fn upload_rejection_scenario(presence_rejection: PresenceRejection) {
         handle.flush(local_failure).await.unwrap_err().error_code(),
         ErrorCode::Conflict
     );
+    if presence_rejection == PresenceRejection::None {
+        let before_retry = uploads.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(14 * 60)).await;
+        tokio::time::resume();
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        assert_eq!(
+            uploads.load(std::sync::atomic::Ordering::SeqCst),
+            before_retry,
+            "Unchanged rejections must stay parked within the 15-minute cooldown"
+        );
+        // Only the remote limit changes: no new local cut or explicit flush.
+        upload_limit.store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(2 * 60)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while status.borrow().pending_changes != 2 {
+                status.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("unchanged rejected uploads must recover after the cooldown");
+        assert_eq!(
+            uploads.load(std::sync::atomic::Ordering::SeqCst),
+            before_retry + 8
+        );
+        assert_eq!(sync.pending_resources(&binding, 32).await.unwrap().len(), 2);
+        assert!(sync
+            .has_pending_through(&binding, &invalid_resource, i64::MAX)
+            .await
+            .unwrap());
+    }
     assert_eq!(handle.status().connection, SyncConnectionState::Connected);
     tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
         .await

@@ -1,0 +1,247 @@
+[
+  {
+    "name": "matrix-image.png",
+    "mime": "image/png",
+    "viewer": "image",
+    "admission": "default",
+    "width": 160,
+    "height": 96
+  },
+  {
+    "name": "matrix-image.jpg",
+    "mime": "image/jpeg",
+    "viewer": "image",
+    "admission": "default",
+    "width": 160,
+    "height": 96
+  },
+  {
+    "name": "matrix-image.webp",
+    "mime": "image/webp",
+    "viewer": "image",
+    "admission": "default",
+    "width": 160,
+    "height": 96
+  },
+  {
+    "name": "matrix-image.gif",
+    "mime": "image/gif",
+    "viewer": "image",
+    "admission": "opt-in",
+    "width": 160,
+    "height": 96
+  },
+  {
+    "name": "matrix-image.bmp",
+    "mime": "image/bmp",
+    "viewer": "image",
+    "admission": "opt-in",
+    "width": 160,
+    "height": 96
+  },
+  {
+    "name": "matrix-image.svg",
+    "mime": "text/plain",
+    "viewer": "text",
+    "admission": "opt-in",
+    "text": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"160\" height=\"96\"><rect width=\"160\" height=\"96\" fill=\"#126543\"/><text x=\"12\" y=\"55\" fill=\"white\">Talos SVG</text></svg>",
+    "note": "Files detects SVG as plain text; Worker file metadata can supply image/svg+xml."
+  },
+  {
+    "name": "matrix-word.docx",
+    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "viewer": "pdf",
+    "admission": "default",
+    "text": "Word preview first page",
+    "secondText": "Word preview second page",
+    "chineseText": "中文预览"
+  },
+  {
+    "name": "matrix-word.doc",
+    "mime": "application/msword",
+    "viewer": "pdf",
+    "admission": "default",
+    "text": "Word preview first page",
+    "secondText": "Word preview second page",
+    "chineseText": "中文预览"
+  },
+  {
+    "name": "matrix-word.odt",
+    "mime": "application/vnd.oasis.opendocument.text",
+    "viewer": "pdf",
+    "admission": "opt-in",
+    "text": "Word preview first page",
+    "secondText": "Word preview second page",
+    "chineseText": "中文预览"
+  },
+  {
+    "name": "matrix-word.pdf",
+    "mime": "application/pdf",
+    "viewer": "pdf",
+    "admission": "default",
+    "text": "Word preview first page",
+    "secondText": "Word preview second page",
+    "chineseText": "中文预览"
+  },
+  {
+    "name": "matrix-sheet.xlsx",
+    "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "viewer": "pdf",
+    "admission": "default",
+    "text": "Spreadsheet preview",
+    "detail": "42",
+    "secondText": "Spreadsheet second sheet"
+  },
+  {
+    "name": "matrix-sheet.xls",
+    "mime": "application/vnd.ms-excel",
+    "viewer": "pdf",
+    "admission": "default",
+    "text": "Spreadsheet preview",
+    "detail": "42",
+    "secondText": "Spreadsheet second sheet"
+  },
+  {
+    "name": "matrix-sheet.ods",
+    "mime": "application/vnd.oasis.opendocument.spreadsheet",
+    "viewer": "pdf",
+    "admission": "opt-in",
+    "text": "Spreadsheet preview",
+    "detail": "42",
+    "secondText": "Spreadsheet second sheet"
+  },
+  {
+    "name": "matrix-slides.pptx",
+    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "viewer": "pdf",
+    "admission": "default",
+    "text": "Presentation first slide",
+    "secondText": "Presentation second slide",
+    "chineseText": "中文预览"
+  },
+  {
+    "name": "matrix-slides.ppt",
+    "mime": "application/vnd.ms-powerpoint",
+    "viewer": "pdf",
+    "admission": "opt-in",
+    "text": "Presentation first slide",
+    "secondText": "Presentation second slide",
+    "chineseText": "中文预览",
+    "fixture": "matrix-slides.ppt.gz"
+  },
+  {
+    "name": "matrix-slides.odp",
+    "mime": "application/vnd.oasis.opendocument.presentation",
+    "viewer": "pdf",
+    "admission": "opt-in",
+    "text": "Presentation first slide",
+    "secondText": "Presentation second slide",
+    "chineseText": "中文预览"
+  },
+  {
+    "name": "matrix-content.md",
+    "mime": "text/markdown",
+    "viewer": "markdown",
+    "admission": "default",
+    "text": "Markdown format preview"
+  },
+  {
+    "name": "matrix-content.csv",
+    "mime": "text/csv",
+    "viewer": "text",
+    "admission": "default",
+    "text": "item,value\nPreview total,42"
+  },
+  {
+    "name": "matrix-content.txt",
+    "mime": "text/plain",
+    "viewer": "text",
+    "admission": "opt-in",
+    "text": "Plain text preview\n中文内容"
+  },
+  {
+    "name": "matrix-content.json",
+    "mime": "application/json",
+    "viewer": "text",
+    "admission": "opt-in",
+    "text": "{\"preview\":\"JSON format\",\"total\":42}"
+  },
+  {
+    "name": "matrix-content.ts",
+    "mime": "text/plain",
+    "viewer": "text",
+    "admission": "opt-in",
+    "text": "export const formatPreview = 42;"
+  },
+  {
+    "name": "matrix-content.xml",
+    "mime": "text/xml",
+    "viewer": "text",
+    "admission": "opt-in",
+    "text": "<?xml version=\"1.0\"?><preview>XML format</preview>"
+  },
+  {
+    "name": "matrix-content.html",
+    "mime": "text/html",
+    "viewer": "html",
+    "admission": "opt-in",
+    "text": "HTML format preview"
+  },
+  {
+    "name": "matrix-bundle.zip",
+    "mime": "application/zip",
+    "viewer": "unsupported",
+    "admission": "opt-in"
+  },
+  {
+    "name": "matrix-bundle.tar",
+    "mime": "application/x-tar",
+    "viewer": "unsupported",
+    "admission": "opt-in"
+  },
+  {
+    "name": "matrix-bundle.tgz",
+    "mime": "application/gzip",
+    "viewer": "unsupported",
+    "admission": "opt-in"
+  },
+  {
+    "name": "matrix-tone.wav",
+    "mime": "audio/x-wav",
+    "viewer": "audio",
+    "admission": "opt-in",
+    "codec": "pcm_s16le"
+  },
+  {
+    "name": "matrix-tone.mp3",
+    "mime": "audio/mpeg",
+    "viewer": "audio",
+    "admission": "opt-in",
+    "codec": "libmp3lame"
+  },
+  {
+    "name": "matrix-tone.ogg",
+    "mime": "audio/ogg",
+    "viewer": "audio",
+    "admission": "opt-in",
+    "codec": "libvorbis"
+  },
+  {
+    "name": "matrix-motion.webm",
+    "mime": "video/webm",
+    "viewer": "video",
+    "admission": "opt-in",
+    "codec": "VP8",
+    "width": 160,
+    "height": 96
+  },
+  {
+    "name": "matrix-motion.mp4",
+    "mime": "video/mp4",
+    "viewer": "video",
+    "admission": "opt-in",
+    "codec": "H.264",
+    "width": 160,
+    "height": 96
+  }
+]

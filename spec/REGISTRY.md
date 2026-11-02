@@ -6,8 +6,8 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 051 |
-| `fix` | 010 |
+| `feat` | 053 |
+| `fix` | 013 |
 | `refactor` | 045 |
 | `docs` | 001 |
 
@@ -15,6 +15,10 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| fix-012 | [Capture contention and terminal logging lifetime](fix-012-capture-and-tui-shutdown/design.md) | active |
+| feat-052 | [Turn trajectory and model request inspection](feat-052-turn-trajectory/design.md) | active |
+| fix-011 | [Custom model stream reliability and reasoning controls](fix-011-qwen-stream-reliability/design.md) | implemented |
+| feat-051 | [Session-bound unified resource preview](feat-051-unified-preview/design.md) | verified |
 | feat-050 | [Desktop managed browser tabs](feat-050-desktop-browser-tabs/design.md) | active |
 | feat-049 | [Official MCP plugin delivery](feat-049-official-mcp-plugin-delivery/design.md) | implemented |
 | feat-048 | [Custom provider connections and model selection](feat-048-custom-llm-providers/design.md) | implemented |
@@ -27,6 +31,12 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | feat-042 | `feat-042-distributed-agent-execution` | implemented |
 | feat-043 | `feat-043-computer-workspace` | implemented |
 | feat-044 | [Talos integration](feat-044-talos-sync/design.md); [independent Sync](https://github.com/apilots/talos-sync/blob/2009733813c9a5416a8b1530580809af1385ec75/spec/feat-044-talos-sync/design.md) | implemented — [acceptance](feat-044-talos-sync/verification-account-sdk.md) |
+
+## Reserved IDs
+
+| ID | Owner | Reason |
+| --- | --- | --- |
+| fix-010 | `docs/worker-memory-ownership` | Separate unmerged Memory/Dream parsing and retry proposal; do not reuse its allocated ID. |
 
 ## Archived Specs
 

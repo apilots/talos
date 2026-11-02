@@ -65,6 +65,7 @@ pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
         "mock",
         talos_types::ProviderModelConfig {
             reasoning_replay: Default::default(),
+            reasoning_efforts: None,
             request_parameters: Default::default(),
             id: id.to_string(),
             name: id.to_string(),

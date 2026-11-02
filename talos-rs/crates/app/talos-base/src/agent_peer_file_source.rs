@@ -28,15 +28,27 @@ impl CoordinatorResources {
         match request {
             Call::PeerFileRead(request) => {
                 let params = request.params.ok_or_else(invalid)?;
-                let result = self
-                    .files
-                    .read_content(
-                        &actor,
-                        FileReadRequest {
-                            file_id: params.file_id,
-                        },
-                    )
-                    .await;
+                let result = match params.range {
+                    Some(range) => {
+                        self.files
+                            .read_preview_range(
+                                &actor,
+                                &params.file_id,
+                                range.offset..range.offset.saturating_add(u64::from(range.limit)),
+                            )
+                            .await
+                    }
+                    None => {
+                        self.files
+                            .read_content(
+                                &actor,
+                                FileReadRequest {
+                                    file_id: params.file_id,
+                                },
+                            )
+                            .await
+                    }
+                };
                 let content = match result {
                     Ok(content) => content,
                     Err(error) => {

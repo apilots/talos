@@ -138,3 +138,18 @@ mod tests {
         assert_eq!(protocol.code, INVALID_PARAMS);
     }
 }
+
+/// Only a typed absent method represents an older host; auth/transport errors remain errors.
+pub(super) fn trajectory_method_absent(error: &TalosError) -> bool {
+    use std::error::Error;
+    let mut source = error.source();
+    while let Some(error) = source {
+        if let Some(protocol) =
+            error.downcast_ref::<talos_app_protocol::errors::AppServerErrorBody>()
+        {
+            return protocol.code == talos_app_protocol::errors::AppServerErrorCode::MethodNotFound;
+        }
+        source = error.source();
+    }
+    false
+}

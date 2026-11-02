@@ -1,13 +1,77 @@
 //! Gateway-only relay. Business admission and persistence stay at the caller.
 use super::*;
+use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Mutex;
 use tokio_stream::Stream;
 use tonic::Streaming;
+
+const MAX_CONNECTIONS: usize = 256;
+const MAX_ACCOUNT_CONNECTIONS: usize = 16;
+
+#[derive(Default)]
+struct Admission {
+    total: usize,
+    accounts: HashMap<String, usize>,
+}
+
+struct ConnectionPermit {
+    admission: Arc<Mutex<Admission>>,
+    account: String,
+}
+
+impl ConnectionPermit {
+    fn acquire(admission: &Arc<Mutex<Admission>>, user_id: &str) -> TalosResult<Self> {
+        let mut counts = admission
+            .lock()
+            .expect("Coordinator admission lock poisoned");
+        if counts.total >= MAX_CONNECTIONS
+            || counts
+                .accounts
+                .get(user_id)
+                .is_some_and(|count| *count >= MAX_ACCOUNT_CONNECTIONS)
+        {
+            return Err(capacity_full());
+        }
+        counts.total += 1;
+        *counts.accounts.entry(user_id.to_owned()).or_default() += 1;
+        Ok(Self {
+            admission: admission.clone(),
+            account: user_id.to_owned(),
+        })
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        let mut counts = self
+            .admission
+            .lock()
+            .expect("Coordinator admission lock poisoned");
+        counts.total -= 1;
+        let count = counts
+            .accounts
+            .get_mut(&self.account)
+            .expect("admitted account");
+        *count -= 1;
+        if *count == 0 {
+            counts.accounts.remove(&self.account);
+        }
+    }
+}
+
+fn capacity_full() -> TalosError {
+    TalosError::new(
+        ErrorCode::ServiceUnavailable,
+        "Coordinator connection capacity is full",
+    )
+}
 
 pub(super) struct CoordinatorRpc {
     management: NodeManagementRpc,
     publisher: RemoteNodePublisher,
     shutdown: CancellationToken,
+    admission: Arc<Mutex<Admission>>,
 }
 impl CoordinatorRpc {
     pub(super) fn new(
@@ -19,6 +83,7 @@ impl CoordinatorRpc {
             management,
             publisher,
             shutdown,
+            admission: Arc::default(),
         }
     }
 }
@@ -77,6 +142,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
         request: Request<Streaming<pb::CoordinatorToControlFrame>>,
     ) -> Result<Response<Self::ConnectStream>, Status> {
         let actor = self.management.actor(&request).await.map_err(status)?;
+        let permit = ConnectionPermit::acquire(&self.admission, &actor.user_id).map_err(status)?;
         let mut input = request.into_inner();
         let first = tokio::time::timeout(std::time::Duration::from_secs(10), input.message())
             .await
@@ -148,6 +214,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
             first.peer_id.clone(),
             input,
             stop.clone(),
+            first.stream_heartbeat,
         )
         .await;
         self.publisher
@@ -169,6 +236,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
         let resource_routes = self.publisher.resource_routes.clone();
         let management = self.management.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             let mut check = tokio::time::interval(std::time::Duration::from_secs(1));
             loop {
                 tokio::select! {

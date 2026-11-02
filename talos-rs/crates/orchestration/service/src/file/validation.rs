@@ -7,7 +7,7 @@ use talos_error::{TalosError, TalosResult};
 
 const MIME_SNIFF_BYTES: usize = 64 * 1024;
 
-/// Captures only the bytes required to validate one upload's media type.
+/// Validates complete text uploads within FileService's configured byte limit.
 ///
 /// Add a suffix-specific branch only when storage acceptance needs validation
 /// that `infer` cannot provide.
@@ -25,14 +25,24 @@ impl MediaTypeValidator {
     }
 
     pub(super) fn observe(&mut self, bytes: &[u8]) {
-        let capture_limit = match self.suffix.as_str() {
-            ".csv" | ".xls" | ".xlsx" | ".md" | ".markdown" => usize::MAX,
-            ".doc" | ".docx" => 0,
-            _ => MIME_SNIFF_BYTES,
-        };
-        let remaining = capture_limit.saturating_sub(self.content.len());
-        self.content
-            .extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+        match self.suffix.as_str() {
+            ".doc" | ".docx" => return,
+            ".csv" | ".xls" | ".xlsx" | ".ppt" | ".pptx" | ".md" | ".markdown" => {
+                self.content.extend_from_slice(bytes);
+                return;
+            }
+            _ => {}
+        }
+        // Preserve bounded sniffing for recognized binary uploads. Text needs
+        // the complete body; FileService enforces its upload limit before observe.
+        let prefix = bytes
+            .len()
+            .min(MIME_SNIFF_BYTES.saturating_sub(self.content.len()));
+        self.content.extend_from_slice(&bytes[..prefix]);
+        if infer::get(&self.content).is_some_and(|kind| !kind.mime_type().starts_with("text/")) {
+            return;
+        }
+        self.content.extend_from_slice(&bytes[prefix..]);
     }
 
     pub(super) fn detected_mime_type(&self) -> Option<String> {
@@ -40,13 +50,46 @@ impl MediaTypeValidator {
             ".doc" => "application/msword",
             ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ".csv" if is_csv(&self.content) => "text/csv",
-            ".md" | ".markdown" if is_markdown_text(&self.content) => "text/markdown",
+            ".md" | ".markdown" if is_utf8_text(&self.content) => "text/markdown",
             ".xls" if Xls::new(Cursor::new(&self.content)).is_ok() => "application/vnd.ms-excel",
             ".xlsx" if Xlsx::new(Cursor::new(&self.content)).is_ok() => {
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             }
-            ".csv" | ".xls" | ".xlsx" | ".md" | ".markdown" => return None,
-            _ => return infer::get(&self.content).map(|kind| kind.mime_type().to_string()),
+            // infer only examines early ZIP entries. Valid presentation packages
+            // may place ppt/presentation.xml after that window; the existing ZIP
+            // reader resolves the authoritative central directory instead.
+            ".pptx"
+                if zip::ZipArchive::new(Cursor::new(&self.content))
+                    .is_ok_and(|mut package| package.by_name("ppt/presentation.xml").is_ok()) =>
+            {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
+            ".csv" | ".xls" | ".xlsx" | ".pptx" | ".md" | ".markdown" => return None,
+            _ => {
+                let detected = infer::get(&self.content);
+                if let Some(kind) = detected
+                    .as_ref()
+                    .filter(|kind| !kind.mime_type().starts_with("text/"))
+                {
+                    return Some(kind.mime_type().to_string());
+                }
+                if !is_utf8_text(&self.content) {
+                    return None;
+                }
+                if let Some(kind) = detected {
+                    return Some(kind.mime_type().to_string());
+                }
+                match self.suffix.as_str() {
+                    ".html" | ".htm" => "text/html",
+                    ".json"
+                        if serde_json::from_slice::<serde::de::IgnoredAny>(&self.content)
+                            .is_ok() =>
+                    {
+                        "application/json"
+                    }
+                    _ => "text/plain",
+                }
+            }
         };
         Some(mime_type.to_string())
     }
@@ -173,7 +216,7 @@ pub(super) fn normalized_suffix(filename: &str) -> String {
 
 // Validate the whole upload within FileService's existing upload-size limit.
 // A suffix or a valid sniffed prefix cannot turn a binary tail into text.
-fn is_markdown_text(content: &[u8]) -> bool {
+pub(crate) fn is_utf8_text(content: &[u8]) -> bool {
     std::str::from_utf8(content).is_ok_and(|text| {
         !text
             .chars()

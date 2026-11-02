@@ -560,6 +560,15 @@ impl AgentSessionDataClient {
 }
 
 impl SessionHistoryReader for AgentSessionDataClient {
+    fn source_node_id(&self) -> Option<String> {
+        Some(self.current_auth().node_id)
+    }
+    fn append_supplement(
+        &self,
+        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(self.append_history_supplement(supplement))
+    }
     fn read(
         &self,
         params: SessionHistoryReadParams,
@@ -766,3 +775,6 @@ fn rpc_request<T>(body: T, timeout: Duration) -> tonic::Request<T> {
     request.set_timeout(timeout);
     request
 }
+
+#[path = "history_append.rs"]
+mod history_append;

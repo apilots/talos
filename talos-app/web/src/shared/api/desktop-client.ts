@@ -65,6 +65,7 @@ export function createDesktopTalosClient(
   };
 
   return {
+    trajectory: client.trajectory,
     sync: client.sync,
     computers: client.computers,
     auth: {
@@ -138,7 +139,10 @@ export function createDesktopTalosClient(
       delete: (request: Parameters<TalosWebClient["projects"]["delete"]>[0]) =>
         client.deleteProject(request),
     },
-    files: client.files,
+    files: { ...client.files, preview: {
+      ...client.files.preview,
+      resourceUrl: (preview, resourcePath = preview.entryPath) => `talos-preview://${preview.previewId}/${resourcePath.split("/").map(encodeURIComponent).join("/")}`,
+    } },
     fs: {
       directory: {
         read: (query?: Parameters<TalosWebClient["fs"]["directory"]["read"]>[0]) =>

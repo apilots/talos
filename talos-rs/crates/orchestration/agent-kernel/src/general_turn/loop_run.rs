@@ -146,7 +146,14 @@ pub async fn execute_general_turn_loop_with_policy(
         let mut pending_messages = take_running_messages(&prepared)?;
         if !pending_messages.is_empty() && step.tool_calls.is_empty() {
             apply_general_turn_step(&mut state, &step);
-            state.messages.push(ChatMessage::assistant(step_text));
+            state
+                .messages
+                .push(ChatMessage::assistant(step_text).with_input_origin(
+                    talos_llm_provider::MessageInputOrigin {
+                        kind: talos_llm_provider::MessageInputKind::Context,
+                        source: talos_llm_provider::MessageInputSource::Runtime,
+                    },
+                ));
             apply_running_messages(&prepared, &mut state, pending_messages).await;
             emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
             continue;
@@ -161,6 +168,7 @@ pub async fn execute_general_turn_loop_with_policy(
                 prepared.stream_tx.clone(),
                 None,
                 cause.clone(),
+                prepared.trajectory.clone(),
             )
             .await?;
             apply_general_turn_step(&mut state, &forced_step);
@@ -182,6 +190,7 @@ pub async fn execute_general_turn_loop_with_policy(
                 prepared.stream_tx.clone(),
                 None,
                 ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+                prepared.trajectory.clone(),
             )
             .await?;
             apply_general_turn_step(&mut state, &forced_step);
@@ -196,7 +205,12 @@ pub async fn execute_general_turn_loop_with_policy(
         if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
             state
                 .messages
-                .push(ChatMessage::assistant(step_text.clone()));
+                .push(ChatMessage::assistant(step_text.clone()).with_input_origin(
+                    talos_llm_provider::MessageInputOrigin {
+                        kind: talos_llm_provider::MessageInputKind::Context,
+                        source: talos_llm_provider::MessageInputSource::Runtime,
+                    },
+                ));
             let stop_reason = match step.model_finish_reason {
                 ModelFinishReason::Length => StopReason::ModelOutputLimit,
                 ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
@@ -227,6 +241,11 @@ pub async fn execute_general_turn_loop_with_policy(
             )
             .await?
         };
+        if let Some(observer) = &prepared.trajectory {
+            for message in &tool_batch.tool_messages {
+                observer.prepared_tool_result(message);
+            }
+        }
         if let Some(pending) = &mut tool_batch.pending_user_action {
             pending.reasoning_continuation = step.reasoning.continuation.clone();
         }
@@ -414,6 +433,11 @@ async fn apply_general_turn_resume(
         prepared.stream_tx.as_ref(),
     )
     .await?;
+    if let Some(observer) = &prepared.trajectory {
+        for message in &replay_batch.tool_messages {
+            observer.prepared_tool_result(message);
+        }
+    }
     if let Some(pending) = &mut replay_batch.pending_user_action {
         pending.reasoning_continuation = reasoning_continuation;
         pending.tool_calls = resume.tool_calls;

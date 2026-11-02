@@ -10,13 +10,14 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-client"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-pb",
  "agent-protocol",
  "bytes",
  "futures-util",
  "rustls",
+ "serde_json",
  "sha2 0.10.9",
  "subtle",
  "talos-agent",
@@ -38,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "agent-pb"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "prost",
  "tonic",
@@ -48,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "agent-protocol"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-pb",
  "prost",
@@ -92,6 +93,12 @@ name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
+name = "ambient-authority"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
 
 [[package]]
 name = "android_system_properties"
@@ -160,7 +167,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app-server"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "talos-base",
  "tempfile",
@@ -650,6 +657,36 @@ dependencies = [
  "quick-xml 0.41.0",
  "serde",
  "zip",
+]
+
+[[package]]
+name = "cap-primitives"
+version = "3.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e0bf07d379916947be6c4a07f43684153d710a2896c31f9e97781362895596c"
+dependencies = [
+ "ambient-authority",
+ "fs-set-times",
+ "io-extras",
+ "io-lifetimes",
+ "ipnet",
+ "maybe-owned",
+ "rustix 1.1.4",
+ "rustix-linux-procfs",
+ "windows-sys 0.59.0",
+ "winx",
+]
+
+[[package]]
+name = "cap-std"
+version = "3.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a59e59fa26472d29680ece6a9f8ee8b0551a719a33df2f5240bde065ecbddfd7"
+dependencies = [
+ "cap-primitives",
+ "io-extras",
+ "io-lifetimes",
+ "rustix 1.1.4",
 ]
 
 [[package]]
@@ -1738,6 +1775,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
 
 [[package]]
+name = "fs-set-times"
+version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
+dependencies = [
+ "io-lifetimes",
+ "rustix 1.1.4",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "fs4"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2655,6 +2703,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-extras"
+version = "0.18.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
+dependencies = [
+ "io-lifetimes",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "io-lifetimes"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06432fb54d3be7964ecd3649233cddf80db2832f47fec34c01f65b3d9d774983"
+
+[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3182,6 +3246,12 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "maybe-owned"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
 
 [[package]]
 name = "md-5"
@@ -5049,6 +5119,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix-linux-procfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fc84bf7e9aa16c4f2c758f27412dc9841341e16aa682d9c7ac308fe3ee12056"
+dependencies = [
+ "once_cell",
+ "rustix 1.1.4",
+]
+
+[[package]]
 name = "rustls"
 version = "0.23.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6104,7 +6184,7 @@ checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
 
 [[package]]
 name = "talos-agent"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-client",
  "agent-pb",
@@ -6137,7 +6217,7 @@ dependencies = [
 
 [[package]]
 name = "talos-agent-api"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -6149,7 +6229,7 @@ dependencies = [
 
 [[package]]
 name = "talos-agent-kernel"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6173,7 +6253,7 @@ dependencies = [
 
 [[package]]
 name = "talos-agent-provider-kernel"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6189,7 +6269,6 @@ dependencies = [
  "talos-logging",
  "talos-memory",
  "talos-prompt",
- "talos-run-control",
  "talos-skills",
  "talos-tools",
  "talos-types",
@@ -6200,7 +6279,7 @@ dependencies = [
 
 [[package]]
 name = "talos-app-protocol"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -6216,7 +6295,7 @@ dependencies = [
 
 [[package]]
 name = "talos-app-server"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6245,7 +6324,7 @@ dependencies = [
 
 [[package]]
 name = "talos-app-server-test-client"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6260,7 +6339,7 @@ dependencies = [
 
 [[package]]
 name = "talos-auth"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -6283,7 +6362,7 @@ dependencies = [
 
 [[package]]
 name = "talos-automation"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6297,7 +6376,7 @@ dependencies = [
 
 [[package]]
 name = "talos-base"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-client",
  "agent-pb",
@@ -6358,7 +6437,7 @@ dependencies = [
 
 [[package]]
 name = "talos-browser"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -6384,7 +6463,7 @@ dependencies = [
 
 [[package]]
 name = "talos-channel"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6428,7 +6507,7 @@ dependencies = [
 
 [[package]]
 name = "talos-config"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "chrono-tz",
  "config",
@@ -6450,7 +6529,7 @@ dependencies = [
 
 [[package]]
 name = "talos-coordinator"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-protocol",
  "async-trait",
@@ -6467,7 +6546,7 @@ dependencies = [
 
 [[package]]
 name = "talos-error"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
@@ -6478,10 +6557,12 @@ dependencies = [
 
 [[package]]
 name = "talos-fs"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "atomic-write-file",
+ "cap-std",
  "fs4",
+ "libc",
  "serde",
  "serde_json",
  "talos-error",
@@ -6491,7 +6572,7 @@ dependencies = [
 
 [[package]]
 name = "talos-gateway"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6524,14 +6605,18 @@ dependencies = [
 
 [[package]]
 name = "talos-gateway-http"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-protocol",
  "async-trait",
  "axum 0.7.9",
+ "base64 0.22.1",
  "bytes",
  "chrono",
+ "futures-util",
+ "http-range-header",
  "opendal",
+ "percent-encoding",
  "serde",
  "serde_html_form",
  "serde_json",
@@ -6568,7 +6653,7 @@ dependencies = [
 
 [[package]]
 name = "talos-guard-task"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "talos-error",
  "talos-logging",
@@ -6579,7 +6664,7 @@ dependencies = [
 
 [[package]]
 name = "talos-knowledge-format"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "okf-core",
  "okf-validator",
@@ -6589,7 +6674,7 @@ dependencies = [
 
 [[package]]
 name = "talos-linux-sandbox"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "libc",
  "seccompiler",
@@ -6601,7 +6686,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-anthropic"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6616,7 +6701,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-bailian"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6631,7 +6716,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-deepseek"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -6644,7 +6729,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-ollama"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -6656,7 +6741,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-openai"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6671,7 +6756,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-openrouter"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "reqwest 0.12.28",
@@ -6684,7 +6769,7 @@ dependencies = [
 
 [[package]]
 name = "talos-llm-provider"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6704,7 +6789,7 @@ dependencies = [
 
 [[package]]
 name = "talos-logging"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6719,7 +6804,7 @@ dependencies = [
 
 [[package]]
 name = "talos-macos-sandbox"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "talos-sandbox-spi",
  "tempfile",
@@ -6727,7 +6812,7 @@ dependencies = [
 
 [[package]]
 name = "talos-mcp"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -6752,7 +6837,7 @@ dependencies = [
 
 [[package]]
 name = "talos-memory"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -6767,7 +6852,7 @@ dependencies = [
 
 [[package]]
 name = "talos-plugin"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "chrono",
  "http 1.4.0",
@@ -6788,7 +6873,7 @@ dependencies = [
 
 [[package]]
 name = "talos-prompt"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6809,7 +6894,7 @@ dependencies = [
 
 [[package]]
 name = "talos-router"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6824,7 +6909,7 @@ dependencies = [
 
 [[package]]
 name = "talos-run-control"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "talos-types",
  "tokio",
@@ -6834,7 +6919,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sandbox-spi"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "serde",
  "thiserror 1.0.69",
@@ -6842,7 +6927,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sdk"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6861,7 +6946,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sdk-embedded"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "bytes",
@@ -6878,7 +6963,7 @@ dependencies = [
 
 [[package]]
 name = "talos-server"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "talos-base",
  "tokio",
@@ -6886,7 +6971,7 @@ dependencies = [
 
 [[package]]
 name = "talos-service"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-client",
  "agent-protocol",
@@ -6896,11 +6981,14 @@ dependencies = [
  "calamine",
  "chrono",
  "csv",
+ "flate2",
  "futures-util",
  "getrandom 0.2.17",
  "http 1.4.0",
  "infer",
+ "mime_guess",
  "opendal",
+ "process-wrap",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6932,11 +7020,12 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "zip",
 ]
 
 [[package]]
 name = "talos-skills"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "serde",
  "serde_json",
@@ -6949,7 +7038,7 @@ dependencies = [
 
 [[package]]
 name = "talos-storage"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "serde",
@@ -6964,7 +7053,7 @@ dependencies = [
 
 [[package]]
 name = "talos-store"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-protocol",
  "async-trait",
@@ -6993,7 +7082,7 @@ dependencies = [
 
 [[package]]
 name = "talos-sync"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "futures-util",
  "loro",
@@ -7022,9 +7111,9 @@ dependencies = [
 
 [[package]]
 name = "talos-sync-sdk"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6788b16499ba23823216be7d85359c7b92361ad2c97142b8750c8c8a20b53b71"
+checksum = "fc953a4589c7b966cbf26603973b6131beaca13f40ccd5f3d59422e6cdfb07de"
 dependencies = [
  "futures-util",
  "loro",
@@ -7044,9 +7133,9 @@ dependencies = [
 
 [[package]]
 name = "talos-sync-types"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f617ee83127d919806b838ec3bd9683a5b3426f7b5dce6525ae393f75a8b621e"
+checksum = "f829db25dc98a76cf206d6830a8b6f085fe25b14f8fe39e39bc2251d9f8f10c4"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -7056,7 +7145,7 @@ dependencies = [
 
 [[package]]
 name = "talos-system-info"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "sysinfo",
  "talos-error",
@@ -7067,7 +7156,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tools"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7077,6 +7166,7 @@ dependencies = [
  "futures-util",
  "globset",
  "html2text",
+ "http 1.4.0",
  "regex",
  "reqwest 0.12.28",
  "schemars 0.8.22",
@@ -7105,7 +7195,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tools-policy"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "async-trait",
  "serde",
@@ -7118,7 +7208,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tools-sandbox"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "libc",
  "serde",
@@ -7136,7 +7226,7 @@ dependencies = [
 
 [[package]]
 name = "talos-tui"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "arboard",
  "async-trait",
@@ -7164,7 +7254,7 @@ dependencies = [
 
 [[package]]
 name = "talos-types"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "bytes",
  "chrono",
@@ -7181,7 +7271,7 @@ dependencies = [
 
 [[package]]
 name = "talos-upgrade"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "chrono",
  "semver",
@@ -7206,14 +7296,14 @@ dependencies = [
 
 [[package]]
 name = "talos-windows-sandbox"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "talos-sandbox-spi",
 ]
 
 [[package]]
 name = "talos-worker"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-client",
  "agent-pb",
@@ -7258,7 +7348,7 @@ dependencies = [
 
 [[package]]
 name = "talos-worker-bin"
-version = "0.1.13-SNAPSHOT"
+version = "0.1.16-SNAPSHOT"
 dependencies = [
  "agent-client",
  "agent-protocol",
@@ -8871,6 +8961,16 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "winx"
+version = "0.36.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f3fd376f71958b862e7afb20cfe5a22830e1963462f3a17f49d82a6c1d1f42d"
+dependencies = [
+ "bitflags 2.11.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

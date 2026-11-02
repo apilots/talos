@@ -27,3 +27,5 @@ pub use provider::{
 pub use skill_roots::{empty_skill_roots_resolver, EmptySkillRootsResolver, SkillRootsResolver};
 pub use talos_agent_kernel::{KernelMemoryProgressStore, KernelSessionArtifactStore};
 pub use transcript::KernelTranscriptStore;
+
+mod trajectory;

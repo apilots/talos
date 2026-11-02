@@ -29,6 +29,33 @@ pub struct SessionHistoryService {
 }
 
 impl SessionHistoryService {
+    pub(crate) fn supports_history_supplements(&self) -> bool {
+        self.event_service.supports_history_supplements()
+    }
+    pub(crate) async fn read_terminal_history_supplement(
+        &self,
+        identity: &talos_agent_api::AgentTurnRef,
+    ) -> TalosResult<Option<talos_agent_api::trajectory::SessionHistorySupplement>> {
+        self.event_service
+            .read_terminal_history_supplement(identity)
+            .await
+    }
+    pub async fn append_history_supplement(
+        &self,
+        value: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> TalosResult<()> {
+        self.event_service.append_history_supplement(value).await
+    }
+
+    pub(crate) async fn read_execution_payload(
+        &self,
+        identity: &talos_agent_api::AgentTurnRef,
+        payload_id: &str,
+    ) -> TalosResult<Option<String>> {
+        self.event_service
+            .read_execution_payload(identity, payload_id)
+            .await
+    }
     pub fn new(event_service: Arc<TimelineEventService>) -> Self {
         Self { event_service }
     }
@@ -317,6 +344,13 @@ impl SessionHistoryService {
 }
 
 impl SessionHistoryReader for SessionHistoryService {
+    fn append_supplement(
+        &self,
+        supplement: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> AgentFuture<'_, AgentResult<()>> {
+        Box::pin(async move { self.append_history_supplement(supplement).await })
+    }
+
     fn read(
         &self,
         params: SessionHistoryReadParams,

@@ -30,6 +30,7 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
     };
     config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: config.llm.model.clone(),
         name: "Worker model".into(),
@@ -119,6 +120,17 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
     // A published environment must already be able to dispatch its first call.
     // Do not hide Connect handshake ordering behind the later direct TLS setup.
     let first_outbound = outbound.workspace_info(context.clone()).await.unwrap();
+    // Keep the real Worker stream idle across probe deadlines, then use its
+    // original environment RPC. Matching Pong must keep the carrier available.
+    for _ in 0..3 {
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(15)).await;
+        tokio::time::resume();
+        assert_eq!(
+            outbound.workspace_info(context.clone()).await.unwrap(),
+            first_outbound
+        );
+    }
     let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
     let pem = certificate.cert.pem();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

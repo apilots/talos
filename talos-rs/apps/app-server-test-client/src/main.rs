@@ -72,6 +72,10 @@ async fn main() -> Result<()> {
 }
 
 async fn smoke(client: &mut AppServerClient) -> Result<()> {
+    eprintln!("trajectory/capabilities");
+    if !client.trajectory_capabilities().await?.supported {
+        return Err(anyhow!("local execution history tracing is unavailable"));
+    }
     eprintln!("model/list");
     list_models(client).await?;
     eprintln!("session id");

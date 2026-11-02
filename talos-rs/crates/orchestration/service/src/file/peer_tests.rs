@@ -23,6 +23,20 @@ impl FilePeerAccess for SourceFiles {
             Ok(content)
         })
     }
+    fn read_range<'a>(
+        &'a self,
+        owner: &'a str,
+        _: &'a str,
+        request: FileReadRequest,
+        range: std::ops::Range<u64>,
+    ) -> AgentFuture<'a, TalosResult<FileContent>> {
+        Box::pin(async move {
+            self.0
+                .service
+                .read_preview_range(&Actor::regular(owner), &request.file_id, range)
+                .await
+        })
+    }
     fn update<'a>(
         &'a self,
         owner: &'a str,
@@ -163,6 +177,24 @@ async fn imported_attachment_uses_source_fileservice_and_never_deletes_a_local_o
         .read_content(&Actor::regular("another-owner"), request.clone())
         .await
         .is_err());
+    let range = target
+        .service
+        .read_preview_range(&actor, &request.file_id, 1..4)
+        .await
+        .unwrap();
+    let whole = source
+        .service
+        .read_content(&actor, request.clone())
+        .await
+        .unwrap();
+    assert_eq!(range.bytes, whole.bytes.slice(1..4));
+    assert!(target
+        .service
+        .read_preview_range(&actor, &request.file_id, 0..0)
+        .await
+        .unwrap()
+        .bytes
+        .is_empty());
     let update = target
         .service
         .update(

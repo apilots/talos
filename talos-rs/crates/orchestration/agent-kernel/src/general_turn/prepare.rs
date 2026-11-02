@@ -4,7 +4,6 @@ use super::prepare_load_policy::{
 };
 use super::*;
 use crate::ExecutionBranch;
-use talos_config::SkillsRuntimeConfig;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_skills::{LocalSkillProvider, SkillPromptBudget, SkillPromptRequest};
 use talos_tools::{ToolSelectionPhase, ToolSelectionRequest};
@@ -81,18 +80,14 @@ fn build_prompt_builder<'a>(
         SkillPromptRequest {
             text: input.to_string(),
             selected: skill_options.selected,
-            budget: build_skill_prompt_budget(&kernel_config.skills),
+            budget: SkillPromptBudget {
+                max_available_summary_bytes: kernel_config.skills.max_available_summary_bytes,
+                max_skill_md_bytes: kernel_config.skills.max_skill_md_bytes,
+            },
         },
     );
 
     Ok(builder)
-}
-
-fn build_skill_prompt_budget(config: &SkillsRuntimeConfig) -> SkillPromptBudget {
-    SkillPromptBudget {
-        max_available_summary_bytes: config.max_available_summary_bytes,
-        max_skill_md_bytes: config.max_skill_md_bytes,
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -820,6 +815,7 @@ pub async fn prepare_general_turn(
         super::attachments::render_prompt_messages(&prompt_assembly, input, attachments)?;
 
     Ok(PreparedGeneralTurn {
+        trajectory: ctx.trajectory.clone(),
         browser_uploads: super::attachments::browser_uploads(&ctx.resolved_attachments),
         session_id: session_id.clone(),
         user_id: ctx.user_id.clone(),

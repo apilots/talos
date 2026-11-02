@@ -225,7 +225,7 @@ export function toolResult(
         `${itemId}-result`,
         {
           type: "toolResult",
-          data: {
+          data: { metrics: null,
             callId: `call-${itemId}`,
             toolName: "Shell",
             content: result,
@@ -429,7 +429,7 @@ export function historyToolItems(itemId: string, output: string): AgentMessageBl
       `${itemId}-result`,
       {
         type: "toolResult",
-        data: {
+        data: { metrics: null,
           callId: `call-${itemId}`,
           toolName: "Shell",
           content: [{ type: "text", text: output }],

@@ -19,6 +19,7 @@ pub fn build_general_turn_step_request(
     }
 
     GeneralTurnStepRequest {
+        trajectory: prepared.trajectory.clone(),
         round: state.round,
         call_mode: KernelModelCallMode::WorkingLoop,
         model: prepared.selected_model.clone(),

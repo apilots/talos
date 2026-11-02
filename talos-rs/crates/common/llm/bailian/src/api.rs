@@ -7,7 +7,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::chat as chat_protocol, validate_inline_attachments, Attachment, AttachmentKind,
     AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream,
-    PromptCacheSupport, ReasoningEffort,
+    PromptCacheSupport, ProviderHttpClients, ProviderHttpTimeouts, ReasoningEffort,
 };
 use tracing::info;
 
@@ -17,6 +17,7 @@ pub struct BailianConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub http_timeouts: Option<ProviderHttpTimeouts>,
 }
 
 impl BailianConfig {
@@ -25,11 +26,18 @@ impl BailianConfig {
             api_key: api_key.into(),
             base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             timeout_secs: 60,
+            http_timeouts: None,
         }
     }
 
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
+        self
+    }
+
+    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
+        self.http_timeouts = timeouts;
         self
     }
 
@@ -54,17 +62,17 @@ pub struct BailianThinkingConfig {
 /// Bailian LLM provider.
 pub struct BailianProvider {
     config: BailianConfig,
-    client: Client,
+    clients: ProviderHttpClients,
 }
 
 impl BailianProvider {
     pub fn new(config: BailianConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build HTTP client");
-
-        Self { config, client }
+        let clients = ProviderHttpClients::new(
+            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
+            config.http_timeouts.as_ref(),
+        )
+        .expect("Failed to build model HTTP clients");
+        Self { config, clients }
     }
 
     pub(crate) fn build_headers(&self) -> header::HeaderMap {
@@ -126,7 +134,8 @@ impl BailianProvider {
         let headers = self.build_headers();
 
         let response = self
-            .client
+            .clients
+            .for_request(false)
             .post(&url)
             .headers(headers)
             .json(&talos_llm_provider::serialize_with_parameters(
@@ -135,27 +144,17 @@ impl BailianProvider {
             )?)
             .send()
             .await
-            .map_err(|e| {
-                TalosError::internal_with_source(
-                    "HTTP request failed; technical details were withheld.",
-                    e.without_url(),
-                )
-            })?;
+            .map_err(|e| talos_llm_provider::transport_error("Bailian HTTP request", e))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(talos_llm_provider::http_response_error(
-                "Bailian", &response,
-            ));
+            return Err(talos_llm_provider::http_rejection_error("Bailian", response).await);
         }
 
-        let bailian_resp: chat_protocol::ChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                TalosError::internal_with_source(
-                    "Failed to parse response; technical details were withheld.",
-                    e.without_url(),
-                )
-            })?;
+        let bailian_resp: chat_protocol::ChatCompletionResponse = response
+            .json()
+            .await
+            .map_err(|e| talos_llm_provider::transport_error("Bailian response decoding", e))?;
 
         chat_protocol::chat_response(bailian_resp, "Bailian")
     }
@@ -168,7 +167,8 @@ impl BailianProvider {
         let headers = self.build_headers();
 
         let response = self
-            .client
+            .clients
+            .for_request(true)
             .post(&url)
             .headers(headers)
             .json(&talos_llm_provider::serialize_with_parameters(
@@ -177,18 +177,11 @@ impl BailianProvider {
             )?)
             .send()
             .await
-            .map_err(|e| {
-                TalosError::internal_with_source(
-                    "HTTP request failed; technical details were withheld.",
-                    e.without_url(),
-                )
-            })?;
+            .map_err(|e| talos_llm_provider::transport_error("Bailian HTTP request", e))?;
 
         let status = response.status();
         if !status.is_success() {
-            return Err(talos_llm_provider::http_response_error(
-                "Bailian", &response,
-            ));
+            return Err(talos_llm_provider::http_rejection_error("Bailian", response).await);
         }
 
         Ok(response)

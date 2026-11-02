@@ -1,6 +1,13 @@
 # Talos
 
-[Chinese](README_zh.md)
+**Open-source AI agent runtime in Rust.** Durable, replayable sessions, any LLM, memory, Skills, MCP, sandboxing, and local + cloud workers. One runtime for TUI, web, desktop and SDK.
+
+[![License](https://img.shields.io/github/license/apilots/talos)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/apilots/talos)](https://github.com/apilots/talos/releases)
+[![Stars](https://img.shields.io/github/stars/apilots/talos?style=social)](https://github.com/apilots/talos/stargazers)
+[![X](https://img.shields.io/badge/X-@__talosai-black?logo=x)](https://x.com/_talosai)
+
+[Website](https://talos.love) · [Download](https://github.com/apilots/talos/releases) · [Chinese](README_zh.md)
 
 Talos is an AI agent platform with durable sessions, provider-based execution,
 shared client contracts, and governed tool access across terminal, web, desktop,

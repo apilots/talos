@@ -5,7 +5,7 @@ use ts_rs::TS;
 pub use talos_config::{
     is_managed_request_parameter, CustomProviderConfig, LlmConfig, LlmProtocol, ModelCostConfig,
     ModelInputKind, ModelRef, ModelSelectionCapabilities, ModelSpeed, ProviderConfig,
-    ProviderModelConfig, ReasoningControl, ReasoningEffort, ReasoningReplay,
+    ProviderHttpTimeouts, ProviderModelConfig, ReasoningControl, ReasoningEffort, ReasoningReplay,
 };
 
 pub type TalosConfig = talos_config::Config;
@@ -69,17 +69,10 @@ impl ModelSelection {
             ));
         }
 
-        match (model.model.reasoning, self.reasoning_effort) {
-            (false, Some(_)) => Err(crate::TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                format!(
-                    "model '{}:{}' does not support reasoning effort selection",
-                    model.provider, model.model.id
-                ),
-            )),
-            (_, None) => Ok(None),
-            (true, Some(level)) => Ok(Some(level)),
-        }
+        model
+            .model
+            .validate_reasoning_effort(self.reasoning_effort)?;
+        Ok(self.reasoning_effort)
     }
 }
 

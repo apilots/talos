@@ -90,10 +90,9 @@ impl DesktopRelay {
             .iter()
             .map(|entry| &entry.binding.viewer_id)
             .collect();
-        if entries.len() >= 64
+        if entries.contains_key(&binding.stream_id)
             || (same_viewer == 0 && viewers.len() >= 2)
             || same_viewer >= 2
-            || entries.contains_key(&binding.stream_id)
             || node_entries.iter().any(|entry| {
                 entry.binding.viewer_id != binding.viewer_id
                     && entry.binding.input_mode == BrowserInputMode::Control
@@ -102,6 +101,18 @@ impl DesktopRelay {
         {
             return Err(TalosError::new(
                 ErrorCode::Conflict,
+                "Desktop viewer or stream admission conflicts.",
+            ));
+        }
+        if entries.len() >= 64
+            || entries
+                .values()
+                .filter(|entry| entry.owner == owner)
+                .count()
+                >= 16
+        {
+            return Err(TalosError::new(
+                ErrorCode::ServiceUnavailable,
                 "Desktop viewer capacity is exhausted.",
             ));
         }

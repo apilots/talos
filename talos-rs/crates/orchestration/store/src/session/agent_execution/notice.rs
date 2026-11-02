@@ -32,7 +32,7 @@ pub(super) async fn list(
         .storage
         .query(
             r#"SELECT * FROM (
-                SELECT *, ROW_NUMBER() OVER (
+                SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json, ROW_NUMBER() OVER (
                     PARTITION BY session_id, turn_id ORDER BY event_seq
                 ) AS notice_position
                 FROM agent_events
@@ -70,7 +70,7 @@ pub(super) async fn append(
         .begin_session_transaction(&notice.identity.session_id)
         .await?;
     let rows = transaction.query(
-        "INSERT INTO agent_events (session_id, turn_id, sequence, occurred_at, persisted_at, payload_json) SELECT ?, ?, NULL, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL) RETURNING *",
+        "INSERT INTO agent_events (session_id, turn_id, sequence, occurred_at, persisted_at, payload_json) SELECT ?, ?, NULL, ?, ?, ? WHERE EXISTS (SELECT 1 FROM agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NOT NULL) RETURNING event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json",
         &[&notice.identity.session_id, &notice.identity.turn_id, &occurred_at, &persisted_at, &raw, &notice.identity.session_id, &notice.identity.turn_id],
     ).await?;
     let result = rows

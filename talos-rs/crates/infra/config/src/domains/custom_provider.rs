@@ -94,6 +94,9 @@ impl LlmConfig {
             }
         }
         for (id, provider) in self.providers() {
+            if let Some(timeouts) = &provider.http_timeouts {
+                timeouts.validate()?;
+            }
             if let Some(protocol) = provider.protocol {
                 if !self.custom_providers.contains_key(id)
                     && !allowed_llm_protocols(id).is_some_and(|allowed| allowed.contains(&protocol))

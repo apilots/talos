@@ -246,3 +246,116 @@ pub fn decode_status(value: pb::ProjectDirectoryStatus) -> TalosResult<ProjectSt
 }
 
 pub use super::environment_oauth_pb::*;
+
+pub fn encode_preview_read(
+    value: talos_types::WorkerPreviewRequest,
+) -> TalosResult<pb::PreviewOperation> {
+    use pb::preview_operation::Operation;
+    use talos_types::WorkerPreviewRequest as Request;
+    Ok(pb::PreviewOperation {
+        operation: Some(match value {
+            Request::Open {
+                root,
+                path: value,
+                expires_at,
+            } => Operation::Open(pb::PreviewOpenParams {
+                root: path(root)?,
+                path: path(value)?,
+                expires_at,
+            }),
+            Request::Read {
+                handle,
+                path: value,
+                offset,
+                limit,
+            } => Operation::Read(pb::PreviewReadParams {
+                handle,
+                path: path(value)?,
+                offset,
+                limit,
+            }),
+            Request::Close { handle } => Operation::Close(handle),
+        }),
+    })
+}
+pub fn decode_preview_read(
+    value: Option<pb::PreviewOperation>,
+) -> TalosResult<talos_types::WorkerPreviewRequest> {
+    use pb::preview_operation::Operation;
+    use talos_types::WorkerPreviewRequest as Request;
+    Ok(match value.and_then(|v| v.operation).ok_or_else(invalid)? {
+        Operation::Open(v) => Request::Open {
+            root: v.root.into(),
+            path: v.path.into(),
+            expires_at: v.expires_at,
+        },
+        Operation::Read(v) => Request::Read {
+            handle: v.handle,
+            path: v.path.into(),
+            offset: v.offset,
+            limit: v.limit,
+        },
+        Operation::Close(handle) => Request::Close { handle },
+    })
+}
+fn encode_preview_metadata(value: talos_types::FilePreviewMetadata) -> pb::PreviewMetadata {
+    pb::PreviewMetadata {
+        name: value.name,
+        mime_type: value.mime_type,
+        size_bytes: value.size_bytes,
+    }
+}
+fn decode_preview_metadata(
+    value: Option<pb::PreviewMetadata>,
+) -> TalosResult<talos_types::FilePreviewMetadata> {
+    let v = value.ok_or_else(invalid)?;
+    Ok(talos_types::FilePreviewMetadata {
+        name: v.name,
+        mime_type: v.mime_type,
+        size_bytes: v.size_bytes,
+    })
+}
+pub fn encode_preview_content(
+    value: talos_types::WorkerPreviewResponse,
+) -> TalosResult<pb::PreviewResult> {
+    use pb::preview_result::Result;
+    use talos_types::WorkerPreviewResponse as Response;
+    Ok(pb::PreviewResult {
+        result: Some(match value {
+            Response::Opened {
+                handle,
+                resource_path,
+                metadata,
+            } => Result::Opened(pb::PreviewOpened {
+                handle,
+                resource_path,
+                metadata: Some(encode_preview_metadata(metadata)),
+            }),
+            Response::Content(v) => Result::Content(pb::PreviewContent {
+                metadata: Some(encode_preview_metadata(v.metadata)),
+                offset: v.offset,
+                data: v.data.to_vec(),
+            }),
+            Response::Closed => Result::Closed(pb::Empty {}),
+        }),
+    })
+}
+pub fn decode_preview_content(
+    value: pb::PreviewResult,
+) -> TalosResult<talos_types::WorkerPreviewResponse> {
+    use pb::preview_result::Result;
+    use talos_types::WorkerPreviewResponse as Response;
+    Ok(match value.result.ok_or_else(invalid)? {
+        Result::Opened(v) => Response::Opened {
+            handle: v.handle,
+            resource_path: v.resource_path,
+            metadata: decode_preview_metadata(v.metadata)?,
+        },
+        Result::Content(v) => Response::Content(talos_types::FilePreviewBytes {
+            metadata: decode_preview_metadata(v.metadata)?,
+            offset: v.offset,
+            data: v.data.into(),
+        }),
+        Result::Closed(_) => Response::Closed,
+    })
+}

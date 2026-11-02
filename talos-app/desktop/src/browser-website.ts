@@ -18,6 +18,10 @@ export function downloadRoot(user:string):string {
   const directory=path.join(app.getPath("userData"),"browser",createHash("sha256").update(user).digest("hex").slice(0,32),"downloads");
   mkdirSync(directory,{recursive:true,mode:0o700});return directory;
 }
+export interface WebsitePreviewOptions {
+  partition: string;
+  onPopup: (url: string) => void;
+}
 /** Owns isolated website targets. Presentation never changes the operation target. */
 export class WebsiteAccount {
   private window:BaseWindow|undefined;
@@ -40,8 +44,13 @@ export class WebsiteAccount {
   error:string|null=null;
   private downloadSession:Session|undefined;
   private readonly downloads=new Map<DownloadItem,string>();
-  readonly downloadDirectory:string;
-  constructor(user:string,private readonly changed:()=>void=()=>{},private readonly platform:NodeJS.Platform=process.platform) {this.downloadDirectory=downloadRoot(user);this.partition=`persist:talos-browser-${createHash("sha256").update(user).digest("hex").slice(0,32)}`;}
+  private downloadPath:string|undefined;
+  get downloadDirectory():string {return this.downloadPath??=downloadRoot(this.user);}
+  constructor(private readonly user:string,private readonly changed:()=>void=()=>{},private readonly platform:NodeJS.Platform=process.platform,private readonly preview?:WebsitePreviewOptions) {this.partition=preview?.partition??`persist:talos-browser-${createHash("sha256").update(user).digest("hex").slice(0,32)}`;}
+  private checkedUrl(url:string):string {
+    if(this.preview && new URL(url).protocol==="talos-preview:")return new URL(url).href;
+    return checkedUrl(url);
+  }
   private readonly onDownload=(_event:Electron.Event,item:DownloadItem)=>{
     let directory:string|undefined;
     try {
@@ -96,9 +105,11 @@ export class WebsiteAccount {
   }
   async open(url:string,check:()=>void=()=>{}):Promise<WebsiteTab> {
     check();if(this.views.size>=MAX_TABS)throw new Error("Browser tab capacity exceeded.");
-    checkedUrl(url);
+    this.checkedUrl(url);
     const browserSession=session.fromPartition(this.partition);
-    if(this.downloadSession!==browserSession) {
+    // Human preview downloads use Electron's native save dialog; only Agent
+    // targets publish downloads into the tool receipt directory.
+    if(!this.preview && this.downloadSession!==browserSession) {
       this.downloadSession?.removeListener("will-download",this.onDownload);
       browserSession.on("will-download",this.onDownload);this.downloadSession=browserSession;
     }
@@ -128,10 +139,13 @@ export class WebsiteAccount {
     wc.on("did-stop-loading",()=>this.changed());
     wc.on("page-title-updated",()=>this.changed());
     wc.on("did-fail-load",(_event,code)=>{if(code!==-3){this.error="This page could not be loaded. Check your connection or try another address.";this.changed();}});
-    wc.setWindowOpenHandler(({url:target})=>{try{checkedUrl(target);void this.open(target).catch(error=>console.error("Website popup failed",error));}catch{/* Unsupported website popups are denied. */}return {action:"deny"};});
-    const navigation=(event:Electron.Event,target:string)=>{try{if(target!==homeUrl)checkedUrl(target);}catch{event.preventDefault();}};
+    wc.setWindowOpenHandler(({url:target})=>{try{this.checkedUrl(target);if(this.preview)this.preview.onPopup(target);else void this.open(target).catch(error=>console.error("Website popup failed",error));}catch{/* Unsupported website popups are denied. */}return {action:"deny"};});
+    const navigation=(event:Electron.Event,target:string)=>{try{
+      if(target!==homeUrl)this.checkedUrl(target);
+      if(this.preview && wc.getURL().startsWith("talos-preview:") && /^https?:/.test(target)){event.preventDefault();this.preview.onPopup(target);}
+    }catch{event.preventDefault();}};
     wc.on("will-navigate",navigation);wc.on("will-redirect",navigation);
-    this.changed();check();await wc.loadURL(url==="about:blank"?homeUrl:checkedUrl(url));check();this.changed();return tab;
+    this.changed();check();await wc.loadURL(url==="about:blank"?homeUrl:this.checkedUrl(url));check();this.changed();return tab;
   }
   attach(window:BaseWindow|undefined):void {
     if(this.window===window)return;
@@ -152,7 +166,7 @@ export class WebsiteAccount {
   async navigate(id:string,action:"navigate"|"back"|"forward"|"reload",url?:string):Promise<void> {
     const wc=this.views.get(id)?.view?.webContents;if(!wc)throw new Error("Unknown tab.");
     this.error=null;
-    if(action==="navigate")await wc.loadURL(checkedUrl(url!));
+    if(action==="navigate")await wc.loadURL(this.checkedUrl(url!));
     else if(action==="back" && wc.navigationHistory.canGoBack())wc.navigationHistory.goBack();
     else if(action==="forward" && wc.navigationHistory.canGoForward())wc.navigationHistory.goForward();
     else if(action==="reload")wc.reload();

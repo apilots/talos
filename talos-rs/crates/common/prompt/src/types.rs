@@ -386,6 +386,9 @@ pub struct PromptBlock {
     pub kind: PromptBlockKind,
     pub text: String,
     pub cache_scope: PromptBlockCacheScope,
+    /// Process-local origin retained while sections become model messages.
+    #[serde(skip)]
+    pub input_origin: Option<talos_llm_provider::MessageInputOrigin>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

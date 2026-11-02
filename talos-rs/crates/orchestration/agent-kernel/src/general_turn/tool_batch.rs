@@ -221,6 +221,7 @@ pub(crate) async fn emit_tool_result_stream_event(
     emit_stream_event(
         stream_tx,
         AgentKernelEventPayload::ToolResult(ToolResultStreamData {
+            metrics: output.metrics.clone(),
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items,
@@ -319,6 +320,7 @@ fn collect_bounded_tool_batch(
             error_count += 1;
         }
         output_items.push(KernelRunItem::ToolResult {
+            metrics: output.metrics.clone(),
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items.clone(),
@@ -334,7 +336,11 @@ fn collect_bounded_tool_batch(
             output.call_id,
             output.tool_name.clone(),
             build_model_tool_result_text(&reduced, max_output_bytes),
-        );
+        )
+        .with_input_origin(talos_llm_provider::MessageInputOrigin {
+            kind: talos_llm_provider::MessageInputKind::Context,
+            source: talos_llm_provider::MessageInputSource::Runtime,
+        });
         message.image_file_ids = reduced
             .content_items
             .iter()

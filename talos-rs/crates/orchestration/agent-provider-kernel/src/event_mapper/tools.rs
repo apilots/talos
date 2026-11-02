@@ -137,6 +137,7 @@ impl KernelAgentEventMapper {
             .start_block(
                 &message,
                 AgentMessageBlockContent::ToolResult(AgentToolResult {
+                    metrics: data.metrics,
                     call_id: data.call_id,
                     tool_name: data.tool_name,
                     content: data.content,

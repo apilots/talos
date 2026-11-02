@@ -133,3 +133,5 @@ pub use talos_types::{
     BrowserControlState, BrowserDisplayCapability, BrowserOperation, BrowserReadiness,
     BrowserRequest, BrowserSnapshot, BrowserTarget, DesktopOpenRequest, DesktopViewGrant,
 };
+
+pub use talos_agent_api::trajectory;

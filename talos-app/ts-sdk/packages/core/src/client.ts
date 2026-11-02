@@ -1,3 +1,6 @@
+import { createTrajectoryClient } from "./trajectory";
+import type * as TrajectoryAPI from "./generated/app-protocol";
+import { createFilePreviewClient } from "./file-preview";
 import { decodeFileContent } from "./file-content";
 import type { DesktopStreamAdapter, FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { parseTalosJson, parseTimelineEvent } from "./adapters";
@@ -191,6 +194,13 @@ export class TalosClient {
     return serialized ? `${this.url(path)}?${serialized}` : this.url(path);
   }
 
+  trajectory = createTrajectoryClient({
+    capabilities: (): Promise<TrajectoryAPI.TrajectoryCapabilitiesResponse> => this.http.request(this.url("/v1/trajectory/capabilities"), undefined),
+    readTurn: (request: TrajectoryAPI.TrajectoryReadTurnRequest, signal?: AbortSignal): Promise<TrajectoryAPI.TrajectoryReadTurnResponse> => this.http.request(this.url("/v1/trajectory/turn/read"), { method: "POST", body: JSON.stringify(request), signal }),
+    readRequest: (request: TrajectoryAPI.TrajectoryReadModelRequestRequest, signal?: AbortSignal): Promise<TrajectoryAPI.TrajectoryReadModelRequestResponse> => this.http.request(this.url("/v1/trajectory/request/read"), { method: "POST", body: JSON.stringify(request), signal }),
+    readTool: (request: TrajectoryAPI.TrajectoryReadToolRequest, signal?: AbortSignal): Promise<TrajectoryAPI.TrajectoryReadToolResponse> => this.http.request(this.url("/v1/trajectory/tool/read"), { method: "POST", body: JSON.stringify(request), signal }),
+    readPayload: (request: TrajectoryAPI.TrajectoryReadPayloadRequest, signal?: AbortSignal): Promise<TrajectoryAPI.TrajectoryReadPayloadResponse> => this.http.request(this.url("/v1/trajectory/payload/read"), { method: "POST", body: JSON.stringify(request), signal }),
+  });
   sync = {
     metrics: (): Promise<SyncMetricsResponse> => this.http.request(this.url("/v1/sync/metrics")),
     status: (): Promise<SyncStatusResponse> => this.http.request(this.url("/v1/sync/status")),
@@ -500,6 +510,15 @@ export class TalosClient {
   };
 
   files = {
+    preview: createFilePreviewClient({
+      prepare: (request: import("./types").FilePreviewPrepareRequest) =>
+        this.http.request<import("./types").FilePreviewDescriptor>(this.url("/v1/file-previews"), { method: "POST", body: JSON.stringify(request) }),
+      read: (request: import("./types").FilePreviewReadRequest) =>
+        this.http.request<import("./types").FilePreviewContent>(this.url("/v1/file-previews/read"), { method: "POST", body: JSON.stringify(request) }),
+      close: (request: import("./types").FilePreviewCloseRequest) =>
+        this.http.request<import("./types").FilePreviewCloseResponse>(this.url("/v1/file-previews/close"), { method: "POST", body: JSON.stringify(request) }),
+    }, (preview, path) => `${preview.resourceBaseUrl ?? this.url(`/v1/file-previews/resources/${encodeURIComponent(preview.previewId)}/`)}${path.split("/").map(encodeURIComponent).join("/")}`),
+
     upload: (
       request: FileUploadRequest,
       data: FileUploadData,

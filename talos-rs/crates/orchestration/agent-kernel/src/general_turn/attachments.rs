@@ -1,7 +1,8 @@
 use talos_config::ModelInputKind;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{
-    validate_attachment_usage, Attachment, AttachmentKind, ChatMessage, LlmProvider, Role,
+    validate_attachment_usage, Attachment, AttachmentKind, ChatMessage, LlmProvider,
+    MessageInputKind, MessageInputOrigin, MessageInputSource, Role,
 };
 use talos_prompt::PromptAssembly;
 use talos_types::ModelInfo;
@@ -66,6 +67,7 @@ fn prepare_resolved_attachments(
             ));
         }
         attachments.push(Attachment {
+            file_id: Some(resolved.file_id.clone()),
             kind,
             filename: resolved.filename.clone(),
             media_type: resolved.media_type.clone(),
@@ -90,7 +92,11 @@ pub fn build_active_turn_input(
         ChatMessage::user(input.text.clone())
     } else {
         ChatMessage::user_with_attachments(input.text.clone(), attachments)?
-    };
+    }
+    .with_input_origin(MessageInputOrigin {
+        kind: MessageInputKind::User,
+        source: MessageInputSource::User,
+    });
     Ok(ActiveTurnInput {
         browser_uploads: browser_uploads(&resolved_attachments),
         input,
@@ -159,7 +165,8 @@ fn attach_to_current_user_message(
             "prompt current user message does not match normalized input",
         ));
     }
-    *message = ChatMessage::user_with_attachments(message.content.clone(), attachments)?;
+    message.attachments = Some(attachments);
+    message.validate_attachments()?;
     Ok(())
 }
 

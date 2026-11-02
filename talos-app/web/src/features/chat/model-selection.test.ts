@@ -16,14 +16,14 @@ const models = [
     id: "shared-model",
     reasoning: true,
     reasoning_effort: "high",
-    selection_capabilities: { reasoning: "effort", fast: false, default_fast: false, default_reasoning_effort: "high" },
+    selection_capabilities: { reasoning: "effort", reasoning_efforts: ["light", "medium", "high", "xhigh"], fast: false, default_fast: false, default_reasoning_effort: "high" },
   },
   {
     provider: "ollama",
     id: "shared-model",
     reasoning: false,
     reasoning_effort: "medium",
-    selection_capabilities: { reasoning: "none", fast: false, default_fast: false, default_reasoning_effort: null },
+    selection_capabilities: { reasoning: "none", reasoning_efforts: [], fast: false, default_fast: false, default_reasoning_effort: null },
   },
 ] as ModelInfo[];
 
@@ -63,7 +63,7 @@ describe("model selection", () => {
   });
 
   it("uses catalog reasoning defaults without inspecting request KV or model names", () => {
-    const configured = [{ ...models[0], name: "Fast Reasoner", request_parameters: { enable_thinking: true }, selection_capabilities: { reasoning: "toggle", fast: true, default_fast: true, default_reasoning_effort: null } }] as ModelInfo[];
+    const configured = [{ ...models[0], name: "Fast Reasoner", request_parameters: { enable_thinking: true }, selection_capabilities: { reasoning: "toggle", reasoning_efforts: [], fast: true, default_fast: true, default_reasoning_effort: null } }] as ModelInfo[];
     const ref = { provider: "openai", id: "shared-model" };
     expect(modelSelectionForRef(configured, ref)).toEqual({ modelRef: ref, reasoningEffort: null });
     expect(reasoningLevelForModel(configured, ref)).toBe("none");

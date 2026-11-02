@@ -193,6 +193,7 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for RelayControl {
             first.peer_id,
             input,
             self.1.child_token(),
+            /* stream_heartbeat */ false,
         )
         .await;
         self.2.send(resources).await.unwrap();

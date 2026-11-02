@@ -236,10 +236,13 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
     let provider_name = provider_name.into();
 
     tokio::spawn(async move {
+        let request_context = crate::error::response_context(&response);
         let mut stream = response.bytes_stream();
         let mut stop_reason: Option<String> = None;
         let mut decoder = SseLineDecoder::new();
-        while let Some(chunk_result) = stream.next().await {
+        while let Some(chunk_result) =
+            tokio::select! { _ = tx.closed() => return, next = stream.next() => next }
+        {
             match chunk_result {
                 Ok(bytes) => {
                     for line in decoder.push(&bytes) {
@@ -322,12 +325,9 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                     }
                 }
                 Err(error) => {
-                    let _ = tx
-                        .send(Err(TalosError::internal_with_source(
-                            "Stream error; technical details were withheld.",
-                            error,
-                        )))
-                        .await;
+                    let error = crate::error::transport_error("Model response stream", error)
+                        .context(&request_context);
+                    let _ = tx.send(Err(error)).await;
                     return;
                 }
             }
@@ -347,6 +347,7 @@ pub fn model_blocks(
     let item_prefix = item_prefix.into();
 
     tokio::spawn(async move {
+        let request_context = crate::error::response_context(&response);
         let mut stream = response.bytes_stream();
         let mut active_blocks: HashMap<usize, ActiveMessagesBlock> = HashMap::new();
         let mut next_tool_index = 0;
@@ -356,7 +357,9 @@ pub fn model_blocks(
         let mut output_tokens: Option<u32> = None;
         let mut decoder = SseLineDecoder::new();
 
-        while let Some(chunk_result) = stream.next().await {
+        while let Some(chunk_result) =
+            tokio::select! { _ = tx.closed() => return, next = stream.next() => next }
+        {
             match chunk_result {
                 Ok(bytes) => {
                     for line in decoder.push(&bytes) {
@@ -520,12 +523,9 @@ pub fn model_blocks(
                     }
                 }
                 Err(error) => {
-                    let _ = tx
-                        .send(Err(TalosError::internal_with_source(
-                            "Stream error; technical details were withheld.",
-                            error,
-                        )))
-                        .await;
+                    let error = crate::error::transport_error("Model response stream", error)
+                        .context(&request_context);
+                    let _ = tx.send(Err(error)).await;
                     return;
                 }
             }

@@ -101,6 +101,14 @@ const pluginUpdateParams = (params: unknown) =>
   ["reject_local_changes", "replace_local_changes"].includes(String(params.conflict_policy));
 const turnIdentity = (value: unknown) =>
   isRecord(value) && hasString(value, "sessionId") && hasString(value, "turnId");
+const trajectoryParams = (params: unknown) => isRecord(params) && turnIdentity(params.identity);
+const trajectoryPageParams = (params: unknown, limitKey: "limit" | "limitBytes") => {
+  if (!isRecord(params) || !trajectoryParams(params)) return false;
+  const limit = params[limitKey];
+  return (params.cursor == null || (typeof params.cursor === "string" && params.cursor.length <= 2048)) &&
+    // Match the wire u32 type; page-size clamping remains owned by the Service.
+    (limit == null || (typeof limit === "number" && Number.isInteger(limit) && limit >= 0 && limit <= 0xffffffff));
+};
 const agentUserInput = (value: unknown) => isRecord(value) && Array.isArray(value.content);
 const turnInput = (value: unknown) => {
   if (!isRecord(value)) {
@@ -210,6 +218,11 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "plugin/enable": pluginInstallIdParams,
   "plugin/disable": pluginInstallIdParams,
   "profile/read": emptyParams,
+  "trajectory/capabilities": (params) => params == null,
+  "trajectory/readTurn": (params) => trajectoryPageParams(params, "limit"),
+  "trajectory/readRequest": (params) => trajectoryParams(params) && hasString(params, "modelRequestId"),
+  "trajectory/readTool": (params) => trajectoryParams(params) && hasString(params, "callId"),
+  "trajectory/readPayload": (params) => trajectoryPageParams(params, "limitBytes") && hasString(params, "payloadId"),
   "skills/list": emptyParams,
   "skills/refresh": emptyParams,
   "skills/suggest": (params) =>
@@ -236,6 +249,11 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     agentUserInput(params.input) &&
     (params.clientRequestId === null || hasString(params, "clientRequestId")),
   "user/current": emptyParams,
+  "file/preview/prepare": params => isRecord(params) && isRecord(params.source)
+    && (params.source.kind === "file" ? hasString(params.source, "fileId")
+      : params.source.kind === "sessionPath" && hasString(params.source, "sessionId") && hasString(params.source, "path")),
+  "file/preview/read": params => hasString(params, "previewId") && hasString(params, "resourcePath"),
+  "file/preview/close": params => hasString(params, "previewId"),
   "workspace/info": emptyParams,
   "workspace/doc/list": emptyParams,
   "workspace/doc/read": (params) => hasString(params, "kind"),

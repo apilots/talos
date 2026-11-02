@@ -883,3 +883,6 @@ async fn config_admission_checks_nonterminal_turns_only_on_the_target_node() {
         .await
         .unwrap());
 }
+
+#[path = "history_supplement_tests.rs"]
+mod history_supplement_tests;

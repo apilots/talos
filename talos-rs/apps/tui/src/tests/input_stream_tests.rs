@@ -391,7 +391,7 @@ async fn test_app_server_initialize_loads_models_without_session() {
 
 #[tokio::test]
 async fn test_app_server_initialize_retries_model_loading_before_succeeding() {
-    let mut app = create_app_server_app_with_model_list_failures(1);
+    let mut app = create_app_server_app_with_model_list_failures(3);
 
     app.initialize_session().await;
 
@@ -400,7 +400,7 @@ async fn test_app_server_initialize_retries_model_loading_before_succeeding() {
     assert!(app
         .right_panel_events
         .iter()
-        .any(|event| event.contains("model load retry 2/5")));
+        .any(|event| event.contains("model load retry 4/4")));
 }
 
 #[tokio::test]

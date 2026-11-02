@@ -3,10 +3,10 @@ import { ArrowLeft, ArrowRight, Globe2, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { DesktopBrowserTab } from "@talos/sdk-app-server/desktop";
 import { useAppStore } from "@/shared/store/app-store";
-import { normalizeWorkspaceWebpageUrl } from "@/shared/store/workspace-window";
 import { actionClasses } from "@/shared/ui/controlStyles";
 import { cn } from "@/shared/lib/cn";
 import { desktopBrowserRequest } from "./desktop-browser";
+import { parseBrowserAddress } from "./browser-address";
 
 /** DOM geometry only. The real website remains isolated in an Electron native view. */
 export function DesktopBrowserPage({ tab, selected }: { tab: DesktopBrowserTab; selected: boolean }) {
@@ -54,7 +54,7 @@ export function DesktopBrowserPage({ tab, selected }: { tab: DesktopBrowserTab; 
         <button type="button" className={button} aria-label={t("forward")} disabled={!tab.forward} onClick={() => act("forward")}><ArrowRight size={15} /></button>
         <button type="button" className={button} aria-label={t("refresh")} onClick={() => act("reload")}><RotateCw size={15} className={tab.loading ? "animate-spin motion-reduce:animate-none" : undefined} /></button>
         <form className="flex h-9 min-w-0 flex-1 items-center rounded-full border border-border bg-card focus-within:ring-2 focus-within:ring-brand/20" onSubmit={event => {
-          event.preventDefault();const url = normalizeWorkspaceWebpageUrl(address.includes("://") ? address : `https://${address}`);
+          event.preventDefault();const url = parseBrowserAddress(address);
           if (!url) { setError(true);return; }editing.current = false;act("navigate", url);
         }}>
           <Globe2 size={14} className="ml-3 shrink-0 text-muted" />

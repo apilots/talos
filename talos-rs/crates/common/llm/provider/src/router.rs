@@ -92,6 +92,10 @@ struct SelectedModelLlmProvider {
 
 #[async_trait]
 impl LlmProvider for SelectedModelLlmProvider {
+    fn bind_request(&self, request: ChatRequest) -> TalosResult<ChatRequest> {
+        self.inner.bind_request(request)
+    }
+
     fn name(&self) -> &str {
         self.inner.name()
     }

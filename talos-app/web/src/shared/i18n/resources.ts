@@ -1,3 +1,4 @@
+import { tracingResources } from "./tracingResources";
 import { computerResources } from "./computerResources";
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
@@ -10,6 +11,7 @@ import { webPreviewResources } from "./webPreviewResources";
 
 export const resources = {
   en: {
+    tracing: tracingResources.en,
     computers: computerResources.en,
     common: {
       navigation: {
@@ -176,6 +178,7 @@ export const resources = {
         modelSelect: "Select model: {{model}}, Provider: {{provider}}",
         chooseModel: "Select model", chooseProvider: "Select Provider",
         changeProvider: "Change Provider: {{provider}}", back: "Back", custom: "Custom",
+        effortUnsupported: "This saved effort is no longer supported. Choose a supported depth or reset.",
         depth: "Reasoning depth", reasoningUnavailable: "This model does not support reasoning",
         off: "Off", on: "On",
       },
@@ -465,6 +468,7 @@ export const resources = {
     },
   },
   "zh-CN": {
+    tracing: tracingResources.zh,
     computers: computerResources["zh-CN"],
     common: {
       navigation: {
@@ -633,6 +637,7 @@ export const resources = {
         modelSelect: "选择模型：{{model}}，Provider：{{provider}}",
         chooseModel: "选择模型", chooseProvider: "选择 Provider",
         changeProvider: "切换 Provider：{{provider}}", back: "返回", custom: "自定义",
+        effortUnsupported: "已保存的档位不再受支持，请选择可用深度或重置。",
         depth: "思考深度", reasoningUnavailable: "此模型不支持思考",
         off: "关闭", on: "开启",
       },

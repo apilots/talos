@@ -2,6 +2,7 @@ use super::*;
 
 fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
     PreparedGeneralTurn {
+        trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
@@ -62,6 +63,7 @@ fn test_working_context_trim_preserves_recent_complete_tool_exchange() {
     };
     let batch =
         super::tool_batch::collect_general_turn_tool_batch(vec![crate::ToolExecutionOutput {
+            metrics: None,
             call_id: "call-old".to_string(),
             tool_name: "MemoryGet".to_string(),
             arguments: serde_json::json!({"memory_id": "mem-1"}),
@@ -132,6 +134,7 @@ fn test_working_context_trim_skips_failed_memory_get_result() {
     let mut state = GeneralTurnLoopState::new(&prepared);
     let batch =
         super::tool_batch::collect_general_turn_tool_batch(vec![crate::ToolExecutionOutput {
+            metrics: None,
             call_id: "call-memory".to_string(),
             tool_name: "MemoryGet".to_string(),
             arguments: serde_json::json!({"memory_id": "missing"}),

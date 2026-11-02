@@ -143,7 +143,7 @@ async fn no_overlap_or_catch_up_after_a_long_round() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn panic_restarts_with_backoff_and_errors_keep_the_schedule() {
+async fn panic_restarts_at_a_fixed_interval_and_errors_keep_the_schedule() {
     let tasks = GuardTasks::default();
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
@@ -154,8 +154,8 @@ async fn panic_restarts_with_backoff_and_errors_keep_the_schedule() {
                 let counter = counter.clone();
                 async move {
                     match counter.fetch_add(1, Ordering::SeqCst) {
-                        0 => panic!("injected task panic"),
-                        1 => Err(TalosError::internal("Injected business failure.")),
+                        0 | 1 => panic!("injected task panic"),
+                        2 => Err(TalosError::internal("Injected business failure.")),
                         _ => Ok(()),
                     }
                 }
@@ -167,9 +167,12 @@ async fn panic_restarts_with_backoff_and_errors_keep_the_schedule() {
     tokio::time::advance(Duration::from_secs(1)).await;
     flush().await;
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-    tokio::time::advance(Duration::from_secs(10)).await;
+    tokio::time::advance(Duration::from_secs(1)).await;
     flush().await;
     assert_eq!(calls.load(Ordering::SeqCst), 3);
+    tokio::time::advance(Duration::from_secs(10)).await;
+    flush().await;
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
     tasks.shutdown().await.unwrap();
 }
 
@@ -238,7 +241,7 @@ async fn duplicate_names_and_invalid_intervals_fail_before_spawning() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn shutdown_interrupts_panic_backoff() {
+async fn shutdown_interrupts_panic_restart_wait() {
     let tasks = GuardTasks::default();
     tasks
         .register(

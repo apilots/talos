@@ -1,48 +1,22 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ExternalLink, Globe2, RotateCw } from "lucide-react";
+import { useRef, useState } from "react";
+import { ArrowRight, Globe2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { openExternalUrl } from "@/shared/lib/open-external";
+import { useBrowserSurface } from "./useBrowserSurface";
+import { BrowserToolbar, BrowserFrame } from "./BrowserToolbar";
 import { normalizeWorkspaceWebpageUrl } from "@/shared/store/workspace-window";
 
 /** A separate client-side preview, with no Talos credentials or host bridge. */
-export function WebPagePreview({ url, onNavigate }: { url: string; onNavigate: (url: string) => void }) {
+export function WebPagePreview({ url, onNavigate }: { url: string; onNavigate: (url: string, title?: string) => void }) {
   const { t } = useTranslation("webPreview");
-  const [address, setAddress] = useState(url);
-  const [addressError, setAddressError] = useState(false);
-  const [externalError, setExternalError] = useState(false);
   const [revision, setRevision] = useState(0);
   const addressInput = useRef<HTMLInputElement>(null);
   const destination = normalizeWorkspaceWebpageUrl(url);
-  useEffect(() => {
-    setAddress(url);
-    setAddressError(false);
-    setExternalError(false);
-  }, [url]);
+  const surface = useBrowserSurface(destination ?? undefined, onNavigate);
 
   return (
     <section aria-label={t("title")} className="flex h-full min-h-0 flex-col bg-background">
-      <div className="shrink-0 border-b border-divider bg-surface px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <button aria-label={t("refresh")} title={t("refresh")} className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted outline-none transition hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent" disabled={!destination} onClick={() => setRevision(value => value + 1)} type="button"><RotateCw aria-hidden="true" size={15} /></button>
-          <form className="flex h-9 min-w-0 flex-1 items-center rounded-full border border-border/75 bg-card shadow-sm transition focus-within:border-brand/35 focus-within:ring-2 focus-within:ring-brand/10" onSubmit={event => {
-            event.preventDefault();
-            const next = normalizeWorkspaceWebpageUrl(address.trim());
-            setAddressError(!next);
-            if (next) {
-              if (next === destination) setRevision(value => value + 1);
-              onNavigate(next);
-            }
-          }}>
-            <Globe2 aria-hidden="true" className="ml-3.5 shrink-0 text-muted/80" size={14} />
-            <input aria-invalid={addressError} aria-label={t("address")} autoComplete="off" className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-[13px] text-ink outline-none placeholder:text-muted/65 selection:bg-brand/15" onChange={event => { setAddress(event.target.value); setAddressError(false); }} placeholder="https://example.com" ref={addressInput} spellCheck={false} type="text" value={address} />
-            <button aria-label={t("go")} title={t("go")} className="mr-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted outline-none transition hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/40" type="submit"><ArrowRight aria-hidden="true" size={14} /></button>
-          </form>
-          <button aria-label={t("openExternal")} title={t("openExternal")} className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted outline-none transition hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent" disabled={!destination} onClick={() => { setExternalError(false); if (destination) void openExternalUrl(destination).catch(() => setExternalError(true)); }} type="button"><ExternalLink aria-hidden="true" size={15} /></button>
-        </div>
-        {addressError ? <p className="mt-2 px-1 text-xs text-danger" role="alert">{t("invalidAddress")}</p> : null}
-        {externalError ? <p className="mt-2 px-1 text-xs text-danger" role="alert">{t("externalFailed")}</p> : null}
-      </div>
+      <BrowserToolbar source={{ kind: "webpage", url, onNavigate, inputRef: addressInput }} surface={surface} onRefresh={() => surface.native ? surface.command("reload") : setRevision(value => value + 1)} refreshDisabled={!destination} />
       {destination ? <p className="shrink-0 border-b border-border/50 bg-surface/20 px-4 py-1.5 text-[11px] leading-4 text-muted">{t("previewHint")}</p> : null}
       {!url ? (
         <div className="min-h-0 flex-1 overflow-y-auto bg-background px-7 py-10">
@@ -57,14 +31,7 @@ export function WebPagePreview({ url, onNavigate }: { url: string; onNavigate: (
       ) : !destination ? (
         <div className="m-5 rounded-xl border border-danger/25 bg-danger/5 p-5 text-sm leading-6 text-danger" role="alert">{t("invalidAddress")}</div>
       ) : (
-        <iframe
-          className="min-h-0 flex-1 border-0 bg-white"
-          key={`${destination}:${revision}`}
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-forms"
-          src={destination}
-          title={t("frameTitle", { url: destination })}
-        />
+        <BrowserFrame key={surface.native ? "native" : `${destination}:${revision}`} surface={surface} url={destination} title={t("frameTitle", { url: destination })} />
       )}
     </section>
   );

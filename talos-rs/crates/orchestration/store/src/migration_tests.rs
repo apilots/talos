@@ -536,6 +536,14 @@ async fn migration_initializes_base_schema_once() {
             "users".to_string(),
         ]
     );
+    let column = sqlx::query("PRAGMA table_info(agent_events)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.get::<String, _>("name") == "execution_capture_json")
+        .unwrap();
+    assert_eq!(column.get::<i64, _>("notnull"), 0);
 }
 
 #[tokio::test]
@@ -791,5 +799,83 @@ async fn migration_owns_subagent_session_schema() {
             "sessions_cleanup_after_delete".to_string(),
             "sessions_tree_agent_path_unique".to_string(),
         ]
+    );
+}
+
+#[tokio::test]
+async fn execution_details_upgrade_preserves_main_history_with_null_details() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let main = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            migrations
+                .iter()
+                .filter(|m| m.version < 202610300001)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    main.run(&pool).await.unwrap();
+    sqlx::query("INSERT INTO sessions (session_key,user_id,agent_id,workspace_id,source_type,source_provider,environment_json,conf_json,usage_json,created_at,last_activity) VALUES ('old-session','old-user','default','default','http','http','{}','{}','{}',10,20)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO agent_events (session_id,turn_id,sequence,occurred_at,persisted_at,payload_json) VALUES ('old-session','old-turn',1,10,11,'{\"type\":\"turnStarted\",\"data\":{}}'),('old-session','old-turn',2,20,21,'{\"type\":\"turnCompleted\",\"data\":{\"stopReason\":\"endTurn\"}}')")
+        .execute(&pool).await.unwrap();
+    let event_query = "SELECT event_seq,session_id,turn_id,sequence,occurred_at,persisted_at,payload_json FROM agent_events ORDER BY event_seq";
+    let before = sqlx::query_as::<_, (i64, String, String, i64, i64, i64, String)>(event_query)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let session_query =
+        "SELECT session_key,user_id,agent_id,workspace_id,created_at,last_activity FROM sessions";
+    let session_before =
+        sqlx::query_as::<_, (String, String, String, String, i64, i64)>(session_query)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let tables_query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+    let tables_before = sqlx::query_scalar::<_, String>(tables_query)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    assert_eq!(
+        sqlx::query_as::<_, (i64, String, String, i64, i64, i64, String)>(event_query)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        before
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, String, String, i64, i64)>(session_query)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        session_before
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(tables_query)
+            .fetch_all(&pool)
+            .await
+            .unwrap(),
+        tables_before
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM agent_events WHERE execution_capture_json IS NULL"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        2
     );
 }

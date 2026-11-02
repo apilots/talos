@@ -1,5 +1,6 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
+import { cn } from "@/shared/lib/cn";
 
 interface SelectProps {
   id?: string;
@@ -7,14 +8,15 @@ interface SelectProps {
   options: ReadonlyArray<{ value: string; label: string }>;
   onValueChange: (value: string) => void;
   disabled?: boolean;
+  className?: string;
   "aria-label"?: string;
   "aria-describedby"?: string;
 }
 
-export function Select({ options, onValueChange, value, disabled, ...props }: SelectProps) {
+export function Select({ options, onValueChange, value, disabled, className, ...props }: SelectProps) {
   return (
     <SelectPrimitive.Root disabled={disabled} onValueChange={onValueChange} value={value}>
-      <SelectPrimitive.Trigger {...props} className="form-control-focus flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-border/85 bg-card px-3 text-left text-sm text-ink disabled:cursor-not-allowed disabled:opacity-50 [&>span:first-child]:truncate">
+      <SelectPrimitive.Trigger {...props} className={cn("form-control-focus flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-[var(--radius-control)] border border-border/85 bg-card px-3 text-left text-sm text-ink disabled:cursor-not-allowed disabled:opacity-50 [&>span:first-child]:truncate", className)}>
         <SelectPrimitive.Value /><SelectPrimitive.Icon asChild><ChevronDown aria-hidden className="shrink-0 text-muted" size={14} /></SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

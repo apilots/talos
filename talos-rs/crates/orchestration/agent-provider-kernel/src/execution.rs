@@ -24,6 +24,21 @@ pub(crate) async fn execute(
     mut turn: SessionTurnParams,
 ) -> AgentResult<SessionTurnResult> {
     let provider = &session.provider;
+    let capture = crate::trajectory::Capture::new(
+        turn.context.identity(),
+        turn.continuation.is_some(),
+        provider.session_history_reader.source_node_id(),
+    );
+    let observed_session = KernelAgentSession {
+        provider: session.provider.clone(),
+        context: session.context.clone(),
+        kernel: session
+            .kernel
+            .clone()
+            .with_trajectory_recorder(capture.recorder()),
+        prompt_context: session.prompt_context.clone(),
+    };
+    let session = &observed_session;
     provider.validate_agent_id(&turn.context.session.agent_id)?;
     let projection = project_input(&turn.initial_input)?;
     let kernel_config = provider.effective_kernel_config(&turn.context);
@@ -58,6 +73,11 @@ pub(crate) async fn execute(
         kernel_config,
     )
     .await;
+    // The same invocation completes this bounded optional handoff before its
+    // canonical waiting/terminal settlement can become visible. Errors remain optional.
+    capture
+        .flush(provider.session_history_reader.as_ref())
+        .await;
     match result {
         Ok(completion) => Ok(completion),
         Err(error) => Err(mapper.settle_failure(error).await),

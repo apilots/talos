@@ -6,6 +6,13 @@ struct DefaultAttachmentProvider;
 
 #[async_trait::async_trait]
 impl LlmProvider for DefaultAttachmentProvider {
+    fn bind_request(&self, mut request: ChatRequest) -> TalosResult<ChatRequest> {
+        request
+            .request_parameters
+            .insert("temperature".into(), serde_json::json!(0.25));
+        Ok(request)
+    }
+
     fn name(&self) -> &str {
         "default"
     }
@@ -23,13 +30,52 @@ impl LlmProvider for DefaultAttachmentProvider {
     }
 }
 
+#[test]
+fn selected_model_router_preserves_final_request_binding() {
+    let router = ReloadableLlmProviderRouter::new(std::sync::Arc::new(|_| {
+        Ok(std::sync::Arc::new(DefaultAttachmentProvider))
+    }));
+    let model = ModelRef {
+        provider: "configured".into(),
+        id: "selected".into(),
+    };
+    let provider = router.provider_for(&model).unwrap();
+    let request = provider
+        .bind_request(ChatRequest::new_user("original input", "selected"))
+        .unwrap();
+    assert_eq!(
+        request.request_parameters["temperature"],
+        serde_json::json!(0.25)
+    );
+    assert_eq!(request.model, "selected");
+    assert_eq!(request.messages[0].content, "original input");
+}
+
 fn png_attachment() -> Attachment {
     Attachment {
+        file_id: None,
         kind: AttachmentKind::Image,
         filename: "pixel.png".to_string(),
         media_type: "image/png".to_string(),
         bytes: Bytes::from_static(&[1, 2, 3]),
     }
+}
+
+#[test]
+fn message_origin_does_not_change_wire_or_conversation_equality() {
+    let original = ChatMessage::user("same model input");
+    let annotated = original.clone().with_input_origin(MessageInputOrigin {
+        kind: MessageInputKind::Context,
+        source: MessageInputSource::Runtime,
+    });
+    assert_eq!(original, annotated);
+    assert_eq!(
+        serde_json::to_value(&original).unwrap(),
+        serde_json::to_value(&annotated).unwrap()
+    );
+    let restored: ChatMessage =
+        serde_json::from_value(serde_json::to_value(annotated).unwrap()).unwrap();
+    assert_eq!(restored.input_origin, None);
 }
 
 #[test]

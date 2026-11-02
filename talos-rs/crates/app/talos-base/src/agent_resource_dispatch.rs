@@ -125,6 +125,17 @@ impl AgentResourceRpcHandler for CoordinatorResources {
                         }),
                     ) as AgentResourceResponses)
                 }
+                Call::AppendSessionHistorySupplement(value) => {
+                    let requests =
+                        tokio_stream::once(Ok(*value)).chain(requests.map(|frame| match frame? {
+                            Call::AppendSessionHistorySupplement(value) => Ok(*value),
+                            _ => Err(invalid()),
+                        }));
+                    let value = data.append_history_stream(requests).await?.into_inner();
+                    Ok(Box::pin(tokio_stream::once(Ok(
+                        Reply::AppendSessionHistorySupplement(Box::new(value)),
+                    ))) as AgentResourceResponses)
+                }
                 Call::SaveToolImage(value) => {
                     let requests =
                         tokio_stream::once(Ok(*value)).chain(requests.map(|frame| match frame? {

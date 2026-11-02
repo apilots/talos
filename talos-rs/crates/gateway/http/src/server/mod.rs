@@ -10,6 +10,7 @@ mod desktop;
 #[path = "error_contract_tests.rs"]
 mod error_contract_tests;
 mod events;
+mod file_preview;
 mod files;
 mod fs;
 mod lifecycle;
@@ -24,6 +25,7 @@ mod projects;
 mod sessions;
 mod skills;
 mod state;
+mod trajectory;
 mod user_profile;
 mod workspace_docs;
 
@@ -185,6 +187,9 @@ impl HttpServer {
 
         let mut app = Router::new()
             .route("/health", get(health_handler))
+            .route("/v1/file-previews", post(file_preview::prepare))
+            .route("/v1/file-previews/read", post(file_preview::read))
+            .route("/v1/file-previews/close", post(file_preview::close))
             .route("/v1/models", get(list_models_handler))
             .route("/v1/auth/logout", post(logout_handler))
             .route("/v1/auth/login/start", post(start_cloud_login_handler))
@@ -202,6 +207,26 @@ impl HttpServer {
             )
             .merge(computers::routes())
             .merge(sync::routes())
+            .route(
+                "/v1/trajectory/capabilities",
+                get(trajectory::trajectory_capabilities),
+            )
+            .route(
+                "/v1/trajectory/turn/read",
+                post(trajectory::read_turn_trajectory),
+            )
+            .route(
+                "/v1/trajectory/request/read",
+                post(trajectory::read_request_trajectory),
+            )
+            .route(
+                "/v1/trajectory/tool/read",
+                post(trajectory::read_tool_trajectory),
+            )
+            .route(
+                "/v1/trajectory/payload/read",
+                post(trajectory::read_trajectory_payload),
+            )
             .route("/v1/sessions", get(list_sessions_handler))
             .route(
                 "/v1/projects",
@@ -346,8 +371,15 @@ impl HttpServer {
                 state.clone(),
                 lifecycle_gate_middleware,
             ))
-            .layer(middleware::from_fn_with_state(state, auth_middleware))
-            .layer(CorsLayer::permissive());
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                auth_middleware,
+            ))
+            .layer(CorsLayer::permissive())
+            .layer(middleware::from_fn_with_state(
+                state,
+                file_preview::resource_delivery,
+            ));
 
         if let Some(webui_dir) = self.webui_dir.as_ref() {
             app = app.fallback_service(

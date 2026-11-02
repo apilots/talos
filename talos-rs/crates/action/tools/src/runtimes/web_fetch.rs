@@ -1,11 +1,15 @@
 use serde::{Deserialize, Serialize};
-use talos_error::{TalosError, TalosResult};
+use std::time::Duration;
+use talos_error::{ErrorCode, TalosError, TalosResult};
 
 use crate::runtimes::web_common::{
     extract_html_title, html_to_text, parse_http_url, truncate_chars, DEFAULT_WEB_USER_AGENT,
+    TRUNCATION_MARKER,
 };
 
 const DEFAULT_MAX_CHARS: usize = 12_000;
+const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn default_max_chars() -> usize {
     DEFAULT_MAX_CHARS
@@ -45,17 +49,20 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
     let auth_warning = private_url_warning(&url);
     let client = reqwest::Client::builder()
         .user_agent(DEFAULT_WEB_USER_AGENT)
+        .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|err| {
-            TalosError::new(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                format!("build web client: {err}"),
+            TalosError::from_source(
+                ErrorCode::ToolExecutionFailed,
+                "Build web client failed.",
+                err.without_url(),
             )
         })?;
-    let response = client.get(url.clone()).send().await.map_err(|err| {
-        TalosError::new(
-            talos_error::ErrorCode::ToolExecutionFailed,
-            format!("fetch web content: {err}"),
+    let mut response = client.get(url.clone()).send().await.map_err(|err| {
+        TalosError::from_source(
+            ErrorCode::ToolExecutionFailed,
+            "Fetch web content failed.",
+            err.without_url(),
         )
     })?;
     let status = response.status();
@@ -72,19 +79,45 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.split(';').next().unwrap_or(value).trim().to_string());
-    let body = response.text().await.map_err(|err| {
-        TalosError::new(
-            talos_error::ErrorCode::ToolExecutionFailed,
-            format!("read web content: {err}"),
+    let mut bytes = Vec::new();
+    let mut body_truncated = false;
+    while let Some(chunk) = response.chunk().await.map_err(|err| {
+        TalosError::from_source(
+            ErrorCode::ToolExecutionFailed,
+            "Read web content failed.",
+            err.without_url(),
         )
-    })?;
+    })? {
+        let remaining = MAX_RESPONSE_BYTES - bytes.len();
+        bytes.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if chunk.len() > remaining {
+            body_truncated = true;
+            break;
+        }
+    }
+    // Keep reqwest's charset, BOM and malformed-sequence decoding over bounded bytes.
+    let mut response = http::Response::<reqwest::Body>::from(response);
+    *response.body_mut() = bytes.into();
+    let body = reqwest::Response::from(response)
+        .text()
+        .await
+        .map_err(|err| {
+            TalosError::from_source(
+                ErrorCode::ToolExecutionFailed,
+                "Decode web content failed.",
+                err.without_url(),
+            )
+        })?;
     let (title, extracted_text) = match mime_type.as_deref() {
         Some(content_type) if content_type.contains("html") => {
             (extract_html_title(&body), html_to_text(&body))
         }
         _ => (None, body),
     };
-    let (content, truncated) = truncate_chars(extracted_text.trim(), request.max_chars);
+    let (mut content, truncated) = truncate_chars(extracted_text.trim(), request.max_chars);
+    if body_truncated && !truncated {
+        content.push_str(TRUNCATION_MARKER);
+    }
 
     Ok(WebFetchResponse {
         requested_url: request.url.clone(),
@@ -93,7 +126,7 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
         title,
         mime_type,
         content,
-        truncated,
+        truncated: truncated || body_truncated,
         auth_warning,
         prompt: request.prompt.clone(),
     })

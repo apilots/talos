@@ -1,0 +1,280 @@
+.tracing-inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid rgb(var(--color-border));
+  overflow: hidden;
+}
+.tracing-inspector > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px;
+  gap: 12px;
+}
+.tracing-inspector > header > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.tracing-inspector h2 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+.tracing-inspector > header p {
+  font-size: var(--trace-caption);
+  color: rgb(var(--color-muted));
+  margin-top: 5px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.tracing-inspector-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tracing-inspector-actions .tracing-select {
+  max-width: 170px;
+}
+.tracing-parameters {
+  flex: none;
+  margin-bottom: 16px;
+  border: 1px solid rgb(var(--color-divider));
+  border-radius: 8px;
+  background: rgb(var(--color-surface) / 0.5);
+}
+.tracing-parameters > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  min-height: 42px;
+  cursor: pointer;
+  color: rgb(var(--color-muted));
+  font-size: var(--trace-meta);
+  list-style: none;
+}
+.tracing-parameters > div {
+  padding-inline: 16px;
+}
+.tracing-parameters > .tracing-action {
+  margin: 8px 16px 12px;
+}
+.tracing-detail-body {
+  padding: 16px 20px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: var(--trace-text);
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+.tracing-root pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font:
+    12.5px/1.8 "IBM Plex Mono",
+    ui-monospace,
+    monospace;
+  margin-block: 10px 16px;
+  tab-size: 2;
+}
+.tracing-body-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: rgb(var(--color-muted));
+  font-size: var(--trace-meta);
+}
+.tracing-statistics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto auto;
+  gap: 6px 12px;
+  padding-block: 4px 16px;
+  font-variant-numeric: tabular-nums;
+}
+.tracing-statistics > div {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: subgrid;
+  min-width: 0;
+}
+.tracing-statistics > div + div {
+  padding-left: 12px;
+  border-left: 1px solid rgb(var(--color-divider));
+}
+.tracing-statistics dt {
+  font-size: var(--trace-meta);
+  color: rgb(var(--color-muted));
+  line-height: 18px;
+  min-height: 18px;
+}
+.tracing-statistics dd {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  margin-top: 0;
+}
+.tracing-usage {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: var(--trace-meta);
+  color: rgb(var(--color-muted));
+  padding-block: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.tracing-usage b {
+  color: rgb(var(--color-ink));
+  font-weight: 500;
+}
+.tracing-timing-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--trace-meta);
+  font-variant-numeric: tabular-nums;
+}
+.tracing-timing-table td,
+.tracing-timing-table th {
+  text-align: left;
+  vertical-align: top;
+  padding-block: 10px;
+  border-bottom: 1px solid rgb(var(--color-divider));
+  overflow-wrap: anywhere;
+}
+.tracing-timing-table th {
+  width: 112px;
+  padding-right: 16px;
+  color: rgb(var(--color-muted));
+  font-weight: 400;
+}
+.tracing-field-note {
+  font-size: var(--trace-meta);
+  color: rgb(var(--color-muted));
+  line-height: 1.7;
+  margin-top: 12px;
+}
+.tracing-message {
+  padding-block: 20px;
+  border-bottom: 1px solid rgb(var(--color-divider));
+  scroll-margin-top: 12px;
+}
+.tracing-message.is-current {
+  border-left: 2px solid rgb(var(--color-accent));
+  padding-inline: 12px;
+  background: rgb(var(--color-selected) / var(--selected-opacity));
+}
+.tracing-message h3 {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tracing-message-id {
+  font-size: var(--trace-caption);
+  color: rgb(var(--color-muted));
+  overflow-wrap: anywhere;
+}
+.tracing-detail-body h3,
+.tracing-detail-body h4 {
+  font-size: var(--trace-meta);
+  color: rgb(var(--color-ink));
+  font-weight: 500;
+}
+.tracing-detail-body details {
+  border-bottom: 1px solid rgb(var(--color-divider));
+  padding-block: 8px;
+}
+.tracing-detail-body details > summary {
+  min-height: 32px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.tracing-detail-body > .tracing-select {
+  margin-bottom: 12px;
+}
+.tracing-consumer {
+  display: grid;
+  gap: 8px;
+  font-size: var(--trace-meta);
+}
+.tracing-consumer .tracing-select {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0;
+}
+.tracing-timing {
+  display: grid;
+  grid-template-columns: minmax(100px, 36%) minmax(0, 1fr);
+  gap: 8px 12px;
+  padding-block: 12px;
+  border-bottom: 1px solid rgb(var(--color-divider));
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.tracing-timing dt {
+  color: rgb(var(--color-muted));
+  font-size: var(--trace-meta);
+}
+.tracing-error {
+  border-left: 2px solid rgb(var(--color-danger));
+  background: rgb(var(--color-danger) / 0.06);
+  padding: 12px;
+  line-height: 1.7;
+}
+.tracing-root[data-narrow="true"] .tracing-inspector > header {
+  padding: 14px;
+}
+.tracing-root[data-narrow="true"] .tracing-detail-body {
+  padding: 14px;
+}
+.tracing-root[data-narrow="true"] .tracing-inspector-actions .tracing-select {
+  max-width: 160px;
+}
+
+.tracing-call-state {
+  font-size: var(--trace-meta);
+  color: rgb(var(--color-muted));
+  white-space: nowrap;
+}
+.tracing-message-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.tracing-message-origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgb(var(--color-muted));
+  font-size: var(--trace-meta);
+}
+.tracing-message .tracing-message-content {
+  margin-block: 14px 0;
+  line-height: 1.8;
+}
+.tracing-identifiers {
+  margin-top: 16px;
+}
+.tracing-identifiers > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(var(--color-muted));
+}
+.tracing-identifiers code {
+  font: 12px/1.7 ui-monospace, monospace;
+  user-select: all;
+}

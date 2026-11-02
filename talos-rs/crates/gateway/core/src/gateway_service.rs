@@ -234,6 +234,40 @@ impl Gateway for ServiceGateway {
         ServiceGateway::recover_timeline(self, actor, request).await
     }
 
+    async fn trajectory_capabilities(
+        &self,
+        actor: &Actor,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryCapabilitiesResponse> {
+        self.service.trajectory_capabilities(actor).await
+    }
+    async fn read_turn_trajectory(
+        &self,
+        actor: &Actor,
+        request: talos_agent_api::trajectory::TrajectoryReadTurnRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadTurnResponse> {
+        self.service.read_turn_trajectory(actor, request).await
+    }
+    async fn read_request_trajectory(
+        &self,
+        actor: &Actor,
+        request: talos_agent_api::trajectory::TrajectoryReadModelRequestRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadModelRequestResponse> {
+        self.service.read_request_trajectory(actor, request).await
+    }
+    async fn read_tool_trajectory(
+        &self,
+        actor: &Actor,
+        request: talos_agent_api::trajectory::TrajectoryReadToolRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadToolResponse> {
+        self.service.read_tool_trajectory(actor, request).await
+    }
+    async fn read_trajectory_payload(
+        &self,
+        actor: &Actor,
+        request: talos_agent_api::trajectory::TrajectoryReadPayloadRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadPayloadResponse> {
+        self.service.read_trajectory_payload(actor, request).await
+    }
     async fn list_sessions(
         &self,
         actor: &Actor,
@@ -625,6 +659,37 @@ impl Gateway for ServiceGateway {
         request: FileReadRequest,
     ) -> TalosResult<talos_types::FileContentResponse> {
         ServiceGateway::read_file_content(self, actor, request).await
+    }
+
+    async fn prepare_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewPrepareRequest,
+    ) -> TalosResult<talos_types::FilePreviewDescriptor> {
+        self.service.prepare_file_preview(actor, request).await
+    }
+
+    async fn read_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewContent> {
+        ServiceGateway::read_file_preview(self, actor, request).await
+    }
+
+    async fn read_file_preview_capability(
+        &self,
+        request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewBytes> {
+        self.service.read_file_preview_capability(request).await
+    }
+
+    async fn close_file_preview(
+        &self,
+        actor: &Actor,
+        request: talos_types::FilePreviewCloseRequest,
+    ) -> TalosResult<talos_types::FilePreviewCloseResponse> {
+        self.service.close_file_preview(actor, request).await
     }
 
     async fn update_file(

@@ -11,6 +11,7 @@ type Methods<T, K extends keyof T> = Pick<T, K>;
 
 /** Transport-neutral API surface consumed by the Web application. */
 export type TalosWebClient = {
+  trajectory: BrowserTalosClient["trajectory"];
   sync: Methods<BrowserTalosClient["sync"], "status" | "enable" | "disable" | "metrics">;
   computers: Methods<BrowserTalosClient["computers"], "list" | "read" | "rename" | "setStatus" | "delete">;
   auth: Methods<BrowserTalosClient["auth"], "logout">;
@@ -38,7 +39,7 @@ export type TalosWebClient = {
     "list" | "add" | "update" | "delete" | "reorder" | "start"
   >;
   projects: Methods<BrowserTalosClient["projects"], "list" | "create" | "patch" | "delete">;
-  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "content" | "update" | "delete">;
+  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "content" | "update" | "delete" | "preview">;
   fs: {
     directory: Methods<BrowserTalosClient["fs"]["directory"], "read" | "create">;
   };

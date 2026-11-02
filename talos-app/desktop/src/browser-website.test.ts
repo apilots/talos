@@ -66,13 +66,25 @@ async function collect() {
 }
 async function downloads(){
   expect(await collect()).toEqual([]);
-  const browserSession=[...fixture.sessions.values()][0] as EventEmitter;
+  const browserSession=fixture.sessions.get(`persist:talos-browser-${createHash("sha256").update("alice").digest("hex").slice(0,32)}`) as EventEmitter;
   const begin=(filename:string,content:string)=>{
     const item=new Download(filename);browserSession.emit("will-download",{},item);
     writeFileSync(item.savePath,content);return item;
   };
   return {browserSession,begin,directory:downloadRoot("alice")};
 }
+it("lets human previews choose their native download destination while Agent receipts stay isolated",async()=>{
+  const account=new WebsiteAccount("preview-owner",()=>{},process.platform,{partition:"preview-owner",onPopup:()=>{}});
+  try {
+    await account.open("about:blank");
+    const browserSession=fixture.sessions.get("preview-owner") as EventEmitter;
+    const item=new Download("preview.txt");browserSession.emit("will-download",{},item);
+    expect(item.savePath).toBe("");expect(item.cancel).not.toHaveBeenCalled();
+    expect(existsSync(path.join(fixture.home,"browser"))).toBe(false);
+    const {begin}=await downloads(),agent=begin("agent.txt","receipt");agent.finish();
+    expect(await collect()).toEqual([{filename:"agent.txt",dataBase64:Buffer.from("receipt").toString("base64")}]);
+  } finally {account.close();}
+});
 it("publishes distinct same-name contents and UUID files only after completion and keeps them until receipts",async()=>{
   const {begin,directory}=await downloads(),uuid="12345678-1234-1234-1234-123456789abc";
   const first=begin("report.pdf","first report"),second=begin("report.pdf","second report"),namedUuid=begin(uuid,"%PDF-1.7 UUID");

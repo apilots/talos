@@ -14,8 +14,19 @@ use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::run_tui_app_with_gateway_client;
 use tokio::sync::Mutex;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Runtime teardown can log while dropping background tasks. Flush the
+    // logging worker only after that runtime has been dropped.
+    let mut log_guard = None;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run(&mut log_guard))
+}
+
+async fn run(
+    log_guard: &mut Option<talos_logging::LogGuard>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--browser-mcp") {
         if let Err(error) = talos_base::run_browser_mcp().await {
             talos_base::exit_with_error("Browser MCP failed", error);
@@ -23,9 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     match cli::parse_terminal_mode() {
-        cli::TerminalMode::Tui => run_embedded_tui().await,
+        cli::TerminalMode::Tui => run_embedded_tui(log_guard).await,
         cli::TerminalMode::Command(command) => {
-            let (_log_guard, mut client) = create_embedded_client().await?;
+            let mut client = create_embedded_client(log_guard).await?;
             ensure_authenticated(&mut client, CloudLoginClientKind::Cli, "Talos CLI").await?;
             cli::run_cli_with_client(command, client).await
         }
@@ -33,18 +44,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn create_embedded_client(
-) -> Result<(talos_logging::LogGuard, EmbeddedServerClient), Box<dyn std::error::Error>> {
+    log_guard: &mut Option<talos_logging::LogGuard>,
+) -> Result<EmbeddedServerClient, Box<dyn std::error::Error>> {
     let logging_options = talos_base::TalosServerOptions {
         logging_stdout: Some(false),
         ..Default::default()
     };
     let app_server = talos_base::run_embedded_app_server(Some(&logging_options)).await?;
+    *log_guard = Some(app_server.log_guard);
     let client = EmbeddedServerClient::from_runtime(app_server.runtime).await?;
-    Ok((app_server.log_guard, client))
+    Ok(client)
 }
 
-async fn run_embedded_tui() -> Result<(), Box<dyn std::error::Error>> {
-    let (_log_guard, mut client) = create_embedded_client().await?;
+async fn run_embedded_tui(
+    log_guard: &mut Option<talos_logging::LogGuard>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = create_embedded_client(log_guard).await?;
     ensure_authenticated(&mut client, CloudLoginClientKind::Tui, "Talos TUI").await?;
     let gateway_client: Arc<dyn talos_tui::GatewayClient> = Arc::new(Mutex::new(client));
     run_tui_app_with_gateway_client(gateway_client).await

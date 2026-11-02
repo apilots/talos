@@ -440,6 +440,7 @@ pub(crate) fn tool_result_block_completed_event(
             AgentMessageBlockStatus::Completed
         },
         content: AgentMessageBlockContent::ToolResult(AgentToolResult {
+            metrics: None,
             call_id,
             tool_name: name.into(),
             content: vec![TalosContentItem::Text {

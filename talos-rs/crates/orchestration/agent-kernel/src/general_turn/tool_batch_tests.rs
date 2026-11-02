@@ -6,6 +6,7 @@ fn model_results_bound_success_and_failure_without_raw_structured_duplicates() {
     for success in [true, false] {
         let path = "/workspace/user/tool-output/session/turn/call/output.log";
         let output = ToolExecutionOutput {
+            metrics: None,
             call_id: "large-call".into(),
             tool_name: "Bash".into(),
             arguments: json!({}),
@@ -56,6 +57,7 @@ fn model_results_bound_success_and_failure_without_raw_structured_duplicates() {
 #[test]
 fn reduce_tool_execution_output_uses_canonical_failure_envelope() {
     let output = ToolExecutionOutput {
+        metrics: None,
         call_id: "call-1".to_string(),
         tool_name: "Read".to_string(),
         arguments: serde_json::json!({"path": "missing"}),
@@ -87,6 +89,7 @@ fn reduce_tool_execution_output_uses_canonical_failure_envelope() {
 #[test]
 fn reduce_tool_execution_output_uses_canonical_success_payload() {
     let output = ToolExecutionOutput {
+        metrics: None,
         call_id: "call-3".to_string(),
         tool_name: "Read".to_string(),
         arguments: serde_json::json!({"path": "README.md"}),
@@ -139,6 +142,7 @@ fn memory_get_keeps_the_full_tool_result() {
     };
     let body = "x".repeat(1_500);
     let output = ToolExecutionOutput {
+        metrics: None,
         call_id: "call-memory".to_string(),
         tool_name: "MemoryGet".to_string(),
         arguments: serde_json::json!({"memory_id": "mem-1"}),
@@ -186,6 +190,7 @@ fn memory_get_keeps_the_full_tool_result() {
 #[test]
 fn reduce_tool_execution_output_rejects_structured_only_success_payload() {
     let output = ToolExecutionOutput {
+        metrics: None,
         call_id: "call-4".to_string(),
         tool_name: "BadTool".to_string(),
         arguments: serde_json::json!({}),
@@ -220,6 +225,7 @@ fn repeated_approvals_preserve_only_the_unexecuted_tool_suffix() {
         "timeout": 3000
     });
     let output = ToolExecutionOutput {
+        metrics: None,
         call_id: "call-approval".to_string(),
         tool_name: "Bash".to_string(),
         arguments: arguments.clone(),
@@ -267,6 +273,7 @@ fn repeated_approvals_preserve_only_the_unexecuted_tool_suffix() {
 
     let resumed_outputs = vec![
         ToolExecutionOutput {
+            metrics: None,
             call_id: calls[0].id.clone(),
             tool_name: calls[0].name.clone(),
             arguments: calls[0].arguments.clone(),
@@ -274,6 +281,7 @@ fn repeated_approvals_preserve_only_the_unexecuted_tool_suffix() {
             is_error: false,
         },
         ToolExecutionOutput {
+            metrics: None,
             call_id: calls[1].id.clone(),
             tool_name: calls[1].name.clone(),
             arguments: calls[1].arguments.clone(),
@@ -308,6 +316,7 @@ fn tool_batch_never_exposes_multiple_pending_user_actions() {
     let outputs = ["call-first", "call-second"]
         .into_iter()
         .map(|call_id| ToolExecutionOutput {
+            metrics: None,
             call_id: call_id.to_string(),
             tool_name: "AskUserQuestion".to_string(),
             arguments: serde_json::json!({"question": call_id}),

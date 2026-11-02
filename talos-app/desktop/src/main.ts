@@ -1,3 +1,4 @@
+import { registerFilePreviewScheme } from "./file-preview-protocol";
 import path from "node:path";
 import { hostname } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -82,6 +83,8 @@ async function createMainWindow(): Promise<BaseWindow> {
   return window;
 }
 
+registerFilePreviewScheme();
+
 app.whenReady().then(async () => {
   controller = await createController();
   registerDesktopIpcHandlers(controller);
@@ -109,7 +112,7 @@ app.on("before-quit", (event) => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" || quitState !== "running") {
     app.quit();
   }
 });

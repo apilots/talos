@@ -9,14 +9,24 @@ pub use talos_types::{ModelRef, ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::{validate_attachment_usage, Attachment, AttachmentUsage};
+use crate::{validate_attachment_usage, Attachment, AttachmentUsage, ChatMessage};
 
 /// Unified function call type used across providers.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionCall {
     pub id: String,
     pub name: String,
     pub arguments: Value,
+    /// Original model argument text, when the protocol actually provides a string.
+    /// Observation-only: excluded from persisted/wire JSON and execution equality.
+    #[serde(skip)]
+    pub arguments_text: Option<String>,
+}
+
+impl PartialEq for FunctionCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.name == other.name && self.arguments == other.arguments
+    }
 }
 
 impl FunctionCall {
@@ -25,7 +35,20 @@ impl FunctionCall {
             id: id.into(),
             name: name.into(),
             arguments,
+            arguments_text: None,
         }
+    }
+
+    /// Decode model response arguments while retaining actual string input for observation.
+    pub fn from_response(id: impl Into<String>, name: impl Into<String>, input: Value) -> Self {
+        let raw = input.as_str().map(str::to_owned);
+        let arguments = raw
+            .as_ref()
+            .and_then(|text| serde_json::from_str(text).ok())
+            .unwrap_or(input);
+        let mut call = Self::new(id, name, arguments);
+        call.arguments_text = raw;
+        call
     }
 }
 
@@ -150,6 +173,13 @@ pub enum ToolCallingError {
 /// provider name or silently drop unsupported fields.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
+    /// Bind final provider-neutral parameters before optional model observation.
+    /// Reject unsupported selections before observation or network dispatch.
+    /// Implementations must make binding idempotent; protocol encoding stays local.
+    fn bind_request(&self, request: ChatRequest) -> TalosResult<ChatRequest> {
+        Ok(request)
+    }
+
     fn name(&self) -> &str;
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse>;
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream>;
@@ -226,6 +256,8 @@ pub trait LlmProviderRouter: Send + Sync {
 pub struct ChatRequest {
     /// Explicit model request-body extensions supplied by the composition root.
     pub request_parameters: std::collections::BTreeMap<String, Value>,
+    /// Process-local preparation state; avoids reapplying a configured thinking switch.
+    pub configured_parameters_applied: bool,
     pub messages: Vec<ChatMessage>,
     pub model: String,
     pub temperature: Option<f32>,
@@ -247,6 +279,7 @@ impl ChatRequest {
     pub fn new_user(message: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             request_parameters: Default::default(),
+            configured_parameters_applied: false,
             messages: vec![ChatMessage::user(message)],
             model: model.into(),
             temperature: None,
@@ -260,164 +293,6 @@ impl ChatRequest {
             speed: None,
         }
     }
-}
-
-/// Provider-neutral chat message.
-///
-/// Construct messages with [`ChatMessage::system`], [`ChatMessage::user`],
-/// [`ChatMessage::user_with_attachments`], [`ChatMessage::assistant`], or
-/// [`ChatMessage::tool`]. This keeps role-specific invariants explicit and is
-/// the supported construction path for downstream crates.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ChatMessage {
-    pub role: Role,
-    pub content: String,
-    /// Persisted FileService references for tool images; re-resolved before model calls.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub image_file_ids: Vec<String>,
-    /// Ordered binary inputs for a user or tool message.
-    ///
-    /// `None` is the only no-attachment state. Generic message serialization
-    /// skips this field; shared protocol encoders are its only wire owners.
-    #[serde(skip, default)]
-    pub attachments: Option<Vec<Attachment>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<FunctionCall>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_continuation: Option<ReasoningContinuation>,
-    // Only RequestLevel providers should consume this field. Unsupported providers must drop it
-    // during request conversion rather than serializing it into outbound payloads.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_control: Option<CacheControl>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CacheControl {
-    #[serde(rename = "type")]
-    pub kind: CacheControlKind,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CacheControlKind {
-    #[serde(rename = "ephemeral")]
-    Ephemeral,
-}
-
-impl ChatMessage {
-    pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::System,
-            content: content.into(),
-            attachments: None,
-            image_file_ids: Vec::new(),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_continuation: None,
-            cache_control: None,
-        }
-    }
-
-    pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::User,
-            content: content.into(),
-            attachments: None,
-            image_file_ids: Vec::new(),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_continuation: None,
-            cache_control: None,
-        }
-    }
-
-    /// Creates a user message with one or more ordered attachments.
-    pub fn user_with_attachments(
-        content: impl Into<String>,
-        attachments: Vec<Attachment>,
-    ) -> TalosResult<Self> {
-        if attachments.is_empty() {
-            return Err(TalosError::new(
-                talos_error::ErrorCode::InvalidRequest,
-                "attached user message must include at least one attachment".to_string(),
-            ));
-        }
-        Ok(Self {
-            attachments: Some(attachments),
-            image_file_ids: Vec::new(),
-            ..Self::user(content)
-        })
-    }
-
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-            attachments: None,
-            image_file_ids: Vec::new(),
-            name: None,
-            tool_call_id: None,
-            tool_calls: None,
-            reasoning_continuation: None,
-            cache_control: None,
-        }
-    }
-
-    pub fn assistant_with_tool_calls(
-        content: impl Into<String>,
-        tool_calls: Vec<FunctionCall>,
-    ) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-            attachments: None,
-            image_file_ids: Vec::new(),
-            name: None,
-            tool_call_id: None,
-            tool_calls: Some(tool_calls),
-            reasoning_continuation: None,
-            cache_control: None,
-        }
-    }
-
-    pub fn tool(
-        tool_call_id: impl Into<String>,
-        name: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
-        Self {
-            role: Role::Tool,
-            content: content.into(),
-            attachments: None,
-            image_file_ids: Vec::new(),
-            name: Some(name.into()),
-            tool_call_id: Some(tool_call_id.into()),
-            tool_calls: None,
-            reasoning_continuation: None,
-            cache_control: None,
-        }
-    }
-
-    /// Attaches provider continuation required to replay this assistant message.
-    pub fn with_reasoning_continuation(mut self, continuation: ReasoningContinuation) -> Self {
-        self.reasoning_continuation = Some(continuation);
-        self
-    }
-}
-
-/// Message role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-    Tool,
 }
 
 /// Provider-neutral reasoning output split into display and replay projections.
@@ -516,6 +391,18 @@ pub struct Usage {
     pub cache_creation_input_tokens: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_input_tokens: Option<u32>,
+}
+
+impl From<&Usage> for talos_types::TokenUsage {
+    fn from(usage: &Usage) -> Self {
+        Self {
+            input_tokens: usage.prompt_tokens,
+            output_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens,
+            cache_read_input_tokens: usage.cache_read_input_tokens,
+        }
+    }
 }
 
 /// Streaming chunk for plain text APIs.
@@ -870,6 +757,7 @@ impl ChatRequestBuilder {
     pub fn build(self) -> ChatRequest {
         ChatRequest {
             request_parameters: Default::default(),
+            configured_parameters_applied: false,
             messages: self.messages.unwrap_or_default(),
             model: self.model.expect("model is required"),
             temperature: self.temperature,

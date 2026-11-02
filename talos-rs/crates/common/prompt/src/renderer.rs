@@ -1,8 +1,55 @@
 use crate::{
     PromptAssembly, PromptBlock, PromptBlockCacheScope, PromptBlockKind, PromptSection,
-    RegionEnvelopePolicy, SectionCacheScope,
+    PromptSectionKind, RegionEnvelopePolicy, SectionCacheScope,
 };
-use talos_llm_provider::{CacheControl, CacheControlKind, ChatMessage};
+use talos_llm_provider::{
+    CacheControl, CacheControlKind, ChatMessage, MessageInputKind, MessageInputOrigin,
+    MessageInputSource,
+};
+
+fn section_source(kind: PromptSectionKind) -> MessageInputSource {
+    match kind {
+        PromptSectionKind::BootstrapSoul
+        | PromptSectionKind::BootstrapIdentity
+        | PromptSectionKind::BootstrapUser
+        | PromptSectionKind::BootstrapHeartbeat
+        | PromptSectionKind::BootstrapAgents => MessageInputSource::Workspace,
+        PromptSectionKind::SkillCatalog | PromptSectionKind::ActiveSkillInstructions => {
+            MessageInputSource::Skills
+        }
+        PromptSectionKind::UserWorkspaceMemory | PromptSectionKind::RetrievedMemories => {
+            MessageInputSource::Memory
+        }
+        PromptSectionKind::RecentTaskContinuity
+        | PromptSectionKind::SessionSummary
+        | PromptSectionKind::RecentMessages
+        | PromptSectionKind::RecentToolHistory
+        | PromptSectionKind::RecentToolOutputs => MessageInputSource::Runtime,
+        PromptSectionKind::IdentityCore
+        | PromptSectionKind::EvidenceToolingPolicy
+        | PromptSectionKind::ToolChoicePriority
+        | PromptSectionKind::RequestedToolPreferenceTemplate
+        | PromptSectionKind::RequestedToolPreferenceHint
+        | PromptSectionKind::FailureRecoveryPolicy
+        | PromptSectionKind::ExpandedToolCatalog
+        | PromptSectionKind::TaskProtocolLibrary
+        | PromptSectionKind::CommunicationPolicy
+        | PromptSectionKind::UserWorkspaceMemoryPolicy
+        | PromptSectionKind::PlanningInstruction => MessageInputSource::Prompt,
+    }
+}
+
+fn combined_source(sources: impl Iterator<Item = MessageInputSource>) -> MessageInputSource {
+    sources
+        .reduce(|left, right| {
+            if left == right {
+                left
+            } else {
+                MessageInputSource::Mixed
+            }
+        })
+        .expect("rendered section groups are nonempty")
+}
 
 fn cache_control_from_scope(scope: PromptBlockCacheScope) -> Option<CacheControl> {
     match scope {
@@ -100,6 +147,15 @@ pub(crate) fn render_prompt_blocks(assembly: &PromptAssembly) -> Vec<PromptBlock
                 .collect::<Vec<_>>()
                 .join("\n\n"),
             cache_scope: block_cache_scope_for_sections(&assembly.dynamic_suffix_sections),
+            input_origin: Some(MessageInputOrigin {
+                kind: MessageInputKind::Context,
+                source: combined_source(
+                    assembly
+                        .dynamic_suffix_sections
+                        .iter()
+                        .map(|section| section_source(section.kind)),
+                ),
+            }),
         });
     }
 
@@ -113,6 +169,10 @@ pub(crate) fn render_prompt_blocks(assembly: &PromptAssembly) -> Vec<PromptBlock
             kind: PromptBlockKind::AppendedSystemContext,
             text: text.clone(),
             cache_scope: PromptBlockCacheScope::NoCache,
+            input_origin: Some(MessageInputOrigin {
+                kind: MessageInputKind::Context,
+                source: MessageInputSource::Runtime,
+            }),
         });
     }
 
@@ -126,6 +186,10 @@ pub(crate) fn render_prompt_blocks(assembly: &PromptAssembly) -> Vec<PromptBlock
             kind: PromptBlockKind::PrependedUserContextMessage,
             text: text.clone(),
             cache_scope: PromptBlockCacheScope::NoCache,
+            input_origin: Some(MessageInputOrigin {
+                kind: MessageInputKind::Context,
+                source: MessageInputSource::Runtime,
+            }),
         });
     }
 
@@ -133,6 +197,10 @@ pub(crate) fn render_prompt_blocks(assembly: &PromptAssembly) -> Vec<PromptBlock
         kind: PromptBlockKind::UserInput,
         text: assembly.user_input.clone(),
         cache_scope: PromptBlockCacheScope::NoCache,
+        input_origin: Some(MessageInputOrigin {
+            kind: MessageInputKind::User,
+            source: MessageInputSource::User,
+        }),
     });
 
     blocks
@@ -149,6 +217,7 @@ fn push_section_blocks(
 
     let mut current_scope = block_cache_scope_for_section(&sections[0]);
     let mut current_sections = Vec::new();
+    let mut sources = Vec::new();
 
     for section in sections {
         let next_scope = block_cache_scope_for_section(section);
@@ -157,11 +226,17 @@ fn push_section_blocks(
                 kind,
                 text: current_sections.join("\n\n"),
                 cache_scope: current_scope,
+                input_origin: Some(MessageInputOrigin {
+                    kind: MessageInputKind::System,
+                    source: combined_source(sources.iter().copied()),
+                }),
             });
             current_sections.clear();
+            sources.clear();
             current_scope = next_scope;
         }
         current_sections.push(render_section_text(section));
+        sources.push(section_source(section.kind));
     }
 
     if !current_sections.is_empty() {
@@ -169,6 +244,10 @@ fn push_section_blocks(
             kind,
             text: current_sections.join("\n\n"),
             cache_scope: current_scope,
+            input_origin: Some(MessageInputOrigin {
+                kind: MessageInputKind::System,
+                source: combined_source(sources.into_iter()),
+            }),
         });
     }
 }
@@ -186,6 +265,7 @@ pub(crate) fn render_chat_messages(blocks: &[PromptBlock]) -> Vec<ChatMessage> {
             | PromptBlockKind::AppendedSystemContext => ChatMessage::system(block.text.clone()),
         };
         message.cache_control = cache_control_from_scope(block.cache_scope);
+        message.input_origin = block.input_origin;
         messages.push(message);
     }
     messages

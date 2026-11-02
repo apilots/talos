@@ -153,6 +153,22 @@ describe("desktop IPC guard", () => {
     expect(() => assertDesktopRendererInvoke("profile/read", {})).not.toThrow();
   });
 
+  it("admits scoped trajectory reads while rejecting malformed identities and pagination", () => {
+    const identity = { sessionId: "session-1", turnId: "turn-1" };
+    const reads = [
+      { method: "trajectory/capabilities", params: null },
+      { method: "trajectory/readTurn", params: { identity, cursor: null, limit: 32 } },
+      { method: "trajectory/readRequest", params: { identity, modelRequestId: "request-1" } },
+      { method: "trajectory/readTool", params: { identity, callId: "call-1" } },
+      { method: "trajectory/readPayload", params: { identity, payloadId: "payload-1", cursor: "opaque-cursor", limitBytes: 256 * 1024 } },
+    ] satisfies AppProtocol.ClientRequestParams[];
+    for (const { method, params } of reads)
+      expect(() => assertDesktopRendererInvoke(method, params)).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("trajectory/readTool", { callId: "call-1" })).toThrow();
+    expect(() => assertDesktopRendererInvoke("trajectory/readTurn", { identity, cursor: "x".repeat(2049) })).toThrow();
+    expect(() => assertDesktopRendererInvoke("trajectory/readPayload", { identity, payloadId: "payload-1", limitBytes: 0.5 })).toThrow();
+  });
+
   it("allows desktop cloud session cache read and clear methods", () => {
     expect(() => assertDesktopRendererInvoke("auth/session/read", {})).not.toThrow();
     expect(() => assertDesktopRendererInvoke("auth/session/clear", {})).not.toThrow();

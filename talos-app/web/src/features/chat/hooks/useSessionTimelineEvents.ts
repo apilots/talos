@@ -9,7 +9,7 @@ import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
-const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
+const RECONNECT_DELAY_MS = 2_000;
 const EVENT_CURSOR_EXPIRED_CODE = AppProtocol.ErrorCode.EventCursorExpired;
 
 export function useSessionTimelineEvents(
@@ -132,7 +132,7 @@ export function useSessionTimelineEvents(
               subscriptionError = recoveryError;
             }
           }
-          const exhausted = attempt + 1 >= RECONNECT_DELAYS_MS.length;
+          const exhausted = attempt >= 3;
           const state = useAppStore.getState();
           state.setStreamError(
             sessionId,
@@ -150,7 +150,7 @@ export function useSessionTimelineEvents(
             reconnectTimer = window.setTimeout(() => {
               finishReconnectDelay = undefined;
               resolve();
-            }, RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]);
+            }, RECONNECT_DELAY_MS);
           });
         }
       }

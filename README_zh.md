@@ -1,6 +1,13 @@
 # Talos
 
-[English](README.md)
+**用 Rust 编写的开源 AI Agent 运行时。** 持久、可回放的会话，支持任意 LLM、记忆、Skills、MCP、沙箱，以及本地 + 云端 Worker。一个运行时同时支撑 TUI、Web、Desktop 和 SDK。
+
+[![License](https://img.shields.io/github/license/apilots/talos)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/apilots/talos)](https://github.com/apilots/talos/releases)
+[![Stars](https://img.shields.io/github/stars/apilots/talos?style=social)](https://github.com/apilots/talos/stargazers)
+[![X](https://img.shields.io/badge/X-@__talosai-black?logo=x)](https://x.com/_talosai)
+
+[官网](https://talos.love) · [下载](https://github.com/apilots/talos/releases) · [English](README.md)
 
 > Historical translation. The [English document](README.md) owns the current
 > 2026-09-07 contracts, diagrams, deployment rules and verification guidance.

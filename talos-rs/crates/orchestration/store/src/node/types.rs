@@ -21,6 +21,19 @@ pub struct NodeRecord {
     pub updated_at: i64,
 }
 
+/// Authentication fields confined to the Store/Service boundary.
+/// Credential and lease checks must still run against each fresh read.
+pub struct NodeAuthenticationRecord {
+    pub node_id: String,
+    pub owner_user_id: Option<String>,
+    pub mode: NodeMode,
+    pub status: NodeStatus,
+    pub credential_hash: Option<[u8; 32]>,
+    pub credential_expires_at: Option<i64>,
+    pub lease_token_hash: Option<[u8; 32]>,
+    pub lease_expires_at: Option<i64>,
+}
+
 pub struct CreateNodeParams {
     pub node_id: String,
     pub owner_user_id: Option<String>,

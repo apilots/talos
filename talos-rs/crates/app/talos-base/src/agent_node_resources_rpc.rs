@@ -21,6 +21,8 @@ use tonic::{Request, Response, Status};
 use super::{failure, ResourceRoutes};
 #[path = "agent_resource_authorization.rs"]
 mod authorization;
+#[path = "agent_resource_history_append.rs"]
+mod history_append;
 use authorization::ResourceAuthority;
 #[path = "agent_resource_images.rs"]
 mod images;
@@ -67,6 +69,13 @@ type AttachmentStream =
 
 #[tonic::async_trait]
 impl pb::agent_session_data_rpc_server::AgentSessionDataRpc for NodeSessionDataRpc {
+    async fn append_session_history_supplement(
+        &self,
+        request: Request<tonic::Streaming<pb::AppendSessionHistorySupplementRequest>>,
+    ) -> Result<Response<pb::AppendSessionHistorySupplementResponse>, Status> {
+        self.append_history_stream(request.into_inner()).await
+    }
+
     async fn read_session_history(
         &self,
         request: Request<pb::ReadSessionHistoryRequest>,

@@ -103,3 +103,95 @@ fn markdown_validation_checks_complete_utf8_content_across_upload_chunks() {
         Some("text/markdown".into())
     );
 }
+
+#[test]
+fn generated_text_uses_complete_content_and_preserves_detected_binary_mime() {
+    use super::MediaTypeValidator;
+
+    let mut code = MediaTypeValidator::new("module.ts");
+    for chunk in "export const label = '模块';\n".as_bytes().chunks(1) {
+        code.observe(chunk);
+    }
+    assert_eq!(code.detected_mime_type(), Some("text/plain".into()));
+    code.observe(&vec![b'a'; super::MIME_SNIFF_BYTES + 1]);
+    code.observe(&[0xff]);
+    assert_eq!(code.detected_mime_type(), None);
+
+    let mut misleading_html = MediaTypeValidator::new("report.html");
+    misleading_html.observe(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+    misleading_html.observe(&vec![0; super::MIME_SNIFF_BYTES * 2]);
+    assert!(misleading_html.content.len() <= super::MIME_SNIFF_BYTES);
+    assert_eq!(
+        misleading_html.detected_mime_type(),
+        Some("image/png".into())
+    );
+}
+
+#[test]
+fn json_requires_parser_success_and_html_fragments_remain_browser_content() {
+    use super::MediaTypeValidator;
+
+    let mut json = MediaTypeValidator::new("result.json");
+    json.observe(br#"{"preview":true}"#);
+    assert_eq!(json.detected_mime_type(), Some("application/json".into()));
+    json.observe(b" incomplete");
+    assert_eq!(json.detected_mime_type(), Some("text/plain".into()));
+
+    let mut html = MediaTypeValidator::new("report.HTML");
+    html.observe(b"<section>Report</section>");
+    assert_eq!(html.detected_mime_type(), Some("text/html".into()));
+    html.observe(&[0]);
+    assert_eq!(html.detected_mime_type(), None);
+}
+
+#[test]
+fn presentation_detection_reads_the_zip_directory_beyond_the_sniff_window() {
+    use super::MediaTypeValidator;
+    use std::io::{Cursor, Write};
+
+    let mut package = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    package
+        .start_file("docProps/thumbnail.bin", options)
+        .unwrap();
+    package
+        .write_all(&vec![0; super::MIME_SNIFF_BYTES + 1])
+        .unwrap();
+    package.start_file("ppt/presentation.xml", options).unwrap();
+    package.write_all(br#"<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>"#).unwrap();
+    let bytes = package.finish().unwrap().into_inner();
+    let mut validator = MediaTypeValidator::new("slides.PPTX");
+    for chunk in bytes.chunks(8192) {
+        validator.observe(chunk);
+    }
+    assert_eq!(
+        validator.detected_mime_type(),
+        Some("application/vnd.openxmlformats-officedocument.presentationml.presentation".into())
+    );
+}
+
+#[test]
+fn legacy_presentation_detection_has_the_complete_compound_file() {
+    use super::MediaTypeValidator;
+    // Shared real LibreOffice-generated fixture; its CFB directory is beyond
+    // the magic-byte prefix, so infer needs the complete bounded upload.
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../../talos-e2e/fixtures/resource-preview/matrix-slides.ppt.gz"
+    ));
+    let mut decoded = Vec::new();
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(bytes.as_slice()),
+        &mut decoded,
+    )
+    .unwrap();
+    let mut validator = MediaTypeValidator::new("slides.ppt");
+    for chunk in decoded.chunks(8192) {
+        validator.observe(chunk);
+    }
+    assert_eq!(
+        validator.detected_mime_type(),
+        Some("application/vnd.ms-powerpoint".into())
+    );
+}

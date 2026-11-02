@@ -1,8 +1,8 @@
 use crate::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
-    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningContinuation,
-    ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice, Usage,
+    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, ModelBlockCompleted,
+    ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
+    ModelOutputPhase, ModelToolCallStart, ReasoningContinuation, ReasoningEffort, ReasoningOutput,
+    Role, SseLineDecoder, ToolChoice, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -19,7 +19,7 @@ mod types;
 #[path = "chat/chat_tests.rs"]
 mod tests;
 
-pub use content::content_text;
+pub use content::{content_text, tool_calls};
 use reasoning::{reasoning_fields, response_reasoning};
 pub use tool_definitions::tools;
 pub use types::*;
@@ -183,19 +183,6 @@ pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ChatCompletionToolChoic
         }),
         None => None,
     }
-}
-
-pub fn tool_calls(tool_calls: Option<Vec<ChatCompletionToolCall>>) -> Option<Vec<FunctionCall>> {
-    tool_calls.map(|calls| {
-        calls
-            .into_iter()
-            .map(|call| {
-                let parsed = serde_json::from_str::<Value>(&call.function.arguments)
-                    .unwrap_or_else(|_| Value::String(call.function.arguments.clone()));
-                FunctionCall::new(call.id, call.function.name, parsed)
-            })
-            .collect()
-    })
 }
 
 pub fn usage(usage: ChatCompletionUsage) -> TalosResult<Usage> {
@@ -413,10 +400,13 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
     let provider_name = provider_name.into();
 
     tokio::spawn(async move {
+        let request_context = crate::error::response_context(&response);
         let mut stream = response.bytes_stream();
         let mut decoder = SseLineDecoder::new();
         let mut final_finish_reason: Option<String> = None;
-        while let Some(chunk_result) = stream.next().await {
+        while let Some(chunk_result) =
+            tokio::select! { _ = tx.closed() => return, next = stream.next() => next }
+        {
             match chunk_result {
                 Ok(bytes) => {
                     for line in decoder.push(&bytes) {
@@ -487,12 +477,9 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                     }
                 }
                 Err(error) => {
-                    let _ = tx
-                        .send(Err(TalosError::internal_with_source(
-                            "Stream error; technical details were withheld.",
-                            error,
-                        )))
-                        .await;
+                    let error = crate::error::transport_error("Model response stream", error)
+                        .context(&request_context);
+                    let _ = tx.send(Err(error)).await;
                     return;
                 }
             }
@@ -509,6 +496,7 @@ pub fn model_blocks(
     let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
 
     tokio::spawn(async move {
+        let request_context = crate::error::response_context(&response);
         let mut stream = response.bytes_stream();
         let mut decoder = SseLineDecoder::new();
         let mut state = ModelBlockState::default();
@@ -516,7 +504,9 @@ pub fn model_blocks(
         let mut final_finish_reason: Option<String> = None;
         let mut final_usage: Option<Usage> = None;
 
-        while let Some(chunk_result) = stream.next().await {
+        while let Some(chunk_result) =
+            tokio::select! { _ = tx.closed() => return, next = stream.next() => next }
+        {
             match chunk_result {
                 Ok(bytes) => {
                     for line in decoder.push(&bytes) {
@@ -842,12 +832,9 @@ pub fn model_blocks(
                     }
                 }
                 Err(error) => {
-                    let _ = tx
-                        .send(Err(TalosError::internal_with_source(
-                            "Stream error; technical details were withheld.",
-                            error,
-                        )))
-                        .await;
+                    let error = crate::error::transport_error("Model response stream", error)
+                        .context(&request_context);
+                    let _ = tx.send(Err(error)).await;
                     return;
                 }
             }

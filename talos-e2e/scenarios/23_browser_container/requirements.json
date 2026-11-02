@@ -1,0 +1,43 @@
+{
+  "default": {},
+  "cases": {
+    "01_docker_worker.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "docker",
+        "openssl",
+        "node",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "websockets"
+      ],
+      "checks": [
+        "docker",
+        "worker_image"
+      ],
+      "binaries": [
+        "server",
+        "app_server",
+        "cli"
+      ]
+    },
+    "02_docker_server.sh": {
+      "commands": [
+        "docker",
+        "python3"
+      ],
+      "python_modules": [
+        "yaml",
+        "websockets"
+      ],
+      "checks": [
+        "docker",
+        "server_image"
+      ],
+      "binaries": []
+    }
+  }
+}

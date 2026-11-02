@@ -1,134 +1,40 @@
-# Browser and resource workspace
+# Native browser runtime
 
-This numbered group owns the Browser MCP and shared resource workspace product
-journeys. Run the complete group before handoff:
+This group owns the native Desktop browser engine and Browser MCP integration.
+Lightweight Web/Desktop workspace resources live in group 22; Docker Worker and
+Server integration lives in group 23. The existing runner and cases are retained.
 
 ```bash
 just e2e-group 20_browser_workspace
-# During development, select one existing numbered case:
-talos-e2e/run_e2e.sh --case 20_browser_workspace/01_resource_tabs
+just e2e-case 20_browser_workspace/04_desktop_mcp
 ```
-
-## Scenarios and observable boundaries
 
 | Case | Product journey | Assertions |
 | --- | --- | --- |
-| `01_resource_tabs` | Web product layout → two independent local-service previews → local Markdown → close/account switch | Initial/refresh sidebar state does not steal focus, genuine keyboard focus remains visible, and closing restores it; same-URL instances keep separate form state; switching/collapse preserves it; keyboard and modal focus work; close/logout destroys instances; real File API renders Markdown and rejects non-owner metadata/content. |
-| `02_desktop_resources` | Actual production Desktop main and renderer → shared preview/Markdown resources | Native IPC, sidebar initial/refresh focus and local File import/render work in the shipped client; same-URL previews retain independent state; local Computer has no Docker desktop entry. This is the native integration slice, not a duplicate Web focus/authorization suite. |
 | `03_desktop_browser` | Real Desktop host → bundled browser and explicitly prepared local Chrome | DOM actions, explicit and implicit current-tab close in both browser modes, stale references, separate per-mode screenshot and upload; bundled debugger detach/recovery; both backends deliver different-content same-name downloads without overwrites, never expose an unfinished download, accept UUID names and honor acknowledgement receipts. Only an owned temporary Chrome profile is connected. |
 | `04_desktop_mcp` | Actual Desktop controller/app-server/embedded Worker → model task → Browser MCP → File API | Tool discovery and typed dispatch in both bundled and explicitly prepared Chrome modes: browser state/actions, screenshot and attachment authorization, uploads/downloads; pause/resume followed by a real target switch and first navigation without a preparatory tool; disconnect leaves Chrome alive. Local browser capability remains independent of remote display. |
-| `05_docker_worker` | Outbound Docker Worker → ordinary task/tools → private live desktop → restart/profile recovery | First non-navigation tool opens a task tab while preserving the private HTTP homepage; navigation/DOM/files and forged attachment rejection; default homepage, background after closing all browser windows and working Browser/Terminal/Files launchers; authenticated media, three consecutive rejected Worker admissions release their candidate reservations while preserving the live controller, input/control fencing, held-key release, backpressure, expiry and viewer teardown; replacement Worker reuses its owned profile. |
-| `06_docker_server` | Packaged anonymous Server → shared CLI/PTY TUI → model edit/add → restart → desktop viewing/control → embedded Browser MCP | Real RFB pixels and X11 key state prove anonymous viewing and input; release clears held input and permits an Agent task; disconnect suspends automation, clears input, and explicit resume permits another task. Each task performs seven real Browser actions and a File API screenshot. Model edits persist across a Server process restart; the TUI exercises DEL and Ctrl-H. Docker networking is disabled and model/page fixtures remain local. |
 
 Case 04 prepares the official MCP snapshot from `build/plugins/official-mcp.json`.
-Case 05 checks the installed source commit, dependency lock and actual browser-use
-version, reuses matching preinstallation across replacement and unchanged updates,
-and preserves disabled state across restart through the original Plugin API. In
-its disposable container, removing packaged environment metadata triggers exact-lock
-online preparation; another real Browser task must then succeed with the prepared
-environment. Persisted manual pause is resumed explicitly through the public API.
-The native account/directory fixture also runs the real `talos plugin` CLI against
-the outbound Docker Worker for both Skill and MCP lifecycle operations; no remote
-installation may appear in the client home. The same case's production Desktop
-IPC/preload/SDK and noVNC viewer must also take control, apply a key to the real
-X11 display, clear held input on release and disconnect, then resume with actual
-pixels and another Agent Browser task. It shares the HTTP viewer's X11 probe;
-connection status alone is not rendered-frame evidence. After online repair, a replacement
-container removes its packaged environment metadata before Worker startup and
-disables external package DNS while retaining the control-plane hosts entry. It
-must reuse the same home environment and complete another real Browser task.
+Both cases use owned profiles and endpoints, never a user's interactive browser.
+The prepared-Chrome case requires port 9222 to be unused. Admission tolerates
+TIME_WAIT but rejects an active listener. Native endpoints accept an explicitly
+supplied current `TALOS_E2E_APP_SERVER_BIN`.
 
-Responsive preview checks keep the same address/iframe DOM and drafts. Address
-focus survives both directions; leaving a native modal preserves the iframe's
-current input focus. Entering a native modal resets a cross-origin child input's
-focus in Chromium: the product restores its browsing context, and the user must
-refocus the input. The scenario verifies this boundary without reading child DOM
-from product code or adding a cross-origin bridge.
+Use macOS or Linux with Chrome, Node/pnpm, the repository toolchain and Python
+fixture dependencies. Linux requires Xvfb and Electron system libraries. Exact
+prerequisites remain in requirements.json; do not disable browser sandboxing.
+Desktop host and driver unit tests stay with their owners rather than becoming
+additional E2E cases.
 
-Each case crosses a different product boundary. Related assertions run in one
-stateful journey rather than replaying a whole model task per assertion. Desktop
-host tests and Python driver unit regressions stay with their owners; the group
-does not wrap them as additional E2E cases. Screenshots, JSON evidence and process
-logs go to the runner's `reports/20_browser_workspace/<case>/` directory.
+CI uses directory/group ownership. Desktop native source changes select this
+group and the native workspace case in group 22. Media, IPC, controller and
+packaging inputs additionally select the Worker container in group 23. Shared
+Browser fixtures select their native and container consumers. Each selected case
+runs once with current-run executable artifacts.
 
-## Prerequisites
-
-Use macOS or Linux, installed Chrome, Docker, Node/pnpm, the repository Rust
-toolchain and protobuf compiler, OpenSSL and Caddy. Install application and Python
-dependencies using the repository lockfiles and the Browser fixture requirements,
-plus the existing workspace dependencies `grpcio protobuf playwright`. On Linux,
-run the group under `xvfb-run -a` with Electron's system libraries and the existing
-sandbox prerequisites. Do not disable the browser sandbox. Python Playwright
-connects to installed Chrome/Electron; no Playwright browser download is needed.
-
-Set `TALOS_E2E_CHROME_BIN` when Chrome is outside its standard installation path;
-`TALOS_E2E_CADDY_BIN` defaults to `caddy`. Port 9222 must be unused for the explicit
-prepared-Chrome case; a running user endpoint is rejected, never borrowed.
-The fixture isolates Chrome with its own temporary `user-data-dir` while keeping
-its normal OS home; Electron receives a separate temporary home. This preserves
-platform startup behavior without reading or attaching to a user browser profile.
-Endpoint admission tolerates TCP TIME_WAIT but still rejects an active listener. Cases
-build current local binaries when a prebuilt binary is not supplied. The shared
-Web fixture uses the standard debug Server build. Native cases accept
-`TALOS_E2E_APP_SERVER_BIN`; Docker accepts `TALOS_E2E_SERVER_BIN` as well.
-
-Build the **current source** Worker image using the standard build context (the
-parent directory must contain this checkout as `talos/`):
-
-```bash
-docker build -f talos/build/worker/Dockerfile -t talos-worker:browser-e2e .
-```
-
-Alternatively, the release/CI packaged stage copies current Linux Worker and
-sandbox-launcher binaries into `.release-product/bin/` and builds the same
-Dockerfile with `--build-arg PRODUCT_STAGE=packaged`. Set
-`TALOS_E2E_WORKER_IMAGE` for another explicitly built current-source tag. The Docker
-case fails if the image is missing; it does not pull an unrelated published image.
-Case 06 uses the current standard Server image, built with
-`docker build -f talos/build/server/Dockerfile -t talos-server:browser-e2e .`,
-or selected through `TALOS_E2E_SERVER_IMAGE`. Its packaged stage consumes the same
-current-run binaries plus `talos-server`, the `talos` CLI and production WebUI
-under `.release-product/webui/`. CI builds these inputs once and uses
-`PRODUCT_STAGE=packaged` without recompiling Rust inside Docker. This case needs
-only Docker, Python, PyYAML and the existing fixture's pinned `websockets` package
-on the host. The case mounts that Python package read-only for its RFB viewer;
-no test dependency is added to the production image. The image supplies the
-Browser runtime and pinned official MCP delivery. It validates a Server process
-restart with the same home and the embedded local media route, independently of
-the registered Worker's authenticated Cloud media route. Actual pixels and
-state records are grouped under `scenarios/01-view`, `02-takeover`,
-`03-release-agent` and `04-disconnect-recover` in the case report directory.
-All profiles, endpoints and containers created by these cases are disposable;
-they must not attach to a user's interactive browser or retained review Worker.
-
-## CI and provider-backed acceptance
-
-The named WebUI and Desktop CI workflows use the unified change selector.
-Desktop-only source/resource changes run cases 02/03/04; media, preload, IPC and
-controller owners also run 05 with the standard packaged Worker image. Web
-changes run case 01 and the shared renderer's native integration case 02, plus
-the Computer deletion journey; Web remote-desktop owners also run 05. Shared
-SDK/runtime/build inputs expand to their affected consumers. Mixed changes take
-the union, with each selected case executed once. CI compiles the required Rust
-binaries together and supplies the current run's artifact to each case through
-`just e2e-case` or `just e2e-group`. Missing
-dependencies, unsupported runtime or incomplete fixture results fail explicitly.
-Server image inputs, shared container/browser resources, and the owning embedded
-runtime/plugin changes select case 06 in the Server CI workflow. Changes limited
-to this scenario do not select the native Desktop family.
-
-Cases 04/05 use a deterministic model endpoint to prove product integration and
-permission/lifecycle behavior without provider secrets. They do **not** claim
-reasoning quality or autonomous website analysis. Final provider-backed acceptance
-uses the configured development visual model and the lowest supported reasoning
-effort, submits an ordinary Composer task to browse `https://talos.love`, analyze
-product features and return source-backed findings with valid screenshots. Inspect
-normal task titles, actual tool calls, recovery errors and rendered final images
-separately for local Desktop and Docker Worker; preserve failures instead of
-rewriting persisted results. See the Browser fixture README for the reusable
-procedure. The same task need not be repurchased for presentation-only changes.
-
-Full multi-control-plane Sync remains group 19 local topology acceptance. Native
-Windows support, production proxy/NAT/TLS deployments and user-managed Chrome
-permissions require their corresponding environment acceptance; this group does
-not label those unavailable environments as passing.
+The controlled-model MCP journey proves integration and lifecycle, not external
+provider reasoning quality. Final provider-backed acceptance uses the configured
+visual model to browse `https://talos.love`, return source-backed findings and
+valid screenshots. Keep that local acceptance separate from public secretless
+CI results. Windows, deployed proxy/NAT/TLS and multi-control-plane Sync require
+their owning environment acceptance.

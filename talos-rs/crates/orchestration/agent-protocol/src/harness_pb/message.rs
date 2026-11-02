@@ -68,6 +68,13 @@ pub fn encode_block(value: AgentMessageBlock) -> TalosResult<pb::MessageBlock> {
                 Content::ToolCall(encode_tool_call(value)?)
             }
             AgentMessageBlockContent::ToolResult(value) => Content::ToolResult(pb::ToolResult {
+                metrics: value.metrics.map(|m| pb::ToolExecutionMetrics {
+                    queued_at_ms: m.queued_at_ms,
+                    started_at_ms: m.started_at_ms,
+                    finished_at_ms: m.finished_at_ms,
+                    queue_duration_ms: m.queue_duration_ms,
+                    execution_duration_ms: m.execution_duration_ms,
+                }),
                 call_id: value.call_id,
                 tool_name: value.tool_name,
                 content: value
@@ -105,6 +112,13 @@ pub fn decode_block(value: pb::MessageBlock) -> TalosResult<AgentMessageBlock> {
         }
         Content::ToolCall(value) => AgentMessageBlockContent::ToolCall(decode_tool_call(value)?),
         Content::ToolResult(value) => AgentMessageBlockContent::ToolResult(AgentToolResult {
+            metrics: value.metrics.map(|m| talos_types::ToolExecutionMetrics {
+                queued_at_ms: m.queued_at_ms,
+                started_at_ms: m.started_at_ms,
+                finished_at_ms: m.finished_at_ms,
+                queue_duration_ms: m.queue_duration_ms,
+                execution_duration_ms: m.execution_duration_ms,
+            }),
             call_id: value.call_id,
             tool_name: value.tool_name,
             content: value

@@ -1,3 +1,5 @@
+import { createTrajectoryClient } from "./trajectory";
+import { createFilePreviewClient } from "./file-preview";
 import { decodeFileContent } from "./file-content";
 import type * as AppProtocol from "./generated/app-protocol";
 import type { FileUploadOptions } from "./adapters";
@@ -115,6 +117,15 @@ export class AppServerClient {
   }
 
   files = {
+    preview: createFilePreviewClient({
+      prepare: (request: AppProtocol.FilePreviewPrepareRequest) => this.transport.request<AppProtocol.FilePreviewDescriptor>("file/preview/prepare", request),
+      read: (request: AppProtocol.FilePreviewReadRequest) => this.transport.request<AppProtocol.FilePreviewContent>("file/preview/read", request),
+      close: (request: AppProtocol.FilePreviewCloseRequest) => this.transport.request<AppProtocol.FilePreviewCloseResponse>("file/preview/close", request),
+    }, (preview, path) => {
+      if (!preview.resourceBaseUrl) throw new Error("A resource URL adapter is required for this transport.");
+      return `${preview.resourceBaseUrl}${path.split("/").map(encodeURIComponent).join("/")}`;
+    }),
+
     upload: async (
       request: FileUploadRequest,
       data: FileUploadData,
@@ -400,6 +411,13 @@ export class AppServerClient {
     });
   }
 
+  trajectory = createTrajectoryClient({
+    capabilities: (): Promise<AppProtocol.TrajectoryCapabilitiesResponse> => this.transport.request("trajectory/capabilities", null),
+    readTurn: (request: AppProtocol.TrajectoryReadTurnRequest): Promise<AppProtocol.TrajectoryReadTurnResponse> => this.transport.request("trajectory/readTurn", request),
+    readRequest: (request: AppProtocol.TrajectoryReadModelRequestRequest): Promise<AppProtocol.TrajectoryReadModelRequestResponse> => this.transport.request("trajectory/readRequest", request),
+    readTool: (request: AppProtocol.TrajectoryReadToolRequest): Promise<AppProtocol.TrajectoryReadToolResponse> => this.transport.request("trajectory/readTool", request),
+    readPayload: (request: AppProtocol.TrajectoryReadPayloadRequest): Promise<AppProtocol.TrajectoryReadPayloadResponse> => this.transport.request("trajectory/readPayload", request),
+  });
   sync = {
     metrics: (): Promise<AppProtocol.SyncMetricsResponse> => this.transport.request("sync/metrics", null),
     status: (): Promise<AppProtocol.SyncStatusResponse> => this.transport.request("sync/status", null),

@@ -90,6 +90,11 @@ impl LocalRequests {
                 | ClientMethod::SessionList
                 | ClientMethod::SessionGet
                 | ClientMethod::SessionHistory
+                | ClientMethod::TrajectoryCapabilities
+                | ClientMethod::TrajectoryReadTurn
+                | ClientMethod::TrajectoryReadRequest
+                | ClientMethod::TrajectoryReadTool
+                | ClientMethod::TrajectoryReadPayload
                 | ClientMethod::SessionActiveTurn
                 | ClientMethod::ProjectList
                 | ClientMethod::ProjectRead

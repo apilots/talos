@@ -68,6 +68,13 @@ pub(super) fn session_and_events(
             block_id: "result".into(),
             status: AgentMessageBlockStatus::Completed,
             content: AgentMessageBlockContent::ToolResult(AgentToolResult {
+                metrics: Some(talos_types::ToolExecutionMetrics {
+                    queued_at_ms: Some(10000),
+                    started_at_ms: Some(10001),
+                    finished_at_ms: Some(10003),
+                    queue_duration_ms: Some(1.0),
+                    execution_duration_ms: Some(2.0),
+                }),
                 call_id: "call-1".into(),
                 tool_name: "Read".into(),
                 content: vec![
@@ -76,6 +83,33 @@ pub(super) fn session_and_events(
                     },
                     TalosContentItem::Text {
                         text: "original result".into(),
+                    },
+                    TalosContentItem::FileRead {
+                        path: "/worker/output.log".into(),
+                        offset: 1,
+                        limit: 1,
+                        total_lines: None,
+                        next_byte_offset: Some(4096),
+                        content: "bounded log page".into(),
+                        truncated: true,
+                    },
+                    TalosContentItem::BashOutput {
+                        session_id: None,
+                        status: TalosToolTaskStatus::Completed,
+                        exit_code: Some(0),
+                        stdout: "bounded preview".into(),
+                        stderr: String::new(),
+                        truncated: true,
+                        elapsed_ms: Some(20),
+                        output_log: Some(BashOutputLog {
+                            path: "/worker/output.log".into(),
+                            relative_path: "tool-output/session-1/turn-1/call-1.log".into(),
+                            total_bytes: 2_097_152,
+                            stored_bytes: 2_097_152,
+                            total_lines: 20_000,
+                            capture_status: BashOutputCaptureStatus::Complete,
+                            expires_at: 604_900,
+                        }),
                     },
                 ],
                 is_error: false,

@@ -8,8 +8,6 @@ import type { ReasoningLevel } from "@/shared/types/ui";
 import { ModelPickerEffortSlider } from "./ModelPickerEffortSlider";
 import styles from "./ModelPicker.module.css";
 
-const EFFORT_LEVELS: ReasoningLevel[] = ["none", "light", "medium", "high", "extra_high"];
-
 export function ModelPickerOverview({ model, modelName, providerName, effort, fast, onFastChange, onEffortChange, onModels }: {
   model?: ComposerModelOption;
   modelName: string;
@@ -26,12 +24,13 @@ export function ModelPickerOverview({ model, modelName, providerName, effort, fa
   const reasoningControl = capabilities?.reasoning ?? "none";
   const supportsFast = Boolean(capabilities?.fast);
   const onLevel = reasoningLevelForEffort(model?.reasoningEffort ?? null);
-  const levels = reasoningControl === "effort" ? EFFORT_LEVELS : reasoningControl === "toggle" ? ["none" as const, onLevel] : ["none" as const];
+  const levels = reasoningControl === "effort" ? ["none" as const, ...(capabilities?.reasoning_efforts ?? []).map(reasoningLevelForEffort)] : reasoningControl === "toggle" ? ["none" as const, onLevel] : ["none" as const];
   const effectiveEffort = reasoningControl === "none" ? "none" : reasoningControl === "toggle" && effort !== "none" ? onLevel : effort;
   const [preview, setPreview] = useState(effectiveEffort);
   useEffect(() => setPreview(effectiveEffort), [effectiveEffort]);
   const defaultEffort = reasoningLevelForEffort(capabilities?.default_reasoning_effort ?? null);
   const label = (level: ReasoningLevel) => level === "none" ? t("modelPicker.off") : reasoningControl === "toggle" ? t("modelPicker.on") : t(level === "extra_high" ? "reasoningExtraHigh" : level === "light" ? "reasoningLight" : level === "medium" ? "reasoningMedium" : "reasoningHigh");
+  const unsupportedEffort = reasoningControl === "effort" && !levels.includes(effort);
   const reasoningDisabled = reasoningControl === "none" || !onEffortChange;
 
   return (
@@ -45,6 +44,7 @@ export function ModelPickerOverview({ model, modelName, providerName, effort, fa
         <button aria-label={t("modelPicker.reset", { depth: label(defaultEffort) })} className={styles.resetEffort} disabled={reasoningDisabled} onClick={() => { setPreview(defaultEffort); onEffortChange?.(defaultEffort); }} type="button"><RotateCcw aria-hidden size={14} strokeWidth={1.3} /></button>
       </div>
       <button aria-label={t("modelPicker.modelSelect", { model: modelName, provider: providerName })} className={styles.currentModel} onClick={onModels} title={`${providerName} · ${modelName}`} type="button"><span className={styles.modelName}>{modelName}</span><ChevronRight aria-hidden size={12} /></button>
+      {unsupportedEffort && <p className="text-xs text-muted" role="status">{t("modelPicker.effortUnsupported")}</p>}
       <ModelPickerEffortSlider disabled={reasoningDisabled} label={t(reasoningControl === "none" ? "modelPicker.reasoningUnavailable" : "modelPicker.depth")} levels={levels} onChange={onEffortChange} onPreviewChange={setPreview} value={preview} valueLabel={label} />
     </>
   );

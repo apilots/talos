@@ -84,7 +84,12 @@ impl NodeControlRpc {
             self.remote_publisher.unpublish(&auth.node_id).await;
             return Err(control_status(error));
         }
-        if let Err(error) = connection.ready() {
+        let ready = if first.stream_heartbeat {
+            connection.ready_with_heartbeat()
+        } else {
+            connection.ready()
+        };
+        if let Err(error) = ready {
             self.nodes.withdraw_publication(&auth, &revoke).await;
             return Err(control_status(error));
         }

@@ -8,6 +8,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { FileCategory } from "@/features/files";
 import { FilesPage } from "./FilesPage";
 import { SidebarPrimaryNav } from "@/widgets/sidebar/SidebarPrimaryNav";
+import { useAppStore } from "@/shared/store/app-store";
 
 const filesPage = vi.hoisted(() => ({
   query: "",
@@ -70,6 +71,14 @@ vi.mock("@/features/files", () => ({
 }));
 
 describe("FilesPage", () => {
+  it.each(["grid", "list"] as const)("opens a Files image in the right workspace from %s", view => {
+    filesPage.view = view;
+    useAppStore.setState({ workspaceOwner: null, workspaceSnapshots: {}, workspaceWindows: [], workspaceActiveKey: null, workspaceOpen: false });
+    render(<MemoryRouter><FilesPage /></MemoryRouter>);
+    fireEvent.click(screen.getByText("diagram.png"));
+    expect(useAppStore.getState().workspaceWindows).toEqual([{ kind: "file", fileId: "file-1" }]);
+    expect(useAppStore.getState().workspaceOpen).toBe(true);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     filesPage.query = "";

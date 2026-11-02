@@ -278,7 +278,7 @@ has_real_llm_key() { return 1; }
 
     def test_packaged_server_requires_only_host_docker_python_and_current_image(self):
         root = E2E / 'scenarios'
-        case = '20_browser_workspace/06_docker_server.sh'
+        case = '23_browser_container/02_docker_server.sh'
         with patch.dict(os.environ, {'TALOS_E2E_SERVER_IMAGE': 'owned-server:current'}), \
              patch.object(runner, 'executable', side_effect=lambda name: name in {'docker', 'python3', 'ps', 'lsof'}), \
              patch.object(runner, 'probe', side_effect=lambda argv: argv in (
@@ -316,7 +316,10 @@ has_real_llm_key() { return 1; }
                 requirements = runner.requirements(root, case)
                 self.assertEqual(requirements["binaries"], ["server"])
                 self.assertEqual(requirements["python_modules"], ["yaml"])
-                self.assertEqual(set(requirements["commands"]), {"cargo", "protoc", "curl"})
+                commands = {"cargo", "protoc", "curl"}
+                if case == "01_models/custom_providers.sh":
+                    commands.update({"git", "node"})
+                self.assertEqual(set(requirements["commands"]), commands)
                 self.assertFalse(requirements.get("checks"))
                 self.assertFalse(requirements.get("env"))
         self.assertIn("model", runner.requirements(root, "03_messages_http_sse.sh")["checks"])

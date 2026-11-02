@@ -234,6 +234,11 @@ pub trait WorkerEnvironment: Send + Sync {
         &self,
         context: WorkerEnvironmentContext,
     ) -> AgentFuture<'_, AgentResult<ModelListResponse>>;
+    fn preview_resource(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: talos_types::WorkerPreviewRequest,
+    ) -> AgentFuture<'_, AgentResult<talos_types::WorkerPreviewResponse>>;
     fn read_directory(
         &self,
         context: WorkerEnvironmentContext,

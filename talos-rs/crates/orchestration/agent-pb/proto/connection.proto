@@ -8,14 +8,17 @@ import "types.proto";
 import "resources.proto";
 import "coordinator.proto";
 
-message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; }
+// Heartbeat frames are enabled only when Connect and Ready both opt in.
+message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; bool stream_heartbeat = 3; }
 message ConnectNodeResponse {
   oneof result { Empty ready = 1; Failure failure = 2; }
+  bool stream_heartbeat = 3;
 }
 message NodeToControlFrame {
   oneof body {
     ConnectNodeRequest connect = 1;
     WorkerRpcResult result = 2;
+    uint64 pong = 3;
   }
 }
 message ControlToNodeFrame {
@@ -24,6 +27,7 @@ message ControlToNodeFrame {
     WorkerRpcCall call = 2;
     CancelWorkerRpcCall cancel = 3;
     AcknowledgeWorkerRpcResult acknowledge = 4;
+    uint64 ping = 5;
   }
 }
 message WorkerRpcCall {
@@ -44,6 +48,7 @@ message WorkerRpcCall {
     PeerFileReadRequest peer_file_read = 111;
     PeerFileUpdateRequest peer_file_update = 112;
     PeerFileDeleteRequest peer_file_delete = 113;
+    AppendSessionHistorySupplementRequest append_session_history_supplement = 125;
     ReadSessionHistoryRequest read_session_history = 100;
     ResolveAttachmentsRequest resolve_attachments = 101;
     ReadMemoryProgressRequest read_memory_progress = 102;
@@ -103,6 +108,7 @@ message WorkerRpcCall {
     ResolveSkillsRequest resolve_skills = 49;
     GetWorkspaceInfoRequest workspace_info = 30;
     ListWorkerModelsRequest list_models = 31;
+    PreviewResourceRequest preview_resource = 122;
     ReadDirectoryRequest read_directory = 32;
     CreateDirectoryRequest create_directory = 33;
     GetProjectStatusRequest project_status = 34;
@@ -124,6 +130,7 @@ message WorkerRpcResult {
     PeerFileReadResponse peer_file_read = 111;
     PeerFileUpdateResponse peer_file_update = 112;
     PeerFileDeleteResponse peer_file_delete = 113;
+    AppendSessionHistorySupplementResponse append_session_history_supplement = 125;
     ReadSessionHistoryResponse read_session_history = 100;
     ResolveAttachmentsResponse resolve_attachments = 101;
     ReadMemoryProgressResponse read_memory_progress = 102;
@@ -181,6 +188,7 @@ message WorkerRpcResult {
     ResolveSkillsResponse resolve_skills = 49;
     GetWorkspaceInfoResponse workspace_info = 30;
     ListWorkerModelsResponse list_models = 31;
+    PreviewResourceResponse preview_resource = 122;
     ReadDirectoryResponse read_directory = 32;
     CreateDirectoryResponse create_directory = 33;
     GetProjectStatusResponse project_status = 34;
@@ -210,7 +218,7 @@ service AgentCoordinatorRpc {
   rpc InvokeActiveCommand(ActiveSessionCommandRequest) returns (ActiveSessionCommandResponse);
   rpc Connect(stream CoordinatorToControlFrame) returns (stream ControlToCoordinatorFrame);
 }
-message ConnectCoordinatorRequest { string peer_id = 1; string computer_id = 2; bool serves_files = 3; }
+message ConnectCoordinatorRequest { string peer_id = 1; string computer_id = 2; bool serves_files = 3; bool stream_heartbeat = 4; }
 message CoordinatorToControlFrame {
   oneof body {
     ConnectCoordinatorRequest connect = 1;
@@ -218,6 +226,7 @@ message CoordinatorToControlFrame {
     CancelWorkerRpcCall cancel = 3;
     AcknowledgeWorkerRpcResult acknowledge = 4;
     WorkerRpcResult resource_result = 5;
+    uint64 ping = 6;
   }
 }
 message ControlToCoordinatorFrame {
@@ -227,5 +236,6 @@ message ControlToCoordinatorFrame {
     WorkerRpcCall resource_call = 3;
     CancelWorkerRpcCall resource_cancel = 4;
     AcknowledgeWorkerRpcResult resource_acknowledge = 5;
+    uint64 pong = 6;
   }
 }

@@ -20,11 +20,17 @@ mod transport;
 
 use control::ControlCommand;
 
+struct FailedUpload {
+    cut: Option<i64>,
+    error: talos_error::ApiError,
+    retry_at: Option<tokio::time::Instant>,
+}
+
 struct RunnerChannels {
     presence_computers: watch::Receiver<Vec<String>>,
     upload_cursor: i64,
     upload_cut: i64,
-    failed_uploads: HashMap<crate::SyncResourceKey, (Option<i64>, talos_error::ApiError)>,
+    failed_uploads: HashMap<crate::SyncResourceKey, FailedUpload>,
     wake: mpsc::Receiver<()>,
     commands: mpsc::Receiver<ControlCommand>,
     status: watch::Sender<SyncStatus>,
@@ -226,6 +232,7 @@ async fn run<A: SyncDataAdapter>(
         .ok()
         .map(|url| url.origin().ascii_serialization());
     tracing::info!(account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, "Sync transport runner started");
+    let base_delay = params.reconnect_delay.min(Duration::from_secs(30));
     loop {
         let enabled = match sync.enabled(&params.binding.scope.account_id).await {
             Ok(enabled) => enabled,
@@ -246,15 +253,24 @@ async fn run<A: SyncDataAdapter>(
         channels.status.send_modify(|value| {
             value.connection = SyncConnectionState::Connecting;
         });
-        let started = std::time::Instant::now();
+        let started = tokio::time::Instant::now();
         let mut phase = transport::ConnectionPhase::Bootstrap;
         let result =
             transport::connected(&sync, &*adapter, &params, &stop, &mut channels, &mut phase).await;
         if stop.is_cancelled() {
             break;
         }
+        let mut retry_delay = base_delay;
         if let Err(error) = result {
-            let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, ?phase, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_ms = params.reconnect_delay.as_millis() as u64);
+            if matches!(
+                error.error_code(),
+                ErrorCode::Unauthenticated
+                    | ErrorCode::PermissionDenied
+                    | ErrorCode::MessageQueueFull
+            ) {
+                retry_delay = retry_delay.max(Duration::from_secs(10));
+            }
+            let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, ?phase, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_ms = retry_delay.as_millis() as u64);
             let _entered = span.enter();
             talos_logging::report_error(&error);
             channels.status.send_modify(|value| {
@@ -265,7 +281,7 @@ async fn run<A: SyncDataAdapter>(
         while let Ok(command) = channels.commands.try_recv() {
             command.reject();
         }
-        tokio::select! { _ = stop.cancelled() => break, _ = tokio::time::sleep(params.reconnect_delay) => {} }
+        tokio::select! { _ = stop.cancelled() => break, _ = tokio::time::sleep(retry_delay) => {} }
     }
     channels
         .status

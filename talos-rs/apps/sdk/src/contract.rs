@@ -219,6 +219,47 @@ pub trait GatewayClient: Send {
 
     async fn get_session(&mut self, request: SessionGetRequest) -> TalosResult<SessionGetResponse>;
 
+    async fn trajectory_capabilities(
+        &mut self,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryCapabilitiesResponse> {
+        Ok(talos_agent_api::trajectory::TrajectoryCapabilitiesResponse { supported: false })
+    }
+    async fn read_turn_trajectory(
+        &mut self,
+        _request: talos_agent_api::trajectory::TrajectoryReadTurnRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadTurnResponse> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This SDK implementation does not support trajectory reads.",
+        ))
+    }
+    async fn read_request_trajectory(
+        &mut self,
+        _request: talos_agent_api::trajectory::TrajectoryReadModelRequestRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadModelRequestResponse> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This SDK implementation does not support trajectory reads.",
+        ))
+    }
+    async fn read_tool_trajectory(
+        &mut self,
+        _request: talos_agent_api::trajectory::TrajectoryReadToolRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadToolResponse> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This SDK implementation does not support trajectory reads.",
+        ))
+    }
+    async fn read_trajectory_payload(
+        &mut self,
+        _request: talos_agent_api::trajectory::TrajectoryReadPayloadRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadPayloadResponse> {
+        Err(TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This SDK implementation does not support trajectory reads.",
+        ))
+    }
     async fn get_session_history(
         &mut self,
         request: SessionHistoryRequest,

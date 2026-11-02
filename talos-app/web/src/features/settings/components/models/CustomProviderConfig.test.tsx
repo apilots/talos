@@ -10,7 +10,7 @@ import "@/shared/i18n/setup";
 import { CustomProviderModal } from "./CustomProviderModal";
 import { CustomProviderMenu } from "./CustomProviderMenu";
 import { SettingsModelModal } from "./SettingsModelModal";
-import { emptyModelForm, formToModel, modelToForm } from "./modelForm";
+import { emptyModelForm, formToModel, modelToForm, type ModelFormState } from "./modelForm";
 import { parseRequestParameters } from "./requestParameters";
 
 
@@ -115,4 +115,44 @@ describe("custom provider configuration", () => {
     expect(parseRequestParameters([{ key: "x", value: "true" }, { key: "x", value: "false" }]).error).toBe("duplicate");
     expect(parseRequestParameters([{ key: "x", value: "not JSON" }]).error).toBe("invalidJson");
   });
+});
+
+it("preserves HTTP deadlines when editing a connection and explicit efforts when editing a model", () => {
+  const onSave = vi.fn();
+  const http_timeouts = { connect_secs: 5, response_secs: 120, stream_idle_secs: 60, stream_total_secs: 600 };
+  render(<CustomProviderModal initial={{ name: "Local", protocol: "chat", base_url: "http://localhost:8000/v1", models: [], http_timeouts }} onSave={onSave} onClose={() => {}} />);
+  fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Edited" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Edited", http_timeouts }));
+  const original = { ...formToModel({ ...emptyModelForm, id: "opaque", reasoning: true }), reasoning_efforts: ["light", "medium", "xhigh"] as const };
+  const model = { ...original, reasoning_efforts: [...original.reasoning_efforts] };
+  expect(formToModel(modelToForm(model), model).reasoning_efforts).toEqual(["light", "medium", "xhigh"]);
+});
+
+it("edits accepted effort levels independently of the thinking parameter", async () => {
+  const saved = vi.fn();
+  function Harness() {
+    const [form, setForm] = useState({ ...emptyModelForm, id: "opaque", reasoning: true, request_parameters: [{ key: "enable_thinking", value: "true" }] });
+    return <SettingsModelModal mode="edit" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={() => {}} />;
+  }
+  render(<Harness />);
+  fireEvent.click(screen.getByText("Advanced"));
+  await userEvent.click(screen.getByRole("checkbox", { name: "Restrict accepted effort levels" }));
+  await userEvent.click(screen.getByRole("checkbox", { name: /^High$/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(saved).toHaveBeenCalledWith(expect.objectContaining({ reasoning_efforts: ["light", "medium", "xhigh"], request_parameters: { enable_thinking: true } }));
+});
+
+it("selects a default from declared effort choices", async () => {
+  const saved = vi.fn();
+  function Harness() {
+    const [form, setForm] = useState<ModelFormState>({ ...emptyModelForm, id: "opaque", reasoning: true, reasoning_efforts: ["light", "medium", "xhigh"] });
+    return <SettingsModelModal mode="edit" form={form} saving={false} error="" onChange={setForm} onSave={() => saved(formToModel(form))} onClose={() => {}} />;
+  }
+  render(<Harness />);
+  await userEvent.click(screen.getByRole("combobox", { name: "Reasoning effort" }));
+  expect(screen.getAllByRole("option")).toHaveLength(3);
+  await userEvent.click(screen.getByRole("option", { name: /^Light$/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(saved).toHaveBeenCalledWith(expect.objectContaining({ reasoning_effort: "light", reasoning_efforts: ["light", "medium", "xhigh"] }));
 });

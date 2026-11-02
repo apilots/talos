@@ -104,7 +104,7 @@ export async function createChatFeatureMock(
             provider: "mock",
             reasoning: true,
             reasoning_effort: "medium",
-            selection_capabilities: { reasoning: "effort", fast: true, default_fast: false, default_reasoning_effort: "medium" },
+            selection_capabilities: { reasoning: "effort", reasoning_efforts: ["light", "medium", "high", "xhigh"], fast: true, default_fast: false, default_reasoning_effort: "medium" },
           },
         ],
       },

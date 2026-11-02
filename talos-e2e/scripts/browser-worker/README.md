@@ -64,7 +64,7 @@ Receipt validation inspects all successful collection responses, including a
 completed response after an earlier pending one, then verifies File API content.
 Failed native MCP tasks preserve the synthetic page's input events and pixels
 before closing their owned views.
-Use `--case 20_browser_workspace/05_docker_worker` with
+Use `--case 23_browser_container/01_docker_worker` with
 `TALOS_E2E_SERVER_BIN`, `TALOS_E2E_APP_SERVER_BIN`, and
 `TALOS_E2E_WORKER_IMAGE`; set `TALOS_E2E_NATIVE_MEDIA=1` to require the actual Desktop
 noVNC viewer. GitHub PR coverage requires this native media path. The controlled

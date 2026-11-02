@@ -170,6 +170,52 @@ pub trait Gateway: Send + Sync {
         request: RecoverTimelineRequest,
     ) -> TalosResult<RecoverTimelineResponse>;
 
+    async fn trajectory_capabilities(
+        &self,
+        _actor: &Actor,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryCapabilitiesResponse> {
+        Ok(talos_agent_api::trajectory::TrajectoryCapabilitiesResponse { supported: false })
+    }
+    async fn read_turn_trajectory(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadTurnRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadTurnResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
+    async fn read_request_trajectory(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadModelRequestRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadModelRequestResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
+    async fn read_tool_trajectory(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadToolRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadToolResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
+    async fn read_trajectory_payload(
+        &self,
+        _actor: &Actor,
+        _request: talos_agent_api::trajectory::TrajectoryReadPayloadRequest,
+    ) -> TalosResult<talos_agent_api::trajectory::TrajectoryReadPayloadResponse> {
+        Err(talos_error::TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "This Gateway does not provide trajectory reads.",
+        ))
+    }
     async fn list_sessions(
         &self,
         actor: &Actor,
@@ -475,6 +521,37 @@ pub trait Gateway: Send + Sync {
         _actor: &Actor,
         _request: FileReadRequest,
     ) -> TalosResult<talos_types::FileContentResponse> {
+        Err(file_gateway_unavailable())
+    }
+
+    async fn prepare_file_preview(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::FilePreviewPrepareRequest,
+    ) -> TalosResult<talos_types::FilePreviewDescriptor> {
+        Err(file_gateway_unavailable())
+    }
+
+    async fn read_file_preview(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewContent> {
+        Err(file_gateway_unavailable())
+    }
+
+    /// Resource transports use only a scoped preview grant, never account credentials.
+    async fn read_file_preview_capability(
+        &self,
+        _request: talos_types::FilePreviewReadRequest,
+    ) -> TalosResult<talos_types::FilePreviewBytes> {
+        Err(file_gateway_unavailable())
+    }
+    async fn close_file_preview(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::FilePreviewCloseRequest,
+    ) -> TalosResult<talos_types::FilePreviewCloseResponse> {
         Err(file_gateway_unavailable())
     }
 

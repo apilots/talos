@@ -14,6 +14,7 @@ use talos_types::*;
 
 pub struct WorkerEnvironmentService {
     config: Arc<RwLock<Config>>,
+    preview_roots: crate::fs::preview::PreviewRoots,
     home: Option<PathBuf>,
     workspace_memory: Arc<crate::UserWorkspaceMemoryService>,
     memory_service: Option<crate::MemoryService>,
@@ -27,6 +28,7 @@ impl WorkerEnvironmentService {
     pub fn new(config: Arc<RwLock<Config>>, home: Option<PathBuf>) -> Self {
         Self {
             config,
+            preview_roots: Default::default(),
             home,
             workspace_memory: Arc::new(crate::UserWorkspaceMemoryService::new()),
             memory_service: None,
@@ -541,6 +543,16 @@ impl WorkerEnvironment for WorkerEnvironmentService {
                 models: resolve_model_catalog(&config.llm),
                 default_model_selection: resolve_default_model_selection(&config.llm)?,
             })
+        })
+    }
+    fn preview_resource(
+        &self,
+        context: WorkerEnvironmentContext,
+        params: WorkerPreviewRequest,
+    ) -> AgentFuture<'_, TalosResult<WorkerPreviewResponse>> {
+        Box::pin(async move {
+            Self::actor(&context)?;
+            self.preview_roots.operate(context.user_id, params).await
         })
     }
     fn read_directory(

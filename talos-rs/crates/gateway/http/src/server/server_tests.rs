@@ -202,6 +202,7 @@ fn test_model_info() -> ModelInfo {
         "bailian",
         talos_types::ProviderModelConfig {
             reasoning_replay: Default::default(),
+            reasoning_efforts: None,
             request_parameters: Default::default(),
             id: "qwen-plus".to_string(),
             name: "Qwen Plus".to_string(),

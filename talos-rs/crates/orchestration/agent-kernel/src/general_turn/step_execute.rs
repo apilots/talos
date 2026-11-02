@@ -1,3 +1,4 @@
+use super::step_output::emit_assistant_text_for_step;
 use super::types::ToolCallRecord;
 use super::*;
 use crate::{
@@ -5,15 +6,6 @@ use crate::{
     ToolProgressDeltaStreamData, ToolProgressKind, ToolStreamKey,
 };
 use std::collections::BTreeSet;
-
-pub(crate) async fn emit_stream_event(
-    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
-    payload: AgentKernelEventPayload,
-) {
-    if let Some(tx) = stream_tx {
-        let _ = tx.send(AgentKernelEvent::new(payload)).await;
-    }
-}
 
 #[derive(Debug, Default)]
 struct PendingToolCall {
@@ -87,16 +79,6 @@ fn normalized_tool_call_id(round: u32, index: usize, id: Option<String>) -> Stri
         .unwrap_or_else(|| format!("tool-{}-{}", round, index))
 }
 
-fn talos_usage_from_provider_usage(usage: &talos_llm_provider::Usage) -> TokenUsage {
-    TokenUsage {
-        input_tokens: usage.prompt_tokens,
-        output_tokens: usage.completion_tokens,
-        total_tokens: usage.total_tokens,
-        cache_creation_input_tokens: usage.cache_creation_input_tokens,
-        cache_read_input_tokens: usage.cache_read_input_tokens,
-    }
-}
-
 fn resolve_assistant_text_phase(
     call_mode: KernelModelCallMode,
     output_phase: ModelOutputPhase,
@@ -162,6 +144,7 @@ async fn close_active_non_final_blocks_before_final(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn stream_round(
     llm_provider: Arc<dyn LlmProvider>,
     request: ChatRequest,
@@ -170,6 +153,7 @@ pub(crate) async fn stream_round(
     _pre_final_execution_summary: Option<String>,
     stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
     streaming_tool_execution: Option<StreamingToolExecutionConfig>,
+    observation: Option<Arc<dyn crate::trajectory::KernelModelObservation>>,
 ) -> TalosResult<StreamRound> {
     let mut stream = llm_provider.stream_model_blocks(request).await?;
     let mut content = String::new();
@@ -234,7 +218,11 @@ pub(crate) async fn stream_round(
         };
 
         let mut stream_done = false;
-        match event? {
+        let event = event?;
+        if let Some(observer) = &observation {
+            observer.model_event(&event);
+        }
+        match event {
             ModelBlockStreamEvent::BlockStarted(started) => match started.kind {
                 ModelBlockKind::Reasoning => {
                     ensure_not_after_final(final_answer_started, "reasoning block")?;
@@ -518,7 +506,7 @@ pub(crate) async fn stream_round(
                 }
                 finish_reason = final_reason;
                 if let Some(final_usage) = final_usage {
-                    usage = talos_usage_from_provider_usage(&final_usage);
+                    usage = TokenUsage::from(&final_usage);
                 }
                 stream_done = true;
             }
@@ -644,86 +632,6 @@ pub(crate) async fn stream_round(
     })
 }
 
-async fn chat_round(
-    llm_provider: Arc<dyn LlmProvider>,
-    request: ChatRequest,
-) -> TalosResult<StreamRound> {
-    let response = llm_provider.chat_with_tools(request).await?;
-    let tool_calls = response.get_tool_calls().to_vec();
-    Ok(StreamRound {
-        content: response.content,
-        reasoning: response.reasoning,
-        tool_calls,
-        streamed_tool_outputs: Vec::new(),
-        finish_reason: response.finish_reason,
-        usage: talos_usage_from_provider_usage(&response.usage),
-        assistant_text_streamed: false,
-        final_answer_streamed: false,
-        execution_summary_streamed: false,
-    })
-}
-
-pub(crate) async fn emit_assistant_text_stream_item(
-    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
-    item_key: KernelStreamItemKey,
-    phase: AssistantTextPhase,
-    round: Option<u32>,
-    text: &str,
-) -> bool {
-    if stream_tx.is_none() || text.trim().is_empty() {
-        return false;
-    }
-
-    emit_stream_event(
-        stream_tx,
-        AgentKernelEventPayload::AssistantTextStarted(AssistantTextStartedStreamData {
-            item_key: item_key.clone(),
-            phase,
-            round,
-        }),
-    )
-    .await;
-    emit_stream_event(
-        stream_tx,
-        AgentKernelEventPayload::AssistantTextDelta(AssistantTextDeltaStreamData {
-            item_key: item_key.clone(),
-            delta: text.to_string(),
-        }),
-    )
-    .await;
-    emit_stream_event(
-        stream_tx,
-        AgentKernelEventPayload::AssistantTextCompleted(AssistantTextCompletedStreamData {
-            item_key,
-        }),
-    )
-    .await;
-    true
-}
-
-async fn emit_assistant_text_for_step(
-    stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
-    round: u32,
-    text: &str,
-    disposition: GeneralTurnStepDisposition,
-) -> bool {
-    let phase = match disposition {
-        GeneralTurnStepDisposition::ContinueWithTools => AssistantTextPhase::Commentary,
-        GeneralTurnStepDisposition::FinalResponse => AssistantTextPhase::FinalAnswer,
-    };
-    emit_assistant_text_stream_item(
-        stream_tx,
-        KernelStreamItemKey {
-            round: Some(round),
-            local_id: "assistant_text".to_string(),
-        },
-        phase,
-        Some(round),
-        text,
-    )
-    .await
-}
-
 pub async fn execute_general_turn_step(
     step: GeneralTurnStepRequest,
     llm_provider: Arc<dyn LlmProvider>,
@@ -733,20 +641,59 @@ pub async fn execute_general_turn_step(
     let stream_tx = step.stream_tx.clone();
     let streaming_tool_execution = step.streaming_tool_execution.clone();
     let pre_final_execution_summary = step.pre_final_execution_summary.clone();
-    let round_response = if stream_tx.is_some() {
+    let recorder = step.trajectory.clone();
+    let request = llm_provider.bind_request(step.into_chat_request())?;
+    let mut observation =
+        crate::trajectory::ModelObservationGuard::new(recorder.as_ref().and_then(|r| {
+            r.start_model(
+                match call_mode {
+                    KernelModelCallMode::WorkingLoop => {
+                        crate::trajectory::KernelObservedPurpose::Working
+                    }
+                    KernelModelCallMode::Finalization => {
+                        crate::trajectory::KernelObservedPurpose::FinalAnswer
+                    }
+                },
+                llm_provider.name(),
+                &request,
+            )
+        }));
+    let result = if stream_tx.is_some() {
         stream_round(
             llm_provider,
-            step.into_chat_request(),
+            request,
             round,
             call_mode,
             pre_final_execution_summary,
             stream_tx.as_ref(),
             streaming_tool_execution,
+            observation.observer(),
         )
-        .await?
+        .await
     } else {
-        chat_round(llm_provider, step.into_chat_request()).await?
+        let result = llm_provider.chat_with_tools(request).await;
+        match result {
+            Ok(response) => {
+                if let Some(observer) = observation.observer() {
+                    observer.response(&response);
+                }
+                Ok(StreamRound {
+                    tool_calls: response.get_tool_calls().to_vec(),
+                    content: response.content,
+                    reasoning: response.reasoning,
+                    finish_reason: response.finish_reason,
+                    usage: TokenUsage::from(&response.usage),
+                    ..Default::default()
+                })
+            }
+            Err(error) => Err(error),
+        }
     };
+    if let (Some(observer), Ok(output)) = (observation.observer(), &result) {
+        observer.tool_calls(&output.tool_calls);
+    }
+    observation.finish(result.as_ref().err());
+    let round_response = result?;
 
     let mut output_items = Vec::new();
     let reasoning_text = round_response.reasoning.display_text();
@@ -813,7 +760,11 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
         .extend(step.reasoning.display_text.clone());
     if !step.tool_calls.is_empty() {
         let mut message =
-            ChatMessage::assistant_with_tool_calls(step.text.clone(), step.tool_calls.clone());
+            ChatMessage::assistant_with_tool_calls(step.text.clone(), step.tool_calls.clone())
+                .with_input_origin(talos_llm_provider::MessageInputOrigin {
+                    kind: talos_llm_provider::MessageInputKind::Context,
+                    source: talos_llm_provider::MessageInputSource::Runtime,
+                });
         if let Some(continuation) = step.reasoning.continuation.clone() {
             message = message.with_reasoning_continuation(continuation);
         }

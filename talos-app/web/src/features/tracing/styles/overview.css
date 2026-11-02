@@ -1,0 +1,216 @@
+.tracing-overview {
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: rgb(var(--color-card));
+}
+.tracing-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.tracing-section-heading h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.tracing-section-heading small {
+  font-size: var(--trace-meta);
+  font-weight: 400;
+  margin-left: 8px;
+  color: rgb(var(--color-muted));
+}
+.tracing-section-heading > span {
+  font-size: var(--trace-caption);
+  color: rgb(var(--color-muted));
+}
+
+.tracing-axis,
+.tracing-lane {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  font-size: var(--trace-caption);
+  color: rgb(var(--color-muted));
+  align-items: center;
+}
+.tracing-axis {
+  margin-block: 6px;
+}
+.tracing-axis > div {
+  position: relative;
+  height: 16px;
+}
+.tracing-axis > div > span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+}
+.tracing-axis > div > span:first-child {
+  transform: none;
+}
+.tracing-axis > div > span:last-child {
+  transform: translateX(-100%);
+}
+.tracing-lane > div {
+  position: relative;
+  height: 20px;
+  border-bottom: 1px solid rgb(var(--color-divider));
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(var(--trace-tick-step, 25%) - 1px),
+    rgb(var(--color-divider)) calc(var(--trace-tick-step, 25%) - 1px),
+    rgb(var(--color-divider)) var(--trace-tick-step, 25%)
+  );
+}
+.tracing-bar {
+  --trace-bar: var(--trace-model);
+  position: absolute;
+  height: 20px;
+  top: 0;
+  min-width: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.tracing-bar::before {
+  content: "";
+  position: absolute;
+  inset: 5px 0;
+  border-radius: 2px;
+  background: rgb(var(--trace-bar) / 0.8);
+}
+.tracing-bar.anchor {
+  --trace-bar: var(--trace-input);
+  min-width: 10px;
+}
+.tracing-bar.anchor::before {
+  width: 3px;
+}
+.tracing-bar.tool {
+  --trace-bar: var(--trace-tool);
+}
+.tracing-bar.waiting::before {
+  background: repeating-linear-gradient(
+    120deg,
+    rgb(var(--color-muted) / 0.12) 0,
+    rgb(var(--color-muted) / 0.12) 2px,
+    rgb(var(--color-muted) / 0.7) 2px,
+    rgb(var(--color-muted) / 0.7) 3px
+  );
+}
+.tracing-bar.failed {
+  --trace-bar: var(--color-danger);
+}
+.tracing-bar:hover::before,
+.tracing-bar[aria-pressed="true"]::before {
+  box-shadow: 0 0 0 1px rgb(var(--trace-bar));
+}
+.tracing-bar:focus-visible {
+  outline: 2px solid rgb(var(--color-ink));
+  outline-offset: 1px;
+  z-index: 1;
+}
+.tracing-preoutput {
+  position: absolute;
+  inset: 5px auto 5px 0;
+  background: rgb(var(--color-card) / 0.6);
+  border-radius: 2px 0 0 2px;
+  pointer-events: none;
+}
+.tracing-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: var(--trace-caption);
+  color: rgb(var(--color-muted));
+  margin-top: 10px;
+}
+.tracing-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tracing-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 5px;
+  border-radius: 1px;
+  background: rgb(var(--trace-model) / 0.8);
+}
+.tracing-legend i.anchor {
+  background: rgb(var(--trace-input));
+}
+.tracing-legend i.preoutput {
+  background: rgb(var(--trace-model) / 0.32);
+}
+.tracing-legend i.tool {
+  background: rgb(var(--trace-tool) / 0.8);
+}
+.tracing-legend i.waiting {
+  background: repeating-linear-gradient(
+    120deg,
+    transparent 0,
+    transparent 2px,
+    rgb(var(--color-muted)) 2px,
+    rgb(var(--color-muted)) 3px
+  );
+}
+.tracing-root[data-narrow="true"] .tracing-overview {
+  padding: 12px;
+}
+.tracing-root[data-narrow="true"] .tracing-legend {
+  justify-content: flex-start;
+}
+.tracing-root[data-narrow="true"] .tracing-section-heading {
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+.tracing-root[data-narrow="true"] .tracing-axis,
+.tracing-root[data-narrow="true"] .tracing-lane {
+  grid-template-columns: 38px minmax(0, 1fr);
+}
+
+.tracing-overview > summary {
+  cursor: pointer;
+  list-style: none;
+  min-height: 24px;
+}
+.tracing-overview > summary h2 {
+  flex: 1;
+}
+
+.tracing-timeline-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-block: 4px 6px;
+  color: rgb(var(--color-muted));
+  font-size: var(--trace-caption);
+  cursor: pointer;
+}
+.tracing-timeline-option input {
+  accent-color: rgb(var(--color-accent));
+}
+.tracing-timeline-scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 4px;
+}
+
+.tracing-timeline-scroll :is(.tracing-axis, .tracing-lane) > span {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  height: 100%;
+  align-content: center;
+  background: rgb(var(--color-card));
+  box-shadow: 6px 0 rgb(var(--color-card));
+}

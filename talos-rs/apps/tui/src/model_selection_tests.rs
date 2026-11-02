@@ -1,6 +1,14 @@
 use super::*;
 use crate::test_support::mock_model_info;
 
+#[tokio::test]
+async fn test_app_server_initialize_reports_error_after_three_model_load_retries() {
+    let mut app = crate::test_support::create_app_server_app_with_model_list_failures(4);
+    app.initialize_session().await;
+    assert_eq!(app.connection_status, "error");
+    assert_eq!(app.session_id, None);
+}
+
 #[test]
 fn selects_duplicate_model_id_by_provider_key() {
     let mut openai = mock_model_info("shared-model", 128_000);
@@ -47,14 +55,14 @@ async fn picker_reasoning_off_is_kept_on_refresh_and_sent_on_first_turn() {
     let mut app = TuiApp::new_with_gateway_client(gateway);
     app.initialize_session().await;
     app.toggle_model_picker();
-    for code in [KeyCode::Enter, KeyCode::Up, KeyCode::Enter] {
+    for code in [KeyCode::Enter, KeyCode::Up, KeyCode::Up, KeyCode::Enter] {
         app.handle_input(KeyEvent::new(code, KeyModifiers::NONE))
             .await
             .unwrap();
     }
     let selected = app.current_model_selection().unwrap();
     assert_eq!(selected.reasoning_effort, None);
-    assert!(app.current_model_status_label().ends_with("off"));
+    assert!(app.current_model_status_label().ends_with("none"));
     app.refresh_models_from_gateway().await.unwrap();
     assert_eq!(app.current_model_selection(), Some(selected.clone()));
     app.send_user_message("configured controls".to_string())

@@ -32,8 +32,16 @@ pub(crate) struct AuthContexts {
 struct Context {
     admission: tokio::sync::Mutex<()>,
     initialized: AtomicBool,
+    last_used: Mutex<Instant>,
     state: watch::Sender<TalosResult<VerifiedContext>>,
     task: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Keeps an admitted credential's maintenance alive while a connection owns it.
+/// Services without cached authorization maintenance use the default lease.
+#[derive(Default)]
+pub struct AccessTokenLease {
+    _context: Option<Arc<Context>>,
 }
 
 #[derive(Clone)]
@@ -62,9 +70,9 @@ impl VerifiedContext {
 }
 
 impl Context {
-    fn stop(&self) {
+    fn stop(&self, error: TalosError) {
         self.initialized.store(true, Ordering::SeqCst);
-        let _ = self.state.send_replace(Err(unauthenticated()));
+        let _ = self.state.send_replace(Err(error));
         if let Some(task) = self.task.lock().expect("Auth task lock").take() {
             task.abort();
         }
@@ -98,17 +106,30 @@ impl AuthContexts {
             .drain()
             .map(|(_, context)| context)
         {
-            context.stop();
+            context.stop(unauthenticated());
         }
         self.tasks.wait().await;
     }
 
     pub(crate) fn identity(&self, token: &str) -> TalosResult<RequestIdentity> {
         let sessions = self.sessions.lock().expect("Auth contexts lock");
-        sessions
+        let context = sessions
             .get(&fingerprint(token))
-            .ok_or_else(unauthenticated)?
-            .identity()
+            .ok_or_else(unauthenticated)?;
+        let identity = context.identity()?;
+        *context.last_used.lock().expect("Auth usage lock") = Instant::now();
+        Ok(identity)
+    }
+
+    pub(crate) fn retain(&self, token: &str) -> TalosResult<AccessTokenLease> {
+        let sessions = self.sessions.lock().expect("Auth contexts lock");
+        let context = sessions
+            .get(&fingerprint(token))
+            .ok_or_else(unauthenticated)?;
+        context.identity()?;
+        Ok(AccessTokenLease {
+            _context: Some(context.clone()),
+        })
     }
 
     pub(crate) fn invalidate(&self, token: &str) {
@@ -118,7 +139,7 @@ impl AuthContexts {
             .expect("Auth contexts lock")
             .remove(&fingerprint(token))
         {
-            context.stop();
+            context.stop(unauthenticated());
         }
     }
 
@@ -134,11 +155,41 @@ impl AuthContexts {
                 return Err(unauthenticated());
             }
             sessions.retain(|_, context| {
-                !context.initialized.load(Ordering::SeqCst) || context.identity().is_ok()
+                if !context.initialized.load(Ordering::SeqCst) {
+                    return true;
+                }
+                if let Err(error) = context.identity() {
+                    // Keep known outage proofs for their existing refresh owner.
+                    // Local readers still reject them at the original deadline.
+                    if error.is_code(ErrorCode::ServiceUnavailable) {
+                        return true;
+                    }
+                    context.stop(error);
+                    return false;
+                }
+                true
             });
             if let Some(context) = sessions.get(&key) {
                 context.clone()
             } else {
+                if sessions.len() >= MAX_CONTEXTS {
+                    // In-flight admissions and retained connections have another Arc.
+                    // Recent local users keep their proof even without a connection lease.
+                    let oldest = sessions
+                        .iter()
+                        .filter(|(_, context)| {
+                            context.initialized.load(Ordering::SeqCst)
+                                && Arc::strong_count(context) == 1
+                        })
+                        .map(|(key, context)| {
+                            (*key, *context.last_used.lock().expect("Auth usage lock"))
+                        })
+                        .filter(|(_, last_used)| last_used.elapsed() >= VALIDITY)
+                        .min_by_key(|(_, last_used)| *last_used);
+                    if let Some(context) = oldest.and_then(|(key, _)| sessions.remove(&key)) {
+                        context.stop(unauthenticated());
+                    }
+                }
                 if sessions.len() >= MAX_CONTEXTS {
                     return Err(TalosError::new(
                         ErrorCode::ServiceUnavailable,
@@ -149,6 +200,7 @@ impl AuthContexts {
                 let context = Arc::new(Context {
                     admission: Default::default(),
                     initialized: AtomicBool::new(false),
+                    last_used: Mutex::new(Instant::now()),
                     state,
                     task: Mutex::new(None),
                 });
@@ -160,7 +212,9 @@ impl AuthContexts {
         // behind a held issuer request. Local readers never take this lock.
         let _admission = context.admission.lock().await;
         if context.initialized.load(Ordering::SeqCst) {
-            return context.identity();
+            let identity = context.identity()?;
+            *context.last_used.lock().expect("Auth usage lock") = Instant::now();
+            return Ok(identity);
         }
         let mut pending = PendingAdmission {
             contexts: self,
@@ -180,13 +234,12 @@ impl AuthContexts {
         match verified {
             Ok(verified) => {
                 let identity = verified.identity()?;
+                *context.last_used.lock().expect("Auth usage lock") = Instant::now();
                 let _ = context.state.send_replace(Ok(verified));
                 let client = client.clone();
                 let token = token.to_owned();
                 let state = context.state.clone();
-                // Stable credential jitter prevents aligned per-account refresh bursts.
-                let refresh = REFRESH.mul_f64(0.9 + f64::from(key[0]) / 2550.0 * 2.0);
-                let mut refresh = tokio::time::interval_at(Instant::now() + refresh, refresh);
+                let mut refresh = tokio::time::interval_at(Instant::now() + REFRESH, REFRESH);
                 refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 let lifetime = RefreshLifetime;
                 tracing::info!("Cloud authorization refresh started");
@@ -216,21 +269,7 @@ impl AuthContexts {
                                         let _ = state.send_replace(Err(error));
                                         return;
                                     }
-                                    // Retry while the old proof can still be used. A full
-                                    // positive-jitter interval can otherwise miss its deadline.
-                                    let deadline = state
-                                        .borrow()
-                                        .as_ref()
-                                        .ok()
-                                        .map(|verified| verified.verified_at + VALIDITY);
-                                    if let Some(deadline) =
-                                        deadline.filter(|deadline| *deadline > Instant::now())
-                                    {
-                                        refresh.reset_at(retry_before_deadline(
-                                            deadline,
-                                            REQUEST_TIMEOUT,
-                                        ));
-                                    }
+                                    refresh.reset_at(Instant::now() + Duration::from_secs(15));
                                     // Publish attempt completion without extending the proof.
                                     state.send_modify(|_| {});
                                 }
@@ -260,7 +299,7 @@ struct PendingAdmission<'a> {
 impl Drop for PendingAdmission<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.context.stop();
+            self.context.stop(unauthenticated());
             let mut sessions = self.contexts.sessions.lock().expect("Auth contexts lock");
             if sessions
                 .get(&self.key)
@@ -302,16 +341,6 @@ async fn verify_remote(client: &TalosCloudClient, token: &str) -> TalosResult<Ve
         verified_at: Instant::now(),
         expires_at_ms,
     })
-}
-
-fn retry_before_deadline(deadline: Instant, request_timeout: Duration) -> Instant {
-    let now = Instant::now();
-    let latest_start = deadline.checked_sub(request_timeout).unwrap_or(deadline);
-    if latest_start <= now {
-        deadline
-    } else {
-        (now + Duration::from_secs(15)).min(latest_start)
-    }
 }
 
 fn fingerprint(token: &str) -> Fingerprint {

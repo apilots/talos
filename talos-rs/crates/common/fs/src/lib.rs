@@ -1,3 +1,6 @@
+mod rooted;
+pub use rooted::{RootedDirectory, RootedFileRead};
+
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
 use std::io::Write;

@@ -8,7 +8,9 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
     validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatMessage,
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort, Role,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, MessageInputKind, MessageInputOrigin,
+    MessageInputSource, ModelBlockStream, ProviderHttpClients, ProviderHttpTimeouts,
+    ReasoningEffort, Role,
 };
 use tracing::info;
 
@@ -37,6 +39,7 @@ pub struct DeepSeekConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
     pub protocol: DeepSeekProtocol,
 }
@@ -47,6 +50,7 @@ impl DeepSeekConfig {
             api_key: api_key.into(),
             base_url: "https://api.deepseek.com".to_string(),
             timeout_secs: 60,
+            http_timeouts: None,
             default_model: "deepseek-chat".to_string(),
             protocol: DeepSeekProtocol::Chat,
         }
@@ -54,6 +58,12 @@ impl DeepSeekConfig {
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
+        self.http_timeouts = timeouts;
         self
     }
 
@@ -76,16 +86,17 @@ impl DeepSeekConfig {
 /// DeepSeek LLM provider.
 pub struct DeepSeekProvider {
     config: DeepSeekConfig,
-    client: Client,
+    clients: ProviderHttpClients,
 }
 
 impl DeepSeekProvider {
     pub fn new(config: DeepSeekConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build DeepSeek HTTP client");
-        Self { config, client }
+        let clients = ProviderHttpClients::new(
+            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
+            config.http_timeouts.as_ref(),
+        )
+        .expect("Failed to build model HTTP clients");
+        Self { config, clients }
     }
 
     pub(crate) fn build_chat_request(
@@ -195,12 +206,11 @@ impl DeepSeekProvider {
         Ok(headers)
     }
 
-    fn request_body(
-        &self,
-        mut request: ChatRequest,
-        stream: bool,
-    ) -> TalosResult<(&'static str, Value)> {
-        self.validate_request_attachments(&request)?;
+    fn prepare_request(&self, mut request: ChatRequest) -> ChatRequest {
+        if self.config.protocol == DeepSeekProtocol::Chat && request.reasoning_effort.is_some() {
+            request.temperature = None;
+            request.top_p = None;
+        }
         if matches!(
             request.model.as_str(),
             "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp"
@@ -214,10 +224,33 @@ impl DeepSeekProvider {
                 .iter()
                 .position(|message| message.role != Role::System)
                 .unwrap_or(request.messages.len());
-            request
-                .messages
-                .insert(index, ChatMessage::system(TOOL_ARGUMENT_FIDELITY_GUIDANCE));
+            // Binding may run before observation and again at the transport boundary.
+            // Keep the existing provider instruction exactly once in the final input.
+            if !request.messages[..index]
+                .iter()
+                .any(|message| message.content == TOOL_ARGUMENT_FIDELITY_GUIDANCE)
+            {
+                request.messages.insert(
+                    index,
+                    ChatMessage::system(TOOL_ARGUMENT_FIDELITY_GUIDANCE).with_input_origin(
+                        MessageInputOrigin {
+                            kind: MessageInputKind::System,
+                            source: MessageInputSource::Runtime,
+                        },
+                    ),
+                );
+            }
         }
+        request
+    }
+
+    fn request_body(
+        &self,
+        request: ChatRequest,
+        stream: bool,
+    ) -> TalosResult<(&'static str, Value)> {
+        self.validate_request_attachments(&request)?;
+        let request = self.prepare_request(request);
         // TODO(PR #50): Recheck empty reasoning_content on future Flash revisions.
         // Preserve upstream emptiness in both transports; never synthesize reasoning
         // or retry a successful response merely to obtain a thinking block.
@@ -245,9 +278,10 @@ impl DeepSeekProvider {
         Ok((endpoint, body))
     }
 
-    async fn post(&self, endpoint: &str, body: Value) -> TalosResult<Response> {
+    async fn post(&self, endpoint: &str, body: Value, stream: bool) -> TalosResult<Response> {
         let response = self
-            .client
+            .clients
+            .for_request(stream)
             .post(self.endpoint_url(endpoint))
             .headers(self.build_headers()?)
             .json(&body)
@@ -255,32 +289,26 @@ impl DeepSeekProvider {
             .await
             .map_err(|error| {
                 let diagnostic = format!("DeepSeek {endpoint} request failed");
-                TalosError::internal_with_source(
-                    "DeepSeek request failed; technical details were withheld.",
-                    error.without_url(),
-                )
-                .context(diagnostic)
+                talos_llm_provider::transport_error("DeepSeek request", error).context(diagnostic)
             })?;
         let status = response.status();
         if status.is_success() {
             return Ok(response);
         }
-        Err(talos_llm_provider::http_response_error(
-            "DeepSeek", &response,
-        ))
+        Err(talos_llm_provider::http_rejection_error("DeepSeek", response).await)
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         let protocol = self.config.protocol;
         let (endpoint, body) = self.request_body(request, false)?;
-        let response = self.post(endpoint, body).await?;
+        let response = self.post(endpoint, body, false).await?;
         match protocol {
             DeepSeekProtocol::Chat => {
                 let response = response
                     .json::<chat_protocol::ChatCompletionResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("DeepSeek Chat response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error("DeepSeek Chat response parsing", error)
                     })?;
                 chat_protocol::chat_response(response, "DeepSeek")
             }
@@ -289,7 +317,10 @@ impl DeepSeekProvider {
                     .json::<messages_protocol::MessagesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::internal_with_source("DeepSeek Messages response parsing failed; technical details were withheld.", error.without_url())
+                        talos_llm_provider::transport_error(
+                            "DeepSeek Messages response parsing",
+                            error,
+                        )
                     })?;
                 messages_protocol::chat_response(response)
             }
@@ -298,12 +329,16 @@ impl DeepSeekProvider {
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<Response> {
         let (endpoint, body) = self.request_body(request, true)?;
-        self.post(endpoint, body).await
+        self.post(endpoint, body, true).await
     }
 }
 
 #[async_trait]
 impl LlmProvider for DeepSeekProvider {
+    fn bind_request(&self, request: ChatRequest) -> TalosResult<ChatRequest> {
+        Ok(self.prepare_request(request))
+    }
+
     fn name(&self) -> &str {
         "deepseek"
     }

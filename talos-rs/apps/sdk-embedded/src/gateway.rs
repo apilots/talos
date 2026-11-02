@@ -1,6 +1,8 @@
 //! Existing product API delegation for this client transport.
 use super::*;
 
+mod timeline;
+
 #[async_trait]
 impl GatewayClient for EmbeddedServerClient {
     async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse> {
@@ -317,6 +319,50 @@ impl GatewayClient for EmbeddedServerClient {
         self.runtime.gateway.get_session(&self.actor, request).await
     }
 
+    async fn trajectory_capabilities(
+        &mut self,
+    ) -> TalosResult<talos_sdk::trajectory::TrajectoryCapabilitiesResponse> {
+        self.runtime
+            .gateway
+            .trajectory_capabilities(&self.actor)
+            .await
+    }
+    async fn read_turn_trajectory(
+        &mut self,
+        request: talos_sdk::trajectory::TrajectoryReadTurnRequest,
+    ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadTurnResponse> {
+        self.runtime
+            .gateway
+            .read_turn_trajectory(&self.actor, request)
+            .await
+    }
+    async fn read_request_trajectory(
+        &mut self,
+        request: talos_sdk::trajectory::TrajectoryReadModelRequestRequest,
+    ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadModelRequestResponse> {
+        self.runtime
+            .gateway
+            .read_request_trajectory(&self.actor, request)
+            .await
+    }
+    async fn read_tool_trajectory(
+        &mut self,
+        request: talos_sdk::trajectory::TrajectoryReadToolRequest,
+    ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadToolResponse> {
+        self.runtime
+            .gateway
+            .read_tool_trajectory(&self.actor, request)
+            .await
+    }
+    async fn read_trajectory_payload(
+        &mut self,
+        request: talos_sdk::trajectory::TrajectoryReadPayloadRequest,
+    ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadPayloadResponse> {
+        self.runtime
+            .gateway
+            .read_trajectory_payload(&self.actor, request)
+            .await
+    }
     async fn get_session_history(
         &mut self,
         request: SessionHistoryRequest,
@@ -411,62 +457,14 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<TimelineStreamSubscription> {
-        let subscription = self
-            .runtime
-            .service
-            .open_timeline_subscription(&self.actor, request)
-            .await?;
-        let response = subscription.response();
-        let subscription_id = response.subscription_id.clone();
-        let mut events = subscription.events;
-        let (tx, rx) = tokio::sync::mpsc::channel(256);
-        let (message_queue_tx, message_queue_rx) = tokio::sync::mpsc::channel(256);
-        let task = tokio::spawn(async move {
-            while let Some(message) = events.recv().await {
-                match message {
-                    // Match the App Server SDK's timeline-only contract; callers
-                    // read volatile display state through get_active_turn.
-                    TimelineSubscriptionMessage::ActiveTurnChanged(_) => {}
-                    TimelineSubscriptionMessage::Event(event) => {
-                        if tx.send(*event).await.is_err() {
-                            return;
-                        }
-                    }
-                    TimelineSubscriptionMessage::MessageQueueChanged(change) => {
-                        if message_queue_tx.send(change).await.is_err() {
-                            return;
-                        }
-                    }
-                    TimelineSubscriptionMessage::Closed(_) => return,
-                }
-            }
-        });
-        if let Some(previous) = self.subscriptions.insert(subscription_id, task) {
-            previous.abort();
-            let _ = previous.await;
-        }
-        Ok(TimelineStreamSubscription {
-            response,
-            stream: TimelineEventStream::new(rx),
-            message_queue_changes: MessageQueueChangeStream::new(message_queue_rx),
-        })
+        self.open_embedded_timeline_stream(request).await
     }
 
     async fn unsubscribe_timeline(
         &mut self,
         request: EventUnsubscribeRequest,
     ) -> TalosResult<EventUnsubscribeResponse> {
-        let unsubscribed = if let Some(task) = self.subscriptions.remove(&request.subscription_id) {
-            task.abort();
-            let _ = task.await;
-            true
-        } else {
-            false
-        };
-        Ok(EventUnsubscribeResponse {
-            subscription_id: request.subscription_id,
-            unsubscribed,
-        })
+        self.unsubscribe_embedded_timeline(request).await
     }
 
     async fn start_turn(&mut self, request: StartTurnRequest) -> TalosResult<StartTurnResponse> {

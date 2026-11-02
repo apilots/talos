@@ -20,6 +20,45 @@ impl AgentNodeClient {
         params: FileReadRequest,
         max_bytes: u64,
     ) -> TalosResult<(FileInfo, Bytes)> {
+        self.read_peer_file_bytes(token, source_peer_id, params, PeerRead::Whole { max_bytes })
+            .await
+    }
+
+    pub async fn read_peer_file_range(
+        &self,
+        token: &str,
+        source_peer_id: &str,
+        params: FileReadRequest,
+        range: std::ops::Range<u64>,
+    ) -> TalosResult<(FileInfo, Bytes)> {
+        self.read_peer_file_bytes(token, source_peer_id, params, PeerRead::Range(range))
+            .await
+    }
+
+    async fn read_peer_file_bytes(
+        &self,
+        token: &str,
+        source_peer_id: &str,
+        params: FileReadRequest,
+        read: PeerRead,
+    ) -> TalosResult<(FileInfo, Bytes)> {
+        let (range, max_bytes) = match &read {
+            PeerRead::Whole { max_bytes } => (None, *max_bytes),
+            PeerRead::Range(range) => {
+                let limit =
+                    u32::try_from(range.end.saturating_sub(range.start)).map_err(|_| invalid())?;
+                if limit > talos_types::FILE_PREVIEW_MAX_READ_BYTES {
+                    return Err(invalid());
+                }
+                (
+                    Some(pb::FileByteRange {
+                        offset: range.start,
+                        limit,
+                    }),
+                    u64::from(limit),
+                )
+            }
+        };
         let file_id = params.file_id.clone();
         let mut stream =
             pb::agent_peer_file_rpc_client::AgentPeerFileRpcClient::new(self.channel.clone())
@@ -30,6 +69,7 @@ impl AgentNodeClient {
                         source_peer_id: source_peer_id.into(),
                         params: Some(pb::PeerFileReadParams {
                             file_id: params.file_id,
+                            range,
                         }),
                     },
                 )?)
@@ -42,7 +82,9 @@ impl AgentNodeClient {
             match reply.result.ok_or_else(invalid)? {
                 pb::peer_file_read_response::Result::File(value) if file.is_none() => {
                     let metadata = resources_pb::decode_tool_file(value)?;
-                    if metadata.file_id != file_id || metadata.size_bytes > max_bytes {
+                    if metadata.file_id != file_id
+                        || matches!(read, PeerRead::Whole { .. }) && metadata.size_bytes > max_bytes
+                    {
                         return Err(TalosError::new(
                             ErrorCode::AttachmentLimitExceeded,
                             "Source file exceeds the caller's file limit",
@@ -61,7 +103,13 @@ impl AgentNodeClient {
                 }
                 pb::peer_file_read_response::Result::Completed(_) => {
                     let file = file.ok_or_else(invalid)?;
-                    if file.size_bytes != bytes.len() as u64 {
+                    let expected_size = match &read {
+                        PeerRead::Whole { .. } => file.size_bytes,
+                        PeerRead::Range(range) => {
+                            range.end.min(file.size_bytes).saturating_sub(range.start)
+                        }
+                    };
+                    if expected_size != bytes.len() as u64 {
                         return Err(invalid());
                     }
                     return Ok((file, Bytes::from(bytes)));
@@ -162,4 +210,9 @@ fn invalid() -> TalosError {
         ErrorCode::InvalidRequest,
         "Peer file RPC payload is invalid",
     )
+}
+
+enum PeerRead {
+    Whole { max_bytes: u64 },
+    Range(std::ops::Range<u64>),
 }

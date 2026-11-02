@@ -74,15 +74,19 @@ export class BrowserWorkspace {
     check();return null;
   }
   private bounds(bounds: DesktopBrowserBounds): DesktopBrowserBounds | null {
-    if (!this.window) return null;
-    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) throw new Error("Invalid browser viewport.");
-    const [width, height] = this.window.getContentSize();
-    const zoom = this.product!.getZoomFactor();
-    bounds = { x: bounds.x * zoom, y: bounds.y * zoom, width: bounds.width * zoom, height: bounds.height * zoom };
-    const x = Math.max(0, Math.min(width, Math.round(bounds.x)));
-    const y = Math.max(0, Math.min(height, Math.round(bounds.y)));
-    const w = Math.min(width - x, Math.round(bounds.width));
-    const h = Math.min(height - y, Math.round(bounds.height));
-    return w > 0 && h > 0 ? { x, y, width: w, height: h } : null;
+    return this.window && this.product ? browserBounds(this.window, this.product, bounds) : null;
   }
+}
+
+/** Convert renderer CSS coordinates to the owning native window bounds. */
+export function browserBounds(window: BaseWindow, product: WebContents, bounds: DesktopBrowserBounds): DesktopBrowserBounds | null {
+  if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) throw new Error("Invalid browser viewport.");
+  const [width, height] = window.getContentSize();
+  const zoom = product.getZoomFactor();
+  bounds = { x: bounds.x * zoom, y: bounds.y * zoom, width: bounds.width * zoom, height: bounds.height * zoom };
+  const x = Math.max(0, Math.min(width, Math.round(bounds.x)));
+  const y = Math.max(0, Math.min(height, Math.round(bounds.y)));
+  const w = Math.min(width - x, Math.round(bounds.width));
+  const h = Math.min(height - y, Math.round(bounds.height));
+  return w > 0 && h > 0 ? { x, y, width: w, height: h } : null;
 }

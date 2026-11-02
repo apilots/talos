@@ -26,6 +26,33 @@ pub struct TimelineEventService {
 }
 
 impl TimelineEventService {
+    pub(crate) fn supports_history_supplements(&self) -> bool {
+        self.execution_store.supports_history_supplements()
+    }
+    pub(crate) async fn append_history_supplement(
+        &self,
+        value: talos_agent_api::trajectory::SessionHistorySupplement,
+    ) -> TalosResult<()> {
+        self.execution_store.append_history_supplement(value).await
+    }
+    pub(crate) async fn read_terminal_history_supplement(
+        &self,
+        identity: &AgentTurnRef,
+    ) -> TalosResult<Option<talos_agent_api::trajectory::SessionHistorySupplement>> {
+        self.execution_store
+            .read_terminal_history_supplement(identity)
+            .await
+    }
+
+    pub(crate) async fn read_execution_payload(
+        &self,
+        identity: &AgentTurnRef,
+        payload_id: &str,
+    ) -> TalosResult<Option<String>> {
+        self.execution_store
+            .read_execution_payload(identity, payload_id)
+            .await
+    }
     pub fn new(execution_store: Arc<dyn AgentExecutionStore>) -> Self {
         Self {
             execution_store,

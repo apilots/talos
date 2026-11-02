@@ -61,6 +61,7 @@ fn inner_model_config_parses_and_validates_against_model_catalog() {
     });
     config.llm.deepseek.models = vec![ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: "deepseek-v4-flash".to_string(),
         name: "DeepSeek V4 Flash".to_string(),
@@ -478,6 +479,7 @@ fn test_model_readiness_reports_missing_provider_api_key() {
     config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
     config.llm.openai.models = vec![ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: "gpt-4o".to_string(),
         name: "GPT-4o".to_string(),

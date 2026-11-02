@@ -6,9 +6,9 @@ use talos_storage::database_error;
 use agent_protocol::{NodeHealth, NodeMode, NodeStatus};
 
 use super::{
-    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodeListScope,
-    NodePageRecord, NodeRecord, RegisterNodeParams, RenameNodeParams, RenewNodeParams,
-    RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
+    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodeAuthenticationRecord,
+    NodeListScope, NodePageRecord, NodeRecord, RegisterNodeParams, RenameNodeParams,
+    RenewNodeParams, RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
 };
 
 const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at, system_info";
@@ -18,6 +18,11 @@ pub trait AgentNodeStore: Send + Sync {
     async fn upsert_embedded(&self, status: NodeStatus, now_at: i64) -> TalosResult<NodeRecord>;
     async fn create(&self, params: CreateNodeParams) -> TalosResult<NodeRecord>;
     async fn get(&self, node_id: &str) -> TalosResult<Option<NodeRecord>>;
+    /// Read fresh credential/lease policy fields without loading the system report.
+    async fn get_authentication(
+        &self,
+        node_id: &str,
+    ) -> TalosResult<Option<NodeAuthenticationRecord>>;
     async fn deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>>;
     async fn delete_owned(&self, node_id: &str, owner: &str, now_at: i64) -> TalosResult<()>;
     async fn list(&self, params: ListNodesParams) -> TalosResult<NodePageRecord>;
@@ -144,6 +149,18 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
         .await
         .map_err(|error| database_error("read Agent node", error))?;
         row.as_ref().map(record_from_row).transpose()
+    }
+
+    async fn get_authentication(
+        &self,
+        node_id: &str,
+    ) -> TalosResult<Option<NodeAuthenticationRecord>> {
+        let row = sqlx::query("SELECT node_id, owner_user_id, mode, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at FROM agent_nodes WHERE node_id = ?")
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| database_error("read Agent node authentication", error))?;
+        row.as_ref().map(authentication_from_row).transpose()
     }
 
     async fn list(&self, params: ListNodesParams) -> TalosResult<NodePageRecord> {
@@ -369,17 +386,6 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<NodeRecord> {
         row.try_get::<String, _>(column)
             .map_err(|error| database_error("decode Agent node", error))
     };
-    let optional_hash = |column| -> TalosResult<Option<[u8; 32]>> {
-        let raw: Option<Vec<u8>> = row
-            .try_get(column)
-            .map_err(|error| database_error("decode Agent node hash", error))?;
-        raw.map(|bytes| {
-            bytes
-                .try_into()
-                .map_err(|_| TalosError::internal("Agent node hash has invalid length"))
-        })
-        .transpose()
-    };
     let system_info: Option<String> = row
         .try_get("system_info")
         .map_err(|error| database_error("decode Worker system report", error))?;
@@ -400,11 +406,11 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<NodeRecord> {
             .try_get("endpoint")
             .map_err(|error| database_error("decode Agent node endpoint", error))?,
         status: parse_status(&text("status")?)?,
-        credential_hash: optional_hash("credential_hash")?,
+        credential_hash: optional_hash(row, "credential_hash")?,
         credential_expires_at: row
             .try_get("credential_expires_at")
             .map_err(|error| database_error("decode Agent node credential expiry", error))?,
-        lease_token_hash: optional_hash("lease_token_hash")?,
+        lease_token_hash: optional_hash(row, "lease_token_hash")?,
         lease_expires_at: row
             .try_get("lease_expires_at")
             .map_err(|error| database_error("decode Agent node lease expiry", error))?,
@@ -419,6 +425,41 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<NodeRecord> {
             .try_get("updated_at")
             .map_err(|error| database_error("decode Agent node update time", error))?,
     })
+}
+
+fn authentication_from_row(row: &SqliteRow) -> TalosResult<NodeAuthenticationRecord> {
+    let text = |column| {
+        row.try_get::<String, _>(column)
+            .map_err(|error| database_error("decode Agent node authentication", error))
+    };
+    Ok(NodeAuthenticationRecord {
+        node_id: text("node_id")?,
+        owner_user_id: row
+            .try_get("owner_user_id")
+            .map_err(|error| database_error("decode Agent node owner", error))?,
+        mode: parse_mode(&text("mode")?)?,
+        status: parse_status(&text("status")?)?,
+        credential_hash: optional_hash(row, "credential_hash")?,
+        credential_expires_at: row
+            .try_get("credential_expires_at")
+            .map_err(|error| database_error("decode Agent node credential expiry", error))?,
+        lease_token_hash: optional_hash(row, "lease_token_hash")?,
+        lease_expires_at: row
+            .try_get("lease_expires_at")
+            .map_err(|error| database_error("decode Agent node lease expiry", error))?,
+    })
+}
+
+fn optional_hash(row: &SqliteRow, column: &str) -> TalosResult<Option<[u8; 32]>> {
+    let raw: Option<Vec<u8>> = row
+        .try_get(column)
+        .map_err(|error| database_error("decode Agent node hash", error))?;
+    raw.map(|bytes| {
+        bytes
+            .try_into()
+            .map_err(|_| TalosError::internal("Agent node hash has invalid length"))
+    })
+    .transpose()
 }
 
 fn mode_text(mode: NodeMode) -> &'static str {

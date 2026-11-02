@@ -99,6 +99,7 @@ fn config(home: &Path, api: &str) -> Config {
     config.llm.deepseek.api_key = Some("controlled-fixture-key".into());
     config.llm.deepseek.models = vec![talos_config::ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: "deepseek-chat".into(),
         name: "Controlled timing".into(),

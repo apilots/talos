@@ -6,8 +6,8 @@ export const DropdownMenu = MenuPrimitive.Root;
 export const DropdownMenuTrigger = MenuPrimitive.Trigger;
 export const DropdownMenuSeparator = MenuPrimitive.Separator;
 
-export const DropdownMenuContent = forwardRef<ElementRef<typeof MenuPrimitive.Content>, ComponentPropsWithoutRef<typeof MenuPrimitive.Content>>(function DropdownMenuContent({ className, sideOffset = 6, ...props }, ref) {
-  return <MenuPrimitive.Portal><MenuPrimitive.Content {...props} className={cn("z-[1200] min-w-40 max-w-[calc(100vw-24px)] rounded-xl border border-border bg-card p-1 text-ink shadow-panel", className)} collisionPadding={12} ref={ref} sideOffset={sideOffset} /></MenuPrimitive.Portal>;
+export const DropdownMenuContent = forwardRef<ElementRef<typeof MenuPrimitive.Content>, ComponentPropsWithoutRef<typeof MenuPrimitive.Content> & { container?: HTMLElement | null }>(function DropdownMenuContent({ className, sideOffset = 6, container, ...props }, ref) {
+  return <MenuPrimitive.Portal container={container}><MenuPrimitive.Content {...props} className={cn("z-[1200] min-w-40 max-w-[calc(100vw-24px)] rounded-xl border border-border bg-card p-1 text-ink shadow-panel", className)} collisionPadding={12} ref={ref} sideOffset={sideOffset} /></MenuPrimitive.Portal>;
 });
 
 export const DropdownMenuItem = forwardRef<ElementRef<typeof MenuPrimitive.Item>, ComponentPropsWithoutRef<typeof MenuPrimitive.Item>>(function DropdownMenuItem({ className, ...props }, ref) {

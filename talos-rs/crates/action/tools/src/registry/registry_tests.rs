@@ -454,17 +454,22 @@ async fn sandbox_approval_allow_once_replays_the_same_bash_invocation_once() {
     let marker = workspace_path.join("approval-marker");
     let mut paths = talos_tools_sandbox::SandboxRuntimePaths::default();
     if cfg!(target_os = "linux") {
-        let executable = std::env::current_exe().expect("test executable must resolve");
-        let artifact_dir = executable.parent().expect("test artifact directory");
-        let runtime_dir = if artifact_dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
-            artifact_dir.parent().expect("Cargo runtime directory")
-        } else {
-            artifact_dir
-        };
-        let helper = runtime_dir.join("talos-linux-sandbox-launcher");
+        let helper = std::env::var_os("TALOS_LINUX_SANDBOX_HELPER")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let executable = std::env::current_exe().expect("test executable must resolve");
+                let artifact_dir = executable.parent().expect("test artifact directory");
+                let runtime_dir = if artifact_dir.file_name() == Some(std::ffi::OsStr::new("deps"))
+                {
+                    artifact_dir.parent().expect("Cargo runtime directory")
+                } else {
+                    artifact_dir
+                };
+                runtime_dir.join("talos-linux-sandbox-launcher")
+            });
         assert!(
             helper.is_file(),
-            "Run this scenario through just test to build the Linux helper"
+            "Supply TALOS_LINUX_SANDBOX_HELPER or run just test to build the Linux helper"
         );
         paths.linux_helper_executable = Some(helper);
     }

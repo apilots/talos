@@ -201,6 +201,7 @@ fn model_info(provider: &str, id: &str, name: &str, reasoning: bool) -> ModelInf
         provider,
         ProviderModelConfig {
             reasoning_replay: Default::default(),
+            reasoning_efforts: None,
             request_parameters: Default::default(),
             id: id.to_string(),
             name: name.to_string(),
@@ -219,6 +220,7 @@ fn test_model_catalog_preserves_provider_order_and_duplicate_ids() {
     let mut llm = LlmConfig::default();
     let shared_model = ProviderModelConfig {
         reasoning_replay: Default::default(),
+        reasoning_efforts: None,
         request_parameters: Default::default(),
         id: "shared-model".to_string(),
         name: "Shared Model".to_string(),
@@ -250,7 +252,7 @@ fn test_model_info_serializes_canonical_model_fields_flat() {
         serde_json::json!({
             "provider": "openai",
             "provider_name": null,
-            "selection_capabilities": {"reasoning":"effort","fast":false,"default_fast":false,"default_reasoning_effort":"medium"},
+            "selection_capabilities": {"reasoning":"effort","reasoning_efforts":["light","medium","high","xhigh"],"fast":false,"default_fast":false,"default_reasoning_effort":"medium"},
             "request_parameters": {},
             "reasoning_replay": "protocol_default",
             "id": "gpt-5.5",
@@ -258,6 +260,7 @@ fn test_model_info_serializes_canonical_model_fields_flat() {
             "context_window": 1_000_000,
             "reasoning": true,
             "reasoning_effort": "medium",
+            "reasoning_efforts": null,
             "speed": "standard",
             "input": ["text"],
             "cost": {

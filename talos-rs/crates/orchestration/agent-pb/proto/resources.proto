@@ -6,6 +6,7 @@ import "types.proto";
 // Node-to-control-plane calls for the existing Kernel dependencies that own
 // product data. Every method has one explicit business operation and a lease.
 service AgentSessionDataRpc {
+  rpc AppendSessionHistorySupplement(stream AppendSessionHistorySupplementRequest) returns (AppendSessionHistorySupplementResponse);
   rpc ReadSessionHistory(ReadSessionHistoryRequest) returns (ReadSessionHistoryResponse);
   rpc ResolveAttachments(ResolveAttachmentsRequest) returns (stream ResolveAttachmentsResponse);
   rpc ReadMemoryProgress(ReadMemoryProgressRequest) returns (ReadMemoryProgressResponse);
@@ -110,7 +111,8 @@ service AgentPeerFileRpc {
 message FileScope { oneof scope { Empty personal = 1; string project_id = 2; } }
 message OptionalTags { repeated string values = 1; }
 message OptionalFileMetadata { map<string, string> values = 1; }
-message PeerFileReadParams { string file_id = 1; }
+message FileByteRange { uint64 offset = 1; uint32 limit = 2; }
+message PeerFileReadParams { string file_id = 1; FileByteRange range = 2; }
 message PeerFileUpdateParams { string file_id = 1; OptionalTags tags = 2; OptionalFileMetadata metadata = 3; }
 message PeerFileDeleteParams { string file_id = 1; }
 message PeerFileReadRequest { NodeAuth auth = 1; PeerFileReadParams params = 2; string source_peer_id = 3; }
@@ -119,3 +121,11 @@ message PeerFileDeleteRequest { NodeAuth auth = 1; PeerFileDeleteParams params =
 message PeerFileReadResponse { oneof result { ToolFileInfo file = 1; bytes chunk = 2; Empty completed = 3; Failure failure = 4; } }
 message PeerFileUpdateResponse { oneof result { ToolFileInfo file = 1; Failure failure = 2; } }
 message PeerFileDeleteResponse { oneof result { string file_id = 1; Failure failure = 2; } }
+
+// Optional missing execution facts, scoped to this existing history invocation.
+message SessionHistorySupplementHeader { TurnRef identity = 1; uint64 byte_length = 2; }
+message AppendSessionHistorySupplementRequest {
+  NodeAuth auth = 1; CoordinatorCallContext caller = 2;
+  oneof body { SessionHistorySupplementHeader header = 3; bytes chunk = 4; }
+}
+message AppendSessionHistorySupplementResponse { oneof result { Empty appended = 1; Failure failure = 2; } }

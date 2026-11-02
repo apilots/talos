@@ -72,7 +72,17 @@ impl ReasoningOption {
     fn for_model(model: &ModelInfo) -> Vec<Self> {
         match model.selection_capabilities.reasoning {
             ReasoningControl::None => Self::NONE.to_vec(),
-            ReasoningControl::Effort => Self::SUPPORTED.to_vec(),
+            ReasoningControl::Effort => Self::SUPPORTED
+                .into_iter()
+                .filter(|option| {
+                    option.effort.is_none_or(|effort| {
+                        model
+                            .selection_capabilities
+                            .reasoning_efforts
+                            .contains(&effort)
+                    })
+                })
+                .collect(),
             ReasoningControl::Toggle => vec![
                 Self {
                     effort: None,
@@ -116,8 +126,6 @@ impl ModelPickerState {
                         current_model.provider, current_model.id
                     ))
             })?;
-        let model = &models[selected_model];
-        current_selection.resolve_reasoning(model)?;
         let mut state = Self {
             step: ModelPickerStep::Model,
             models: models.to_vec(),
@@ -285,7 +293,14 @@ impl ModelPickerState {
             f,
             area,
             bg_style,
-            format!("Select Reasoning Level for {}", model.model.display_name()),
+            if model.provider == self.current_selection.model_ref.provider
+                && model.model.id == self.current_selection.model_ref.id
+                && self.current_selection.resolve_reasoning(model).is_err()
+            {
+                "Saved effort unavailable; choose a supported level".to_owned()
+            } else {
+                format!("Select Reasoning Level for {}", model.model.display_name())
+            },
             items,
             self.selected_reasoning,
         );
@@ -340,7 +355,7 @@ impl ModelPickerState {
                 self.reasoning_options()
                     .iter()
                     .position(|option| option.effort == effort)
-                    .expect("validated model reasoning state must have a picker option")
+                    .unwrap_or(0)
             };
     }
 
