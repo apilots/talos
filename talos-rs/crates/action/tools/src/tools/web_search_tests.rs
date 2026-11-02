@@ -247,13 +247,11 @@ async fn execute_payload_enforces_firecrawl_configured_deadline() {
         error.error_code(),
         talos_error::ErrorCode::ToolExecutionFailed
     );
-    let source = std::error::Error::source(&error).unwrap();
-    assert!(
-        source.is::<tokio::time::error::Elapsed>()
-            || source
-                .downcast_ref::<reqwest::Error>()
-                .is_some_and(reqwest::Error::is_timeout)
-    );
+    let source = std::error::Error::source(&error)
+        .unwrap()
+        .downcast_ref::<reqwest::Error>()
+        .expect("Firecrawl timeout must come from its HTTP client");
+    assert!(source.is_timeout());
     task.abort();
     if let Err(error) = task.await {
         assert!(error.is_cancelled());

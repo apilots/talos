@@ -64,18 +64,7 @@ impl SearchProvider for FirecrawlSearchProvider {
         if let Some(api_key) = &self.api_key {
             search = search.bearer_auth(api_key);
         }
-        let response: SearchResponse = tokio::time::timeout(
-            Duration::from_millis(self.timeout_ms.max(1)),
-            search_json(search),
-        )
-        .await
-        .map_err(|err| {
-            TalosError::from_source(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                "Firecrawl search timed out.",
-                err,
-            )
-        })??;
+        let response: SearchResponse = search_json(search).await?;
         if !response.success {
             return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
