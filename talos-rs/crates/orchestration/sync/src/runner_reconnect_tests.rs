@@ -19,7 +19,7 @@ async fn wait_connection(handle: &SyncHandle, expected: SyncConnectionState) {
 }
 
 #[tokio::test]
-async fn rejected_credentials_delay_the_next_single_connection_attempt() {
+async fn rejected_credentials_use_the_configured_fixed_reconnect_interval() {
     let fixture = fixture().await;
     let (attempts, mut received) = mpsc::unbounded_channel();
     let (errors, code) = tokio::sync::watch::channel(SyncErrorCode::Unauthenticated);
@@ -42,13 +42,13 @@ async fn rejected_credentials_delay_the_next_single_connection_attempt() {
     wait_connection(&handle, SyncConnectionState::Disconnected).await;
     errors.send_replace(SyncErrorCode::ServiceUnavailable);
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(4)).await;
+    tokio::time::advance(Duration::from_millis(500)).await;
     tokio::time::resume();
     // Let local SQLite I/O finish if an incorrect early retry started.
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(received.try_recv().is_err());
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(6)).await;
+    tokio::time::advance(Duration::from_millis(500)).await;
     tokio::time::resume();
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(2), received.recv())
@@ -63,7 +63,7 @@ async fn rejected_credentials_delay_the_next_single_connection_attempt() {
 }
 
 #[tokio::test]
-async fn reconnect_backoff_survives_short_feeds_and_resets_after_a_stable_tls_session() {
+async fn fixed_reconnect_interval_recovers_short_feeds_and_refreshed_credentials() {
     let (listener, acceptor, trusted_ca) = tls_listener().await;
     let endpoint = format!(
         "wss://localhost:{}/v1/sync",
@@ -167,7 +167,7 @@ async fn reconnect_backoff_survives_short_feeds_and_resets_after_a_stable_tls_se
     let second = received.recv().await.unwrap();
     let third = received.recv().await.unwrap();
     assert!(second.duration_since(first) >= Duration::from_millis(100));
-    assert!(third.duration_since(second) >= Duration::from_millis(200));
+    assert!(third.duration_since(second) >= Duration::from_millis(100));
     wait_connection(&handle, SyncConnectionState::Connected).await;
     let dropped_at = Instant::now();
     disconnect.send(()).await.unwrap();
@@ -175,7 +175,7 @@ async fn reconnect_backoff_survives_short_feeds_and_resets_after_a_stable_tls_se
         .await
         .unwrap()
         .unwrap();
-    assert!(fourth.duration_since(dropped_at) >= Duration::from_millis(400));
+    assert!(fourth.duration_since(dropped_at) >= Duration::from_millis(100));
     wait_connection(&handle, SyncConnectionState::Disconnected).await;
     assert_eq!(
         handle.status().last_error.unwrap().code,
@@ -184,7 +184,7 @@ async fn reconnect_backoff_survives_short_feeds_and_resets_after_a_stable_tls_se
     // A later callback supplies the refreshed login. It must recover through a
     // real TLS handshake, without a special wake or restarting the runner.
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(10)).await;
+    tokio::time::advance(Duration::from_millis(100)).await;
     tokio::time::resume();
     received.recv().await.unwrap();
     wait_connection(&handle, SyncConnectionState::Connected).await;

@@ -246,7 +246,6 @@ async fn shutdown_joins_held_refresh_and_prevents_restart() {
 async fn transient_outage_preserves_classification_and_recovers_after_the_proof_deadline() {
     let (service, client, issuer, server) = issuer().await;
     let token = "test-token-a";
-    assert!(fingerprint(token)[0] > 127);
     service.verify(&client, token).await.unwrap();
     let context = service
         .sessions

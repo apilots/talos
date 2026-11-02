@@ -261,15 +261,15 @@ describe("useSessionTimelineEvents", () => {
     expect(useAppStore.getState().streams["sess-1"]?.isStreaming).toBe(true);
   });
 
-  it("continues reconnecting with the maximum delay after the initial attempts", async () => {
+  it("continues reconnecting at a fixed interval after the initial attempts", async () => {
     vi.useFakeTimers();
     apiMocks.subscribeTimelineEvents.mockRejectedValue(new Error("stream disconnected"));
 
     renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, historyOptions));
-    for (const delay of [500, 1_000, 2_000, 4_000, 8_000, 12_000, 12_000]) {
-      await act(() => vi.advanceTimersByTimeAsync(delay));
+    await act(async () => { await Promise.resolve(); });
+    for (let retry = 1; retry <= 7; retry += 1) {
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(retry + 1);
     }
-
-    expect(apiMocks.subscribeTimelineEvents.mock.calls.length).toBeGreaterThan(7);
   });
 });

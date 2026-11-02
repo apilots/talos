@@ -239,9 +239,7 @@ impl AuthContexts {
                 let client = client.clone();
                 let token = token.to_owned();
                 let state = context.state.clone();
-                // Stable credential jitter prevents aligned per-account refresh bursts.
-                let refresh = REFRESH.mul_f64(0.9 + f64::from(key[0]) / 2550.0 * 2.0);
-                let mut refresh = tokio::time::interval_at(Instant::now() + refresh, refresh);
+                let mut refresh = tokio::time::interval_at(Instant::now() + REFRESH, REFRESH);
                 refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 let lifetime = RefreshLifetime;
                 tracing::info!("Cloud authorization refresh started");
@@ -271,23 +269,7 @@ impl AuthContexts {
                                         let _ = state.send_replace(Err(error));
                                         return;
                                     }
-                                    // Retry while the old proof can still be used. A full
-                                    // positive-jitter interval can otherwise miss its deadline.
-                                    let deadline = state
-                                        .borrow()
-                                        .as_ref()
-                                        .ok()
-                                        .map(|verified| verified.verified_at + VALIDITY);
-                                    if let Some(deadline) =
-                                        deadline.filter(|deadline| *deadline > Instant::now())
-                                    {
-                                        refresh.reset_at(retry_before_deadline(
-                                            deadline,
-                                            REQUEST_TIMEOUT,
-                                        ));
-                                    } else {
-                                        refresh.reset_at(Instant::now() + Duration::from_secs(15));
-                                    }
+                                    refresh.reset_at(Instant::now() + Duration::from_secs(15));
                                     // Publish attempt completion without extending the proof.
                                     state.send_modify(|_| {});
                                 }
@@ -359,16 +341,6 @@ async fn verify_remote(client: &TalosCloudClient, token: &str) -> TalosResult<Ve
         verified_at: Instant::now(),
         expires_at_ms,
     })
-}
-
-fn retry_before_deadline(deadline: Instant, request_timeout: Duration) -> Instant {
-    let now = Instant::now();
-    let latest_start = deadline.checked_sub(request_timeout).unwrap_or(deadline);
-    if latest_start <= now {
-        deadline
-    } else {
-        (now + Duration::from_secs(15)).min(latest_start)
-    }
 }
 
 fn fingerprint(token: &str) -> Fingerprint {

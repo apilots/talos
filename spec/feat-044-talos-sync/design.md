@@ -78,12 +78,10 @@ delivered or persisted before verification. Cancelled/expired logins and failed
 commits invalidate any admitted but undelivered token, preventing an orphan Auth
 refresh task. This uses the same AuthService and adds no background task.
 
-Auth refresh runs every 60 seconds with stable +/-10% credential jitter, with a
-5-second remote timeout. A verified context lasts at most 120 seconds and never
+Auth refresh runs at a fixed 60-second interval, with a 5-second remote timeout. A verified context lasts at most 120 seconds and never
 past token expiry. Known rejection invalidates it immediately; transient errors
-never extend its deadline. Failed refresh retries within 15 seconds, capped to
-leave the remaining verification window's request budget; no retry burst or
-query-triggered remote fallback is introduced. Logout/cache removal invalidates the current generation
+never extend its deadline. Failed refresh retries at a fixed 15-second interval;
+No retry burst or query-triggered remote fallback is introduced. Logout/cache removal invalidates the current generation
 before remote completion. Shutdown cancels and joins all Auth tasks through its
 owned tracker; last-owner drop cancels maintenance.
 Persisted cloud-session JSON remains only a login candidate and cannot authorize
