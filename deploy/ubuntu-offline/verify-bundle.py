@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Verify a delivery archive through Docker import and its packaged launcher."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import time
+import urllib.request
+import uuid
+
+from package import digest
+
+
+def run(*args, **kwargs):
+    return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT,
+                                   timeout=300, **kwargs).strip()
+
+
+def unpack(archive, destination):
+    with tarfile.open(archive) as source:
+        members = source.getmembers()
+        names = [member.name for member in members]
+        images = {f'talos-ubuntu-pre-{arch}.tar.gz' for arch in ('arm64', 'amd64')}
+        allowed = images | {'chromium-seccomp.json', 'run.sh', 'image-prefix.txt',
+                            'source-revision.txt', 'README.txt', 'SHA256SUMS-arm64',
+                            'SHA256SUMS-amd64', 'SHA256SUMS-images'}
+        if len(names) != len(set(names)) or not set(names) <= allowed:
+            raise ValueError('Unexpected or duplicate delivery archive entries')
+        for member in members:
+            if not member.isfile():
+                raise ValueError(f'Expected a regular archive member: {member.name}')
+            with source.extractfile(member) as content, (destination / member.name).open('wb') as target:
+                shutil.copyfileobj(content, target)
+    architectures = [arch for arch in ('arm64', 'amd64')
+                     if (destination / f'talos-ubuntu-pre-{arch}.tar.gz').is_file()]
+    if not architectures:
+        raise ValueError('No target images found in delivery archive')
+    checksum = 'SHA256SUMS-images' if len(architectures) == 2 else f'SHA256SUMS-{architectures[0]}'
+    checked = set()
+    for line in (destination / checksum).read_text().splitlines():
+        expected, filename = line.split(maxsplit=1)
+        if filename in checked or filename not in names or digest(destination / filename) != expected:
+            raise ValueError(f'Checksum mismatch or missing entry: {filename}')
+        checked.add(filename)
+    if checked != set(names) - {checksum}:
+        raise ValueError('Checksum list does not cover every delivery member')
+    return architectures
+
+
+def wait_ready(name):
+    port = run('docker', 'port', name, '19091/tcp').splitlines()[0].rsplit(':', 1)[1]
+    url = f'http://127.0.0.1:{port}'
+    for _ in range(90):
+        try:
+            with urllib.request.urlopen(url + '/health', timeout=3) as response:
+                assert json.load(response)['auth_enabled'] is False
+            with urllib.request.urlopen(url + '/', timeout=3) as response:
+                assert '/assets/' in response.read().decode()
+            return
+        except (OSError, ValueError, AssertionError):
+            time.sleep(2)
+    raise RuntimeError(f'{name}: anonymous HTTP/WebUI did not become ready')
+
+
+def verify(directory, arch, output):
+    name = 'talos-bundle-check-' + uuid.uuid4().hex[:10]
+    volume = name + '-data'
+    log = []
+    try:
+        log.append(run('docker', 'load', '-i', str(directory / f'talos-ubuntu-pre-{arch}.tar.gz')))
+        prefix = (directory / 'image-prefix.txt').read_text().strip()
+        revision = (directory / 'source-revision.txt').read_text().strip()
+        metadata = json.loads(run('docker', 'image', 'inspect', prefix + '-' + arch,
+                                 '--format', '{{json .}}'))
+        assert metadata['Os'] == 'linux' and metadata['Architecture'] == arch
+        assert metadata['Config']['Labels']['org.opencontainers.image.revision'] == revision
+        assert prefix.endswith(':' + revision[:8])
+        env = dict(os.environ, CONTAINER_NAME=name, DATA_VOLUME=volume, HTTP_PORT='0')
+        for attempt in range(2):
+            log.append(run('bash', str(directory / 'run.sh'), arch, env=env))
+            wait_ready(name)
+            if attempt:
+                assert run('docker', 'exec', name, 'cat', '/home/talos/.talos/bundle-marker') == 'retained-volume'
+            else:
+                run('docker', 'exec', name, 'bash', '-euc',
+                    'printf retained-volume > "$TALOS_HOME/bundle-marker"; '
+                    'for tool in kubectl ssh scp sftp crontab curl wget dig nslookup ip ss '
+                    'ping traceroute nc ps top pgrep lsof strace tcpdump jq less vi rsync '
+                    'tar gzip unzip openssl git rg; do command -v "$tool" >/dev/null; done; '
+                    'kubectl version --client -o json > /tmp/kubectl-version.json')
+            run('docker', 'rm', '-f', name)
+        return {'architecture': arch, 'status': 'PASS', 'revision': revision,
+                'checks': ['archive checksums', 'docker load', 'image provenance',
+                           'packaged launcher', 'anonymous HTTP/WebUI',
+                           'installed tools', 'retained-volume container recreation']}
+    except subprocess.CalledProcessError as error:
+        log.append(error.output or '')
+        raise
+    finally:
+        (output / f'bundle-{arch}.log').write_text('\n'.join(log) + '\n')
+        subprocess.run(['docker', 'rm', '-f', name], capture_output=True)
+        subprocess.run(['docker', 'volume', 'rm', volume], capture_output=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('archive', type=Path)
+    parser.add_argument('--output-dir', type=Path, default=Path(__file__).resolve().parents[2]
+                        / 'output/ubuntu-server/bundle-verification')
+    args = parser.parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+    try:
+        with tempfile.TemporaryDirectory(prefix='bundle-', dir=args.output_dir) as scratch:
+            directory = Path(scratch).resolve()
+            for arch in unpack(args.archive, directory):
+                results.append(verify(directory, arch, args.output_dir))
+                print(f'PASS bundle {arch}', flush=True)
+    except Exception as error:
+        results.append({'status': 'FAIL', 'detail': str(error)})
+        raise
+    finally:
+        (args.output_dir / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
+
+
+if __name__ == '__main__':
+    main()
