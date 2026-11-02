@@ -232,7 +232,7 @@ async fn run<A: SyncDataAdapter>(
         .ok()
         .map(|url| url.origin().ascii_serialization());
     tracing::info!(account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, "Sync transport runner started");
-    let retry_delay = params.reconnect_delay.min(Duration::from_secs(30));
+    let base_delay = params.reconnect_delay.min(Duration::from_secs(30));
     loop {
         let enabled = match sync.enabled(&params.binding.scope.account_id).await {
             Ok(enabled) => enabled,
@@ -260,7 +260,16 @@ async fn run<A: SyncDataAdapter>(
         if stop.is_cancelled() {
             break;
         }
+        let mut retry_delay = base_delay;
         if let Err(error) = result {
+            if matches!(
+                error.error_code(),
+                ErrorCode::Unauthenticated
+                    | ErrorCode::PermissionDenied
+                    | ErrorCode::MessageQueueFull
+            ) {
+                retry_delay = retry_delay.max(Duration::from_secs(10));
+            }
             let span = tracing::warn_span!("sync_transport_failed", account_id = %params.binding.scope.account_id, peer_id = %sync.peer_id(), ?endpoint_origin, ?phase, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_ms = retry_delay.as_millis() as u64);
             let _entered = span.enter();
             talos_logging::report_error(&error);
