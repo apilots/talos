@@ -126,7 +126,7 @@ describe("useSessionTimelineEvents", () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(result.current.error).toBe("queue unavailable");
-    await act(() => vi.advanceTimersByTimeAsync(500));
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect({ queue: result.current.queue, error: result.current.error }).toEqual({ queue, error: undefined });
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
   });
@@ -159,7 +159,7 @@ describe("useSessionTimelineEvents", () => {
     renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true, undefined, undefined, historyOptions));
     await Promise.resolve();
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(1);
-    await act(() => vi.advanceTimersByTimeAsync(500));
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
 
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
     expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-7");
@@ -265,11 +265,16 @@ describe("useSessionTimelineEvents", () => {
     vi.useFakeTimers();
     apiMocks.subscribeTimelineEvents.mockRejectedValue(new Error("stream disconnected"));
 
-    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, historyOptions));
+    const { unmount } = renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, undefined, historyOptions));
     await act(async () => { await Promise.resolve(); });
     for (let retry = 1; retry <= 7; retry += 1) {
-      await act(() => vi.advanceTimersByTimeAsync(500));
+      await act(() => vi.advanceTimersByTimeAsync(1_999));
+      expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(retry);
+      await act(() => vi.advanceTimersByTimeAsync(1));
       expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(retry + 1);
     }
+    unmount();
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+    expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(8);
   });
 });
