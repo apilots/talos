@@ -6,8 +6,7 @@ use reqwest::{header, Client, Response};
 use serde_json::Value;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
-    LlmProtocol, ProviderConfig, ProviderHttpTimeouts, ProviderModelConfig, ReasoningEffort,
-    ReasoningReplay,
+    LlmProtocol, ProviderConfig, ProviderModelConfig, ReasoningEffort, ReasoningReplay,
 };
 
 use crate::{
@@ -42,11 +41,7 @@ impl ProtocolProvider {
                 "Custom provider Base URL is required",
             )
         })?;
-        let defaults = ProviderHttpTimeouts::default();
-        let clients = ProviderHttpClients::new(
-            Client::builder,
-            Some(config.http_timeouts.as_ref().unwrap_or(&defaults)),
-        )?;
+        let clients = ProviderHttpClients::new(Client::builder, config.http_timeouts.as_ref())?;
         Ok(Self {
             name: name.to_owned(),
             protocol,

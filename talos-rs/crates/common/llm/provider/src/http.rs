@@ -12,27 +12,25 @@ pub struct ProviderHttpClients {
 }
 
 impl ProviderHttpClients {
-    /// The builder supplies adapter defaults; an explicit policy overrides deadlines.
+    /// Adapters supply transport options; omitted deadlines use the shared policy.
     pub fn new(
         builder: impl Fn() -> ClientBuilder,
         timeouts: Option<&ProviderHttpTimeouts>,
     ) -> TalosResult<Self> {
-        if let Some(timeouts) = timeouts {
-            timeouts.validate()?;
-        }
+        let defaults = ProviderHttpTimeouts::default();
+        let timeouts = timeouts.unwrap_or(&defaults);
+        timeouts.validate()?;
         let build = |stream: bool| {
             let mut client = builder();
-            if let Some(timeouts) = timeouts {
-                client = client
-                    .connect_timeout(Duration::from_secs(timeouts.connect_secs))
-                    .timeout(Duration::from_secs(if stream {
-                        timeouts.stream_total_secs
-                    } else {
-                        timeouts.response_secs
-                    }));
-                if stream {
-                    client = client.read_timeout(Duration::from_secs(timeouts.stream_idle_secs));
-                }
+            client = client
+                .connect_timeout(Duration::from_secs(timeouts.connect_secs))
+                .timeout(Duration::from_secs(if stream {
+                    timeouts.stream_total_secs
+                } else {
+                    timeouts.response_secs
+                }));
+            if stream {
+                client = client.read_timeout(Duration::from_secs(timeouts.stream_idle_secs));
             }
             client.build().map_err(|error| {
                 TalosError::internal_with_source(
@@ -42,11 +40,7 @@ impl ProviderHttpClients {
             })
         };
         let response = build(false)?;
-        let stream = if timeouts.is_some() {
-            build(true)?
-        } else {
-            response.clone()
-        };
+        let stream = build(true)?;
         Ok(Self { response, stream })
     }
 
