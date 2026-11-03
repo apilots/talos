@@ -104,6 +104,13 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
         .unwrap();
     assert_eq!(display.state, ActiveTurnState::Cancelling);
     assert_eq!(
+        b.sessions
+            .active_session_ids(&["session-cancel".into()])
+            .await
+            .unwrap(),
+        std::collections::BTreeSet::from(["session-cancel".into()])
+    );
+    assert_eq!(
         display.initial_message_id.as_deref(),
         Some("original-message")
     );
@@ -179,6 +186,13 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
         .await
         .unwrap()
         .is_none());
+    assert_eq!(
+        b.sessions
+            .active_session_ids(&["session-cancel".into()])
+            .await
+            .unwrap(),
+        std::collections::BTreeSet::new()
+    );
     let loaded = b
         .sessions
         .get_session_record("session-cancel")

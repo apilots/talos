@@ -161,6 +161,13 @@ impl SessionStore for RecordingSessionStore {
             .collect())
     }
 
+    async fn active_session_ids(
+        &self,
+        _session_ids: &[String],
+    ) -> TalosResult<std::collections::BTreeSet<String>> {
+        Ok(std::collections::BTreeSet::new())
+    }
+
     async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize> {
         Ok(self
             .records

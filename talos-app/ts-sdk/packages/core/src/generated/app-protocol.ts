@@ -95,7 +95,14 @@ export type SessionListRequest = {
  */
 nodeId?: string, projectId: string | null, limit: number | null, offset: number | null, };
 
-export type SessionListResponse = { sessions: Array<SessionInfo>, };
+export type SessionListEntry = {
+/**
+ * Includes running, waiting-for-input and cancelling Turns.
+ * False does not assert a successful terminal outcome.
+ */
+hasActiveTurn: boolean, nodeId: string, id: string, title: string, userId: string, sourceType: SessionSourceType, sourceProvider: SessionSourceProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, createdAt: number, lastActivity: number, messageCount: number, usage: SessionUsage, projectId: string | null, currentDirectory: string | null, };
+
+export type SessionListResponse = { sessions: Array<SessionListEntry>, };
 
 export type SessionGetRequest = { sessionId: string, };
 

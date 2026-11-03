@@ -11,6 +11,7 @@ import type { Sidebar } from "@/widgets/sidebar/Sidebar";
 
 const mocks = vi.hoisted(() => ({
   sidebarProps: undefined as ComponentProps<typeof Sidebar> | undefined,
+  hasActiveTurn: true,
   deleteProject: vi.fn(),
   updateProjectName: vi.fn(),
   deleteSession: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("../hooks/useChatQueries", () => ({
     data: [
       {
         id: "session-known-project",
+        hasActiveTurn: mocks.hasActiveTurn,
         title: "Known project session",
         projectId: "project-known",
         modelSelection: {
@@ -115,7 +117,10 @@ vi.mock("@/shared/store/app-store", () => ({
       setSessionStatus: mocks.setSessionStatus,
       setConnection: vi.fn(),
       setSidebarOpen: vi.fn(),
-      streams: {},
+      streams: {
+        "session-known-project": { isStreaming: true },
+        "session-chat": { isStreaming: true },
+      },
       transientStatuses: {},
     }),
 }));
@@ -124,6 +129,7 @@ describe("SidebarContainer", () => {
   afterEach(() => {
     cleanup();
     mocks.sidebarProps = undefined;
+    mocks.hasActiveTurn = true;
   });
 
   it("keeps sessions visible when their project is missing from the project list", () => {
@@ -141,6 +147,25 @@ describe("SidebarContainer", () => {
       "session-missing-project",
       "session-chat",
     ]);
+  });
+
+  it("clears completed background activity despite stale running state", () => {
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/sessions/session-chat"]}>
+        <SidebarContainer />
+      </MemoryRouter>,
+    );
+    expect(mocks.sidebarProps?.projectGroups[0]?.sessions[0]?.status).toBe("running");
+
+    mocks.hasActiveTurn = false;
+    rerender(
+      <MemoryRouter initialEntries={["/sessions/session-chat"]}>
+        <SidebarContainer />
+      </MemoryRouter>,
+    );
+    expect(mocks.sidebarProps?.projectGroups[0]?.sessions[0]?.status).toBe("done");
+    expect(mocks.sidebarProps?.chats.find((session) => session.id === "session-chat")?.status)
+      .toBe("running");
   });
 
   it("deletes the active session and clears its local state", async () => {

@@ -39,6 +39,7 @@ export TALOS_TEST_INNER_MODEL_ID="opaque-7f82"
 : >"${case_dir}/empty.env"
 export TALOS_TEST_ENV_TEMPLATE="${case_dir}/empty.env"
 start_server
+printf '%s' "${GATEWAY_URL}" >"${case_dir}/gateway-url"
 mkdir -p "${case_dir}/workspace"
 
 last_provider=""
@@ -48,6 +49,7 @@ while IFS=$'\t' read -r provider mode; do
     session_id="$(new_session_id)"
     last_provider="${provider}"
   fi
+  printf '%s' "${session_id}" >"${case_dir}/current-session"
   payload="$(python3 "${fixture}" payload "${provider}" "${mode}" "${case_dir}/workspace")"
   send_message_response "${session_id}" "${payload}" "${provider}-${mode}" >"${case_dir}/${provider}-${mode}.json"
 done <"${case_dir}/plan.tsv"

@@ -73,7 +73,7 @@ pub use talos_types::{
     SessionActiveTurnRequest, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
     SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionConf,
     SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest, SessionGetResponse,
-    SessionHistoryRequest, SessionInfo, SessionListRequest, SessionListResponse,
+    SessionHistoryRequest, SessionInfo, SessionListEntry, SessionListRequest, SessionListResponse,
     SessionPatchRequest, SessionUpdateResponse, SessionUsage, StartTurnRequest, StartTurnResponse,
     SubagentOutcome, SubagentRef, SubagentSnapshot, SubagentSpawnResult, SubagentUpdate,
     SubagentUpdateKind, SubscribeTimelineRequest, SubscribeTimelineResponse, SyncMetadataCounts,

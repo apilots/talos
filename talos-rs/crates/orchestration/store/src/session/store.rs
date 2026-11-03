@@ -64,6 +64,12 @@ pub trait SessionStore: Send + Sync {
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>>;
 
+    /// Batch display activity for already authorized Session IDs, without replaying history.
+    async fn active_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> TalosResult<std::collections::BTreeSet<String>>;
+
     async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize>;
 
     /// Returns current Session and Message counts for one owner.
@@ -445,6 +451,13 @@ impl SessionStore for DatabaseSessionStore {
             records.push(record);
         }
         Ok(records)
+    }
+
+    async fn active_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> TalosResult<std::collections::BTreeSet<String>> {
+        self.read_active_session_ids(session_ids).await
     }
 
     async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize> {

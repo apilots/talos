@@ -195,7 +195,20 @@ pub struct SessionListRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[ts(rename_all = "camelCase")]
 pub struct SessionListResponse {
-    pub sessions: Vec<SessionInfo>,
+    pub sessions: Vec<SessionListEntry>,
+}
+
+/// A live Session list row. Activity is derived from existing Turn facts;
+/// immutable SessionInfo and synchronized metadata remain unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct SessionListEntry {
+    #[serde(flatten)]
+    pub session: SessionInfo,
+    /// Includes running, waiting-for-input and cancelling Turns.
+    /// False does not assert a successful terminal outcome.
+    pub has_active_turn: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]

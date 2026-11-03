@@ -518,6 +518,13 @@ async fn terminal_settlement_removes_nonterminal_indexes() {
         .await
         .unwrap();
 
+    let listed_ids = ["session-1".into()];
+    assert!(store
+        .active_session_ids(&listed_ids)
+        .await
+        .unwrap()
+        .contains("session-1"));
+
     let terminal = store
         .commit_terminal_settlement(CommitTerminalSettlementParams {
             event: event(
@@ -531,6 +538,11 @@ async fn terminal_settlement_removes_nonterminal_indexes() {
         })
         .await
         .unwrap();
+    assert!(store
+        .active_session_ids(&listed_ids)
+        .await
+        .unwrap()
+        .is_empty());
     let identity = AgentTurnRef::new("session-1", "turn-1");
     assert_eq!(
         store

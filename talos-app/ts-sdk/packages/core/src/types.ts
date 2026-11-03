@@ -289,6 +289,7 @@ export type {
   SessionInfo,
   SessionListRequest,
   SessionListResponse,
+  SessionListEntry,
   SessionPatchRequest,
   SessionSourceProvider,
   SessionSourceType,
