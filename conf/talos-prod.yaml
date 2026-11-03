@@ -565,6 +565,7 @@ storage:
   max_connections: 5
   files:
     default: "local"
+    preview_base_url: null
     backends:
       local:
         type: "fs"

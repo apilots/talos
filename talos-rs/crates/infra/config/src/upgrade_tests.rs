@@ -192,6 +192,191 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
 }
 
 #[test]
+fn managed_profiles_preserve_complete_valid_operator_config() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    for profile in ["talos.yaml", "talos-prod.yaml", "talos-dev.yaml"] {
+        for variant in [
+            "valid",
+            "retired-mode",
+            "invalid-compaction",
+            "multiple-invalid-compaction",
+            "ambiguous-memory",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = TalosPaths::from_home(dir.path().join("home"));
+            let template_path = repo_root.join("conf").join(profile);
+            let mut config: Config =
+                serde_yaml::from_value(read_yaml_file(&template_path).unwrap()).unwrap();
+            config.workspaces = crate::WorkspaceConfig {
+                default_workspace_id: "research".into(),
+                definitions: vec![crate::WorkspaceDefinition::new(
+                    "research",
+                    "workspace-research",
+                )],
+            };
+            config.agent.kernel.prompt.window.reserved_output_tokens =
+                crate::ReservedOutputPolicy::Ratio {
+                    numerator: 1,
+                    denominator: 8,
+                };
+            config.storage.files.preview_base_url = Some("https://preview.example.invalid".into());
+            config.memory.file_list_default_limit = 100;
+            config.memory.file_list_max_limit = 200;
+            config.agent.kernel.output.max_tokens = 100000;
+            config.agent.kernel.output.upper_limit = 200000;
+            config.agent.kernel.compaction.trigger_ratio_percent = 95;
+            config.agent.kernel.compaction.hard_ratio_percent = 99;
+            config.agent.kernel.compaction.recent_messages_max_chars = 10000;
+            config
+                .agent
+                .kernel
+                .compaction
+                .compacted_recent_messages_max_chars = 9000;
+            config.agent.kernel.compaction.summary_max_chars = 5000;
+            config.agent.kernel.compaction.compacted_summary_max_chars = 4000;
+            config.agent.kernel.compaction.tool_exchange_max_chars = 5000;
+            config
+                .agent
+                .kernel
+                .compaction
+                .compacted_tool_exchange_max_chars = 4000;
+            config.agent.kernel.compaction.retrieved_memory_max_chars = 5000;
+            config
+                .agent
+                .kernel
+                .compaction
+                .compacted_retrieved_memory_max_chars = 4000;
+            config.agent.kernel.tools.bash.output_log.max_file_bytes = 5368709120;
+            config
+                .agent
+                .kernel
+                .tools
+                .bash
+                .output_log
+                .max_workspace_bytes = 10737418240;
+            config.storage.files.limits.max_metadata_value_bytes = 16384;
+            config.storage.files.limits.max_metadata_bytes = 32768;
+            config.validate_runtime().unwrap();
+
+            let mut saved = serde_yaml::to_value(config).unwrap();
+            // Runtime-only paths are not writable operator configuration.
+            for path in [
+                vec!["logging", "file"],
+                vec!["storage", "connection_string"],
+                vec!["agent", "kernel", "timezone"],
+            ] {
+                remove_path_for_test(&mut saved, &path);
+            }
+            remove_path_for_test(&mut saved, &["sync", "trusted_ca_file"]);
+            let expected: Config = serde_yaml::from_value(saved.clone()).unwrap();
+            expected.validate_runtime().unwrap();
+            if variant == "retired-mode" {
+                set_path_for_test(&mut saved, &["mode"], YamlValue::String("local".into()));
+            }
+            if matches!(
+                variant,
+                "invalid-compaction" | "multiple-invalid-compaction"
+            ) {
+                set_path_for_test(
+                    &mut saved,
+                    &["agent", "kernel", "compaction", "recent_messages_keep"],
+                    YamlValue::Number(0.into()),
+                );
+            }
+            if variant == "multiple-invalid-compaction" {
+                set_path_for_test(
+                    &mut saved,
+                    &[
+                        "agent",
+                        "kernel",
+                        "compaction",
+                        "compacted_recent_messages_keep",
+                    ],
+                    YamlValue::Number(0.into()),
+                );
+            }
+            if variant == "ambiguous-memory" {
+                set_path_for_test(
+                    &mut saved,
+                    &["memory", "file_list_default_limit"],
+                    YamlValue::Number(80.into()),
+                );
+                set_path_for_test(
+                    &mut saved,
+                    &["memory", "file_list_max_limit"],
+                    YamlValue::Number(60.into()),
+                );
+            }
+            write_existing(&paths, &saved);
+            let original = std::fs::read(&paths.config_file).unwrap();
+
+            let report = match upgrade_default_config_from_template(&paths, &template_path) {
+                Err(error)
+                    if matches!(variant, "multiple-invalid-compaction" | "ambiguous-memory") =>
+                {
+                    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+                    assert_eq!(std::fs::read(&paths.config_file).unwrap(), original);
+                    let backups = std::fs::read_dir(&paths.conf_dir)
+                        .unwrap()
+                        .filter_map(Result::ok)
+                        .filter(|entry| entry.file_name().to_string_lossy().contains(".bak."))
+                        .count();
+                    assert_eq!(backups, 0);
+                    continue;
+                }
+                result => result.unwrap(),
+            };
+            assert_ne!(
+                variant, "ambiguous-memory",
+                "an ambiguous repair must not guess operator intent"
+            );
+            assert!(report.changed, "{profile}, variant={variant}");
+            let actual: Config =
+                serde_yaml::from_value(read_yaml_file(&paths.config_file).unwrap()).unwrap();
+            assert_eq!(
+                serde_json::to_value(actual).unwrap(),
+                serde_json::to_value(expected).unwrap(),
+                "{profile}, variant={variant}"
+            );
+            let expected_removed: Vec<String> = if variant == "retired-mode" {
+                vec!["mode".into()]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(report.removed_paths, expected_removed, "{profile}");
+            let mut expected_defaulted: Vec<String> = match variant {
+                "invalid-compaction" => vec!["agent.kernel.compaction.recent_messages_keep".into()],
+                "multiple-invalid-compaction" => vec![
+                    "agent.kernel.compaction.recent_messages_keep".into(),
+                    "agent.kernel.compaction.compacted_recent_messages_keep".into(),
+                ],
+                _ => Vec::new(),
+            };
+            expected_defaulted.sort();
+            let mut actual_defaulted = report.defaulted_paths.clone();
+            actual_defaulted.sort();
+            assert_eq!(
+                actual_defaulted, expected_defaulted,
+                "{profile}, variant={variant}"
+            );
+            assert!(
+                report.added_paths.contains(&"sync.trusted_ca_file".into()),
+                "{profile}"
+            );
+            assert_eq!(
+                read_yaml_file(report.backup_path.as_ref().unwrap()).unwrap(),
+                saved
+            );
+            assert!(
+                !upgrade_default_config_from_template(&paths, &template_path)
+                    .unwrap()
+                    .changed
+            );
+        }
+    }
+}
+
+#[test]
 fn upgrade_refuses_to_erase_worker_identity_when_tls_is_missing() {
     let dir = tempfile::tempdir().unwrap();
     let paths = TalosPaths::from_home(dir.path().join(".talos"));
@@ -638,4 +823,25 @@ fn upgrade_preserves_custom_providers_when_legacy_template_omits_section() {
         get_path_for_test(&upgraded, &["llm", "custom_providers"]),
         Some(&custom)
     );
+    let mut invalid = upgraded.clone();
+    set_path_for_test(
+        &mut invalid,
+        &["llm", "custom_providers", "llm-gateway", "models"],
+        YamlValue::String("invalid-catalog".into()),
+    );
+    write_existing(&paths, &invalid);
+    let original = std::fs::read(&paths.config_file).unwrap();
+    let backup_count = || {
+        std::fs::read_dir(&paths.conf_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".bak."))
+            .count()
+    };
+    let backups_before = backup_count();
+    let error = upgrade_default_config_from_template(&paths, &template_path)
+        .expect_err("an invalid operator catalog must not be erased");
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+    assert_eq!(std::fs::read(&paths.config_file).unwrap(), original);
+    assert_eq!(backup_count(), backups_before);
 }
