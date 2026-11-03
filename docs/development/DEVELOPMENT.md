@@ -205,6 +205,18 @@ claims; do not claim runtime behavior was tested by a Markdown check.
 - Manual validation exercises the complete affected user path with all required services, including frontend and backend when both are needed. Screenshots or logs demonstrate behavior, not just a static page opening.
 - Reuse test helpers and fixtures. Avoid tests of static definitions or negative tests for removed logic. Rust-specific assertions and layout are defined in [Test organization](RUST.md#test-organization).
 
+## Model connection acceptance
+
+Native and custom model connections share HTTP defaults: 10 seconds to connect,
+120 seconds for a non-streaming response, 90 seconds of streaming read inactivity,
+and 900 seconds total for a stream. Explicit `http_timeouts` overrides take
+precedence. Maintained configuration templates include nullable policy fields so
+managed upgrades preserve saved native-provider overrides across restarts.
+
+Select reasoning replay per model using its configured wire contract. A private
+Chat endpoint requiring `reasoning_content` must opt in; do not change replay
+fields globally for unrelated providers.
+
 ## Plans and durable evidence
 
 For complex or staged work, maintain a task-owned `IMPLEMENTATION_PLAN.md`

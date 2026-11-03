@@ -133,6 +133,11 @@ excludes waiting/terminal facts; the separate channel carries the unique
 settlement per invocation, including cumulative logical-Turn metrics. A missing
 settlement is an explicit failure, not a synthesized successful completion.
 
+The Kernel publishes current Turn metrics before propagating a failed model
+step. Elapsed active time and the attempted round include that failed request;
+usage remains limited to observed token accounting. Settlement retains the
+original typed error and the latest canonical metrics.
+
 ## Settlement, state and recovery
 
 ```text
@@ -283,6 +288,8 @@ policy decision.
 These constraints govern context injected by Talos runtime code, not the development assistant's file reads, documentation, or work reports.
 
 - Build context incrementally without rewriting historical items. Preserve content order and structure to avoid unnecessary cache invalidation.
+- Generic tool-failure recovery guidance belongs to the typed static prompt policy. Keep individual failure details in their existing tool-result envelope; do not append runtime `system` messages after conversation history.
+- A model call with observed malformed JSON arguments still fails tool execution and remains unchanged in canonical items and trajectory. When adding that call to model context, use an empty object for its argument projection so strict protocol templates can consume the following tool error and let the model retry. Preserve valid JSON arguments, including scalar values; never repair the actual execution input.
 - Represent injected fragments as typed context objects using the project's injection interface; record source, boundaries, trimming policy, and token-cost assumptions instead of scattering string concatenation.
 - Bound every injected item, list, log, file fragment, and tool result before model injection. Enforce the configured hard cap; no individual item may exceed 10K tokens.
 - Mark new items that may exceed 1K tokens as high risk and obtain human review before merge or release. Prepare the implementation, cap/trimming verification, and review materials first; do not mark delivery complete before review.

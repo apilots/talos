@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use reqwest::{header, Client};
-use std::time::Duration;
 use talos_error::TalosResult;
 use talos_llm_provider::{
     protocols::messages as messages_protocol, validate_inline_attachments, Attachment,
@@ -17,7 +16,6 @@ use tracing::{debug, info};
 pub struct AnthropicConfig {
     pub api_key: String,
     pub base_url: String,
-    pub timeout_secs: u64,
     pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: Option<String>,
 }
@@ -27,7 +25,6 @@ impl AnthropicConfig {
         Self {
             api_key: api_key.into(),
             base_url: "https://api.anthropic.com/v1".to_string(),
-            timeout_secs: 120,
             http_timeouts: None,
             default_model: None,
         }
@@ -38,14 +35,18 @@ impl AnthropicConfig {
         self
     }
 
-    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    /// Use the shared HTTP policy when no explicit deadlines are supplied.
     pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
         self.http_timeouts = timeouts;
         self
     }
 
     pub fn with_timeout(mut self, secs: u64) -> Self {
-        self.timeout_secs = secs;
+        self.http_timeouts = Some(ProviderHttpTimeouts {
+            response_secs: secs,
+            stream_total_secs: secs,
+            ..ProviderHttpTimeouts::default()
+        });
         self
     }
 
@@ -70,11 +71,7 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     pub fn new(config: AnthropicConfig) -> Self {
         let clients = ProviderHttpClients::new(
-            || {
-                Client::builder()
-                    .timeout(Duration::from_secs(config.timeout_secs))
-                    .referer(false)
-            },
+            || Client::builder().referer(false),
             config.http_timeouts.as_ref(),
         )
         .expect("Failed to build model HTTP clients");

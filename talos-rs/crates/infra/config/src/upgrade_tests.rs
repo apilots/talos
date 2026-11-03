@@ -148,6 +148,8 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
             (vec!["logging", "timezone"], "UTC"),
             (vec!["logging", "target_levels"], "{talos_sync::runner: info, loro_internal::oplog::change_store::block_encode: debug}"),
             (vec!["llm", "ollama", "api_key"], "fixture-provider-key"),
+            (vec!["llm", "deepseek", "http_timeouts"], "{connect_secs: 12, response_secs: 180, stream_idle_secs: 150, stream_total_secs: 1200}"),
+            (vec!["llm", "openai", "http_timeouts"], "{connect_secs: 11, response_secs: 130, stream_idle_secs: 100, stream_total_secs: 950}"),
             (
                 vec!["channels", "discord", "token"],
                 "fixture-channel-token",

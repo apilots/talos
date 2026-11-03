@@ -321,6 +321,7 @@ pub struct GeneralTurnLoopState {
     pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub started_at: Instant,
     pub messages: Vec<ChatMessage>,
+    /// Number of model requests attempted, including failed and finalization requests.
     pub round: u32,
     pub output_items: Vec<KernelRunItem>,
     pub usage: TokenUsage,
@@ -388,7 +389,7 @@ impl GeneralTurnLoopState {
     }
 
     pub fn restore_execution_metrics(&mut self, metrics: &TurnExecutionMetrics) {
-        self.round = metrics.model_rounds.saturating_sub(1);
+        self.round = metrics.model_rounds;
         self.tool_call_count = metrics.tool_calls as usize;
         self.tool_result_count =
             metrics.tool_successes.saturating_add(metrics.tool_errors) as usize;
@@ -506,6 +507,5 @@ pub struct PendingUserActionRequest {
 pub struct ToolResultLog {
     pub(crate) call_id: String,
     pub(crate) tool: String,
-    pub(crate) payload: Value,
     pub(crate) is_error: bool,
 }

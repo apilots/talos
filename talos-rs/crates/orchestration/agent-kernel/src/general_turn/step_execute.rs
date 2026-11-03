@@ -50,16 +50,21 @@ fn finalize_tool_calls(
         let name = required_tool_name(round, index, call.name)?;
 
         let id = normalized_tool_call_id(round, index, call.id);
+        let raw_arguments = call.arguments_buffer;
         let arguments = if let Some(value) = call.final_arguments {
             value
-        } else if call.arguments_buffer.trim().is_empty() {
+        } else if raw_arguments.trim().is_empty() {
             serde_json::json!({})
         } else {
-            serde_json::from_str::<Value>(&call.arguments_buffer)
-                .unwrap_or(Value::String(call.arguments_buffer))
+            serde_json::from_str::<Value>(&raw_arguments)
+                .unwrap_or_else(|_| Value::String(raw_arguments.clone()))
         };
 
-        calls.push(FunctionCall::new(id, name, arguments));
+        let mut call = FunctionCall::new(id, name, arguments);
+        if !raw_arguments.is_empty() && call.arguments.as_str() == Some(raw_arguments.as_str()) {
+            call.arguments_text = Some(raw_arguments);
+        }
+        calls.push(call);
     }
 
     Ok(calls)
@@ -759,12 +764,21 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
         .reasoning_log
         .extend(step.reasoning.display_text.clone());
     if !step.tool_calls.is_empty() {
-        let mut message =
-            ChatMessage::assistant_with_tool_calls(step.text.clone(), step.tool_calls.clone())
-                .with_input_origin(talos_llm_provider::MessageInputOrigin {
-                    kind: talos_llm_provider::MessageInputKind::Context,
-                    source: talos_llm_provider::MessageInputSource::Runtime,
-                });
+        let mut replay_calls = step.tool_calls.clone();
+        for call in &mut replay_calls {
+            if let (Value::String(arguments), Some(raw)) = (&call.arguments, &call.arguments_text) {
+                if arguments == raw && serde_json::from_str::<Value>(raw).is_err() {
+                    // Only the new context entry needs a parseable object.
+                    // Execution and canonical observations retain the invalid input.
+                    call.arguments = serde_json::json!({});
+                }
+            }
+        }
+        let mut message = ChatMessage::assistant_with_tool_calls(step.text.clone(), replay_calls)
+            .with_input_origin(talos_llm_provider::MessageInputOrigin {
+                kind: talos_llm_provider::MessageInputKind::Context,
+                source: talos_llm_provider::MessageInputSource::Runtime,
+            });
         if let Some(continuation) = step.reasoning.continuation.clone() {
             message = message.with_reasoning_continuation(continuation);
         }

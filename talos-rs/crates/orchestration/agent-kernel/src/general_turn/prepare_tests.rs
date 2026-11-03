@@ -38,7 +38,6 @@ fn test_build_session_continuity_records_recent_goal_failure_and_retry_guidance(
         vec![ToolResultLog {
             call_id: "call-1".to_string(),
             tool: "Bash".to_string(),
-            payload: json!({"error": "permission denied"}),
             is_error: true,
         }],
     );
@@ -75,7 +74,6 @@ fn test_build_session_continuity_prefers_verified_evidence_guidance_without_fail
         vec![ToolResultLog {
             call_id: "call-1".to_string(),
             tool: "Read".to_string(),
-            payload: json!({"content": "[package]"}),
             is_error: false,
         }],
     );

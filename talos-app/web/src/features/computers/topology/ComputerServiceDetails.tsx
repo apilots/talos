@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-core";
-import { controlPlanePeer, type ComputerService } from "./observations";
+import { controlPlanePeer, controlPlaneSyncState, type ComputerService } from "./observations";
+import { SyncTopologyState } from "./sync-state";
 import { SyncPeerDetails } from "./SyncPeerDetails";
 
 export function ComputerServiceDetails({
@@ -18,6 +19,7 @@ export function ComputerServiceDetails({
 }) {
   const { t, i18n } = useTranslation("computers");
   const peer = controlPlanePeer(metrics);
+  const syncDisabled = controlPlaneSyncState(metrics, syncStatus) === SyncTopologyState.Disabled;
   return (
     <>
       <div className="cmp-inspector-heading">
@@ -29,15 +31,17 @@ export function ComputerServiceDetails({
       </div>
       <dl className="cmp-facts">
         <div>
-          <dt>{t("endpoint")}</dt>
+          <dt>{t(service === "sync" && syncDisabled ? "state" : "endpoint")}</dt>
           <dd>
             {service === "sync"
-              ? (syncEndpoint ?? metrics?.endpoint ?? t("unknown"))
+              ? (syncDisabled ? t("syncDisabled") : (syncEndpoint ?? metrics?.endpoint ?? t("unknown")))
               : controlPlane}
           </dd>
         </div>
       </dl>
-      {metrics ? (
+      {syncDisabled ? (
+        service === "controlPlane" ? <p className="cmp-footnote">{t("syncDisabled")}</p> : null
+      ) : metrics ? (
         <p className="cmp-footnote">
           {t("lastObserved", {
             time: new Date(metrics.observedAt * 1000).toLocaleTimeString(
@@ -48,7 +52,7 @@ export function ComputerServiceDetails({
       ) : (
         <p className="cmp-footnote">{t(service === "sync" && syncEndpoint ? "lastKnownEndpoint" : "syncUnknown")}</p>
       )}
-      {service === "controlPlane" ? (
+      {service === "controlPlane" && !syncDisabled ? (
         <SyncPeerDetails
           peers={peer ? [peer] : []}
           metrics={metrics}
@@ -58,7 +62,7 @@ export function ComputerServiceDetails({
               : undefined
           }
         />
-      ) : (
+      ) : service === "sync" ? (
         <>
           <h3 className="mb-3 mt-6 text-sm font-medium">
             {t("resourceCounts")}
@@ -91,7 +95,7 @@ export function ComputerServiceDetails({
             </p>
           ) : null}
         </>
-      )}
+      ) : null}
       <p className="cmp-footnote">{t("flowHelpText")}</p>
     </>
   );

@@ -18,7 +18,8 @@ pub struct FunctionCall {
     pub name: String,
     pub arguments: Value,
     /// Original model argument text, when the protocol actually provides a string.
-    /// Observation-only: excluded from persisted/wire JSON and execution equality.
+    /// Identifies malformed JSON for model-context replay; never an execution input.
+    /// Excluded from persisted/wire JSON and execution equality.
     #[serde(skip)]
     pub arguments_text: Option<String>,
 }

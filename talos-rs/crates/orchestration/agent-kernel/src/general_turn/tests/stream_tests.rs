@@ -4,6 +4,9 @@ use talos_llm_provider::{
     ModelBlockStreamEvent, ModelOutputPhase,
 };
 
+#[path = "stream_recovery_tests.rs"]
+mod recovery_tests;
+
 struct DirectStreamingAnswerProvider;
 struct ExplicitFinalModelBlockProvider;
 struct ScriptedModelBlockProvider {

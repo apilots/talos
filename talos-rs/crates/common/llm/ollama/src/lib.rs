@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use reqwest::{header, Client, Response};
-use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
@@ -14,7 +13,6 @@ use talos_llm_provider::{
 pub struct OllamaConfig {
     pub api_key: Option<String>,
     pub base_url: String,
-    pub timeout_secs: u64,
     pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
 }
@@ -24,7 +22,6 @@ impl OllamaConfig {
         Self {
             api_key: None,
             base_url: base_url.into(),
-            timeout_secs: 60,
             http_timeouts: None,
             default_model: default_model.into(),
         }
@@ -35,14 +32,18 @@ impl OllamaConfig {
         self
     }
 
-    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    /// Use the shared HTTP policy when no explicit deadlines are supplied.
     pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
         self.http_timeouts = timeouts;
         self
     }
 
     pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
-        self.timeout_secs = timeout_secs;
+        self.http_timeouts = Some(ProviderHttpTimeouts {
+            response_secs: timeout_secs,
+            stream_total_secs: timeout_secs,
+            ..ProviderHttpTimeouts::default()
+        });
         self
     }
 }
@@ -55,11 +56,8 @@ pub struct OllamaProvider {
 
 impl OllamaProvider {
     pub fn new(config: OllamaConfig) -> Self {
-        let clients = ProviderHttpClients::new(
-            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
-            config.http_timeouts.as_ref(),
-        )
-        .expect("Failed to build model HTTP clients");
+        let clients = ProviderHttpClients::new(Client::builder, config.http_timeouts.as_ref())
+            .expect("Failed to build model HTTP clients");
         Self { config, clients }
     }
 

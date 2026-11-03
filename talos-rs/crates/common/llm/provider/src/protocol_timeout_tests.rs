@@ -1,5 +1,5 @@
 use super::*;
-use crate::ModelBlockStreamEvent;
+use crate::{ModelBlockStreamEvent, ProviderHttpTimeouts};
 use serde_json::json;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -65,6 +65,31 @@ fn short_timeouts() -> ProviderHttpTimeouts {
         response_secs: 1,
         stream_idle_secs: 1,
         stream_total_secs: 3,
+    }
+}
+
+#[tokio::test]
+async fn omitted_policy_uses_shared_deadlines_for_both_response_modes() {
+    // A legacy adapter builder must not impose its total timeout on streaming.
+    let clients = ProviderHttpClients::new(
+        || reqwest::Client::builder().timeout(Duration::from_millis(1)),
+        None,
+    )
+    .unwrap();
+    for stream in [false, true] {
+        let (url, task) = server("200 OK", vec![(Duration::from_millis(30), "OK".into())]).await;
+        let body = clients
+            .for_request(stream)
+            .post(url)
+            .body("{}")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(body, "OK");
+        task.await.unwrap();
     }
 }
 

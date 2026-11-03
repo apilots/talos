@@ -72,7 +72,6 @@ fn test_bailian_config_builder() {
 
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://example.com/compatible-mode/v1");
-    assert_eq!(config.timeout_secs, 120);
 }
 
 #[test]

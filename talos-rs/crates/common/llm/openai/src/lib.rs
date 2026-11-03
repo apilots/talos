@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use reqwest::{header, Client};
-use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, responses as responses_protocol},
@@ -24,7 +23,6 @@ pub enum OpenAIProtocol {
 pub struct OpenAIConfig {
     pub api_key: String,
     pub base_url: String,
-    pub timeout_secs: u64,
     pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
     pub protocol: OpenAIProtocol,
@@ -35,7 +33,6 @@ impl OpenAIConfig {
         Self {
             api_key: api_key.into(),
             base_url: "https://api.openai.com/v1".to_string(),
-            timeout_secs: 60,
             http_timeouts: None,
             default_model: "gpt-5.5".to_string(),
             protocol: OpenAIProtocol::Chat,
@@ -47,14 +44,18 @@ impl OpenAIConfig {
         self
     }
 
-    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    /// Use the shared HTTP policy when no explicit deadlines are supplied.
     pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
         self.http_timeouts = timeouts;
         self
     }
 
     pub fn with_timeout(mut self, secs: u64) -> Self {
-        self.timeout_secs = secs;
+        self.http_timeouts = Some(ProviderHttpTimeouts {
+            response_secs: secs,
+            stream_total_secs: secs,
+            ..ProviderHttpTimeouts::default()
+        });
         self
     }
 
@@ -77,11 +78,8 @@ pub struct OpenAIProvider {
 
 impl OpenAIProvider {
     pub fn new(config: OpenAIConfig) -> Self {
-        let clients = ProviderHttpClients::new(
-            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
-            config.http_timeouts.as_ref(),
-        )
-        .expect("Failed to build model HTTP clients");
+        let clients = ProviderHttpClients::new(Client::builder, config.http_timeouts.as_ref())
+            .expect("Failed to build model HTTP clients");
         Self { config, clients }
     }
 

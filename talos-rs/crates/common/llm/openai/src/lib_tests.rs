@@ -71,7 +71,6 @@ fn test_openai_config_builder() {
 
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://custom.openai.com/v1");
-    assert_eq!(config.timeout_secs, 120);
     assert_eq!(config.protocol, OpenAIProtocol::Chat);
 }
 

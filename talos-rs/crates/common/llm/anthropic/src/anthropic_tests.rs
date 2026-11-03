@@ -73,7 +73,6 @@ fn test_anthropic_config_builder() {
 
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://custom.anthropic.com/v1");
-    assert_eq!(config.timeout_secs, 120);
 }
 
 #[test]
