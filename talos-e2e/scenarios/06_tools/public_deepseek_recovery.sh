@@ -91,7 +91,6 @@ for step in (1, 2):
     assert response["session_id"] == sys.argv[1]
     calls = [x for x in response["output"] if x["type"] == "tool_call"]
     results = {x["call_id"]: x for x in response["output"] if x["type"] == "tool_result"}
-    actual = [c for c in calls if c["name"] in ("Bash", "Read")]
     assert len({c["call_id"] for c in calls}) == len(calls)
     assert set(results) == {c["call_id"] for c in calls}
     successful_bash = [
@@ -107,7 +106,6 @@ for step in (1, 2):
             and (workspace / c["arguments"].get("path", "")).resolve()
             == (workspace / "deliberately-missing.txt").resolve()
         ]
-        assert any(successful_bash[0] < failed < successful_bash[-1] for failed in failed_reads)
     answer = "".join(x["text"] for x in response["output"] if x["type"] == "output_text")
     assert ("RECOVERY_OK" in answer and source.strip() in answer) if step == 1 else "FOLLOWUP_OK" in answer
     records = [json.loads(line[6:]) for line in (report / f"public-deepseek-{step}_events.log").read_text().splitlines() if line.startswith("data: ")]
@@ -120,7 +118,18 @@ for step in (1, 2):
     requests = [x["request"] for x in trace["data"]["data"] if x["type"] == "modelRequest"]
     assert requests and all(r["connectionId"] == "deepseek" and r["modelId"] == "deepseek-v4-flash" for r in requests)
     assert all(c["observedState"] == "completed" for r in requests for c in r["callRecords"])
-    checks.append({"step": step, "tool_names": [c["name"] for c in actual], "tool_errors": sum(results[c["call_id"]]["is_error"] for c in actual), "metrics": response["metrics"]})
+    if step == 1:
+        ordinals = {r["modelRequestId"]: r["ordinal"] for r in requests}
+        tool_ordinals = {
+            x["tool"]["callId"]: ordinals[x["tool"]["sourceModelRequestId"]]
+            for x in trace["data"]["data"] if x["type"] == "tool"
+        }
+        assert any(
+            successful_bash[0] < failed < recovered
+            and tool_ordinals[calls[failed]["call_id"]] < tool_ordinals[calls[recovered]["call_id"]]
+            for failed in failed_reads for recovered in successful_bash
+        )
+    checks.append({"step": step, "tool_names": [c["name"] for c in calls], "tool_errors": sum(results[c["call_id"]]["is_error"] for c in calls), "metrics": response["metrics"]})
 (report / "public-deepseek-summary.json").write_text(json.dumps({"endpoint": "https://api.deepseek.com", "model": "deepseek-v4-flash", "sessionId": sys.argv[1], "checks": checks, "file_effect_verified": True}, indent=2))
 print("CASE public_deepseek_recovery PASS real_public_model=true tool_failure_recovered=true same_session_followup=true file_effect=true")
 PY
