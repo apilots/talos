@@ -34,6 +34,7 @@ export function MessageList({
   const copiedBlockLabel = t("copiedBlock");
   const helpfulLabel = t("helpful");
   const notHelpfulLabel = t("notHelpful");
+  const lastUserIndex = blocks.reduce((last, block, index) => block.kind === "user" ? index : last, -1);
 
   if (blocks.length === 0) {
     return (
@@ -52,12 +53,12 @@ export function MessageList({
 
   return (
     <div className="space-y-5 md:space-y-6">
-      {blocks.map((block) => {
+      {blocks.map((block, index) => {
         if (block.kind === "notice") return <SystemNotice key={block.id} notice={block.notice} />;
         if (block.kind === "timeline") {
           return (
             <MessageTimelineBlock
-              block={block}
+              block={index < lastUserIndex ? { ...block, live: false } : block}
               copiedLabel={copiedBlockLabel}
               copyLabel={copyBlockLabel}
               helpfulLabel={helpfulLabel}
