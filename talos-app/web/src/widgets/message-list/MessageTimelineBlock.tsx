@@ -65,7 +65,7 @@ export function MessageTimelineBlock({
     (item) => item.status === "running" || item.status === "waitingForInput",
   );
   const hasActiveTimeline = hasRunningItem || (live && processItems.length > 0 && responseItems.length === 0);
-  const isAwaitingTimelineDelta = (live || hasRunningItem) && responseItems.length === 0;
+  const isAwaitingTimelineDelta = block.live !== false && (live || hasRunningItem) && responseItems.length === 0;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const totalDuration = timelineDuration(processItems, nowMs);
   const displayDuration = metrics?.durationMs ?? totalDuration;

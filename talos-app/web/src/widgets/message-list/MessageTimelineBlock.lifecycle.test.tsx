@@ -12,8 +12,8 @@ describe("MessageTimelineBlock lifecycle", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the timeline waiting indicator while a live turn is between completed tool work and the next server item", async () => {
-    const { getByLabelText } = render(
+  it("keeps waiting for the next item only after the latest steer", () => {
+    const view = (
       <MessageList
         blocks={[
           {
@@ -40,10 +40,19 @@ describe("MessageTimelineBlock lifecycle", () => {
         ]}
         emptyDetail=""
         emptyTitle=""
-      />,
+      />
     );
 
+    const { container, getByLabelText, rerender } = render(view);
     expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
+
+    rerender(<MessageList {...view.props} blocks={[
+      ...view.props.blocks,
+      { id: "steer", kind: "user", text: "Continue", fileIds: [] },
+      { ...view.props.blocks[0], id: "after-steer" },
+    ]} />);
+    expect(container.querySelector("details")?.querySelector('[aria-label="Waiting for timeline update"]')).toBeNull();
+    expect(getByLabelText("Waiting for timeline update").closest("details")).toBe(container.querySelectorAll("details")[1]);
   });
 
   it("keeps a manually collapsed live timeline closed when ordinary events arrive", async () => {
