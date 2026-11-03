@@ -261,6 +261,7 @@ llm:
   #           chat_template_kwargs:
   #             enable_thinking: true
   anthropic:
+    http_timeouts: null
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://api.anthropic.com/v1"
     protocol: "messages"
@@ -302,8 +303,10 @@ llm:
           cache_read: 0
           cache_write: 0
   # All built-in and custom connections accept the same optional HTTP policy.
-  # Omit it to retain the provider's existing defaults. Responses uses HTTP/SSE here.
+  # Omit it or use null for shared defaults: connect 10s, response 120s,
+  # stream idle 90s, stream total 900s. Responses uses HTTP/SSE here.
   openai:
+    http_timeouts: null
     # http_timeouts:
     #   connect_secs: 10
     #   response_secs: 120
@@ -350,6 +353,7 @@ llm:
           cache_read: 0
           cache_write: 0
   bailian:
+    http_timeouts: null
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
     protocol: "chat"
@@ -391,6 +395,7 @@ llm:
           cache_read: 0
           cache_write: 0
   deepseek:
+    http_timeouts: null
     api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
     base_url: "https://api.deepseek.com"
     protocol: "chat"
@@ -432,6 +437,7 @@ llm:
           cache_read: 0
           cache_write: 0
   openrouter:
+    http_timeouts: null
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
     base_url: "https://openrouter.ai/api/v1"
     protocol: "chat"
@@ -497,6 +503,7 @@ llm:
           cache_read: 0
           cache_write: 0
   ollama:
+    http_timeouts: null
     base_url: "http://localhost:11434"
     protocol: "chat"
     models:

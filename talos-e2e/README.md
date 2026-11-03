@@ -346,3 +346,12 @@ Group `12_files` retains Local attachment and S3 upload/list/read/delete coverag
 Its S3 helper owns a standalone Versity Gateway process and temporary directory
 under `scenarios/12_files/.tmp/`; the scenario EXIT trap stops the process and
 removes the directory, including on failure. No Docker or MinIO client is needed.
+
+`06_tools/public_deepseek_recovery` uses the dev YAML and the real public
+`https://api.deepseek.com` `deepseek-v4-flash` model. It requires
+`TALOS_LLM_DEEPSEEK_API_KEY`, performs a successful Bash call, a deliberate Read
+failure, and a recovery Bash write, then continues the same Session with another
+tool call. It checks streamed events, canonical call/result identities, terminal
+history, model-request tracing and exact file effects. Run it locally with
+`just e2e-case 06_tools/public_deepseek_recovery` or through the existing
+maintainer-only `06_tools` workflow; public PR gates do not receive model secrets.

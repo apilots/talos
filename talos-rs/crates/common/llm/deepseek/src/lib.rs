@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 use reqwest::{header, Client, Response};
 use serde_json::Value;
-use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
@@ -38,7 +37,6 @@ pub enum DeepSeekProtocol {
 pub struct DeepSeekConfig {
     pub api_key: String,
     pub base_url: String,
-    pub timeout_secs: u64,
     pub http_timeouts: Option<ProviderHttpTimeouts>,
     pub default_model: String,
     pub protocol: DeepSeekProtocol,
@@ -49,7 +47,6 @@ impl DeepSeekConfig {
         Self {
             api_key: api_key.into(),
             base_url: "https://api.deepseek.com".to_string(),
-            timeout_secs: 60,
             http_timeouts: None,
             default_model: "deepseek-chat".to_string(),
             protocol: DeepSeekProtocol::Chat,
@@ -61,14 +58,18 @@ impl DeepSeekConfig {
         self
     }
 
-    /// Explicit HTTP deadlines override timeout_secs for both response modes.
+    /// Use the shared HTTP policy when no explicit deadlines are supplied.
     pub fn with_http_timeouts(mut self, timeouts: Option<ProviderHttpTimeouts>) -> Self {
         self.http_timeouts = timeouts;
         self
     }
 
     pub fn with_timeout(mut self, timeout_secs: u64) -> Self {
-        self.timeout_secs = timeout_secs;
+        self.http_timeouts = Some(ProviderHttpTimeouts {
+            response_secs: timeout_secs,
+            stream_total_secs: timeout_secs,
+            ..ProviderHttpTimeouts::default()
+        });
         self
     }
 
@@ -91,11 +92,8 @@ pub struct DeepSeekProvider {
 
 impl DeepSeekProvider {
     pub fn new(config: DeepSeekConfig) -> Self {
-        let clients = ProviderHttpClients::new(
-            || Client::builder().timeout(Duration::from_secs(config.timeout_secs)),
-            config.http_timeouts.as_ref(),
-        )
-        .expect("Failed to build model HTTP clients");
+        let clients = ProviderHttpClients::new(Client::builder, config.http_timeouts.as_ref())
+            .expect("Failed to build model HTTP clients");
         Self { config, clients }
     }
 

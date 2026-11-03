@@ -1,5 +1,5 @@
 import type { AppProtocol } from "@talos/sdk-core";
-import { syncObservationState } from "./sync-state";
+import { syncObservationState, SyncTopologyState } from "./sync-state";
 
 export type ComputerService = "controlPlane" | "sync";
 export type FlowLayer = "all" | "execution" | "sync";
@@ -54,6 +54,8 @@ export function controlPlaneSyncState(
   metrics: AppProtocol.SyncMetricsResponse | undefined,
   status?: AppProtocol.SyncStatusResponse,
 ) {
+  // Configuration is authoritative even when disabled Sync produces no metrics.
+  if (status?.configuredEnabled === false) return SyncTopologyState.Disabled;
   const peer = controlPlanePeer(metrics);
   return syncObservationState(
     metrics,

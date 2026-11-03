@@ -12,6 +12,14 @@ const status: AppProtocol.SyncStatusResponse = {
 };
 afterEach(() => vi.useRealTimers());
 
+it("shows explicitly disabled Control Plane Sync without requiring observations", () => {
+  const disabled = { ...status, configuredEnabled: false, connection: "disabled" as const };
+  expect(controlPlaneSyncState(undefined, disabled)).toBe(SyncTopologyState.Disabled);
+  expect(controlPlaneSyncState({ ...topologyMetrics, controlPlanePeerId: null }, disabled)).toBe(SyncTopologyState.Disabled);
+  expect(controlPlaneSyncState(undefined)).toBe(SyncTopologyState.Unknown);
+  expect(computerSyncState(undefined, "worker-b", disabled)).toBe(SyncTopologyState.Unknown);
+});
+
 it("keeps idle heartbeats separate from document flow and expires old snapshots", () => {
   const peer: AppProtocol.SyncPeerMetrics = { ...topologyMetrics.peers[0], lastActivityAt: null, lastHeartbeatAt: now };
   const metrics = { ...topologyMetrics, peers: [peer] };

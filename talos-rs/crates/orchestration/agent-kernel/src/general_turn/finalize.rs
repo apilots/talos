@@ -16,13 +16,8 @@ pub(crate) fn build_turn_execution_metrics(
     let tool_calls = state.tool_call_count as u32;
     let tool_results = state.tool_result_count as u32;
     let tool_errors = state.tool_error_count as u32;
-    let model_rounds = if matches!(stop_reason, StopReason::WaitingUserAction) {
-        state.round
-    } else {
-        state.round.saturating_add(1)
-    };
     TurnExecutionMetrics {
-        model_rounds,
+        model_rounds: state.round,
         tool_calls,
         tool_successes: tool_results.saturating_sub(tool_errors),
         tool_errors,

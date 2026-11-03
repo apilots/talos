@@ -29,9 +29,9 @@ use talos_prompt::{
     PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
     SessionHistoryCompaction, SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger,
 };
-use talos_tools::{
-    ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
-};
+#[cfg(test)]
+use talos_tools::ToolOutputPayload;
+use talos_tools::{ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolPending};
 use talos_types::talos::{
     DynamicToolArguments, StopReason as TalosApiStopReason, TalosContentItem, TokenUsage,
     TurnExecutionMetrics,
@@ -74,10 +74,8 @@ pub use dream_memory::form_dream_session_memory;
 pub(crate) use finalize::build_turn_execution_metrics;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
-    build_read_only_nudge_message, build_tool_failure_recovery_nudge_message,
     run_forced_finalization_step, should_force_finalization_for_empty_response,
-    should_force_finalization_for_step, should_inject_read_only_nudge,
-    stop_reason_for_forced_finalization,
+    should_force_finalization_for_step, stop_reason_for_forced_finalization,
 };
 pub(crate) use loop_run::execute_general_turn_loop_with_resume;
 #[cfg(test)]
