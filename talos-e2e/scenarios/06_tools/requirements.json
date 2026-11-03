@@ -17,6 +17,9 @@
     ]
   },
   "cases": {
+    "public_deepseek_recovery.sh": {
+      "env": ["TALOS_LLM_DEEPSEEK_API_KEY"]
+    },
     "output_logs.sh": {
       "commands": ["cargo", "protoc", "just", "cargo-nextest", "python3", "rg"],
       "python_modules": [],
