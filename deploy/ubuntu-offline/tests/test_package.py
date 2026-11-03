@@ -95,7 +95,7 @@ class PackageTests(unittest.TestCase):
                     server.auth_enabled = auth
                     with patch.object(verify_bundle, 'run', return_value=f'127.0.0.1:{server.server_port}'), \
                             patch.object(verify_bundle.time, 'sleep', side_effect=AssertionError('Unexpected HTTP retry')):
-                        verify_bundle.wait_ready('fixture', container_port=8080, expected_auth=auth)
+                        verify_bundle.wait_ready('fixture', expected_auth=auth)
         finally:
             server.shutdown()
             server.server_close()

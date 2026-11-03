@@ -48,8 +48,8 @@ template cannot reconstruct a lost custom value.
 New volumes use production defaults: gateway authentication enabled and internal
 port 8080. Set model endpoints and credentials in the deployment configuration or
 its `.env`, outside the image. Existing volumes retain their saved listener and
-authentication settings. `CONTAINER_PORT` controls only Docker's port mapping;
-it does not edit configuration. The healthcheck reads the actual saved port.
+authentication settings. The container listener and healthcheck use 8080;
+`HTTP_PORT` controls the host mapping only (19091 by default).
 
 The image contains Server, WebUI, embedded Worker, TUI, migrations and the sandbox
 helper. Browser resources and the pinned official MCP snapshot use the formal
@@ -89,17 +89,17 @@ sudo docker exec -it talos-pre talos
 Open `http://<server-ip>:19091`. The outer `.tar` is a delivery bundle; Docker loads
 the inner `.tar.gz`. The bundle includes the matching Chromium seccomp profile,
 image tag metadata and launcher. `CONTAINER_NAME=talos-pre`, `HTTP_PORT=19091` and
-`DATA_VOLUME=talos-pre-data` and `CONTAINER_PORT=8080` are the launcher defaults.
-For an existing offline deployment with gateway.port=19091, stop/remove only the
-old container and reuse its data volume:
+`DATA_VOLUME=talos-pre-data` are the launcher defaults. The mapping is
+host 19091 to container 8080. When upgrading, stop/remove only the old container
+and reuse its existing data volume:
 
 ```bash
 sudo docker rm -f talos-pre
-sudo env CONTAINER_PORT=19091 DATA_VOLUME=talos-pre-data bash ./run.sh amd64
+sudo env DATA_VOLUME=talos-pre-data bash ./run.sh amd64
 ```
 
-Use the actual existing volume/name and configured internal port if different.
-Do not remove the volume or replace its runtime YAML with the packaged template.
+Use the actual existing volume/name if different. Do not remove the volume or
+replace its runtime YAML with the packaged template.
 
 The launcher uses the formal Chromium seccomp profile, `no-new-privileges` and
 1 GiB shared memory. The host must support Chromium's user namespaces. No

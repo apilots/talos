@@ -112,6 +112,6 @@ WORKDIR /home/talos/.talos
 EXPOSE 8080
 VOLUME ["/home/talos/.talos"]
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
-    CMD ["python3", "-c", "import os, pathlib, urllib.request, yaml; config = yaml.safe_load((pathlib.Path(os.environ['TALOS_HOME']) / 'conf/talos.yaml').read_text()); urllib.request.urlopen('http://127.0.0.1:' + str(config['gateway']['port']) + '/health', timeout=3).close()"]
+    CMD curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["talos-server"]

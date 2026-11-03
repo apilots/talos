@@ -52,8 +52,8 @@ def unpack(archive, destination):
     return architectures
 
 
-def wait_ready(name, container_port=19091, expected_auth=False):
-    port = run('docker', 'port', name, f'{container_port}/tcp').splitlines()[0].rsplit(':', 1)[1]
+def wait_ready(name, expected_auth=False):
+    port = run('docker', 'port', name, '8080/tcp').splitlines()[0].rsplit(':', 1)[1]
     url = f'http://127.0.0.1:{port}'
     for _ in range(90):
         try:
@@ -64,7 +64,7 @@ def wait_ready(name, container_port=19091, expected_auth=False):
             return
         except (OSError, ValueError, AssertionError):
             time.sleep(2)
-    raise RuntimeError(f'{name}: HTTP/WebUI on container port {container_port} did not become ready')
+    raise RuntimeError(f'{name}: HTTP/WebUI on container port 8080 did not become ready')
 
 
 def verify(directory, arch, output):
@@ -83,10 +83,9 @@ def verify(directory, arch, output):
         image = prefix + '-' + arch
         run('docker', 'run', '--rm', '--entrypoint', 'sh', image, '-ec',
             'test ! -e "$TALOS_HOME/conf/talos.yaml"')
-        env = dict(os.environ, CONTAINER_NAME=name, DATA_VOLUME=volume, HTTP_PORT='0',
-                   CONTAINER_PORT='8080')
+        env = dict(os.environ, CONTAINER_NAME=name, DATA_VOLUME=volume, HTTP_PORT='127.0.0.1:0')
         log.append(run('bash', str(directory / 'run.sh'), arch, env=env))
-        wait_ready(name, container_port=8080, expected_auth=True)
+        wait_ready(name, expected_auth=True)
         template_hash = run('docker', 'exec', name, 'sha256sum',
                             '/opt/talos/conf/talos.yaml').split()[0]
         run('docker', 'exec', name, 'bash', '-euc',
@@ -114,7 +113,7 @@ import yaml
 home = Path('/home/talos/.talos')
 path = home / 'conf/talos.yaml'
 config = yaml.safe_load(path.read_text())
-config['gateway'].update(port=19091, auth=False)
+config['gateway'].update(port=8080, auth=False)
 config['sync']['enabled'] = False
 for provider, settings in json.loads(sys.argv[1]).items():
     config['llm'][provider].update(settings)
@@ -126,7 +125,6 @@ for provider in ('anthropic', 'openai', 'bailian', 'deepseek', 'openrouter', 'ol
     old_template['llm'][provider].pop('http_timeouts', None)
 (home / 'conf/talos.yaml.template').write_text(yaml.safe_dump(old_template, sort_keys=False))
 ''', json.dumps(fixture), marker)
-        env['CONTAINER_PORT'] = '19091'
         for _ in range(2):
             log.append(run('bash', str(directory / 'run.sh'), arch, env=env))
             wait_ready(name)
@@ -142,7 +140,7 @@ for provider, settings in json.loads(sys.argv[1]).items():
 assert config['llm']['deepseek']['models'][0]['id'] == 'offline-upgrade-fixture'
 assert config['llm']['deepseek']['models'][0]['name'] == 'Offline upgrade fixture'
 assert config['llm']['ollama']['http_timeouts'] is None
-assert config['gateway']['port'] == 19091 and config['gateway']['auth'] is False
+assert config['gateway']['port'] == 8080 and config['gateway']['auth'] is False
 assert (home / 'bundle-marker').read_text() == sys.argv[2]
 assert (home / 'conf/talos.yaml.template').read_bytes() == Path('/opt/talos/conf/talos.yaml').read_bytes()
 ''', json.dumps(fixture), marker)

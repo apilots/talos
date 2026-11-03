@@ -56,11 +56,9 @@ An explicit arm64 or amd64 argument is also supported.
 WebUI: http://<server-ip>:19091
 TUI: sudo docker exec -it talos-pre talos
 
-Defaults: CONTAINER_NAME=talos-pre, DATA_VOLUME=talos-pre-data, HTTP_PORT=19091,
-CONTAINER_PORT=8080 (the production template's internal listener).
+Defaults: CONTAINER_NAME=talos-pre, DATA_VOLUME=talos-pre-data, HTTP_PORT=19091.
+The container listens on 8080; the launcher publishes host 19091 by default.
 When upgrading, remove only the old container and reuse its existing data volume.
-Set CONTAINER_PORT to the gateway.port saved in that volume; older offline
-installations normally use: sudo env CONTAINER_PORT=19091 bash ./run.sh
 Docker and Chromium user namespace support must be available on the host.
 The image contains only the production upgrade template, never a private profile.
 Talos upgrades the saved configuration in the data volume at normal startup.

@@ -43,7 +43,7 @@ def inside(*args, **kwargs):
 
 
 def get(path):
-    raw = inside('curl', '-fsS', '--max-time', '10', 'http://127.0.0.1:19091' + path)
+    raw = inside('curl', '-fsS', '--max-time', '10', 'http://127.0.0.1:8080' + path)
     return json.loads(raw)
 
 
@@ -68,7 +68,7 @@ def save_models_after_tui():
         request = subprocess.run(
             ['docker', 'exec', '-i', name, 'curl', '--fail-with-body', '-sS', '--max-time', '30',
              '-X', 'PUT', '-H', 'Content-Type: application/json', '--data-binary', '@-',
-             'http://127.0.0.1:19091/v1/llm' + target],
+             'http://127.0.0.1:8080/v1/llm' + target],
             input=payload, text=True, capture_output=True, check=True,
         )
         assert json.loads(request.stdout)['status'] == 'success'
@@ -128,12 +128,12 @@ from pathlib import Path
 import yaml
 home = Path('/home/talos/.talos')
 config = yaml.safe_load(Path('/opt/talos/conf/talos.yaml').read_text())
-config['gateway'].update(port=19091, auth=False)
+config['gateway'].update(port=8080, auth=False)
 config['sync']['enabled'] = False
 (home / 'conf').mkdir(parents=True, exist_ok=True)
 (home / 'conf/talos.yaml').write_text(yaml.safe_dump(config, sort_keys=False))
 ''')
-    publish = ['-p', '127.0.0.1::19091'] if network != 'none' else []
+    publish = ['-p', '127.0.0.1::8080'] if network != 'none' else []
     docker('run', '-d', '--platform', f'linux/{arch}', '--name', name,
            '--network', network, '--shm-size=1g', '--security-opt', 'no-new-privileges:true',
            '--security-opt', 'seccomp=' + str(repo / 'deploy/docker/talos-worker/chromium-seccomp.json'),
@@ -147,7 +147,7 @@ config['sync']['enabled'] = False
            '== int(sys.argv[1]) for b in bins)', '183' if arch == 'arm64' else '62')
     record('architecture', f'all four ELF executables match linux/{arch}')
     if publish:
-        port = docker('port', name, '19091/tcp').strip().rsplit(':', 1)[1]
+        port = docker('port', name, '8080/tcp').strip().rsplit(':', 1)[1]
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/v1/user', timeout=10) as response:
             assert 'anonymous' in response.read().decode()
         record('published-port', 'host accesses anonymous API through Docker port mapping')
@@ -173,11 +173,11 @@ config['sync']['enabled'] = False
     (output / 'user.json').write_text(json.dumps(user, indent=2))
     assert 'anonymous' in json.dumps(user), user
     record('anonymous', 'HTTP /v1/user works without credentials')
-    html = inside('curl', '-fsS', 'http://127.0.0.1:19091/')
+    html = inside('curl', '-fsS', 'http://127.0.0.1:8080/')
     assert '<html' in html.lower() and '/assets/' in html
     asset = __import__('re').search(r'(?:src|href)="(/assets/[^\"]+\.js)"', html)
     assert asset, 'WebUI JavaScript reference missing'
-    inside('curl', '-fsS', '-o', '/dev/null', 'http://127.0.0.1:19091' + asset[1])
+    inside('curl', '-fsS', '-o', '/dev/null', 'http://127.0.0.1:8080' + asset[1])
     record('webui', 'HTML and referenced JavaScript load from packaged resources')
     status = inside('talos', 'status')
     assert 'Talos runtime accessible' in status

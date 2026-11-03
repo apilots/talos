@@ -13,6 +13,6 @@ docker run -d --name "${CONTAINER_NAME:-talos-pre}" --platform "linux/${arch}" \
     --restart unless-stopped --shm-size=1g \
     --security-opt no-new-privileges:true \
     --security-opt "seccomp=${script_dir}/chromium-seccomp.json" \
-    -p "${HTTP_PORT:-19091}:${CONTAINER_PORT:-8080}" \
+    -p "${HTTP_PORT:-19091}:8080" \
     -v "${DATA_VOLUME:-talos-pre-data}:/home/talos/.talos" "${image}"
 printf 'WebUI: http://localhost:%s\nTUI: docker exec -it %s talos\n' "${HTTP_PORT:-19091}" "${CONTAINER_NAME:-talos-pre}"
