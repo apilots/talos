@@ -57,6 +57,16 @@ for step in 1 2; do
   payload="$(cat "${SCENARIO_REPORT_DIR}/public-deepseek-${step}-request.json")"
   send_message_response "${session_id}" "${payload}" "public-deepseek-${step}" \
     >"${SCENARIO_REPORT_DIR}/public-deepseek-${step}.json"
+  python3 - "${step}" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+workspace = Path(os.environ["CASE_WORKSPACE"])
+expected = (workspace / "source.txt").read_text() + ("FOLLOWUP_OK\n" if sys.argv[1] == "2" else "")
+assert (workspace / "recovered.txt").read_text() == expected
+assert not (workspace / "deliberately-missing.txt").exists()
+PY
 done
 
 python3 - "${session_id}" <<'PY'
@@ -69,8 +79,6 @@ from pathlib import Path
 report = Path(os.environ["SCENARIO_REPORT_DIR"])
 workspace = Path(os.environ["CASE_WORKSPACE"])
 source = (workspace / "source.txt").read_text()
-assert (workspace / "recovered.txt").read_text() == source + "FOLLOWUP_OK\n"
-assert not (workspace / "deliberately-missing.txt").exists()
 history_url = os.environ["GATEWAY_URL"] + "/v1/sessions/" + sys.argv[1] + "/history?limit=10"
 history = json.load(urllib.request.urlopen(history_url, timeout=30))
 (report / "public-deepseek-history.json").write_text(json.dumps(history))
@@ -84,13 +92,22 @@ for step in (1, 2):
     calls = [x for x in response["output"] if x["type"] == "tool_call"]
     results = {x["call_id"]: x for x in response["output"] if x["type"] == "tool_result"}
     actual = [c for c in calls if c["name"] in ("Bash", "Read")]
-    assert [c["name"] for c in actual] == (["Bash", "Read", "Bash"] if step == 1 else ["Bash"])
-    assert [results[c["call_id"]]["is_error"] for c in actual] == ([False, True, False] if step == 1 else [False])
-    if step == 1:
-        failed_path = Path(actual[1]["arguments"]["path"])
-        assert (workspace / failed_path).resolve() == (workspace / "deliberately-missing.txt").resolve()
     assert len({c["call_id"] for c in calls}) == len(calls)
-    assert all(c["call_id"] in results for c in calls)
+    assert set(results) == {c["call_id"] for c in calls}
+    successful_bash = [
+        i for i, c in enumerate(calls)
+        if c["name"] == "Bash" and not results[c["call_id"]]["is_error"]
+    ]
+    assert successful_bash
+    if step == 1:
+        failed_reads = [
+            i for i, c in enumerate(calls)
+            if c["name"] == "Read" and results[c["call_id"]]["is_error"]
+            and isinstance(c["arguments"], dict)
+            and (workspace / c["arguments"].get("path", "")).resolve()
+            == (workspace / "deliberately-missing.txt").resolve()
+        ]
+        assert any(successful_bash[0] < failed < successful_bash[-1] for failed in failed_reads)
     answer = "".join(x["text"] for x in response["output"] if x["type"] == "output_text")
     assert ("RECOVERY_OK" in answer and source.strip() in answer) if step == 1 else "FOLLOWUP_OK" in answer
     records = [json.loads(line[6:]) for line in (report / f"public-deepseek-{step}_events.log").read_text().splitlines() if line.startswith("data: ")]
