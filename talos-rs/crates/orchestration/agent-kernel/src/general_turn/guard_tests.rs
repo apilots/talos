@@ -20,37 +20,6 @@ fn salvage_finalization_prompt_rejects_planning_only_answers() {
     assert!(SALVAGE_FINALIZATION_INSTRUCTION.contains("planning sentence"));
 }
 
-#[test]
-fn read_only_nudge_prefers_answering_with_existing_evidence() {
-    assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("verified evidence"));
-    assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("single most relevant file"));
-    assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("assistant response body"));
-}
-
-#[test]
-fn tool_failure_recovery_nudge_rejects_repeating_failed_targets() {
-    let batch = GeneralTurnToolBatch {
-        output_items: Vec::new(),
-        tool_messages: Vec::new(),
-        pending_user_action: None,
-        logs: vec![ToolResultLog {
-            call_id: "call-1".to_string(),
-            tool: "Bash".to_string(),
-            payload: serde_json::json!({ "value": { "exit_code": 1 } }),
-            is_error: false,
-        }],
-        error_count: 0,
-    };
-
-    let message = build_tool_failure_recovery_nudge_message(&batch)
-        .expect("non-zero exit code should trigger recovery nudge");
-    assert_eq!(message.role, Role::System);
-    assert!(message.content.contains("verified paths"));
-    assert!(message
-        .content
-        .contains("Do not retry the same missing path"));
-}
-
 struct FinalizationReasoningProvider {
     calls: AtomicUsize,
 }
@@ -108,12 +77,13 @@ async fn forced_finalization_disables_reasoning_effort_for_visible_answer_phase(
         calls: AtomicUsize::new(0),
     });
 
+    let mut model_rounds = 0;
     let result = run_forced_finalization_step(
         vec![ChatMessage::user("Analyze the project.")],
         "mock-model".to_string(),
         provider.clone(),
         None,
-        None,
+        &mut model_rounds,
         ForcedFinalizationCause::RepeatedReadOnlyInvestigation,
         None,
     )

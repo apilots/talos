@@ -102,7 +102,7 @@ fn reduce_tool_execution_output_uses_canonical_success_payload() {
     let reduced = reduce_tool_execution_output(&output);
     assert!(!reduced.is_error);
     assert_eq!(
-        reduced.payload,
+        model_payload_from_envelope(&reduced.envelope),
         serde_json::json!({
             "type": "text",
             "text": "plain text result",
@@ -212,7 +212,7 @@ fn reduce_tool_execution_output_rejects_structured_only_success_payload() {
         }]
     );
     assert_ne!(
-        reduced.payload,
+        model_payload_from_envelope(&reduced.envelope),
         serde_json::json!({"result": "hidden"}),
         "model projection must not use structured_content as the primary payload"
     );

@@ -66,7 +66,7 @@ fn build_requested_tool_preference_template_payload() -> String {
 
 fn build_failure_recovery_policy_payload() -> String {
     [
-        "- failed_actions_are_evidence: true",
+        "- failed_actions_are_evidence: When a tool fails, revise the next step using verified paths and successful outputs. Do not retry the same missing path, command, or arguments unless a successful result proves the target exists. If blocked, explain the limitation in the final answer.",
         "- salvage_answer_if_possible: true",
         "- report_partial_evidence_in_final_answer: true",
     ]

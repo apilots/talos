@@ -44,7 +44,10 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
         !result.output_text().contains("Tool execution completed."),
         "forced summary should replace placeholder fallback"
     );
-    assert!(provider.round.load(Ordering::SeqCst) >= 3);
+    assert_eq!(
+        result.metrics().model_rounds,
+        provider.round.load(Ordering::SeqCst) as u32
+    );
     assert!(
         provider
             .finalization_context_had_tool_result
@@ -96,5 +99,8 @@ async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_em
         !result.output_text().contains("Tool execution completed."),
         "salvage call should replace placeholder fallback"
     );
-    assert!(provider.round.load(Ordering::SeqCst) >= 4);
+    assert_eq!(
+        result.metrics().model_rounds,
+        provider.round.load(Ordering::SeqCst) as u32
+    );
 }

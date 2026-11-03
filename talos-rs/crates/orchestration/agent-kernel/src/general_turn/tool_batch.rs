@@ -47,151 +47,7 @@ pub(super) fn take_new_retrieved_memories(
     accepted
 }
 
-fn build_tool_result_payload(
-    tool_name: &str,
-    outcome: &ToolDispatchOutcome,
-) -> (Value, Vec<TalosContentItem>, bool, Option<Value>) {
-    let envelope = outcome.envelope();
-    let pending_arguments = envelope
-        .pending
-        .as_ref()
-        .and_then(|pending| pending.arguments.clone());
-    let next_turn_failure = envelope
-        .next_turn_failure_payload()
-        .and_then(|value| serde_json::to_value(value).ok());
-    let semantic_events = envelope
-        .semantic_events()
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-
-    match outcome {
-        ToolDispatchOutcome::Pending { pending, .. } => {
-            let error = match pending {
-                ToolPending::Dynamic { .. } => "dynamic tool response is pending".to_string(),
-                ToolPending::Question { .. } => "question response is pending".to_string(),
-                ToolPending::SandboxApproval { .. } => "sandbox approval is pending".to_string(),
-            };
-            (
-                serde_json::json!({
-                    "ok": false,
-                    "tool": tool_name,
-                    "error": error,
-                    "truncated": false,
-                    "envelope": envelope,
-                    "semantic_events": semantic_events,
-                }),
-                Vec::new(),
-                true,
-                pending_arguments,
-            )
-        }
-        ToolDispatchOutcome::Executed { payload } => match payload {
-            _ if payload.validate_canonical_result().is_err() => {
-                let error = "canonical tool result requires content_items".to_string();
-                (
-                    serde_json::json!({
-                        "ok": false,
-                        "tool": tool_name,
-                        "error": error,
-                        "truncated": false,
-                        "semantic_events": semantic_events,
-                    }),
-                    vec![TalosContentItem::Text { text: error }],
-                    true,
-                    pending_arguments,
-                )
-            }
-            ToolOutputPayload::Function {
-                content,
-                success,
-                structured_content,
-                ..
-            } => {
-                let truncated = content.contains("[truncated]");
-                if *success {
-                    (
-                        model_payload_from_envelope(&envelope),
-                        envelope.content_items.clone(),
-                        false,
-                        pending_arguments,
-                    )
-                } else {
-                    let error = envelope
-                        .error
-                        .as_ref()
-                        .map(|item| item.message.clone())
-                        .unwrap_or_else(|| "unknown error".to_string());
-                    let mut value = serde_json::json!({
-                        "ok": false,
-                        "tool": tool_name,
-                        "error": error,
-                        "truncated": truncated,
-                        "envelope": envelope,
-                        "semantic_events": semantic_events,
-                    });
-                    if let Some(structured) = structured_content {
-                        if let Some(object) = value.as_object_mut() {
-                            object.insert("structured".to_string(), structured.clone());
-                        }
-                    }
-                    if let Some(next_turn_failure) = next_turn_failure {
-                        if let Some(object) = value.as_object_mut() {
-                            object.insert("next_turn_failure".to_string(), next_turn_failure);
-                        }
-                    }
-                    (
-                        value,
-                        envelope.content_items.clone(),
-                        true,
-                        pending_arguments,
-                    )
-                }
-            }
-            ToolOutputPayload::Resource { .. } => (
-                model_payload_from_envelope(&envelope),
-                envelope.content_items.clone(),
-                false,
-                pending_arguments,
-            ),
-            ToolOutputPayload::Mcp {
-                content, is_error, ..
-            } => {
-                if *is_error {
-                    let mut value = serde_json::json!({
-                        "ok": false,
-                        "tool": tool_name,
-                        "error": content,
-                        "truncated": content.contains("[truncated]"),
-                        "envelope": envelope,
-                        "semantic_events": semantic_events,
-                    });
-                    if let Some(next_turn_failure) = next_turn_failure {
-                        if let Some(object) = value.as_object_mut() {
-                            object.insert("next_turn_failure".to_string(), next_turn_failure);
-                        }
-                    }
-                    (
-                        value,
-                        envelope.content_items.clone(),
-                        true,
-                        pending_arguments,
-                    )
-                } else {
-                    (
-                        model_payload_from_envelope(&envelope),
-                        envelope.content_items.clone(),
-                        false,
-                        pending_arguments,
-                    )
-                }
-            }
-        },
-    }
-}
-
 struct ReducedToolExecutionOutput {
-    payload: Value,
     content_items: Vec<TalosContentItem>,
     is_error: bool,
     envelope: ToolResultEnvelope,
@@ -199,10 +55,17 @@ struct ReducedToolExecutionOutput {
 
 fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExecutionOutput {
     let envelope = output.outcome.envelope();
-    let (payload, content_items, is_error, _) =
-        build_tool_result_payload(&output.tool_name, &output.outcome);
+    let (content_items, is_error) = match output.outcome.payload() {
+        Some(payload) if payload.validate_canonical_result().is_err() => (
+            vec![TalosContentItem::Text {
+                text: "canonical tool result requires content_items".to_string(),
+            }],
+            true,
+        ),
+        Some(payload) => (envelope.content_items.clone(), payload.is_error()),
+        None => (Vec::new(), true),
+    };
     ReducedToolExecutionOutput {
-        payload,
         content_items,
         is_error,
         envelope,
@@ -329,7 +192,6 @@ fn collect_bounded_tool_batch(
         logs.push(ToolResultLog {
             call_id: output.call_id.clone(),
             tool: output.tool_name.clone(),
-            payload: reduced.payload.clone(),
             is_error: reduced.is_error,
         });
         let mut message = ChatMessage::tool(
@@ -474,7 +336,6 @@ pub fn apply_general_turn_tool_batch(
     state.tool_result_count += batch.logs.len();
     state.tool_error_count += batch.error_count;
     state.pending_user_action = batch.pending_user_action.clone();
-    state.round += 1;
 }
 
 #[cfg(test)]

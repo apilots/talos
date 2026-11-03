@@ -61,222 +61,228 @@ pub async fn execute_general_turn_loop_with_policy(
         ));
     let mut tool_loop_guard = ToolLoopGuardState::default();
 
-    if let Some(resume) = resume {
-        apply_general_turn_resume(
-            &prepared,
-            tool_executor.clone(),
-            tool_executor_port.clone(),
-            kernel_config.clone(),
-            &mut state,
-            resume,
-            policy.clone(),
-            command_risk_assessor.clone(),
-        )
-        .await?;
-        let stop_reason = if state.pending_user_action.is_some() {
-            StopReason::WaitingUserAction
-        } else {
-            StopReason::EndTurn
-        };
-        emit_turn_metrics_after_tool_batch(&prepared, &state, stop_reason).await;
-        if state.pending_user_action.is_some() {
-            let executed = finalize_general_turn_artifacts(state, String::new(), stop_reason);
-            emit_general_turn_finalization_stream(&prepared, &executed).await;
-            return Ok(executed);
-        }
-    }
-
-    let (final_text, stop_reason) = loop {
-        let messages = take_running_messages(&prepared)?;
-        apply_running_messages(&prepared, &mut state, messages).await;
-        super::attachments::limit_tool_images(&prepared, &mut state.messages);
-        enforce_working_context_budget(&prepared, &mut state, kernel_config.as_ref()).await?;
-        super::attachments::resolve_tool_images(
-            &prepared,
-            &mut state.messages,
-            tool_executor_port.as_ref(),
-            llm_provider.as_ref(),
-        )
-        .await?;
-        let tool_definitions =
-            tool_executor_port.get_tool_definitions_for_request(&prepared.tool_selection_request);
-        let mut step_request = build_general_turn_step_request(
-            &prepared,
-            &state,
-            tool_definitions,
-            execution_settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
-            kernel_config.compaction.retrieved_memories_keep,
-            kernel_config.compaction.retrieved_memory_max_chars,
-        );
-        if prepared.stream_tx.is_some() {
-            step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
-                execution_mode: execution_settings.tool_execution_mode,
-                max_parallelism: kernel_config.tool_parallelism,
-                execution_context: ToolExecutionContext {
-                    browser_uploads: prepared
-                        .browser_uploads
-                        .iter()
-                        .chain(&state.browser_uploads)
-                        .cloned()
-                        .collect(),
-                    session_id: prepared.session_id.clone(),
-                    turn_id: prepared.invocation_id.clone(),
-                    agent_id: prepared.agent_id.clone(),
-                    workspace_id: prepared.workspace_id.clone(),
-                    user_id: prepared.user_id.clone(),
-                    project_root: prepared.project_root.clone(),
-                    kernel_config: kernel_config.clone(),
-                    dynamic_tool_results: std::collections::HashMap::new(),
-                    user_action_responses: std::collections::HashMap::new(),
-                    sandbox_approval_fingerprints: std::collections::HashMap::new(),
-                    command_risk_assessor: Some(command_risk_assessor.clone()),
-                    run_tasks: prepared.run_tasks.clone(),
-                },
-                tool_registry: tool_executor_port.clone(),
-            });
-        }
-        policy.before_step_request(&mut step_request)?;
-        let mut step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
-        if let Some(policy_stop) = policy.after_step_result(&mut step)? {
-            apply_general_turn_step(&mut state, &step);
-            break (policy_stop.output_text, policy_stop.stop_reason);
-        }
-        let step_text = step.text.clone();
-        let step_disposition = step.disposition;
-        let mut pending_messages = take_running_messages(&prepared)?;
-        if !pending_messages.is_empty() && step.tool_calls.is_empty() {
-            apply_general_turn_step(&mut state, &step);
-            state
-                .messages
-                .push(ChatMessage::assistant(step_text).with_input_origin(
-                    talos_llm_provider::MessageInputOrigin {
-                        kind: talos_llm_provider::MessageInputKind::Context,
-                        source: talos_llm_provider::MessageInputSource::Runtime,
-                    },
-                ));
-            apply_running_messages(&prepared, &mut state, pending_messages).await;
-            emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
-            continue;
-        }
-        if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
-            let mut messages = prepared.messages.clone();
-            messages.extend(state.messages.clone());
-            let forced_step = run_forced_finalization_step(
-                messages,
-                prepared.selected_model.clone(),
-                llm_provider.clone(),
-                prepared.stream_tx.clone(),
-                None,
-                cause.clone(),
-                prepared.trajectory.clone(),
-            )
-            .await?;
-            apply_general_turn_step(&mut state, &forced_step);
-            break (
-                forced_step.text.clone(),
-                stop_reason_for_forced_finalization(cause),
-            );
-        }
-        apply_general_turn_step(&mut state, &step);
-        emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
-
-        if should_force_finalization_for_empty_response(state.tool_call_count, &step) {
-            let mut messages = prepared.messages.clone();
-            messages.extend(state.messages.clone());
-            let forced_step = run_forced_finalization_step(
-                messages,
-                prepared.selected_model.clone(),
-                llm_provider.clone(),
-                prepared.stream_tx.clone(),
-                None,
-                ForcedFinalizationCause::EmptyFinalResponseAfterTools,
-                prepared.trajectory.clone(),
-            )
-            .await?;
-            apply_general_turn_step(&mut state, &forced_step);
-            break (
-                forced_step.text.clone(),
-                stop_reason_for_forced_finalization(
-                    ForcedFinalizationCause::EmptyFinalResponseAfterTools,
-                ),
-            );
-        }
-
-        if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
-            state
-                .messages
-                .push(ChatMessage::assistant(step_text.clone()).with_input_origin(
-                    talos_llm_provider::MessageInputOrigin {
-                        kind: talos_llm_provider::MessageInputKind::Context,
-                        source: talos_llm_provider::MessageInputSource::Runtime,
-                    },
-                ));
-            let stop_reason = match step.model_finish_reason {
-                ModelFinishReason::Length => StopReason::ModelOutputLimit,
-                ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
-                ModelFinishReason::ToolCalls => StopReason::EndTurn,
-            };
-            break (step_text, stop_reason);
-        }
-
-        let mut tool_batch = if prepared.stream_tx.is_some() {
-            super::tool_batch::collect_general_turn_tool_batch_for_calls(
-                step.streamed_tool_outputs.clone(),
-                &step.tool_calls,
-            )?
-        } else {
-            execute_general_turn_tool_batch(
+    let result: TalosResult<(String, StopReason)> = async {
+        if let Some(resume) = resume {
+            apply_general_turn_resume(
                 &prepared,
-                &state.browser_uploads,
                 tool_executor.clone(),
                 tool_executor_port.clone(),
                 kernel_config.clone(),
-                &prepared.user_id,
-                &step.tool_calls,
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
+                &mut state,
+                resume,
+                policy.clone(),
                 command_risk_assessor.clone(),
-                prepared.stream_tx.as_ref(),
             )
-            .await?
-        };
-        if let Some(observer) = &prepared.trajectory {
-            for message in &tool_batch.tool_messages {
-                observer.prepared_tool_result(message);
+            .await?;
+            let stop_reason = if state.pending_user_action.is_some() {
+                StopReason::WaitingUserAction
+            } else {
+                StopReason::EndTurn
+            };
+            emit_turn_metrics_stream_event(&prepared, &state, stop_reason).await;
+            if state.pending_user_action.is_some() {
+                return Ok((String::new(), stop_reason));
             }
         }
-        if let Some(pending) = &mut tool_batch.pending_user_action {
-            pending.reasoning_continuation = step.reasoning.continuation.clone();
-        }
-        let policy_stop = policy.after_tool_batch(&mut tool_batch)?;
-        emit_pending_user_action_stream_events(&prepared, &tool_batch).await;
-        apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
-        let tool_batch_stop_reason = if tool_batch.pending_user_action.is_some() {
-            StopReason::WaitingUserAction
-        } else {
-            StopReason::EndTurn
+
+        let (final_text, stop_reason) = loop {
+            let messages = take_running_messages(&prepared)?;
+            apply_running_messages(&prepared, &mut state, messages).await;
+            super::attachments::limit_tool_images(&prepared, &mut state.messages);
+            enforce_working_context_budget(&prepared, &mut state, kernel_config.as_ref()).await?;
+            super::attachments::resolve_tool_images(
+                &prepared,
+                &mut state.messages,
+                tool_executor_port.as_ref(),
+                llm_provider.as_ref(),
+            )
+            .await?;
+            let tool_definitions = tool_executor_port
+                .get_tool_definitions_for_request(&prepared.tool_selection_request);
+            let mut step_request = build_general_turn_step_request(
+                &prepared,
+                &state,
+                tool_definitions,
+                execution_settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
+                kernel_config.compaction.retrieved_memories_keep,
+                kernel_config.compaction.retrieved_memory_max_chars,
+            );
+            if prepared.stream_tx.is_some() {
+                step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
+                    execution_mode: execution_settings.tool_execution_mode,
+                    max_parallelism: kernel_config.tool_parallelism,
+                    execution_context: ToolExecutionContext {
+                        browser_uploads: prepared
+                            .browser_uploads
+                            .iter()
+                            .chain(&state.browser_uploads)
+                            .cloned()
+                            .collect(),
+                        session_id: prepared.session_id.clone(),
+                        turn_id: prepared.invocation_id.clone(),
+                        agent_id: prepared.agent_id.clone(),
+                        workspace_id: prepared.workspace_id.clone(),
+                        user_id: prepared.user_id.clone(),
+                        project_root: prepared.project_root.clone(),
+                        kernel_config: kernel_config.clone(),
+                        dynamic_tool_results: std::collections::HashMap::new(),
+                        user_action_responses: std::collections::HashMap::new(),
+                        sandbox_approval_fingerprints: std::collections::HashMap::new(),
+                        command_risk_assessor: Some(command_risk_assessor.clone()),
+                        run_tasks: prepared.run_tasks.clone(),
+                    },
+                    tool_registry: tool_executor_port.clone(),
+                });
+            }
+            policy.before_step_request(&mut step_request)?;
+            state.round = state.round.saturating_add(1);
+            let mut step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
+            if let Some(policy_stop) = policy.after_step_result(&mut step)? {
+                apply_general_turn_step(&mut state, &step);
+                break (policy_stop.output_text, policy_stop.stop_reason);
+            }
+            let step_text = step.text.clone();
+            let step_disposition = step.disposition;
+            let mut pending_messages = take_running_messages(&prepared)?;
+            if !pending_messages.is_empty() && step.tool_calls.is_empty() {
+                apply_general_turn_step(&mut state, &step);
+                state
+                    .messages
+                    .push(ChatMessage::assistant(step_text).with_input_origin(
+                        talos_llm_provider::MessageInputOrigin {
+                            kind: talos_llm_provider::MessageInputKind::Context,
+                            source: talos_llm_provider::MessageInputSource::Runtime,
+                        },
+                    ));
+                apply_running_messages(&prepared, &mut state, pending_messages).await;
+                emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
+                continue;
+            }
+            if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
+                let mut messages = prepared.messages.clone();
+                messages.extend(state.messages.clone());
+                let forced_step = run_forced_finalization_step(
+                    messages,
+                    prepared.selected_model.clone(),
+                    llm_provider.clone(),
+                    prepared.stream_tx.clone(),
+                    &mut state.round,
+                    cause.clone(),
+                    prepared.trajectory.clone(),
+                )
+                .await?;
+                apply_general_turn_step(&mut state, &forced_step);
+                break (
+                    forced_step.text.clone(),
+                    stop_reason_for_forced_finalization(cause),
+                );
+            }
+            apply_general_turn_step(&mut state, &step);
+            emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
+
+            if should_force_finalization_for_empty_response(state.tool_call_count, &step) {
+                let mut messages = prepared.messages.clone();
+                messages.extend(state.messages.clone());
+                let forced_step = run_forced_finalization_step(
+                    messages,
+                    prepared.selected_model.clone(),
+                    llm_provider.clone(),
+                    prepared.stream_tx.clone(),
+                    &mut state.round,
+                    ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+                    prepared.trajectory.clone(),
+                )
+                .await?;
+                apply_general_turn_step(&mut state, &forced_step);
+                break (
+                    forced_step.text.clone(),
+                    stop_reason_for_forced_finalization(
+                        ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+                    ),
+                );
+            }
+
+            if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
+                state
+                    .messages
+                    .push(ChatMessage::assistant(step_text.clone()).with_input_origin(
+                        talos_llm_provider::MessageInputOrigin {
+                            kind: talos_llm_provider::MessageInputKind::Context,
+                            source: talos_llm_provider::MessageInputSource::Runtime,
+                        },
+                    ));
+                let stop_reason = match step.model_finish_reason {
+                    ModelFinishReason::Length => StopReason::ModelOutputLimit,
+                    ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
+                    ModelFinishReason::ToolCalls => StopReason::EndTurn,
+                };
+                break (step_text, stop_reason);
+            }
+
+            let mut tool_batch = if prepared.stream_tx.is_some() {
+                super::tool_batch::collect_general_turn_tool_batch_for_calls(
+                    step.streamed_tool_outputs.clone(),
+                    &step.tool_calls,
+                )?
+            } else {
+                execute_general_turn_tool_batch(
+                    &prepared,
+                    &state.browser_uploads,
+                    tool_executor.clone(),
+                    tool_executor_port.clone(),
+                    kernel_config.clone(),
+                    &prepared.user_id,
+                    &step.tool_calls,
+                    std::collections::HashMap::new(),
+                    std::collections::HashMap::new(),
+                    std::collections::HashMap::new(),
+                    command_risk_assessor.clone(),
+                    prepared.stream_tx.as_ref(),
+                )
+                .await?
+            };
+            if let Some(observer) = &prepared.trajectory {
+                for message in &tool_batch.tool_messages {
+                    observer.prepared_tool_result(message);
+                }
+            }
+            if let Some(pending) = &mut tool_batch.pending_user_action {
+                pending.reasoning_continuation = step.reasoning.continuation.clone();
+            }
+            let policy_stop = policy.after_tool_batch(&mut tool_batch)?;
+            emit_pending_user_action_stream_events(&prepared, &tool_batch).await;
+            apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
+            let tool_batch_stop_reason = if tool_batch.pending_user_action.is_some() {
+                StopReason::WaitingUserAction
+            } else {
+                StopReason::EndTurn
+            };
+            emit_turn_metrics_stream_event(&prepared, &state, tool_batch_stop_reason).await;
+            pending_messages.extend(take_running_messages(&prepared)?);
+            let received_messages = !pending_messages.is_empty();
+            apply_running_messages(&prepared, &mut state, pending_messages).await;
+
+            if let Some(policy_stop) = policy_stop {
+                break (policy_stop.output_text, policy_stop.stop_reason);
+            }
+
+            if tool_batch.pending_user_action.is_some() {
+                break (String::new(), StopReason::WaitingUserAction);
+            }
+            if received_messages {
+                continue;
+            }
         };
-        emit_turn_metrics_after_tool_batch(&prepared, &state, tool_batch_stop_reason).await;
-        if let Some(message) = build_tool_failure_recovery_nudge_message(&tool_batch) {
-            state.messages.push(message);
-        }
-        if should_inject_read_only_nudge(&tool_loop_guard) {
-            state.messages.push(build_read_only_nudge_message());
-        }
-        pending_messages.extend(take_running_messages(&prepared)?);
-        let received_messages = !pending_messages.is_empty();
-        apply_running_messages(&prepared, &mut state, pending_messages).await;
 
-        if let Some(policy_stop) = policy_stop {
-            break (policy_stop.output_text, policy_stop.stop_reason);
-        }
-
-        if tool_batch.pending_user_action.is_some() {
-            break (String::new(), StopReason::WaitingUserAction);
-        }
-        if received_messages {
-            continue;
+        Ok((final_text, stop_reason))
+    }
+    .await;
+    let (final_text, stop_reason) = match result {
+        Ok(result) => result,
+        Err(error) => {
+            // Keep the original failure and publish the latest attempted-round time.
+            emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
+            return Err(error);
         }
     };
 
@@ -334,24 +340,6 @@ async fn emit_turn_metrics_stream_event(
         prepared.stream_tx.as_ref(),
         AgentKernelEventPayload::TurnMetrics(crate::TurnMetricsStreamData {
             metrics: build_turn_execution_metrics(state, stop_reason),
-            usage: state.usage.clone(),
-            context: None,
-        }),
-    )
-    .await;
-}
-
-async fn emit_turn_metrics_after_tool_batch(
-    prepared: &PreparedGeneralTurn,
-    state: &GeneralTurnLoopState,
-    stop_reason: StopReason,
-) {
-    let mut metrics = build_turn_execution_metrics(state, stop_reason);
-    metrics.model_rounds = state.round;
-    emit_stream_event(
-        prepared.stream_tx.as_ref(),
-        AgentKernelEventPayload::TurnMetrics(crate::TurnMetricsStreamData {
-            metrics,
             usage: state.usage.clone(),
             context: None,
         }),

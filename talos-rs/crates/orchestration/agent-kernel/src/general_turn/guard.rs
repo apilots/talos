@@ -25,8 +25,6 @@ Response contract:
 - Preserve exact requested phrases, markers, or acknowledgement tokens without paraphrase.
 - If tool evidence is incomplete, say what is incomplete and give the best next step."#;
 const FALLBACK_SALVAGE_RESPONSE: &str = "I could not produce a full final answer after tool execution. Based on the available tool results, at least one required step failed or returned insufficient evidence. Review the tool errors and continue with a narrower follow-up step.";
-const LOW_GAIN_READ_ONLY_NUDGE: &str = "You are repeating a similar read-only investigation. Prefer answering now with verified evidence already collected. If one more read is essential, read only the single most relevant file; otherwise produce the final answer in the assistant response body.";
-const TOOL_FAILURE_RECOVERY_NUDGE: &str = "The previous tool batch included failed commands or failed file reads. Before calling another tool, revise the next step using only verified paths and successful outputs already observed. Do not retry the same missing path, command, or arguments unless a prior successful result proves that exact target exists. If the failure blocks the task, explain the limitation in the final answer instead of repeating the failed lookup.";
 
 pub(crate) fn is_read_only_tool_name(tool_name: &str) -> bool {
     matches!(
@@ -79,49 +77,6 @@ pub(crate) fn should_force_finalization_for_step(
         .then_some(ForcedFinalizationCause::RepeatedReadOnlyInvestigation)
 }
 
-pub(crate) fn should_inject_read_only_nudge(guard: &ToolLoopGuardState) -> bool {
-    guard.consecutive_equivalent_read_only_rounds == 1
-}
-
-pub(crate) fn build_read_only_nudge_message() -> ChatMessage {
-    ChatMessage::system(LOW_GAIN_READ_ONLY_NUDGE).with_input_origin(MessageInputOrigin {
-        kind: MessageInputKind::Context,
-        source: MessageInputSource::Runtime,
-    })
-}
-
-pub(crate) fn build_tool_failure_recovery_nudge_message(
-    batch: &GeneralTurnToolBatch,
-) -> Option<ChatMessage> {
-    batch_has_recoverable_tool_failure(batch).then(|| {
-        ChatMessage::system(TOOL_FAILURE_RECOVERY_NUDGE).with_input_origin(MessageInputOrigin {
-            kind: MessageInputKind::Context,
-            source: MessageInputSource::Runtime,
-        })
-    })
-}
-
-fn batch_has_recoverable_tool_failure(batch: &GeneralTurnToolBatch) -> bool {
-    batch.logs.iter().any(|log| {
-        log.is_error
-            || log
-                .payload
-                .pointer("/exit_code")
-                .and_then(Value::as_i64)
-                .is_some_and(|code| code != 0)
-            || log
-                .payload
-                .pointer("/value/exit_code")
-                .and_then(Value::as_i64)
-                .is_some_and(|code| code != 0)
-            || log
-                .payload
-                .pointer("/ok")
-                .and_then(Value::as_bool)
-                .is_some_and(|ok| !ok)
-    })
-}
-
 pub(crate) fn stop_reason_for_forced_finalization(_cause: ForcedFinalizationCause) -> StopReason {
     match _cause {
         ForcedFinalizationCause::EmptyFinalResponseAfterTools
@@ -143,7 +98,7 @@ pub(crate) async fn run_forced_finalization_step(
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
     stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
-    pre_final_execution_summary: Option<String>,
+    model_rounds: &mut u32,
     cause: ForcedFinalizationCause,
     trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
 ) -> TalosResult<GeneralTurnStepResult> {
@@ -166,10 +121,12 @@ pub(crate) async fn run_forced_finalization_step(
         }),
     );
 
+    let round = *model_rounds;
+    *model_rounds = model_rounds.saturating_add(1);
     let step = execute_general_turn_step(
         GeneralTurnStepRequest {
             trajectory: trajectory.clone(),
-            round: 0,
+            round,
             call_mode: KernelModelCallMode::Finalization,
             model: model.clone(),
             max_tokens: None,
@@ -178,7 +135,7 @@ pub(crate) async fn run_forced_finalization_step(
             parallel_tool_calls: false,
             reasoning_effort: None,
             speed: Default::default(),
-            pre_final_execution_summary: pre_final_execution_summary.clone(),
+            pre_final_execution_summary: None,
             stream_tx: stream_tx.clone(),
             streaming_tool_execution: None,
         },
@@ -196,7 +153,7 @@ pub(crate) async fn run_forced_finalization_step(
         model,
         llm_provider,
         stream_tx,
-        pre_final_execution_summary,
+        model_rounds,
         trajectory,
     )
     .await
@@ -208,7 +165,7 @@ async fn run_salvage_finalization_step(
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
     stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
-    pre_final_execution_summary: Option<String>,
+    model_rounds: &mut u32,
     trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
 ) -> TalosResult<GeneralTurnStepResult> {
     messages.push(
@@ -226,10 +183,12 @@ async fn run_salvage_finalization_step(
         );
     }
 
+    let round = *model_rounds;
+    *model_rounds = model_rounds.saturating_add(1);
     let mut salvage_step = execute_general_turn_step(
         GeneralTurnStepRequest {
             trajectory,
-            round: 0,
+            round,
             call_mode: KernelModelCallMode::Finalization,
             model,
             max_tokens: None,
@@ -238,11 +197,7 @@ async fn run_salvage_finalization_step(
             parallel_tool_calls: false,
             reasoning_effort: None,
             speed: Default::default(),
-            pre_final_execution_summary: if prior_step.execution_summary_streamed {
-                None
-            } else {
-                pre_final_execution_summary
-            },
+            pre_final_execution_summary: None,
             stream_tx,
             streaming_tool_execution: None,
         },
