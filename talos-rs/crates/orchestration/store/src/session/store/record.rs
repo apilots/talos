@@ -3,6 +3,7 @@
 use super::DatabaseSessionStore;
 use crate::session::{SessionRecord, SessionTreeIdentity};
 use serde_json::Value;
+use talos_agent_api::AgentEventPayload;
 use talos_error::{TalosError, TalosResult};
 use talos_storage::Row;
 use talos_types::talos::{SessionSourceProvider, SessionSourceType, TalosSessionEnvironment};
@@ -226,6 +227,60 @@ impl DatabaseSessionStore {
 }
 
 impl DatabaseSessionStore {
+    pub(super) async fn read_active_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> TalosResult<std::collections::BTreeSet<String>> {
+        let mut ids = std::collections::BTreeSet::new();
+        if session_ids.is_empty() {
+            return Ok(ids);
+        }
+        let mut tx = self.storage.begin_read_transaction().await?;
+        // Stay below SQLite's bind limit; all batches share one committed cut.
+        for batch in session_ids.chunks(500) {
+            let placeholders = vec!["?"; batch.len()].join(", ");
+            let sql = format!(
+                r#"
+                SELECT s.session_key, a.session_id AS local_session_id, e.payload_json
+                FROM sessions s
+                LEFT JOIN agent_active_turns a ON a.session_id = s.session_key
+                LEFT JOIN agent_events e ON a.session_id IS NULL
+                    AND s.execution_node_id != 'embedded' AND e.event_seq = (
+                        SELECT event_seq FROM agent_events
+                        WHERE session_id = s.session_key AND sequence IS NOT NULL
+                        ORDER BY event_seq DESC LIMIT 1
+                    )
+                WHERE s.session_key IN ({placeholders})
+            "#
+            );
+            let params = batch.iter().map(String::as_str).collect::<Vec<_>>();
+            for row in tx.query(&sql, &params).await? {
+                let id = row.get_string("session_key").ok_or_else(|| {
+                    TalosError::internal("Session activity identity is unavailable.")
+                })?;
+                let active = if row.get_string("local_session_id").is_some() {
+                    true
+                } else if let Some(raw) = row.get_string("payload_json") {
+                    let payload: AgentEventPayload =
+                        serde_json::from_str(&raw).map_err(|error| {
+                            TalosError::internal_with_source(
+                                "Session activity fact is invalid.",
+                                error,
+                            )
+                        })?;
+                    !payload.is_terminal()
+                } else {
+                    false
+                };
+                if active {
+                    ids.insert(id);
+                }
+            }
+        }
+        tx.commit().await?;
+        Ok(ids)
+    }
+
     pub(super) async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
         let sql = "SELECT session_key, agent_id, execution_node_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, source_type, source_provider, channel_id, thread_id, environment_json, created_at, last_activity, message_count, latest_turn_seq, memory_processed_until_event_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;

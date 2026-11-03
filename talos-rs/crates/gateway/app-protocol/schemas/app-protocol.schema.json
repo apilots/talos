@@ -10982,6 +10982,104 @@
       ],
       "type": "object"
     },
+    "SessionListEntry": {
+      "description": "A live Session list row. Activity is derived from existing Turn facts; immutable SessionInfo and synchronized metadata remain unchanged.",
+      "properties": {
+        "configuredDefaultMode": {
+          "$ref": "#/definitions/UserPermissionMode"
+        },
+        "createdAt": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "currentDirectory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveMode": {
+          "$ref": "#/definitions/UserPermissionMode"
+        },
+        "hasActiveTurn": {
+          "description": "Includes running, waiting-for-input and cancelling Turns. False does not assert a successful terminal outcome.",
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "lastActivity": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "messageCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelSelection": {
+          "$ref": "#/definitions/ModelSelection"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "projectId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceProvider": {
+          "$ref": "#/definitions/SessionSourceProvider"
+        },
+        "sourceType": {
+          "$ref": "#/definitions/SessionSourceType"
+        },
+        "title": {
+          "type": "string"
+        },
+        "usage": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SessionUsage"
+            }
+          ],
+          "default": {
+            "context": null,
+            "tokens": {
+              "cache_creation_input_tokens": null,
+              "cache_read_input_tokens": null,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0
+            }
+          }
+        },
+        "userId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "configuredDefaultMode",
+        "createdAt",
+        "effectiveMode",
+        "hasActiveTurn",
+        "id",
+        "lastActivity",
+        "messageCount",
+        "modelSelection",
+        "nodeId",
+        "sourceProvider",
+        "sourceType",
+        "title",
+        "userId"
+      ],
+      "type": "object"
+    },
     "SessionListRequest": {
       "additionalProperties": false,
       "properties": {
@@ -11019,6 +11117,21 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "SessionListResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/definitions/SessionListEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
       "type": "object"
     },
     "SessionPatchRequest": {
@@ -14368,6 +14481,9 @@
     "session_history_response": {
       "$ref": "#/definitions/SessionHistoryResponse"
     },
+    "session_list_response": {
+      "$ref": "#/definitions/SessionListResponse"
+    },
     "start_turn_request": {
       "$ref": "#/definitions/StartTurnRequest"
     },
@@ -14473,6 +14589,7 @@
     "server_request",
     "session_get_response",
     "session_history_response",
+    "session_list_response",
     "start_turn_request",
     "start_turn_response",
     "submit_turn_input_request",

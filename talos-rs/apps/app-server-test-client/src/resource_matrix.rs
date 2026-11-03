@@ -143,7 +143,7 @@ pub(super) async fn resource_matrix(client: &mut AppServerClient) -> Result<()> 
     if !listed_sessions
         .sessions
         .iter()
-        .any(|candidate| candidate.id == session_id)
+        .any(|candidate| candidate.session.id == session_id)
     {
         return Err(anyhow!("session.list did not include created session"));
     }

@@ -16,8 +16,7 @@ impl ServiceGateway {
         actor: &Actor,
         request: SessionListRequest,
     ) -> TalosResult<SessionListResponse> {
-        let sessions = self.service.list_sessions(actor, request).await?;
-        Ok(SessionListResponse { sessions })
+        self.service.list_sessions(actor, request).await
     }
 
     pub(crate) async fn get_session(

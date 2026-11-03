@@ -65,11 +65,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
             return Ok(None);
         };
         let last = parse_event_record(row)?;
-        if matches!(
-            last.payload,
-            talos_agent_api::AgentEventPayload::TurnCompleted(_)
-                | talos_agent_api::AgentEventPayload::TurnFailed(_)
-        ) {
+        if last.payload.is_terminal() {
             tx.commit().await?;
             return Ok(None);
         }

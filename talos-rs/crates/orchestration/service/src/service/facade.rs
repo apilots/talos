@@ -256,7 +256,7 @@ impl TalosService {
         &self,
         actor: &Actor,
         mut request: SessionListRequest,
-    ) -> ServiceResult<Vec<SessionInfo>> {
+    ) -> ServiceResult<talos_types::SessionListResponse> {
         if let Some(node) = request.node_id.take() {
             request.node_id = Some(self.resolve_computer_metadata_node(actor, &node).await?);
         }
@@ -264,7 +264,19 @@ impl TalosService {
         for info in self.access.list_sessions(actor, request).await? {
             result.push(self.session_for_client(actor, info).await?);
         }
-        Ok(result)
+        let ids = result
+            .iter()
+            .map(|session| session.id.clone())
+            .collect::<Vec<_>>();
+        let active_session_ids = self.sessions.active_session_ids(&ids).await?;
+        let sessions = result
+            .into_iter()
+            .map(|session| talos_types::SessionListEntry {
+                has_active_turn: active_session_ids.contains(&session.id),
+                session,
+            })
+            .collect();
+        Ok(talos_types::SessionListResponse { sessions })
     }
 
     /// Reads the authenticated user's Profile usage view.

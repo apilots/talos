@@ -65,7 +65,7 @@ export function useSessionsQuery() {
   const query = useQuery({
     queryKey: chatKeys.sessions(connectionKey),
     queryFn: listSessions,
-    refetchInterval: 4_000,
+    refetchInterval: 5_000,
   });
 
   const data = [...(query.data ?? [])].sort(

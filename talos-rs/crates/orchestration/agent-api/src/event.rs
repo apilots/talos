@@ -145,6 +145,13 @@ pub enum AgentEventPayload {
     TurnFailed(AgentTurnFailed),
 }
 
+impl AgentEventPayload {
+    /// Whether this canonical fact ends its Turn, independently of presentation.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::TurnCompleted(_) | Self::TurnFailed(_))
+    }
+}
+
 /// Marker payload for the unique start of one logical Turn.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct AgentTurnStarted {}

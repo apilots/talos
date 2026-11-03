@@ -190,7 +190,13 @@ where
         let mut client = self.lock().await;
         SdkGatewayClient::list_sessions(&mut *client, SessionListRequest::default())
             .await
-            .map(|response| response.sessions)
+            .map(|response| {
+                response
+                    .sessions
+                    .into_iter()
+                    .map(|entry| entry.session)
+                    .collect()
+            })
     }
 
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {

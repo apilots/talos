@@ -39,7 +39,11 @@ export function SidebarContainer({ computer, computerEntry }: { computer?: impor
     return {
       id: sessionId,
       label: aliases[sessionId] ?? session.title,
-      status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
+      // Only the selected Session has an event observer. Background rows use
+      // the server list snapshot, never its abandoned live-response cache.
+      status: location.pathname === `/sessions/${sessionId}`
+        ? getEffectiveSessionStatus(statuses[sessionId], streams[sessionId])
+        : session.hasActiveTurn ? "running" : "done",
       model: session.modelSelection.modelRef.id,
       projectId: session.projectId ?? null,
       lastActivityAt: session.lastActivity,

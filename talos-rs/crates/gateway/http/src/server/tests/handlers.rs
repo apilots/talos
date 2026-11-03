@@ -269,7 +269,8 @@ async fn test_list_sessions_handler_returns_data_array() {
 
     let data = expect_success(response.0);
     assert_eq!(data.sessions.len(), 1);
-    assert_eq!(data.sessions[0].id, "mock-session");
+    assert_eq!(data.sessions[0].session.id, "mock-session");
+    assert!(!data.sessions[0].has_active_turn);
 }
 
 #[tokio::test]

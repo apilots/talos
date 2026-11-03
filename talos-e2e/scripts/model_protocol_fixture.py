@@ -236,6 +236,15 @@ def serve(directory):
                     rounds[key] = rounds.get(key, 0) + 1
                     assert rounds[key] <= 2, "Agent exceeded the expected two-round tool loop"
                 call, done = check_request(body, headers, provider, mode)
+                # The HTTP scenario checks list activity during actual execution;
+                # the standalone TUI fixture has no HTTP gateway.
+                if (directory / "gateway-url").exists():
+                    base = (directory / "gateway-url").read_text()
+                    session_id = (directory / "current-session").read_text()
+                    sessions = http(base, "/v1/sessions")["sessions"]
+                    session = next(row for row in sessions if row["id"] == session_id)
+                    assert session["hasActiveTurn"] is True, session
+
                 with lock:
                     with (directory / "requests.jsonl").open("a") as output:
                         output.write(json.dumps({"provider": provider, "mode": mode, "followup": done, "body": body}) + "\n")
@@ -312,6 +321,9 @@ def verify(base, directory):
         if provider == "chat-protocol-default":
             from trajectory_fixture import verify as verify_trajectory
             verify_trajectory(base, directory, stored)
+    listed = http(base, "/v1/sessions")
+    assert all(session["hasActiveTurn"] is False for session in listed["sessions"]), listed
+    print("CASE batched_session_activity PASS running_and_terminal=true")
     catalog = http(base, "/v1/models")["models"]
     adaptive_model = next(item for item in catalog if item["provider"] == "message-adaptive-fixture")
     assert adaptive_model["selection_capabilities"]["reasoning"] == "effort", adaptive_model

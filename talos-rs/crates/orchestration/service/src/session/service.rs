@@ -262,6 +262,13 @@ impl SessionService {
         Ok(record)
     }
 
+    pub(crate) async fn active_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> TalosResult<std::collections::BTreeSet<String>> {
+        self.session_store.active_session_ids(session_ids).await
+    }
+
     pub(crate) async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionInfo>> {
         let records = self.session_store.list_session_records(&query).await?;
         let mut sessions = Vec::with_capacity(records.len());
