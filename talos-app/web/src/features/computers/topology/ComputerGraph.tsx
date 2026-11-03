@@ -10,7 +10,7 @@ import {
   type ComputerService,
   type FlowLayer,
 } from "./observations";
-import { syncStateLabel } from "./sync-state";
+import { syncStateLabel, SyncTopologyState } from "./sync-state";
 
 export interface ComputerGraphProps {
   nodes: AppProtocol.NodeInfo[];
@@ -148,7 +148,7 @@ export function ComputerGraph({
           </footer>
         </button>
         <div className="cmp-service-relation">
-          {metrics?.controlPlanePeerId ? (
+          {metrics?.controlPlanePeerId || planeState === SyncTopologyState.Disabled ? (
             <>
               <ArrowLeftRight size={15} />
               <span data-sync-state={planeState}>{t(syncStateLabel[planeState])}</span>
@@ -169,11 +169,11 @@ export function ComputerGraph({
           </span>
           <span>
             <strong>Talos Sync</strong>
-            <small>{syncEndpoint ?? metrics?.endpoint ?? t("unknown")}</small>
+            <small>{planeState === SyncTopologyState.Disabled ? t("syncDisabled") : (syncEndpoint ?? metrics?.endpoint ?? t("unknown"))}</small>
           </span>
           <footer>
             {t("syncFacts")}
-            <span>{t(!metrics && syncEndpoint ? "lastKnownEndpointShort" : "fixedService")}</span>
+            <span>{t(planeState !== SyncTopologyState.Disabled && !metrics && syncEndpoint ? "lastKnownEndpointShort" : "fixedService")}</span>
           </footer>
         </button>
         {nodes.map((node, index) => {

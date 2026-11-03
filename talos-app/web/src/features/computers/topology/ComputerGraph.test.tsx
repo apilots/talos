@@ -9,12 +9,39 @@ import { computerResources } from "@/shared/i18n/computerResources";
 import { ComputerGraph } from "./ComputerGraph";
 import { ComputerTopologyList } from "./ComputerTopologyList";
 import { SyncPeerDetails } from "./SyncPeerDetails";
+import { ComputerServiceDetails } from "./ComputerServiceDetails";
 import {
   topologyMetrics,
   topologyNodes,
 } from "@/shared/test/computer-topology.fixture";
 
 afterEach(cleanup);
+
+it.each(["en", "zh-CN"])("shows disabled Sync instead of unknown without metrics (%s)", async (locale) => {
+  const i18n = createInstance();
+  const resources = computerResources[locale as keyof typeof computerResources];
+  await i18n.init({ lng: locale, resources: { [locale]: { computers: resources } } });
+  const syncStatus: AppProtocol.SyncStatusResponse = {
+    configuredEnabled: false, connection: "disabled", peerId: "peer-control",
+    pendingChanges: 0, lastAcknowledgedAt: null, lastError: null,
+    localComputerId: "manager-a", canClaimLocalHistory: false,
+  };
+  const { container } = render(<I18nextProvider i18n={i18n}>
+    <ComputerGraph nodes={topologyNodes} syncStatus={syncStatus}
+      controlPlane="https://control.example" layer="all" onInspect={vi.fn()} onService={vi.fn()} />
+    <section data-testid="disabled-sync-details">
+      <ComputerServiceDetails service="sync" syncStatus={syncStatus}
+        syncEndpoint="wss://previous.example/sync" controlPlane="https://control.example" />
+    </section>
+  </I18nextProvider>);
+  const service = screen.getByRole("button", { name: locale === "en" ? "Inspect Talos Sync" : "查看 Talos Sync 的详情" });
+  expect(service).toHaveTextContent(resources.syncDisabled);
+  expect(service).not.toHaveTextContent(resources.unknown);
+  expect(screen.queryByText(resources.controlPlaneSyncUnknown)).toBeNull();
+  expect(screen.getByTestId("disabled-sync-details").querySelector("dd")).toHaveTextContent(resources.syncDisabled);
+  expect(screen.queryByText("wss://previous.example/sync")).toBeNull();
+  expect([...container.querySelectorAll('[data-flow="sync"]')].map((wire) => wire.getAttribute("data-sync-state"))).toEqual(["disabled"]);
+});
 
 it.each(["en", "zh-CN"])(
   "renders only observed sync mappings with bidirectional arrows (%s)",
