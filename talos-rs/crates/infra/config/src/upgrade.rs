@@ -6,7 +6,15 @@ use talos_fs::{FileSystem, WriteOptions};
 
 use crate::env::{EnvSecretStore, RuntimeEnv};
 use crate::loader::default_config_resource_path;
-use crate::{validate, Config, TalosPaths};
+use crate::{validate, Config, ReservedOutputPolicy, TalosPaths};
+
+const RESERVED_OUTPUT_POLICY_PATH: &[&str] = &[
+    "agent",
+    "kernel",
+    "prompt",
+    "window",
+    "reserved_output_tokens",
+];
 
 /// Result of refreshing the product-managed default config template cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,17 +165,20 @@ pub(crate) fn upgrade_default_config_from_template(
             template_path.display()
         ))
     })?;
-    let validation_template = build_validation_template(&template, &original, &runtime_env);
-
+    // Align keys before validating values: unknown legacy keys must not poison
+    // validation, and new defaults must not be skipped by a valid-group shortcut.
     let mut normalize_report = NormalizeReport::default();
+    let candidate =
+        align_template_shape(&template, &original, &mut Vec::new(), &mut normalize_report)?;
+    let validation_template = build_validation_template(&template, &candidate, &runtime_env);
     let normalized = normalize_value(
         &template,
-        &original,
+        &candidate,
         &validation_template,
         &mut Vec::new(),
         &mut normalize_report,
         &runtime_env,
-    );
+    )?;
 
     // An invalid registration must be repaired explicitly. Defaulting it to
     // null loses the saved UUID and could make the host enroll a new Computer.
@@ -320,6 +331,77 @@ fn get_path<'a>(root: &'a YamlValue, path: &[&str]) -> Option<&'a YamlValue> {
     Some(cursor)
 }
 
+fn align_template_shape(
+    template: &YamlValue,
+    original: &YamlValue,
+    path: &mut Vec<String>,
+    report: &mut NormalizeReport,
+) -> TalosResult<YamlValue> {
+    if is_dynamic_map_path(path) {
+        return Ok(original.clone());
+    }
+    if path == RESERVED_OUTPUT_POLICY_PATH {
+        // This schema-owned sum type has variant-specific fields. Deserialize it
+        // atomically instead of using the template's one variant as a key list.
+        let Ok(policy) = serde_yaml::from_value::<ReservedOutputPolicy>(original.clone()) else {
+            return Ok(original.clone());
+        };
+        let canonical = serde_yaml::to_value(policy).map_err(|error| {
+            TalosError::internal_with_source(
+                "Serialize configured output reservation policy; technical details were withheld.",
+                error,
+            )
+        })?;
+        if let (YamlValue::Mapping(saved), YamlValue::Mapping(current)) = (original, &canonical) {
+            for key in saved.keys().filter(|key| !current.contains_key(key)) {
+                if let Some(key) = key.as_str() {
+                    path.push(key.to_string());
+                    report.removed_paths.push(format_path(path));
+                    path.pop();
+                }
+            }
+        }
+        return Ok(canonical);
+    }
+
+    let (YamlValue::Mapping(template_map), YamlValue::Mapping(original_map)) = (template, original)
+    else {
+        return Ok(original.clone());
+    };
+    let mut aligned = Mapping::new();
+    for (key, template_value) in template_map {
+        let Some(key_name) = key.as_str() else {
+            aligned.insert(key.clone(), template_value.clone());
+            continue;
+        };
+        path.push(key_name.to_string());
+        let value = if let Some(original_value) = original_map.get(key) {
+            align_template_shape(template_value, original_value, path, report)?
+        } else {
+            report.added_paths.push(format_path(path));
+            template_value.clone()
+        };
+        aligned.insert(key.clone(), value);
+        path.pop();
+    }
+    for (key, original_value) in original_map {
+        if template_map.contains_key(key) {
+            continue;
+        }
+        if let Some(key_name) = key.as_str() {
+            path.push(key_name.to_string());
+            // Older templates did not include the supported dynamic catalog.
+            if path == ["llm", "custom_providers"].as_slice() {
+                aligned.insert(key.clone(), original_value.clone());
+            } else {
+                report.removed_paths.push(format_path(path));
+            }
+            path.pop();
+        }
+    }
+    Ok(YamlValue::Mapping(aligned))
+}
+
 fn normalize_value(
     template: &YamlValue,
     original: &YamlValue,
@@ -327,82 +409,95 @@ fn normalize_value(
     path: &mut Vec<String>,
     report: &mut NormalizeReport,
     runtime_env: &RuntimeEnv,
-) -> YamlValue {
-    if is_dynamic_map_path(path) && validates_at_path(root_template, path, original, runtime_env) {
-        return original.clone();
+) -> TalosResult<YamlValue> {
+    // Validate a complete configured group first. Valid related values must not
+    // be checked one at a time against unrelated production defaults.
+    if validates_at_path(root_template, path, original, runtime_env) {
+        return Ok(original.clone());
     }
+    let (YamlValue::Mapping(template_map), YamlValue::Mapping(original_map)) = (template, original)
+    else {
+        return Err(configuration_group_requires_repair(path));
+    };
 
-    match (template, original) {
-        (YamlValue::Mapping(template_map), YamlValue::Mapping(original_map)) => normalize_mapping(
-            template_map,
-            original_map,
-            root_template,
-            path,
-            report,
-            runtime_env,
-        ),
-        _ => {
-            if validates_at_path(root_template, path, original, runtime_env) {
-                original.clone()
-            } else {
-                report.defaulted_paths.push(format_path(path));
-                template.clone()
-            }
-        }
-    }
-}
-
-fn normalize_mapping(
-    template_map: &Mapping,
-    original_map: &Mapping,
-    root_template: &YamlValue,
-    path: &mut Vec<String>,
-    report: &mut NormalizeReport,
-    runtime_env: &RuntimeEnv,
-) -> YamlValue {
-    let mut normalized = Mapping::new();
-    for (key, template_value) in template_map {
+    let mut normalized = original_map.clone();
+    for (key, original_value) in original_map {
+        let Some(template_value) = template_map.get(key) else {
+            // Shape alignment permits this only for an older template's
+            // supported dynamic catalog. Final validation still applies.
+            continue;
+        };
         let Some(key_name) = key.as_str() else {
-            normalized.insert(key.clone(), template_value.clone());
             continue;
         };
         path.push(key_name.to_string());
-        if let Some(original_value) = original_map.get(key) {
-            let value = normalize_value(
-                template_value,
-                original_value,
-                root_template,
-                path,
-                report,
-                runtime_env,
+        if template_value.is_mapping()
+            && original_value.is_mapping()
+            && !is_dynamic_map_path(path)
+            && path != RESERVED_OUTPUT_POLICY_PATH
+        {
+            normalized.insert(
+                key.clone(),
+                normalize_value(
+                    template_value,
+                    original_value,
+                    root_template,
+                    path,
+                    report,
+                    runtime_env,
+                )?,
             );
-            normalized.insert(key.clone(), value);
-        } else {
-            report.added_paths.push(format_path(path));
-            normalized.insert(key.clone(), template_value.clone());
         }
         path.pop();
     }
-
-    for (key, original_value) in original_map {
-        if template_map.contains_key(key) {
-            continue;
-        }
-        if let Some(key_name) = key.as_str() {
-            path.push(key_name.to_string());
-            if path == &["llm".to_string(), "custom_providers".to_string()]
-                && validates_at_path(root_template, path, original_value, runtime_env)
-            {
-                normalized.insert(key.clone(), original_value.clone());
-                path.pop();
-                continue;
-            }
-            report.removed_paths.push(format_path(path));
-            path.pop();
-        }
+    let normalized = YamlValue::Mapping(normalized);
+    if validates_at_path(root_template, path, &normalized, runtime_env) {
+        return Ok(normalized);
     }
 
-    YamlValue::Mapping(normalized)
+    // A single default is safe only when it repairs the complete group and no
+    // other leaf default does. Do not guess between coupled invalid settings.
+    let mut repair = None;
+    for (key, template_value) in template_map {
+        let Some(original_value) = normalized.get(key) else {
+            continue;
+        };
+        let Some(key_name) = key.as_str() else {
+            continue;
+        };
+        path.push(key_name.to_string());
+        let is_leaf = !template_value.is_mapping() && !original_value.is_mapping();
+        let eligible = is_leaf || path == RESERVED_OUTPUT_POLICY_PATH;
+        path.pop();
+        if !eligible || original_value == template_value {
+            continue;
+        }
+        let mut candidate = normalized.clone();
+        candidate[key.clone()] = template_value.clone();
+        if validates_at_path(root_template, path, &candidate, runtime_env) {
+            if repair.is_some() {
+                return Err(configuration_group_requires_repair(path));
+            }
+            repair = Some((key_name.to_string(), candidate));
+        }
+    }
+    if let Some((key, candidate)) = repair {
+        path.push(key);
+        report.defaulted_paths.push(format_path(path));
+        path.pop();
+        return Ok(candidate);
+    }
+    Err(configuration_group_requires_repair(path))
+}
+
+fn configuration_group_requires_repair(path: &[String]) -> TalosError {
+    TalosError::new(
+        talos_error::ErrorCode::InvalidRequest,
+        format!(
+            "Configuration upgrade cannot safely repair {}. Repair this configuration group before upgrading.",
+            format_path(path)
+        ),
+    )
 }
 
 fn validates_at_path(

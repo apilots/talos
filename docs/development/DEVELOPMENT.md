@@ -260,6 +260,13 @@ Keep provider secrets in `.env`; configuration references the corresponding
 `TALOS_LLM_*_API_KEY` variables. Repository defaults live under `conf/` and are
 copied or upgraded by the runtime rather than edited in a user's home directly.
 
+Managed upgrades align saved keys with the current template before validating
+values. Valid configured groups are preserved together, including cross-field
+constraints; typed enum variants retain their own fields rather than the
+example variant's shape. A unique single-value default may repair an invalid
+group; ambiguous or multiple invalid settings require explicit repair without
+rewriting the saved file. The complete result validates before backup and write.
+
 `talos.yaml`, `talos-dev.yaml`, and `talos-prod.yaml` share the same configuration
 schema. The startup entrypoint selects Server or Worker capabilities. Both Docker
 images package `talos-prod.yaml` as `conf/talos.yaml`; deployment examples supply
