@@ -19,7 +19,7 @@ deploy/
 ## Offline Ubuntu image
 
 [`ubuntu-offline/`](ubuntu-offline/README.md) builds local `amd64` and `arm64`
-offline bundles with a private deployment profile, packaged Browser resources,
+offline bundles with the production upgrade template, packaged Browser resources,
 diagnostic tools and a persistent-volume launcher. It reuses the formal runtime
 resources and configuration upgrades; private profiles and image archives stay
 out of Git.

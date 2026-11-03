@@ -92,19 +92,10 @@ COPY --from=rust-builder /artifacts/ /opt/talos/bin/
 COPY --from=web-builder /workspace/talos-app/web/dist/ /opt/talos/webui/
 COPY conf/talos-prod.yaml /opt/talos/conf/talos.yaml
 COPY conf/migrations /opt/talos/conf/migrations
-COPY --chown=talos:talos pre.yaml /home/talos/.talos/conf/talos.yaml
-RUN python3 - <<'PYTHON'
-from pathlib import Path
-import yaml
-path = Path('/home/talos/.talos/conf/talos.yaml')
-profile = yaml.safe_load(path.read_text())
-profile['gateway']['host'] = '0.0.0.0'
-path.write_text(yaml.safe_dump(profile, sort_keys=False))
-PYTHON
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES /usr/share/licenses/talos/
 ARG REVISION
-LABEL org.opencontainers.image.title="Talos Ubuntu Pre" \
-      org.opencontainers.image.description="Anonymous offline Server, WebUI and shared TUI" \
+LABEL org.opencontainers.image.title="Talos Ubuntu Offline" \
+      org.opencontainers.image.description="Offline Server, WebUI and shared TUI with production upgrade template" \
       org.opencontainers.image.source="https://github.com/apilots/talos" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="Apache-2.0"
@@ -118,9 +109,9 @@ ENV HOME=/home/talos \
     PATH=/opt/talos/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 USER talos
 WORKDIR /home/talos/.talos
-EXPOSE 19091
+EXPOSE 8080
 VOLUME ["/home/talos/.talos"]
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
-    CMD curl -fsS http://127.0.0.1:19091/health >/dev/null || exit 1
+    CMD ["python3", "-c", "import os, pathlib, urllib.request, yaml; config = yaml.safe_load((pathlib.Path(os.environ['TALOS_HOME']) / 'conf/talos.yaml').read_text()); urllib.request.urlopen('http://127.0.0.1:' + str(config['gateway']['port']) + '/health', timeout=3).close()"]
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["talos-server"]

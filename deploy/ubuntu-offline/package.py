@@ -56,11 +56,17 @@ An explicit arm64 or amd64 argument is also supported.
 WebUI: http://<server-ip>:19091
 TUI: sudo docker exec -it talos-pre talos
 
-Defaults: CONTAINER_NAME=talos-pre, DATA_VOLUME=talos-pre-data, HTTP_PORT=19091.
-When upgrading, remove the old container and reuse its existing data volume.
+Defaults: CONTAINER_NAME=talos-pre, DATA_VOLUME=talos-pre-data, HTTP_PORT=19091,
+CONTAINER_PORT=8080 (the production template's internal listener).
+When upgrading, remove only the old container and reuse its existing data volume.
+Set CONTAINER_PORT to the gateway.port saved in that volume; older offline
+installations normally use: sudo env CONTAINER_PORT=19091 bash ./run.sh
 Docker and Chromium user namespace support must be available on the host.
-The image contains the supplied private pre profile; model requests still need
-access to that profile's model services. No startup package downloads are needed.
+The image contains only the production upgrade template, never a private profile.
+Talos upgrades the saved configuration in the data volume at normal startup.
+New volumes use production defaults (gateway authentication enabled).
+Keep model credentials and endpoints in the deployment volume or its .env.
+No startup package downloads are needed.
 source-revision.txt records the full immutable product source revision.
 ''')
     shared += ['source-revision.txt', 'README.txt']

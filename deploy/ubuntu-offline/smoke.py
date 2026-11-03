@@ -19,10 +19,11 @@ image = sys.argv[1]
 name = 'talos-pre-smoke-' + uuid.uuid4().hex[:10]
 volume = name + '-data'
 network = os.environ.get('NETWORK', 'none')
-model_test = os.environ.get('MODEL_TEST') == '1'
+if os.environ.get('MODEL_TEST') == '1':
+    raise SystemExit('MODEL_TEST is not supported by the profile-free image smoke; use the standard provider E2E scenarios with explicit model credentials.')
 repo = Path(__file__).resolve().parents[2]
 arch = subprocess.check_output(['docker', 'image', 'inspect', image, '--format', '{{.Architecture}}'], text=True).strip()
-output = Path(os.environ.get('OUTPUT_DIR', str(repo / 'output' / 'ubuntu-server'))) / f'smoke-{arch}-{network}'
+output = Path(os.environ.get('OUTPUT_DIR', str(repo / 'output' / 'ubuntu-offline'))) / f'smoke-{arch}-{network}'
 output.mkdir(parents=True, exist_ok=True)
 results = []
 
@@ -85,10 +86,6 @@ def tui():
     deadline = time.monotonic() + 60
     rendered_at = None
     quit_sent = False
-    prompt_sent = False
-    reply_complete = not model_test
-    previous_sessions = {s['id'] for s in get('/v1/sessions')['data']['sessions']} if model_test else set()
-    next_history_check = 0
     try:
         while time.monotonic() < deadline:
             if select.select([master], [], [], 0.2)[0]:
@@ -103,36 +100,13 @@ def tui():
                     os.write(master, b'\x1b[1;1R')
                 if b'\x1b[?2004h' in transcript and b'Tip:' in transcript and len(transcript) > 300:
                     rendered_at = rendered_at or time.monotonic()
-            if rendered_at and model_test and not prompt_sent:
-                os.write(master, b'Reply with exactly UBUNTU_TUI_OK. Do not use tools.X\x7fY\x08\r')
-                prompt_sent = True
-            if prompt_sent and not reply_complete and time.monotonic() >= next_history_check:
-                next_history_check = time.monotonic() + 1
-                for session in get('/v1/sessions')['data']['sessions']:
-                    if session['id'] in previous_sessions:
-                        continue
-                    history = get('/v1/sessions/' + session['id'] + '/history')
-                    for turn in history['data']['data']:
-                        for message in turn.get('result', {}).get('result', {}).get('messages', []):
-                            for block in message['blocks']:
-                                content = block['content']
-                                if (content['type'] == 'assistantText' and
-                                        content['data']['phase'] == 'finalAnswer' and
-                                        content['data']['text'].strip() == 'UBUNTU_TUI_OK'):
-                                    user_texts = [b['content']['data'].get('text')
-                                                  for m in turn['result']['result']['messages'] if m['role'] == 'user'
-                                                  for b in m['blocks'] if b['content']['type'] == 'userContent']
-                                    assert user_texts == ['Reply with exactly UBUNTU_TUI_OK. Do not use tools.'], user_texts
-                                    reply_complete = True
-                                    (output / 'tui-history.json').write_text(json.dumps(history, indent=2))
-                                    record('tui-model-shared-session', 'PTY DEL and Ctrl-H removed input correctly; actual assistant reply visible through HTTP')
-            if rendered_at and reply_complete and time.monotonic() - rendered_at > 2 and not quit_sent:
+            if rendered_at and time.monotonic() - rendered_at > 2 and not quit_sent:
                 os.write(master, b'\x03')  # Ctrl-C, the product's quit shortcut.
                 quit_sent = True
             if process.poll() is not None:
                 break
         process.wait(timeout=10)
-        assert rendered_at and reply_complete and quit_sent and process.returncode == 0, \
+        assert rendered_at and quit_sent and process.returncode == 0, \
             f'TUI did not render and exit cleanly: exit={process.returncode}'
         assert b'Cloud login required' not in transcript
         (output / 'tui.ansi').write_bytes(transcript)
@@ -147,6 +121,18 @@ def tui():
 
 try:
     docker('volume', 'create', volume)
+    # Public isolated test fixture; the delivery image itself retains the original prod template.
+    docker('run', '--rm', '--network', 'none', '--entrypoint', 'python3',
+           '-v', f'{volume}:/home/talos/.talos', image, '-c', r'''
+from pathlib import Path
+import yaml
+home = Path('/home/talos/.talos')
+config = yaml.safe_load(Path('/opt/talos/conf/talos.yaml').read_text())
+config['gateway'].update(port=19091, auth=False)
+config['sync']['enabled'] = False
+(home / 'conf').mkdir(parents=True, exist_ok=True)
+(home / 'conf/talos.yaml').write_text(yaml.safe_dump(config, sort_keys=False))
+''')
     publish = ['-p', '127.0.0.1::19091'] if network != 'none' else []
     docker('run', '-d', '--platform', f'linux/{arch}', '--name', name,
            '--network', network, '--shm-size=1g', '--security-opt', 'no-new-privileges:true',
@@ -204,31 +190,9 @@ try:
     inside('bash', '-c', 'test -s "$TALOS_HOME/data/talos.db" && '
            'test -s "$TALOS_HOME/conf/talos.yaml" && '
            'printf shared-volume > "$TALOS_HOME/acceptance-marker"')
-    session_id = None
-    if model_test:
-        session_id = 'ubuntu-pre-' + uuid.uuid4().hex
-        answer = inside('talos', 'exec', '--session', session_id,
-                        'Reply with exactly UBUNTU_PRE_OK. Do not use any tools.', timeout=240)
-        (output / 'model.txt').write_text(answer)
-        assert 'UBUNTU_PRE_OK' in answer
-        session = get('/v1/sessions/' + session_id)
-        assert session_id in json.dumps(session)
-        record('model-and-shared-session', 'CLI completed an internal model request; HTTP Server sees its session')
-        tool_session = 'ubuntu-pre-tool-' + uuid.uuid4().hex
-        tool_answer = inside('talos', 'exec', '--session', tool_session,
-                             "You must call tool 'Bash' exactly once before any final answer. "
-                             'Use command printf UBUNTU_PRE_TOOL_OK. Do not call any other tool. '
-                             'Do not answer from prior knowledge or workspace context. '
-                             'After the tool result is returned, return its raw stdout.', timeout=240)
-        (output / 'tool.txt').write_text(tool_answer)
-        assert 'TOOL_CALL_STARTED name=Bash' in tool_answer
-        assert 'internal=Bash is_error=false' in tool_answer and 'UBUNTU_PRE_TOOL_OK' in tool_answer
-        record('shell-tool', 'internal model called Bash successfully under the supplied pre policy')
     docker('restart', name)
     ready()
     assert inside('cat', '/home/talos/.talos/acceptance-marker') == 'shared-volume'
-    if session_id:
-        assert session_id in json.dumps(get('/v1/sessions/' + session_id))
     assert get('/v1/llm?nodeId=embedded')['data']['config']['bailian']['models'][0]['name'] == 'Shared TUI model save acceptance'
     record('model-save-persistence', 'Bailian model edit survives Server restart after shared TUI use')
     record('persistence', 'configuration, database and shared data survive container restart')

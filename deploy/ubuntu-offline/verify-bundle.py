@@ -52,19 +52,19 @@ def unpack(archive, destination):
     return architectures
 
 
-def wait_ready(name):
-    port = run('docker', 'port', name, '19091/tcp').splitlines()[0].rsplit(':', 1)[1]
+def wait_ready(name, container_port=19091, expected_auth=False):
+    port = run('docker', 'port', name, f'{container_port}/tcp').splitlines()[0].rsplit(':', 1)[1]
     url = f'http://127.0.0.1:{port}'
     for _ in range(90):
         try:
             with urllib.request.urlopen(url + '/health', timeout=3) as response:
-                assert json.load(response)['auth_enabled'] is False
+                assert json.load(response)['auth_enabled'] is expected_auth
             with urllib.request.urlopen(url + '/', timeout=3) as response:
                 assert '/assets/' in response.read().decode()
             return
         except (OSError, ValueError, AssertionError):
             time.sleep(2)
-    raise RuntimeError(f'{name}: anonymous HTTP/WebUI did not become ready')
+    raise RuntimeError(f'{name}: HTTP/WebUI on container port {container_port} did not become ready')
 
 
 def verify(directory, arch, output):
@@ -80,28 +80,86 @@ def verify(directory, arch, output):
         assert metadata['Os'] == 'linux' and metadata['Architecture'] == arch
         assert metadata['Config']['Labels']['org.opencontainers.image.revision'] == revision
         assert prefix.endswith(':' + revision[:8])
-        env = dict(os.environ, CONTAINER_NAME=name, DATA_VOLUME=volume, HTTP_PORT='0')
-        for attempt in range(2):
+        image = prefix + '-' + arch
+        run('docker', 'run', '--rm', '--entrypoint', 'sh', image, '-ec',
+            'test ! -e "$TALOS_HOME/conf/talos.yaml"')
+        env = dict(os.environ, CONTAINER_NAME=name, DATA_VOLUME=volume, HTTP_PORT='0',
+                   CONTAINER_PORT='8080')
+        log.append(run('bash', str(directory / 'run.sh'), arch, env=env))
+        wait_ready(name, container_port=8080, expected_auth=True)
+        template_hash = run('docker', 'exec', name, 'sha256sum',
+                            '/opt/talos/conf/talos.yaml').split()[0]
+        run('docker', 'exec', name, 'bash', '-euc',
+            'for tool in kubectl ssh scp sftp crontab curl wget dig nslookup ip ss '
+            'ping traceroute nc ps top pgrep lsof strace tcpdump jq less vi rsync '
+            'tar gzip unzip openssl git rg; do command -v "$tool" >/dev/null; done; '
+            'kubectl version --client -o json > /tmp/kubectl-version.json')
+        run('docker', 'rm', '-f', name)
+
+        # Simulate an operator-owned config and an old cached template, never a private profile.
+        fixture = {
+            'deepseek': {'base_url': 'https://deepseek.example.invalid/v1',
+                         'http_timeouts': {'connect_secs': 12, 'response_secs': 180,
+                                           'stream_idle_secs': 150, 'stream_total_secs': 1200}},
+            'openai': {'base_url': 'https://openai.example.invalid/v1',
+                       'http_timeouts': {'connect_secs': 11, 'response_secs': 130,
+                                         'stream_idle_secs': 100, 'stream_total_secs': 950}},
+        }
+        marker = uuid.uuid4().hex
+        run('docker', 'run', '--rm', '--entrypoint', 'python3',
+            '-v', volume + ':/home/talos/.talos', image, '-c', r'''
+import json, sys
+from pathlib import Path
+import yaml
+home = Path('/home/talos/.talos')
+path = home / 'conf/talos.yaml'
+config = yaml.safe_load(path.read_text())
+config['gateway'].update(port=19091, auth=False)
+config['sync']['enabled'] = False
+for provider, settings in json.loads(sys.argv[1]).items():
+    config['llm'][provider].update(settings)
+config['llm']['deepseek']['models'][0].update(id='offline-upgrade-fixture', name='Offline upgrade fixture')
+path.write_text(yaml.safe_dump(config, sort_keys=False))
+(home / 'bundle-marker').write_text(sys.argv[2])
+old_template = yaml.safe_load(Path('/opt/talos/conf/talos.yaml').read_text())
+for provider in ('anthropic', 'openai', 'bailian', 'deepseek', 'openrouter', 'ollama'):
+    old_template['llm'][provider].pop('http_timeouts', None)
+(home / 'conf/talos.yaml.template').write_text(yaml.safe_dump(old_template, sort_keys=False))
+''', json.dumps(fixture), marker)
+        env['CONTAINER_PORT'] = '19091'
+        for _ in range(2):
             log.append(run('bash', str(directory / 'run.sh'), arch, env=env))
             wait_ready(name)
-            if attempt:
-                assert run('docker', 'exec', name, 'cat', '/home/talos/.talos/bundle-marker') == 'retained-volume'
-            else:
-                run('docker', 'exec', name, 'bash', '-euc',
-                    'printf retained-volume > "$TALOS_HOME/bundle-marker"; '
-                    'for tool in kubectl ssh scp sftp crontab curl wget dig nslookup ip ss '
-                    'ping traceroute nc ps top pgrep lsof strace tcpdump jq less vi rsync '
-                    'tar gzip unzip openssl git rg; do command -v "$tool" >/dev/null; done; '
-                    'kubectl version --client -o json > /tmp/kubectl-version.json')
+            run('docker', 'exec', name, 'python3', '-c', r'''
+import json, sys
+from pathlib import Path
+import yaml
+home = Path('/home/talos/.talos')
+config = yaml.safe_load((home / 'conf/talos.yaml').read_text())
+for provider, settings in json.loads(sys.argv[1]).items():
+    for key, value in settings.items():
+        assert config['llm'][provider][key] == value, (provider, key)
+assert config['llm']['deepseek']['models'][0]['id'] == 'offline-upgrade-fixture'
+assert config['llm']['deepseek']['models'][0]['name'] == 'Offline upgrade fixture'
+assert config['llm']['ollama']['http_timeouts'] is None
+assert config['gateway']['port'] == 19091 and config['gateway']['auth'] is False
+assert (home / 'bundle-marker').read_text() == sys.argv[2]
+assert (home / 'conf/talos.yaml.template').read_bytes() == Path('/opt/talos/conf/talos.yaml').read_bytes()
+''', json.dumps(fixture), marker)
             run('docker', 'rm', '-f', name)
         return {'architecture': arch, 'status': 'PASS', 'revision': revision,
+                'template_sha256': template_hash,
                 'checks': ['archive checksums', 'docker load', 'image provenance',
-                           'packaged launcher', 'anonymous HTTP/WebUI',
-                           'installed tools', 'retained-volume container recreation']}
+                           'no baked runtime profile', 'prod bootstrap HTTP/WebUI',
+                           'installed tools', 'cached template refresh',
+                           'saved timeout/model settings retained across two recreations']}
     except subprocess.CalledProcessError as error:
         log.append(error.output or '')
         raise
     finally:
+        logs = subprocess.run(['docker', 'logs', name], capture_output=True, text=True)
+        if logs.returncode == 0:
+            log.append(logs.stdout + logs.stderr)
         (output / f'bundle-{arch}.log').write_text('\n'.join(log) + '\n')
         subprocess.run(['docker', 'rm', '-f', name], capture_output=True)
         subprocess.run(['docker', 'volume', 'rm', volume], capture_output=True)
@@ -111,7 +169,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('archive', type=Path)
     parser.add_argument('--output-dir', type=Path, default=Path(__file__).resolve().parents[2]
-                        / 'output/ubuntu-server/bundle-verification')
+                        / 'output/ubuntu-offline/acceptance')
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     results = []

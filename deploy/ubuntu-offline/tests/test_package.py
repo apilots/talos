@@ -80,7 +80,7 @@ class PackageTests(unittest.TestCase):
                 pass
 
             def do_GET(self):
-                body = b'{"auth_enabled":false}' if self.path == '/health' else b'<html>/assets/app.js</html>'
+                body = json.dumps({"auth_enabled": self.server.auth_enabled}).encode() if self.path == '/health' else b'<html>/assets/app.js</html>'
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
@@ -90,9 +90,12 @@ class PackageTests(unittest.TestCase):
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
-            with patch.object(verify_bundle, 'run', return_value=f'127.0.0.1:{server.server_port}'), \
-                    patch.object(verify_bundle.time, 'sleep', side_effect=AssertionError('Unexpected HTTP retry')):
-                verify_bundle.wait_ready('fixture')
+            for auth in (False, True):
+                with self.subTest(auth=auth):
+                    server.auth_enabled = auth
+                    with patch.object(verify_bundle, 'run', return_value=f'127.0.0.1:{server.server_port}'), \
+                            patch.object(verify_bundle.time, 'sleep', side_effect=AssertionError('Unexpected HTTP retry')):
+                        verify_bundle.wait_ready('fixture', container_port=8080, expected_auth=auth)
         finally:
             server.shutdown()
             server.server_close()

@@ -3,10 +3,13 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
-config="${1:?Usage: build.sh /absolute/path/to/talos-pre.yaml}"
+if [[ $# -ne 0 ]]; then
+    echo "Usage: build.sh (production template only; no private configuration input)" >&2
+    exit 2
+fi
 image="${IMAGE:-talos-ubuntu-pre}"
 read -r -a platforms <<< "${PLATFORMS:-arm64 amd64}"
-output="${OUTPUT_DIR:-${repo_root}/output/ubuntu-server}"
+output="${OUTPUT_DIR:-${repo_root}/output/ubuntu-offline}"
 revision="$(git -C "${repo_root}" rev-parse HEAD)"
 mkdir -p "${repo_root}/.tmp"
 context="$(mktemp -d "${repo_root}/.tmp/ubuntu-offline.XXXXXX")"
@@ -16,16 +19,15 @@ cp "${repo_root}/deploy/docker/talos-worker/chromium-seccomp.json" "${output}/ch
 cp "${script_dir}/run.sh" "${output}/run.sh"
 printf '%s:%s\n' "${image}" "${revision:0:8}" > "${output}/image-prefix.txt"
 
-# Only committed product inputs enter the context. Private configuration stays local.
-git -C "${repo_root}" archive HEAD talos-rs talos-app conf/talos-prod.yaml conf/migrations build/worker/browser build/container build/plugins LICENSE NOTICE THIRD_PARTY_NOTICES \
+# Only committed product inputs enter the context; runtime configuration stays in the data volume.
+git -C "${repo_root}" archive HEAD talos-rs talos-app conf/talos-prod.yaml conf/migrations build/worker/browser build/container build/plugins deploy/ubuntu-offline/Dockerfile LICENSE NOTICE THIRD_PARTY_NOTICES \
     | tar -x -C "${context}"
-cp "${script_dir}/Dockerfile" "${context}/Dockerfile"
-cp "${config}" "${context}/pre.yaml"
 
 for arch in "${platforms[@]}"; do
     case "${arch}" in arm64|amd64) ;; *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; esac
     tag="${image}:${revision:0:8}-${arch}"
     docker buildx build --platform "linux/${arch}" --load --progress=plain \
+        --file "${context}/deploy/ubuntu-offline/Dockerfile" \
         --build-arg "REVISION=${revision}" --build-arg "BUILD_JOBS=${BUILD_JOBS:-4}" \
         -t "${tag}" "${context}" 2>&1 | tee "${output}/build-${arch}.log"
     docker image inspect "${tag}" --format '{{.Os}}/{{.Architecture}} {{.Id}}' \
