@@ -104,6 +104,32 @@ def verify(directory, arch, output):
                        'http_timeouts': {'connect_secs': 11, 'response_secs': 130,
                                          'stream_idle_secs': 100, 'stream_total_secs': 950}},
         }
+        operator_settings = {
+            'workspaces': {'default_workspace_id': 'research',
+                           'definitions': [{'workspace_id': 'research',
+                                            'root_prefix': 'workspace-research'}]},
+            'agent.kernel.prompt.window.reserved_output_tokens': {
+                'kind': 'ratio', 'numerator': 1, 'denominator': 8},
+            'storage.files.preview_base_url': 'https://preview.example.invalid',
+            'memory.file_list_default_limit': 100,
+            'memory.file_list_max_limit': 200,
+            'agent.kernel.output.max_tokens': 100000,
+            'agent.kernel.output.upper_limit': 200000,
+            'agent.kernel.compaction.trigger_ratio_percent': 95,
+            'agent.kernel.compaction.hard_ratio_percent': 99,
+            'agent.kernel.compaction.recent_messages_max_chars': 10000,
+            'agent.kernel.compaction.compacted_recent_messages_max_chars': 9000,
+            'agent.kernel.compaction.summary_max_chars': 5000,
+            'agent.kernel.compaction.compacted_summary_max_chars': 4000,
+            'agent.kernel.compaction.tool_exchange_max_chars': 5000,
+            'agent.kernel.compaction.compacted_tool_exchange_max_chars': 4000,
+            'agent.kernel.compaction.retrieved_memory_max_chars': 5000,
+            'agent.kernel.compaction.compacted_retrieved_memory_max_chars': 4000,
+            'agent.kernel.tools.bash.output_log.max_file_bytes': 5368709120,
+            'agent.kernel.tools.bash.output_log.max_workspace_bytes': 10737418240,
+            'storage.files.limits.max_metadata_value_bytes': 16384,
+            'storage.files.limits.max_metadata_bytes': 32768,
+        }
         marker = uuid.uuid4().hex
         run('docker', 'run', '--rm', '--entrypoint', 'python3',
             '-v', volume + ':/home/talos/.talos', image, '-c', r'''
@@ -117,6 +143,12 @@ config['gateway'].update(port=8080, auth=False)
 config['sync']['enabled'] = False
 for provider, settings in json.loads(sys.argv[1]).items():
     config['llm'][provider].update(settings)
+for dotted_path, value in json.loads(sys.argv[3]).items():
+    keys = dotted_path.split('.')
+    parent = config
+    for key in keys[:-1]:
+        parent = parent[key]
+    parent[keys[-1]] = value
 config['llm']['deepseek']['models'][0].update(id='offline-upgrade-fixture', name='Offline upgrade fixture')
 path.write_text(yaml.safe_dump(config, sort_keys=False))
 (home / 'bundle-marker').write_text(sys.argv[2])
@@ -124,7 +156,7 @@ old_template = yaml.safe_load(Path('/opt/talos/conf/talos.yaml').read_text())
 for provider in ('anthropic', 'openai', 'bailian', 'deepseek', 'openrouter', 'ollama'):
     old_template['llm'][provider].pop('http_timeouts', None)
 (home / 'conf/talos.yaml.template').write_text(yaml.safe_dump(old_template, sort_keys=False))
-''', json.dumps(fixture), marker)
+''', json.dumps(fixture), marker, json.dumps(operator_settings))
         for _ in range(2):
             log.append(run('bash', str(directory / 'run.sh'), arch, env=env))
             wait_ready(name)
@@ -137,20 +169,26 @@ config = yaml.safe_load((home / 'conf/talos.yaml').read_text())
 for provider, settings in json.loads(sys.argv[1]).items():
     for key, value in settings.items():
         assert config['llm'][provider][key] == value, (provider, key)
+for dotted_path, expected in json.loads(sys.argv[3]).items():
+    actual = config
+    for key in dotted_path.split('.'):
+        actual = actual[key]
+    assert actual == expected, (dotted_path, actual, expected)
 assert config['llm']['deepseek']['models'][0]['id'] == 'offline-upgrade-fixture'
 assert config['llm']['deepseek']['models'][0]['name'] == 'Offline upgrade fixture'
 assert config['llm']['ollama']['http_timeouts'] is None
 assert config['gateway']['port'] == 8080 and config['gateway']['auth'] is False
 assert (home / 'bundle-marker').read_text() == sys.argv[2]
 assert (home / 'conf/talos.yaml.template').read_bytes() == Path('/opt/talos/conf/talos.yaml').read_bytes()
-''', json.dumps(fixture), marker)
+''', json.dumps(fixture), marker, json.dumps(operator_settings))
             run('docker', 'rm', '-f', name)
         return {'architecture': arch, 'status': 'PASS', 'revision': revision,
                 'template_sha256': template_hash,
                 'checks': ['archive checksums', 'docker load', 'image provenance',
                            'no baked runtime profile', 'prod bootstrap HTTP/WebUI',
                            'installed tools', 'cached template refresh',
-                           'saved timeout/model settings retained across two recreations']}
+                           'saved timeout/model settings retained across two recreations',
+                           'ratio/workspace/preview and coupled operator values retained']}
     except subprocess.CalledProcessError as error:
         log.append(error.output or '')
         raise
