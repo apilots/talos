@@ -139,8 +139,9 @@ function shouldCreateMetricsBlock(metrics: ChatTurnMetrics) {
 
 function mergeTimelineItem(current: ChatTimelineItem, next: ChatTimelineItem): ChatTimelineItem {
   if (current.kind === "tool_call" && next.kind === "tool_call") {
+    const hasResult = current.contentItems !== undefined;
     const status =
-      current.status === "waitingForInput" && next.status === "running"
+      hasResult || (current.status === "waitingForInput" && next.status === "running")
         ? current.status
         : next.status;
     return {
@@ -150,7 +151,7 @@ function mergeTimelineItem(current: ChatTimelineItem, next: ChatTimelineItem): C
       progress: next.progress.length > 0 ? next.progress : current.progress,
       output: next.output ?? current.output,
       prompt: next.prompt ?? current.prompt,
-      completedAtMs: next.completedAtMs ?? current.completedAtMs,
+      completedAtMs: hasResult ? current.completedAtMs : next.completedAtMs ?? current.completedAtMs,
     };
   }
   if (current.kind !== "tool_call" && next.kind !== "tool_call") {

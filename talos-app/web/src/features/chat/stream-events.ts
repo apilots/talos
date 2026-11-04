@@ -532,7 +532,9 @@ function applyMessageCompleted(
     }
     const item = blockToChatItem(block);
     if (item) {
-      state.replaceTimelineItem(sessionId, turnId, item);
+      // Results arrive in a separate message and must survive the call snapshot.
+      if (item.kind === "tool_call") state.upsertTimelineItem(sessionId, turnId, item);
+      else state.replaceTimelineItem(sessionId, turnId, item);
     }
   }
 }

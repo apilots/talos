@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "@/shared/store/app-store";
 import { applyStreamEventBatch, restoreActiveTurn } from "../stream-events";
 import { createTimelineEventBatcher } from "../timeline-event-batcher";
-import { pendingUserAction, textDelta, baseEvent } from "./streaming-fixtures";
+import { pendingUserAction, textDelta, baseEvent, itemCompleted, toolResult, turnCompleted } from "./streaming-fixtures";
 import { runningTurn } from "./running-turn-fixture";
 
 function answer() {
@@ -48,6 +48,31 @@ describe("running Turn state and offset", () => {
     const tools = useAppStore.getState().streams["sess-1"]?.blocks.flatMap((block) => block.kind === "timeline" ? block.items : []);
     expect(tools).toHaveLength(1);
     expect(tools?.[0]).toMatchObject({ kind: "tool_call", arguments: '{"x":1}' });
+  });
+
+  it.each([false, true])("retains a restored tool's result through message completion (error=%s)", (isError) => {
+    const call = itemCompleted("tool-1", 9, "tool_call").event.data.payload;
+    if (call.type !== "messageBlockCompleted") throw new Error("Expected tool call fixture");
+    const snapshot = runningTurn();
+    snapshot.messages[0].blocks = [{ ...call.data.block, status: "running", completedAt: null }];
+    restoreActiveTurn("sess-1", snapshot);
+    const result = toolResult("tool-1", "Retained result", 10);
+    const payload = result.event.data.payload;
+    if (payload.type !== "messageBlockCompleted" || payload.data.block.content.type !== "toolResult") {
+      throw new Error("Expected tool result fixture");
+    }
+    payload.data.block.content.data.isError = isError;
+    applyStreamEventBatch("sess-1", [result]);
+    const expected = { kind: "tool_call", output: "Retained result",
+      contentItems: [{ type: "text", text: "Retained result" }], isError,
+      status: isError ? "failed" : "completed", completedAtMs: 10_000 };
+    const items = () => useAppStore.getState().streams["sess-1"].blocks
+      .flatMap((block) => block.kind === "timeline" ? block.items : []);
+    expect(items()).toEqual([expect.objectContaining(expected)]);
+    applyStreamEventBatch("sess-1", [baseEvent({ type: "messageCompleted", data: {
+      ...snapshot.messages[0], status: "completed", completedAt: 11, blocks: [call.data.block],
+    } }, 11), turnCompleted(12)]);
+    expect(items()).toEqual([expect.objectContaining(expected)]);
   });
 
   it("updates cancellation state at an unchanged content offset", () => {
