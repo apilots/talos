@@ -168,14 +168,21 @@ export type SandboxApprovalDecision = "allowOnce" | "deny" | "cancel";
 
 export type SessionActiveTurnRequest = { sessionId: string, };
 
-export type SessionActiveTurnResponse = { activeTurn: TimelineActiveTurn | null,
+export type SessionActiveTurnResponse = { activeTurn: ActiveTurnSnapshot | null,
+/**
+ * Latest terminal Turn covered by the captured running offset (or idle tail).
+ * Parallel History reads must cover this position before restoring the Turn.
+ */
+lastCompletedEventSeq: number,
 /**
  * Latest durable Session event, including terminal facts and product notices.
  * Idle clients use changes to refresh history; this is not a history boundary.
  */
 latestEventId: string | null, };
 
-export type SessionActiveTurnChangedNotification = { sessionId: string, state: SessionActiveTurnResponse, };
+export type SessionActiveTurnStatus = { activeTurn: TimelineActiveTurn | null, latestEventId: string | null, };
+
+export type SessionActiveTurnChangedNotification = { sessionId: string, state: SessionActiveTurnStatus, };
 
 export type PayloadRef = { payloadId: string,
 /**
@@ -292,6 +299,8 @@ export type TimelineReplay = { events: Array<TimelineEvent>, highWaterMarkEventI
 export type TimelineCursorStatus = "current" | "fromBeginning";
 
 export type TimelineActiveTurn = { identity: AgentTurnRef, initialMessageId: string | null, state: ActiveTurnState, lastEventId: string, updatedAt: number, };
+
+export type ActiveTurnSnapshot = { lastSequence: number, lastEventSeq: number, messages: Array<AgentMessage>, metrics: AgentRunMetrics, pendingInput: AgentPendingInput | null, notices: Array<TimelineEvent>, identity: AgentTurnRef, initialMessageId: string | null, state: ActiveTurnState, lastEventId: string, updatedAt: number, };
 
 export type ActiveTurnState = "running" | "waitingForInput" | "cancelling";
 

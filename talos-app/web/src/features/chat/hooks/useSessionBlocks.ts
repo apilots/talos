@@ -16,11 +16,12 @@ export function useSessionBlocks({
 }) {
   const { t } = useTranslation("chat");
 
+  const history = useMemo(() => buildBlocksFromHistorySnapshot(sessionHistory), [sessionHistory]);
   return useMemo(() => {
     return buildSessionBlocks({
       sessionId,
       streamState,
-      sessionHistory,
+      history,
       waitingResponseDetail: t("waitingResponseDetail"),
       waitingResponseTitle: t("waitingResponseTitle"),
       stoppingResponseDetail: t("stoppingResponseDetail"),
@@ -29,7 +30,7 @@ export function useSessionBlocks({
   }, [
     sessionId,
     streamState,
-    sessionHistory,
+    history,
     t,
   ]);
 }
@@ -37,7 +38,7 @@ export function useSessionBlocks({
 export function buildSessionBlocks({
   sessionId,
   streamState,
-  sessionHistory,
+  history,
   waitingResponseDetail,
   waitingResponseTitle,
   stoppingResponseDetail,
@@ -45,13 +46,12 @@ export function buildSessionBlocks({
 }: {
   sessionId: string;
   streamState?: StreamSessionState;
-  sessionHistory?: ChatApiSessionHistory;
+  history: ReturnType<typeof buildBlocksFromHistorySnapshot>;
   waitingResponseDetail: string;
   waitingResponseTitle: string;
   stoppingResponseDetail: string;
   stoppingResponseTitle: string;
 }) {
-  const history = buildBlocksFromHistorySnapshot(sessionHistory);
   const recoveredMessageIds = history.messageIds;
   const recoveredInputItems = history.inputItems;
   const historyBlocks = history.blocks;

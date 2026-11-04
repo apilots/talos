@@ -375,6 +375,27 @@ impl AgentExecutionStore for DatabaseSessionStore {
         rows.iter().map(parse_event_record).collect()
     }
 
+    async fn list_agent_terminal_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        through_event_seq: Option<i64>,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEventRecord>> {
+        let after = after_event_seq.to_string();
+        let through = through_event_seq.unwrap_or(i64::MAX).to_string();
+        let limit = limit.clamp(1, MAX_EVENT_READ_LIMIT).to_string();
+        self.storage
+            .query(
+                "SELECT event_seq, session_id, turn_id, sequence, occurred_at, persisted_at, payload_json FROM agent_events WHERE session_id = ? AND event_seq > ? AND event_seq <= ? AND json_extract(payload_json, '$.type') IN ('turnCompleted', 'turnFailed') ORDER BY event_seq ASC LIMIT ?",
+                &[session_id, &after, &through, &limit],
+            )
+            .await?
+            .iter()
+            .map(parse_event_record)
+            .collect()
+    }
+
     async fn get_agent_terminal_event_by_initial_message(
         &self,
         session_id: &str,

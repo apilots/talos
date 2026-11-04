@@ -55,6 +55,17 @@ class ChangeScopeTests(unittest.TestCase):
                          client_group_targets('23_browser_container')['desktop'])
         self.assertFalse(helper.rust or helper.frontend)
 
+    def test_running_turn_snapshot_and_render_owners_select_the_json_browser_case(self):
+        for path in ['talos-app/web/src/features/chat/hooks/useSessionTimelineEvents.ts',
+                     'talos-app/web/src/pages/chat/useChatSessionAutoScroll.ts',
+                     'talos-app/web/src/widgets/message-list/MessageTimelineBlock.tsx',
+                     'talos-rs/crates/orchestration/service/src/timeline/active_turn_snapshot.rs',
+                     'talos-rs/crates/orchestration/agent-api/src/event.rs',
+                     'talos-e2e/scripts/running_turn.py',
+                     'talos-e2e/scenarios/09_app_server/running_turn.sh']:
+            selected = impact([path])
+            self.assertIn('case:09_app_server/running_turn', selected.targets['webui'], path)
+
     def test_workspace_helper_directory_and_frontend_changes_keep_their_consumers(self):
         paths = ['talos-app/web/src/features/web-preview/BrowserToolbar.tsx',
                  'talos-e2e/scripts/workspace_resources/new_helper.py']

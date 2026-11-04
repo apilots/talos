@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { applyStreamEvent } from "../stream-events";
+import { applyStreamEvent, buildBlocksFromHistorySnapshot } from "../stream-events";
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
 import { useAppStore } from "@/shared/store/app-store";
 import { itemCompleted, itemStarted, textDelta, userInputStarted, withMessage } from "./streaming-fixtures";
@@ -50,6 +50,7 @@ describe("same-turn user input streaming", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: useAppStore.getState().streams["sess-1"],
+      history: buildBlocksFromHistorySnapshot(undefined),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",
@@ -74,6 +75,7 @@ describe("same-turn user input streaming", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: useAppStore.getState().streams["sess-1"],
+      history: buildBlocksFromHistorySnapshot(undefined),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",

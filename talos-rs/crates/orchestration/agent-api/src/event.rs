@@ -82,6 +82,25 @@ pub struct TimelineActiveTurn {
     pub updated_at: i64,
 }
 
+/// One running Turn read at the exact durable offset in `lastEventId`.
+///
+/// Restore messages and sequence together, then subscribe strictly after that
+/// offset. This read does not replace raw event replay or completed history.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActiveTurnSnapshot {
+    #[serde(flatten)]
+    pub active_turn: TimelineActiveTurn,
+    #[ts(type = "number")]
+    pub last_sequence: u64,
+    #[ts(type = "number")]
+    pub last_event_seq: i64,
+    pub messages: Vec<crate::AgentMessage>,
+    pub metrics: AgentRunMetrics,
+    pub pending_input: Option<AgentPendingInput>,
+    pub notices: Vec<TimelineEvent>,
+}
+
 /// Interpretation of the cursor used for one Timeline replay.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -114,9 +133,21 @@ pub struct RecoverTimelineResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionActiveTurnResponse {
-    pub active_turn: Option<TimelineActiveTurn>,
+    pub active_turn: Option<ActiveTurnSnapshot>,
+    /// Latest terminal Turn covered by the captured running offset (or idle tail).
+    /// Parallel History reads must cover this position before restoring the Turn.
+    #[ts(type = "number")]
+    pub last_completed_event_seq: i64,
     /// Latest durable Session event, including terminal facts and product notices.
     /// Idle clients use changes to refresh history; this is not a history boundary.
+    pub latest_event_id: Option<String>,
+}
+
+/// Lightweight Session activity invalidation; full Turn content is read on demand.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionActiveTurnStatus {
+    pub active_turn: Option<TimelineActiveTurn>,
     pub latest_event_id: Option<String>,
 }
 
@@ -126,7 +157,7 @@ pub struct SessionActiveTurnResponse {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionActiveTurnChangedNotification {
     pub session_id: String,
-    pub state: SessionActiveTurnResponse,
+    pub state: SessionActiveTurnStatus,
 }
 
 /// Closed union of canonical Agent Turn lifecycle events.

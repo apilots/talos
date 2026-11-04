@@ -7,7 +7,7 @@ import {
   textDelta,
   userInputStarted,
 } from "../__tests__/streaming-fixtures";
-import { applyStreamEvent } from "../stream-events";
+import { applyStreamEvent, buildBlocksFromHistorySnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import { buildSessionBlocks } from "./useSessionBlocks";
 
@@ -31,9 +31,9 @@ describe("buildSessionBlocks", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: useAppStore.getState().streams["sess-1"],
-      sessionHistory: sessionHistory([
+      history: buildBlocksFromHistorySnapshot(sessionHistory([
         historyTextItem("input-1", "user_input", "input", "single input"),
-      ]),
+      ])),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",
@@ -56,12 +56,12 @@ describe("buildSessionBlocks", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: useAppStore.getState().streams["sess-1"],
-      sessionHistory: sessionHistory([
+      history: buildBlocksFromHistorySnapshot(sessionHistory([
         historyTextItem("input-1", "user_input", "input", "initial"),
         historyTextItem("thinking-1", "assistant_text", "commentary", "before steer"),
         historyTextItem("input-2", "user_input", "input", "steer"),
         historyTextItem("answer-1", "assistant_text", "final_answer", "after steer"),
-      ]),
+      ])),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",
@@ -93,6 +93,7 @@ describe("buildSessionBlocks", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: useAppStore.getState().streams["sess-1"],
+      history: buildBlocksFromHistorySnapshot(undefined),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",

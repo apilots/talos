@@ -20,6 +20,8 @@ vi.hoisted(() => {
 
 const mocks = vi.hoisted(() => ({
   activeTurn: undefined as unknown,
+  activeTurnError: null as Error | null,
+  historyLoaded: true,
   activeTurnQuery: vi.fn(),
   activeTurnRefetch: vi.fn().mockResolvedValue(undefined),
   createInitialTurnRequest: vi.fn(() => ({
@@ -45,17 +47,18 @@ vi.mock("./useChatQueries", () => ({
   useActiveTurnQuery: (...args: unknown[]) => {
     mocks.activeTurnQuery(...args);
     return {
-      data: mocks.activeTurn === undefined ? undefined : { activeTurn: mocks.activeTurn, latestEventId: null },
+      data: mocks.activeTurn === undefined ? undefined : { activeTurn: mocks.activeTurn, lastCompletedEventSeq: 0, latestEventId: null },
       isFetchedAfterMount: true,
-      error: undefined,
+      isSuccess: !mocks.activeTurnError,
+      error: mocks.activeTurnError,
       refetch: mocks.activeTurnRefetch,
     };
   },
   useSessionHistoryQuery: (_sessionId: string, enabled: boolean) => ({
     data: { data: [], nextCursor: null, lastStableEventId: null },
     error: undefined,
-    isSuccess: enabled,
-    isFetchedAfterMount: enabled,
+    isSuccess: enabled && mocks.historyLoaded,
+    isFetchedAfterMount: enabled && mocks.historyLoaded,
     refetch: mocks.sessionHistoryRefetch,
   }),
 }));
@@ -123,7 +126,34 @@ describe("useChatSession", () => {
     mocks.messageQueueHook.mockClear();
     mocks.timeline.mockClear();
     mocks.activeTurn = undefined;
+    mocks.activeTurnError = null;
+    mocks.historyLoaded = true;
     useAppStore.getState().resetStream("session-1");
+  });
+
+  it("starts the running Turn query while History is still loading and waits to subscribe", () => {
+    mocks.historyLoaded = false;
+    const { rerender } = renderHook(() => useChatSession("session-1", 1));
+    expect(mocks.activeTurnQuery).toHaveBeenLastCalledWith("session-1", true);
+    expect(mocks.timeline.mock.lastCall?.[2]).toBe(false);
+    mocks.historyLoaded = true;
+    rerender();
+    expect(mocks.timeline.mock.lastCall?.[2]).toBe(true);
+  });
+
+  it("shows and retries a failed running Turn query without replaying the backlog", async () => {
+    mocks.activeTurnError = new Error("Running Turn unavailable");
+    const { result, rerender } = renderHook(() => useChatSession("session-1", 1));
+    expect(mocks.timeline.mock.lastCall?.[2]).toBe(false);
+    expect(result.current.showReconnectControls).toBe(true);
+    expect(result.current.streamError).toBe("Running Turn unavailable");
+    await act(async () => result.current.retryStream());
+    expect(mocks.activeTurnRefetch).toHaveBeenCalledOnce();
+    mocks.activeTurnError = null;
+    mocks.activeTurn = { state: "running", identity: { sessionId: "session-1", turnId: "turn-1" } };
+    rerender();
+    expect(mocks.timeline.mock.lastCall?.[2]).toBe(true);
+    expect(result.current.streamError).toBeUndefined();
   });
 
   it("restores the draft when the server reports an active turn", async () => {
@@ -145,7 +175,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
     );
 
     act(() => {
@@ -161,7 +191,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
     );
 
     act(() => {
@@ -178,7 +208,7 @@ describe("useChatSession", () => {
       true,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
     );
   });
 
@@ -193,7 +223,7 @@ describe("useChatSession", () => {
       true,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
     );
   });
 
@@ -211,7 +241,7 @@ describe("useChatSession", () => {
       false,
       expect.any(Function),
       expect.objectContaining({ start: mocks.messageQueueStart }),
-      { stableEventSeq: 0, reloadHistory: expect.any(Function) },
+      expect.objectContaining({ stableEventSeq: 0, reloadHistory: expect.any(Function) }),
     );
   });
 

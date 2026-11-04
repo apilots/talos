@@ -44,6 +44,7 @@ NATIVE_BROWSER_CASES = client_group_targets('20_browser_workspace')['desktop']
 CONTAINER_CASES = client_group_targets('23_browser_container')
 BROWSER_CASES = (WORKSPACE_CASES['webui'] | WORKSPACE_CASES['desktop']
                  | NATIVE_BROWSER_CASES | CONTAINER_CASES['desktop'])
+RUNNING_TURN_TARGET = 'case:09_app_server/running_turn'
 TUI_TARGET = 'case:08_tui/controlled_chat'
 MEDIA_OWNERS = ('desktop-media', 'desktop-ipc', 'desktop-server-requests', 'ipc-guard',
                 'ipc.', 'preload.', 'app-server-controller')
@@ -132,7 +133,7 @@ class Impact:
         self.targets['server'].update(SERVER_TARGETS.values())
         self.targets['server'].update(CONTAINER_CASES['server'])
         self.targets['desktop'].update(BROWSER_CASES - WORKSPACE_CASES['webui'])
-        self.targets['webui'].update(WORKSPACE_CASES['webui'])
+        self.targets['webui'].update(WORKSPACE_CASES['webui'] | {RUNNING_TURN_TARGET})
         for category, cases in PREVIEW_CASES.items():
             self.targets[category].update(cases)
         self.targets['tui'].add(TUI_TARGET)
@@ -231,6 +232,8 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.installer = True
             elif path.startswith(('talos-e2e/scenarios/08_tui/', 'talos-e2e/scripts/tui')):
                 result.targets['tui'].add(TUI_TARGET)
+            elif path in ('talos-e2e/scripts/running_turn.py', 'talos-e2e/scenarios/09_app_server/running_turn.sh'):
+                result.targets['webui'].add(RUNNING_TURN_TARGET)
             elif path == 'talos-e2e/scripts/computer_workspace/deletion.py':
                 result.targets['webui'].add(SERVER_TARGETS['registration'])
             elif path.startswith('talos-e2e/scripts/browser-worker/'):
@@ -264,6 +267,12 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
         else:
             # Unclassified product/build inputs must never become an implicit skip.
             result.full(rust, frontend)
+    if any(path.startswith(('talos-app/web/src/features/chat/',
+                            'talos-app/web/src/pages/chat/useChatSessionAutoScroll',
+                            'talos-app/web/src/widgets/message-list/',
+                            'talos-rs/crates/orchestration/service/src/timeline/',
+                            'talos-rs/crates/orchestration/agent-api/src/event.rs')) for path in paths):
+        result.targets['webui'].add(RUNNING_TURN_TARGET)
     affected = rust.closure(direct_rust, reverse=True)
     result.rust.update(affected)
     if direct_rust & {'talos-types', 'talos-app-protocol', 'agent-protocol'}:

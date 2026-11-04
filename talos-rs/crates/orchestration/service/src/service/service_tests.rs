@@ -1020,9 +1020,10 @@ async fn assert_session_creation_rolled_back(
     assert_eq!(recovery.active_turn, None);
     assert!(service
         .events
-        .display_active_turn(session_id)
+        .read_active_turn(session_id)
         .await
         .expect("active turn lookup should succeed")
+        .active_turn
         .is_none());
     if let Some(key) = idempotency_key {
         let reservation = store

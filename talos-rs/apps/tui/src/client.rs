@@ -421,7 +421,7 @@ where
             },
         )
         .await
-        .map(|response| response.active_turn)
+        .map(|response| response.active_turn.map(|snapshot| snapshot.active_turn))
     }
 
     async fn start_turn_stream(
@@ -473,7 +473,7 @@ where
             &mut *client,
             SubscribeTimelineRequest {
                 session_id: session_id.to_string(),
-                turn_id: Some(active_turn.identity.turn_id),
+                turn_id: Some(active_turn.active_turn.identity.turn_id),
                 since_event_id,
                 replay_limit: Some(256),
                 close_when_idle: Some(false),

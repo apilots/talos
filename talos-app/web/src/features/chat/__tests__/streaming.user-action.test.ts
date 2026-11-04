@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   applyActiveTurnSnapshot,
   applyStreamEvent,
-  applyTimelineRecovery,
+  restoreActiveTurn,
 } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import {
@@ -17,6 +17,7 @@ import {
   waitingForUserAction,
   withMessage,
 } from "./streaming-fixtures";
+import { runningTurn } from "./running-turn-fixture";
 
 describe("timeline user action events", () => {
   beforeEach(() => {
@@ -39,7 +40,7 @@ describe("timeline user action events", () => {
       expect.objectContaining({
         kind: "timeline",
         live: true,
-        items: [expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" })],
+        items: expect.arrayContaining([expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" })]),
       }),
     ]);
 
@@ -78,52 +79,14 @@ describe("timeline user action events", () => {
     });
   });
 
-  it("does not rewind a newer consumed cursor to the recovery high-water mark", () => {
+  it("does not rewind a newer consumed cursor to an older running Turn", () => {
     useAppStore.getState().setStreamMeta("sess-1", {
-      activeTurnId: "turn-1",
-      activeMessageId: "msg-1",
-      isStreaming: true,
-      lastEventId: "ev_12",
-      lastEventSeq: 12,
+      activeTurnId: "turn-1", activeMessageId: "msg-1", isStreaming: true,
+      lastEventId: "ev_12", lastEventSeq: 12,
     });
-
-    applyTimelineRecovery("sess-1", {
-      replay: {
-        events: [],
-        highWaterMarkEventId: "ev_9",
-        nextCursor: null,
-        lastEventSeq: 9,
-        cursorStatus: "fromBeginning",
-      },
-      activeTurn: activeTurn({ lastEventId: "ev_9" }),
-    });
-
+    restoreActiveTurn("sess-1", runningTurn());
     expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
-      lastEventId: "ev_12",
-      lastEventSeq: 12,
-    });
-  });
-
-  it("does not advance the consumed cursor to an unseen recovery high-water mark", () => {
-    useAppStore.getState().setStreamMeta("sess-1", {
-      lastEventId: "ev_1",
-      lastEventSeq: 1,
-    });
-
-    applyTimelineRecovery("sess-1", {
-      replay: {
-        events: [],
-        highWaterMarkEventId: "ev_9",
-        nextCursor: "ev_1",
-        lastEventSeq: 1,
-        cursorStatus: "current",
-      },
-      activeTurn: activeTurn({ lastEventId: "ev_9" }),
-    });
-
-    expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
-      lastEventId: "ev_1",
-      lastEventSeq: 1,
+      lastEventId: "ev_12", lastEventSeq: 12,
     });
   });
 
@@ -137,24 +100,17 @@ describe("timeline user action events", () => {
     expect(useAppStore.getState().streams["sess-1"]?.activeTurnId).toBe("turn-new");
   });
 
-  it("restores pending action content from replay, not from the active turn index", () => {
-    applyTimelineRecovery("sess-1", {
-      replay: {
-        events: [waitingForUserAction(2)],
-        highWaterMarkEventId: "ev_2",
-        nextCursor: null,
-        lastEventSeq: 2,
-        cursorStatus: "fromBeginning",
-      },
-      activeTurn: activeTurn({ state: "waitingForInput", lastEventId: "ev_2" }),
-    });
+  it("restores pending action content from the running Turn record", () => {
+    restoreActiveTurn("sess-1", runningTurn({
+      state: "waitingForInput", pendingInput: { type: "userAction", action: pendingUserAction() },
+    }));
 
     const stream = useAppStore.getState().streams["sess-1"];
     expect(stream?.pendingUserAction).toMatchObject({ actionId: "action-1" });
     const timeline = stream?.blocks.find((block) => block.kind === "timeline");
     expect(timeline).toMatchObject({
       kind: "timeline",
-      items: [expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" })],
+      items: expect.arrayContaining([expect.objectContaining({ itemId: "tool-1", status: "waitingForInput" })]),
     });
   });
 

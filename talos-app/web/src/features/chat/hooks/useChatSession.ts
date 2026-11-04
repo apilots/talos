@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import { useSessionBlocks } from "./useSessionBlocks";
@@ -16,7 +16,6 @@ import {
 } from "./useChatSessionTimelineLifecycle";
 import { createInitialTurnRequest, isActiveTurnRunningError } from "../api";
 import {
-  applyActiveTurnSnapshot,
   clearInactiveTurnSnapshot,
 } from "../stream-events";
 import { activeContextCompaction } from "../timeline-state";
@@ -44,12 +43,12 @@ export function useChatSession(
   const sessionAvailable = serverMessageCount !== undefined;
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
-  const refetchHistory = sessionHistoryQuery.refetch;
   const activeTurnQuery = useActiveTurnQuery(
     sessionId,
-    sessionHistoryQuery.isSuccess && sessionHistoryQuery.isFetchedAfterMount && !streamState?.isStreaming,
+    sessionAvailable && !streamState?.isStreaming,
   );
   const activeTurn = activeTurnQuery.data?.activeTurn;
+  const activeTurnReadError = sessionAvailable && !streamState?.isStreaming ? activeTurnQuery.error : null;
   const messageQueue = useSessionMessageQueue(sessionId, sessionAvailable && !streamState?.isStreaming);
   const {
     contextCompaction,
@@ -91,26 +90,9 @@ export function useChatSession(
       : undefined;
 
   useEffect(() => {
-    if (!activeTurn || !activeTurnQuery.isFetchedAfterMount || !sessionHistoryQuery.isSuccess) {
-      return;
-    }
-    // Once replay has established a Turn, only ordered events may advance it.
-    if (sessionHistoryQuery.data?.data.some((turn) =>
-      turn.identity.turnId === activeTurn?.identity.turnId,
-    ) || useAppStore.getState().streams[sessionId]?.activeTurnId === activeTurn.identity.turnId) {
-      return;
-    }
-    applyActiveTurnSnapshot(sessionId, activeTurn);
-  }, [activeTurn, activeTurnQuery.isFetchedAfterMount, sessionHistoryQuery.data, sessionHistoryQuery.isSuccess, sessionId]);
-
-  useEffect(() => {
     const error = activeTurnQuery.error;
     if (activeTurn === null && !useAppStore.getState().streams[sessionId]?.isStreaming) {
       clearInactiveTurnSnapshot(sessionId);
-      // The snapshot cursor also changes for remote Turns that finish between polls.
-      if (activeTurnQuery.isFetchedAfterMount) {
-        void refetchHistory();
-      }
       return;
     }
     if (
@@ -120,7 +102,7 @@ export function useChatSession(
       return;
     }
     clearInactiveTurnSnapshot(sessionId);
-  }, [activeTurnQuery.data, activeTurnQuery.error, activeTurnQuery.isFetchedAfterMount, refetchHistory, sessionId]);
+  }, [activeTurn, activeTurnQuery.error, sessionId]);
 
   useEffect(() => {
     const activeMessageId = streamState?.activeMessageId;
@@ -252,8 +234,10 @@ export function useChatSession(
     },
     pendingUserAction: streamState?.pendingUserAction,
     streamConnectionState: streamState?.connectionState ?? "idle",
-    showReconnectControls: streamState?.showReconnectControls ?? false,
-    streamError: streamState?.error ? apiErrorMessage(streamState.error) : undefined,
+    showReconnectControls: Boolean(activeTurnReadError) || (streamState?.showReconnectControls ?? false),
+    streamError: activeTurnReadError
+      ? userVisibleErrorMessage(activeTurnReadError, "Running Turn query failed.")
+      : streamState?.error ? apiErrorMessage(streamState.error) : undefined,
     sessionHistoryQuery,
   };
 }

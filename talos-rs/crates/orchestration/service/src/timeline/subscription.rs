@@ -96,13 +96,6 @@ impl TimelineSubscriptionService {
         self.inner.subscribe_live_events()
     }
 
-    pub(crate) async fn display_active_turn(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
-        self.inner.display_active_turn(session_id).await
-    }
-
     pub async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         self.inner.latest_event_id(session_id).await
     }

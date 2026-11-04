@@ -1,4 +1,5 @@
 import type {
+  ActiveTurnSnapshot,
   AgentEvent,
   AgentMessage,
   AgentMessageBlock,
@@ -7,11 +8,8 @@ import type {
   AgentTurnRef,
 } from "@talos/sdk-core";
 
-const MAX_MESSAGES = 256;
-const MAX_BLOCKS = 2_048;
-
 /**
- * Bounded Web projection of one live Agent Turn event stream.
+ * Web projection of one live Agent Turn event stream.
  *
  * The server remains authoritative. This accumulator only applies ordered
  * events, replaces provisional state with MessageCompleted snapshots,
@@ -24,6 +22,14 @@ export class LiveTurnProjection {
   private readonly blocksByMessageId = new Map<string, Map<string, AgentMessageBlock>>();
   private metricsValue: AgentRunMetrics | undefined;
   private pendingInputValue: AgentPendingInput | undefined;
+
+  restore(snapshot: ActiveTurnSnapshot) {
+    this.reset(snapshot.identity);
+    for (const message of snapshot.messages) this.upsertMessage(message);
+    this.lastSequenceValue = snapshot.lastSequence;
+    this.metricsValue = clone(snapshot.metrics);
+    this.pendingInputValue = snapshot.pendingInput ? clone(snapshot.pendingInput) : undefined;
+  }
 
   apply(event: AgentEvent): boolean {
     if (!sameIdentity(this.identityValue, event.identity)) {
@@ -115,38 +121,15 @@ export class LiveTurnProjection {
   }
 
   private upsertMessage(message: AgentMessage) {
-    this.ensureMessageCapacity(message.messageId);
-    const blockCount = [...this.blocksByMessageId.entries()]
-      .filter(([messageId]) => messageId !== message.messageId)
-      .reduce((count, [, blocks]) => count + blocks.size, message.blocks.length);
-    if (blockCount > MAX_BLOCKS) {
-      throw new RangeError(`Agent event stream exceeds ${MAX_BLOCKS} message blocks`);
-    }
-    this.messagesById.set(message.messageId, clone(message));
-    this.blocksByMessageId.set(
-      message.messageId,
-      new Map(message.blocks.map((block) => [block.blockId, clone(block)])),
-    );
+    const copy = clone(message);
+    this.messagesById.set(message.messageId, { ...copy, blocks: [] });
+    this.blocksByMessageId.set(message.messageId,
+      new Map(copy.blocks.map((block) => [block.blockId, block])));
   }
 
   private upsertBlock(messageId: string, block: AgentMessageBlock) {
-    this.ensureMessageCapacity(messageId);
     let blocks = this.blocksByMessageId.get(messageId);
-    if (!blocks) {
-      blocks = new Map();
-      this.blocksByMessageId.set(messageId, blocks);
-    }
-    if (blocks.has(block.blockId)) {
-      blocks.set(block.blockId, clone(block));
-      return;
-    }
-    const blockCount = [...this.blocksByMessageId.values()].reduce(
-      (count, current) => count + current.size,
-      0,
-    );
-    if (blockCount >= MAX_BLOCKS) {
-      throw new RangeError(`Agent event stream exceeds ${MAX_BLOCKS} message blocks`);
-    }
+    if (!blocks) { blocks = new Map(); this.blocksByMessageId.set(messageId, blocks); }
     blocks.set(block.blockId, clone(block));
   }
 
@@ -191,16 +174,6 @@ export class LiveTurnProjection {
           block.content.data.message = delta.data.message ?? block.content.data.message;
         }
         return;
-    }
-  }
-
-  private ensureMessageCapacity(messageId: string) {
-    if (
-      !this.messagesById.has(messageId) &&
-      !this.blocksByMessageId.has(messageId) &&
-      new Set([...this.messagesById.keys(), ...this.blocksByMessageId.keys()]).size >= MAX_MESSAGES
-    ) {
-      throw new RangeError(`Agent event stream exceeds ${MAX_MESSAGES} messages`);
     }
   }
 }

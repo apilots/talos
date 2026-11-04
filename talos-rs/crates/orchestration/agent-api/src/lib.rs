@@ -14,13 +14,13 @@ mod turn_api;
 
 pub use continuation::AgentContinuationRef;
 pub use event::{
-    AgentContextCompactionDelta, AgentEvent, AgentEventPayload, AgentMessageBlockCompleted,
-    AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
-    AgentMessageStarted, AgentPendingInput, AgentRunMetrics, AgentStopReason,
-    AgentToolCallArgumentsDelta, AgentTurnCompleted, AgentTurnFailed, AgentTurnStarted,
-    RecoverTimelineResponse, SessionActiveTurnChangedNotification, SessionActiveTurnResponse,
-    TimelineActiveTurn, TimelineCursorStatus, TimelineEvent, TimelineEventPayload, TimelineReplay,
-    TimelineSystemNotice,
+    ActiveTurnSnapshot, AgentContextCompactionDelta, AgentEvent, AgentEventPayload,
+    AgentMessageBlockCompleted, AgentMessageBlockDelta, AgentMessageBlockDeltaContent,
+    AgentMessageBlockStarted, AgentMessageStarted, AgentPendingInput, AgentRunMetrics,
+    AgentStopReason, AgentToolCallArgumentsDelta, AgentTurnCompleted, AgentTurnFailed,
+    AgentTurnStarted, RecoverTimelineResponse, SessionActiveTurnChangedNotification,
+    SessionActiveTurnResponse, SessionActiveTurnStatus, TimelineActiveTurn, TimelineCursorStatus,
+    TimelineEvent, TimelineEventPayload, TimelineReplay, TimelineSystemNotice,
 };
 pub use history::{SessionHistoryResponse, SessionHistoryTurn};
 pub use lifecycle::ActiveTurnState;

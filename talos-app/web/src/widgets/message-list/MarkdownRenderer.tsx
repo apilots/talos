@@ -1,7 +1,7 @@
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { useMemo, type ComponentProps, type ReactNode } from "react";
+import { memo, useMemo, type ComponentProps, type ReactNode } from "react";
 import { FileImage } from "./FileImage";
 import { fileReferenceId } from "@/shared/lib/open-resource";
 import { ResourceLink } from "@/shared/ui/ResourceLink";
@@ -16,7 +16,7 @@ interface MarkdownRendererProps {
   onOpenLink?: (url: string) => Promise<void>;
 }
 
-export function MarkdownRenderer({ className, text, renderFileImage, resolveImageUrl, onOpenLink }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ className, text, renderFileImage, resolveImageUrl, onOpenLink }: MarkdownRendererProps) {
   const markdownComponents = useMemo(
     () => ({
       a: (props: ComponentProps<"a">) => <ResourceLink {...props} onOpenLink={onOpenLink} />,
@@ -42,4 +42,4 @@ export function MarkdownRenderer({ className, text, renderFileImage, resolveImag
       </ReactMarkdown>
     </div>
   );
-}
+});

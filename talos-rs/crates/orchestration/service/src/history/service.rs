@@ -4,8 +4,7 @@ use std::sync::Arc;
 use crate::timeline::TimelineEventId;
 use crate::TimelineEventService;
 use talos_agent::{
-    AgentEventReducer, AgentFuture, AgentResult, SessionHistoryReadParams, SessionHistoryReader,
-    SessionHistoryWindow,
+    AgentFuture, AgentResult, SessionHistoryReadParams, SessionHistoryReader, SessionHistoryWindow,
 };
 use talos_agent_api::{
     AgentEventPayload, AgentRunFailure, AgentRunOutput, AgentRunResult, SessionHistoryResponse,
@@ -13,7 +12,6 @@ use talos_agent_api::{
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
 
-const HISTORY_SCAN_BATCH_SIZE: usize = 2048;
 const DEFAULT_HISTORY_PAGE_SIZE: usize = 100;
 const MAX_HISTORY_PAGE_SIZE: usize = 1000;
 const HISTORY_CURSOR_PREFIX: &str = "history_";
@@ -198,65 +196,14 @@ impl SessionHistoryService {
         through_event_seq: Option<i64>,
         limit: usize,
     ) -> TalosResult<Vec<(i64, SessionHistoryTurn)>> {
-        let mut timeline_cursor =
-            (after_event_seq > 0).then(|| TimelineEventId::from_seq(after_event_seq));
-        let mut reducers = HashMap::new();
-        let mut completed = Vec::with_capacity(limit);
-        loop {
-            let events = self
-                .event_service
-                .list_events_after(
-                    session_id,
-                    timeline_cursor.as_ref(),
-                    HISTORY_SCAN_BATCH_SIZE,
-                )
-                .await?;
-            if events.is_empty() {
-                break;
-            }
-            for timeline_event in &events {
-                if through_event_seq.is_some_and(|through| timeline_event.event_seq > through) {
-                    break;
-                }
-                let Some(event) = timeline_event.event.agent_event().cloned() else {
-                    continue;
-                };
-                let identity = event.identity.clone();
-                let terminal = matches!(
-                    event.payload,
-                    AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
-                );
-                reducers
-                    .entry(identity.turn_id.clone())
-                    .or_insert_with(|| AgentEventReducer::new(identity))
-                    .apply(event)
-                    .map_err(|error| {
-                        TalosError::internal_with_source("invalid canonical Session history", error)
-                    })?;
-                if !terminal {
-                    continue;
-                }
-                let reducer = reducers
-                    .remove(&timeline_event.event.identity().turn_id)
-                    .expect("terminal Turn reducer exists");
-                let turn = self.reduce_checkpoint(timeline_event, reducer.checkpoint())?;
-                completed.push((timeline_event.event_seq, turn));
-                if completed.len() == limit {
-                    return Ok(completed);
-                }
-            }
-            if events.len() < HISTORY_SCAN_BATCH_SIZE
-                || through_event_seq.is_some_and(|through| {
-                    events
-                        .last()
-                        .is_some_and(|event| event.event_seq >= through)
-                })
-            {
-                break;
-            }
-            timeline_cursor = events
-                .last()
-                .map(|event| TimelineEventId::from(event.event_id.clone()));
+        let terminals = self
+            .event_service
+            .list_terminal_events_after(session_id, after_event_seq, through_event_seq, limit)
+            .await?;
+        let mut completed = Vec::with_capacity(terminals.len());
+        for terminal in terminals {
+            let event_seq = terminal.event_seq;
+            completed.push((event_seq, self.reduce_terminal(terminal).await?));
         }
         Ok(completed)
     }

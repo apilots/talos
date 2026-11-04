@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ChatRenderBlock } from "@/shared/types/ui";
+import { Button } from "@/shared/ui/Button";
 import { CopyableBlock } from "./CopyableBlock";
 import { formatDuration } from "./formatDuration";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -37,6 +38,8 @@ interface MessageTimelineBlockProps {
   pendingUserAction?: PendingUserAction;
   renderUserAction?: (action: PendingUserAction) => ReactNode;
 }
+
+const PROCESS_PAGE_SIZE = 64;
 
 const FINAL_ANSWER_REPLAY_CHUNK_SIZE = 24;
 const FINAL_ANSWER_REPLAY_INTERVAL_MS = 16;
@@ -61,6 +64,9 @@ export function MessageTimelineBlock({
     (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
   );
   const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item));
+  const [processVisibleCount, setProcessVisibleCount] = useState(PROCESS_PAGE_SIZE);
+  const processStart = Math.max(0, processItems.length - processVisibleCount);
+  const renderedProcessItems = processItems.filter((item, index) => index >= processStart || item.itemId === pendingUserAction?.itemId);
   const hasRunningItem = processItems.some(
     (item) => item.status === "running" || item.status === "waitingForInput",
   );
@@ -137,8 +143,14 @@ export function MessageTimelineBlock({
               <ChevronDown className="transition-transform duration-200 group-open/timeline:rotate-180" size={13} />
             </span>
           </summary>
+          {processStart > 0 && open ? (
+            <Button className="my-2" type="button" variant="ghost"
+              onClick={() => setProcessVisibleCount((count) => count + PROCESS_PAGE_SIZE)}>
+              {t("showEarlierSteps", { count: Math.min(PROCESS_PAGE_SIZE, processStart) })}
+            </Button>
+          ) : null}
           <ol className="space-y-4 border-t border-border/35 px-3 py-3.5 md:px-4">
-            {processItems.map((item, index) => {
+            {renderedProcessItems.map((item, index) => {
               const statusLabel = visibleTimelineItemStatus(item);
               const itemKey = timelineItemKey(timelineId, item.itemId);
               const role = timelineItemRole(item);
@@ -150,7 +162,7 @@ export function MessageTimelineBlock({
                   data-timeline-role={role}
                   key={itemKey}
                 >
-                  {index < processItems.length - 1 || isAwaitingTimelineDelta ? (
+                  {index < renderedProcessItems.length - 1 || isAwaitingTimelineDelta ? (
                     <span className="absolute left-[0.72rem] top-7 h-[calc(100%-0.9rem)] w-px bg-border/65" />
                   ) : null}
                   <span className={timelineIconClass(role)}>

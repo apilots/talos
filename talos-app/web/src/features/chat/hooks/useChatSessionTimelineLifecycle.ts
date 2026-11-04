@@ -53,12 +53,15 @@ export function useChatSessionTimelineLifecycle({
     sessionId,
     history?.lastStableEventId ?? undefined,
     Boolean(sessionId) && shouldSubscribeTimeline &&
+      (Boolean(streamState?.isStreaming) || (activeTurnQuery.isSuccess && activeTurnQuery.isFetchedAfterMount)) &&
       (!sessionAvailable || (sessionHistoryQuery.isSuccess && sessionHistoryQuery.isFetchedAfterMount)),
     async () => {
       await invalidateSessionQueries();
     },
     messageQueue,
     {
+      activeTurnState: activeTurnQuery.data,
+      history,
       stableEventSeq: history?.data.at(-1)?.completedEventSeq ?? 0,
       reloadHistory: async () => {
         const result = await sessionHistoryQuery.refetch();
@@ -83,7 +86,9 @@ export function useChatSessionTimelineLifecycle({
 
   return {
     contextCompaction,
-    retryTimeline,
+    retryTimeline: activeTurnQuery.error && !streamState?.isStreaming
+      ? () => { void activeTurnQuery.refetch(); }
+      : retryTimeline,
     setCompactionObservationActive,
   };
 }

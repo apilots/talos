@@ -74,6 +74,23 @@
       "binaries": [
         "server"
       ]
+    },
+    "running_turn.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "playwright"
+      ],
+      "checks": [
+        "chrome"
+      ],
+      "binaries": [
+        "server"
+      ]
     }
   }
 }

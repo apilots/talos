@@ -297,6 +297,38 @@ new capability as complete until those paths and their tests are aligned.
 - Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
 - Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
 
+### Running Turn reads and stream offsets
+
+`GET /v1/sessions/:session_id/active-turn` and `session/active_turn` return
+`activeTurn` as an `ActiveTurnSnapshot`: the running Turn's canonical messages,
+metrics, pending input, notices and Turn sequence at its exact `lastEventId` /
+`lastEventSeq` offset. `latestEventId` remains an observation of the Session tail,
+not the resume offset for that content. The snapshot can legitimately represent
+an earlier running state if execution advances or completes during the read.
+The query response is expanded in the current protocol generation; regenerate
+SDKs and upgrade strict Rust query consumers with Server. Raw event/recovery
+payloads and activity-notification JSON remain unchanged.
+
+Web queries completed history and the running Turn concurrently. The existing
+current-Turn response includes `lastCompletedEventSeq`, bounded by the captured
+Turn offset (or captured Session tail when idle). History must cover that position;
+only reads that straddle a completion need a History refresh. Web restores history
+and the running record in order, initializes its accumulator, and subscribes
+strictly after the matching offset. If that history already contains
+the captured Turn, history owns it instead. Activity notifications remain
+metadata-only invalidations; they do not broadcast the full running record.
+Cached reconnection resumes only
+from committed client state. Cursor expiration or lag refreshes the running
+Turn through the same query; raw recovery and event APIs retain their existing
+ordered-event semantics for other consumers.
+
+A Turn may run for hours. Neither message/block count nor execution duration is
+truncated by the client accumulator. Running and completed Turns share linear
+message-to-display projection. Process steps render in pages with earlier steps
+available on demand; all content remains in state. Event bursts yield between
+bounded batches and publish one store update per batch. Navigation cancels
+uncommitted work without advancing the resume offset beyond applied content.
+
 ### Web visual system
 
 Web and Desktop share theme tokens in `talos-app/web/src/app/styles/index.css`
