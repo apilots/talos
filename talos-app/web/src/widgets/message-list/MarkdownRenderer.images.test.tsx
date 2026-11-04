@@ -73,3 +73,19 @@ it("releases a pending File request without publishing a URL after unmount", asy
   await Promise.resolve();
   expect(create).not.toHaveBeenCalled();
 });
+
+it("skips unchanged Markdown work while updating text and image callbacks", () => {
+  const renderImage = vi.fn(() => <span>First image</span>);
+  const text = "![Preview](talos-file://image)";
+  const view = render(<MarkdownRenderer className="markdown-body" text={text} renderFileImage={renderImage} />);
+  view.rerender(<MarkdownRenderer className="markdown-body" text={text} renderFileImage={renderImage} />);
+  expect(renderImage).toHaveBeenCalledTimes(1);
+  const updated = `# Updated\n\n${text}`;
+  view.rerender(<MarkdownRenderer className="markdown-body" text={updated} renderFileImage={renderImage} />);
+  expect(screen.getByRole("heading", { name: "Updated" })).toBeInTheDocument();
+  expect(renderImage).toHaveBeenCalledTimes(2);
+  const renderUpdatedImage = vi.fn(() => <span>Updated image</span>);
+  view.rerender(<MarkdownRenderer className="markdown-body" text={updated} renderFileImage={renderUpdatedImage} />);
+  expect(screen.getByText("Updated image")).toBeInTheDocument();
+  expect(renderUpdatedImage).toHaveBeenCalledTimes(1);
+});

@@ -16,12 +16,19 @@ export function useChatSessionAutoScroll({
   const stickToBottomRef = useRef(true);
   const wasStreamingRef = useRef(false);
   const currentSessionIdRef = useRef(sessionId);
+  const scrollFrameRef = useRef<number | null>(null);
 
-  function scrollToBottom() {
-    const viewport = viewportRef.current;
-    if (viewport && stickToBottomRef.current) {
-      viewport.scrollTop = viewport.scrollHeight;
+  function scheduleScrollToBottom() {
+    if (scrollFrameRef.current !== null) {
+      return;
     }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const viewport = viewportRef.current;
+      if (viewport && stickToBottomRef.current) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
   }
 
   function handleScroll(viewport: HTMLDivElement) {
@@ -34,7 +41,7 @@ export function useChatSessionAutoScroll({
     if (!content || typeof ResizeObserver === "undefined") {
       return;
     }
-    const observer = new ResizeObserver(scrollToBottom);
+    const observer = new ResizeObserver(scheduleScrollToBottom);
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
@@ -45,9 +52,13 @@ export function useChatSessionAutoScroll({
     }
     currentSessionIdRef.current = sessionId;
     wasStreamingRef.current = isStreaming;
-    scrollToBottom();
-    const frameId = window.requestAnimationFrame(scrollToBottom);
-    return () => window.cancelAnimationFrame(frameId);
+    scheduleScrollToBottom();
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
   }, [blocks, isStreaming, streamError, sessionId]);
 
   return { contentRef, endRef, handleScroll, viewportRef };
