@@ -54,67 +54,28 @@ impl Tool for UserWorkspaceMemoryUpdateTool {
     }
 
     fn parameters_schema(&self) -> Option<Value> {
-        let entry = entry_schema();
+        // Tool parsers may inspect only direct properties to decode object values;
+        // hiding them in oneOf can turn JSON objects into strings. Keep the model
+        // schema flat; the typed enum below still enforces each operation's fields.
         Some(serde_json::json!({
             "type": "object",
-            "oneOf": [
-                {
-                    "type": "object",
-                    "required": ["operation", "entry"],
-                    "properties": {
-                        "operation": {"const": "create_entry"},
-                        "entry": entry.clone()
-                    },
-                    "additionalProperties": false
+            "required": ["operation"],
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": [
+                        "create_entry", "update_entry", "upsert_entry",
+                        "replace_entry", "remove_entry", "replace_document"
+                    ],
+                    "description": "create_entry, upsert_entry and replace_entry require entry; update_entry requires key and update; remove_entry requires key; replace_document requires content and base_version."
                 },
-                {
-                    "type": "object",
-                    "required": ["operation", "key", "update"],
-                    "properties": {
-                        "operation": {"const": "update_entry"},
-                        "key": key_schema(),
-                        "update": entry_update_schema()
-                    },
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "required": ["operation", "entry"],
-                    "properties": {
-                        "operation": {"const": "upsert_entry"},
-                        "entry": entry.clone()
-                    },
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "required": ["operation", "entry"],
-                    "properties": {
-                        "operation": {"const": "replace_entry"},
-                        "entry": entry
-                    },
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "required": ["operation", "key"],
-                    "properties": {
-                        "operation": {"const": "remove_entry"},
-                        "key": key_schema()
-                    },
-                    "additionalProperties": false
-                },
-                {
-                    "type": "object",
-                    "required": ["operation", "content", "base_version"],
-                    "properties": {
-                        "operation": {"const": "replace_document"},
-                        "content": {"type": "string", "maxLength": 8000},
-                        "base_version": expected_version_schema()
-                    },
-                    "additionalProperties": false
-                }
-            ]
+                "entry": entry_schema(),
+                "key": key_schema(),
+                "update": entry_update_schema(),
+                "content": {"type": "string", "maxLength": 8000},
+                "base_version": expected_version_schema()
+            },
+            "additionalProperties": false
         }))
     }
 
@@ -241,23 +202,16 @@ fn entry_update_schema() -> Value {
 
 fn expected_version_schema() -> Value {
     serde_json::json!({
-        "oneOf": [
-            {
-                "type": "object",
-                "required": ["mode"],
-                "properties": {"mode": {"const": "must_not_exist"}},
-                "additionalProperties": false
-            },
-            {
-                "type": "object",
-                "required": ["mode", "version_token"],
-                "properties": {
-                    "mode": {"const": "match"},
-                    "version_token": {"type": "string"}
-                },
-                "additionalProperties": false
+        "type": "object",
+        "required": ["mode"],
+        "properties": {
+            "mode": {"type": "string", "enum": ["must_not_exist", "match"]},
+            "version_token": {
+                "type": "string",
+                "description": "Required when mode is match; omit for must_not_exist."
             }
-        ]
+        },
+        "additionalProperties": false
     })
 }
 
