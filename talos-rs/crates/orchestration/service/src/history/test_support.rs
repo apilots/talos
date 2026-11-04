@@ -9,6 +9,8 @@ use talos_storage::{Row, SqliteStorage, Storage, StorageTransaction};
 pub(super) struct CountingStorage {
     pub(super) inner: SqliteStorage,
     reads: AtomicUsize,
+    notice_reads: AtomicUsize,
+    event_rows: AtomicUsize,
 }
 
 impl CountingStorage {
@@ -16,11 +18,21 @@ impl CountingStorage {
         Self {
             inner,
             reads: AtomicUsize::new(0),
+            notice_reads: AtomicUsize::new(0),
+            event_rows: AtomicUsize::new(0),
         }
     }
 
     pub(super) fn take_reads(&self) -> usize {
         self.reads.swap(0, Ordering::Relaxed)
+    }
+
+    pub(super) fn take_notice_reads(&self) -> usize {
+        self.notice_reads.swap(0, Ordering::Relaxed)
+    }
+
+    pub(super) fn take_event_rows(&self) -> usize {
+        self.event_rows.swap(0, Ordering::Relaxed)
     }
 }
 
@@ -36,7 +48,17 @@ impl Storage for CountingStorage {
 
     async fn query(&self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
         self.reads.fetch_add(1, Ordering::Relaxed);
-        self.inner.query(sql, params).await
+        if sql.contains("notice_position") {
+            self.notice_reads.fetch_add(1, Ordering::Relaxed);
+        }
+        let rows = self.inner.query(sql, params).await?;
+        self.event_rows.fetch_add(
+            rows.iter()
+                .filter(|row| row.get_string("payload_json").is_some())
+                .count(),
+            Ordering::Relaxed,
+        );
+        Ok(rows)
     }
 
     async fn execute(&self, sql: &str, params: &[&str]) -> TalosResult<u64> {

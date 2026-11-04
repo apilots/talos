@@ -282,6 +282,24 @@ impl TimelineEventService {
             .map(|records| records.into_iter().map(map_timeline_event).collect())
     }
 
+    pub(crate) async fn list_terminal_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        through_event_seq: Option<i64>,
+        limit: usize,
+    ) -> TalosResult<Vec<TimelineEvent>> {
+        self.execution_store
+            .list_agent_terminal_events_after(
+                session_id,
+                after_event_seq,
+                through_event_seq,
+                limit.clamp(1, MAX_TIMELINE_READ_LIMIT),
+            )
+            .await
+            .map(|records| records.into_iter().map(map_timeline_event).collect())
+    }
+
     /// Publish records returned by one successful Store commit.
     pub(crate) fn publish_committed(
         &self,

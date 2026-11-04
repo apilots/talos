@@ -344,6 +344,16 @@ pub trait AgentExecutionStore: Send + Sync {
         limit: usize,
     ) -> TalosResult<Vec<AgentEventRecord>>;
 
+    /// Read terminal facts in chronological order within (after, through].
+    /// An absent upper bound includes all currently committed terminal facts.
+    async fn list_agent_terminal_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        through_event_seq: Option<i64>,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEventRecord>>;
+
     /// Read the terminal fact for the Turn started by one exact User message.
     async fn get_agent_terminal_event_by_initial_message(
         &self,

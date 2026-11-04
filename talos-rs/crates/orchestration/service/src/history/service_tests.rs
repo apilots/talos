@@ -232,9 +232,9 @@ async fn history_notice_reads_do_not_grow_per_turn() {
         "1",
     )
     .await;
-    storage.take_reads();
+    storage.take_notice_reads();
     history.read("session-1", None, Some(100)).await.unwrap();
-    let single_turn_reads = storage.take_reads();
+    let single_turn_reads = storage.take_notice_reads();
 
     for suffix in ["2", "3"] {
         commit_completed_turn(
@@ -252,9 +252,9 @@ async fn history_notice_reads_do_not_grow_per_turn() {
     )
     .await;
     publish_warning(&history, AgentTurnRef::new("foreign", "turn-2")).await;
-    storage.take_reads();
+    storage.take_notice_reads();
     let page = history.read("session-1", None, Some(100)).await.unwrap();
-    let page_reads = storage.take_reads();
+    let page_reads = storage.take_notice_reads();
     for window in [
         SessionHistoryWindow::Latest,
         SessionHistoryWindow::OldestAfter {
@@ -282,7 +282,120 @@ async fn history_notice_reads_do_not_grow_per_turn() {
             ("turn-3".to_string(), vec![])
         ],
     );
-    assert_eq!(page_reads, single_turn_reads);
+    assert_eq!((single_turn_reads, page_reads), (1, 1));
+}
+
+#[tokio::test]
+async fn history_does_not_load_a_long_running_turn() {
+    let (store, history, storage) = fixture().await;
+    let identity = AgentTurnRef::new("session-long-running", "turn-running");
+    let admission = commit_test_running_turn(
+        store.as_ref(),
+        identity.clone(),
+        completed_message(
+            &identity,
+            "user-running",
+            AgentMessageRole::User,
+            AgentMessageBlockContent::UserContent(talos_agent_api::AgentUserContent::Text {
+                text: "continue working".into(),
+            }),
+        ),
+    )
+    .await;
+    let mut tail = admission.active_turn.last_event_seq;
+    let mut sequence = admission.events.last().unwrap().sequence;
+    for duration in 1..=2050 {
+        sequence += 1;
+        tail = store
+            .commit_progress_event(
+                AgentEvent {
+                    identity: identity.clone(),
+                    sequence,
+                    occurred_at: 12,
+                    payload: AgentEventPayload::MetricsUpdated(talos_agent_api::AgentRunMetrics {
+                        duration_ms: Some(duration),
+                        ..Default::default()
+                    }),
+                },
+                tail,
+            )
+            .await
+            .unwrap()
+            .active_turn
+            .last_event_seq;
+    }
+    storage.take_event_rows();
+    let empty = history
+        .read(&identity.session_id, None, Some(10))
+        .await
+        .unwrap();
+    assert_eq!(
+        empty,
+        talos_agent_api::SessionHistoryResponse {
+            data: Vec::new(),
+            next_cursor: None,
+            last_stable_event_id: None,
+        }
+    );
+    assert_eq!(storage.take_event_rows(), 0);
+
+    // A completed Turn from another Session must never appear in this page.
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("foreign", "completed"),
+        "foreign",
+    )
+    .await;
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity: identity.clone(),
+                sequence: sequence + 1,
+                occurred_at: 13,
+                payload: AgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
+                    error: talos_error::ApiError::new(talos_error::ErrorCode::InternalError),
+                    retryable: false,
+                }),
+            },
+            expected_event_seq: tail,
+            completed_turn_metrics: None,
+        })
+        .await
+        .unwrap();
+    let expected = history
+        .read(&identity.session_id, None, Some(10))
+        .await
+        .unwrap();
+    assert_eq!(expected.data.len(), 1);
+    assert!(matches!(
+        expected.data[0].result,
+        talos_agent_api::AgentRunResult::Failed(_)
+    ));
+    let next = AgentTurnRef::new(&identity.session_id, "next-running");
+    commit_test_running_turn(
+        store.as_ref(),
+        next.clone(),
+        completed_message(
+            &next,
+            "next-user",
+            AgentMessageRole::User,
+            AgentMessageBlockContent::UserContent(talos_agent_api::AgentUserContent::Text {
+                text: "next".into(),
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(
+        history
+            .read(&identity.session_id, None, Some(10))
+            .await
+            .unwrap(),
+        expected
+    );
+    assert_eq!(
+        expected.last_stable_event_id,
+        Some(crate::timeline::TimelineEventId::from_seq(terminal.event_seq).to_string())
+    );
 }
 
 #[tokio::test]

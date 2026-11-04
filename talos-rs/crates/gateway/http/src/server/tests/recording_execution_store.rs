@@ -273,6 +273,32 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
         Ok(events)
     }
 
+    async fn list_agent_terminal_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        through_event_seq: Option<i64>,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEventRecord>> {
+        Ok(self
+            .events
+            .lock()
+            .expect("event fixture lock")
+            .iter()
+            .filter(|event| {
+                event.identity.session_id == session_id
+                    && event.event_seq > after_event_seq
+                    && through_event_seq.is_none_or(|through| event.event_seq <= through)
+                    && matches!(
+                        event.payload,
+                        AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
+                    )
+            })
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
     async fn get_agent_terminal_event_by_initial_message(
         &self,
         _session_id: &str,
