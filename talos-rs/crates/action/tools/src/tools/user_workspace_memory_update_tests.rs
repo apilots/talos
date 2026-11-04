@@ -159,16 +159,83 @@ async fn update_tool_propagates_writer_failure_without_success_or_retry() {
 }
 
 #[test]
-fn update_tool_schema_exposes_operation_specific_contracts() {
-    let schema = UserWorkspaceMemoryUpdateTool
-        .parameters_schema()
-        .expect("tool schema");
+fn update_tool_exposes_object_types_through_provider_schemas() {
+    use talos_llm_provider::protocols;
 
-    assert_eq!(schema["oneOf"].as_array().map(Vec::len), Some(6));
-    assert!(schema.to_string().contains("base_version"));
-    assert!(schema.to_string().contains("additionalProperties"));
-    assert!(schema.to_string().contains("clear_fields"));
-    assert!(!schema.to_string().contains("\"action\""));
+    let registry = crate::ToolRegistry::new();
+    registry.register(Arc::new(UserWorkspaceMemoryUpdateTool));
+    let definitions = registry
+        .select_tools(&Default::default())
+        .model_definitions();
+    let chat = serde_json::to_value(protocols::chat::tools(Some(definitions.clone())))
+        .expect("Chat tool definitions should serialize");
+    let messages = serde_json::to_value(protocols::messages::tools(Some(definitions.clone())))
+        .expect("Messages tool definitions should serialize");
+    let responses = serde_json::to_value(protocols::responses::tools(Some(definitions)))
+        .expect("Responses tool definitions should serialize");
+
+    for schema in [
+        &chat[0]["function"]["parameters"],
+        &messages[0]["input_schema"],
+        &responses[0]["parameters"],
+    ] {
+        for field in ["entry", "update", "base_version"] {
+            // Provider parsers need this direct lookup to decode JSON object text.
+            assert_eq!(schema["properties"][field]["type"], "object", "{field}");
+        }
+    }
+}
+
+#[test]
+fn update_tool_keeps_object_arguments_required_and_typed() {
+    for (field, mut input) in [
+        (
+            "entry",
+            serde_json::json!({
+                "operation": "create_entry", "entry": {
+                    "key": "response-style", "section": "interaction_guidance",
+                    "title": "Response style", "kind": "preference", "summary": "Be concise."
+                }
+            }),
+        ),
+        (
+            "update",
+            serde_json::json!({
+                "operation": "update_entry", "key": "response-style", "update": {"summary": "Be concise."}
+            }),
+        ),
+        (
+            "base_version",
+            serde_json::json!({
+                "operation": "replace_document", "content": "memory",
+                "base_version": {"mode": "match", "version_token": "v1"}
+            }),
+        ),
+    ] {
+        UserWorkspaceMemoryUpdateTool
+            .validate_input(&input)
+            .expect("valid operation");
+        let mut encoded = input.clone();
+        encoded[field] = Value::String(input[field].to_string());
+        assert!(
+            UserWorkspaceMemoryUpdateTool
+                .validate_input(&encoded)
+                .is_err(),
+            "string object: {field}"
+        );
+        input.as_object_mut().unwrap().remove(field);
+        assert!(
+            UserWorkspaceMemoryUpdateTool
+                .validate_input(&input)
+                .is_err(),
+            "missing: {field}"
+        );
+    }
+    assert!(UserWorkspaceMemoryUpdateTool
+        .validate_input(&serde_json::json!({
+            "operation": "replace_document", "content": "memory", "base_version": {"mode": "match"}
+        }))
+        .is_err());
 }
 
 #[tokio::test]
