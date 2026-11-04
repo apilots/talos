@@ -1,6 +1,77 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ActiveTurnSnapshot": {
+      "additionalProperties": false,
+      "description": "One running Turn read at the exact durable offset in `lastEventId`.\n\nRestore messages and sequence together, then subscribe strictly after that offset. This read does not replace raw event replay or completed history.",
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "initialMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastEventId": {
+          "type": "string"
+        },
+        "lastEventSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "lastSequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/AgentMessage"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "$ref": "#/definitions/AgentRunMetrics"
+        },
+        "notices": {
+          "items": {
+            "$ref": "#/definitions/TimelineEvent"
+          },
+          "type": "array"
+        },
+        "pendingInput": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AgentPendingInput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/definitions/ActiveTurnState"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "identity",
+        "lastEventId",
+        "lastEventSeq",
+        "lastSequence",
+        "messages",
+        "metrics",
+        "notices",
+        "state",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "ActiveTurnState": {
       "description": "Durable nonterminal state of one logical Agent Turn.\n\nTerminal truth belongs exclusively to the terminal Agent event, so this enum intentionally has no completed or failed variants.",
       "enum": [
@@ -10653,7 +10724,7 @@
           "type": "string"
         },
         "state": {
-          "$ref": "#/definitions/SessionActiveTurnResponse"
+          "$ref": "#/definitions/SessionActiveTurnStatus"
         }
       },
       "required": [
@@ -10681,6 +10752,38 @@
         "activeTurn": {
           "anyOf": [
             {
+              "$ref": "#/definitions/ActiveTurnSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastCompletedEventSeq": {
+          "description": "Latest terminal Turn covered by the captured running offset (or idle tail). Parallel History reads must cover this position before restoring the Turn.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "latestEventId": {
+          "description": "Latest durable Session event, including terminal facts and product notices. Idle clients use changes to refresh history; this is not a history boundary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lastCompletedEventSeq"
+      ],
+      "type": "object"
+    },
+    "SessionActiveTurnStatus": {
+      "additionalProperties": false,
+      "description": "Lightweight Session activity invalidation; full Turn content is read on demand.",
+      "properties": {
+        "activeTurn": {
+          "anyOf": [
+            {
               "$ref": "#/definitions/TimelineActiveTurn"
             },
             {
@@ -10689,7 +10792,6 @@
           ]
         },
         "latestEventId": {
-          "description": "Latest durable Session event, including terminal facts and product notices. Idle clients use changes to refresh history; this is not a history boundary.",
           "type": [
             "string",
             "null"
@@ -14475,6 +14577,9 @@
     "server_request": {
       "$ref": "#/definitions/ServerRequest"
     },
+    "session_active_turn_response": {
+      "$ref": "#/definitions/SessionActiveTurnResponse"
+    },
     "session_get_response": {
       "$ref": "#/definitions/SessionGetResponse"
     },
@@ -14587,6 +14692,7 @@
     "retry_turn_request",
     "server_notification",
     "server_request",
+    "session_active_turn_response",
     "session_get_response",
     "session_history_response",
     "session_list_response",

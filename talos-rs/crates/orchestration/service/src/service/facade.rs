@@ -314,16 +314,7 @@ impl TalosService {
         session_id: &str,
     ) -> ServiceResult<talos_agent_api::SessionActiveTurnResponse> {
         let _session = self.access.load_session(actor, session_id).await?;
-        let active_turn = self.events.display_active_turn(session_id).await?;
-        let latest_event_id = self
-            .events
-            .latest_event_id(session_id)
-            .await?
-            .map(|event_id| event_id.to_string());
-        Ok(talos_agent_api::SessionActiveTurnResponse {
-            active_turn,
-            latest_event_id,
-        })
+        self.events.read_active_turn(session_id).await
     }
 
     async fn submit_start_turn(

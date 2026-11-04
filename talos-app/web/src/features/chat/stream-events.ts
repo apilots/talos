@@ -1,16 +1,18 @@
 import type {
+  ActiveTurnSnapshot,
   AgentAssistantTextPhase,
   AgentMessage,
+  AgentTurnFailed,
   AgentMessageBlock,
   AgentMessageBlockContent,
   AgentMessageBlockDeltaContent,
   AgentRunMetrics,
   PendingUserAction,
-  RecoverTimelineResponse,
   SessionHistoryResponse,
   TimelineActiveTurn,
   TimelineEvent,
 } from "@talos/sdk-core";
+import { batchChatUpdates, chatBatchState } from "./store-batch";
 import { LiveTurnProjection } from "./live-turn-projection";
 import { decodeApiError, parseTimelineEvent } from "@talos/sdk-core";
 
@@ -23,6 +25,22 @@ import type {
   ChatTurnMetrics,
   ChatUserInput,
 } from "@/shared/types/ui";
+
+function chatState() { return chatBatchState() ?? useAppStore.getState(); }
+
+/** Mutate the reducer in order and publish one visible state per batch. */
+export function applyStreamEventBatch(sessionId: string, events: TimelineEvent[], budgetMs = Infinity) {
+  let consumed = 0;
+  const deadline = performance.now() + budgetMs;
+  batchChatUpdates(chatState(), () => {
+    for (const event of events) {
+      applyStreamEvent(sessionId, event);
+      consumed += 1;
+      if (performance.now() >= deadline) break;
+    }
+  });
+  return consumed;
+}
 
 const eventAccumulators = new Map<string, LiveTurnProjection>();
 
@@ -50,114 +68,122 @@ export interface ChatTimelineBuildResult {
   messageIds: Set<string>;
 }
 
-export function buildBlocksFromHistorySnapshot(
-  response: SessionHistoryResponse | undefined,
-): ChatTimelineBuildResult {
+export function buildBlocksFromHistorySnapshot(response: SessionHistoryResponse | undefined): ChatTimelineBuildResult {
+  const result: ChatTimelineBuildResult = { blocks: [], inputItems: [], messageIds: new Set() };
+  for (const turn of response?.data ?? []) {
+    const built = buildTurnBlocks({
+      identity: turn.identity, messages: turn.result.result.messages, notices: turn.notices,
+      metrics: toChatTurnMetrics(turn.result.result.metrics, turn.result.status === "completed" ? "completed" : "failed"),
+      error: turn.result.status === "failed" ? turn.result.result.failure.error : undefined,
+    });
+    result.blocks.push(...built.blocks);
+    const inputOffset = result.inputItems.length;
+    result.inputItems.push(...built.inputItems.map((item) => ({ ...item, itemIndex: item.itemIndex + inputOffset })));
+    for (const id of built.messageIds) result.messageIds.add(id);
+  }
+  return result;
+}
+
+function buildTurnBlocks({ identity, messages, metrics, notices, error, live = false }: {
+  identity: ActiveTurnSnapshot["identity"]; messages: AgentMessage[];
+  metrics: ChatTurnMetrics; notices: TimelineEvent[]; error?: AgentTurnFailed["error"]; live?: boolean;
+}): ChatTimelineBuildResult {
   const blocks: ChatRenderBlock[] = [];
   const inputItems: ChatTimelineBuildResult["inputItems"] = [];
   const messageIds = new Set<string>();
   let inputIndex = 0;
+  const toolItems = new Map<string, Extract<ChatTimelineItem, { kind: "tool_call" }>>();
+  let segmentMessageId: string | undefined;
+  let timeline: Extract<ChatRenderBlock, { kind: "timeline" }> | undefined;
 
-  for (const turn of response?.data ?? []) {
-    const output = turn.result.result;
-    const metrics = toChatTurnMetrics(
-      output.metrics,
-      turn.result.status === "completed" ? "completed" : "failed",
-    );
-    const toolItems = new Map<string, Extract<ChatTimelineItem, { kind: "tool_call" }>>();
-    let segmentMessageId: string | undefined;
-    let timeline: Extract<ChatRenderBlock, { kind: "timeline" }> | undefined;
-
-    const ensureTimeline = () => {
-      timeline ??= {
-        id: segmentMessageId
-          ? `timeline-${turn.identity.sessionId}-${turn.identity.turnId}-${segmentMessageId}`
-          : `timeline-${turn.identity.sessionId}-${turn.identity.turnId}`,
-        kind: "timeline",
-        items: [],
-        live: false,
-      };
-      return timeline;
+  const ensureTimeline = () => {
+    timeline ??= {
+      id: segmentMessageId
+        ? `timeline-${identity.sessionId}-${identity.turnId}-${segmentMessageId}`
+        : `timeline-${identity.sessionId}-${identity.turnId}`,
+      kind: "timeline",
+      items: [],
+      live,
     };
-    const flushTimeline = () => {
-      if (timeline?.items.length) {
-        blocks.push(timeline);
-      }
-      timeline = undefined;
-    };
-
-    for (const message of output.messages) {
-      messageIds.add(message.messageId);
-      const input = message.role === "user" ? messageUserInput(message) : undefined;
-      if (input && hasUserInput(input)) {
-        flushTimeline();
-        blocks.push({
-          id: `user-${turn.identity.turnId}-${message.messageId}`,
-          kind: "user",
-          ...input,
-          live: false,
-        });
-        inputItems.push({ messageId: message.messageId, itemIndex: inputIndex, ...input });
-        inputIndex += 1;
-        segmentMessageId = message.messageId;
-      }
-
-      for (const block of message.blocks) {
-        if (block.content.type === "userContent") {
-          continue;
-        }
-        if (block.content.type === "toolCall") {
-          const item = blockToChatItem(block);
-          if (item?.kind === "tool_call") {
-            toolItems.set(block.content.data.callId, item);
-            ensureTimeline().items.push(item);
-          }
-          continue;
-        }
-        if (block.content.type === "toolResult") {
-          const tool = toolItems.get(block.content.data.callId);
-          if (tool) {
-            tool.output = outputContentToText(block.content.data.content);
-            tool.contentItems = block.content.data.content;
-            tool.isError = block.content.data.isError;
-            tool.status = block.content.data.isError ? "failed" : "completed";
-            tool.completedAtMs = block.completedAt === null ? null : block.completedAt * 1000;
-          }
-          continue;
-        }
-        const item = blockToChatItem(block);
-        if (item) {
-          ensureTimeline().items.push(item);
-        }
-      }
+    return timeline;
+  };
+  const flushTimeline = () => {
+    if (timeline?.items.length) {
+      blocks.push(timeline);
     }
+    timeline = undefined;
+  };
 
-    if (turn.result.status === "failed") {
-      ensureTimeline().error = decodeApiError(turn.result.result.failure.error);
-    }
-    if (timeline) {
-      timeline.metrics = metrics;
-      if (timeline.error || timeline.items.length > 0 || hasMetrics(metrics)) {
-        blocks.push(timeline);
-      }
-    } else if (hasMetrics(metrics)) {
+  for (const message of messages) {
+    messageIds.add(message.messageId);
+    const input = message.role === "user" ? messageUserInput(message) : undefined;
+    if (input && hasUserInput(input)) {
+      flushTimeline();
       blocks.push({
-        id: segmentMessageId
-          ? `timeline-${turn.identity.sessionId}-${turn.identity.turnId}-${segmentMessageId}`
-          : `timeline-${turn.identity.sessionId}-${turn.identity.turnId}`,
-        kind: "timeline",
-        items: [],
-        metrics,
+        id: `user-${identity.turnId}-${message.messageId}`,
+        kind: "user",
+        ...input,
         live: false,
       });
+      inputItems.push({ messageId: message.messageId, itemIndex: inputIndex, ...input });
+      inputIndex += 1;
+      segmentMessageId = message.messageId;
     }
-    for (const envelope of turn.notices) {
-      const { event } = parseTimelineEvent(envelope);
-      if (event.type !== "systemNotice") throw new Error("Invalid history notice.");
-      blocks.push({ id: `notice-${envelope.eventId}`, kind: "notice", notice: event.data.notice, live: false });
+
+    for (const block of message.blocks) {
+      if (block.content.type === "userContent") {
+        continue;
+      }
+      if (block.content.type === "toolCall") {
+        const item = blockToChatItem(block);
+        if (item?.kind === "tool_call") {
+          toolItems.set(block.content.data.callId, item);
+          ensureTimeline().items.push(item);
+        }
+        continue;
+      }
+      if (block.content.type === "toolResult") {
+        const tool = toolItems.get(block.content.data.callId);
+        if (tool) {
+          tool.output = outputContentToText(block.content.data.content);
+          tool.contentItems = block.content.data.content;
+          tool.isError = block.content.data.isError;
+          tool.status = block.content.data.isError ? "failed" : "completed";
+          tool.completedAtMs = block.completedAt === null ? null : block.completedAt * 1000;
+        }
+        continue;
+      }
+      const item = blockToChatItem(block);
+      if (item) {
+        ensureTimeline().items.push(item);
+      }
     }
   }
 
+  if (error) {
+    ensureTimeline().error = decodeApiError(error);
+  }
+  if (timeline) {
+    timeline.metrics = metrics;
+    if (timeline.error || timeline.items.length > 0 || hasMetrics(metrics)) {
+      blocks.push(timeline);
+    }
+  } else if (hasMetrics(metrics)) {
+    blocks.push({
+      id: segmentMessageId
+        ? `timeline-${identity.sessionId}-${identity.turnId}-${segmentMessageId}`
+        : `timeline-${identity.sessionId}-${identity.turnId}`,
+      kind: "timeline",
+      items: [],
+      metrics,
+      live,
+    });
+  }
+  for (const envelope of notices) {
+    const { event } = parseTimelineEvent(envelope);
+    if (event.type !== "systemNotice") throw new Error("Invalid history notice.");
+    blocks.push({ id: `notice-${envelope.eventId}`, kind: "notice", notice: event.data.notice, live: false });
+  }
   return { blocks, inputItems, messageIds };
 }
 
@@ -167,7 +193,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEvent) {
     return;
   }
 
-  const state = useAppStore.getState();
+  const state = chatState();
   const stream = state.streams[sessionId];
   if (
     stream?.lastEventSeq !== undefined &&
@@ -294,21 +320,37 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEvent) {
   }
 }
 
-export function applyTimelineRecovery(
-  sessionId: string,
-  recovery: RecoverTimelineResponse,
-) {
-  if (recovery.activeTurn) {
-    applyActiveTurnSnapshot(sessionId, recovery.activeTurn);
+/** Restore the running Turn and its matching offset before receiving later events. */
+export function restoreActiveTurn(sessionId: string, snapshot: ActiveTurnSnapshot) {
+  if (snapshot.identity.sessionId !== sessionId) return;
+  const current = chatState().streams[sessionId];
+  if ((current?.lastEventSeq ?? -1) > snapshot.lastEventSeq) return;
+  if (current?.lastEventSeq === snapshot.lastEventSeq && current.activeTurnId === snapshot.identity.turnId) {
+    batchChatUpdates(chatState(), () => applyActiveTurnSnapshot(sessionId, snapshot));
+    return;
   }
-  recovery.replay.events
-    .slice()
-    .sort((left, right) => left.eventSeq - right.eventSeq)
-    .forEach((event) => applyStreamEvent(sessionId, event));
+  batchChatUpdates(chatState(), () => {
+    const state = chatState();
+    state.resetLiveResponse(sessionId);
+    applyActiveTurnSnapshot(sessionId, snapshot);
+    const accumulator = eventAccumulator(sessionId);
+    accumulator.restore(snapshot);
+    const metrics = toChatTurnMetrics(snapshot.metrics, "running");
+    const content = buildTurnBlocks({ ...snapshot, metrics, live: true });
+    chatState().restoreTurnContent(sessionId, content.blocks, metrics);
+    if (snapshot.pendingInput?.type === "userAction") {
+      applyWaitingForUserAction(sessionId, snapshot.identity.turnId, snapshot.pendingInput.action, accumulator);
+    }
+    chatState().setStreamMeta(sessionId, {
+      lastEventId: snapshot.lastEventId, lastEventSeq: snapshot.lastEventSeq,
+      lastSequence: snapshot.lastSequence,
+      connectionState: snapshot.state === "cancelling" ? "cancelling" : "detached",
+    });
+  });
 }
 
 export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TimelineActiveTurn) {
-  const state = useAppStore.getState();
+  const state = chatState();
   const stream = state.streams[sessionId];
   const turnChanged = stream?.activeTurnId !== activeTurn.identity.turnId;
   if (turnChanged) {
@@ -333,7 +375,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TimelineA
 }
 
 export function clearInactiveTurnSnapshot(sessionId: string) {
-  const state = useAppStore.getState();
+  const state = chatState();
   state.setPendingUserAction(sessionId, undefined);
   state.setSessionStatus(sessionId, undefined);
   state.setTimelineLive(sessionId, false);
@@ -349,7 +391,7 @@ export function clearInactiveTurnSnapshot(sessionId: string) {
 }
 
 function applyMessageStarted(sessionId: string, turnId: string, message: AgentMessage) {
-  const state = useAppStore.getState();
+  const state = chatState();
   if (message.role !== "user") {
     return;
   }
@@ -379,7 +421,7 @@ function applyBlockStarted(
 ) {
   const item = blockToChatItem(block);
   if (item) {
-    useAppStore.getState().upsertTimelineItem(sessionId, turnId, item);
+    chatState().upsertTimelineItem(sessionId, turnId, item);
   }
 }
 
@@ -396,7 +438,7 @@ function applyBlockDelta(
   if (!block) {
     return;
   }
-  const state = useAppStore.getState();
+  const state = chatState();
   switch (delta.type) {
     case "text": {
       const item = blockToChatItem(block);
@@ -457,7 +499,7 @@ function applyBlockCompleted(
     if (!toolRef) {
       return;
     }
-    useAppStore.getState().updateTimelineTool(sessionId, turnId, toolRef.block.blockId, {
+    chatState().updateTimelineTool(sessionId, turnId, toolRef.block.blockId, {
       output: outputContentToText(block.content.data.content),
       contentItems: block.content.data.content,
       isError: block.content.data.isError,
@@ -468,7 +510,7 @@ function applyBlockCompleted(
   }
   const item = blockToChatItem(block);
   if (item) {
-    useAppStore.getState().upsertTimelineItem(sessionId, turnId, item);
+    chatState().upsertTimelineItem(sessionId, turnId, item);
   }
 }
 
@@ -482,7 +524,7 @@ function applyMessageCompleted(
     applyMessageStarted(sessionId, turnId, message);
     return;
   }
-  const state = useAppStore.getState();
+  const state = chatState();
   for (const block of message.blocks) {
     if (block.content.type === "toolResult") {
       applyBlockCompleted(sessionId, accumulator, turnId, block);
@@ -501,7 +543,7 @@ function applyWaitingForUserAction(
   action: PendingUserAction,
   accumulator: LiveTurnProjection,
 ) {
-  const state = useAppStore.getState();
+  const state = chatState();
   state.setPendingUserAction(sessionId, action);
   state.setSessionStatus(sessionId, "running");
   state.setTimelineLive(sessionId, true);
@@ -705,7 +747,7 @@ function userActionPrompt(action: PendingUserAction) {
 }
 
 function markPendingInputCompleted(sessionId: string) {
-  const state = useAppStore.getState();
+  const state = chatState();
   const pending = state.streams[sessionId]?.pendingInput;
   if (!pending) {
     return;
@@ -718,7 +760,7 @@ function completeTurnMetrics(
   turnId: string,
   status: ChatTurnMetrics["state"],
 ) {
-  const state = useAppStore.getState();
+  const state = chatState();
   const metrics = state.streams[sessionId]?.turnMetrics;
   if (metrics) {
     state.setTurnMetrics(sessionId, turnId, { ...metrics, state: status });

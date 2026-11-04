@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
-import { applyStreamEvent } from "../stream-events";
+import { applyStreamEvent, buildBlocksFromHistorySnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   assistantTextCommitted,
@@ -290,7 +290,7 @@ describe("timeline stream events", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: undefined,
-      sessionHistory: history,
+      history: buildBlocksFromHistorySnapshot(history),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",
@@ -320,7 +320,7 @@ describe("timeline stream events", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: undefined,
-      sessionHistory: history,
+      history: buildBlocksFromHistorySnapshot(history),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",
@@ -361,7 +361,7 @@ describe("timeline stream events", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: useAppStore.getState().streams["sess-1"],
-      sessionHistory: history,
+      history: buildBlocksFromHistorySnapshot(history),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
-import { applyStreamEvent } from "../stream-events";
+import { applyStreamEvent, buildBlocksFromHistorySnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   historyUserInputItem,
@@ -27,9 +27,9 @@ describe("timeline attachment events", () => {
 
     const restored = buildSessionBlocks({
       sessionId: "sess-1",
-      sessionHistory: sessionHistory([
+      history: buildBlocksFromHistorySnapshot(sessionHistory([
         ...historyUserInputItem("input-1", "", ["file-1"]),
-      ]),
+      ])),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",
       stoppingResponseDetail: "stopping detail",

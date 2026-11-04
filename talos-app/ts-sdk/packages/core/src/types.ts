@@ -63,6 +63,8 @@ export type {
   ContextCompactionStage,
   ContextCompactionTrigger,
   ContextUsage,
+  ActiveTurnSnapshot,
+  SessionActiveTurnStatus,
   RecoverTimelineResponse,
   SessionHistoryTurn,
   TimelineActiveTurn,

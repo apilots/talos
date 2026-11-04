@@ -10,6 +10,7 @@ import {
   upsertTimelineItemInStream,
 } from "./timeline-state";
 import type { ChatSlice, ChatSliceSetter } from "./store.types";
+import { createBatchedChatSetter } from "./store-batch";
 
 export type { ChatSlice, ChatSliceSetter } from "./store.types";
 
@@ -33,7 +34,8 @@ function updateStream(
   }));
 }
 
-export function createChatSlice(set: ChatSliceSetter): ChatSlice {
+export function createChatSlice(commit: ChatSliceSetter): ChatSlice {
+  const set = createBatchedChatSetter(commit);
   return {
     sessionAliases: {},
     transientStatuses: {},
@@ -87,6 +89,10 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
+    restoreTurnContent: (sessionId, blocks, metrics) => updateStream(set, sessionId, (stream) => {
+      const ids = new Set(blocks.map((block) => block.id));
+      return { ...stream, blocks: [...stream.blocks.filter((block) => block.kind === "notice" && !ids.has(block.id)), ...blocks], turnMetrics: metrics };
+    }),
     upsertNotice: (sessionId, eventId, notice) => updateStream(set, sessionId, (stream) => ({
       ...stream,
       blocks: [...stream.blocks.filter((block) => block.id !== `notice-${eventId}`), { id: `notice-${eventId}`, kind: "notice", notice, live: false }],

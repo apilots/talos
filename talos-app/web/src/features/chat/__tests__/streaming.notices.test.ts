@@ -42,7 +42,7 @@ it("preserves success and a warning's historical position across later Turns", (
   }
   history.data.push(later);
   applyStreamEvent("sess-1", { ...record, eventId: "ev_21", eventSeq: 21, persistedAt: 21 });
-  const blocks = buildSessionBlocks({ sessionId: "sess-1", streamState: useAppStore.getState().streams["sess-1"], sessionHistory: history,
+  const blocks = buildSessionBlocks({ sessionId: "sess-1", streamState: useAppStore.getState().streams["sess-1"], history: buildBlocksFromHistorySnapshot(history),
     waitingResponseTitle: "Waiting", waitingResponseDetail: "", stoppingResponseTitle: "Stopping", stoppingResponseDetail: "" });
   expect(blocks.filter((block) => block.kind === "notice")).toEqual([expectedNotice, { ...expectedNotice, id: "notice-ev_21" }]);
   render(createElement(MessageList, { blocks, emptyTitle: "Empty", emptyDetail: "" }));

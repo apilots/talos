@@ -223,15 +223,6 @@ export async function getSessionHistory(sessionId: string) {
   return history;
 }
 
-export async function recoverTimelineLiveTail(sessionId: string, afterEventId?: string) {
-  const response = await getTalosClient().sessions.recoverTimeline({
-    sessionId,
-    afterEventId: afterEventId ?? null,
-    replayLimit: null,
-  });
-  return response;
-}
-
 export async function startTimelineTurn(
   request: StartTurnRequest,
   onAcceptedMessageId?: (messageId: string) => void,

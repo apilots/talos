@@ -3,11 +3,19 @@ use super::*;
 #[tokio::test]
 async fn test_get_active_turn_handler_returns_active_state() {
     let event_store = Arc::new(RecordingAgentExecutionStore::default());
+    event_store.append_event(talos_agent_api::AgentEvent {
+        identity: AgentTurnRef::new("mock-session", "turn-1"),
+        sequence: 1,
+        occurred_at: 123,
+        payload: talos_agent_api::AgentEventPayload::TurnStarted(
+            talos_agent_api::AgentTurnStarted {},
+        ),
+    });
     event_store.set_active_turn(AgentActiveTurnRecord {
         identity: AgentTurnRef::new("mock-session", "turn-1"),
         initial_message_id: Some("msg-1".to_string()),
         state: ActiveTurnState::Running,
-        last_event_seq: 7,
+        last_event_seq: 1,
         current_action_id: None,
         updated_at: 123,
     });
@@ -43,18 +51,40 @@ async fn test_get_active_turn_handler_returns_active_state() {
     );
     assert_eq!(
         payload["data"]["activeTurn"]["lastEventId"],
-        "ev_00000000000000000007"
+        "ev_00000000000000000001"
     );
 }
 
 #[tokio::test]
 async fn test_get_active_turn_handler_returns_waiting_state_without_a_second_action_dto() {
     let event_store = Arc::new(RecordingAgentExecutionStore::default());
+    for (sequence, payload) in [
+        (
+            1,
+            talos_agent_api::AgentEventPayload::TurnStarted(talos_agent_api::AgentTurnStarted {}),
+        ),
+        (
+            2,
+            talos_agent_api::AgentEventPayload::WaitingForInput(
+                talos_agent_api::AgentPendingInput::Message {
+                    action_id: "action-dynamic".into(),
+                    prompt: "Continue?".into(),
+                },
+            ),
+        ),
+    ] {
+        event_store.append_event(talos_agent_api::AgentEvent {
+            identity: AgentTurnRef::new("mock-session", "turn-dynamic"),
+            sequence,
+            occurred_at: 125,
+            payload,
+        });
+    }
     event_store.set_active_turn(AgentActiveTurnRecord {
         identity: AgentTurnRef::new("mock-session", "turn-dynamic"),
         initial_message_id: Some("msg-dynamic".to_string()),
         state: ActiveTurnState::WaitingForInput,
-        last_event_seq: 9,
+        last_event_seq: 2,
         current_action_id: Some("action-dynamic".to_string()),
         updated_at: 125,
     });
@@ -84,6 +114,11 @@ async fn test_get_active_turn_handler_returns_waiting_state_without_a_second_act
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
     assert_eq!(payload["status"], "success");
     assert_eq!(payload["data"]["activeTurn"]["state"], "waitingForInput");
+    assert_eq!(
+        payload["data"]["activeTurn"]["pendingInput"]["type"],
+        "message"
+    );
+    assert_eq!(payload["data"]["activeTurn"]["lastSequence"], 2);
     assert!(payload["data"]["activeTurn"]
         .get("pendingUserAction")
         .is_none());

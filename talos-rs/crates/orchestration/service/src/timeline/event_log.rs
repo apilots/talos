@@ -101,6 +101,21 @@ impl TimelineEventService {
         identity: &AgentTurnRef,
         through_event_seq: i64,
     ) -> TalosResult<talos_agent::AgentRunCheckpoint> {
+        Ok(self
+            .turn_checkpoint_with_pending(identity, through_event_seq)
+            .await?
+            .0)
+    }
+
+    pub(super) async fn turn_checkpoint_with_pending(
+        &self,
+        identity: &AgentTurnRef,
+        through_event_seq: i64,
+    ) -> TalosResult<(
+        talos_agent::AgentRunCheckpoint,
+        Option<talos_agent_api::AgentPendingInput>,
+    )> {
+        let mut pending_input = None;
         let mut reducer = talos_agent::AgentEventReducer::new(identity.clone());
         let mut found_tail = false;
         super::scan_turn_events(
@@ -109,6 +124,11 @@ impl TimelineEventService {
             through_event_seq,
             |record| {
                 found_tail = record.event_seq == through_event_seq;
+                if let talos_agent_api::AgentEventPayload::WaitingForInput(pending) =
+                    &record.payload
+                {
+                    pending_input = Some(pending.clone());
+                }
                 reducer.apply(talos_agent_api::AgentEvent {
                     identity: record.identity,
                     sequence: record.sequence,
@@ -123,7 +143,7 @@ impl TimelineEventService {
                 "canonical Turn checkpoint tail was not found",
             ));
         }
-        Ok(reducer.checkpoint())
+        Ok((reducer.checkpoint(), pending_input))
     }
 
     /// Scan one Turn at the current Session tail for a bounded consumer projection.
@@ -189,19 +209,18 @@ impl TimelineEventService {
     }
 
     pub(crate) async fn publish_active_turn(&self, session_id: &str) -> TalosResult<()> {
-        let active_turn = self.display_active_turn(session_id).await?;
-        let latest_event_id = self
-            .latest_event_id(session_id)
-            .await?
-            .map(|id| id.to_string());
+        let state = talos_agent_api::SessionActiveTurnStatus {
+            active_turn: self.display_active_turn(session_id).await?,
+            latest_event_id: self
+                .latest_event_id(session_id)
+                .await?
+                .map(|id| id.to_string()),
+        };
         let _ = self
             .active_tx
             .send(talos_agent_api::SessionActiveTurnChangedNotification {
                 session_id: session_id.into(),
-                state: talos_agent_api::SessionActiveTurnResponse {
-                    active_turn,
-                    latest_event_id,
-                },
+                state,
             });
         Ok(())
     }

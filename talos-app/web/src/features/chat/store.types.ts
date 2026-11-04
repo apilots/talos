@@ -1,4 +1,5 @@
 import type {
+  ChatRenderBlock,
   ChatTimelinePhase,
   ChatTimelineItem,
   ChatTurnMetrics,
@@ -17,6 +18,7 @@ export interface ChatSlice {
   setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
   resetStream: (sessionId: string) => void;
   resetLiveResponse: (sessionId: string) => void;
+  restoreTurnContent: (sessionId: string, blocks: ChatRenderBlock[], metrics: ChatTurnMetrics) => void;
   upsertNotice: (sessionId: string, eventId: string, notice: import("@talos/sdk-core").AppProtocol.AgentSystemNotice) => void;
   upsertUserInputBlock: (
     sessionId: string,

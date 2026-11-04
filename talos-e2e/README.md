@@ -355,3 +355,15 @@ tool call. It checks streamed events, canonical call/result identities, terminal
 history, model-request tracing and exact file effects. Run it locally with
 `just e2e-case 06_tools/public_deepseek_recovery` or through the existing
 maintainer-only `06_tools` workflow; public PR gates do not receive model secrets.
+
+### Long running Turn JSON load
+
+`just e2e-case 09_app_server/running_turn` uses the production Web build and an
+isolated system Chrome with explicit JSON Session/SSE fixtures. Computer and
+metadata APIs use a real Server. It covers a single three-hour-shaped Turn at a
+large offset with8/500/3000steps, refresh, earlier-step access, a live1000-delta
+burst and Sidebar navigation. It saves the input JSON, screenshots and timings.
+The represented duration is fixture data; this test does not wait three hours or
+claim model/runtime endurance. Service/HTTP tests separately verify that a real
+canonical Turn read and the offset subscription agree. The WebUI hosted gate
+selects this case for chat, rendering and Timeline ownership changes.

@@ -13,19 +13,20 @@ pub use contract::{
 };
 pub use login::{now_ms, open_external_url};
 pub use talos_agent_api::{
-    ActiveTurnState, AgentAssistantText, AgentAssistantTextPhase, AgentContextCompaction,
-    AgentContextCompactionDelta, AgentEvent, AgentEventPayload, AgentExecutionSummary,
-    AgentInterruptOutcome, AgentMediaSource, AgentMessage, AgentMessageBlock,
-    AgentMessageBlockCompleted, AgentMessageBlockContent, AgentMessageBlockDelta,
-    AgentMessageBlockDeltaContent, AgentMessageBlockStarted, AgentMessageBlockStatus,
-    AgentMessageRole, AgentMessageStarted, AgentMessageStatus, AgentPendingInput, AgentReasoning,
-    AgentRunFailure, AgentRunMetrics, AgentRunOutput, AgentRunResult, AgentStopReason,
-    AgentSystemNotice, AgentToolCall, AgentToolCallArguments, AgentToolCallArgumentsDelta,
-    AgentToolProgress, AgentToolResult, AgentTurnCompleted, AgentTurnFailed, AgentTurnStarted,
-    AgentUserContent, AgentUserInput, InterruptTurnRequest, InterruptTurnResponse,
-    RecoverTimelineResponse, SessionActiveTurnResponse, SessionHistoryResponse, SessionHistoryTurn,
-    SubmitTurnInput, SubmitTurnInputRequest, SubmitTurnInputResponse, SystemNoticeContent,
-    TimelineActiveTurn, TimelineCursorStatus, TimelineEvent, TimelineEventPayload, TimelineReplay,
+    ActiveTurnSnapshot, ActiveTurnState, AgentAssistantText, AgentAssistantTextPhase,
+    AgentContextCompaction, AgentContextCompactionDelta, AgentEvent, AgentEventPayload,
+    AgentExecutionSummary, AgentInterruptOutcome, AgentMediaSource, AgentMessage,
+    AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
+    AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
+    AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted, AgentMessageStatus,
+    AgentPendingInput, AgentReasoning, AgentRunFailure, AgentRunMetrics, AgentRunOutput,
+    AgentRunResult, AgentStopReason, AgentSystemNotice, AgentToolCall, AgentToolCallArguments,
+    AgentToolCallArgumentsDelta, AgentToolProgress, AgentToolResult, AgentTurnCompleted,
+    AgentTurnFailed, AgentTurnStarted, AgentUserContent, AgentUserInput, InterruptTurnRequest,
+    InterruptTurnResponse, RecoverTimelineResponse, SessionActiveTurnResponse,
+    SessionActiveTurnStatus, SessionHistoryResponse, SessionHistoryTurn, SubmitTurnInput,
+    SubmitTurnInputRequest, SubmitTurnInputResponse, SystemNoticeContent, TimelineActiveTurn,
+    TimelineCursorStatus, TimelineEvent, TimelineEventPayload, TimelineReplay,
     TimelineSystemNotice,
 };
 pub use talos_app_protocol::events::timeline_event_method;

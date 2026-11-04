@@ -61,6 +61,7 @@ pub struct AppProtocolSchemaRoot {
     pub trajectory_readpayload_response: talos_agent_api::trajectory::TrajectoryReadPayloadResponse,
     pub trajectory_payload: talos_agent_api::trajectory::TrajectoryPayload,
     pub session_history_response: talos_agent_api::SessionHistoryResponse,
+    pub session_active_turn_response: talos_agent_api::SessionActiveTurnResponse,
     pub pending_user_action: talos_types::PendingUserAction,
     pub timeline_recovery_response: talos_agent_api::RecoverTimelineResponse,
     pub event_unsubscribe_response: talos_types::EventUnsubscribeResponse,
@@ -178,6 +179,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SandboxApprovalDecision>());
     output.push_str(&export::<talos_types::SessionActiveTurnRequest>());
     output.push_str(&export::<talos_agent_api::SessionActiveTurnResponse>());
+    output.push_str(&export::<talos_agent_api::SessionActiveTurnStatus>());
     output.push_str(&export::<
         talos_agent_api::SessionActiveTurnChangedNotification,
     >());
@@ -254,6 +256,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_agent_api::TimelineReplay>());
     output.push_str(&export::<talos_agent_api::TimelineCursorStatus>());
     output.push_str(&export::<talos_agent_api::TimelineActiveTurn>());
+    output.push_str(&export::<talos_agent_api::ActiveTurnSnapshot>());
     output.push_str(&export::<talos_agent_api::ActiveTurnState>());
     output.push_str(&export::<talos_types::NodeOperatingSystem>());
     output.push_str(&export::<talos_types::NodeNetworkInterface>());

@@ -14,7 +14,7 @@ import type {
   PendingUserAction,
   SessionHistoryResponse,
   TalosContentItem,
-  TimelineActiveTurn,
+  ActiveTurnSnapshot,
   TimelineEvent,
 } from "@talos/sdk-core";
 
@@ -468,12 +468,18 @@ export function usage() {
   };
 }
 
-export function activeTurn(overrides: Partial<TimelineActiveTurn>): TimelineActiveTurn {
+export function activeTurn(overrides: Partial<ActiveTurnSnapshot> = {}): ActiveTurnSnapshot {
   return {
     identity: { sessionId: "sess-1", turnId: "turn-1" },
     initialMessageId: "msg-1",
     state: "running",
     lastEventId: "ev_0",
+    lastEventSeq: 0,
+    lastSequence: 0,
+    messages: [],
+    metrics: executionMetrics(),
+    pendingInput: null,
+    notices: [],
     updatedAt: 0,
     ...overrides,
   };
