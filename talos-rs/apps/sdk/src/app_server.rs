@@ -61,11 +61,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 mod events;
-use events::{dispatch_message_queue_change, dispatch_timeline_event};
+use events::{dispatch_automation_change, dispatch_message_queue_change, dispatch_timeline_event};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::{
-    GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
+    AutomationChangeStream, GatewayClient, MessageQueueChangeStream, TimelineEventStream,
+    TimelineStreamSubscription,
 };
 
 mod request;
@@ -133,6 +134,7 @@ pub struct AppServerClient {
 struct SubscriptionStream {
     session_id: String,
     sender: mpsc::Sender<TimelineEvent>,
+    automation_sender: mpsc::Sender<talos_types::AutomationChangedNotification>,
     message_queue_sender: mpsc::Sender<talos_types::MessageQueueChangedNotification>,
 }
 

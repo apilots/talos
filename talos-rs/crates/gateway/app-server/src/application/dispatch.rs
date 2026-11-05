@@ -8,6 +8,49 @@ impl TalosApplicationAdapter {
         request: ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
         match request.params {
+            ClientRequestParams::AutomationRead(params) => to_value(
+                self.gateway
+                    .session_automation(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::AutomationExecute(params) => to_value(
+                self.gateway
+                    .execute_automation(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::AutomationList(params) => to_value(
+                self.gateway
+                    .list_automation(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::AutomationCommandCatalog(params) => to_value(
+                self.gateway
+                    .automation_command_catalog(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::AutomationResolveCommand(params) => to_value(
+                self.gateway
+                    .resolve_automation_command(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::BuiltinJobList(params) => to_value(
+                self.gateway
+                    .list_builtin_jobs(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::BuiltinJobControl(params) => to_value(
+                self.gateway
+                    .control_builtin_job(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+
             ClientRequestParams::Initialize(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
             ClientRequestParams::ProfileRead(params) => to_value(
                 self.gateway

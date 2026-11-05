@@ -82,10 +82,12 @@ async fn queue_selection_updates_reorders_and_deletes_server_messages() {
         app.message_queue.messages,
         vec![
             QueuedMessage {
+                source: talos_sdk::QueuedMessageSource::User,
                 id: "q2".to_string(),
                 input: text_input("second"),
             },
             QueuedMessage {
+                source: talos_sdk::QueuedMessageSource::User,
                 id: "q1".to_string(),
                 input: AgentUserInput {
                     content: vec![
@@ -110,6 +112,7 @@ async fn queue_selection_updates_reorders_and_deletes_server_messages() {
     assert_eq!(
         app.message_queue.messages,
         vec![QueuedMessage {
+            source: talos_sdk::QueuedMessageSource::User,
             id: "q1".to_string(),
             input: AgentUserInput {
                 content: vec![
@@ -163,6 +166,7 @@ async fn steer_rejects_skill_and_interrupt_keeps_the_queue() {
     assert_eq!(
         app.message_queue.messages,
         vec![QueuedMessage {
+            source: talos_sdk::QueuedMessageSource::User,
             id: "q2".to_string(),
             input: AgentUserInput {
                 content: vec![
@@ -199,6 +203,7 @@ async fn start_removes_only_the_selected_server_message() {
     assert_eq!(
         app.message_queue.messages,
         vec![QueuedMessage {
+            source: talos_sdk::QueuedMessageSource::User,
             id: "q1".to_string(),
             input: text_input("first"),
         }]
@@ -280,6 +285,7 @@ async fn auto_dispatched_queue_change_connects_the_new_turn_stream() {
         (
             true,
             vec![QueuedMessage {
+                source: talos_sdk::QueuedMessageSource::User,
                 id: "q2".to_string(),
                 input: text_input("second"),
             }],
@@ -343,6 +349,7 @@ fn app_with_rendered_queue(input: AgentUserInput) -> TuiApp {
         revision: 2,
         max_messages: 10,
         messages: vec![QueuedMessage {
+            source: talos_sdk::QueuedMessageSource::User,
             id: "q1".to_string(),
             input,
         }],

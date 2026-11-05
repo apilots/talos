@@ -169,6 +169,14 @@ impl AgentExecutionDriver {
         params: AgentRunParams,
         command: Option<CommandLease>,
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
+        self.start_automation(params, command, None).await
+    }
+    pub(crate) async fn start_automation(
+        &self,
+        params: AgentRunParams,
+        command: Option<CommandLease>,
+        automation_origin: Option<talos_types::AutomationTurnOrigin>,
+    ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
         if params.checkpoint.is_some() || params.continuation.is_some() {
             return Err(TalosError::internal(
                 "fresh Agent execution cannot include continuation state",
@@ -189,6 +197,7 @@ impl AgentExecutionDriver {
             .commit_initial_admission(CommitInitialAdmissionParams {
                 events: execution.admission.events.clone(),
                 command,
+                automation_origin,
             })
             .await
         {

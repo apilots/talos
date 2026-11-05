@@ -42,6 +42,7 @@ pub(crate) struct ApplicationSyncHost {
     pub data: crate::NodeSessionDataRpc,
     pub images: crate::NodeToolImageRpc,
     pub control: Arc<dyn talos_tools::AgentControl>,
+    pub automation: Arc<dyn talos_tools::AutomationControl>,
     pub worker: talos_worker::TalosWorker,
     pub worker_rpc: Arc<talos_worker::WorkerRpcHost>,
     pub worker_registration: Arc<tokio::sync::Mutex<Option<talos_worker::RegisteredWorker>>>,
@@ -140,6 +141,7 @@ impl ApplicationSyncHost {
             data: self.data.clone(),
             images: self.images.clone(),
             control: self.control.clone(),
+            automation: self.automation.clone(),
             files: self.service.files.clone(),
             auth: self.auth_service.clone(),
         })

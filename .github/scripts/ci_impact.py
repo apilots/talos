@@ -9,9 +9,13 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 CATEGORIES = ('webui', 'desktop', 'tui', 'server')
+AUTOMATION_TARGET = 'case:24_automation/01_session_automation'
+AUTOMATION_WEB_TARGET = 'case:24_automation/02_web_entry'
+AUTOMATION_TUI_TARGET = 'case:24_automation/03_tui_entry'
 SERVER_TARGETS = {
     'models': 'group:01_models',
     'app-server': 'case:09_app_server/smoke_e2e\ncase:09_app_server/desktop_recovery',
+    'automation': AUTOMATION_TARGET,
     'registration': 'case:09_app_server/computer_deletion',
     'files': 'group:12_files', 'sandbox': 'group:14_sandbox',
     'output-logs': 'case:06_tools/output_logs',
@@ -136,7 +140,8 @@ class Impact:
         self.targets['webui'].update(WORKSPACE_CASES['webui'] | {RUNNING_TURN_TARGET})
         for category, cases in PREVIEW_CASES.items():
             self.targets[category].update(cases)
-        self.targets['tui'].add(TUI_TARGET)
+        self.targets['tui'].update({TUI_TARGET, AUTOMATION_TUI_TARGET})
+        self.targets['webui'].add(AUTOMATION_WEB_TARGET)
         self.installer = self.mcp = self.harness = True
 
 
@@ -234,6 +239,20 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.targets['tui'].add(TUI_TARGET)
             elif path in ('talos-e2e/scripts/running_turn.py', 'talos-e2e/scenarios/09_app_server/running_turn.sh'):
                 result.targets['webui'].add(RUNNING_TURN_TARGET)
+            elif path in ('talos-e2e/scripts/automation_model_fixture.py',
+                          'talos-e2e/scenarios/24_automation/requirements.json'):
+                result.targets['server'].add(AUTOMATION_TARGET)
+                result.targets['webui'].add(AUTOMATION_WEB_TARGET)
+                result.targets['tui'].add(AUTOMATION_TUI_TARGET)
+            elif path in ('talos-e2e/scripts/automation_cli_acceptance.py',
+                          'talos-e2e/scenarios/24_automation/01_session_automation.sh'):
+                result.targets['server'].add(AUTOMATION_TARGET)
+            elif path in ('talos-e2e/scripts/automation_web.py',
+                          'talos-e2e/scenarios/24_automation/02_web_entry.sh'):
+                result.targets['webui'].add(AUTOMATION_WEB_TARGET)
+            elif path in ('talos-e2e/scripts/automation_tui.py',
+                          'talos-e2e/scenarios/24_automation/03_tui_entry.sh'):
+                result.targets['tui'].add(AUTOMATION_TUI_TARGET)
             elif path == 'talos-e2e/scripts/computer_workspace/deletion.py':
                 result.targets['webui'].add(SERVER_TARGETS['registration'])
             elif path.startswith('talos-e2e/scripts/browser-worker/'):
@@ -272,15 +291,22 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                             'talos-app/web/src/widgets/message-list/',
                             'talos-rs/crates/orchestration/service/src/timeline/',
                             'talos-rs/crates/orchestration/agent-api/src/event.rs')) for path in paths):
-        result.targets['webui'].add(RUNNING_TURN_TARGET)
+        result.targets['webui'].update({RUNNING_TURN_TARGET, AUTOMATION_WEB_TARGET})
+    if any(path.startswith(('talos-app/web/src/features/automation/',
+                            'talos-app/web/src/pages/automation/')) for path in paths):
+        result.targets['webui'].add(AUTOMATION_WEB_TARGET)
     affected = rust.closure(direct_rust, reverse=True)
     result.rust.update(affected)
+    if affected & {'talos-service', 'talos-tools', 'talos-skills', 'talos-sdk'}:
+        result.targets['server'].add(AUTOMATION_TARGET)
+        result.targets['webui'].add(AUTOMATION_WEB_TARGET)
+        result.targets['tui'].add(AUTOMATION_TUI_TARGET)
     if direct_rust & {'talos-types', 'talos-app-protocol', 'agent-protocol'}:
         # Generated wire contracts have both Rust and TypeScript consumers.
         direct_frontend.update(frontend.roots)
     result.frontend.update(frontend.closure(direct_frontend, reverse=True))
     if 'talos-web' in result.frontend:
-        result.targets['webui'].update(PREVIEW_CASES['webui'])
+        result.targets['webui'].update(PREVIEW_CASES['webui'] | {AUTOMATION_WEB_TARGET})
         result.targets['desktop'].update(PREVIEW_CASES['desktop'])
     elif 'talos-desktop' in result.frontend:
         result.targets['desktop'].update(PREVIEW_CASES['desktop'])
@@ -295,17 +321,20 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                             'talos-rs/crates/infra/config/src/domains/storage')) for path in paths):
         for category, cases in PREVIEW_CASES.items():
             result.targets[category].update(cases)
+    if any(path.startswith(('talos-rs/apps/tui/src/automation',
+                            'talos-rs/apps/tui/src/cli/automation')) for path in paths):
+        result.targets['server'].add(AUTOMATION_TARGET)
     # Expand each owner's acceptance independently, then union the results. A
     # TUI+MCP edit must not accidentally take a broader route than those edits alone.
     for owner in direct_rust:
         consumers = rust.closure({owner}, reverse=True)
         if 'talos-tui' in consumers:
-            result.targets['tui'].add(TUI_TARGET)
+            result.targets['tui'].update({TUI_TARGET, AUTOMATION_TUI_TARGET})
         focused = rust.roots[owner].startswith((
             'talos-rs/crates/action/', 'talos-rs/apps/sdk',
             'talos-rs/crates/orchestration/agent-client'))
         if focused:
-            result.targets['server'].add(SERVER_TARGETS['app-server'])
+            result.targets['server'].update({SERVER_TARGETS['app-server'], AUTOMATION_TARGET})
             if owner in {'talos-tools', 'talos-tools-policy', 'talos-tools-sandbox',
                          'talos-linux-sandbox', 'talos-macos-sandbox', 'talos-browser'}:
                 result.targets['server'].update(SERVER_TARGETS[k] for k in ('models', 'output-logs', 'sandbox', 'files'))

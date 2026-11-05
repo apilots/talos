@@ -46,6 +46,7 @@ impl Default for ToolPolicy {
                 "ToolSearch".to_string(),
                 "TodoWrite".to_string(),
                 "AskUserQuestion".to_string(),
+                "automation".to_string(),
                 "spawn_agent".to_string(),
                 "send_message".to_string(),
                 "followup_task".to_string(),

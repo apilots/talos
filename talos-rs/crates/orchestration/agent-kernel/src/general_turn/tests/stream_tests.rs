@@ -1010,6 +1010,7 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
             execution_mode: ToolExecutionMode::Sequential,
             max_parallelism: 1,
             execution_context: ToolExecutionContext {
+                registration: None,
                 browser_uploads: Vec::new(),
                 session_id: "ordered-stream".to_string(),
                 turn_id: "turn-ordered-stream".to_string(),

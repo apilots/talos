@@ -33,6 +33,11 @@ use crate::{
     TimelineSubscriptionService,
 };
 
+#[path = "../automation/goal_loop/facade.rs"]
+mod automation_api;
+#[path = "../automation/native_jobs_facade.rs"]
+mod native_jobs_api;
+
 #[path = "sync_management.rs"]
 mod sync_management;
 pub use sync_management::ManagementSync;
@@ -89,6 +94,7 @@ pub struct TalosService {
     pub files: Arc<FileService>,
     execution_gate: Arc<crate::turn::NodeAdmissionGates>,
     active_commands: Arc<std::sync::RwLock<Option<Arc<dyn agent_protocol::ActiveSessionCommands>>>>,
+    native_jobs: Arc<std::sync::OnceLock<Arc<crate::automation::native_jobs::NativeJobService>>>,
 }
 
 impl TalosService {
@@ -190,6 +196,7 @@ impl TalosService {
             file_previews: Default::default(),
             sync_management: Default::default(),
             active_commands: Default::default(),
+            native_jobs: Default::default(),
             oauth_relay_origin: base_config.cloud.agent_base_url.clone(),
             oauth_routes: Arc::default(),
             oauth_capacity: Arc::new(tokio::sync::Semaphore::new(32)),
@@ -668,6 +675,11 @@ impl TalosService {
                 self.turns.recover_active_turn(session, active).await?;
             }
         }
+        if let Err(error) = self.reconcile_session_goal(&request.session_id).await {
+            // An offline Worker must not turn a readable Timeline into a failure
+            // or imply that the Goal has paused or completed.
+            talos_logging::report_error(&error);
+        }
         let after_event_id = parse_timeline_event_id(request.since_event_id)?;
         let command = TimelineSubscribeCommand {
             session_id: request.session_id,
@@ -679,7 +691,13 @@ impl TalosService {
         };
         let subscription = if request.turn_id.is_none() {
             self.events
-                .subscribe_with_queue_changes(command, self.message_queue.subscribe_changed())
+                .subscribe_with_changes(
+                    command,
+                    self.message_queue.subscribe_changed(),
+                    self.turns
+                        .installed_automation()
+                        .map(|automation| automation.subscribe_changed()),
+                )
                 .await?
         } else {
             self.events.subscribe(command).await?
@@ -701,6 +719,9 @@ impl TalosService {
             if !self.turns.is_turn_execution_active(&active.identity) {
                 self.turns.recover_active_turn(session, active).await?;
             }
+        }
+        if let Err(error) = self.reconcile_session_goal(&request.session_id).await {
+            talos_logging::report_error(&error);
         }
         let after_event_id = parse_timeline_event_id(request.after_event_id)?;
         self.events

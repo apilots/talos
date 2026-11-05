@@ -1,0 +1,93 @@
+syntax = "proto3";
+package talos.agent.v1;
+import "auth.proto";
+import "types.proto";
+import "resources.proto";
+
+// Invocation-bound Goal/Loop operations over the existing resource channels.
+// Native maintenance Job management is deliberately not part of this service.
+service AgentAutomationControlRpc {
+  rpc ExecuteAutomation(ExecuteAutomationRequest) returns (ExecuteAutomationResponse);
+}
+message ExecuteAutomationRequest {
+  NodeAuth auth = 1;
+  AutomationModelParams params = 2;
+  CoordinatorCallContext caller = 3;
+}
+message ExecuteAutomationResponse {
+  oneof result { AutomationControlResult accepted = 1; Failure failure = 2; }
+}
+message AutomationModelParams {
+  AgentCaller caller = 1;
+  string call_id = 2;
+  AutomationAction action = 3;
+}
+message AutomationAction {
+  oneof target { AutomationGoalAction goal = 1; AutomationLoopAction loop_task = 2; }
+}
+message AutomationGoalAction {
+  oneof action {
+    CreateAutomationGoal create = 1; Empty read = 2; EditAutomationGoal edit = 3;
+    AutomationGoalId pause = 4; AutomationGoalId resume = 5;
+    AutomationGoalId clear = 6; CompleteAutomationGoal complete = 7;
+  }
+}
+message CreateAutomationGoal { string objective = 1; optional uint64 token_budget = 2; }
+message AutomationGoalId { string goal_id = 1; }
+message EditAutomationGoal { string goal_id = 1; uint64 expected_revision = 2; string objective = 3; }
+message CompleteAutomationGoal { string goal_id = 1; uint64 objective_revision = 2; string evidence = 3; }
+message AutomationLoopAction {
+  oneof action {
+    CreateAutomationLoop create = 1; Empty list = 2; EditAutomationLoop edit = 3;
+    AutomationLoopId stop = 4; AutomationLoopId clear = 5; DecideAutomationLoop decide = 6;
+  }
+}
+message CreateAutomationLoop { string prompt = 1; AutomationLoopSchedule schedule = 2; }
+message AutomationLoopId { string loop_id = 1; }
+message EditAutomationLoop { string loop_id = 1; uint64 expected_revision = 2; string prompt = 3; AutomationLoopSchedule schedule = 4; }
+message DecideAutomationLoop { string loop_id = 1; uint64 config_revision = 2; AutomationLoopDecision decision = 3; }
+message AutomationLoopSchedule {
+  oneof schedule { uint32 fixed_minutes = 1; Empty model_decided = 2; }
+}
+message AutomationLoopDecision {
+  oneof decision { ContinueAutomationLoop continue_loop = 1; string stop_reason = 2; }
+}
+message ContinueAutomationLoop { uint32 delay_minutes = 1; string reason = 2; }
+enum AutomationEffect { AUTOMATION_EFFECT_UNSPECIFIED = 0; AUTOMATION_EFFECT_APPLIED = 1; AUTOMATION_EFFECT_PENDING_SETTLEMENT = 2; }
+message AutomationObjectRef { oneof value { string goal_id = 1; string loop_id = 2; } }
+message AutomationControlResult { AutomationEffect effect = 1; AutomationTurnOrigin bound_origin = 2; AutomationSessionSnapshot snapshot = 3; AutomationObjectRef created_object = 4; }
+message AutomationSessionSnapshot { string session_id = 1; AutomationGoal goal = 2; repeated AutomationLoop loops = 3; }
+enum AutomationGoalStatus {
+  AUTOMATION_GOAL_STATUS_UNSPECIFIED = 0; AUTOMATION_GOAL_STATUS_ACTIVE = 1;
+  AUTOMATION_GOAL_STATUS_PAUSED = 2; AUTOMATION_GOAL_STATUS_COMPLETE = 3; AUTOMATION_GOAL_STATUS_CLEARED = 4;
+}
+enum AutomationGoalPauseReason {
+  AUTOMATION_GOAL_PAUSE_REASON_UNSPECIFIED = 0; AUTOMATION_GOAL_PAUSE_REASON_USER_PAUSED = 1;
+  AUTOMATION_GOAL_PAUSE_REASON_USER_CANCELLED = 2; AUTOMATION_GOAL_PAUSE_REASON_WAITING_FOR_USER = 3;
+  AUTOMATION_GOAL_PAUSE_REASON_EXECUTION_FAILED = 4; AUTOMATION_GOAL_PAUSE_REASON_BUDGET_EXHAUSTED = 5;
+  AUTOMATION_GOAL_PAUSE_REASON_NO_PROGRESS = 6;
+}
+enum AutomationLoopStatus {
+  reserved 3; reserved "AUTOMATION_LOOP_STATUS_EXPIRED";
+  AUTOMATION_LOOP_STATUS_UNSPECIFIED = 0; AUTOMATION_LOOP_STATUS_ACTIVE = 1; AUTOMATION_LOOP_STATUS_STOPPED = 2;
+}
+enum AutomationLoopStopReason {
+  AUTOMATION_LOOP_STOP_REASON_UNSPECIFIED = 0; AUTOMATION_LOOP_STOP_REASON_USER_STOPPED = 1;
+  AUTOMATION_LOOP_STOP_REASON_USER_CANCELLED = 2; AUTOMATION_LOOP_STOP_REASON_MODEL_STOPPED = 3;
+  AUTOMATION_LOOP_STOP_REASON_WAITING_FOR_USER = 4; AUTOMATION_LOOP_STOP_REASON_EXECUTION_FAILED = 5;
+  AUTOMATION_LOOP_STOP_REASON_MISSING_DECISION = 6; AUTOMATION_LOOP_STOP_REASON_QUEUE_FULL = 7;
+}
+message AutomationGoal {
+  string id = 1; string session_id = 2; string objective = 3; uint64 objective_revision = 4;
+  AutomationGoalStatus status = 5; optional AutomationGoalPauseReason pause_reason = 6;
+  optional string reason = 7; optional uint64 token_budget = 8; uint64 tokens_used = 9;
+  optional string latest_turn_id = 10; optional string completion_evidence = 11;
+  int64 created_at = 12; int64 updated_at = 13;
+}
+message AutomationLoop {
+  reserved 10; reserved "expires_at";
+  string id = 1; string session_id = 2; string prompt = 3; AutomationLoopSchedule schedule = 4;
+  uint64 config_revision = 5; AutomationLoopStatus status = 6; optional AutomationLoopStopReason stop_reason = 7;
+  optional string reason = 8; optional int64 next_due_at = 9;
+  optional string latest_turn_id = 11; int64 created_at = 12; int64 updated_at = 13;
+}

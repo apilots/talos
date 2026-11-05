@@ -1,7 +1,10 @@
 import { vi } from "vitest";
+import type { ComponentProps } from "react";
 
 const mocks = {
   sendText: vi.fn(),
+  draft: "",
+  realComposer: false,
   sendTurn: vi.fn(),
   setDraft: vi.fn(),
   refetchProjects: vi.fn(),
@@ -29,16 +32,9 @@ export async function createChatFeatureMock(
 
   return {
     ...actual,
-    ChatComposer: (props: {
-      commandResponse?: { kind: string; state?: string };
-      disabled?: boolean;
-      onModelChange?: (model: string) => void;
-      onCommand?: (command: "compact" | "clear" | "status" | "model") => Promise<void> | void;
-      onProjectChange: (projectId: string) => void;
-      onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
-      onSend: (attachments: []) => Promise<void>;
-    }) => {
+    ChatComposer: (props: ComponentProps<typeof actual.ChatComposer>) => {
       mocks.composerProps = props;
+      if (mocks.realComposer) return <actual.ChatComposer {...props} />;
       return (
         <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
           {props.commandResponse ? <div>{props.commandResponse.kind}</div> : null}
@@ -62,7 +58,7 @@ export async function createChatFeatureMock(
     },
     useChatSession: () => ({
       blocks: [],
-      draft: "",
+      draft: mocks.draft,
       setDraft: mocks.setDraft,
       sendTurn: mocks.sendTurn,
       sendText: mocks.sendText,
@@ -149,4 +145,28 @@ export function createAppStoreMock() {
         connection: {}, selectComputer: vi.fn(),
       }),
   };
+}
+
+export function resetChatSessionPageMocks() {
+  mocks.session = {
+    context: { session_id: "sess-1" },
+    title: "Session 1",
+    projectId: null,
+    config: { llm: { model: "model-1" } },
+    state: { message_count: 0 },
+    modelSelection: {
+      modelRef: { provider: "mock", id: "model-1" },
+      reasoningEffort: null,
+    },
+  };
+  mocks.realComposer = false;
+  mocks.draft = "";
+  mocks.sendTurn.mockReset();
+  mocks.sendTurn.mockResolvedValue(undefined);
+  mocks.sessionHistoryError = undefined;
+  mocks.sessionHistoryIsSuccess = true;
+  mocks.isStreaming = false;
+  mocks.composerProps = undefined;
+  mocks.sessionQueryEnabled = undefined;
+  mocks.setDraft.mockReset();
 }

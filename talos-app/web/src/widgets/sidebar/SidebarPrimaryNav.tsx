@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Blocks, Brain, FileText, PenLine } from "lucide-react";
+import { Blocks, Brain, FileText, PenLine, Repeat2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -28,6 +28,7 @@ export function SidebarPrimaryNav({ onCreateThread, computerEntry }: SidebarPrim
         <span>{t("chat:newThread")}</span>
       </button>
       {computerEntry}
+      <SidebarNavItem icon={<Repeat2 aria-hidden="true" size={16} />} label={t("sidebar:automation")} to="/automation" />
       <SidebarNavItem icon={<Brain aria-hidden="true" size={16} />} label={t("sidebar:memory")} to="/memory" />
       <SidebarNavItem icon={<Blocks aria-hidden="true" size={16} />} label={t("sidebar:plugins")} to="/plugins" />
       <SidebarNavItem icon={<FileText aria-hidden="true" size={16} />} label={t("sidebar:files")} to="/files" />

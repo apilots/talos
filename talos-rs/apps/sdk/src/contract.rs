@@ -55,12 +55,26 @@ pub struct TimelineStreamSubscription {
     pub response: SubscribeTimelineResponse,
     pub stream: TimelineEventStream,
     pub message_queue_changes: MessageQueueChangeStream,
+    pub automation_changes: AutomationChangeStream,
 }
 
 /// Live queue invalidations delivered by an existing Session subscription.
 ///
 /// Notifications are not replayed. Callers must list the complete queue after
 /// connecting and after observing a newer revision.
+/// Live automation invalidations; re-read Session facts after connection.
+pub struct AutomationChangeStream {
+    receiver: mpsc::Receiver<talos_types::AutomationChangedNotification>,
+}
+impl AutomationChangeStream {
+    pub fn new(receiver: mpsc::Receiver<talos_types::AutomationChangedNotification>) -> Self {
+        Self { receiver }
+    }
+    pub async fn recv(&mut self) -> Option<talos_types::AutomationChangedNotification> {
+        self.receiver.recv().await
+    }
+}
+
 pub struct MessageQueueChangeStream {
     receiver: mpsc::Receiver<talos_types::MessageQueueChangedNotification>,
 }
@@ -94,6 +108,37 @@ impl MessageQueueChangeStream {
 
 #[async_trait]
 pub trait GatewayClient: Send {
+    async fn session_automation(
+        &mut self,
+        request: talos_types::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_types::SessionAutomationSnapshot>;
+    /// Executes user management through the Session owner. Model-only completion
+    /// and next-wake declarations are rejected by the Service on this API.
+    async fn execute_automation(
+        &mut self,
+        request: talos_types::AutomationRequest,
+    ) -> TalosResult<talos_types::AutomationControlResult>;
+    async fn list_automation(
+        &mut self,
+        request: talos_types::AutomationListRequest,
+    ) -> TalosResult<talos_types::AutomationListResponse>;
+    async fn automation_command_catalog(
+        &mut self,
+        request: talos_types::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_types::AutomationCommandCatalogResponse>;
+    async fn resolve_automation_command(
+        &mut self,
+        request: talos_types::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_types::AutomationCommandResolveResponse>;
+    async fn list_builtin_jobs(
+        &mut self,
+        request: talos_types::BuiltinJobListRequest,
+    ) -> TalosResult<talos_types::BuiltinJobListResponse>;
+    async fn control_builtin_job(
+        &mut self,
+        request: talos_types::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_types::BuiltinJobInfo>;
+
     /// Reads current-account Sync observations without enabling sync or exposing credentials.
     async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse>;
 

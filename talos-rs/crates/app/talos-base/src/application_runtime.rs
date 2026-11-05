@@ -83,6 +83,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             attachment_reader: file_service.clone(),
             tool_image_store: tool_image_store.clone(),
             agent_control: None,
+            automation_control: None,
         },
         if std::env::var_os("TALOS_DESKTOP_HOSTNAME").is_some() {
             talos_types::BrowserHostKind::Desktop
@@ -232,6 +233,15 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             config.talos_paths().talos_home,
         ))?;
     service.set_coordinator_id(sync.peer_id().into());
+    service.install_session_automation(
+        session_store_impl.automation_store(),
+        Arc::new(
+            super::application_automation_control::ApplicationAutomationSkillResolver::new(
+                Arc::downgrade(&coordinator),
+                session_store.clone(),
+            ),
+        ),
+    )?;
     let sync_stores = Arc::new(super::application_sync::ApplicationSyncStores {
         storage: storage.clone(),
         sessions: session_store_impl.clone(),
@@ -245,21 +255,27 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     });
     let agent_control: Arc<dyn AgentControl> =
         Arc::new(ApplicationAgentControl::new(service.clone()));
+    let automation_control: Arc<dyn talos_tools::AutomationControl> = Arc::new(
+        super::application_automation_control::ApplicationAutomationControl::new(service.clone()),
+    );
     let (resource_rpc, resource_client) = super::local_resource_rpc::LocalResourceRpc::start(
         local_auth,
-        super::agent_node_rpc::NodeSessionDataRpc::new(
-            node_service.clone(),
-            session_store.clone(),
-            session_history_reader.clone(),
-            attachment_reader.clone(),
-            memory_progress_store.clone(),
-        ),
-        super::agent_node_rpc::NodeToolImageRpc::new(
-            node_service.clone(),
-            tool_image_store.clone(),
-            config.storage.files.limits.max_upload_bytes,
-        ),
-        agent_control.clone(),
+        super::agent_node_rpc::NodeResourceServices {
+            session_data: super::agent_node_rpc::NodeSessionDataRpc::new(
+                node_service.clone(),
+                session_store.clone(),
+                session_history_reader.clone(),
+                attachment_reader.clone(),
+                memory_progress_store.clone(),
+            ),
+            tool_images: super::agent_node_rpc::NodeToolImageRpc::new(
+                node_service.clone(),
+                tool_image_store.clone(),
+                config.storage.files.limits.max_upload_bytes,
+            ),
+            agent_control: agent_control.clone(),
+            automation_control: automation_control.clone(),
+        },
     )
     .await?;
     worker.use_local_resource_rpc(resource_client);
@@ -300,12 +316,21 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         &config,
         config.automation.dream_memory_maintenance.clone(),
     );
+    use talos_store::automation::native_jobs::NativeJobControlStore;
+    let native_job_controls = Arc::new(
+        talos_store::automation::native_jobs::DatabaseNativeJobControlStore::new(
+            storage_connection.pool().clone(),
+        ),
+    );
+    let initial_paused = native_job_controls.load_paused(sync.peer_id()).await?;
     let automation = application_automation::start_maintenance(
         profile_store,
         config.automation.profile_usage_retention.clone(),
         dream_memory_maintenance,
         config.automation.dream_memory_maintenance.clone(),
         talos_config::parse_timezone(&config.timezone)?,
+        initial_paused,
+        Arc::downgrade(&service),
     )
     .await?;
 
@@ -361,6 +386,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             config.storage.files.limits.max_upload_bytes,
         ),
         control: agent_control.clone(),
+        automation: automation_control.clone(),
         worker: worker.clone(),
         worker_rpc: worker_rpc.clone(),
         worker_registration: worker_registration.clone(),
@@ -381,6 +407,19 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     for binding in sync.saved_bindings().await? {
         sync_host.install_capture(binding)?;
     }
+    let native_job_host: Arc<dyn talos_service::NativeJobHost> =
+        Arc::new(super::application_native_jobs::ApplicationNativeJobHost {
+            sync_host: Arc::downgrade(&sync_host),
+            storage: storage.clone(),
+            automation: automation.clone(),
+            execution_instance_id: sync.peer_id().to_owned(),
+        });
+    service.install_native_job_control(Arc::new(
+        talos_service::automation::native_jobs::NativeJobService::new(
+            native_job_controls,
+            Arc::downgrade(&native_job_host),
+        ),
+    ))?;
     let management: Arc<dyn talos_service::ManagementSync> = sync_host.clone();
     service.set_sync_management(Arc::downgrade(&management));
     if let Some(session) = service
@@ -421,7 +460,9 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         attachment_reader,
         memory_progress_store,
         agent_control,
+        automation_control,
         tool_image_store,
         automation,
+        _native_job_host: native_job_host,
     })
 }

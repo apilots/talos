@@ -39,6 +39,8 @@ pub enum ServerNotification {
     SubscriptionTerminated(SubscriptionTerminatedNotification),
     #[serde(rename = "messageQueue/changed")]
     MessageQueueChanged(MessageQueueChangedNotification),
+    #[serde(rename = "automation/changed")]
+    AutomationChanged(talos_types::AutomationChangedNotification),
     #[serde(rename = "desktop/worker/failed")]
     DesktopWorkerFailed(talos_error::ApiError),
     #[serde(rename = "desktop/worker/ready")]

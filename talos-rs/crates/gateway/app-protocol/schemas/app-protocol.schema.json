@@ -5,6 +5,18 @@
       "additionalProperties": false,
       "description": "One running Turn read at the exact durable offset in `lastEventId`.\n\nRestore messages and sequence together, then subscribe strictly after that offset. This read does not replace raw event replay or completed history.",
       "properties": {
+        "automationInput": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationInputOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
+        },
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
@@ -1745,6 +1757,559 @@
       ],
       "type": "object"
     },
+    "AutomationAction": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/GoalAction"
+            },
+            "target": {
+              "enum": [
+                "goal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "target"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/LoopAction"
+            },
+            "target": {
+              "enum": [
+                "loop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "target"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AutomationChangedNotification": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "AutomationCommand": {
+      "oneOf": [
+        {
+          "properties": {
+            "mode": {
+              "$ref": "#/definitions/AutomationMode"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "activate"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode",
+            "prompt",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mode": {
+              "$ref": "#/definitions/AutomationMode"
+            },
+            "type": {
+              "enum": [
+                "read"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mode": {
+              "$ref": "#/definitions/AutomationMode"
+            },
+            "objectId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "edit"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "pauseGoal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "resumeGoal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "clearGoal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "loopId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "stopLoop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "loopId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "clearLoop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AutomationCommandCatalogRequest": {
+      "type": "object"
+    },
+    "AutomationCommandCatalogResponse": {
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/AutomationCommandDescriptor"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "AutomationCommandDescriptor": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/definitions/AutomationMode"
+        }
+      },
+      "required": [
+        "command",
+        "description",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "AutomationCommandResolveRequest": {
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "AutomationCommandResolveResponse": {
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationCommand"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AutomationControlResult": {
+      "description": "Declarations are acknowledged without claiming their terminal effect happened.",
+      "properties": {
+        "boundOrigin": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationTurnOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact invocation binding for the model; multiple Loops may have the same prompt. Management calls without an invoking Turn return null."
+        },
+        "createdObject": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationObjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Create operations return the exact object, including idempotent replies. Never infer a new Loop's identity from prompt text or snapshot differences."
+        },
+        "effect": {
+          "$ref": "#/definitions/AutomationEffect"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/SessionAutomationSnapshot"
+        }
+      },
+      "required": [
+        "effect",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "AutomationEffect": {
+      "enum": [
+        "applied",
+        "pendingSettlement"
+      ],
+      "type": "string"
+    },
+    "AutomationInputOrigin": {
+      "description": "Exact triggering Input message. Other human/Steer messages in the same Turn keep ordinary provenance, even while that Turn belongs to Goal or Loop.",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "origin": {
+          "$ref": "#/definitions/AutomationTurnOrigin"
+        }
+      },
+      "required": [
+        "messageId",
+        "origin"
+      ],
+      "type": "object"
+    },
+    "AutomationListEntry": {
+      "oneOf": [
+        {
+          "properties": {
+            "goal": {
+              "$ref": "#/definitions/SessionGoal"
+            },
+            "type": {
+              "enum": [
+                "goal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goal",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "loopTask": {
+              "$ref": "#/definitions/SessionLoop"
+            },
+            "type": {
+              "enum": [
+                "loop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopTask",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AutomationListRequest": {
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scope": {
+          "$ref": "#/definitions/AutomationListScope"
+        },
+        "sessionId": {
+          "description": "Omitted/null lists the authenticated user's accessible Sessions.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "type": "object"
+    },
+    "AutomationListResponse": {
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/AutomationListEntry"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "AutomationListScope": {
+      "enum": [
+        "unfinished",
+        "ended"
+      ],
+      "type": "string"
+    },
+    "AutomationMode": {
+      "enum": [
+        "goal",
+        "loop"
+      ],
+      "type": "string"
+    },
+    "AutomationObjectRef": {
+      "description": "Exact object identity issued by the creation owner.",
+      "oneOf": [
+        {
+          "properties": {
+            "goalId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "goal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goalId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "loopId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "loop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AutomationRequest": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/AutomationAction"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "AutomationRequestReason": {
+      "enum": [
+        "selectedModeManagementConflict",
+        "selectedModeConflict",
+        "computerRequired",
+        "chatRequired",
+        "taskNotFound",
+        "goalNotFound",
+        "systemSkillUnavailable"
+      ],
+      "type": "string"
+    },
+    "AutomationTurnOrigin": {
+      "description": "Provenance bound at admission (or to the explicit initial Goal Turn). It is never inferred from text or the Session's current mode.",
+      "oneOf": [
+        {
+          "properties": {
+            "goalId": {
+              "type": "string"
+            },
+            "objectiveRevision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "goal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goalId",
+            "objectiveRevision",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "configRevision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "loopId": {
+              "type": "string"
+            },
+            "occurrenceId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "loop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "configRevision",
+            "loopId",
+            "occurrenceId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "BashOutputCaptureStatus": {
       "enum": [
         "capturing",
@@ -3006,6 +3571,177 @@
       ],
       "type": "string"
     },
+    "BuiltinJobAction": {
+      "enum": [
+        "pause",
+        "resume",
+        "runOnce"
+      ],
+      "type": "string"
+    },
+    "BuiltinJobControlRequest": {
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/BuiltinJobAction"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "executionInstanceId": {
+          "type": "string"
+        },
+        "jobId": {
+          "$ref": "#/definitions/BuiltinJobId"
+        }
+      },
+      "required": [
+        "action",
+        "computerId",
+        "executionInstanceId",
+        "jobId"
+      ],
+      "type": "object"
+    },
+    "BuiltinJobId": {
+      "description": "Closed set of user-manageable jobs; internal Loop scans are not included.",
+      "enum": [
+        "profileUsageRetention",
+        "dreamMemoryMaintenance"
+      ],
+      "type": "string"
+    },
+    "BuiltinJobInfo": {
+      "description": "Existing callbacks operate on the execution instance's database, including all related users/computers. `computer_id` names the actual callback host; neither identifier is a data filter or proof of whole-instance ownership.",
+      "properties": {
+        "availableActions": {
+          "items": {
+            "$ref": "#/definitions/BuiltinJobAction"
+          },
+          "type": "array"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "executionInstanceId": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/definitions/BuiltinJobId"
+        },
+        "lastFinishedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "lastOutcome": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/BuiltinJobOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "nextDueAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "running": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availableActions",
+        "computerId",
+        "executionInstanceId",
+        "id",
+        "name",
+        "paused",
+        "running",
+        "schedule",
+        "timezone"
+      ],
+      "type": "object"
+    },
+    "BuiltinJobListRequest": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "BuiltinJobListResponse": {
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/BuiltinJobInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "BuiltinJobOutcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "succeeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ApiError"
+            },
+            "type": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ClientCapabilities": {
       "properties": {
         "protocol_version": {
@@ -3061,6 +3797,132 @@
     },
     "ClientRequestParams": {
       "oneOf": [
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "automation/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionAutomationReadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "automation/execute"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AutomationRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "automation/list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AutomationListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "automation/commandCatalog"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AutomationCommandCatalogRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "automation/resolveCommand"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AutomationCommandResolveRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "builtinJob/list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/BuiltinJobListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "builtinJob/control"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/BuiltinJobControlRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
         {
           "properties": {
             "method": {
@@ -6007,6 +6869,24 @@
       "oneOf": [
         {
           "properties": {
+            "reason": {
+              "$ref": "#/definitions/AutomationRequestReason"
+            },
+            "type": {
+              "enum": [
+                "automationRequest"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "operation": {
               "$ref": "#/definitions/BrowserCapabilityOperation"
             },
@@ -6770,6 +7650,188 @@
       ],
       "type": "object"
     },
+    "GoalAction": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "objective": {
+              "type": "string"
+            },
+            "tokenBudget": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "create"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "objective",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": [
+                "read"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expectedRevision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "goalId": {
+              "type": "string"
+            },
+            "objective": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "edit"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expectedRevision",
+            "goalId",
+            "objective",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "goalId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pause"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goalId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "goalId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "resume"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goalId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "goalId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "clear"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goalId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Model-only declaration; effective only after matching normal settlement.",
+          "properties": {
+            "evidence": {
+              "type": "string"
+            },
+            "goalId": {
+              "type": "string"
+            },
+            "objectiveRevision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "complete"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "evidence",
+            "goalId",
+            "objectiveRevision",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GoalPauseReason": {
+      "enum": [
+        "userPaused",
+        "userCancelled",
+        "waitingForUser",
+        "executionFailed",
+        "budgetExhausted",
+        "noProgress"
+      ],
+      "type": "string"
+    },
+    "GoalStatus": {
+      "enum": [
+        "active",
+        "paused",
+        "complete",
+        "cleared"
+      ],
+      "type": "string"
+    },
     "InitializeParams": {
       "properties": {
         "actor_credentials": {
@@ -7157,6 +8219,256 @@
         "messages"
       ],
       "type": "string"
+    },
+    "LoopAction": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "schedule": {
+              "$ref": "#/definitions/LoopSchedule"
+            },
+            "type": {
+              "enum": [
+                "create"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt",
+            "schedule",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": [
+                "list"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "expectedRevision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "loopId": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "schedule": {
+              "$ref": "#/definitions/LoopSchedule"
+            },
+            "type": {
+              "enum": [
+                "edit"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expectedRevision",
+            "loopId",
+            "prompt",
+            "schedule",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "loopId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "stop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "loopId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "clear"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopId",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Model-only decision; effective only after matching normal settlement.",
+          "properties": {
+            "configRevision": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "decision": {
+              "$ref": "#/definitions/LoopWakeDecision"
+            },
+            "loopId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "decide"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "configRevision",
+            "decision",
+            "loopId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LoopSchedule": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "minutes": {
+              "format": "uint32",
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "fixedInterval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "minutes",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": [
+                "modelDecided"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LoopStatus": {
+      "enum": [
+        "active",
+        "stopped"
+      ],
+      "type": "string"
+    },
+    "LoopStopReason": {
+      "enum": [
+        "userStopped",
+        "userCancelled",
+        "modelStopped",
+        "waitingForUser",
+        "executionFailed",
+        "missingDecision",
+        "queueFull"
+      ],
+      "type": "string"
+    },
+    "LoopWakeDecision": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "delayMinutes": {
+              "format": "uint32",
+              "minimum": 1.0,
+              "type": "integer"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "continue"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delayMinutes",
+            "reason",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "stop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "MarketplaceSourceId": {
       "type": "string"
@@ -9940,6 +11252,16 @@
         },
         "input": {
           "$ref": "#/definitions/AgentUserInput"
+        },
+        "source": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/QueuedMessageSource"
+            }
+          ],
+          "default": {
+            "type": "user"
+          }
         }
       },
       "required": [
@@ -9947,6 +11269,47 @@
         "input"
       ],
       "type": "object"
+    },
+    "QueuedMessageSource": {
+      "description": "Queue provenance is process-local, even when its definition is durable.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "user"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "loopId": {
+              "type": "string"
+            },
+            "occurrenceId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "loop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "loopId",
+            "occurrenceId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ReasoningEffort": {
       "enum": [
@@ -10610,6 +11973,24 @@
           "properties": {
             "method": {
               "enum": [
+                "automation/changed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AutomationChangedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "desktop/worker/failed"
               ],
               "type": "string"
@@ -10800,6 +12181,46 @@
       },
       "type": "object"
     },
+    "SessionAutomationReadRequest": {
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionAutomationSnapshot": {
+      "description": "Current Session facts. Historical definitions use the paginated list API.",
+      "properties": {
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionGoal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "loops": {
+          "items": {
+            "$ref": "#/definitions/SessionLoop"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "loops",
+        "sessionId"
+      ],
+      "type": "object"
+    },
     "SessionClearRequest": {
       "additionalProperties": false,
       "properties": {
@@ -10901,6 +12322,87 @@
       ],
       "type": "object"
     },
+    "SessionGoal": {
+      "properties": {
+        "completionEvidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "latestTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "objective": {
+          "type": "string"
+        },
+        "objectiveRevision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "pauseReason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GoalPauseReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/GoalStatus"
+        },
+        "tokenBudget": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokensUsed": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "createdAt",
+        "id",
+        "objective",
+        "objectiveRevision",
+        "sessionId",
+        "status",
+        "tokensUsed",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "SessionHistoryRequest": {
       "additionalProperties": false,
       "properties": {
@@ -10960,6 +12462,18 @@
       "additionalProperties": false,
       "description": "One terminal Turn in canonical Session history.",
       "properties": {
+        "automationInput": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationInputOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
+        },
         "completedAt": {
           "format": "int64",
           "type": "integer"
@@ -11233,6 +12747,78 @@
       },
       "required": [
         "sessions"
+      ],
+      "type": "object"
+    },
+    "SessionLoop": {
+      "properties": {
+        "configRevision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "latestTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nextDueAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schedule": {
+          "$ref": "#/definitions/LoopSchedule"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/LoopStatus"
+        },
+        "stopReason": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LoopStopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "configRevision",
+        "createdAt",
+        "id",
+        "prompt",
+        "schedule",
+        "sessionId",
+        "status",
+        "updatedAt"
       ],
       "type": "object"
     },
@@ -13314,6 +14900,18 @@
       "additionalProperties": false,
       "description": "Current nonterminal Turn projection for one Session.",
       "properties": {
+        "automationInput": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AutomationInputOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact admitted automation Input; later User Steer messages remain ordinary."
+        },
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
@@ -14436,11 +16034,89 @@
     "auth_session_read_response": {
       "$ref": "#/definitions/AuthSessionReadResponse"
     },
+    "automation_action": {
+      "$ref": "#/definitions/AutomationAction"
+    },
+    "automation_changed_notification": {
+      "$ref": "#/definitions/AutomationChangedNotification"
+    },
+    "automation_command": {
+      "$ref": "#/definitions/AutomationCommand"
+    },
+    "automation_command_catalog_request": {
+      "$ref": "#/definitions/AutomationCommandCatalogRequest"
+    },
+    "automation_command_catalog_response": {
+      "$ref": "#/definitions/AutomationCommandCatalogResponse"
+    },
+    "automation_command_descriptor": {
+      "$ref": "#/definitions/AutomationCommandDescriptor"
+    },
+    "automation_command_resolve_request": {
+      "$ref": "#/definitions/AutomationCommandResolveRequest"
+    },
+    "automation_command_resolve_response": {
+      "$ref": "#/definitions/AutomationCommandResolveResponse"
+    },
+    "automation_control_result": {
+      "$ref": "#/definitions/AutomationControlResult"
+    },
+    "automation_effect": {
+      "$ref": "#/definitions/AutomationEffect"
+    },
+    "automation_input_origin": {
+      "$ref": "#/definitions/AutomationInputOrigin"
+    },
+    "automation_list_entry": {
+      "$ref": "#/definitions/AutomationListEntry"
+    },
+    "automation_list_request": {
+      "$ref": "#/definitions/AutomationListRequest"
+    },
+    "automation_list_response": {
+      "$ref": "#/definitions/AutomationListResponse"
+    },
+    "automation_list_scope": {
+      "$ref": "#/definitions/AutomationListScope"
+    },
+    "automation_mode": {
+      "$ref": "#/definitions/AutomationMode"
+    },
+    "automation_object_ref": {
+      "$ref": "#/definitions/AutomationObjectRef"
+    },
+    "automation_request": {
+      "$ref": "#/definitions/AutomationRequest"
+    },
+    "automation_turn_origin": {
+      "$ref": "#/definitions/AutomationTurnOrigin"
+    },
     "browser_host_response": {
       "$ref": "#/definitions/BrowserHostResponse"
     },
     "browser_snapshot": {
       "$ref": "#/definitions/BrowserSnapshot"
+    },
+    "builtin_job_action": {
+      "$ref": "#/definitions/BuiltinJobAction"
+    },
+    "builtin_job_control_request": {
+      "$ref": "#/definitions/BuiltinJobControlRequest"
+    },
+    "builtin_job_id": {
+      "$ref": "#/definitions/BuiltinJobId"
+    },
+    "builtin_job_info": {
+      "$ref": "#/definitions/BuiltinJobInfo"
+    },
+    "builtin_job_list_request": {
+      "$ref": "#/definitions/BuiltinJobListRequest"
+    },
+    "builtin_job_list_response": {
+      "$ref": "#/definitions/BuiltinJobListResponse"
+    },
+    "builtin_job_outcome": {
+      "$ref": "#/definitions/BuiltinJobOutcome"
     },
     "client_request_params": {
       "$ref": "#/definitions/ClientRequestParams"
@@ -14508,6 +16184,15 @@
     "file_upload_response": {
       "$ref": "#/definitions/FileUploadResponse"
     },
+    "goal_action": {
+      "$ref": "#/definitions/GoalAction"
+    },
+    "goal_pause_reason": {
+      "$ref": "#/definitions/GoalPauseReason"
+    },
+    "goal_status": {
+      "$ref": "#/definitions/GoalStatus"
+    },
     "initialize_response": {
       "$ref": "#/definitions/InitializeResponse"
     },
@@ -14519,6 +16204,21 @@
     },
     "jsonrpc_message": {
       "$ref": "#/definitions/JsonRpcMessage"
+    },
+    "loop_action": {
+      "$ref": "#/definitions/LoopAction"
+    },
+    "loop_schedule": {
+      "$ref": "#/definitions/LoopSchedule"
+    },
+    "loop_status": {
+      "$ref": "#/definitions/LoopStatus"
+    },
+    "loop_stop_reason": {
+      "$ref": "#/definitions/LoopStopReason"
+    },
+    "loop_wake_decision": {
+      "$ref": "#/definitions/LoopWakeDecision"
     },
     "mcp_authentication_response": {
       "$ref": "#/definitions/McpAuthenticationResponse"
@@ -14565,6 +16265,9 @@
     "profile_read_response": {
       "$ref": "#/definitions/ProfileReadResponse"
     },
+    "queued_message_source": {
+      "$ref": "#/definitions/QueuedMessageSource"
+    },
     "recover_timeline_request": {
       "$ref": "#/definitions/RecoverTimelineRequest"
     },
@@ -14580,14 +16283,26 @@
     "session_active_turn_response": {
       "$ref": "#/definitions/SessionActiveTurnResponse"
     },
+    "session_automation_read_request": {
+      "$ref": "#/definitions/SessionAutomationReadRequest"
+    },
+    "session_automation_snapshot": {
+      "$ref": "#/definitions/SessionAutomationSnapshot"
+    },
     "session_get_response": {
       "$ref": "#/definitions/SessionGetResponse"
+    },
+    "session_goal": {
+      "$ref": "#/definitions/SessionGoal"
     },
     "session_history_response": {
       "$ref": "#/definitions/SessionHistoryResponse"
     },
     "session_list_response": {
       "$ref": "#/definitions/SessionListResponse"
+    },
+    "session_loop": {
+      "$ref": "#/definitions/SessionLoop"
     },
     "start_turn_request": {
       "$ref": "#/definitions/StartTurnRequest"
@@ -14645,8 +16360,34 @@
     "auth_logout_response",
     "auth_session_clear_response",
     "auth_session_read_response",
+    "automation_action",
+    "automation_changed_notification",
+    "automation_command",
+    "automation_command_catalog_request",
+    "automation_command_catalog_response",
+    "automation_command_descriptor",
+    "automation_command_resolve_request",
+    "automation_command_resolve_response",
+    "automation_control_result",
+    "automation_effect",
+    "automation_input_origin",
+    "automation_list_entry",
+    "automation_list_request",
+    "automation_list_response",
+    "automation_list_scope",
+    "automation_mode",
+    "automation_object_ref",
+    "automation_request",
+    "automation_turn_origin",
     "browser_host_response",
     "browser_snapshot",
+    "builtin_job_action",
+    "builtin_job_control_request",
+    "builtin_job_id",
+    "builtin_job_info",
+    "builtin_job_list_request",
+    "builtin_job_list_response",
+    "builtin_job_outcome",
     "client_request_params",
     "cloud_login_cancel_response",
     "cloud_login_start_response",
@@ -14669,10 +16410,18 @@
     "file_read_response",
     "file_update_response",
     "file_upload_response",
+    "goal_action",
+    "goal_pause_reason",
+    "goal_status",
     "initialize_response",
     "interrupt_turn_request",
     "interrupt_turn_response",
     "jsonrpc_message",
+    "loop_action",
+    "loop_schedule",
+    "loop_status",
+    "loop_stop_reason",
+    "loop_wake_decision",
     "mcp_authentication_response",
     "mcp_authentication_start_response",
     "mcp_server_list_response",
@@ -14688,14 +16437,19 @@
     "node_info",
     "pending_user_action",
     "profile_read_response",
+    "queued_message_source",
     "recover_timeline_request",
     "retry_turn_request",
     "server_notification",
     "server_request",
     "session_active_turn_response",
+    "session_automation_read_request",
+    "session_automation_snapshot",
     "session_get_response",
+    "session_goal",
     "session_history_response",
     "session_list_response",
+    "session_loop",
     "start_turn_request",
     "start_turn_response",
     "submit_turn_input_request",

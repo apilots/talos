@@ -174,6 +174,17 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "messageQueue/add": (params) =>
     messageQueueSessionParams(params) && isRecord(params) && agentUserInput(params.input),
   "messageQueue/list": messageQueueSessionParams,
+  "automation/read": sessionParams,
+  "automation/execute": (params) => sessionParams(params) && isRecord(params)
+    && isRecord(params.action) && ["goal", "loop"].includes(String(params.action.target))
+    && isRecord(params.action.action) && typeof params.action.action.type === "string",
+  "automation/list": emptyParams,
+  "automation/commandCatalog": emptyParams,
+  "automation/resolveCommand": (params) => hasString(params, "text"),
+  "builtinJob/list": (params) => hasString(params, "computerId"),
+  "builtinJob/control": (params) => hasString(params, "computerId")
+    && hasString(params, "executionInstanceId")
+    && hasString(params, "jobId") && hasString(params, "action"),
   "messageQueue/update": (params) =>
     messageQueueMessageParams(params) && isRecord(params) && agentUserInput(params.input),
   "messageQueue/delete": messageQueueMessageParams,

@@ -10,6 +10,7 @@ import { resolveAppServerCommand } from "./app-server-binary";
 import { DesktopAppServerController } from "./app-server-controller";
 import {
   broadcastActiveTurnChanged,
+  broadcastAutomationChanged,
   broadcastMessageQueueChanged,
   broadcastTimelineEvent,
   broadcastRuntimeState,
@@ -46,6 +47,7 @@ async function createController(): Promise<DesktopAppServerController> {
     clientKind: "desktop",
     onActiveTurnChanged: broadcastActiveTurnChanged,
     onMessageQueueChanged: broadcastMessageQueueChanged,
+    onAutomationChanged: broadcastAutomationChanged,
     onEvent: (event) => broadcastTimelineEvent(event),
     onSubscriptionTerminated: (notification) => broadcastSubscriptionTerminated(notification),
     onRuntimeState: (state) => { if(["starting","restarting"].includes(state.kind)) { desktopMediaHost.reset(); void desktopBrowserHost.reset().catch(error=>console.error("Desktop browser reset failed",error)); } broadcastRuntimeState(state); },

@@ -7,6 +7,7 @@ pub fn auth(request: &pb::worker_rpc_call::Request) -> Option<&pb::NodeAuth> {
     use pb::worker_rpc_call::Request as Call;
     macro_rules! read { ($($variant:ident),+ $(,)?) => { match request { $(Call::$variant(value) => value.auth.as_ref(),)+ } }; }
     read!(
+        ExecuteAutomation,
         SetRegistrationAdmission,
         ActiveSessionCommand,
         ReadSessionExecutionState,
@@ -89,6 +90,7 @@ pub fn replace_auth(request: &mut pb::worker_rpc_call::Request, auth: &pb::NodeA
     use pb::worker_rpc_call::Request as Call;
     macro_rules! replace { ($($variant:ident),+ $(,)?) => { match request { $(Call::$variant(value) => value.auth = Some(auth.clone()),)+ } }; }
     replace!(
+        ExecuteAutomation,
         SetRegistrationAdmission,
         ActiveSessionCommand,
         ReadSessionExecutionState,
@@ -254,6 +256,7 @@ pub fn resource_caller(
 ) -> Option<&pb::CoordinatorCallContext> {
     use pb::worker_rpc_call::Request as Call;
     match request {
+        Call::ExecuteAutomation(value) => value.caller.as_ref(),
         Call::AppendSessionHistorySupplement(value) => value.caller.as_ref(),
         Call::ReadSessionHistory(value) => value.caller.as_ref(),
         Call::ResolveAttachments(value) => value.caller.as_ref(),

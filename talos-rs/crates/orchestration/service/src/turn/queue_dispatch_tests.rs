@@ -302,3 +302,147 @@ async fn queued_messages_continue_after_a_failed_turn() {
         "{content}"
     );
 }
+
+#[tokio::test]
+async fn automatic_dispatch_contention_yields_but_manual_start_stays_busy() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    execution.hold_admission.store(true, Ordering::SeqCst);
+    let (service, timeline, store, queue) = test_service(execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    let queued = queue
+        .add("s1", test_user_input("run exactly once"))
+        .unwrap();
+    let message_id = queued.messages[0].id.clone();
+    let winner = tokio::spawn({
+        let service = service.clone();
+        async move { service.try_dispatch_next("s1").await }
+    });
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        execution.admission_reached.notified(),
+    )
+    .await
+    .expect("first dispatcher must hold the original reservation before admission");
+    assert!(store.get_agent_active_turn("s1").await.unwrap().is_none());
+    let automatic = service.try_dispatch_next("s1").await;
+    let manual = service
+        .start_queued_message(test_session(), Some(&message_id))
+        .await;
+    // Always release the original owner before asserting, including the red run.
+    execution.admission_release.notify_one();
+    winner.await.unwrap().unwrap().unwrap();
+    wait_for_canonical_terminal(store.as_ref()).await;
+    assert!(automatic.unwrap().is_none());
+    assert!(manual
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::MessageQueueBusy));
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    assert!(queue.list("s1").unwrap().messages.is_empty());
+    let events = timeline.list_events_after("s1", None, 100).await.unwrap();
+    assert!(!events.iter().any(|record| matches!(
+        record.event,
+        talos_agent_api::TimelineEventPayload::SystemNotice(_)
+    )));
+}
+
+#[tokio::test]
+async fn automatic_dispatch_preserves_busy_errors_after_reservation() {
+    let execution = Arc::new(RecordingAgentExecution {
+        stream_error: Mutex::new(Some(TalosError::new(
+            talos_error::ErrorCode::MessageQueueBusy,
+            "Worker admission is busy",
+        ))),
+        ..Default::default()
+    });
+    let (service, _, store, queue) = test_service(execution).await;
+    create_test_session_record(store).await;
+    queue
+        .add("s1", test_user_input("retain admission failure"))
+        .unwrap();
+    let error = service.try_dispatch_next("s1").await.unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::MessageQueueBusy));
+    assert_eq!(queue.list("s1").unwrap().messages.len(), 1);
+    // The failed later phase must release its reservation, not strand the row.
+    let reservation = queue.reserve_front("s1").unwrap().unwrap();
+    queue.release(reservation).unwrap();
+}
+
+#[tokio::test]
+async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work() {
+    struct UnusedSkills;
+    impl crate::automation::goal_loop::AutomationSkillResolver for UnusedSkills {
+        fn resolve<'a>(
+            &'a self,
+            _: &'a SessionRecord,
+            _: talos_types::AutomationMode,
+        ) -> futures_util::future::BoxFuture<'a, TalosResult<talos_types::SkillSelector>> {
+            unreachable!("ordinary queued input does not select an automation Skill")
+        }
+    }
+    let logs = tempfile::tempdir().unwrap();
+    let log_path = logs.path().join("automation.log");
+    let dispatch = log_dispatch(&log_path);
+    let _subscriber = tracing::dispatcher::set_default(&dispatch);
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let execution = Arc::new(RecordingAgentExecution::default());
+    let (service, _, store, queue) = test_service_with_storage(
+        execution.clone(),
+        Arc::new(RecordingAgentCoordinator::default()),
+        storage.clone(),
+    )
+    .await;
+    service
+        .install_automation(store.automation_store(), Arc::new(UnusedSkills))
+        .unwrap();
+    create_test_session_record(store.clone()).await;
+    let identity = AgentTurnRef::new("s1", "recovered-turn");
+    let input = completed_agent_user_input(
+        &identity.turn_id,
+        "input-original",
+        test_user_input("Original work"),
+        1,
+    )
+    .unwrap();
+    commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
+    DatabaseProfileStore::new(storage.pool().clone())
+        .record_turn_usage(talos_store::profile::TurnUsageUpdate {
+            user_id: "u1".into(),
+            session_id: identity.session_id.clone(),
+            turn_id: identity.turn_id.clone(),
+            request_id: "profile-original".into(),
+            model_ref: ModelRef {
+                provider: "mock".into(),
+                id: "model-1".into(),
+            },
+            usage: Default::default(),
+            usage_available: false,
+            stop_reason: StopReason::WaitingUserAction,
+            timezone: "UTC".into(),
+            completed_at_ms: 1000,
+            usage_date: "2026-09-06".into(),
+        })
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agent_events SET automation_origin_json='invalid-json' WHERE session_id='s1' AND turn_id='recovered-turn' AND sequence=1")
+        .execute(storage.pool()).await.unwrap();
+    queue
+        .add("s1", test_user_input("Next ordinary work"))
+        .unwrap();
+    let active = store.get_agent_active_turn("s1").await.unwrap().unwrap();
+    service
+        .recover_active_turn(test_session(), active)
+        .await
+        .unwrap();
+    wait_for_stream_requests(execution.as_ref(), 1).await;
+    let remaining_usage: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM profile_turn_usage WHERE session_id='s1' AND turn_id='recovered-turn'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    assert_eq!(remaining_usage, 0);
+    assert!(queue.list("s1").unwrap().messages.is_empty());
+    assert!(std::fs::read_to_string(log_path)
+        .unwrap()
+        .contains("settle Session automation"));
+}

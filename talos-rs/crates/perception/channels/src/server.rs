@@ -265,7 +265,7 @@ async fn submit_channel_turn(
                             return Ok(collector.finish());
                         }
                     }
-                    TimelineSubscriptionMessage::MessageQueueChanged(_) | TimelineSubscriptionMessage::ActiveTurnChanged(_) => {}
+                    TimelineSubscriptionMessage::MessageQueueChanged(_) | TimelineSubscriptionMessage::ActiveTurnChanged(_) | TimelineSubscriptionMessage::AutomationChanged(_) => {}
                     TimelineSubscriptionMessage::Closed(_) => {
                         return Ok(collector.finish());
                     }

@@ -26,8 +26,12 @@ use tracing::{info, warn};
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
 mod agent_node_rpc;
+mod application_automation_control;
+mod application_native_jobs;
 mod local_resource_rpc;
-pub use agent_node_rpc::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
+pub use agent_node_rpc::{
+    NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
+};
 mod application_automation;
 mod application_desktop;
 mod application_runtime;
@@ -80,6 +84,7 @@ pub struct TalosServerRuntime {
     shutdown_token: CancellationToken,
     lifecycle: Arc<ServerLifecycle>,
     automation: Automation,
+    _native_job_host: Arc<dyn talos_service::NativeJobHost>,
     plugins: PluginManagerService,
     browser: Arc<talos_browser::BrowserRuntime>,
     worker_rpc: Arc<talos_worker::WorkerRpcHost>,
@@ -119,8 +124,10 @@ pub struct TalosApplicationRuntime {
     pub(crate) memory_progress_store:
         Arc<dyn talos_agent_provider_kernel::KernelMemoryProgressStore>,
     pub(crate) agent_control: Arc<dyn talos_tools::AgentControl>,
+    pub(crate) automation_control: Arc<dyn talos_tools::AutomationControl>,
     pub(crate) tool_image_store: Arc<dyn talos_tools::ToolImageStore>,
     automation: Automation,
+    _native_job_host: Arc<dyn talos_service::NativeJobHost>,
 }
 
 impl TalosApplicationRuntime {
@@ -153,6 +160,7 @@ impl TalosApplicationRuntime {
                 self.config.storage.files.limits.max_upload_bytes,
             ),
             control: self.agent_control.clone(),
+            automation: self.automation_control.clone(),
             files: self.service.files.clone(),
             auth: self.auth_service.clone(),
         })
@@ -474,6 +482,7 @@ impl TalosServerRuntime {
             worker_rpc,
             resource_rpc,
             worker_registration,
+            _native_job_host,
         } = self;
 
         let signal_shutdown = shutdown_token.clone();
@@ -577,13 +586,16 @@ async fn start_server_after_startup(
                 runtime.node_service.clone(),
                 runtime.auth_service.clone(),
                 runtime.coordinator.clone(),
-                session_data,
-                runtime.agent_control.clone(),
-                agent_node_rpc::NodeToolImageRpc::new(
-                    runtime.node_service.clone(),
-                    runtime.tool_image_store.clone(),
-                    runtime.config.storage.files.limits.max_upload_bytes,
-                ),
+                agent_node_rpc::NodeResourceServices {
+                    session_data,
+                    agent_control: runtime.agent_control.clone(),
+                    automation_control: runtime.automation_control.clone(),
+                    tool_images: agent_node_rpc::NodeToolImageRpc::new(
+                        runtime.node_service.clone(),
+                        runtime.tool_image_store.clone(),
+                        runtime.config.storage.files.limits.max_upload_bytes,
+                    ),
+                },
             )
             .and_then(|server| {
                 server
@@ -636,6 +648,7 @@ async fn start_server_after_startup(
         shutdown_token: CancellationToken::new(),
         lifecycle: http_server.lifecycle(),
         automation: runtime.automation,
+        _native_job_host: runtime._native_job_host,
         plugins: runtime.worker.plugin_manager(),
         browser: runtime.worker.browser(),
         worker_rpc: runtime.worker_rpc,

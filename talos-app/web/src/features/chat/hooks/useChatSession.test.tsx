@@ -1,135 +1,21 @@
 // @vitest-environment jsdom
 
+import { getChatSessionMocks, resetChatSessionMocks } from "./useChatSession.test-support";
+import { applyStreamEvent } from "../stream-events";
+import { contextCompactionStarted } from "../__tests__/streaming-fixtures";
+
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
+import { beforeEach, describe, expect, it } from "vitest";
+import { AppProtocol } from "@talos/sdk-browser";
 
 import { useChatSession } from "./useChatSession";
 import { useAppStore } from "@/shared/store/app-store";
 
-vi.hoisted(() => {
-  Object.defineProperty(globalThis, "localStorage", {
-    configurable: true,
-    value: {
-      getItem: () => null,
-      setItem: () => undefined,
-      removeItem: () => undefined,
-    },
-  });
-});
 
-const mocks = vi.hoisted(() => ({
-  activeTurn: undefined as unknown,
-  activeTurnError: null as Error | null,
-  historyLoaded: true,
-  activeTurnQuery: vi.fn(),
-  activeTurnRefetch: vi.fn().mockResolvedValue(undefined),
-  createInitialTurnRequest: vi.fn(() => ({
-    sessionId: "session-1",
-    input: { content: [{ type: "file", fileId: "file-1" }] },
-  })),
-  send: vi.fn(),
-  sessionHistoryRefetch: vi.fn().mockResolvedValue(undefined),
-  messageQueueStart: vi.fn(),
-  messageQueueHook: vi.fn(),
-  timeline: vi.fn(),
-}));
-
-vi.mock("../api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../api")>();
-  return {
-    ...actual,
-    createInitialTurnRequest: mocks.createInitialTurnRequest,
-  };
-});
-
-vi.mock("./useChatQueries", () => ({
-  useActiveTurnQuery: (...args: unknown[]) => {
-    mocks.activeTurnQuery(...args);
-    return {
-      data: mocks.activeTurn === undefined ? undefined : { activeTurn: mocks.activeTurn, lastCompletedEventSeq: 0, latestEventId: null },
-      isFetchedAfterMount: true,
-      isSuccess: !mocks.activeTurnError,
-      error: mocks.activeTurnError,
-      refetch: mocks.activeTurnRefetch,
-    };
-  },
-  useSessionHistoryQuery: (_sessionId: string, enabled: boolean) => ({
-    data: { data: [], nextCursor: null, lastStableEventId: null },
-    error: undefined,
-    isSuccess: enabled && mocks.historyLoaded,
-    isFetchedAfterMount: enabled && mocks.historyLoaded,
-    refetch: mocks.sessionHistoryRefetch,
-  }),
-}));
-
-vi.mock("./useSessionBlocks", () => ({
-  useSessionBlocks: () => [],
-}));
-
-vi.mock("./useSessionQueryInvalidation", () => ({
-  useSessionQueryInvalidation: () => ({
-    invalidateSessionQueries: async () => {
-      await mocks.sessionHistoryRefetch();
-      await mocks.activeTurnRefetch();
-    },
-  }),
-}));
-
-vi.mock("./useSessionMessageQueue", () => ({
-  useSessionMessageQueue: (...args: unknown[]) => {
-    mocks.messageQueueHook(...args);
-    return {
-    queue: undefined,
-    error: undefined,
-    add: vi.fn(),
-    update: vi.fn(),
-    delete: vi.fn(),
-    reorder: vi.fn(),
-    steer: vi.fn(),
-    start: mocks.messageQueueStart,
-    };
-  },
-}));
-
-vi.mock("./useSessionTimelineEvents", () => ({
-  useSessionTimelineEvents: (...args: unknown[]) => {
-    mocks.timeline(...args);
-    return { retryTimeline: vi.fn() };
-  },
-}));
-
-vi.mock("./useSessionStreaming", () => ({
-  useSessionStreaming: () => ({
-    canRetryResponse: false,
-    isCancelling: false,
-    isStreaming: false,
-    retryResponse: vi.fn(),
-    sendMutation: { mutateAsync: mocks.send },
-    sendText: vi.fn(),
-    stopResponse: vi.fn(),
-  }),
-}));
+const mocks = getChatSessionMocks();
 
 describe("useChatSession", () => {
-  beforeEach(() => {
-    useAppStore.setState({ composerDrafts: {} });
-    mocks.send.mockReset().mockRejectedValue(new TalosApiError({
-      code: AppProtocol.ErrorCode.ActiveTurnRunning, localization: null,
-      message: "Active turn is already running",
-    }));
-    mocks.createInitialTurnRequest.mockClear();
-    mocks.activeTurnRefetch.mockClear();
-    mocks.activeTurnQuery.mockClear();
-    mocks.sessionHistoryRefetch.mockClear();
-    mocks.messageQueueStart.mockReset().mockResolvedValue(undefined);
-    mocks.messageQueueHook.mockClear();
-    mocks.timeline.mockClear();
-    mocks.activeTurn = undefined;
-    mocks.activeTurnError = null;
-    mocks.historyLoaded = true;
-    useAppStore.getState().resetStream("session-1");
-  });
+  beforeEach(resetChatSessionMocks);
 
   it("starts the running Turn query while History is still loading and waits to subscribe", () => {
     mocks.historyLoaded = false;
@@ -160,7 +46,7 @@ describe("useChatSession", () => {
     const { result } = renderHook(() => useChatSession("session-1", 0));
     act(() => result.current.setDraft("keep this input"));
 
-    await act(() => result.current.sendTurn());
+    await act(async () => { await expect(result.current.sendTurn()).rejects.toThrow("Active turn is already running"); });
 
     expect(mocks.send).toHaveBeenCalledTimes(1);
     expect(result.current.draft).toBe("keep this input");
@@ -277,6 +163,7 @@ describe("useChatSession", () => {
   });
 
   it("allows an attachment-only turn and forwards ordered file ids", async () => {
+    mocks.send.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() => useChatSession("session-1", 0));
 
     await act(() => result.current.sendTurn({ fileIds: ["file-2", "file-1"] }));
@@ -293,4 +180,29 @@ describe("useChatSession", () => {
     );
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
+
+  it("queues during the accepted-start window before the first Timeline Turn identity arrives", async () => {
+    mocks.isStreaming = true;
+    mocks.messageQueueAdd.mockClear().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useChatSession("session-1", 1));
+    act(() => result.current.setDraft("Next input"));
+    await act(async () => result.current.sendTurn());
+    expect(mocks.messageQueueAdd).toHaveBeenCalledWith({ content: [{ type: "text", text: "Next input" }] });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(result.current.messageQueue.canStart).toBe(false);
+  });
+
+  it("rejects sendText during automatic context compaction instead of acknowledging a discarded input", async () => {
+    const event = contextCompactionStarted("compact-1", "summarizing", null, 1);
+    event.event.data.identity.sessionId = "session-1";
+    applyStreamEvent("session-1", event);
+    mocks.messageQueueAdd.mockClear();
+    const { result } = renderHook(() => useChatSession("session-1", 1));
+    await expect(result.current.sendText("Keep this input")).rejects.toMatchObject({ code: AppProtocol.ErrorCode.Conflict });
+    expect(mocks.messageQueueAdd).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+
+
 });

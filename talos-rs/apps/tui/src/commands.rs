@@ -26,6 +26,19 @@ impl TuiApp {
             return Ok(false);
         }
 
+        if self.automation_edit.is_some() {
+            if let Err(error) = self.save_automation_edit().await {
+                self.show_status_hint(error.to_api_error().message, Duration::from_secs(4));
+            }
+            return Ok(false);
+        }
+        let text = self.input_buffer.trim().to_string();
+        if matches!(text.split_whitespace().next(), Some("/goal" | "/loop")) {
+            if let Err(error) = self.handle_automation_command(&text).await {
+                self.show_status_hint(error.to_api_error().message, Duration::from_secs(4));
+            }
+            return Ok(false);
+        }
         let result = if self.editing_queue_message_id.is_some() {
             let user_input = self.compose_user_input_text()?;
             if self.update_queued_message_text(user_input).await {
@@ -125,9 +138,31 @@ impl TuiApp {
         }
 
         match cmd {
+            "goal" | "loop" => {
+                self.handle_automation_command(command_line).await?;
+                Ok(false)
+            }
+            "automation" => {
+                let mut arguments = args.split_whitespace();
+                let first = arguments.next();
+                if first == Some("ended") {
+                    self.show_automation_scope(
+                        talos_sdk::AutomationListScope::Ended,
+                        arguments.next(),
+                    )
+                    .await?;
+                } else {
+                    self.show_automation_management(first).await?;
+                }
+                Ok(false)
+            }
+            "jobs" => {
+                self.manage_builtin_job(&args).await?;
+                Ok(false)
+            }
             "help" => {
                 self.push_system_notice(
-                    "Commands: /help /model /models /permissions /sessions /status /compact /clear /quit\nKeys: ↑/↓ history, Home/End cursor, Ctrl+V paste image, Ctrl+O expand tool, Ctrl+U clear input"
+                    "Commands: /help /model /models /permissions /sessions /status /compact /clear /goal /loop /automation /jobs /quit\nKeys: Alt+Backspace clear mode, Ctrl+G tasks, Ctrl+Q queue, ↑/↓ history, Home/End cursor, Ctrl+V paste image, Ctrl+O expand tool, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)

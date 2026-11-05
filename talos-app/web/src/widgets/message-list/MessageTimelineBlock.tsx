@@ -1,3 +1,4 @@
+import { useNowMs } from "@/shared/hooks/useNowMs";
 import type { ReactNode } from "react";
 import type { PendingUserAction } from "@talos/sdk-browser";
 import {
@@ -17,7 +18,7 @@ import { useTranslation } from "react-i18next";
 import type { ChatRenderBlock } from "@/shared/types/ui";
 import { Button } from "@/shared/ui/Button";
 import { CopyableBlock } from "./CopyableBlock";
-import { formatDuration } from "./formatDuration";
+import { formatDuration } from "@/shared/lib/formatDuration";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { TurnMetricsFooter } from "./TurnMetricsFooter";
@@ -72,21 +73,13 @@ export function MessageTimelineBlock({
   );
   const hasActiveTimeline = hasRunningItem || (live && processItems.length > 0 && responseItems.length === 0);
   const isAwaitingTimelineDelta = block.live !== false && (live || hasRunningItem) && responseItems.length === 0;
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const nowMs = useNowMs(hasRunningItem);
   const totalDuration = timelineDuration(processItems, nowMs);
   const displayDuration = metrics?.durationMs ?? totalDuration;
   const requiresAttention = processItems.some((item) => item.status === "waitingForInput");
   const [open, setOpen] = useState(hasActiveTimeline);
   const wasActiveRef = useRef(hasActiveTimeline);
   const userCollapsedRef = useRef(false);
-
-  useEffect(() => {
-    if (!hasRunningItem) {
-      return;
-    }
-    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [hasRunningItem]);
 
   useEffect(() => {
     if (requiresAttention) {

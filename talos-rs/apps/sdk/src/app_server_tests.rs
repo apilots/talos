@@ -280,6 +280,7 @@ async fn dispatch_timeline_event_routes_only_matching_subscription() {
             SubscriptionStream {
                 session_id: "session-1".to_string(),
                 sender: first_tx,
+                automation_sender: mpsc::channel(4).0,
                 message_queue_sender: first_queue_tx,
             },
         );
@@ -288,6 +289,7 @@ async fn dispatch_timeline_event_routes_only_matching_subscription() {
             SubscriptionStream {
                 session_id: "session-1".to_string(),
                 sender: second_tx,
+                automation_sender: mpsc::channel(4).0,
                 message_queue_sender: second_queue_tx,
             },
         );
@@ -343,6 +345,7 @@ async fn message_queue_change_closes_a_lagged_sdk_subscription() {
         SubscriptionStream {
             session_id: "session-1".to_string(),
             sender: timeline_tx,
+            automation_sender: mpsc::channel(4).0,
             message_queue_sender: queue_tx,
         },
     );
@@ -407,4 +410,62 @@ fn authenticated_login_response(access_token: &str) -> CloudLoginStatusResponse 
         token_type: "Bearer".to_string(),
         access_token: access_token.to_string(),
     }
+}
+
+#[test]
+fn decodes_automation_invalidation_separately_from_timeline() {
+    let notification = talos_app_protocol::JsonRpcNotification::new(
+        "automation/changed",
+        Some(serde_json::json!({"sessionId":"session-1"})),
+    );
+    let change = response::decode_automation_changed(&notification)
+        .unwrap()
+        .unwrap();
+    assert_eq!(change.session_id, "session-1");
+    assert!(response::decode_message_queue_changed(&notification)
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn automation_changes_are_scoped_and_close_lagged_subscription() {
+    let senders = Arc::new(Mutex::new(HashMap::new()));
+    let (timeline_tx, _timeline_rx) = mpsc::channel(1);
+    let (queue_tx, _queue_rx) = mpsc::channel(1);
+    let (automation_tx, mut automation_rx) = mpsc::channel(1);
+    senders.lock().await.insert(
+        "sub-1".into(),
+        SubscriptionStream {
+            session_id: "session-1".into(),
+            sender: timeline_tx,
+            message_queue_sender: queue_tx,
+            automation_sender: automation_tx,
+        },
+    );
+    dispatch_automation_change(
+        &senders,
+        talos_types::AutomationChangedNotification {
+            session_id: "other".into(),
+        },
+    )
+    .await;
+    assert!(automation_rx.try_recv().is_err());
+    dispatch_automation_change(
+        &senders,
+        talos_types::AutomationChangedNotification {
+            session_id: "session-1".into(),
+        },
+    )
+    .await;
+    assert_eq!(automation_rx.recv().await.unwrap().session_id, "session-1");
+    for _ in 0..2 {
+        dispatch_automation_change(
+            &senders,
+            talos_types::AutomationChangedNotification {
+                session_id: "session-1".into(),
+            },
+        )
+        .await;
+    }
+    assert!(senders.lock().await.is_empty());
 }

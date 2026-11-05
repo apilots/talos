@@ -8,6 +8,9 @@ use crate::{AgentRunResult, AgentTurnRef};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionHistoryTurn {
+    /// Exact admitted automation Input; later User Steer messages remain ordinary.
+    #[serde(default)]
+    pub automation_input: Option<talos_types::AutomationInputOrigin>,
     pub identity: AgentTurnRef,
     pub result: AgentRunResult,
     /// Product notices do not alter execution results or Provider continuation state.

@@ -121,6 +121,7 @@ impl AgentEnvironmentClient {
             }
             match first {
                 Call::ActiveSessionCommand(_)
+                | Call::ExecuteAutomation(_)
                 | Call::PeerFileRead(_)
                 | Call::PeerFileUpdate(_)
                 | Call::PeerFileDelete(_)

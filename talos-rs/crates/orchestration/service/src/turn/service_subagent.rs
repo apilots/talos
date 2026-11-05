@@ -33,6 +33,8 @@ impl TurnService {
         self.submit_turn(
             session,
             TurnSubmission {
+                origin: None,
+                queue_message_id: None,
                 input: request.input,
                 retry_of_message_id: None,
             },

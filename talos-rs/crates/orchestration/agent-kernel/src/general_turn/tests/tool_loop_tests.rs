@@ -736,6 +736,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let provider = Arc::new(PolicyStepProvider::default());
     let policy = Arc::new(RecordingStepPolicy::default());
     let prepared = PreparedGeneralTurn {
+        registration: None,
         trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
@@ -820,6 +821,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     let provider = Arc::new(DynamicResumeProvider::default());
     let recorder = Arc::new(PreparedToolRecorder::default());
     let prepared = PreparedGeneralTurn {
+        registration: None,
         trajectory: Some(recorder.clone()),
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),
@@ -961,6 +963,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
     ));
 
     let prepared = PreparedGeneralTurn {
+        registration: None,
         trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s-question".to_string(),

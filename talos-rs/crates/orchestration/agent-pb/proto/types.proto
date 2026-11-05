@@ -209,6 +209,7 @@ message ApiError {
   ErrorCode code = 1;
   string message = 2;
   oneof localization {
+    AutomationRequestLocalization automation_request = 9;
     BrowserCapabilityUnavailable browser_capability_unavailable = 8;
     Empty computer_deletion_active = 5;
     Empty computer_registration_removed = 6;
@@ -219,6 +220,17 @@ message ApiError {
 }
 message ModelNotConfigured { string provider = 1; string model = 2; }
 message AttachmentCountExceeded { uint64 limit = 1; uint64 actual = 2; }
+message AutomationRequestLocalization { AutomationRequestReason reason = 1; }
+enum AutomationRequestReason {
+  AUTOMATION_REQUEST_REASON_UNSPECIFIED = 0;
+  AUTOMATION_REQUEST_REASON_SELECTED_MODE_MANAGEMENT_CONFLICT = 1;
+  AUTOMATION_REQUEST_REASON_SELECTED_MODE_CONFLICT = 2;
+  AUTOMATION_REQUEST_REASON_COMPUTER_REQUIRED = 3;
+  AUTOMATION_REQUEST_REASON_TASK_NOT_FOUND = 4;
+  AUTOMATION_REQUEST_REASON_GOAL_NOT_FOUND = 5;
+  AUTOMATION_REQUEST_REASON_SYSTEM_SKILL_UNAVAILABLE = 6;
+  AUTOMATION_REQUEST_REASON_CHAT_REQUIRED = 7;
+}
 message Failure { ApiError error = 1; }
 message TurnRef { string session_id = 1; string turn_id = 2; }
 message TokenUsage {
@@ -450,3 +462,11 @@ enum BashOutputCaptureStatus {
   BASH_OUTPUT_CAPTURE_STATUS_INTERRUPTED = 4;
   BASH_OUTPUT_CAPTURE_STATUS_WRITE_FAILED = 5;
 }
+
+// Exact admitted product provenance shared by history and automation RPC.
+message AutomationTurnOrigin {
+  oneof origin { AutomationGoalOrigin goal = 1; AutomationLoopOrigin loop_task = 2; }
+}
+message AutomationGoalOrigin { string goal_id = 1; uint64 objective_revision = 2; }
+message AutomationLoopOrigin { string loop_id = 1; string occurrence_id = 2; uint64 config_revision = 3; }
+message AutomationInputOrigin { string message_id = 1; AutomationTurnOrigin origin = 2; }

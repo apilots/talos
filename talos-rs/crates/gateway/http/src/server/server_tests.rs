@@ -618,3 +618,6 @@ mod handlers;
 mod message_queue;
 #[path = "tests/messages.rs"]
 mod messages;
+
+#[path = "tests/automation.rs"]
+mod automation;

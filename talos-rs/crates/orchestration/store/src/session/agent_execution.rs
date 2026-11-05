@@ -135,6 +135,7 @@ pub enum IdempotencyReservation {
 
 /// Inputs atomically committed for one fresh Agent Turn.
 pub struct CommitInitialAdmissionParams {
+    pub automation_origin: Option<talos_types::AutomationTurnOrigin>,
     pub events: Vec<AgentEvent>,
     pub command: Option<CommandLease>,
 }
@@ -165,6 +166,13 @@ pub struct CommitTerminalSettlementParams {
 /// Narrow atomic Store commands for canonical Agent execution facts.
 #[async_trait]
 pub trait AgentExecutionStore: Send + Sync {
+    /// Read exact original Input metadata for at most 1,000 Turn identities.
+    /// No rows means those Turns have no automation binding; never infer from prompts.
+    async fn read_automation_input_origins(
+        &self,
+        identities: &[AgentTurnRef],
+    ) -> TalosResult<Vec<(AgentTurnRef, talos_types::AutomationInputOrigin)>>;
+
     /// Whether this existing execution-history owner supports private supplements.
     fn supports_history_supplements(&self) -> bool {
         false

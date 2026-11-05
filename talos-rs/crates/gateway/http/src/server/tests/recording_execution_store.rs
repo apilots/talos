@@ -46,6 +46,14 @@ impl RecordingAgentExecutionStore {
 
 #[async_trait]
 impl AgentExecutionStore for RecordingAgentExecutionStore {
+    async fn read_automation_input_origins(
+        &self,
+        _identities: &[AgentTurnRef],
+    ) -> TalosResult<Vec<(AgentTurnRef, talos_types::AutomationInputOrigin)>> {
+        // This fixture records plain execution only; it never installs automation.
+        Ok(Vec::new())
+    }
+
     async fn append_timeline_notice(
         &self,
         _notice: TimelineSystemNotice,

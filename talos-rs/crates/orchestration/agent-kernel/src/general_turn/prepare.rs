@@ -2,6 +2,7 @@ use super::prepare_compaction::*;
 use super::prepare_load_policy::{
     build_compacted_prompt_load_policy, build_initial_prompt_load_policy,
 };
+use super::prepare_warnings::{emit_prompt_warning_events, filter_prompt_warnings};
 use super::*;
 use crate::ExecutionBranch;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
@@ -109,6 +110,7 @@ async fn rebuild_prompt_assembly(
     load_policy: PromptLoadPolicy,
     dynamic_trim_policy: DynamicTrimPolicy,
     skill_options: Option<GeneralTurnSkillOptions>,
+    automation_context: Option<&str>,
 ) -> TalosResult<talos_prompt::PromptAssembly> {
     let context = session_prompt_context_source
         .load(SessionPromptContextConfig {
@@ -192,7 +194,7 @@ async fn rebuild_prompt_assembly(
             })
             .collect(),
     };
-    build_prompt_builder(
+    let mut assembly = build_prompt_builder(
         agent_name,
         agent_description,
         input,
@@ -212,7 +214,11 @@ async fn rebuild_prompt_assembly(
         skill_options,
     )?
     .assemble()
-    .await
+    .await?;
+    if let Some(context) = automation_context {
+        assembly.append_runtime_context(context)?;
+    }
+    Ok(assembly)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -240,6 +246,7 @@ async fn compact_session_history_if_needed(
     session_continuity: Option<SessionContinuity>,
     user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     skill_options: Option<GeneralTurnSkillOptions>,
+    automation_context: Option<&str>,
 ) -> TalosResult<super::types::PreparedSessionCompaction> {
     let Some(trigger) = determine_history_compaction_trigger(prompt_assembly, kernel_config) else {
         return Ok(None);
@@ -320,6 +327,7 @@ async fn compact_session_history_if_needed(
         build_compacted_prompt_load_policy(kernel_config, compact_cursor),
         DynamicTrimPolicy::PreserveAll,
         skill_options,
+        automation_context,
     )
     .await?;
     let summary_sections_after = count_section_kind(
@@ -361,26 +369,13 @@ async fn compact_session_history_if_needed(
     )))
 }
 
-async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[KernelWarning]) {
-    for warning in warnings {
-        let payload = PromptWarningEventData {
-            warning: warning.clone(),
-            agent_id: ctx.agent_id.clone(),
-            session_id: ctx.session_id.clone(),
-            phase: ctx.phase.clone(),
-        };
-        emit_stream_event(
-            ctx.stream_tx.as_ref(),
-            AgentKernelEventPayload::PromptWarning(payload),
-        )
-        .await;
-    }
-}
-
 pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
-    talos_error::TalosError::new(talos_error::ErrorCode::ContextCompactionFailed, format!(
-        "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
-    ))
+    talos_error::TalosError::new(
+        talos_error::ErrorCode::ContextCompactionFailed,
+        format!(
+            "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
+        ),
+    )
 }
 
 pub(crate) fn build_blocked_compaction_state() -> SessionCompactionState {
@@ -411,55 +406,6 @@ pub(crate) fn prompt_budget_still_exhausted_from_diagnostics(
     diagnostics.window_usage.window_resolved && !diagnostics.window_usage.within_effective_budget
 }
 
-pub(crate) fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
-    match warning {
-        KernelWarning::PromptBootstrapFileMissing(payload) => {
-            Some(format!("missing:{:?}:{}", payload.file_kind, payload.path))
-        }
-        KernelWarning::PromptBootstrapFileTruncated(payload) => Some(format!(
-            "truncated:{:?}:{}",
-            payload.file_kind, payload.path
-        )),
-        KernelWarning::PromptBootstrapFileDropped(payload) => {
-            Some(format!("dropped:{:?}:{}", payload.file_kind, payload.path))
-        }
-        KernelWarning::PromptDynamicSectionDropped(payload) => Some(format!(
-            "dynamic_dropped:{}",
-            serialize_section_kinds(&payload.sections)
-        )),
-    }
-}
-
-fn serialize_section_kinds(sections: &[PromptSectionKind]) -> String {
-    sections
-        .iter()
-        .map(|section| format!("{section:?}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn filter_prompt_warnings(
-    ctx: &InvocationContext,
-    warnings: Vec<KernelWarning>,
-) -> (Vec<KernelWarning>, Option<PromptWarningState>) {
-    let mut warning_state = ctx.session.state.prompt_warning.clone().unwrap_or_default();
-    let mut changed = false;
-    let mut filtered = Vec::new();
-
-    for warning in warnings {
-        if let Some(key) = prompt_warning_key(&warning) {
-            if warning_state.seen_warning_keys.insert(key) {
-                changed = true;
-                filtered.push(warning);
-            }
-        } else {
-            filtered.push(warning);
-        }
-    }
-
-    (filtered, changed.then_some(warning_state))
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn prepare_general_turn(
     ctx: &mut InvocationContext,
@@ -472,8 +418,13 @@ pub async fn prepare_general_turn(
     user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
+    registration: Option<Arc<crate::tool_execution::registration::RegistrationGuard>>,
     run_tasks: talos_run_control::RunTaskGroup,
 ) -> TalosResult<PreparedGeneralTurn> {
+    let automation_context = registration
+        .as_ref()
+        .map(|guard| guard.runtime_context())
+        .transpose()?;
     let session_id = ctx.session_id.clone();
     let invocation_id = ctx.invocation_id.clone();
     let agent_id = ctx.agent_id.clone();
@@ -518,6 +469,7 @@ pub async fn prepare_general_turn(
         initial_load_policy.clone(),
         DynamicTrimPolicy::PreserveAll,
         skill_options.clone(),
+        automation_context.as_deref(),
     )
     .await?;
     super::attachments::reserve_prompt_attachment_tokens(&mut prompt_assembly, attachment_tokens)?;
@@ -575,6 +527,7 @@ pub async fn prepare_general_turn(
         session_continuity.clone(),
         user_workspace_memory.clone(),
         skill_options.clone(),
+        automation_context.as_deref(),
     )
     .await;
     let maybe_compaction = match compaction_result {
@@ -700,6 +653,7 @@ pub async fn prepare_general_turn(
             fallback_load_policy,
             DynamicTrimPolicy::TrimToBudget,
             skill_options,
+            automation_context.as_deref(),
         )
         .await?;
         super::attachments::reserve_prompt_attachment_tokens(
@@ -815,6 +769,7 @@ pub async fn prepare_general_turn(
         super::attachments::render_prompt_messages(&prompt_assembly, input, attachments)?;
 
     Ok(PreparedGeneralTurn {
+        registration,
         trajectory: ctx.trajectory.clone(),
         browser_uploads: super::attachments::browser_uploads(&ctx.resolved_attachments),
         session_id: session_id.clone(),

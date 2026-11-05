@@ -1,6 +1,6 @@
 //! Composes the render runtime, live reducer, and transcript store.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::render_runtime::common::style::StyledLine;
 use crate::render_runtime::render::live::{LiveProjectionBlock, LiveReducer};
@@ -29,6 +29,10 @@ pub(crate) struct RenderRuntimeEngine {
     message_blocks: HashMap<String, AgentMessageBlock>,
     tool_call_blocks: HashMap<String, String>,
     local_user_input_block: Option<TranscriptBlockId>,
+    automation_inputs: HashMap<(String, String), talos_sdk::AutomationInputOrigin>,
+    input_blocks: HashMap<(String, String), TranscriptBlockId>,
+    input_created_at: HashMap<(String, String), i64>,
+    annotated_inputs: HashSet<(String, String)>,
 }
 
 impl RenderRuntimeEngine {
@@ -89,6 +93,94 @@ impl RenderRuntimeEngine {
             self.runtime.handle_event(TuiRuntimeEvent::HistoryLoaded);
         }
         count
+    }
+
+    pub(crate) fn set_automation_input(
+        &mut self,
+        turn_id: &str,
+        input: talos_sdk::AutomationInputOrigin,
+    ) {
+        let key = (turn_id.to_string(), input.message_id.clone());
+        self.automation_inputs.insert(key.clone(), input);
+        self.annotate_input(&key);
+    }
+    pub(crate) fn loop_input_created_at(&self, turn_id: &str, loop_id: &str) -> Option<i64> {
+        self.automation_inputs.iter().find_map(|(key, input)| {
+            (key.0 == turn_id && matches!(&input.origin, talos_sdk::AutomationTurnOrigin::Loop { loop_id: id, .. } if id == loop_id))
+                .then(|| self.input_created_at.get(key).copied()).flatten()
+        })
+    }
+    fn annotate_input(&mut self, key: &(String, String)) {
+        if self.annotated_inputs.contains(key) {
+            return;
+        }
+        let (Some(input), Some(block)) =
+            (self.automation_inputs.get(key), self.input_blocks.get(key))
+        else {
+            return;
+        };
+        let label = match input.origin {
+            talos_sdk::AutomationTurnOrigin::Goal { .. } => "  ◎ Goal",
+            talos_sdk::AutomationTurnOrigin::Loop { .. } => "  ↻ Loop",
+        };
+        self.store.append_input_metadata(*block, label);
+        self.annotated_inputs.insert(key.clone());
+        self.runtime.handle_event(TuiRuntimeEvent::LiveCommitTick);
+    }
+    pub(crate) fn apply_turn_event_payload(&mut self, turn_id: &str, payload: AgentEventPayload) {
+        let input = match &payload {
+            AgentEventPayload::MessageStarted(started) => Some(&started.message),
+            AgentEventPayload::MessageCompleted(message) => Some(message),
+            _ => None,
+        };
+        if let Some(message) = input.filter(|m| m.role == talos_sdk::AgentMessageRole::User) {
+            self.input_created_at.insert(
+                (turn_id.into(), message.message_id.clone()),
+                message.created_at,
+            );
+        }
+        let key = match &payload {
+            AgentEventPayload::MessageBlockStarted(started)
+                if matches!(
+                    started.block.content,
+                    AgentMessageBlockContent::UserContent(_)
+                ) =>
+            {
+                Some((turn_id.to_string(), started.message_id.clone()))
+            }
+            AgentEventPayload::MessageCompleted(message)
+                if message.role == talos_sdk::AgentMessageRole::User =>
+            {
+                Some((turn_id.to_string(), message.message_id.clone()))
+            }
+            _ => None,
+        };
+        if let AgentEventPayload::MessageCompleted(message) = &payload {
+            if message.role == talos_sdk::AgentMessageRole::User
+                && key
+                    .as_ref()
+                    .is_some_and(|key| !self.input_blocks.contains_key(key))
+            {
+                self.push_many_finalized(
+                    crate::render_runtime::render::history::agent_message_to_blocks(message),
+                );
+            }
+        }
+        let complete = matches!(payload, AgentEventPayload::MessageCompleted(_));
+        self.apply_agent_event_payload(payload);
+        if let Some(key) = key {
+            if let Some(block) = self
+                .store
+                .blocks()
+                .last()
+                .filter(|block| block.kind == TranscriptBlockKind::UserInput)
+            {
+                self.input_blocks.insert(key.clone(), block.id);
+            }
+            if complete {
+                self.annotate_input(&key);
+            }
+        }
     }
 
     pub(crate) fn apply_agent_event_payload(&mut self, payload: AgentEventPayload) {
@@ -241,6 +333,10 @@ impl RenderRuntimeEngine {
         self.message_blocks.clear();
         self.tool_call_blocks.clear();
         self.local_user_input_block = None;
+        self.automation_inputs.clear();
+        self.input_blocks.clear();
+        self.input_created_at.clear();
+        self.annotated_inputs.clear();
     }
 
     fn push_finalized(&mut self, block: FinalizedTranscriptBlock) {

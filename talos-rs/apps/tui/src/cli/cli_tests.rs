@@ -161,3 +161,118 @@ fn plugin_lifecycle_uses_install_ids_and_preserves_the_selected_computer() {
         }))
     ));
 }
+
+#[test]
+fn goal_and_loop_cli_require_an_existing_session_and_preserve_named_actions() {
+    assert!(Cli::try_parse_from(["talos", "goal", "start", "objective"]).is_err());
+    assert!(Cli::try_parse_from(["talos", "loop", "list"]).is_err());
+    let goal = Cli::try_parse_from([
+        "talos",
+        "goal",
+        "--session",
+        "s",
+        "clear",
+        "--id",
+        "old-goal",
+    ])
+    .unwrap();
+    assert!(
+        matches!(goal.command,Some(Commands::Goal(types::GoalCmd {session,command:Some(types::GoalCommands::Clear {id:Some(id)})})) if session=="s" && id=="old-goal")
+    );
+    let loop_cmd = Cli::try_parse_from([
+        "talos",
+        "loop",
+        "--session",
+        "s",
+        "edit",
+        "loop-1",
+        "--every",
+        "5",
+        "new prompt",
+    ])
+    .unwrap();
+    assert!(
+        matches!(loop_cmd.command,Some(Commands::Loop(types::LoopCmd {session,command:Some(types::LoopCommands::Edit {id,every:Some(5),dynamic:false,prompt})})) if session=="s" && id=="loop-1" && prompt==vec!["new prompt"])
+    );
+    assert!(Cli::try_parse_from([
+        "talos",
+        "loop",
+        "--session",
+        "s",
+        "start",
+        "--every",
+        "5",
+        "--dynamic",
+        "prompt"
+    ])
+    .is_err());
+}
+#[test]
+fn cli_flags_build_typed_schedules_without_parsing_or_rewriting_prompt() {
+    use talos_sdk::{LoopAction, LoopSchedule};
+    let prompt = "5m 每 10 分钟检查 CI";
+    assert_eq!(
+        automation::loop_create(prompt.into(), Some(5), false).unwrap(),
+        LoopAction::Create {
+            prompt: prompt.into(),
+            schedule: LoopSchedule::FixedInterval { minutes: 5 }
+        }
+    );
+    assert_eq!(
+        automation::loop_create(prompt.into(), None, true).unwrap(),
+        LoopAction::Create {
+            prompt: prompt.into(),
+            schedule: LoopSchedule::ModelDecided {}
+        }
+    );
+    assert_eq!(
+        automation::loop_schedule(None, false).unwrap(),
+        LoopSchedule::ModelDecided {}
+    );
+    assert!(automation::loop_schedule(Some(0), false).is_err());
+    assert!(automation::loop_schedule(Some(5), true).is_err());
+}
+#[test]
+fn native_jobs_cli_requires_computer_and_keeps_owner_scoped_action() {
+    assert!(Cli::try_parse_from(["talos", "automation", "jobs", "list"]).is_err());
+    let command = Cli::try_parse_from([
+        "talos",
+        "automation",
+        "jobs",
+        "--computer",
+        "computer-1",
+        "run-once",
+        "profile-usage-retention",
+    ])
+    .unwrap();
+    assert!(
+        matches!(command.command,Some(Commands::Automation(types::AutomationCmd {command:types::AutomationCommands::Jobs {computer,command:Some(types::JobCommands::RunOnce {id})}})) if computer=="computer-1" && id=="profile-usage-retention")
+    );
+}
+
+#[test]
+fn foreground_creation_uses_owner_receipt_even_when_snapshot_is_already_empty() {
+    use talos_sdk::{
+        AutomationControlResult, AutomationEffect, AutomationObjectRef, SessionAutomationSnapshot,
+    };
+    let mut result = AutomationControlResult {
+        snapshot: SessionAutomationSnapshot {
+            session_id: "s".into(),
+            goal: None,
+            loops: vec![],
+        },
+        effect: AutomationEffect::Applied,
+        bound_origin: None,
+        created_object: Some(AutomationObjectRef::Loop {
+            loop_id: "exact-created-loop".into(),
+        }),
+    };
+    assert_eq!(
+        automation::created_target(&result).unwrap(),
+        AutomationObjectRef::Loop {
+            loop_id: "exact-created-loop".into()
+        }
+    );
+    result.created_object = None;
+    assert!(automation::created_target(&result).is_err());
+}

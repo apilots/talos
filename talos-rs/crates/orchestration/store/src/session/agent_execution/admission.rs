@@ -31,7 +31,11 @@ pub(super) async fn commit_initial(
     store: &DatabaseSessionStore,
     params: CommitInitialAdmissionParams,
 ) -> TalosResult<AgentEventCommit> {
-    let CommitInitialAdmissionParams { events, command } = params;
+    let CommitInitialAdmissionParams {
+        events,
+        command,
+        automation_origin,
+    } = params;
     let (identity, initial_message_id) = validate_initial_admission(&events)?;
     if let Some(command) = command.as_ref() {
         if command.command != IdempotentCommand::TurnSubmission
@@ -53,6 +57,15 @@ pub(super) async fn commit_initial(
         .last()
         .expect("validated admission is non-empty")
         .event_seq;
+    if let Some(origin) = automation_origin.as_ref() {
+        crate::automation::goal_loop::bind_admission_origin(
+            transaction.as_mut(),
+            &identity,
+            origin,
+            &initial_message_id,
+        )
+        .await?;
+    }
     let updated_at = chrono::Utc::now().timestamp();
     let last_event_seq_param = last_event_seq.to_string();
     let updated_at_param = updated_at.to_string();

@@ -77,6 +77,56 @@ pub(crate) fn require_non_empty(value: &str, field: &str) -> TalosResult<()> {
 
 #[async_trait]
 impl Gateway for ServiceGateway {
+    async fn session_automation(
+        &self,
+        actor: &Actor,
+        request: talos_types::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_types::SessionAutomationSnapshot> {
+        ServiceGateway::session_automation(self, actor, request).await
+    }
+    async fn execute_automation(
+        &self,
+        actor: &Actor,
+        request: talos_types::AutomationRequest,
+    ) -> TalosResult<talos_types::AutomationControlResult> {
+        ServiceGateway::execute_automation(self, actor, request).await
+    }
+    async fn list_automation(
+        &self,
+        actor: &Actor,
+        request: talos_types::AutomationListRequest,
+    ) -> TalosResult<talos_types::AutomationListResponse> {
+        ServiceGateway::list_automation(self, actor, request).await
+    }
+    async fn automation_command_catalog(
+        &self,
+        actor: &Actor,
+        request: talos_types::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_types::AutomationCommandCatalogResponse> {
+        ServiceGateway::automation_command_catalog(self, actor, request).await
+    }
+    async fn resolve_automation_command(
+        &self,
+        actor: &Actor,
+        request: talos_types::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_types::AutomationCommandResolveResponse> {
+        ServiceGateway::resolve_automation_command(self, actor, request).await
+    }
+    async fn list_builtin_jobs(
+        &self,
+        actor: &Actor,
+        request: talos_types::BuiltinJobListRequest,
+    ) -> TalosResult<talos_types::BuiltinJobListResponse> {
+        ServiceGateway::list_builtin_jobs(self, actor, request).await
+    }
+    async fn control_builtin_job(
+        &self,
+        actor: &Actor,
+        request: talos_types::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_types::BuiltinJobInfo> {
+        ServiceGateway::control_builtin_job(self, actor, request).await
+    }
+
     async fn list_computers(
         &self,
         actor: &Actor,

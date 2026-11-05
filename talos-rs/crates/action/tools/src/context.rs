@@ -15,8 +15,8 @@ use crate::state::{
     ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore, ToolCatalogState,
     ToolResultBudgetState,
 };
-use crate::AgentControl;
 use crate::CommandRiskAssessor;
+use crate::{AgentControl, AutomationControl};
 
 /// Classifies best-effort progress emitted while a tool is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +91,7 @@ pub struct ToolContext {
     current_call_id: Option<String>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
     agent_control: Option<Arc<dyn AgentControl>>,
+    automation_control: Option<Arc<dyn AutomationControl>>,
     memory_reader: Option<Arc<dyn MemoryReader>>,
     image_store: Option<Arc<dyn crate::ToolImageStore>>,
     browser_uploads: Vec<talos_types::ToolInputFile>,
@@ -134,6 +135,7 @@ impl ToolContext {
             current_call_id: None,
             kernel_config,
             agent_control: None,
+            automation_control: None,
             memory_reader: None,
             image_store: None,
             browser_uploads: Vec::new(),
@@ -152,6 +154,12 @@ impl ToolContext {
     /// Attaches the application-owned child Session control port.
     pub fn with_agent_control(mut self, control: Arc<dyn AgentControl>) -> Self {
         self.agent_control = Some(control);
+        self
+    }
+
+    /// Attaches the invocation-owned Goal/Loop operation port.
+    pub fn with_automation_control(mut self, control: Arc<dyn AutomationControl>) -> Self {
+        self.automation_control = Some(control);
         self
     }
 
@@ -289,6 +297,10 @@ impl ToolContext {
     /// Returns the application-owned child Session control port when configured.
     pub fn agent_control(&self) -> Option<Arc<dyn AgentControl>> {
         self.agent_control.clone()
+    }
+
+    pub fn automation_control(&self) -> Option<Arc<dyn AutomationControl>> {
+        self.automation_control.clone()
     }
 
     pub fn memory_reader(&self) -> Option<Arc<dyn MemoryReader>> {

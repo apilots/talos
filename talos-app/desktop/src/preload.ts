@@ -42,6 +42,10 @@ const bridge: TalosDesktopBridge = {
     const listener = (_event: IpcRendererEvent, notice: AppProtocol.SessionActiveTurnChangedNotification) => handler(notice);
     ipcRenderer.on(TALOS_IPC.activeTurnChanged, listener); return () => ipcRenderer.off(TALOS_IPC.activeTurnChanged, listener);
   },
+  onAutomationChanged: (handler) => {
+    const listener = (_event: IpcRendererEvent, notice: AppProtocol.AutomationChangedNotification) => handler(notice);
+    ipcRenderer.on(TALOS_IPC.automationChanged, listener); return () => ipcRenderer.off(TALOS_IPC.automationChanged, listener);
+  },
   onMessageQueueChanged: (handler) => {
     const listener = (_event: IpcRendererEvent, notice: AppProtocol.MessageQueueChangedNotification) => handler(notice);
     ipcRenderer.on(TALOS_IPC.messageQueueChanged, listener); return () => ipcRenderer.off(TALOS_IPC.messageQueueChanged, listener);

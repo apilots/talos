@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { TalosContentItem, TalosToolProgressKind } from "@/shared/types/protocol";
 import type { ChatToolStatus } from "@/shared/types/ui";
 import { ToolCallCard } from "@/widgets/tool-call-card/ToolCallCard";
-import { formatDuration } from "./formatDuration";
+import { formatDuration } from "@/shared/lib/formatDuration";
 import { buildToolDisplayTitle } from "./toolDisplay";
 import { ToolResultPreview, ToolResultRenderer } from "./ToolResultRenderer";
 

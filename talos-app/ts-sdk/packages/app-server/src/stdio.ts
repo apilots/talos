@@ -8,6 +8,7 @@ import {
   type AppServerErrorHandler,
   type AppServerEventHandler,
   type AppServerActiveTurnChangedHandler,
+  type AppServerAutomationChangedHandler,
   type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
@@ -216,6 +217,11 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     this.events.on("activeTurnChanged", handler); return () => this.events.off("activeTurnChanged", handler);
   }
 
+  onAutomationChanged(handler: AppServerAutomationChangedHandler): () => void {
+    this.events.on("automationChanged", handler);
+    return () => this.events.off("automationChanged", handler);
+  }
+
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
     this.events.on("messageQueueChanged", handler);
     return () => this.events.off("messageQueueChanged", handler);
@@ -338,6 +344,9 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       }
       if (message.method === "session/activeTurnChanged" && message.params && typeof message.params === "object" && "sessionId" in message.params && "state" in message.params) {
         this.events.emit("activeTurnChanged", message.params);
+      }
+      if (message.method === "automation/changed" && isAutomationChangedNotification(message.params)) {
+        this.events.emit("automationChanged", message.params);
       }
       if (
         message.method === "messageQueue/changed" &&
@@ -567,4 +576,8 @@ function decodeAppServerErrorBody(value: unknown): AppProtocol.AppServerErrorBod
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAutomationChangedNotification(value: unknown): value is AppProtocol.AutomationChangedNotification {
+  return !!value && typeof value === "object" && "sessionId" in value && typeof value.sessionId === "string";
 }

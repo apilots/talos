@@ -1,8 +1,9 @@
+import type { AutomationMode, AutomationTurnOrigin } from "@talos/sdk-browser";
 import { Sparkles, Wrench } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 
-import { MessageAttachments } from "./MessageAttachments";
+import { UserInputMessage } from "./UserInputMessage";
 
 import { cn } from "@/shared/lib/cn";
 const MarkdownRenderer = lazy(() =>
@@ -10,25 +11,30 @@ const MarkdownRenderer = lazy(() =>
 );
 
 export function TextMessageBlock({
+  activationMode,
+  automationOrigin,
+  createdAt,
   fileIds = [],
   kind,
   messageId,
   text,
 }: {
+  activationMode?: AutomationMode;
+  automationOrigin?: AutomationTurnOrigin;
+  createdAt?: number;
   fileIds?: string[];
   kind: "user" | "assistant" | "thinking" | "system";
   messageId?: string;
   text: string;
 }) {
   const { t } = useTranslation("chat");
-  const isUser = kind === "user";
+  if (kind === "user") return <UserInputMessage activationMode={activationMode} automationOrigin={automationOrigin} createdAt={createdAt} fileIds={fileIds} messageId={messageId} text={text} />;
   const isThinking = kind === "thinking";
   const isSystem = kind === "system";
   const icon = isThinking ? <Sparkles size={16} /> : <Wrench size={16} />;
   return (
     <div
-      className={cn("flex items-start gap-3.5 md:gap-4", isUser ? "justify-end" : "justify-start")}
-      data-chat-user-block-id={isUser ? messageId : undefined}
+      className="flex items-start justify-start gap-3.5 md:gap-4"
     >
       {isThinking || isSystem ? (
         <div
@@ -47,25 +53,15 @@ export function TextMessageBlock({
       <div
         className={cn(
           "min-w-0",
-          isUser
-            ? "max-w-[min(100%,39rem)] rounded-[var(--radius-panel)] border border-border/70 bg-surface px-4 py-3 text-ink"
-            : isThinking
+          isThinking
               ? "flex-1 rounded-[var(--radius-panel)] border border-border/70 bg-background/[0.34] px-4 py-3 text-muted"
               : isSystem
                 ? "flex-1 rounded-[var(--radius-panel)] border border-border/65 bg-background/40 px-4 py-3 text-muted"
                 : "flex-1 px-1 py-2 text-ink",
         )}
-        data-response-surface={!isUser && !isThinking && !isSystem ? "plain" : undefined}
+        data-response-surface={!isThinking && !isSystem ? "plain" : undefined}
       >
         <div>
-          {isUser ? (
-            <div className="space-y-2.5">
-              {fileIds.length > 0 ? <MessageAttachments fileIds={fileIds} /> : null}
-              {text ? (
-                <div className="whitespace-pre-wrap break-words text-sm leading-[1.7]">{text}</div>
-              ) : null}
-            </div>
-          ) : (
             <Suspense fallback={<div className="text-sm text-muted">{t("renderingMessage")}</div>}>
               <MarkdownRenderer
                 className={cn(
@@ -79,7 +75,6 @@ export function TextMessageBlock({
                 text={text}
               />
             </Suspense>
-          )}
         </div>
       </div>
     </div>

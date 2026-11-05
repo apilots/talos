@@ -65,15 +65,18 @@ impl DesktopFixture {
             nodes.clone(),
             Arc::new(TestAuth),
             coordinator.clone(),
-            NodeSessionDataRpc::new(
-                nodes.clone(),
-                sessions,
-                Arc::new(EmptyHistory),
-                Arc::new(TestAttachments),
-                Arc::new(TestMemoryProgress::default()),
-            ),
-            Arc::new(TestAgentControl),
-            NodeToolImageRpc::new(nodes.clone(), Arc::new(TestToolImages), 1024),
+            NodeResourceServices {
+                session_data: NodeSessionDataRpc::new(
+                    nodes.clone(),
+                    sessions,
+                    Arc::new(EmptyHistory),
+                    Arc::new(TestAttachments),
+                    Arc::new(TestMemoryProgress::default()),
+                ),
+                agent_control: Arc::new(TestAgentControl),
+                automation_control: Arc::new(TestAutomationControl),
+                tool_images: NodeToolImageRpc::new(nodes.clone(), Arc::new(TestToolImages), 1024),
+            },
         )
         .unwrap();
         let stop = CancellationToken::new();

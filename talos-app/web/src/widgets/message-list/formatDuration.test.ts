@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDuration } from "./formatDuration";
+import { formatDuration } from "@/shared/lib/formatDuration";
 
 describe("formatDuration", () => {
   it("formats shared timeline and tool durations", () => {

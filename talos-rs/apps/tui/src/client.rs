@@ -29,6 +29,7 @@ pub struct SessionSubscription {
 /// Session-scoped UI signals; canonical Turn execution keeps its existing owner.
 pub(crate) enum SessionEvent {
     QueueChanged(MessageQueueChangedNotification),
+    AutomationChanged(talos_sdk::AutomationChangedNotification),
     Notice {
         event_seq: i64,
         notice: talos_sdk::TimelineSystemNotice,
@@ -46,6 +47,12 @@ impl SessionSubscription {
         }
     }
 
+    /// Wait for an existing Session invalidation without exposing a second
+    /// event protocol. False means the forwarding stream has closed.
+    pub async fn wait_for_change(&mut self) -> bool {
+        self.receiver.recv().await.is_some()
+    }
+
     pub(crate) fn try_recv(&mut self) -> Result<SessionEvent, mpsc::error::TryRecvError> {
         self.receiver.try_recv()
     }
@@ -61,6 +68,38 @@ impl Drop for SessionSubscription {
 
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
+    async fn session_automation(
+        &self,
+        request: talos_sdk::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_sdk::SessionAutomationSnapshot>;
+    async fn execute_automation(
+        &self,
+        request: talos_sdk::AutomationRequest,
+    ) -> TalosResult<talos_sdk::AutomationControlResult>;
+    async fn list_automation(
+        &self,
+        request: talos_sdk::AutomationListRequest,
+    ) -> TalosResult<talos_sdk::AutomationListResponse>;
+    async fn automation_command_catalog(
+        &self,
+        request: talos_sdk::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_sdk::AutomationCommandCatalogResponse>;
+    async fn resolve_automation_command(
+        &self,
+        request: talos_sdk::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_sdk::AutomationCommandResolveResponse>;
+    async fn list_builtin_jobs(
+        &self,
+        request: talos_sdk::BuiltinJobListRequest,
+    ) -> TalosResult<talos_sdk::BuiltinJobListResponse>;
+    async fn control_builtin_job(
+        &self,
+        request: talos_sdk::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_sdk::BuiltinJobInfo>;
+    async fn list_skills(
+        &self,
+        request: talos_sdk::SkillsListRequest,
+    ) -> TalosResult<talos_sdk::SkillsListResponse>;
     async fn list_models(&self) -> TalosResult<ModelListResponse>;
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse>;
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>>;
@@ -153,6 +192,62 @@ impl<C> GatewayClient for Mutex<C>
 where
     C: SdkGatewayClient + Send,
 {
+    async fn session_automation(
+        &self,
+        request: talos_sdk::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_sdk::SessionAutomationSnapshot> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::session_automation(&mut *client, request).await
+    }
+    async fn execute_automation(
+        &self,
+        request: talos_sdk::AutomationRequest,
+    ) -> TalosResult<talos_sdk::AutomationControlResult> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::execute_automation(&mut *client, request).await
+    }
+    async fn list_automation(
+        &self,
+        request: talos_sdk::AutomationListRequest,
+    ) -> TalosResult<talos_sdk::AutomationListResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::list_automation(&mut *client, request).await
+    }
+    async fn automation_command_catalog(
+        &self,
+        request: talos_sdk::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_sdk::AutomationCommandCatalogResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::automation_command_catalog(&mut *client, request).await
+    }
+    async fn resolve_automation_command(
+        &self,
+        request: talos_sdk::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_sdk::AutomationCommandResolveResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::resolve_automation_command(&mut *client, request).await
+    }
+    async fn list_builtin_jobs(
+        &self,
+        request: talos_sdk::BuiltinJobListRequest,
+    ) -> TalosResult<talos_sdk::BuiltinJobListResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::list_builtin_jobs(&mut *client, request).await
+    }
+    async fn control_builtin_job(
+        &self,
+        request: talos_sdk::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_sdk::BuiltinJobInfo> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::control_builtin_job(&mut *client, request).await
+    }
+    async fn list_skills(
+        &self,
+        request: talos_sdk::SkillsListRequest,
+    ) -> TalosResult<talos_sdk::SkillsListResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::list_skills(&mut *client, request).await
+    }
     async fn list_models(&self) -> TalosResult<ModelListResponse> {
         let mut client = self.lock().await;
         SdkGatewayClient::list_models(&mut *client, ModelListRequest { node_id: None }).await
@@ -309,6 +404,7 @@ where
 
         let mut timeline = subscription.stream.into_inner();
         let mut changes = subscription.message_queue_changes;
+        let mut automation = subscription.automation_changes;
         let (sender, receiver) = mpsc::channel(32);
         let forward_task = tokio::spawn(async move {
             loop {
@@ -318,6 +414,10 @@ where
                         if let talos_sdk::TimelineEventPayload::SystemNotice(notice) = event.event {
                             if sender.send(SessionEvent::Notice { event_seq: event.event_seq, notice }).await.is_err() { return; }
                         }
+                    }
+                    change = automation.recv() => {
+                        let Some(change) = change else { return; };
+                        if sender.send(SessionEvent::AutomationChanged(change)).await.is_err() { return; }
                     }
                     change = changes.recv() => {
                         let Some(change) = change else {

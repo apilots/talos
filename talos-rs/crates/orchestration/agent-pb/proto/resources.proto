@@ -44,6 +44,7 @@ message TimelineEvent {
 message SessionHistoryTurn {
   TurnRef identity = 1; HistoryRunResult result = 2; repeated TimelineEvent notices = 3;
   int64 completed_event_seq = 4; int64 completed_at = 5;
+  AutomationInputOrigin automation_input = 6;
 }
 message SessionHistoryTurns { repeated SessionHistoryTurn data = 1; }
 message ReadSessionHistoryResponse { oneof result { SessionHistoryTurns turns = 1; Failure failure = 2; } }

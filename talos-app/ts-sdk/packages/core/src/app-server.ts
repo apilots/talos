@@ -70,6 +70,8 @@ export type AppServerSubscriptionTerminatedHandler = (
   notification: AppProtocol.SubscriptionTerminatedNotification,
 ) => void;
 
+export type AppServerAutomationChangedHandler = (notification: AppProtocol.AutomationChangedNotification) => void;
+
 export type AppServerMessageQueueChangedHandler = (
   notification: AppProtocol.MessageQueueChangedNotification,
 ) => void;
@@ -90,6 +92,7 @@ export interface AppServerTransport {
   ): Promise<T>;
   onEvent(handler: AppServerEventHandler): () => void;
   onActiveTurnChanged?(handler: AppServerActiveTurnChangedHandler): () => void;
+  onAutomationChanged?(handler: AppServerAutomationChangedHandler): () => void;
   onMessageQueueChanged?(handler: AppServerMessageQueueChangedHandler): () => void;
   onSubscriptionTerminated?(handler: AppServerSubscriptionTerminatedHandler): () => void;
   onError?(handler: AppServerErrorHandler): () => void;
@@ -103,6 +106,10 @@ export class AppServerClient {
   }
 
   onActiveTurnChanged(handler: AppServerActiveTurnChangedHandler): () => void { return this.transport.onActiveTurnChanged?.(handler) ?? (() => undefined); }
+
+  onAutomationChanged(handler: AppServerAutomationChangedHandler): () => void {
+    return this.transport.onAutomationChanged?.(handler) ?? (() => undefined);
+  }
 
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
     return this.transport.onMessageQueueChanged?.(handler) ?? (() => undefined);
@@ -509,6 +516,19 @@ export class AppServerClient {
   ): Promise<AppProtocol.SubmitTurnInputResponse> {
     return this.transport.request("turn/input", params);
   }
+
+  automation = {
+    read: (request: AppProtocol.SessionAutomationReadRequest): Promise<AppProtocol.SessionAutomationSnapshot> => this.transport.request("automation/read", request),
+    execute: (request: AppProtocol.AutomationRequest): Promise<AppProtocol.AutomationControlResult> => this.transport.request("automation/execute", request),
+    list: (request: AppProtocol.AutomationListRequest): Promise<AppProtocol.AutomationListResponse> => this.transport.request("automation/list", request),
+    commandCatalog: (request: AppProtocol.AutomationCommandCatalogRequest): Promise<AppProtocol.AutomationCommandCatalogResponse> => this.transport.request("automation/commandCatalog", request),
+    resolveCommand: (request: AppProtocol.AutomationCommandResolveRequest): Promise<AppProtocol.AutomationCommandResolveResponse> => this.transport.request("automation/resolveCommand", request),
+  };
+
+  builtinJobs = {
+    list: (request: AppProtocol.BuiltinJobListRequest): Promise<AppProtocol.BuiltinJobListResponse> => this.transport.request("builtinJob/list", request),
+    control: (request: AppProtocol.BuiltinJobControlRequest): Promise<AppProtocol.BuiltinJobInfo> => this.transport.request("builtinJob/control", request),
+  };
 
   messageQueue = {
     add: (params: AppProtocol.MessageQueueAddRequest): Promise<AppProtocol.MessageQueue> =>

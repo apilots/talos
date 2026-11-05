@@ -56,6 +56,7 @@ mod prepare_continuity;
 mod prepare_load_policy;
 #[cfg(test)]
 mod prepare_tests;
+mod prepare_warnings;
 mod run;
 mod step_execute;
 mod step_output;

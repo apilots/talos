@@ -155,6 +155,32 @@ node gRPC，显式选择无密钥的上游 Auth 契约 fixture。覆盖所有者
 Playwright 和已安装的 Chrome（`TALOS_E2E_CHROME_BIN`）。该场景不代替本地 group 19
 多管理端 Sync 拓扑验收；删除后的历史导入另有两个 peer 的 Store/CRDT 回归。
 
+### Session 自动化分组
+
+`just e2e-group 24_automation` 统一负责 Goal／Loop 产品验收；原 runner 按文件系统与依赖声明发现三个 case：
+
+- `01_session_automation`：下述生命周期、间隔、互斥、Queue／Steer、重启与 CLI／SDK／Worker 合同。
+- `02_web_entry`：真实隔离 Server、生产 Web 与已安装 Chrome，验证 Add／slash、结构化输入、首轮倒计时／取消、自动执行可见与结束行移出。
+- `03_tui_entry`：真实终端 `/goal <提示词>`、`/loop <提示词>`，沿原 SkillSelection 提交，验证自动流展示与任务清理。
+
+三个 case 复用同一本地受控模型 fixture，无需供应商 key。共享 fixture 改动选择三个载体，Web／TUI 入口改动选择各自载体。生命周期 case 从 app-server smoke 目标移出，合并多个 owner 的 CI 选择时只执行一次。入口 case 补齐客户端链路，不重复完整生命周期矩阵。
+
+`just e2e-case 24_automation/01_session_automation` 使用隔离 home 和本地受控模型/Auth 上游，
+贯穿真实 System Skill、Automation Tool、Service、原队列、结算和 History。相同业务
+断言分别走 app-server 与 embedded SDK，每种 transport 都保留一次真实一分钟固定
+Loop 等待，并覆盖自动 Turn 中普通 User Queue/Steer、动态决定校验、版本编辑和停止。另沿同一真实工具路径验证模型 Stop 在正常结算时生效、
+固定下次时间超过 7 天（10081 分钟且无到期字段），以及 Goal 跨两个 Turn 保持创建时间、
+完成后更新时间定格。受控模型还提交带非法嵌套字段的动态 schedule，真实工具拒绝后
+List 确认未创建定义，同一 Turn 纠正 Create，再经正常模型 Stop 结束。固定 / 动态用例
+的输入明确周期要求；受控响应不代表证明真实模型的通用语言推断能力。
+场景仅 hard-restart 自建 app-server，区分持久定义与原内存队列；随后显式执行
+`just test -p talos-base --run-ignored only -E 'test(automation_worker_business)'`
+验证真实 Direct/Outbound 注册 Worker。默认 ignored 不算验收通过。场景不需要模型
+密钥、私有源码或伪业务 API；无关 MCP 工具关闭。浏览器输入和呈现仍由 Web/Desktop
+场景负责。
+
+同一 Automation 用例还通过共享受控模型运行真实 `talos` CLI：Goal start/complete 与 pause/resume 保持前台执行宿主；Loop 首轮结算后保持运行，另一个 CLI 按精确 ID Stop 后退出；模型自主 Stop 也在原结算后使 CLI owner 正常退出。此短进程验收不重复一分钟间隔矩阵。
+
 `09_app_server/desktop_recovery` 使用真实 controller、SDK、Server 和 app-server 进程，
 以受控的本地 Auth/模型 HTTP fixture 验证认证要求、SIGTERM 后自动恢复、已交付事件与
 持久历史一致、Computer/Session 不变、后续回合和原取消句柄，不需要私有源码或付费凭据。

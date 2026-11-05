@@ -10,7 +10,15 @@ message CoordinatorTurnInput {
   optional string client_request_id = 1;
   oneof input { ProductUserInput message = 2; string queued_message_id = 3; ActionResponse action_response = 4; }
 }
-message CoordinatorQueueMessage { ProductUserInput input = 1; string message_id = 2; }
+message CoordinatorQueueLoopSource { string loop_id = 1; string occurrence_id = 2; }
+message CoordinatorQueueMessage {
+  ProductUserInput input = 1;
+  string message_id = 2;
+  oneof source {
+    bool user = 3;
+    CoordinatorQueueLoopSource loop = 4;
+  }
+}
 message CoordinatorQueueOrder { repeated string message_ids = 1; }
 message CoordinatorQueueStart { optional string message_id = 1; }
 message ActiveSessionCommandRequest {

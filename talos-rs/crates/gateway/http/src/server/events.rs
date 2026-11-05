@@ -77,6 +77,9 @@ pub(super) async fn subscribe_timeline_events_handler(
             TimelineSubscriptionMessage::MessageQueueChanged(change) => {
                 message_queue_changed_sse_event(change)
             }
+            TimelineSubscriptionMessage::AutomationChanged(change) => Ok(Event::default()
+                .event("automation/changed")
+                .data(serde_json::to_string(&change)?)),
             TimelineSubscriptionMessage::Closed(closed) => {
                 timeline_subscription_closed_sse_event(closed)
             }

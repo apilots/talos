@@ -1,4 +1,5 @@
 pub(crate) use super::*;
+mod automation;
 mod mock_gateway;
 mod render_runtime;
 pub(crate) use mock_gateway::*;
@@ -29,6 +30,10 @@ impl MockGatewayClient {
     pub(crate) fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(MockGatewayState {
+                automation: None,
+                automation_reads: 0,
+                automation_requests: Vec::new(),
+                builtin_jobs: Vec::new(),
                 models: vec![
                     mock_model_info("qwen-plus", 128_000),
                     mock_model_info("gpt-5.3 medium", 128_000),
@@ -54,6 +59,7 @@ impl MockGatewayClient {
                 shutdown_calls: 0,
                 cancelled_sessions: Vec::new(),
                 active_turn_id: None,
+                active_input_origin: None,
                 session_usage: talos_types::talos::TokenUsage::default(),
                 session_context_usage: None,
                 compact_calls: 0,
@@ -115,6 +121,69 @@ impl MockGatewayClient {
 
 #[async_trait]
 impl GatewayClient for MockGatewayClient {
+    async fn session_automation(
+        &self,
+        request: talos_sdk::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_sdk::SessionAutomationSnapshot> {
+        self.state.lock().unwrap().automation_reads += 1;
+        Ok(self.automation_snapshot(&request.session_id))
+    }
+    async fn execute_automation(
+        &self,
+        request: talos_sdk::AutomationRequest,
+    ) -> TalosResult<talos_sdk::AutomationControlResult> {
+        self.apply_automation(request)
+    }
+    async fn list_automation(
+        &self,
+        request: talos_sdk::AutomationListRequest,
+    ) -> TalosResult<talos_sdk::AutomationListResponse> {
+        self.automation_list(request)
+    }
+    async fn automation_command_catalog(
+        &self,
+        _: talos_sdk::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_sdk::AutomationCommandCatalogResponse> {
+        Ok(talos_sdk::AutomationCommandCatalogResponse {
+            data: talos_sdk::automation_command_catalog(),
+        })
+    }
+    async fn resolve_automation_command(
+        &self,
+        request: talos_sdk::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_sdk::AutomationCommandResolveResponse> {
+        Ok(talos_sdk::AutomationCommandResolveResponse {
+            command: talos_sdk::resolve_automation_command(&request.text)?,
+        })
+    }
+    async fn list_builtin_jobs(
+        &self,
+        request: talos_sdk::BuiltinJobListRequest,
+    ) -> TalosResult<talos_sdk::BuiltinJobListResponse> {
+        Ok(talos_sdk::BuiltinJobListResponse {
+            data: self
+                .state
+                .lock()
+                .unwrap()
+                .builtin_jobs
+                .iter()
+                .filter(|job| job.computer_id == request.computer_id)
+                .cloned()
+                .collect(),
+        })
+    }
+    async fn control_builtin_job(
+        &self,
+        request: talos_sdk::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_sdk::BuiltinJobInfo> {
+        self.apply_builtin_job(request)
+    }
+    async fn list_skills(
+        &self,
+        _: talos_sdk::SkillsListRequest,
+    ) -> TalosResult<talos_sdk::SkillsListResponse> {
+        self.system_skills()
+    }
     async fn list_models(&self) -> TalosResult<talos_sdk::ModelListResponse> {
         let mut state = self.state.lock().unwrap();
         if state.list_models_failures_remaining > 0 {
@@ -250,6 +319,7 @@ impl GatewayClient for MockGatewayClient {
         state.next_queued_message_id = state.next_queued_message_id.saturating_add(1);
         let id = format!("q{}", state.next_queued_message_id);
         state.message_queue.messages.push(QueuedMessage {
+            source: talos_sdk::QueuedMessageSource::User,
             id,
             input: request.input,
         });
@@ -612,10 +682,19 @@ impl GatewayClient for MockGatewayClient {
     }
 
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<TimelineActiveTurn>> {
-        let active_turn_id = self.state.lock().unwrap().active_turn_id.clone();
+        let (active_turn_id, automation_input) = {
+            let state = self.state.lock().unwrap();
+            (
+                state.active_turn_id.clone(),
+                state.active_input_origin.clone(),
+            )
+        };
         Ok(active_turn_id.map(|turn_id| TimelineActiveTurn {
+            initial_message_id: automation_input
+                .as_ref()
+                .map(|input| input.message_id.clone()),
+            automation_input,
             identity: AgentTurnRef::new(session_id, turn_id),
-            initial_message_id: None,
             state: ActiveTurnState::Running,
             last_event_id: "ev_0".to_string(),
             updated_at: 0,

@@ -1,4 +1,6 @@
+mod automation_control;
 mod image;
+pub use automation_control::{AutomationControl, AutomationControlFuture};
 pub use image::ToolImageStore;
 pub mod command_risk;
 pub mod context;
@@ -56,6 +58,7 @@ pub use talos_tools_sandbox::{AbsolutePathBuf, ToolSandboxEnvironment};
 // Built-in tools
 pub mod tools {
     pub mod ask_user_question;
+    pub mod automation;
     pub mod bash;
     pub mod edit;
     pub mod glob;
@@ -78,11 +81,11 @@ mod memory_tools_tests;
 
 // Re-export the built-in tools
 pub use tools::{
-    ask_user_question::AskUserQuestionTool, bash::BashTool, edit::EditTool, glob::GlobTool,
-    grep::GrepTool, memory_get::MemoryGetTool, memory_search::MemorySearchTool, read::ReadTool,
-    todo_write::TodoWriteTool, tool_search::ToolSearchTool,
-    user_workspace_memory_update::UserWorkspaceMemoryUpdateTool, web_fetch::WebFetchTool,
-    web_search::WebSearchTool, write::WriteTool,
+    ask_user_question::AskUserQuestionTool, automation::AutomationTool, bash::BashTool,
+    edit::EditTool, glob::GlobTool, grep::GrepTool, memory_get::MemoryGetTool,
+    memory_search::MemorySearchTool, read::ReadTool, todo_write::TodoWriteTool,
+    tool_search::ToolSearchTool, user_workspace_memory_update::UserWorkspaceMemoryUpdateTool,
+    web_fetch::WebFetchTool, web_search::WebSearchTool, write::WriteTool,
 };
 
 use std::sync::Arc;
@@ -104,6 +107,7 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     registry.register(Arc::new(ToolSearchTool));
     registry.register(Arc::new(TodoWriteTool));
     registry.register(Arc::new(AskUserQuestionTool));
+    registry.register(Arc::new(AutomationTool));
 }
 
 pub fn register_network_tools(registry: &ToolRegistry) {

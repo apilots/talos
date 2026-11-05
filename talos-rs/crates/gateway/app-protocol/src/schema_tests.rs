@@ -11,10 +11,14 @@ fn json_schema_fixture_is_current() {
 
 #[test]
 fn typescript_fixture_is_current() {
-    let expected = generate_typescript();
-    let actual = std::fs::read_to_string(typescript_fixture_path())
-        .expect("typescript fixture should be checked in");
-    assert_eq!(actual, expected);
+    for (name, expected) in [
+        ("app-protocol.ts", generate_typescript()),
+        ("automation.ts", generate_automation_typescript()),
+    ] {
+        let actual = std::fs::read_to_string(typescript_fixture_path().with_file_name(name))
+            .expect("typescript fixture should be checked in");
+        assert_eq!(actual, expected, "{name}");
+    }
 }
 
 fn schema_fixture_path() -> PathBuf {

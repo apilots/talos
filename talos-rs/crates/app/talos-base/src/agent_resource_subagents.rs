@@ -20,23 +20,8 @@ impl NodeSubagentControlRpc {
         scope: Option<&pb::CoordinatorCallContext>,
     ) -> TalosResult<()> {
         self.session_data
-            .authorize(auth, &caller.session_id, scope)
-            .await?;
-        if let ResourceAuthority::Invocation { caller: scope, .. } = &self.session_data.authority {
-            let session = scope
-                .session
-                .as_ref()
-                .ok_or_else(invalid_resource_request)?;
-            if session.agent_id != caller.agent_id
-                || scope.turn_id.as_deref() != Some(caller.turn_id.as_str())
-            {
-                return Err(TalosError::new(
-                    ErrorCode::PermissionDenied,
-                    "Subagent caller belongs to another invocation",
-                ));
-            }
-        }
-        Ok(())
+            .authorize_agent_caller(auth, caller, scope)
+            .await
     }
 }
 

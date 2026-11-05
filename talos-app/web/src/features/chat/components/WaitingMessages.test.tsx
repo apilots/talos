@@ -13,7 +13,7 @@ const queue = {
   maxMessages: 10,
   messages: [
     {
-      id: "q1",
+      id: "q1", source: { type: "user" as const },
       input: {
         content: [
           { type: "text" as const, text: "First waiting message" },
@@ -22,7 +22,7 @@ const queue = {
       },
     },
     {
-      id: "q2",
+      id: "q2", source: { type: "user" as const },
       input: {
         content: [{ type: "skillSelection" as const, name: "review", path: "/skills/review" }],
       },
@@ -35,7 +35,7 @@ const steerQueue = {
   messages: [
     queue.messages[0]!,
     {
-      id: "q3",
+      id: "q3", source: { type: "user" as const },
       input: { content: [{ type: "text" as const, text: "Second steer message" }] },
     },
   ],
@@ -67,8 +67,8 @@ describe("WaitingMessages", () => {
     const actions = handlers();
     render(<WaitingMessages controller={{ queue, ...actions }} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "More message actions" })[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0]!, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit message" }));
     const input = screen.getByDisplayValue("First waiting message");
     fireEvent.change(input, { target: { value: "Updated message" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
@@ -81,8 +81,8 @@ describe("WaitingMessages", () => {
       });
     });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "More message actions" })[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Move down" }));
+    fireEvent.pointerDown(screen.getAllByRole("button", { name: "More message actions" })[0]!, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move down" }));
     expect(actions.reorder).toHaveBeenCalledWith(["q2", "q1"]);
   });
 

@@ -1,7 +1,7 @@
 import type { SkillSuggestion } from "@talos/sdk-browser";
 
 export const SESSION_COMMAND_IDS = ["compact", "clear", "status"] as const;
-export const COMPOSER_COMMAND_IDS = [...SESSION_COMMAND_IDS, "model"] as const;
+export const COMPOSER_COMMAND_IDS = [...SESSION_COMMAND_IDS, "model", "goal", "loop"] as const;
 
 export type ComposerCommandId = (typeof COMPOSER_COMMAND_IDS)[number];
 export type ComposerSessionCommandId = (typeof SESSION_COMMAND_IDS)[number];

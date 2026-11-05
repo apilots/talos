@@ -241,7 +241,12 @@ impl SessionHistoryService {
                 .or_default()
                 .push(event);
         }
+        let mut origins = self.event_service.read_input_origins(&identities).await?;
         for turn in turns {
+            turn.automation_input = origins.remove(&(
+                turn.identity.session_id.clone(),
+                turn.identity.turn_id.clone(),
+            ));
             turn.notices = notices
                 .remove(&(
                     turn.identity.session_id.clone(),
@@ -281,6 +286,7 @@ impl SessionHistoryService {
             }
         };
         Ok(SessionHistoryTurn {
+            automation_input: None,
             identity: terminal.event.identity().clone(),
             result,
             notices: Vec::new(),

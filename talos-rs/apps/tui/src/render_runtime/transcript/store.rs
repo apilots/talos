@@ -40,6 +40,24 @@ impl TranscriptStore {
         id
     }
 
+    /// Update the original Input projection. Native lines already flushed remain
+    /// immutable; history reload obtains this metadata without reprinting a card.
+    pub(crate) fn append_input_metadata(&mut self, id: TranscriptBlockId, label: &str) {
+        let Some(block) = self
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == id && block.kind == TranscriptBlockKind::UserInput)
+        else {
+            return;
+        };
+        let line = TranscriptLine::new(
+            TranscriptLineId(self.next_line_id),
+            StyledLine::plain(label),
+        );
+        self.next_line_id += 1;
+        block.lines.push(line);
+    }
+
     pub(crate) fn replace_user_input(
         &mut self,
         block_id: TranscriptBlockId,

@@ -166,6 +166,7 @@ impl GeneralTurnResult {
 
 #[derive(Debug, Clone)]
 pub struct PreparedGeneralTurn {
+    pub(crate) registration: Option<Arc<crate::tool_execution::registration::RegistrationGuard>>,
     pub trajectory: Option<Arc<dyn crate::trajectory::KernelTrajectoryRecorder>>,
     pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,

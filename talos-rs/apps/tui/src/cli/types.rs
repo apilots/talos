@@ -31,6 +31,12 @@ pub(crate) enum Commands {
     /// Manage Skills and MCP installations through the selected Worker's Plugin service.
     Plugin(PluginCmd),
 
+    /// Continue one existing Session toward an objective.
+    Goal(GoalCmd),
+    /// Follow up in one existing Session.
+    Loop(LoopCmd),
+    /// Manage Session automation and owner-scoped native Jobs.
+    Automation(AutomationCmd),
     /// System status check.
     Status,
 }
@@ -127,4 +133,102 @@ pub(crate) enum PluginCommands {
     Disable { install_id: String },
     /// Uninstall through the existing Plugin lifecycle.
     Uninstall { install_id: String },
+}
+
+#[derive(Args)]
+pub(crate) struct GoalCmd {
+    /// Existing Session. Automation never creates a cross-Session scheduler.
+    #[arg(long)]
+    pub(crate) session: String,
+    #[command(subcommand)]
+    pub(crate) command: Option<GoalCommands>,
+}
+#[derive(Subcommand)]
+pub(crate) enum GoalCommands {
+    Show,
+    /// Run this Goal in the foreground; keep this embedded owner process alive.
+    Start {
+        #[arg(required = true, trailing_var_arg = true)]
+        prompt: Vec<String>,
+        #[arg(long)]
+        token_budget: Option<u64>,
+    },
+    Edit {
+        #[arg(required = true, trailing_var_arg = true)]
+        prompt: Vec<String>,
+    },
+    Pause,
+    /// Resume and observe the existing Goal in the foreground.
+    Resume,
+    Clear {
+        #[arg(long)]
+        id: Option<String>,
+    },
+}
+#[derive(Args)]
+pub(crate) struct LoopCmd {
+    #[arg(long)]
+    pub(crate) session: String,
+    #[command(subcommand)]
+    pub(crate) command: Option<LoopCommands>,
+}
+#[derive(Subcommand)]
+pub(crate) enum LoopCommands {
+    List,
+    /// Run this Loop in the foreground; keep this embedded owner process alive.
+    Start {
+        /// Integer minutes, validated by the shared LoopSchedule contract.
+        #[arg(long, conflicts_with = "dynamic")]
+        every: Option<u32>,
+        #[arg(long)]
+        dynamic: bool,
+        #[arg(required = true, trailing_var_arg = true)]
+        prompt: Vec<String>,
+    },
+    Edit {
+        id: String,
+        #[arg(long, conflicts_with = "dynamic")]
+        every: Option<u32>,
+        #[arg(long)]
+        dynamic: bool,
+        #[arg(trailing_var_arg = true)]
+        prompt: Vec<String>,
+    },
+    Stop {
+        id: String,
+    },
+    Clear {
+        id: String,
+    },
+}
+#[derive(Args)]
+pub(crate) struct AutomationCmd {
+    #[command(subcommand)]
+    pub(crate) command: AutomationCommands,
+}
+#[derive(Subcommand)]
+pub(crate) enum AutomationCommands {
+    /// Caller-owned Session tasks; pass the returned cursor for another page.
+    List {
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        ended: bool,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Native maintenance callbacks belonging to this actual Computer/instance.
+    Jobs {
+        #[arg(long)]
+        computer: String,
+        #[command(subcommand)]
+        command: Option<JobCommands>,
+    },
+}
+#[derive(Subcommand)]
+pub(crate) enum JobCommands {
+    List,
+    Pause { id: String },
+    Resume { id: String },
+    RunOnce { id: String },
 }

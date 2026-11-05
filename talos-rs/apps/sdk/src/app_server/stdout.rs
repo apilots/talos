@@ -71,6 +71,10 @@ pub(super) fn spawn_stdout_reader(
                         dispatch_message_queue_change(&subscription_senders, change).await;
                         continue;
                     }
+                    if let Ok(Some(change)) = response::decode_automation_changed(&notification) {
+                        dispatch_automation_change(&subscription_senders, change).await;
+                        continue;
+                    }
                     let Ok(Some(notification)) = response::decode_event_notification(notification)
                     else {
                         continue;

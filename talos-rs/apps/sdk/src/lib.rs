@@ -9,7 +9,8 @@ mod login;
 
 pub use app_server::{AppServerClient, AppServerClientConfig, AppServerOwnership};
 pub use contract::{
-    GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
+    AutomationChangeStream, GatewayClient, MessageQueueChangeStream, TimelineEventStream,
+    TimelineStreamSubscription,
 };
 pub use login::{now_ms, open_external_url};
 pub use talos_agent_api::{
@@ -136,3 +137,18 @@ pub use talos_types::{
 };
 
 pub use talos_agent_api::trajectory;
+
+// Shared public automation facts and command semantics; runtime identities stay internal.
+pub use talos_types::{
+    automation_command_catalog, resolve_automation_command, AutomationAction,
+    AutomationChangedNotification, AutomationCommand, AutomationCommandCatalogRequest,
+    AutomationCommandCatalogResponse, AutomationCommandDescriptor, AutomationCommandResolveRequest,
+    AutomationCommandResolveResponse, AutomationControlResult, AutomationEffect,
+    AutomationInputOrigin, AutomationListEntry, AutomationListRequest, AutomationListResponse,
+    AutomationListScope, AutomationMode, AutomationObjectRef, AutomationRequest,
+    AutomationTurnOrigin, BuiltinJobAction, BuiltinJobControlRequest, BuiltinJobId, BuiltinJobInfo,
+    BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobOutcome, GoalAction, GoalPauseReason,
+    GoalStatus, LoopAction, LoopSchedule, LoopStatus, LoopStopReason, LoopWakeDecision,
+    QueuedMessageSource, SessionAutomationReadRequest, SessionAutomationSnapshot, SessionGoal,
+    SessionLoop,
+};

@@ -283,6 +283,7 @@ pub async fn execute_general_turn_tool_batch(
     stream_tx: Option<&mpsc::Sender<AgentKernelEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
+        registration: prepared.registration.clone(),
         browser_uploads: prepared
             .browser_uploads
             .iter()

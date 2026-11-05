@@ -22,6 +22,8 @@ export type { ReasoningLevel };
 
 export interface MessageQueueController {
   activeTurnId?: string;
+  canSteer?: boolean;
+  canStart?: boolean;
   error?: string;
   queue?: MessageQueue;
   delete: (messageId: string) => Promise<unknown>;
@@ -33,8 +35,12 @@ export interface MessageQueueController {
 
 export interface ChatComposerProps {
   draft: string;
+  initialAutomationMode?: import("@talos/sdk-browser").AutomationMode;
+  onRestoredAutomationModeConsumed?: () => void;
+  automationCommands?: import("@talos/sdk-browser").AppProtocol.AutomationCommandDescriptor[];
   onDraftChange: (value: string) => void;
-  onSend: (attachments: FileInfo[]) => Promise<void> | void;
+  automation?: import("@/features/automation/useSessionAutomation").SessionAutomationController;
+  onSend: (attachments: FileInfo[], mode?: import("@talos/sdk-browser").AutomationMode) => Promise<void> | void;
   onCommand?: (command: ComposerSessionCommandId) => Promise<void> | void;
   commandResponse?: ComposerCommandResponseState;
   commandStatus?: ComposerStatusSnapshot;

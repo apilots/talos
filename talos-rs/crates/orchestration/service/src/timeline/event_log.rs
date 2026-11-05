@@ -20,7 +20,7 @@ const MAX_TIMELINE_READ_LIMIT: usize = 10_000;
 /// `TimelineEvent` without another business-event envelope.
 #[derive(Clone)]
 pub struct TimelineEventService {
-    execution_store: Arc<dyn AgentExecutionStore>,
+    pub(super) execution_store: Arc<dyn AgentExecutionStore>,
     live_tx: broadcast::Sender<TimelineEvent>,
     pub(super) active_tx: broadcast::Sender<talos_agent_api::SessionActiveTurnChangedNotification>,
 }
@@ -241,12 +241,23 @@ impl TimelineEventService {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<talos_agent_api::TimelineActiveTurn>> {
-        if let Some(active) = self.get_active_turn(session_id).await? {
-            return Ok(Some(super::mapping::map_timeline_active_turn(active)));
+        let mut active = if let Some(active) = self.get_active_turn(session_id).await? {
+            Some(super::mapping::map_timeline_active_turn(active))
+        } else {
+            self.execution_store
+                .get_shared_active_turn(session_id)
+                .await?
+        };
+        if let Some(active) = active.as_mut() {
+            let mut origins = self
+                .read_input_origins(std::slice::from_ref(&active.identity))
+                .await?;
+            active.automation_input = origins.remove(&(
+                active.identity.session_id.clone(),
+                active.identity.turn_id.clone(),
+            ));
         }
-        self.execution_store
-            .get_shared_active_turn(session_id)
-            .await
+        Ok(active)
     }
 
     pub(crate) async fn get_active_turn(

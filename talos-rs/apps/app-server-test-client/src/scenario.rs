@@ -14,6 +14,9 @@ pub(crate) enum Scenario {
     SkillsE2e,
     McpE2e,
     MessageQueueE2e,
+    AutomationE2e,
+    AutomationEmbeddedE2e,
+    AutomationRestartE2e,
 }
 
 impl Scenario {
@@ -31,6 +34,9 @@ impl Scenario {
             "skills-e2e" => Ok(Self::SkillsE2e),
             "mcp-e2e" => Ok(Self::McpE2e),
             "message-queue-e2e" => Ok(Self::MessageQueueE2e),
+            "automation-e2e" => Ok(Self::AutomationE2e),
+            "automation-embedded-e2e" => Ok(Self::AutomationEmbeddedE2e),
+            "automation-restart-e2e" => Ok(Self::AutomationRestartE2e),
             other => Err(anyhow!("unsupported scenario: {other}")),
         }
     }

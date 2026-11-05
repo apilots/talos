@@ -64,7 +64,16 @@ export function buildSessionBlocks({
     streamState?.pendingInput,
   );
   const historyNoticeIds = new Set(historyBlocks.filter((block) => block.kind === "notice").map((block) => block.id));
-  const liveBlocks = (streamState?.blocks ?? []).filter((block) =>
+  const historyById = new Map(historyBlocks.map((block) => [block.id, block]));
+  const liveBlocks = (streamState?.blocks ?? []).map((block) => {
+    if (block.kind !== "user") return block;
+    const historical = historyById.get(block.id);
+    if (historical?.kind !== "user" || ((block.automationOrigin || !historical.automationOrigin) && (block.activationMode || !historical.activationMode))) return block;
+    return { ...block,
+      ...(!block.automationOrigin && historical.automationOrigin ? { automationOrigin: historical.automationOrigin } : {}),
+      ...(!block.activationMode && historical.activationMode ? { activationMode: historical.activationMode } : {}),
+    };
+  }).filter((block) =>
     block.kind === "notice"
       ? !historyNoticeIds.has(block.id)
       : !historyHasActiveMessage || Boolean(streamState?.isStreaming),
@@ -154,6 +163,7 @@ function createPendingInputBlock(
   return {
     id: `user-${pendingInput.serverMessageId ?? pendingInput.clientMessageId}`,
     kind: "user",
+    ...(pendingInput.activationMode ? { activationMode: pendingInput.activationMode } : {}),
     text: pendingInput.text,
     fileIds: pendingInput.fileIds,
     live: true,

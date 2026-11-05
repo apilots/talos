@@ -1,14 +1,23 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { createJSONStorage } from "zustand/middleware";
 
 import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
 import { createDefaultProjects } from "@/shared/types/domain";
+import "@testing-library/jest-dom/vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { ChatHomePage } from "./ChatHomePage";
+import { setTalosClientFactory, resetTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+}
 
 let testProjects = createDefaultProjects();
 const createProjectMutateAsync = vi.fn();
@@ -27,7 +36,7 @@ vi.mock("@/features/chat", () => ({
   }: {
     activeProjectId: string;
     onPermissionModeChange: (mode: "approveForMe") => void;
-    onSend: () => void;
+    onSend: (attachments: [], mode?: "goal" | "loop") => Promise<void> | void;
     permissionMode: string;
     reasoningLevel: string;
     selectedModel?: string;
@@ -38,7 +47,9 @@ vi.mock("@/features/chat", () => ({
       <span data-testid="composer-reasoning">{reasoningLevel}</span>
       <span data-testid="composer-permission">{permissionMode}</span>
       <button onClick={() => onPermissionModeChange("approveForMe")}>Approve for me</button>
-      <button onClick={onSend}>Send</button>
+      <button onClick={() => void onSend([])}>Send</button>
+      <button onClick={() => void onSend([], "goal")}>Send Goal</button>
+      <button onClick={() => void onSend([], "loop")}>Send Loop</button>
     </div>
   ),
   useCreateProjectMutation: () => ({
@@ -101,11 +112,12 @@ function LocationStateProbe() {
 
 describe("ChatHomePage", () => {
   afterEach(() => {
-    cleanup();
+    cleanup(); resetTalosClientFactory();
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    setTalosClientFactory(() => ({ automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
 
     const storage = new Map<string, string>();
     useAppStore.persist.setOptions({
@@ -180,6 +192,40 @@ describe("ChatHomePage", () => {
       });
     });
   });
+
+  it("does not navigate back when a protected-Skill lookup resolves after leaving Home", async () => {
+    let resolve!: (value: { data: unknown[] }) => void;
+    const list = vi.fn(() => new Promise<{ data: unknown[] }>((done) => { resolve = done; }));
+    setTalosClientFactory(() => ({ skills: { list }, automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
+    render(<MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "Original task" } }]}><Routes>
+      <Route path="/" element={<><ChatHomePage /><Link to="/settings">Leave Home</Link></>} />
+      <Route path="/settings" element={<div>Settings destination</div>} />
+      <Route path="/sessions/:sessionId" element={<LocationStateProbe />} />
+    </Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Send Goal" }));
+    await waitFor(() => expect(list).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("link", { name: "Leave Home" }));
+    await act(async () => { resolve({ data: [{ name: "goal", scope: "system", enabled: true, read_only: true, path: "/real/goal/SKILL.md" }] }); });
+    expect(screen.getByText("Settings destination")).toBeInTheDocument();
+    expect(screen.queryByTestId("location-state")).toBeNull();
+  });
+
+  it.each(["goal", "loop"] as const)("preserves the selected %s and exact prompt through initial navigation", async (mode) => {
+    const list = vi.fn().mockResolvedValue({ data: [
+      { name: mode, scope: "project", path: "/project/SKILL.md", enabled: true, read_only: false },
+      { name: mode, scope: "system", path: `/worker/${mode}/SKILL.md`, enabled: true, read_only: true },
+    ] });
+    setTalosClientFactory(() => ({ skills: { list }, automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
+    render(<MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "Check original task" } }]}><Routes>
+      <Route path="/" element={<ChatHomePage />} /><Route path="/sessions/:sessionId" element={<LocationStateProbe />} />
+    </Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: mode === "goal" ? "Send Goal" : "Send Loop" }));
+    await waitFor(() => expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}" )).toMatchObject({
+      initialNodeId: "embedded", initialPrompt: "Check original task", initialSkillSelection: { name: mode, path: `/worker/${mode}/SKILL.md` },
+    }));
+    expect(list).toHaveBeenCalledWith({ nodeId: "embedded", include_disabled: false });
+  });
+
 });
 
 vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: "embedded", selected: { available: true } }), useProductScope: () => "test-scope", ComputerContext: () => null }));

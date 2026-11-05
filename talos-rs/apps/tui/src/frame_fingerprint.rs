@@ -5,6 +5,10 @@ use std::hash::{Hash, Hasher};
 use crate::TuiApp;
 
 pub(crate) fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
+    tui_frame_fingerprint_at(app, chrono::Utc::now().timestamp())
+}
+
+pub(crate) fn tui_frame_fingerprint_at(app: &TuiApp, now: i64) -> u64 {
     let mut hasher = DefaultHasher::new();
     app.input_buffer.hash(&mut hasher);
     app.cursor_index.hash(&mut hasher);
@@ -16,6 +20,16 @@ pub(crate) fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     hash_debug(&app.rendered_chat_cache_key, &mut hasher);
     hash_debug(&app.render_runtime.live_projection_lines(), &mut hasher);
     hash_debug(&app.message_queue, &mut hasher);
+    hash_debug(&app.automation_snapshot, &mut hasher);
+    for task in app.automation_targets() {
+        app.automation_task_time(&task, now).hash(&mut hasher);
+    }
+    hash_debug(&app.automation_edit, &mut hasher);
+    hash_debug(&app.selected_skills, &mut hasher);
+    hash_debug(&app.automation_error, &mut hasher);
+    app.tasks_expanded.hash(&mut hasher);
+    app.selected_automation.hash(&mut hasher);
+    hash_debug(&app.render_runtime.store().blocks(), &mut hasher);
     app.in_flight.hash(&mut hasher);
     app.received_output_delta.hash(&mut hasher);
     hash_debug(&app.turn_metrics, &mut hasher);

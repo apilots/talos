@@ -51,6 +51,24 @@ describe("useSessionStreaming", () => {
     mocks.invalidateSessionQueries.mockReset().mockResolvedValue(undefined);
   });
 
+  it.each(["goal", "loop"] as const)("preserves this request's %s selection in the first pending bubble until admission", async (mode) => {
+    let accept!: () => void;
+    mocks.startTimelineTurn.mockImplementation((_request, onAccepted) => new Promise<string>((resolve) => {
+      accept = () => { onAccepted("canonical-input"); resolve("canonical-input"); };
+    }));
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(() => useSessionStreaming("session-1"), { wrapper });
+    const request = { sessionId: "session-1", input: { content: [{ type: "skillSelection" as const, name: mode, path: `/real/${mode}/SKILL.md` }, { type: "text" as const, text: "Original task" }] }, modelSelection: null, userPermissionMode: null, projectId: null, currentDirectory: null, clientRequestId: null };
+    let sending!: Promise<void>;
+    await act(async () => { sending = result.current.sendText("Original task", request); });
+    expect(useAppStore.getState().streams["session-1"]?.pendingInput).toMatchObject({ text: "Original task", activationMode: mode, phase: "local" });
+    expect(mocks.startTimelineTurn).toHaveBeenCalledWith(request, expect.any(Function));
+    await act(async () => { accept(); await sending; });
+    expect(useAppStore.getState().streams["session-1"]?.pendingInput).toMatchObject({ text: "Original task", activationMode: mode, phase: "accepted", serverMessageId: "canonical-input" });
+    expect(result.current.isStreaming).toBe(true);
+  });
+
   it("shows a start error and clears the pending response state", async () => {
     mocks.startTimelineTurn.mockRejectedValue(
       new Error("Storage error: no such column: latest_turn_seq"),
@@ -110,6 +128,16 @@ describe("useSessionStreaming", () => {
       isStreaming: true,
     });
     expect(mocks.invalidateSessionQueries).toHaveBeenCalledOnce();
+  });
+
+  it("does not inherit a selected source into the existing text-only Retry payload", async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    useAppStore.getState().setStreamMeta("session-1", { activeMessageId: "original", activeInput: { text: "Original task", fileIds: [], activationMode: "goal" } });
+    const { result } = renderHook(() => useSessionStreaming("session-1"), { wrapper });
+    await act(async () => { await result.current.retryResponse(); });
+    expect(useAppStore.getState().streams["session-1"]?.pendingInput).not.toHaveProperty("activationMode");
+    expect(mocks.retryTimelineTurn.mock.calls[0]?.[0].input.content).toEqual([{ type: "text", text: "Original task" }]);
   });
 
   it("accepts an attachment-only retry before completion and keeps real cancellation available", async () => {

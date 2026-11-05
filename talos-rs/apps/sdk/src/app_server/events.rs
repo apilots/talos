@@ -36,3 +36,13 @@ pub(super) async fn dispatch_message_queue_change(
             || stream.message_queue_sender.try_send(change.clone()).is_ok()
     });
 }
+
+pub(super) async fn dispatch_automation_change(
+    subscription_senders: &Arc<Mutex<HashMap<String, SubscriptionStream>>>,
+    change: talos_types::AutomationChangedNotification,
+) {
+    subscription_senders.lock().await.retain(|_, stream| {
+        stream.session_id != change.session_id
+            || stream.automation_sender.try_send(change.clone()).is_ok()
+    });
+}

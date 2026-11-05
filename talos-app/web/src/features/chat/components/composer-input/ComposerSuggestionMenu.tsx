@@ -1,6 +1,7 @@
 import { selectionClasses } from "@/shared/ui/controlStyles";
 import { Fragment, useLayoutEffect, useRef } from "react";
 import { Box, ChartNoAxesColumn, Eraser, Gauge, Package, type LucideIcon } from "lucide-react";
+import { AutomationModeIcon } from "@/shared/ui/AutomationModeIcon";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -18,7 +19,7 @@ interface ComposerSuggestionMenuProps {
   suggestions: ComposerSuggestion[];
 }
 
-const COMMAND_ICONS: Record<ComposerCommandId, LucideIcon> = {
+const COMMAND_ICONS: Record<Exclude<ComposerCommandId, "goal" | "loop">, LucideIcon> = {
   compact: Box,
   clear: Eraser,
   status: Gauge,
@@ -75,7 +76,7 @@ export function ComposerSuggestionMenu({
           let Icon: LucideIcon = Package;
 
           if (suggestion.type === "command") {
-            Icon = COMMAND_ICONS[suggestion.id];
+            if (suggestion.id !== "goal" && suggestion.id !== "loop") Icon = COMMAND_ICONS[suggestion.id];
             key = `command:${suggestion.id}`;
             title = commandTitle(suggestion.id);
             description = suggestion.id === "compact" && contextUsage?.usedTokens
@@ -111,7 +112,9 @@ export function ComposerSuggestionMenu({
                 role="option"
                 type="button"
               >
-                <Icon className="shrink-0 text-ink/65" size={18} strokeWidth={source ? 1.8 : undefined} />
+                {suggestion.type === "command" && (suggestion.id === "goal" || suggestion.id === "loop")
+                  ? <AutomationModeIcon mode={suggestion.id} className="shrink-0 text-ink/65" size={18} />
+                  : <Icon className="shrink-0 text-ink/65" size={18} strokeWidth={source ? 1.8 : undefined} />}
                 <span className="min-w-0 truncate text-[15px] font-medium text-ink/75">
                   {title}
                 </span>

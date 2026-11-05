@@ -7,11 +7,58 @@ import tomllib
 import unittest
 
 from pr_change_scope import ROOT, SCOPES, VERSION_PATTERNS, is_document, should_run, version_change_only, version_files
-from ci_impact import impact, rust_graph, frontend_graph, client_group_targets, SERVER_TARGETS, CONTAINER_CASES, TUI_TARGET
+from ci_impact import impact, rust_graph, frontend_graph, client_group_targets, SERVER_TARGETS, CONTAINER_CASES, TUI_TARGET, AUTOMATION_TARGET, AUTOMATION_WEB_TARGET, AUTOMATION_TUI_TARGET
 from ci_plan import plan, task_roots
 
 
 class ChangeScopeTests(unittest.TestCase):
+    def test_automation_runtime_owners_select_hosted_business_acceptance(self):
+        for path in [
+            'talos-rs/crates/common/types/src/automation.rs',
+            'talos-rs/crates/orchestration/service/src/automation/goal_loop.rs',
+            'talos-rs/crates/action/tools/src/tools/automation.rs',
+        ]:
+            targets = impact([path]).targets['server']
+            self.assertIn(AUTOMATION_TARGET, '\n'.join(targets).splitlines(), path)
+            tasks = plan([path])['categories']['server']['scenarios']['include']
+            self.assertEqual(sum(task['cases'].count('24_automation/01_session_automation.sh') for task in tasks), 1)
+
+    def test_automation_case_and_model_fixture_select_only_their_acceptance(self):
+        for path in [
+            'talos-e2e/scripts/automation_cli_acceptance.py',
+            'talos-e2e/scenarios/24_automation/01_session_automation.sh',
+        ]:
+            selected = impact([path])
+            self.assertEqual(selected.targets['server'], {AUTOMATION_TARGET})
+            self.assertFalse(selected.rust or selected.frontend or selected.installer)
+
+    def test_automation_entries_and_shared_fixture_select_their_original_carriers(self):
+        for path, category, target in [
+            ('talos-e2e/scripts/automation_web.py', 'webui', AUTOMATION_WEB_TARGET),
+            ('talos-e2e/scenarios/24_automation/02_web_entry.sh', 'webui', AUTOMATION_WEB_TARGET),
+            ('talos-e2e/scripts/automation_tui.py', 'tui', AUTOMATION_TUI_TARGET),
+            ('talos-e2e/scenarios/24_automation/03_tui_entry.sh', 'tui', AUTOMATION_TUI_TARGET),
+        ]:
+            selected = impact([path])
+            self.assertEqual(selected.targets[category], {target})
+            self.assertEqual(sum(map(len, selected.targets.values())), 1)
+        selected = plan(['talos-e2e/scripts/automation_model_fixture.py'])
+        expected = {'server': '01_session_automation', 'webui': '02_web_entry', 'tui': '03_tui_entry'}
+        for category, case in expected.items():
+            tasks = selected['categories'][category]['scenarios']['include']
+            self.assertEqual([task['cases'] for task in tasks], [[f'24_automation/{case}.sh']])
+        self.assertTrue(selected['categories']['webui']['scenarios']['include'][0]['chrome'])
+        self.assertFalse(selected['categories']['server']['scenarios']['include'][0]['chrome'])
+        self.assertIn(AUTOMATION_WEB_TARGET, impact(['talos-app/ts-sdk/packages/core/src/adapters.ts']).targets['webui'])
+
+    def test_automation_cli_selects_real_process_acceptance_and_binaries(self):
+        for path in ['talos-rs/apps/tui/src/cli/automation.rs',
+                     'talos-rs/apps/tui/src/automation_management.rs']:
+            selected = plan([path])
+            tasks = selected['categories']['server']['scenarios']['include']
+            task = next(task for task in tasks if '24_automation/01_session_automation.sh' in task['cases'])
+            self.assertTrue({'app_server', 'test_client', 'cli'} <= set(task['binaries']))
+
     def test_resource_preview_group_is_gated_for_shared_renderer_and_owning_scenarios(self):
         selected = plan(['talos-app/web/src/features/files/components/FilePreview.tsx'])
         for category, case in [('webui', '21_resource_preview/01_web_preview.sh'),
@@ -76,7 +123,8 @@ class ChangeScopeTests(unittest.TestCase):
                                 '22_workspace_resources/02_desktop_resources.sh',
                                 '21_resource_preview/01_web_preview.sh',
                                 '21_resource_preview/02_desktop_preview.sh',
-                                '09_app_server/computer_deletion.sh'})
+                                '09_app_server/computer_deletion.sh',
+                                '24_automation/02_web_entry.sh'})
         self.assertEqual(selected['test_build']['tests'], {})
         self.assertFalse(selected['installer'] or selected['mcp'])
 
@@ -139,7 +187,7 @@ class ChangeScopeTests(unittest.TestCase):
     def test_tui_leaf_selects_only_tui(self):
         result = impact(['talos-rs/apps/tui/src/render/chat_lines.rs'])
         self.assertEqual(result.rust, {'talos-tui'})
-        self.assertEqual(result.targets['tui'], {TUI_TARGET})
+        self.assertEqual(result.targets['tui'], {TUI_TARGET, AUTOMATION_TUI_TARGET})
         self.assertFalse(result.installer or result.mcp or result.frontend)
         self.assertFalse(result.targets['desktop'] or result.targets['server'] or result.targets['webui'])
 

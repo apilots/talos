@@ -1,4 +1,5 @@
 mod active_turn_snapshot;
+mod automation_metadata;
 mod cursor;
 mod event_log;
 pub(crate) mod mapping;

@@ -778,3 +778,6 @@ fn rpc_request<T>(body: T, timeout: Duration) -> tonic::Request<T> {
 
 #[path = "history_append.rs"]
 mod history_append;
+
+#[path = "automation_resource.rs"]
+mod automation;

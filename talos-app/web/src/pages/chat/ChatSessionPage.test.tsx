@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderView, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Link, MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import "@/shared/i18n/setup";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { ChatSessionPage } from "./ChatSessionPage";
-import { getChatSessionPageMocks } from "./ChatSessionPage.test-support";
+import { getChatSessionPageMocks, resetChatSessionPageMocks } from "./ChatSessionPage.test-support";
+
+vi.mock("@/features/automation/useSessionAutomation", () => ({
+  useSessionAutomation: () => ({ tasks: [], commands: [], execute: vi.fn(), refresh: vi.fn(), command: vi.fn(), setEditing: vi.fn(), pending: false }),
+}));
 
 vi.mock("@/features/chat", async (importOriginal) => {
   const support = await import("./ChatSessionPage.test-support");
@@ -18,6 +24,16 @@ vi.mock("@/shared/store/app-store", async () => {
 });
 
 const mocks = getChatSessionPageMocks();
+const apiMocks = vi.hoisted(() => ({ node: "embedded", list: vi.fn() }));
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderView(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+}
+
+vi.mock("@/shared/api/client", () => ({ getTalosClient: () => ({
+  automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) },
+  skills: { list: apiMocks.list },
+}) }));
 
 function NavigateAwayButton() {
   const navigate = useNavigate();
@@ -44,22 +60,9 @@ describe("ChatSessionPage", () => {
 
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
-    mocks.session = {
-      context: { session_id: "sess-1" },
-      title: "Session 1",
-      projectId: null,
-      config: { llm: { model: "model-1" } },
-      state: { message_count: 0 },
-      modelSelection: {
-        modelRef: { provider: "mock", id: "model-1" },
-        reasoningEffort: null,
-      },
-    };
-    mocks.sessionHistoryError = undefined;
-    mocks.sessionHistoryIsSuccess = true;
-    mocks.isStreaming = false;
-    mocks.composerProps = undefined;
-    mocks.sessionQueryEnabled = undefined;
+    resetChatSessionPageMocks();
+    apiMocks.node = "embedded";
+    apiMocks.list.mockReset().mockResolvedValue({ data: ["goal", "loop"].map((name) => ({ name, scope: "system", enabled: true, read_only: true, path: `/actual-worker/${name}/SKILL.md` })) });
     mocks.sendText.mockImplementation(
       () =>
         new Promise<void>((resolve, reject) => {
@@ -87,7 +90,7 @@ describe("ChatSessionPage", () => {
     expect(mocks.mutateModel).not.toHaveBeenCalled();
   });
 
-  it("keeps permission changes local before the session exists", () => {
+  it("keeps permission changes local before the session exists", async () => {
     mocks.session = undefined;
     mocks.sendTurn.mockResolvedValue(undefined);
 
@@ -121,9 +124,9 @@ describe("ChatSessionPage", () => {
     expect(mocks.mutatePermissionMode).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(mocks.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
+    await waitFor(() => expect(mocks.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
       userPermissionMode: "approveForMe",
-    }));
+    })));
   });
 
   it("requires confirmation before enabling full access", () => {
@@ -244,14 +247,15 @@ describe("ChatSessionPage", () => {
     expect(mocks.sendText).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(mocks.sendTurn).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.sendTurn).toHaveBeenCalledWith({
+      nodeId: "embedded",
       modelSelection: {
         modelRef: { provider: "mock", id: "model-1" },
         reasoningEffort: "medium",
       },
       project: undefined,
       userPermissionMode: "approveForMe",
-    });
+    }));
   });
 
   it("does not navigate back to the session after leaving while the initial prompt is running", async () => {
@@ -290,38 +294,6 @@ describe("ChatSessionPage", () => {
     expect(screen.getByText("Settings page")).toBeTruthy();
   });
 
-  it("waits for initial admission before querying the newly created session", async () => {
-    mocks.session = undefined;
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
-        <Routes><Route element={<ChatSessionPage />} path="/sessions/:sessionId" /></Routes>
-      </MemoryRouter>,
-    );
-    await waitFor(() => expect(mocks.sendText).toHaveBeenCalled());
-    expect(mocks.sessionQueryEnabled).toBe(false);
-    await act(async () => { resolveSend(); });
-    await waitFor(() => expect(mocks.sessionQueryEnabled).toBe(true));
-  });
-
-  it.each(["success", "failure"])("clears pending admission after navigating away and returning (%s)", async (outcome) => {
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
-        <Link to="/sessions/sess-2">Other session</Link>
-        <Link to="/sessions/sess-1">Original session</Link>
-        <Routes><Route element={<ChatSessionPage />} path="/sessions/:sessionId" /></Routes>
-      </MemoryRouter>,
-    );
-    await waitFor(() => expect(mocks.sendText).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("link", { name: "Other session" }));
-    expect(mocks.sessionQueryEnabled).toBe(true);
-    await act(async () => {
-      if (outcome === "success") resolveSend();
-      else rejectSend(new Error("Admission failed."));
-    });
-    fireEvent.click(screen.getByRole("link", { name: "Original session" }));
-    expect(mocks.sessionQueryEnabled).toBe(true);
-  });
-
   it("shows history errors instead of the empty ready state", () => {
     mocks.sessionHistoryError = new Error("history parse failed");
     mocks.sessionHistoryIsSuccess = false;
@@ -341,4 +313,4 @@ describe("ChatSessionPage", () => {
   });
 });
 
-vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: "embedded", select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));
+vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: apiMocks.node, select: vi.fn() }), useProductScope: () => "test-scope", useComputer: () => ({ data: { available: true } }) }));

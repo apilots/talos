@@ -6,6 +6,8 @@ import { AppLayout } from "@/app/layouts/AppLayout";
 import { useConnectionSettings } from "@/features/connection";
 import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
+const AutomationPage = lazy(() => import("@/pages/automation/AutomationPage").then((module) => ({ default: module.AutomationPage })));
+
 const ComputersPage = lazy(() => import("@/pages/computers/ComputersPage").then((module) => ({ default: module.ComputersPage })));
 
 const ChatHomePage = lazy(() =>
@@ -84,6 +86,7 @@ export const router = createRouter([
     path: "/",
     element: <RequireAuth>{<AppLayout />}</RequireAuth>,
     children: [
+      { path: "automation", element: withSuspense(<AutomationPage />) },
       { path: "computers", element: withSuspense(<ComputersPage />) },
       {
         index: true,

@@ -12,6 +12,35 @@ pub(super) enum ResourceAuthority {
     },
 }
 impl NodeSessionDataRpc {
+    pub(super) async fn authorize_agent_caller(
+        &self,
+        auth: Option<pb::NodeAuth>,
+        caller: &talos_types::AgentCaller,
+        supplied_scope: Option<&pb::CoordinatorCallContext>,
+    ) -> TalosResult<()> {
+        self.authorize(auth, &caller.session_id, supplied_scope)
+            .await?;
+        let scope = match &self.authority {
+            ResourceAuthority::Invocation { caller, .. } => Some(caller),
+            ResourceAuthority::Host(_) | ResourceAuthority::Lease => supplied_scope,
+        };
+        if let Some(scope) = scope {
+            let session = scope.session.as_ref().ok_or_else(denied)?;
+            if session.session_id != caller.session_id
+                || session.agent_id != caller.agent_id
+                || scope
+                    .turn_id
+                    .as_deref()
+                    .is_some_and(|turn| turn != caller.turn_id)
+                || (matches!(self.authority, ResourceAuthority::Invocation { .. })
+                    && scope.turn_id.is_none())
+            {
+                return Err(denied());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn should_route(&self) -> bool {
         matches!(self.authority, ResourceAuthority::Lease)
     }

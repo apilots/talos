@@ -1,10 +1,11 @@
 //! Protected loopback callback listener for the same management resource owners.
-use crate::agent_node_rpc::{NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc};
+use crate::agent_node_rpc::{
+    NodeAutomationControlRpc, NodeResourceServices, NodeSubagentControlRpc,
+};
 use agent_client::AgentSessionDataClient;
 use agent_protocol::NodeAuth;
 use std::{sync::Arc, time::Duration};
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_tools::AgentControl;
 use tokio::{net::TcpListener, sync::Mutex, task::JoinHandle};
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
@@ -20,10 +21,14 @@ impl LocalResourceRpc {
 
     pub(crate) async fn start(
         auth: NodeAuth,
-        data: NodeSessionDataRpc,
-        images: NodeToolImageRpc,
-        control: Arc<dyn AgentControl>,
+        resources: NodeResourceServices,
     ) -> TalosResult<(Arc<Self>, AgentSessionDataClient)> {
+        let NodeResourceServices {
+            session_data: data,
+            tool_images: images,
+            agent_control: control,
+            automation_control: automation,
+        } = resources;
         let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|error| {
             TalosError::from_source(
                 ErrorCode::ServiceUnavailable,
@@ -40,6 +45,7 @@ impl LocalResourceRpc {
         let data = data.with_host_auth(auth.clone());
         let images = images.with_authorization(data.clone());
         let control = NodeSubagentControlRpc::new(data.clone(), control);
+        let automation = NodeAutomationControlRpc::new(data.clone(), automation);
         let stop = CancellationToken::new();
         let task_stop = stop.clone();
         let task = tokio::spawn(async move {
@@ -54,6 +60,9 @@ impl LocalResourceRpc {
                 )
                 .add_service(
                     agent_pb::agent_tool_image_rpc_server::AgentToolImageRpcServer::new(images),
+                )
+                .add_service(
+                    agent_pb::agent_automation_control_rpc_server::AgentAutomationControlRpcServer::new(automation),
                 )
                 .serve_with_incoming_shutdown(
                     TcpListenerStream::new(listener),

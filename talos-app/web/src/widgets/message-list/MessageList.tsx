@@ -72,6 +72,9 @@ export function MessageList({
         if (block.kind === "user") {
           return (
             <TextMessageBlock
+              activationMode={block.activationMode}
+              automationOrigin={block.automationOrigin}
+              createdAt={block.createdAt}
               fileIds={block.fileIds}
               key={block.id}
               kind={block.kind}

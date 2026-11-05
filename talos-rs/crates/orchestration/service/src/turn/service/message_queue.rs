@@ -5,12 +5,38 @@ impl TurnService {
         &self,
         session_id: &str,
     ) -> TalosResult<Option<StartTurnResponse>> {
-        if !self.can_auto_dispatch(session_id).await? {
-            return Ok(None);
-        }
-        let Some(reservation) = self.message_queue.reserve_front(session_id)? else {
-            return Ok(None);
+        let auto_dispatch = self.can_auto_dispatch(session_id).await?;
+        let reservation = match self.message_queue.reserve_front(session_id) {
+            Ok(Some(reservation)) => reservation,
+            Ok(None) => return Ok(None),
+            // Another original dispatcher owns this row while admission is in flight.
+            Err(error) if error.is_code(talos_error::ErrorCode::MessageQueueBusy) => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
         };
+        if !auto_dispatch {
+            let allowed = if let talos_types::QueuedMessageSource::Loop { loop_id, .. } =
+                reservation.source()
+            {
+                self.can_dispatch_automation(
+                    session_id,
+                    &talos_types::AutomationObjectRef::Loop {
+                        loop_id: loop_id.clone(),
+                    },
+                )
+                .await
+            } else {
+                Ok(false)
+            };
+            match allowed {
+                Ok(true) => {}
+                result => {
+                    self.message_queue.release(reservation)?;
+                    return result.map(|_| None);
+                }
+            }
+        }
         let session = self
             .execution
             .sessions
@@ -36,7 +62,7 @@ impl TurnService {
         }
     }
 
-    async fn can_auto_dispatch(&self, session_id: &str) -> TalosResult<bool> {
+    pub(super) async fn can_auto_dispatch(&self, session_id: &str) -> TalosResult<bool> {
         if self.canonical_active_turn(session_id).await?.is_some() {
             return Ok(false);
         }
@@ -54,6 +80,24 @@ impl TurnService {
         }))
     }
 
+    pub(super) async fn can_dispatch_automation(
+        &self,
+        session_id: &str,
+        object: &talos_types::AutomationObjectRef,
+    ) -> TalosResult<bool> {
+        if self.can_auto_dispatch(session_id).await? {
+            return Ok(true);
+        }
+        match self.automation.get() {
+            Some(automation) => {
+                automation
+                    .allows_explicit_dispatch(session_id, object)
+                    .await
+            }
+            None => Ok(false),
+        }
+    }
+
     pub(crate) async fn start_queued_message(
         &self,
         session: talos_store::session::SessionRecord,
@@ -66,6 +110,11 @@ impl TurnService {
                 format!("session `{session_id}` already has an active turn"),
             ));
         }
+        let cancelled_boundary = if let Some(automation) = self.automation.get() {
+            automation.cancelled_dispatch_boundary(&session_id).await?
+        } else {
+            None
+        };
         let reservation = match message_id {
             Some(message_id) => self.message_queue.reserve(&session_id, message_id)?,
             None => self
@@ -78,6 +127,17 @@ impl TurnService {
                     )
                 })?,
         };
+        if let (Some(automation), talos_types::QueuedMessageSource::Loop { loop_id, .. }) =
+            (self.automation.get(), reservation.source())
+        {
+            automation.allow_explicit_dispatch(
+                &session_id,
+                talos_types::AutomationObjectRef::Loop {
+                    loop_id: loop_id.clone(),
+                },
+                cancelled_boundary,
+            );
+        }
         self.submit_queue_reservation(session, reservation).await
     }
 
@@ -100,12 +160,35 @@ impl TurnService {
         session: talos_store::session::SessionRecord,
         reservation: MessageQueueReservation,
     ) -> TalosResult<StartTurnResponse> {
-        let input = reservation.input().clone();
+        let source = reservation.source().clone();
+        let preparation = self.prepare_queued_automation(&session, &reservation).await;
+        let (input, origin) = match preparation {
+            Ok(Some(value)) => value,
+            Ok(None) => {
+                self.message_queue.discard(reservation)?;
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Loop is no longer eligible for admission.",
+                ));
+            }
+            Err(error) => {
+                self.message_queue.release(reservation)?;
+                if let talos_types::QueuedMessageSource::Loop { loop_id, .. } = source {
+                    self.automation_service()?
+                        .failed_loop_admission(&loop_id, &error)
+                        .await?;
+                }
+                return Err(error);
+            }
+        };
+
         let (auto_dispatch_tx, auto_dispatch_rx) = oneshot::channel();
         let result = self
             .submit_turn_owned(
                 session,
                 TurnSubmission {
+                    origin,
+                    queue_message_id: Some(reservation.message_id().to_owned()),
                     input,
                     retry_of_message_id: None,
                 },
@@ -122,9 +205,42 @@ impl TurnService {
             }
             Err(error) => {
                 self.message_queue.release(reservation)?;
+                if let talos_types::QueuedMessageSource::Loop { loop_id, .. } = source {
+                    self.automation_service()?
+                        .failed_loop_admission(&loop_id, &error)
+                        .await?;
+                }
                 Err(error)
             }
         }
+    }
+
+    async fn prepare_queued_automation(
+        &self,
+        session: &talos_store::session::SessionRecord,
+        reservation: &MessageQueueReservation,
+    ) -> TalosResult<Option<(AgentUserInput, Option<talos_types::AutomationTurnOrigin>)>> {
+        if let talos_types::QueuedMessageSource::Loop {
+            loop_id,
+            occurrence_id,
+        } = reservation.source()
+        {
+            return self
+                .automation_service()?
+                .prepare_loop(session, loop_id, occurrence_id)
+                .await
+                .map(|value| value.map(|(input, origin)| (input, Some(origin))));
+        }
+        if let Some(automation) = self.automation.get() {
+            automation
+                .validate_user_input(
+                    &session.id,
+                    reservation.input(),
+                    Some(reservation.message_id()),
+                )
+                .await?;
+        }
+        Ok(Some((reservation.input().clone(), None)))
     }
 
     pub(crate) async fn steer_queued_message(
@@ -136,6 +252,27 @@ impl TurnService {
     ) -> TalosResult<()> {
         let session_id = session.id.clone();
         let reservation = self.message_queue.reserve(&session_id, message_id)?;
+        if reservation.source() != &talos_types::QueuedMessageSource::User {
+            self.message_queue.release(reservation)?;
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Automatic Loop messages cannot Steer.",
+            ));
+        }
+        let activation = match talos_types::explicit_automation_mode(reservation.input()) {
+            Ok(mode) => mode,
+            Err(error) => {
+                self.message_queue.release(reservation)?;
+                return Err(error);
+            }
+        };
+        if activation.is_some() {
+            self.message_queue.release(reservation)?;
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Automation activation messages must wait for their own Turn.",
+            ));
+        }
         if let Err(error) = validate_active_turn_input(reservation.input()) {
             self.message_queue.release(reservation)?;
             return Err(error);

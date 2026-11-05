@@ -59,6 +59,26 @@ pub async fn run_general_turn_with_resume(
     message_rx: Option<mpsc::Receiver<crate::ActiveTurnInputDelivery>>,
     run_tasks: RunTaskGroup,
 ) -> TalosResult<GeneralTurnResult> {
+    let registration = crate::tool_execution::registration::RegistrationGuard::from_initial(
+        input,
+        skill_options
+            .as_ref()
+            .map(|options| options.selected.as_slice())
+            .unwrap_or_default(),
+    )?;
+    if let Some(guard) = &registration {
+        // Request metadata uses the same trusted port and cached classification
+        // as actual dispatch; this read creates no model Tool call or ledger row.
+        let context = tool_executor_port
+            .build_context(
+                ctx.session_id.clone(),
+                ctx.user_id.clone(),
+                Some(Arc::new(kernel_config.clone())),
+            )
+            .with_turn_id(ctx.invocation_id.clone())
+            .with_agent_id(ctx.agent_id.clone());
+        guard.resolve(&context, &ctx.invocation_id).await?;
+    }
     let mut prepared = prepare_general_turn(
         ctx,
         agent_name,
@@ -70,6 +90,7 @@ pub async fn run_general_turn_with_resume(
         user_workspace_memory,
         kernel_config,
         skill_options.clone(),
+        registration,
         run_tasks,
     )
     .await?;

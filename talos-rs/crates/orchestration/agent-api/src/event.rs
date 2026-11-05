@@ -74,6 +74,9 @@ impl TimelineEventPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TimelineActiveTurn {
+    /// Exact admitted automation Input; later User Steer messages remain ordinary.
+    #[serde(default)]
+    pub automation_input: Option<talos_types::AutomationInputOrigin>,
     pub identity: AgentTurnRef,
     pub initial_message_id: Option<String>,
     pub state: crate::ActiveTurnState,

@@ -10,6 +10,7 @@ import type { ProjectView, ReasoningLevel } from "@/shared/types/ui";
 export interface SessionLocationState {
   initialNodeId?: string;
   initialPrompt?: string;
+  initialSkillSelection?: { name: string; path: string };
   initialModel?: ModelRef;
   initialReasoningLevel?: ReasoningLevel;
   initialPermissionMode?: UserPermissionMode;

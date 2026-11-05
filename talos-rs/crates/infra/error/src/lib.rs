@@ -8,7 +8,8 @@ use ts_rs::TS;
 
 mod api_error;
 pub use api_error::{
-    ApiError, BrowserCapabilityOperation, BrowserCapabilityReason, ErrorLocalization,
+    ApiError, AutomationRequestReason, BrowserCapabilityOperation, BrowserCapabilityReason,
+    ErrorLocalization,
 };
 
 /// Public application error code shared by server and SDKs.

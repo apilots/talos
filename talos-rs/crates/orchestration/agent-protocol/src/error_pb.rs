@@ -11,6 +11,11 @@ pub fn encode_failure(error: &TalosError) -> pb::Failure {
 
 pub fn encode_api_error(api: ApiError) -> pb::ApiError {
     let localization = api.localization.map(|value| match value {
+        ErrorLocalization::AutomationRequest { reason } => {
+            pb::api_error::Localization::AutomationRequest(pb::AutomationRequestLocalization {
+                reason: automation_reason_to_wire(reason),
+            })
+        }
         ErrorLocalization::BrowserCapabilityUnavailable { operation, reason } => {
             pb::api_error::Localization::BrowserCapabilityUnavailable(
                 pb::BrowserCapabilityUnavailable {
@@ -58,6 +63,11 @@ pub fn decode_api_error(error: pb::ApiError) -> TalosResult<ApiError> {
         .localization
         .map(|value| -> TalosResult<ErrorLocalization> {
             Ok(match value {
+                pb::api_error::Localization::AutomationRequest(value) => {
+                    ErrorLocalization::AutomationRequest {
+                        reason: automation_reason_from_wire(value.reason)?,
+                    }
+                }
                 pb::api_error::Localization::BrowserCapabilityUnavailable(value) => {
                     ErrorLocalization::BrowserCapabilityUnavailable {
                         operation: browser_operation_from_wire(value.operation)?,
@@ -284,6 +294,12 @@ mod tests {
         })
         .is_err());
         for localization in [
+            ErrorLocalization::AutomationRequest {
+                reason: talos_error::AutomationRequestReason::SelectedModeConflict,
+            },
+            ErrorLocalization::AutomationRequest {
+                reason: talos_error::AutomationRequestReason::GoalNotFound,
+            },
             ErrorLocalization::ModelNotConfigured {
                 provider: "p".into(),
                 model: "m".into(),
@@ -326,13 +342,13 @@ mod tests {
     }
 }
 
-macro_rules! browser_enum {
+macro_rules! localization_enum {
     ($encode:ident,$decode:ident,$kind:ident,$($variant:ident),+) => {
         fn $encode(value:talos_error::$kind)->i32 {match value {$(talos_error::$kind::$variant=>pb::$kind::$variant as i32,)+}}
         fn $decode(value:i32)->TalosResult<talos_error::$kind> {match pb::$kind::try_from(value).map_err(|_|malformed_failure())? {$(pb::$kind::$variant=>Ok(talos_error::$kind::$variant),)+_=>Err(malformed_failure())}}
     };
 }
-browser_enum!(
+localization_enum!(
     browser_operation_to_wire,
     browser_operation_from_wire,
     BrowserCapabilityOperation,
@@ -341,7 +357,7 @@ browser_enum!(
     ReleaseControl,
     OpenLocal
 );
-browser_enum!(
+localization_enum!(
     browser_reason_to_wire,
     browser_reason_from_wire,
     BrowserCapabilityReason,
@@ -350,4 +366,16 @@ browser_enum!(
     HostPolicy,
     UnsupportedVersion,
     ClientMismatch
+);
+localization_enum!(
+    automation_reason_to_wire,
+    automation_reason_from_wire,
+    AutomationRequestReason,
+    SelectedModeManagementConflict,
+    SelectedModeConflict,
+    ComputerRequired,
+    ChatRequired,
+    TaskNotFound,
+    GoalNotFound,
+    SystemSkillUnavailable
 );

@@ -32,7 +32,7 @@ describe("useSessionMessageQueue", () => {
     const added: MessageQueue = {
       revision: 1,
       maxMessages: 10,
-      messages: [{ id: "q1", input: { content: [{ type: "text", text: "waiting" }] } }],
+      messages: [{ id: "q1", source: { type: "user" as const }, input: { content: [{ type: "text", text: "waiting" }] } }],
     };
     const add = vi.fn().mockResolvedValue(added);
     setTalosClientFactory(() => ({
@@ -54,7 +54,7 @@ describe("useSessionMessageQueue", () => {
       {
         revision: 2,
         maxMessages: 10,
-        messages: [{ id: "q1", input: { content: [{ type: "text", text: "from another client" }] } }],
+        messages: [{ id: "q1", source: { type: "user" as const }, input: { content: [{ type: "text", text: "from another client" }] } }],
       },
     ];
     const list = vi.fn()

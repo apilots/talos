@@ -1,6 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     for source in [
         "auth.proto",
+        "automation.proto",
         "desktop.proto",
         "coordinator.proto",
         "memory.proto",
@@ -24,9 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Box only the new carrier oneofs; existing business messages and wire fields stay unchanged.
         .boxed(".talos.agent.v1.WorkerRpcCall.request")
         .boxed(".talos.agent.v1.WorkerRpcResult.response")
+        // Keep the typed automation receipt from inflating its result enum.
+        .boxed(".talos.agent.v1.ExecuteAutomationResponse.result")
         .compile_protos(
             &[
                 "proto/auth.proto",
+                "proto/automation.proto",
                 "proto/desktop.proto",
                 "proto/coordinator.proto",
                 "proto/memory.proto",

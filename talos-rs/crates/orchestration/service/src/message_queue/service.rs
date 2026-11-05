@@ -35,9 +35,16 @@ pub(crate) struct MessageQueueReservation {
     session_id: String,
     message_id: String,
     input: AgentUserInput,
+    source: talos_types::QueuedMessageSource,
 }
 
 impl MessageQueueReservation {
+    pub(crate) fn source(&self) -> &talos_types::QueuedMessageSource {
+        &self.source
+    }
+    pub(crate) fn message_id(&self) -> &str {
+        &self.message_id
+    }
     pub(crate) fn input(&self) -> &AgentUserInput {
         &self.input
     }
@@ -66,7 +73,36 @@ impl SessionMessageQueueService {
     }
 
     pub fn add(&self, session_id: &str, input: AgentUserInput) -> TalosResult<MessageQueue> {
+        self.add_from(session_id, input, talos_types::QueuedMessageSource::User)
+    }
+
+    pub(crate) fn add_loop(
+        &self,
+        session_id: &str,
+        input: AgentUserInput,
+        loop_id: String,
+        occurrence_id: String,
+    ) -> TalosResult<MessageQueue> {
+        self.add_from(
+            session_id,
+            input,
+            talos_types::QueuedMessageSource::Loop {
+                loop_id,
+                occurrence_id,
+            },
+        )
+    }
+    fn add_from(
+        &self,
+        session_id: &str,
+        input: AgentUserInput,
+        source: talos_types::QueuedMessageSource,
+    ) -> TalosResult<MessageQueue> {
         self.with_queue(session_id, QueueAccess::Create, |queue| {
+            if let talos_types::QueuedMessageSource::Loop { loop_id, .. } = &source {
+                if queue.messages.iter().any(|m| matches!(&m.source,talos_types::QueuedMessageSource::Loop {loop_id: id,..} if id==loop_id)) { return Ok(self.snapshot(queue)); }
+            } else { validate_intent(queue,&input,None)?; }
+
             if queue.messages.len() >= self.inner.max_messages as usize {
                 return Err(TalosError::new(
                     ErrorCode::MessageQueueFull,
@@ -75,10 +111,15 @@ impl SessionMessageQueueService {
             }
 
             let revision = next_revision(queue.revision)?;
-            queue.messages.push_back(QueuedMessage {
+            let message=QueuedMessage {
                 id: format!("qmsg_{}", Uuid::now_v7().simple()),
                 input,
-            });
+                source: source.clone(),
+            };
+            if source == talos_types::QueuedMessageSource::User {
+                let index=queue.messages.iter().position(|m|matches!(m.source,talos_types::QueuedMessageSource::Loop{..})).unwrap_or(queue.messages.len());
+                queue.messages.insert(index,message);
+            } else { queue.messages.push_back(message); }
             queue.revision = revision;
             self.publish_changed(session_id, revision);
             Ok(self.snapshot(queue))
@@ -101,6 +142,8 @@ impl SessionMessageQueueService {
         input: AgentUserInput,
     ) -> TalosResult<MessageQueue> {
         self.with_existing_message(session_id, message_id, |queue, index| {
+            ensure_user(queue, index)?;
+            validate_intent(queue, &input, Some(message_id))?;
             ensure_not_busy(queue, message_id)?;
             if queue.messages[index].input == input {
                 return Ok(self.snapshot(queue));
@@ -116,6 +159,7 @@ impl SessionMessageQueueService {
 
     pub fn delete(&self, session_id: &str, message_id: &str) -> TalosResult<MessageQueue> {
         self.with_existing_message(session_id, message_id, |queue, index| {
+            ensure_user(queue, index)?;
             ensure_not_busy(queue, message_id)?;
             let revision = next_revision(queue.revision)?;
             queue.messages.remove(index);
@@ -158,6 +202,40 @@ impl SessionMessageQueueService {
                 return Ok(self.snapshot(queue));
             }
 
+            let mut loop_seen = false;
+            let ordered = message_ids
+                .iter()
+                .map(|id| {
+                    queue
+                        .messages
+                        .iter()
+                        .find(|m| &m.id == id)
+                        .expect("validated IDs")
+                })
+                .collect::<Vec<_>>();
+            for message in &ordered {
+                match message.source {
+                    talos_types::QueuedMessageSource::Loop { .. } => loop_seen = true,
+                    talos_types::QueuedMessageSource::User if loop_seen => {
+                        return Err(queue_conflict("User messages must precede Loop messages"))
+                    }
+                    _ => {}
+                }
+            }
+            let previous_loops = queue
+                .messages
+                .iter()
+                .filter(|m| matches!(m.source, talos_types::QueuedMessageSource::Loop { .. }))
+                .map(|m| &m.id)
+                .collect::<Vec<_>>();
+            let next_loops = ordered
+                .iter()
+                .filter(|m| matches!(m.source, talos_types::QueuedMessageSource::Loop { .. }))
+                .map(|m| &m.id)
+                .collect::<Vec<_>>();
+            if previous_loops != next_loops {
+                return Err(queue_conflict("Loop message order is read-only"));
+            }
             let revision = next_revision(queue.revision)?;
             let mut messages = queue
                 .messages
@@ -191,6 +269,7 @@ impl SessionMessageQueueService {
                 session_id: session_id.to_string(),
                 message_id: message_id.to_string(),
                 input: queue.messages[index].input.clone(),
+                source: queue.messages[index].source.clone(),
             })
         })
     }
@@ -209,6 +288,7 @@ impl SessionMessageQueueService {
                     session_id: session_id.to_string(),
                     message_id: message.id.clone(),
                     input: message.input.clone(),
+                    source: message.source.clone(),
                 };
                 queue
                     .busy_message_ids
@@ -250,6 +330,25 @@ impl SessionMessageQueueService {
         })
     }
 
+    pub(crate) fn is_reserved(&self, id: &str, session: &str) -> TalosResult<bool> {
+        Ok(self
+            .with_queue(session, QueueAccess::Existing, |queue| {
+                Ok(queue.busy_message_ids.contains(id))
+            })?
+            .unwrap_or(false))
+    }
+    pub(crate) fn remove_loop(&self, session_id: &str, loop_id: &str) -> TalosResult<()> {
+        self.with_queue(session_id,QueueAccess::Existing,|queue| {
+            let before=queue.messages.len();
+            queue.messages.retain(|m|!matches!(&m.source,talos_types::QueuedMessageSource::Loop{loop_id:id,..} if id==loop_id) || queue.busy_message_ids.contains(&m.id));
+            if queue.messages.len()!=before { queue.revision=next_revision(queue.revision)?; self.publish_changed(session_id,queue.revision); }
+            Ok(())
+        })?;
+        Ok(())
+    }
+    pub(crate) fn discard(&self, reservation: MessageQueueReservation) -> TalosResult<()> {
+        self.commit(reservation).map(|_| ())
+    }
     pub fn clear_session(&self, session_id: &str) -> TalosResult<()> {
         self.inner
             .queues
@@ -369,4 +468,34 @@ fn message_not_found(session_id: &str, message_id: &str) -> TalosError {
         ErrorCode::ResourceNotFound,
         format!("message queue item `{message_id}` was not found in session `{session_id}`"),
     )
+}
+
+fn ensure_user(queue: &SessionMessageQueue, index: usize) -> TalosResult<()> {
+    if queue.messages[index].source != talos_types::QueuedMessageSource::User {
+        return Err(queue_conflict("Automatic Loop messages are read-only"));
+    }
+    Ok(())
+}
+fn validate_intent(
+    queue: &SessionMessageQueue,
+    input: &AgentUserInput,
+    exclude: Option<&str>,
+) -> TalosResult<()> {
+    let Some(incoming) = talos_types::explicit_automation_mode(input)? else {
+        return Ok(());
+    };
+    for message in queue.messages.iter().filter(|m| {
+        Some(m.id.as_str()) != exclude && m.source == talos_types::QueuedMessageSource::User
+    }) {
+        if let Some(pending) = talos_types::explicit_automation_mode(&message.input)? {
+            if incoming == talos_types::AutomationMode::Goal
+                || pending == talos_types::AutomationMode::Goal
+            {
+                return Err(queue_conflict(
+                    "Session has a conflicting pending activation",
+                ));
+            }
+        }
+    }
+    Ok(())
 }

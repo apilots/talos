@@ -1,6 +1,7 @@
 mod access;
 mod account;
 mod agent_node;
+pub mod automation;
 mod config;
 mod desktop;
 pub mod file;
@@ -10,6 +11,7 @@ mod inner_model;
 mod memory;
 mod message_queue;
 mod model;
+mod native_jobs;
 mod plugin;
 mod profile;
 mod project;
@@ -41,6 +43,9 @@ pub use inner_model::{
 };
 pub use memory::MemoryService;
 pub use message_queue::SessionMessageQueueService;
+pub use native_jobs::{
+    NativeJobFuture, NativeJobHost, NativeJobPauseUpdate, NativeJobRuntime, ResolvedNativeJobs,
+};
 pub use plugin::{mcp_relay_callback_uri, McpCredentialStore, PluginManagerService};
 pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};

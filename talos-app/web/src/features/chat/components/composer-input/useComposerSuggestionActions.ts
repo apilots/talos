@@ -12,6 +12,7 @@ interface ComposerSuggestionActionsOptions {
   draft: string;
   modelTriggerRef: RefObject<HTMLButtonElement | null>;
   moveCursorToPosition: (cursorIndex: number) => void;
+  onAutomationMode?: (mode: "goal" | "loop") => void;
   onCommand?: ChatComposerProps["onCommand"];
   onDraftChange: (value: string) => void;
   onResetHistory: () => void;
@@ -24,6 +25,7 @@ export function useComposerSuggestionActions({
   modelTriggerRef,
   moveCursorToPosition,
   onCommand,
+  onAutomationMode,
   onDraftChange,
   onResetHistory,
   session,
@@ -50,6 +52,11 @@ export function useComposerSuggestionActions({
     }
 
     moveCursorToPosition(next.cursorIndex);
+    if (suggestion.id === "goal" || suggestion.id === "loop") {
+      onAutomationMode?.(suggestion.id);
+      session.cancelCurrentTrigger();
+      return;
+    }
     const execution = onCommand?.(suggestion.id);
     if (execution) {
       void execution.catch(() => undefined);

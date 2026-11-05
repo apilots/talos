@@ -840,10 +840,17 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
             .await
             .unwrap();
     let tables_query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
-    let tables_before = sqlx::query_scalar::<_, String>(tables_query)
+    let mut tables_before = sqlx::query_scalar::<_, String>(tables_query)
         .fetch_all(&pool)
         .await
         .unwrap();
+    // Later migrations add automation definitions without rewriting existing facts.
+    tables_before.extend([
+        "session_goals".to_owned(),
+        "session_loops".to_owned(),
+        "automation_native_job_controls".to_owned(),
+    ]);
+    tables_before.sort();
 
     run_migrations(&pool, &migration_dir).await.unwrap();
     run_migrations(&pool, &migration_dir).await.unwrap();

@@ -244,3 +244,66 @@ fn message_queue_methods_decode_shared_camel_case_requests() {
         })
     );
 }
+
+#[test]
+fn automation_public_methods_decode_closed_shared_contracts() {
+    let cases = [
+        ("automation/read", json!({"sessionId":"s1"})),
+        (
+            "automation/execute",
+            json!({"sessionId":"s1", "action":{"target":"goal", "action":{"type":"pause", "goalId":"g1"}}}),
+        ),
+        (
+            "automation/list",
+            json!({"sessionId":null,"scope":"unfinished","cursor":null,"limit":20}),
+        ),
+        ("automation/commandCatalog", json!({})),
+        (
+            "automation/resolveCommand",
+            json!({"text":"/loop 5m check CI"}),
+        ),
+        ("builtinJob/list", json!({"computerId":"c1"})),
+        (
+            "builtinJob/control",
+            json!({"computerId":"c1","executionInstanceId":"i1","jobId":"profileUsageRetention","action":"pause"}),
+        ),
+    ];
+    for (method, params) in cases {
+        let method_id = ClientMethod::from_str(method).expect("canonical public method");
+        assert_eq!(method_id.as_str(), method);
+        let request = ClientRequest::decode(method, Some(params.clone())).unwrap();
+        let serialized = serde_json::to_value(request.params).unwrap();
+        assert_eq!(serialized["method"], method);
+        assert_eq!(serialized["params"], params);
+    }
+    for params in [
+        json!({"sessionId":"s1","action":{"target":"builtinJob","action":{"type":"pause"}}}),
+        json!({"sessionId":"s1","action":{"target":"loop","action":{"type":"runCommand","command":"anything"}}}),
+    ] {
+        assert!(ClientRequest::decode("automation/execute", Some(params)).is_err());
+    }
+}
+
+#[test]
+fn automation_notification_is_a_session_invalidation_without_runtime_identity() {
+    let change =
+        crate::ServerNotification::AutomationChanged(talos_types::AutomationChangedNotification {
+            session_id: "s1".into(),
+        });
+    assert_eq!(
+        serde_json::to_value(change).unwrap(),
+        json!({
+            "method":"automation/changed", "params":{"sessionId":"s1"}
+        })
+    );
+    let request = talos_types::AutomationRequest {
+        session_id: "s1".into(),
+        action: talos_types::AutomationAction::Goal {
+            action: talos_types::GoalAction::Read {},
+        },
+    };
+    let fields = serde_json::to_value(request).unwrap();
+    for field in ["caller", "turnId", "callId", "agentId"] {
+        assert!(fields.get(field).is_none());
+    }
+}

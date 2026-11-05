@@ -6,6 +6,7 @@ import { connectionScope } from "@/shared/store/connection-scope";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
+import { activationModeFromContent } from "../session-input";
 import type { ChatUserInput } from "@/shared/types/ui";
 import type { StartTurnRequest } from "@talos/sdk-browser";
 
@@ -141,15 +142,18 @@ export function useSessionStreaming(
         throw new Error("No retryable message attempt.");
       }
 
+      // Retry's existing payload contains text/files, not the prior selection.
+      const retryInput = { ...input };
+      delete retryInput.activationMode;
       resetStream(sessionId);
-      setPendingInput(sessionId, { ...input, clientMessageId, phase: "local" });
+      setPendingInput(sessionId, { ...retryInput, clientMessageId, phase: "local" });
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
         lastEventId: currentStream?.lastEventId,
         lastEventSeq: currentStream?.lastEventSeq,
-        activeInput: input,
+        activeInput: retryInput,
         activeClientMessageId: clientMessageId,
       });
       setSessionStatus(sessionId, "running");
@@ -217,7 +221,8 @@ export function useSessionStreaming(
 function turnUserInput(text: string, request?: StartTurnRequest): ChatUserInput {
   const fileIds =
     request?.input.content.flatMap((item) => (item.type === "file" ? [item.fileId] : [])) ?? [];
-  return { text, fileIds };
+  const activationMode = activationModeFromContent(request?.input.content ?? []);
+  return { text, fileIds, ...(activationMode ? { activationMode } : {}) };
 }
 
 function hasUserInput(input: ChatUserInput) {

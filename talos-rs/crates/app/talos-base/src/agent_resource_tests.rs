@@ -35,9 +35,12 @@ async fn local_callback_ports_and_current_invocation_use_the_persisted_session_o
     };
     let (host, resources) = crate::local_resource_rpc::LocalResourceRpc::start(
         auth.clone(),
-        data.clone(),
-        NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
-        Arc::new(TestAgentControl),
+        NodeResourceServices {
+            session_data: data.clone(),
+            tool_images: NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
+            agent_control: Arc::new(TestAgentControl),
+            automation_control: Arc::new(TestAutomationControl),
+        },
     )
     .await
     .unwrap();
@@ -188,9 +191,12 @@ async fn history_supplement_stream_round_trips_large_invocation_and_uses_origina
     };
     let (host, resources) = crate::local_resource_rpc::LocalResourceRpc::start(
         auth.clone(),
-        data,
-        NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
-        Arc::new(TestAgentControl),
+        NodeResourceServices {
+            session_data: data,
+            tool_images: NodeToolImageRpc::new(nodes, Arc::new(TestToolImages), 1024),
+            agent_control: Arc::new(TestAgentControl),
+            automation_control: Arc::new(TestAutomationControl),
+        },
     )
     .await
     .unwrap();

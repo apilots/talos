@@ -44,7 +44,7 @@ tui_wait_for_text "${TUI_SESSION_NAME}" 'Type a message' 120 0.25
 tui_send_input "${TUI_SESSION_NAME}" 'PROTOCOL_CASE=chat-protocol-default:on. Run the controlled Bash tool and return its result.'
 tui_wait_for_text "${TUI_SESSION_NAME}" 'PROTOCOL_OK:call_chat-protocol-default_on' 240 0.25 "${SCENARIO_REPORT_DIR}/terminal.txt"
 # Completion text can precede TurnCompleted; wait for the actual idle UI state.
-tui_wait_for_text "${TUI_SESSION_NAME}" 'last ·' 240 0.1 "${SCENARIO_REPORT_DIR}/terminal.txt"
+tui_wait_for_text "${TUI_SESSION_NAME}" '✻ Brewed for' 240 0.1 "${SCENARIO_REPORT_DIR}/terminal.txt"
 tmux resize-window -t "${TUI_SESSION_NAME}" -x 80 -y 38
 tui_wait_for_text "${TUI_SESSION_NAME}" 'PROTOCOL_OK:call_chat-protocol-default_on' 40 0.1
 python3 - "${case_dir}" "${TALOS_HOME}/data/talos.db" <<'PY'

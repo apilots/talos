@@ -357,6 +357,7 @@ export function sessionHistory(
   flushAgentBlocks();
   return {
     data: [{
+      automationInput: null,
       identity: { sessionId: "sess-1", turnId: "turn-1" },
       notices: [],
       completedEventSeq: 9,
@@ -470,6 +471,7 @@ export function usage() {
 
 export function activeTurn(overrides: Partial<ActiveTurnSnapshot> = {}): ActiveTurnSnapshot {
   return {
+    automationInput: null,
     identity: { sessionId: "sess-1", turnId: "turn-1" },
     initialMessageId: "msg-1",
     state: "running",

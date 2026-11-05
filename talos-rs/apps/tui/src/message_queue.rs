@@ -40,6 +40,7 @@ impl TuiApp {
         };
 
         self.clear_message_queue_projection();
+        self.refresh_automation().await;
         match client.subscribe_session_events(&session_id).await {
             Ok(subscription) => {
                 self.session_subscription = Some(subscription);
@@ -63,9 +64,15 @@ impl TuiApp {
         let mut highest_revision: Option<u64> = None;
         let mut disconnected = false;
         let mut notices = Vec::new();
+        let mut automation_changed = false;
         if let Some(subscription) = self.session_subscription.as_mut() {
             loop {
                 match subscription.try_recv() {
+                    Ok(crate::client::SessionEvent::AutomationChanged(change)) => {
+                        if self.session_id.as_deref() == Some(change.session_id.as_str()) {
+                            automation_changed = true;
+                        }
+                    }
                     Ok(crate::client::SessionEvent::Notice { event_seq, notice }) => {
                         notices.push((event_seq, notice))
                     }
@@ -86,6 +93,11 @@ impl TuiApp {
             }
         }
 
+        if automation_changed {
+            self.refresh_automation().await;
+            // Goal work can start without consuming a queued message.
+            self.message_queue_turn_reconcile_pending = true;
+        }
         for (event_seq, notice) in notices {
             self.apply_system_notice(event_seq, notice);
         }
@@ -132,11 +144,11 @@ impl TuiApp {
     }
 
     pub(crate) fn select_message_queue(&mut self) {
-        self.selected_queue_message = if self.message_queue.messages.is_empty() {
-            None
-        } else {
-            Some(0)
-        };
+        self.selected_queue_message = self
+            .message_queue
+            .messages
+            .iter()
+            .position(|message| message.source == talos_sdk::QueuedMessageSource::User);
     }
 
     pub(crate) fn move_message_queue_selection(&mut self, offset: isize) {
@@ -144,14 +156,34 @@ impl TuiApp {
             self.select_message_queue();
             return;
         };
-        let last = self.message_queue.messages.len().saturating_sub(1);
-        self.selected_queue_message = Some(current.saturating_add_signed(offset).min(last));
+        let users: Vec<_> = self
+            .message_queue
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| message.source == talos_sdk::QueuedMessageSource::User)
+            .map(|(index, _)| index)
+            .collect();
+        let position = users
+            .iter()
+            .position(|index| *index == current)
+            .unwrap_or(0);
+        self.selected_queue_message = users
+            .get(
+                position
+                    .saturating_add_signed(offset)
+                    .min(users.len().saturating_sub(1)),
+            )
+            .copied();
     }
 
     pub(crate) fn begin_selected_queue_edit(&mut self) {
         let Some(message) = self.selected_queue_message().cloned() else {
             return;
         };
+        if message.source != talos_sdk::QueuedMessageSource::User {
+            return;
+        }
         self.input_buffer = queued_message_text(&message);
         self.cursor_index = self.input_buffer.chars().count();
         self.editing_queue_message_id = Some(message.id);
@@ -212,6 +244,13 @@ impl TuiApp {
     }
 
     pub(crate) async fn delete_selected_queued_message(&mut self) {
+        if self
+            .selected_queue_message()
+            .is_some_and(|message| message.source != talos_sdk::QueuedMessageSource::User)
+        {
+            return;
+        }
+
         let Some(message_id) = self
             .selected_queue_message()
             .map(|message| message.id.clone())
@@ -240,6 +279,19 @@ impl TuiApp {
             return;
         };
         let target = index.saturating_add_signed(offset);
+        if self
+            .message_queue
+            .messages
+            .get(index)
+            .is_some_and(|message| message.source != talos_sdk::QueuedMessageSource::User)
+            || self
+                .message_queue
+                .messages
+                .get(target)
+                .is_some_and(|message| message.source != talos_sdk::QueuedMessageSource::User)
+        {
+            return;
+        }
         if target >= self.message_queue.messages.len() || target == index {
             return;
         }
@@ -274,6 +326,13 @@ impl TuiApp {
         let Some(message) = self.selected_queue_message().cloned() else {
             return;
         };
+        if message.source != talos_sdk::QueuedMessageSource::User {
+            self.show_status_hint(
+                "Loop occurrences are managed by their task.",
+                Duration::from_secs(2),
+            );
+            return;
+        }
         if self.in_flight {
             if !queued_message_is_steerable(&message) {
                 self.show_status_hint(
@@ -351,7 +410,7 @@ impl TuiApp {
         }
     }
 
-    async fn refresh_message_queue(&mut self, target_revision: u64) {
+    pub(crate) async fn refresh_message_queue(&mut self, target_revision: u64) {
         let (Some(client), Some(session_id)) =
             (self.gateway_client.clone(), self.session_id.clone())
         else {
@@ -420,6 +479,7 @@ impl TuiApp {
         let Some(client) = self.gateway_client.clone() else {
             return;
         };
+        self.refresh_automation().await;
         match client.reconnect_active_turn_stream(session_id, None).await {
             Ok(receiver) => {
                 self.abort_pending_stream_task();
@@ -550,6 +610,10 @@ pub(crate) fn queued_message_summary(message: &QueuedMessage) -> String {
 }
 
 pub(crate) fn queued_message_is_steerable(message: &QueuedMessage) -> bool {
+    if message.source != talos_sdk::QueuedMessageSource::User {
+        return false;
+    }
+
     message.input.content.iter().all(|item| {
         matches!(
             item,

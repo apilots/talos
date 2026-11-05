@@ -168,6 +168,7 @@ pub(crate) async fn seed_running_agent_execution(
     );
     store
         .commit_initial_admission(talos_store::session::CommitInitialAdmissionParams {
+            automation_origin: None,
             events: admission,
             command: None,
         })
@@ -203,6 +204,7 @@ pub(crate) async fn seed_waiting_agent_execution(
     );
     let initial = store
         .commit_initial_admission(talos_store::session::CommitInitialAdmissionParams {
+            automation_origin: None,
             events: admission,
             command: None,
         })

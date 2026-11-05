@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use talos_automation::{Automation, AutomationJob};
+use talos_automation::{Automation, AutomationJob, AutomationJobControl};
 use talos_config::{DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig, TalosTimezone};
 use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::TalosResult;
@@ -74,6 +74,8 @@ pub(super) async fn start_maintenance(
     memory: DreamMemoryMaintenance,
     memory_config: DreamMemoryMaintenanceConfig,
     timezone: TalosTimezone,
+    initial_paused: Vec<talos_types::BuiltinJobId>,
+    service: std::sync::Weak<talos_service::TalosService>,
 ) -> TalosResult<Automation> {
     let retention = ProfileUsageRetention::new(profiles, profile_config.clone());
     Automation::start(vec![
@@ -85,7 +87,11 @@ pub(super) async fn start_maintenance(
                 let retention = retention.clone();
                 async move { retention.run().await.map(|_| ()) }
             },
-        ),
+        )
+        .with_control(AutomationJobControl {
+            paused: initial_paused.contains(&talos_types::BuiltinJobId::ProfileUsageRetention),
+            run_once: true,
+        }),
         AutomationJob::cron(
             "dream-memory-maintenance",
             memory_config.cron,
@@ -94,7 +100,22 @@ pub(super) async fn start_maintenance(
                 let memory = memory.clone();
                 async move { memory.run().await.map(|_| ()) }
             },
-        ),
+        )
+        .with_control(AutomationJobControl {
+            paused: initial_paused.contains(&talos_types::BuiltinJobId::DreamMemoryMaintenance),
+            run_once: true,
+        }),
+        AutomationJob::cron("session-loop-scan", "*/1 * * * * *", timezone, move || {
+            let service = service.clone();
+            async move {
+                if let Some(service) = service.upgrade() {
+                    service
+                        .scan_session_loops(chrono::Utc::now().timestamp())
+                        .await?;
+                }
+                Ok(())
+            }
+        }),
     ])
     .await
 }

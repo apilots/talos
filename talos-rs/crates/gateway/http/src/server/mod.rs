@@ -1,6 +1,7 @@
 mod access;
 mod auth;
 mod auth_session;
+mod automation;
 mod computers;
 mod errors;
 mod sync;
@@ -346,6 +347,34 @@ impl HttpServer {
             .route("/v1/turns/interrupt", post(interrupt_turn_handler))
             .route("/v1/turns/input", post(submit_turn_input_handler))
             .route("/v1/message-queue/add", post(add_queued_message_handler))
+            .route(
+                "/v1/automation/read",
+                post(automation::session_automation_handler),
+            )
+            .route(
+                "/v1/automation/execute",
+                post(automation::execute_automation_handler),
+            )
+            .route(
+                "/v1/automation/list",
+                post(automation::list_automation_handler),
+            )
+            .route(
+                "/v1/automation/command-catalog",
+                post(automation::automation_command_catalog_handler),
+            )
+            .route(
+                "/v1/automation/resolve-command",
+                post(automation::resolve_automation_command_handler),
+            )
+            .route(
+                "/v1/builtin-job/list",
+                post(automation::list_builtin_jobs_handler),
+            )
+            .route(
+                "/v1/builtin-job/control",
+                post(automation::control_builtin_job_handler),
+            )
             .route("/v1/message-queue/list", post(list_message_queue_handler))
             .route(
                 "/v1/message-queue/update",

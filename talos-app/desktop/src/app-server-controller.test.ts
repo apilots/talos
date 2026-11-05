@@ -14,8 +14,9 @@ describe("DesktopAppServerController", () => {
     const bridge = new FakeBridge();
     const onActiveTurnChanged = vi.fn();
     const onMessageQueueChanged = vi.fn();
+    const onAutomationChanged = vi.fn();
     const onRuntimeState = vi.fn();
-    const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onActiveTurnChanged, onMessageQueueChanged, onRuntimeState });
+    const controller = new DesktopAppServerController({ bridgeFactory: () => bridge, onActiveTurnChanged, onMessageQueueChanged, onAutomationChanged, onRuntimeState });
     await controller.connect();
     await controller.invoke("event/subscribe", { sessionId: "shared", turnId: null, sinceEventId: null, replayLimit: null, closeWhenIdle: false, closeOnTerminal: false });
     const active = { sessionId: "shared", state: { activeTurn: null, latestEventId: null } };
@@ -23,6 +24,9 @@ describe("DesktopAppServerController", () => {
     bridge.emitNotification({ jsonrpc: "2.0", method: "messageQueue/changed", params: { sessionId: "shared", revision: 2 } });
     bridge.emitNotification({ jsonrpc: "2.0", method: "desktop/worker/failed", params: { code: AppProtocol.ErrorCode.ServiceUnavailable, message: "Computer unavailable", localization: null } });
     bridge.emitNotification({ jsonrpc: "2.0", method: "desktop/worker/ready", params: null });
+    bridge.emitNotification({ jsonrpc: "2.0", method: "automation/changed", params: { sessionId: "shared" } });
+    bridge.emitNotification({ jsonrpc: "2.0", method: "automation/changed", params: { sessionId: "other-session" } });
+    expect(onAutomationChanged.mock.calls).toEqual([[{ sessionId: "shared" }]]);
     expect(onActiveTurnChanged).toHaveBeenCalledWith(active);
     expect(onMessageQueueChanged).toHaveBeenCalledWith({ sessionId: "shared", revision: 2 });
     expect(onRuntimeState.mock.calls.at(-1)).toEqual([{ kind: "ready", message: null }]);

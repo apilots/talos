@@ -50,6 +50,7 @@ pub(crate) fn completed_history_response(
 ) -> SessionHistoryResponse {
     SessionHistoryResponse {
         data: vec![SessionHistoryTurn {
+            automation_input: None,
             notices: vec![],
             identity: AgentTurnRef::new("sess-test", "turn-history"),
             result: AgentRunResult::Completed(AgentRunOutput {

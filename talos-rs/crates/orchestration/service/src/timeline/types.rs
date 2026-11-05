@@ -53,8 +53,9 @@ pub enum TimelineSubscriptionCloseReason {
 
 #[derive(Debug, Clone)]
 pub enum TimelineSubscriptionMessage {
-    ActiveTurnChanged(talos_agent_api::SessionActiveTurnChangedNotification),
+    ActiveTurnChanged(Box<talos_agent_api::SessionActiveTurnChangedNotification>),
     Event(Box<TimelineEvent>),
     MessageQueueChanged(MessageQueueChangedNotification),
+    AutomationChanged(talos_types::AutomationChangedNotification),
     Closed(TimelineSubscriptionClosed),
 }

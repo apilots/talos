@@ -627,7 +627,7 @@ async fn forward_subscription(
     while let Some(message) = source.events.recv().await {
         match message {
             TimelineSubscriptionMessage::ActiveTurnChanged(change) => {
-                if send_active_turn_changed(change, &outgoing_tx)
+                if send_active_turn_changed(*change, &outgoing_tx)
                     .await
                     .is_err()
                 {
@@ -644,6 +644,14 @@ async fn forward_subscription(
             }
             TimelineSubscriptionMessage::MessageQueueChanged(change) => {
                 if send_message_queue_changed(change, &outgoing_tx)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            TimelineSubscriptionMessage::AutomationChanged(change) => {
+                if notifications::send_automation_changed(change, &outgoing_tx)
                     .await
                     .is_err()
                 {

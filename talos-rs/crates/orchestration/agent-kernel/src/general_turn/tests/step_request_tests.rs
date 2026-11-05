@@ -5,6 +5,7 @@ use talos_prompt::{PromptMode, PromptWindowUsage};
 #[tokio::test]
 async fn test_build_general_turn_step_request() {
     let prepared = PreparedGeneralTurn {
+        registration: None,
         trajectory: None,
         browser_uploads: Vec::new(),
         session_id: "s1".to_string(),

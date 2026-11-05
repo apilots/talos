@@ -191,6 +191,9 @@ fn decode_target(value: Option<pb::AgentTarget>) -> TalosResult<AgentTarget> {
 
 pub fn encode_history_turn(value: SessionHistoryTurn) -> TalosResult<pb::SessionHistoryTurn> {
     Ok(pb::SessionHistoryTurn {
+        automation_input: value
+            .automation_input
+            .map(crate::automation_pb::encode_input_origin),
         identity: Some(harness_pb::encode_turn_ref(value.identity)),
         result: Some(encode_run_result(value.result)?),
         notices: value
@@ -205,6 +208,10 @@ pub fn encode_history_turn(value: SessionHistoryTurn) -> TalosResult<pb::Session
 
 pub fn decode_history_turn(value: pb::SessionHistoryTurn) -> TalosResult<SessionHistoryTurn> {
     Ok(SessionHistoryTurn {
+        automation_input: value
+            .automation_input
+            .map(crate::automation_pb::decode_input_origin)
+            .transpose()?,
         identity: harness_pb::decode_turn_ref(value.identity)?,
         result: decode_run_result(value.result.ok_or_else(invalid)?)?,
         notices: value

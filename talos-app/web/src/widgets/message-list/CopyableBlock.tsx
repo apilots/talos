@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCopyText } from "@/shared/hooks/useCopyText";
 
 export function CopyableBlock({
   children,
@@ -21,28 +21,7 @@ export function CopyableBlock({
   responseActionInset?: boolean;
   variant?: "hover" | "response";
 }) {
-  const [copied, setCopied] = useState(false);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-      }
-    };
-  }, []);
-
-  const copyBlock = async () => {
-    if (!copyText) {
-      return;
-    }
-    await writeClipboardText(copyText);
-    setCopied(true);
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-    }
-    resetTimerRef.current = setTimeout(() => setCopied(false), 1200);
-  };
+  const { copied, copy: copyBlock } = useCopyText(copyText);
 
   return (
     <div className="group relative">
@@ -93,21 +72,4 @@ export function CopyableBlock({
       )}
     </div>
   );
-}
-
-async function writeClipboardText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
 }
