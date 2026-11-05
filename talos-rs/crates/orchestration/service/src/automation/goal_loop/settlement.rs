@@ -1,5 +1,17 @@
 use super::*;
+
+const DEFAULT_GOAL_MAX_RUNTIME_SECONDS: i64 = 24 * 60 * 60;
+
 impl SessionAutomationService {
+    pub(crate) fn goal_budget_exhausted(goal: &SessionGoal, now: i64) -> bool {
+        goal.token_budget
+            .is_some_and(|budget| goal.tokens_used >= budget)
+            || now
+                >= goal
+                    .created_at
+                    .saturating_add(DEFAULT_GOAL_MAX_RUNTIME_SECONDS)
+    }
+
     pub(crate) async fn settle(
         &self,
         session: &SessionRecord,
@@ -41,15 +53,13 @@ impl SessionAutomationService {
             self.forget_explicit_dispatch(&session.id, &automation_object(origin));
         }
         if let Some(goal) = self.store.snapshot(&session.id).await?.goal {
-            let current_work = match origin.as_ref() {
-                Some(AutomationTurnOrigin::Goal { goal_id, .. }) => goal_id == &goal.id,
-                None => !self
-                    .execution
-                    .get_agent_active_turn(&session.id)
-                    .await?
-                    .is_some_and(|active| active.identity != event.identity),
-                _ => false,
-            };
+            let current_work = matches!(
+                origin.as_ref(),
+                Some(AutomationTurnOrigin::Goal { goal_id, objective_revision })
+                    if goal_id == &goal.id
+                        && *objective_revision == goal.objective_revision
+                        && goal.latest_turn_id.as_deref().is_none_or(|turn_id| turn_id == event.identity.turn_id)
+            );
             if current_work && goal.status == GoalStatus::Active && (waiting || failed.is_some()) {
                 self.pause(
                     &goal,
@@ -93,10 +103,7 @@ impl SessionAutomationService {
                         return Ok(());
                     }
                 }
-                if goal
-                    .token_budget
-                    .is_some_and(|budget| goal.tokens_used >= budget)
-                {
+                if Self::goal_budget_exhausted(&goal, now) {
                     self.pause(&goal, GoalPauseReason::BudgetExhausted, now)
                         .await?;
                 } else if let Some(metrics) = metrics {
@@ -245,16 +252,6 @@ impl SessionAutomationService {
         {
             if task.next_due_at.is_some_and(|due| due <= now) {
                 self.enqueue_loop(session, &task).await?;
-                let current = self.store.loop_task(&task.id).await?;
-                let queued = self.queue.list(&session.id)?.messages.iter().any(|message| {
-                    matches!(&message.source, QueuedMessageSource::Loop { loop_id, .. } if loop_id == &task.id)
-                });
-                if current.status == LoopStatus::Active && queued {
-                    let mut next = current.clone();
-                    next.next_due_at = None;
-                    self.store.replace_loop(&current, &next).await?;
-                    self.emit(&session.id);
-                }
             }
         }
         Ok(())

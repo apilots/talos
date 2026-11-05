@@ -219,7 +219,26 @@ Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
 does not claim a live remote desktop connection.
 
-`just e2e-case 09_app_server/automation_e2e` uses isolated homes and controlled
+### Session automation group
+
+`just e2e-group 24_automation` owns Goal/Loop product acceptance. The existing
+runner discovers its three cases from the filesystem and their declared prerequisites:
+
+- `01_session_automation`: shared lifecycle, cadence, mutual exclusion, Queue/Steer,
+  restart and CLI/SDK/Worker contracts described below.
+- `02_web_entry`: actual Add and slash selections, original typed input, first-work
+  countdown/cancel, automatic Timeline output and terminal row removal using a real
+  isolated Server, production Web assets and installed Chrome.
+- `03_tui_entry`: actual `/goal <prompt>` and `/loop <prompt>` through the original
+  terminal/SkillSelection path, automatic stream display and terminal task cleanup.
+
+All three reuse the local controlled model fixture; no provider key is required.
+Shared fixture changes select all three cases. Web and TUI entry changes select their
+own carriers. The lifecycle case is no longer bundled into the app-server smoke target,
+so it runs once when ownership selections are combined. Client cases supplement,
+rather than repeat, the full lifecycle matrix.
+
+`just e2e-case 24_automation/01_session_automation` uses isolated homes and controlled
 loopback model/Auth upstreams with real System Skills, Automation Tool, Service,
 queue, settlement and History. It runs the shared business assertions through
 app-server and the embedded SDK, including a real one-minute fixed Loop interval

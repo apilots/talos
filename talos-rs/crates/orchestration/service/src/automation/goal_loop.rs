@@ -2,7 +2,7 @@
 use crate::SessionMessageQueueService;
 use futures_util::future::BoxFuture;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use talos_agent_api::{
     ActiveTurnState, AgentEvent, AgentEventPayload, AgentMessageBlockContent, AgentMessageRole,
     AgentRunMetrics, AgentTurnRef,
@@ -41,7 +41,7 @@ pub struct SessionAutomationService {
     queue: SessionMessageQueueService,
     resolver: Arc<dyn AutomationSkillResolver>,
     changed: tokio::sync::broadcast::Sender<AutomationChangedNotification>,
-    gates: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
+    gates: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     declarations: Arc<Mutex<HashMap<(String, String), Declaration>>>,
     explicit_dispatch: Arc<Mutex<HashMap<String, Vec<explicit_dispatch::ExplicitDispatch>>>>,
 }
@@ -87,13 +87,19 @@ impl SessionAutomationService {
         });
     }
     pub(crate) async fn lock(&self, session: &str) -> tokio::sync::OwnedMutexGuard<()> {
-        let gate = self
-            .gates
-            .lock()
-            .expect("automation gates")
-            .entry(session.into())
-            .or_default()
-            .clone();
+        let gate = {
+            let mut gates = self.gates.lock().expect("automation gates");
+            // Match the existing admission gates: live guards/waiters retain
+            // their gate, while idle Session keys are reclaimed on use.
+            gates.retain(|_, gate| gate.strong_count() > 0);
+            if let Some(gate) = gates.get(session).and_then(Weak::upgrade) {
+                gate
+            } else {
+                let gate = Arc::new(tokio::sync::Mutex::new(()));
+                gates.insert(session.into(), Arc::downgrade(&gate));
+                gate
+            }
+        };
         gate.lock_owned().await
     }
     pub async fn snapshot(&self, session_id: &str) -> TalosResult<SessionAutomationSnapshot> {
@@ -267,7 +273,20 @@ impl SessionAutomationService {
         let input = self
             .skill_input(session, AutomationMode::Loop, task.prompt.clone())
             .await?;
-        self.enqueue_prepared_loop(session, task, input).await
+        let mut claimed = task.clone();
+        if task.next_due_at.is_some() {
+            // The durable compare-and-update wins a deadline before touching
+            // any process-local queue. Another embedded owner loses this CAS.
+            claimed.next_due_at = None;
+            match self.store.replace_loop(task, &claimed).await {
+                Ok(()) => {}
+                Err(error) if error.is_code(ErrorCode::Conflict) => return Ok(()),
+                Err(error) => return Err(error),
+            }
+        }
+        self.enqueue_prepared_loop(session, &claimed, input).await?;
+        self.emit(&session.id);
+        Ok(())
     }
     async fn enqueue_prepared_loop(
         &self,

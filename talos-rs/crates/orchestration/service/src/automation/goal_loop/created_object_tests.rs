@@ -4,17 +4,8 @@ use super::*;
 async fn concurrent_same_prompt_model_creations_return_exact_loop_references() {
     let (service, store) = fixture().await;
     let session = store.get_session_record("alice").await.unwrap().unwrap();
-    let input = service
-        .turns
-        .automation_service()
-        .unwrap()
-        .skill_input(
-            &session,
-            AutomationMode::Loop,
-            "Explicitly create Loops".into(),
-        )
-        .await
-        .unwrap();
+    let input =
+        crate::test_support::test_user_input("Set up repeated follow-ups for both deployments");
     let (identity, _) = admitted(&service, &store, None, input).await;
     let request = AutomationModelRequest {
         caller: AgentCaller {

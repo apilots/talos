@@ -283,3 +283,98 @@ async fn model_decided_stop_is_applied_only_after_normal_completion() {
     assert_eq!(stopped.stop_reason, Some(LoopStopReason::ModelStopped));
     assert_eq!(stopped.next_due_at, None);
 }
+
+#[tokio::test]
+async fn goal_runtime_budget_pauses_continuation_without_resetting_its_start() {
+    let (service, store) = fixture().await;
+    let db = store.automation_store();
+    let mut original = goal("bounded", "alice", GoalStatus::Active);
+    original.token_budget = None;
+    original.created_at = chrono::Utc::now().timestamp() - 86_400;
+    db.create_goal(&original, None).await.unwrap();
+    let (turn, commit) = admitted(
+        &service,
+        &store,
+        Some(AutomationTurnOrigin::Goal {
+            goal_id: original.id.clone(),
+            objective_revision: original.objective_revision,
+        }),
+        crate::test_support::test_user_input("Continue the bounded work"),
+    )
+    .await;
+    let event = normal_end(&store, turn, commit).await;
+    let session = store.get_session_record("alice").await.unwrap().unwrap();
+    let automation = service.turns.automation_service().unwrap();
+    automation.settle(&session, &event, None).await.unwrap();
+    let paused = db.goal(&original.id).await.unwrap();
+    assert_eq!(paused.status, GoalStatus::Paused);
+    assert_eq!(paused.pause_reason, Some(GoalPauseReason::BudgetExhausted));
+    automation
+        .execute(
+            &session,
+            AutomationAction::Goal {
+                action: GoalAction::Resume {
+                    goal_id: original.id.clone(),
+                },
+            },
+            AutomationCaller::User,
+        )
+        .await
+        .unwrap();
+    service.turns.continue_goal(session, true).await.unwrap();
+    let resumed = db.goal(&original.id).await.unwrap();
+    assert_eq!(resumed.status, GoalStatus::Paused);
+    assert_eq!(resumed.pause_reason, Some(GoalPauseReason::BudgetExhausted));
+    assert_eq!(resumed.created_at, original.created_at);
+    assert!(store
+        .get_agent_active_turn("alice")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn unrelated_user_failure_preserves_the_active_goal() {
+    let (service, store) = fixture().await;
+    let db = store.automation_store();
+    let mut original = goal("active", "alice", GoalStatus::Active);
+    original.created_at = chrono::Utc::now().timestamp();
+    db.create_goal(&original, None).await.unwrap();
+    let (identity, commit) = admitted(
+        &service,
+        &store,
+        None,
+        crate::test_support::test_user_input("Answer an unrelated question"),
+    )
+    .await;
+    let event = CanonicalAgentEvent {
+        identity,
+        sequence: commit.events.last().unwrap().sequence + 1,
+        occurred_at: chrono::Utc::now().timestamp(),
+        payload: CanonicalAgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
+            error: talos_error::TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "The ordinary User task failed.",
+            )
+            .to_api_error(),
+            retryable: false,
+        }),
+    };
+    store
+        .commit_terminal_settlement(talos_store::session::CommitTerminalSettlementParams {
+            event: event.clone(),
+            expected_event_seq: commit.active_turn.last_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .unwrap();
+    let session = store.get_session_record("alice").await.unwrap().unwrap();
+    service
+        .turns
+        .automation_service()
+        .unwrap()
+        .settle(&session, &event, None)
+        .await
+        .unwrap();
+    assert_eq!(db.goal(&original.id).await.unwrap(), original);
+}

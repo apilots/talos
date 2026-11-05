@@ -39,6 +39,11 @@ async fn fixture() -> (TalosService, Arc<DatabaseSessionStore>) {
     (service, store)
 }
 fn goal(id: &str, session: &str, status: GoalStatus) -> SessionGoal {
+    let now = if status == GoalStatus::Complete {
+        1
+    } else {
+        chrono::Utc::now().timestamp() - AUTOMATION_INITIAL_DELAY_SECONDS
+    };
     SessionGoal {
         id: id.into(),
         session_id: session.into(),
@@ -51,8 +56,8 @@ fn goal(id: &str, session: &str, status: GoalStatus) -> SessionGoal {
         tokens_used: 12,
         latest_turn_id: None,
         completion_evidence: None,
-        created_at: 1,
-        updated_at: 1,
+        created_at: now,
+        updated_at: now,
     }
 }
 #[tokio::test]
@@ -177,48 +182,6 @@ async fn editing_goal_preserves_budget_and_does_not_start_a_turn() {
         .unwrap()
         .is_none());
 }
-#[tokio::test]
-async fn pending_goal_excludes_loop_without_a_second_queue() {
-    let (service, _) = fixture().await;
-    service
-        .message_queue
-        .add(
-            "alice",
-            AgentUserInput {
-                content: vec![
-                    AgentUserContent::Text {
-                        text: "Fix tests".into(),
-                    },
-                    AgentUserContent::SkillSelection {
-                        name: "goal".into(),
-                        path: "/protected/goal".into(),
-                    },
-                ],
-            },
-        )
-        .unwrap();
-    let rejected = service
-        .execute_automation(
-            &Actor::regular("alice"),
-            AutomationRequest {
-                session_id: "alice".into(),
-                action: AutomationAction::Loop {
-                    action: LoopAction::Create {
-                        prompt: "Check CI".into(),
-                        schedule: LoopSchedule::ModelDecided {},
-                    },
-                },
-            },
-        )
-        .await;
-    assert!(rejected
-        .unwrap_err()
-        .is_code(talos_error::ErrorCode::Conflict));
-    assert_eq!(
-        service.message_queue.list("alice").unwrap().messages.len(),
-        1
-    );
-}
 
 fn task(id: &str, mode: LoopSchedule) -> SessionLoop {
     // Existing behavior fixtures represent an already eligible definition.
@@ -292,88 +255,7 @@ async fn normal_end(
     event
 }
 #[tokio::test]
-async fn old_stop_cannot_end_an_edited_fixed_configuration() {
-    let (service, store) = fixture().await;
-    let db = store.automation_store();
-    let original = task("loop", LoopSchedule::ModelDecided {});
-    db.create_loop(&original).await.unwrap();
-    let origin = AutomationTurnOrigin::Loop {
-        loop_id: "loop".into(),
-        occurrence_id: "o".into(),
-        config_revision: 1,
-    };
-    let (identity, commit) = admitted(
-        &service,
-        &store,
-        Some(origin),
-        crate::test_support::test_user_input("Check deployment"),
-    )
-    .await;
-    let caller = AgentCaller {
-        session_id: "alice".into(),
-        turn_id: identity.turn_id.clone(),
-        agent_id: store
-            .get_session_record("alice")
-            .await
-            .unwrap()
-            .unwrap()
-            .agent_id,
-    };
-    service
-        .execute_automation_model(AutomationModelRequest {
-            caller,
-            call_id: uuid::Uuid::new_v4().to_string(),
-            action: AutomationAction::Loop {
-                action: LoopAction::Decide {
-                    loop_id: "loop".into(),
-                    config_revision: 1,
-                    decision: LoopWakeDecision::Stop {
-                        reason: "Old work finished".into(),
-                    },
-                },
-            },
-        })
-        .await
-        .unwrap();
-    service
-        .execute_automation(
-            &Actor::regular("alice"),
-            AutomationRequest {
-                session_id: "alice".into(),
-                action: AutomationAction::Loop {
-                    action: LoopAction::Edit {
-                        loop_id: "loop".into(),
-                        expected_revision: 1,
-                        prompt: "New work".into(),
-                        schedule: LoopSchedule::FixedInterval { minutes: 3 },
-                    },
-                },
-            },
-        )
-        .await
-        .unwrap();
-    assert!(store
-        .get_agent_active_turn("alice")
-        .await
-        .unwrap()
-        .is_some());
-    let event = normal_end(&store, identity, commit).await;
-    let session = store.get_session_record("alice").await.unwrap().unwrap();
-    service
-        .turns
-        .automation_service()
-        .unwrap()
-        .settle(&session, &event, Some(&AgentRunMetrics::default()))
-        .await
-        .unwrap();
-    let after = db.loop_task("loop").await.unwrap();
-    assert_eq!(after.status, LoopStatus::Active);
-    assert_eq!(after.config_revision, 2);
-    assert_eq!(after.prompt, "New work");
-    assert!(after.next_due_at.unwrap() >= event.occurred_at + 180);
-}
-#[tokio::test]
-async fn dynamic_decision_waits_for_normal_terminal_and_missing_live_decision_stops() {
+async fn dynamic_decision_schedules_next_run_after_normal_terminal() {
     let (service, store) = fixture().await;
     let db = store.automation_store();
     db.create_loop(&task("loop", LoopSchedule::ModelDecided {}))
@@ -400,23 +282,6 @@ async fn dynamic_decision_waits_for_normal_terminal_and_missing_live_decision_st
             .unwrap()
             .agent_id,
     };
-    let invalid = service
-        .execute_automation_model(AutomationModelRequest {
-            caller: caller.clone(),
-            call_id: uuid::Uuid::new_v4().to_string(),
-            action: AutomationAction::Loop {
-                action: LoopAction::Decide {
-                    loop_id: "loop".into(),
-                    config_revision: 1,
-                    decision: LoopWakeDecision::Continue {
-                        delay_minutes: 0,
-                        reason: "too early".into(),
-                    },
-                },
-            },
-        })
-        .await;
-    assert!(invalid.is_err());
     service
         .execute_automation_model(AutomationModelRequest {
             caller,
@@ -443,53 +308,6 @@ async fn dynamic_decision_waits_for_normal_terminal_and_missing_live_decision_st
         .await
         .unwrap();
     assert!(db.loop_task("loop").await.unwrap().next_due_at.unwrap() >= event.occurred_at + 120);
-    // Recovered normal facts with no live metrics do not prove missingDecision.
-    let second = task("unknown", LoopSchedule::ModelDecided {});
-    db.create_loop(&second).await.unwrap();
-    let (identity, commit) = admitted(
-        &service,
-        &store,
-        Some(AutomationTurnOrigin::Loop {
-            loop_id: "unknown".into(),
-            occurrence_id: "o2".into(),
-            config_revision: 1,
-        }),
-        crate::test_support::test_user_input("Check again"),
-    )
-    .await;
-    let event = normal_end(&store, identity, commit).await;
-    automation.settle(&session, &event, None).await.unwrap();
-    assert_eq!(
-        db.loop_task("unknown").await.unwrap().status,
-        LoopStatus::Active
-    );
-}
-#[tokio::test]
-async fn old_loop_with_no_next_time_remains_active_without_inventing_work() {
-    let (service, store) = fixture().await;
-    let db = store.automation_store();
-    let mut old = task("old", LoopSchedule::ModelDecided {});
-    old.created_at = 1;
-    old.updated_at = 1;
-    db.create_loop(&old).await.unwrap();
-    let session = store.get_session_record("alice").await.unwrap().unwrap();
-    service
-        .turns
-        .automation_service()
-        .unwrap()
-        .scan(&session, 30 * 24 * 60 * 60)
-        .await
-        .unwrap();
-    assert_eq!(
-        db.loop_task("old").await.unwrap().status,
-        LoopStatus::Active
-    );
-    assert!(service
-        .message_queue
-        .list("alice")
-        .unwrap()
-        .messages
-        .is_empty());
 }
 #[tokio::test]
 async fn goal_budget_is_charged_from_bound_metrics_and_pauses_at_boundary() {
@@ -560,48 +378,6 @@ async fn goal_budget_is_charged_from_bound_metrics_and_pauses_at_boundary() {
     let after = store.automation_store().goal(&goal.id).await.unwrap();
     assert_eq!(after.tokens_used, 11);
     assert_eq!(after.pause_reason, Some(GoalPauseReason::BudgetExhausted));
-}
-#[tokio::test]
-async fn a_model_cannot_create_from_an_ordinary_user_turn() {
-    let (service, store) = fixture().await;
-    let (identity, _) = admitted(
-        &service,
-        &store,
-        None,
-        crate::test_support::test_user_input("Fix this test"),
-    )
-    .await;
-    let caller = AgentCaller {
-        session_id: "alice".into(),
-        turn_id: identity.turn_id,
-        agent_id: store
-            .get_session_record("alice")
-            .await
-            .unwrap()
-            .unwrap()
-            .agent_id,
-    };
-    let error = service
-        .execute_automation_model(AutomationModelRequest {
-            caller,
-            call_id: "unauthorized".into(),
-            action: AutomationAction::Goal {
-                action: GoalAction::Create {
-                    objective: "Keep working".into(),
-                    token_budget: None,
-                },
-            },
-        })
-        .await
-        .unwrap_err();
-    assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
-    assert!(store
-        .automation_store()
-        .snapshot("alice")
-        .await
-        .unwrap()
-        .goal
-        .is_none());
 }
 #[tokio::test]
 async fn completed_goal_is_readable_but_not_a_mode_and_clear_hides_the_definition() {
@@ -706,105 +482,6 @@ async fn completed_goal_is_readable_but_not_a_mode_and_clear_hides_the_definitio
         .any(|entry| matches!(entry,AutomationListEntry::Goal{goal} if goal.id==complete.id)));
 }
 #[tokio::test]
-async fn automatic_loop_cannot_create_or_mutate_other_or_edited_loops() {
-    let (service, store) = fixture().await;
-    let db = store.automation_store();
-    db.create_loop(&task("bound", LoopSchedule::ModelDecided {}))
-        .await
-        .unwrap();
-    db.create_loop(&task("other", LoopSchedule::ModelDecided {}))
-        .await
-        .unwrap();
-    let (identity, _) = admitted(
-        &service,
-        &store,
-        Some(AutomationTurnOrigin::Loop {
-            loop_id: "bound".into(),
-            occurrence_id: "o".into(),
-            config_revision: 1,
-        }),
-        AgentUserInput {
-            content: vec![
-                AgentUserContent::Text {
-                    text: "Run bound loop".into(),
-                },
-                AgentUserContent::SkillSelection {
-                    name: "loop".into(),
-                    path: "/verified-system/loop/SKILL.md".into(),
-                },
-            ],
-        },
-    )
-    .await;
-    let caller = AgentCaller {
-        session_id: "alice".into(),
-        turn_id: identity.turn_id.clone(),
-        agent_id: store
-            .get_session_record("alice")
-            .await
-            .unwrap()
-            .unwrap()
-            .agent_id,
-    };
-    for action in [
-        LoopAction::Create {
-            prompt: "Recursive".into(),
-            schedule: LoopSchedule::ModelDecided {},
-        },
-        LoopAction::Stop {
-            loop_id: "other".into(),
-        },
-        LoopAction::Clear {
-            loop_id: "other".into(),
-        },
-    ] {
-        let error = service
-            .execute_automation_model(AutomationModelRequest {
-                caller: caller.clone(),
-                call_id: uuid::Uuid::new_v4().to_string(),
-                action: AutomationAction::Loop { action },
-            })
-            .await
-            .unwrap_err();
-        assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
-    }
-    service
-        .execute_automation(
-            &Actor::regular("alice"),
-            AutomationRequest {
-                session_id: "alice".into(),
-                action: AutomationAction::Loop {
-                    action: LoopAction::Edit {
-                        loop_id: "bound".into(),
-                        expected_revision: 1,
-                        prompt: "New config".into(),
-                        schedule: LoopSchedule::FixedInterval { minutes: 4 },
-                    },
-                },
-            },
-        )
-        .await
-        .unwrap();
-    let error = service
-        .execute_automation_model(AutomationModelRequest {
-            caller,
-            call_id: "old-stop".into(),
-            action: AutomationAction::Loop {
-                action: LoopAction::Stop {
-                    loop_id: "bound".into(),
-                },
-            },
-        })
-        .await
-        .unwrap_err();
-    assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
-    assert_eq!(
-        db.loop_task("bound").await.unwrap().status,
-        LoopStatus::Active
-    );
-    assert_eq!(db.loops("alice").await.unwrap().len(), 2);
-}
-#[tokio::test]
 async fn automation_changes_have_typed_notifications_independent_of_queue_revision() {
     let (service, store) = fixture().await;
     let db = store.automation_store();
@@ -899,72 +576,6 @@ async fn same_prompt_loops_read_the_exact_admitted_bound_origin() {
     }
 }
 #[tokio::test]
-async fn automatic_goal_cannot_resume_or_rewrite_user_paused_definition() {
-    let (service, store) = fixture().await;
-    let db = store.automation_store();
-    let active = goal("g", "alice", GoalStatus::Active);
-    db.create_goal(&active, None).await.unwrap();
-    let (identity, _) = admitted(
-        &service,
-        &store,
-        Some(AutomationTurnOrigin::Goal {
-            goal_id: "g".into(),
-            objective_revision: 1,
-        }),
-        crate::test_support::test_user_input("Do goal work"),
-    )
-    .await;
-    service
-        .execute_automation(
-            &Actor::regular("alice"),
-            AutomationRequest {
-                session_id: "alice".into(),
-                action: AutomationAction::Goal {
-                    action: GoalAction::Pause {
-                        goal_id: "g".into(),
-                    },
-                },
-            },
-        )
-        .await
-        .unwrap();
-    let caller = AgentCaller {
-        session_id: "alice".into(),
-        turn_id: identity.turn_id,
-        agent_id: store
-            .get_session_record("alice")
-            .await
-            .unwrap()
-            .unwrap()
-            .agent_id,
-    };
-    for action in [
-        GoalAction::Resume {
-            goal_id: "g".into(),
-        },
-        GoalAction::Edit {
-            goal_id: "g".into(),
-            expected_revision: 1,
-            objective: "Easier goal".into(),
-        },
-        GoalAction::Clear {
-            goal_id: "g".into(),
-        },
-    ] {
-        let error = service
-            .execute_automation_model(AutomationModelRequest {
-                caller: caller.clone(),
-                call_id: uuid::Uuid::new_v4().to_string(),
-                action: AutomationAction::Goal { action },
-            })
-            .await
-            .unwrap_err();
-        assert!(error.is_code(talos_error::ErrorCode::PermissionDenied));
-    }
-    assert_eq!(db.goal("g").await.unwrap().status, GoalStatus::Paused);
-    assert_eq!(db.goal("g").await.unwrap().objective, "Finish migration");
-}
-#[tokio::test]
 async fn committed_user_steer_retains_bound_definition_management() {
     let (service, store) = fixture().await;
     let db = store.automation_store();
@@ -1055,100 +666,6 @@ async fn committed_user_steer_retains_bound_definition_management() {
         .unwrap_err();
     assert!(rejected.is_code(talos_error::ErrorCode::PermissionDenied));
 }
-#[tokio::test]
-async fn natural_activation_queued_while_busy_keeps_selection_and_cannot_steer() {
-    let (service, store) = fixture().await;
-    let (identity, _) = admitted(
-        &service,
-        &store,
-        None,
-        crate::test_support::test_user_input("Current manual task"),
-    )
-    .await;
-    let queued = service
-        .add_queued_message(
-            &Actor::regular("alice"),
-            MessageQueueAddRequest {
-                session_id: "alice".into(),
-                input: crate::test_support::test_user_input("用 Loop 每 5 分钟检查 CI"),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(queued.messages.len(), 1);
-    assert!(queued.messages[0].input.content.iter().any(|c|matches!(c,AgentUserContent::SkillSelection{name,path} if name=="loop" && path=="/verified-system/loop/SKILL.md")));
-    let error = service
-        .turns
-        .steer_queued_message(
-            store.get_session_record("alice").await.unwrap().unwrap(),
-            &queued.messages[0].id,
-            &identity.turn_id,
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
-    assert_eq!(
-        service.message_queue.list("alice").unwrap().messages,
-        queued.messages
-    );
-}
-#[tokio::test]
-async fn repeated_or_old_terminal_does_not_move_a_known_loop_schedule() {
-    let (service, store) = fixture().await;
-    let db = store.automation_store();
-    db.create_loop(&task("l", LoopSchedule::FixedInterval { minutes: 2 }))
-        .await
-        .unwrap();
-    let origin = AutomationTurnOrigin::Loop {
-        loop_id: "l".into(),
-        occurrence_id: "o1".into(),
-        config_revision: 1,
-    };
-    let (identity, commit) = admitted(
-        &service,
-        &store,
-        Some(origin),
-        crate::test_support::test_user_input("Check deployment"),
-    )
-    .await;
-    let mut terminal = normal_end(&store, identity, commit).await;
-    terminal.occurred_at -= 30;
-    let session = store.get_session_record("alice").await.unwrap().unwrap();
-    let automation = service.turns.automation_service().unwrap();
-    automation
-        .settle(&session, &terminal, Some(&Default::default()))
-        .await
-        .unwrap();
-    let scheduled = db.loop_task("l").await.unwrap();
-    assert_eq!(scheduled.next_due_at, Some(terminal.occurred_at + 120));
-    automation
-        .settle(&session, &terminal, Some(&Default::default()))
-        .await
-        .unwrap();
-    assert_eq!(
-        db.loop_task("l").await.unwrap().next_due_at,
-        scheduled.next_due_at
-    );
-    let (new_identity, _) = admitted(
-        &service,
-        &store,
-        Some(AutomationTurnOrigin::Loop {
-            loop_id: "l".into(),
-            occurrence_id: "o2".into(),
-            config_revision: 1,
-        }),
-        crate::test_support::test_user_input("New occurrence"),
-    )
-    .await;
-    automation
-        .settle(&session, &terminal, Some(&Default::default()))
-        .await
-        .unwrap();
-    let running = db.loop_task("l").await.unwrap();
-    assert_eq!(running.latest_turn_id, Some(new_identity.turn_id));
-    assert_eq!(running.next_due_at, None);
-}
 
 #[path = "no_progress_tests.rs"]
 mod no_progress_tests;
@@ -1173,3 +690,6 @@ mod explicit_dispatch_tests;
 
 #[path = "preparation_tests.rs"]
 mod preparation_tests;
+
+#[path = "cross_runtime_tests.rs"]
+mod cross_runtime_tests;

@@ -67,4 +67,4 @@ cat "${evidence}/restart.log"
 }
 cat "${evidence}/remote-workers.log"
 [[ ! -f "${case_dir}/errors.jsonl" ]] || { cat "${case_dir}/errors.jsonl" >&2; exit 1; }
-echo 'CASE automation_e2e PASS model=controlled tool=real transports=app-server,embedded,direct,outbound cadence=real-minute'
+echo 'CASE session_automation PASS model=controlled tool=real transports=app-server,embedded,direct,outbound cadence=real-minute'

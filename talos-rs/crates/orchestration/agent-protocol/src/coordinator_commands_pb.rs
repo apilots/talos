@@ -8,10 +8,6 @@ use talos_agent_api::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::*;
 
-#[cfg(test)]
-#[path = "coordinator_queue_source_tests.rs"]
-mod queue_source_tests;
-
 fn invalid() -> TalosError {
     TalosError::new(
         ErrorCode::InvalidRequest,

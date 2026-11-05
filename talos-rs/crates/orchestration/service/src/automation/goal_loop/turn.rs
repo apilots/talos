@@ -67,10 +67,7 @@ impl TurnService {
         {
             return Ok(());
         }
-        if goal
-            .token_budget
-            .is_some_and(|budget| goal.tokens_used >= budget)
-        {
+        if SessionAutomationService::goal_budget_exhausted(&goal, chrono::Utc::now().timestamp()) {
             automation
                 .pause(
                     &goal,

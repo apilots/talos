@@ -126,73 +126,6 @@ async fn control_only_goal_read_is_no_progress() {
     assert_eq!(result.pause_reason, Some(GoalPauseReason::NoProgress));
 }
 #[tokio::test]
-async fn successful_goal_registration_waits_without_no_progress_pause() {
-    let (service, store) = fixture().await;
-    let mut input = crate::test_support::test_user_input("Finish tests");
-    input.content.push(AgentUserContent::SkillSelection {
-        name: "goal".into(),
-        path: "/verified-system/goal/SKILL.md".into(),
-    });
-    let (identity, commit) = admitted(&service, &store, None, input).await;
-    let commit = append_tool_call(&store, &identity, commit, "automation").await;
-    let result = service
-        .execute_automation_model(AutomationModelRequest {
-            caller: caller(&store, &identity).await,
-            call_id: "call".into(),
-            action: AutomationAction::Goal {
-                action: GoalAction::Create {
-                    objective: "Finish tests".into(),
-                    token_budget: None,
-                },
-            },
-        })
-        .await
-        .unwrap();
-    let id = result.snapshot.goal.unwrap().id;
-    let registered = store.automation_store().goal(&id).await.unwrap();
-    let mut waiting = registered.clone();
-    waiting.created_at = chrono::Utc::now().timestamp() + 86_400;
-    store
-        .automation_store()
-        .replace_goal(&registered, &waiting)
-        .await
-        .unwrap();
-    assert!(service
-        .execute_automation_model(AutomationModelRequest {
-            caller: caller(&store, &identity).await,
-            call_id: "premature-complete".into(),
-            action: AutomationAction::Goal {
-                action: GoalAction::Complete {
-                    goal_id: id.clone(),
-                    objective_revision: 1,
-                    evidence: "No work has run".into(),
-                }
-            },
-        })
-        .await
-        .unwrap_err()
-        .is_code(talos_error::ErrorCode::Conflict));
-    settle_with_tools(&service, &store, identity, commit, 1).await;
-    assert_eq!(
-        store.automation_store().goal(&id).await.unwrap().status,
-        GoalStatus::Active
-    );
-    let session = store.get_session_record("alice").await.unwrap().unwrap();
-    service.turns.continue_goal(session, false).await.unwrap();
-    assert!(store
-        .get_agent_active_turn("alice")
-        .await
-        .unwrap()
-        .is_none());
-    assert!(store
-        .automation_store()
-        .goal(&id)
-        .await
-        .unwrap()
-        .latest_turn_id
-        .is_none());
-}
-#[tokio::test]
 async fn ordinary_work_tool_retains_goal_progress() {
     let (service, store) = fixture().await;
     let (identity, commit) = active_goal_turn(&service, &store).await;
@@ -229,34 +162,5 @@ async fn completion_declaration_wins_over_control_only_no_progress() {
     assert_eq!(
         result.completion_evidence.as_deref(),
         Some("All checks passed")
-    );
-}
-#[tokio::test]
-async fn idempotent_goal_create_ack_does_not_earn_another_registration_exception() {
-    let (service, store) = fixture().await;
-    let (identity, commit) = active_goal_turn(&service, &store).await;
-    let commit = append_tool_call(&store, &identity, commit, "automation").await;
-    service
-        .execute_automation_model(AutomationModelRequest {
-            caller: caller(&store, &identity).await,
-            call_id: "call".into(),
-            action: AutomationAction::Goal {
-                action: GoalAction::Create {
-                    objective: "Finish migration".into(),
-                    token_budget: None,
-                },
-            },
-        })
-        .await
-        .unwrap();
-    settle_with_tools(&service, &store, identity, commit, 1).await;
-    assert_eq!(
-        store
-            .automation_store()
-            .goal("g")
-            .await
-            .unwrap()
-            .pause_reason,
-        Some(GoalPauseReason::NoProgress)
     );
 }

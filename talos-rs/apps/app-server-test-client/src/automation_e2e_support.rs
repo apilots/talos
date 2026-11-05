@@ -33,9 +33,7 @@ pub(super) fn selected(marker: &str, skill: &SkillSummary) -> AgentUserInput {
     let instruction = match marker.split_once('_').map(|(kind, _)| kind) {
         Some("fixed" | "stop") => "check progress every 1 minute",
         Some("fixedlong") => "check progress every 10081 minutes",
-        Some("dynamic" | "dynamicstop" | "strict") => {
-            "check progress; model decides the next check time"
-        }
+        Some("dynamic" | "dynamicstop") => "check progress; model decides the next check time",
         _ => "complete the verifiable Goal objective",
     };
     let mut input = text(&format!(

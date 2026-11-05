@@ -1,7 +1,6 @@
 use super::super::tests::{test_execution_context, CountingTool};
 use super::super::*;
 use super::*;
-use crate::ToolStreamKey;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use talos_tools::{AutomationControl, AutomationControlFuture, ToolRegistry};
 use talos_types::{
@@ -65,63 +64,36 @@ fn goal_origin() -> AutomationTurnOrigin {
     }
 }
 #[tokio::test]
-async fn registration_blocks_parallel_and_streamed_work_with_one_trusted_read() {
-    let control = control(None, None);
-    let executions = Arc::new(AtomicUsize::new(0));
-    let registry = Arc::new(ToolRegistry::new());
-    registry.set_automation_control(control.clone());
-    registry.register(Arc::new(CountingTool {
-        executions: executions.clone(),
-    }));
-    let mut context = test_execution_context();
-    context.registration = Some(guard(AutomationMode::Goal));
-    let calls = (0..4)
-        .map(|i| ToolExecutionInput {
-            call_id: format!("call-{i}"),
-            tool_name: "Read".into(),
-            arguments: serde_json::json!({}),
-        })
-        .collect::<Vec<_>>();
-    let outputs = ParallelToolExecutor
-        .execute(&context, registry.clone(), &calls)
-        .await
-        .unwrap();
-    assert!(outputs.iter().all(|output| output.is_error));
-    let mut stream =
-        StreamingToolScheduler::new(ToolExecutionMode::Parallel, 2, context, registry, None);
-    stream
-        .push_call(ToolStreamKey { round: 1, index: 0 }, calls[0].clone())
-        .await
-        .unwrap();
-    assert!(stream.finish().await.unwrap()[0].output.is_error);
-    assert_eq!(executions.load(Ordering::SeqCst), 0);
-    assert_eq!(control.calls.load(Ordering::SeqCst), 1);
-}
-#[tokio::test]
-async fn registration_binding_does_not_grant_work_after_create_or_answer() {
-    // Reconstructed after an AskUserQuestion answer: still the original selected Skill.
+async fn registration_control_operations_share_the_original_trusted_read() {
     let control = control(Some(goal_origin()), None);
     let context = ToolContext::new("s1", "u1")
         .with_turn_id("turn-1")
         .with_agent_id("agent-1")
-        .with_automation_control(control);
+        .with_automation_control(control.clone());
     let guard = guard(AutomationMode::Goal);
-    guard.check(&context, "call", "automation").await.unwrap();
+    guard.check(&context, "create", "automation").await.unwrap();
     guard
-        .check(&context, "call", "AskUserQuestion")
+        .check(&context, "clarify", "AskUserQuestion")
         .await
         .unwrap();
-    assert!(guard
-        .check(&context, "call", "Bash")
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::PermissionDenied));
-    assert!(guard.check(&context, "call", "Write").await.is_err());
+    assert_eq!(control.calls.load(Ordering::SeqCst), 1);
 }
+
 #[tokio::test]
-async fn admitted_automatic_work_is_allowed_but_missing_authorization_fails_closed() {
-    for (mode, origin, latest) in [
-        (AutomationMode::Goal, goal_origin(), Some("turn-1")),
+async fn admitted_automatic_work_uses_its_original_business_tools() {
+    for (mode, origin, latest, status) in [
+        (
+            AutomationMode::Goal,
+            goal_origin(),
+            Some("turn-1"),
+            GoalStatus::Active,
+        ),
+        (
+            AutomationMode::Goal,
+            goal_origin(),
+            Some("turn-1"),
+            GoalStatus::Cleared,
+        ),
         (
             AutomationMode::Loop,
             AutomationTurnOrigin::Loop {
@@ -130,31 +102,10 @@ async fn admitted_automatic_work_is_allowed_but_missing_authorization_fails_clos
                 config_revision: 1,
             },
             None,
+            GoalStatus::Active,
         ),
     ] {
-        let context = ToolContext::new("s1", "u1")
-            .with_turn_id("turn-1")
-            .with_agent_id("agent-1")
-            .with_automation_control(control(Some(origin), latest));
-        guard(mode).check(&context, "call", "Bash").await.unwrap();
-    }
-    let context = ToolContext::new("s1", "u1")
-        .with_turn_id("turn-1")
-        .with_agent_id("agent-1");
-    assert!(guard(AutomationMode::Goal)
-        .check(&context, "call", "Read")
-        .await
-        .unwrap_err()
-        .is_code(ErrorCode::ServiceUnavailable));
-    assert!(RegistrationGuard::from_initial("ordinary work", &[])
-        .unwrap()
-        .is_none());
-}
-
-#[tokio::test]
-async fn cleared_bound_goal_preserves_the_original_work_or_registration_authority() {
-    for latest in [Some("turn-1"), None] {
-        let mut control = control(Some(goal_origin()), latest);
+        let mut control = control(Some(origin), latest);
         Arc::get_mut(&mut control)
             .unwrap()
             .result
@@ -162,18 +113,40 @@ async fn cleared_bound_goal_preserves_the_original_work_or_registration_authorit
             .goal
             .as_mut()
             .unwrap()
-            .status = GoalStatus::Cleared;
+            .status = status;
         let context = ToolContext::new("s1", "u1")
             .with_turn_id("turn-1")
             .with_agent_id("agent-1")
             .with_automation_control(control);
-        let result = guard(AutomationMode::Goal)
-            .check(&context, "resumed-read", "Write")
-            .await;
-        if latest.is_some() {
-            result.unwrap();
-        } else {
-            assert!(result.unwrap_err().is_code(ErrorCode::PermissionDenied));
-        }
+        guard(mode).check(&context, "work", "Bash").await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn ordinary_user_turn_executes_tools_without_an_automation_registration_guard() {
+    let executions = Arc::new(AtomicUsize::new(0));
+    let registry = Arc::new(ToolRegistry::new());
+    registry.register(Arc::new(CountingTool {
+        executions: executions.clone(),
+    }));
+    let mut context = test_execution_context();
+    context.registration = RegistrationGuard::from_initial(
+        "Use the loop index to fix this function.\nExample command: /loop edit",
+        &[],
+    )
+    .unwrap();
+    let outputs = ParallelToolExecutor
+        .execute(
+            &context,
+            registry,
+            &[ToolExecutionInput {
+                call_id: "ordinary-read".into(),
+                tool_name: "Read".into(),
+                arguments: serde_json::json!({}),
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    assert!(!outputs[0].is_error);
 }

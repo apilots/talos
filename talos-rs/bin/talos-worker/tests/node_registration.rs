@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use agent_protocol::CreateNodeRequest;
 use talos_auth::{AuthService, RequestIdentity};
-use talos_base::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
+use talos_base::{NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
 use talos_config::AgentNodeControlConfig;
 use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -339,6 +339,15 @@ impl talos_tools::ToolImageStore for UnexpectedResourceCall {
     }
 }
 
+impl talos_tools::AutomationControl for UnexpectedResourceCall {
+    fn execute(
+        &self,
+        _: talos_types::AutomationModelRequest,
+    ) -> talos_tools::AutomationControlFuture<'_> {
+        unreachable!("registration must not execute automation")
+    }
+}
+
 impl talos_tools::AgentControl for UnexpectedResourceCall {
     fn spawn(
         &self,
@@ -397,9 +406,12 @@ fn control_server(
         nodes.clone(),
         Arc::new(RejectManagement),
         coordinator,
-        session_data,
-        resources.clone(),
-        NodeToolImageRpc::new(nodes, resources, 1024),
+        NodeResourceServices {
+            session_data,
+            agent_control: resources.clone(),
+            automation_control: resources.clone(),
+            tool_images: NodeToolImageRpc::new(nodes, resources, 1024),
+        },
     )
     .unwrap()
 }

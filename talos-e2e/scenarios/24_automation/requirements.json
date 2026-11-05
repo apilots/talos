@@ -1,0 +1,55 @@
+{
+  "default": {
+    "commands": [
+      "cargo",
+      "protoc"
+    ],
+    "python_modules": [
+      "yaml"
+    ],
+    "checks": []
+  },
+  "cases": {
+    "01_session_automation.sh": {
+      "checks": [],
+      "commands": [
+        "cargo",
+        "protoc",
+        "timeout",
+        "just"
+      ],
+      "binaries": [
+        "app_server",
+        "test_client",
+        "cli"
+      ]
+    },
+    "02_web_entry.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "pnpm"
+      ],
+      "python_modules": [
+        "yaml",
+        "playwright"
+      ],
+      "checks": [
+        "chrome"
+      ],
+      "binaries": [
+        "server"
+      ]
+    },
+    "03_tui_entry.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "tmux"
+      ],
+      "binaries": [
+        "cli"
+      ]
+    }
+  }
+}

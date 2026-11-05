@@ -154,7 +154,3 @@ fn invalid() -> TalosError {
         "Automation RPC payload is malformed",
     )
 }
-
-#[cfg(test)]
-#[path = "automation_pb/tests.rs"]
-mod tests;

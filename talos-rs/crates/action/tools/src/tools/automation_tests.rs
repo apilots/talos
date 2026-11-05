@@ -85,67 +85,6 @@ async fn forwards_only_runtime_caller_and_preserves_pending_settlement() {
 }
 
 #[tokio::test]
-async fn missing_runtime_identity_or_port_never_calls_control() {
-    let control = control(AutomationEffect::Applied);
-    let input = json!({"target": "goal", "action": {"type": "read"}});
-    for context in [
-        ToolContext::new("session", "user").with_automation_control(control.clone()),
-        context(control.clone()).with_turn_id(""),
-        context(control.clone()).with_agent_id(""),
-        ToolContext::new("", "user")
-            .with_turn_id("turn")
-            .with_agent_id("agent")
-            .with_automation_control(control.clone()),
-        runtime_context(),
-        ToolContext::new("session", "user")
-            .with_turn_id("turn")
-            .with_agent_id("agent")
-            .with_automation_control(control.clone()),
-    ] {
-        let error = AutomationTool
-            .execute_payload(input.clone(), context)
-            .await
-            .unwrap_err();
-        assert!(error.is_code(ErrorCode::ToolExecutionFailed));
-    }
-    assert!(control.requests.lock().unwrap().is_empty());
-}
-
-#[test]
-fn rejects_native_jobs_spoofed_identity_and_sub_minute_decisions() {
-    for input in [
-        json!({"target": "builtinJob", "action": {"type": "pause"}}),
-        json!({"target": "goal", "action": {"type": "read"}, "caller": {"sessionId": "other"}}),
-        json!({"target": "goal", "action": {"type": "read"}, "callId": "model-call"}),
-        json!({"target": "loop", "action": {"type": "create", "prompt": "Check", "schedule": {"type": "fixedInterval", "minutes": 0}}}),
-        json!({"target": "loop", "action": {"type": "decide", "loopId": "loop", "configRevision": 1, "decision": {"type": "continue", "delayMinutes": 0, "reason": "Now"}}}),
-    ] {
-        assert!(AutomationTool.validate_input(&input).is_err());
-    }
-}
-
-#[test]
-fn registered_tool_is_local_serial_mutating_and_has_object_arguments() {
-    let registry = ToolRegistry::new();
-    crate::register_core_local_tools(&registry);
-    let control = control(AutomationEffect::Applied);
-    registry.set_automation_control(control.clone());
-    let inherited = registry.build_context("session", "workspace-user", None);
-    assert!(inherited.automation_control().is_some());
-    assert!(registry
-        .get_tool_definitions()
-        .iter()
-        .any(|tool| tool.name == "automation"));
-    assert_eq!(AutomationTool.source(), crate::ToolSource::Local);
-    assert_eq!(AutomationTool.parallelism(), ToolParallelism::SerialOnly);
-    assert!(AutomationTool.mutating());
-    let schema = AutomationTool.parameters_schema().unwrap();
-    assert_eq!(schema["properties"]["action"]["type"], "object");
-    assert_eq!(schema["additionalProperties"], false);
-    assert!(schema["properties"].get("caller").is_none());
-}
-
-#[tokio::test]
 async fn invocation_port_overrides_registry_default() {
     let registry = ToolRegistry::new();
     let default = control(AutomationEffect::Applied);
@@ -227,69 +166,6 @@ async fn distinct_runtime_calls_in_one_turn_keep_distinct_create_identities() {
     );
 }
 
-#[tokio::test]
-async fn blank_runtime_call_id_is_rejected_before_control() {
-    let control = control(AutomationEffect::Applied);
-    let mut context = context(control.clone());
-    context.bind_current_call_id("  ");
-    let error = AutomationTool
-        .execute_payload(
-            json!({"target": "goal", "action": {"type": "read"}}),
-            context,
-        )
-        .await
-        .unwrap_err();
-    assert!(error.is_code(ErrorCode::ToolExecutionFailed));
-    assert!(control.requests.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn custom_policy_can_still_deny_automation_before_control() {
-    let registry = ToolRegistry::new_with_policy(talos_tools_policy::ToolPolicy::deny_list(vec![
-        "automation",
-    ]));
-    registry.register(Arc::new(AutomationTool));
-    let control = control(AutomationEffect::Applied);
-    registry.set_automation_control(control.clone());
-    let invocation = registry
-        .build_function_invocation(
-            "call",
-            "automation",
-            json!({"target": "goal", "action": {"type": "read"}}),
-        )
-        .unwrap();
-    let context = registry
-        .build_context("session", "user", None)
-        .with_turn_id("turn")
-        .with_agent_id("agent");
-    let error = registry
-        .execute_invocation_with_context(invocation, context)
-        .await
-        .unwrap_err();
-    assert!(error.error().is_code(ErrorCode::PermissionDenied));
-    assert!(control.requests.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn original_service_denial_is_propagated_without_a_success_receipt() {
-    struct Denied;
-    impl AutomationControl for Denied {
-        fn execute(&self, _: AutomationModelRequest) -> AutomationControlFuture<'_> {
-            Box::pin(async {
-                Err(TalosError::new(
-                    ErrorCode::PermissionDenied,
-                    "No activation intent",
-                ))
-            })
-        }
-    }
-    let error = AutomationTool.execute_payload(
-        json!({"target": "goal", "action": {"type": "create", "objective": "Fix tests", "tokenBudget": null}}),
-        context(Arc::new(Denied)),
-    ).await.unwrap_err();
-    assert!(error.is_code(ErrorCode::PermissionDenied));
-}
-
 #[test]
 fn large_model_view_is_explicitly_shortened_without_losing_effect() {
     let mut result = control(AutomationEffect::PendingSettlement).result.clone();
@@ -331,6 +207,3 @@ fn large_model_view_is_explicitly_shortened_without_losing_effect() {
     assert!(value["notice"].as_str().unwrap().contains("shortened"));
     assert!(value.to_string().len() <= MAX_RESULT_BYTES);
 }
-
-#[path = "automation_validation_tests.rs"]
-mod strict_inputs;

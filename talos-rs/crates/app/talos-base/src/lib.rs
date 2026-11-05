@@ -29,7 +29,9 @@ mod agent_node_rpc;
 mod application_automation_control;
 mod application_native_jobs;
 mod local_resource_rpc;
-pub use agent_node_rpc::{NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc};
+pub use agent_node_rpc::{
+    NodeResourceServices, NodeRpcServer, NodeSessionDataRpc, NodeToolImageRpc,
+};
 mod application_automation;
 mod application_desktop;
 mod application_runtime;

@@ -155,7 +155,17 @@ node gRPC，显式选择无密钥的上游 Auth 契约 fixture。覆盖所有者
 Playwright 和已安装的 Chrome（`TALOS_E2E_CHROME_BIN`）。该场景不代替本地 group 19
 多管理端 Sync 拓扑验收；删除后的历史导入另有两个 peer 的 Store/CRDT 回归。
 
-`just e2e-case 09_app_server/automation_e2e` 使用隔离 home 和本地受控模型/Auth 上游，
+### Session 自动化分组
+
+`just e2e-group 24_automation` 统一负责 Goal／Loop 产品验收；原 runner 按文件系统与依赖声明发现三个 case：
+
+- `01_session_automation`：下述生命周期、间隔、互斥、Queue／Steer、重启与 CLI／SDK／Worker 合同。
+- `02_web_entry`：真实隔离 Server、生产 Web 与已安装 Chrome，验证 Add／slash、结构化输入、首轮倒计时／取消、自动执行可见与结束行移出。
+- `03_tui_entry`：真实终端 `/goal <提示词>`、`/loop <提示词>`，沿原 SkillSelection 提交，验证自动流展示与任务清理。
+
+三个 case 复用同一本地受控模型 fixture，无需供应商 key。共享 fixture 改动选择三个载体，Web／TUI 入口改动选择各自载体。生命周期 case 从 app-server smoke 目标移出，合并多个 owner 的 CI 选择时只执行一次。入口 case 补齐客户端链路，不重复完整生命周期矩阵。
+
+`just e2e-case 24_automation/01_session_automation` 使用隔离 home 和本地受控模型/Auth 上游，
 贯穿真实 System Skill、Automation Tool、Service、原队列、结算和 History。相同业务
 断言分别走 app-server 与 embedded SDK，每种 transport 都保留一次真实一分钟固定
 Loop 等待，并覆盖自动 Turn 中普通 User Queue/Steer、动态决定校验、版本编辑和停止。另沿同一真实工具路径验证模型 Stop 在正常结算时生效、

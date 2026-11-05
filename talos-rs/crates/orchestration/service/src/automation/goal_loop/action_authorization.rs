@@ -102,12 +102,14 @@ impl SessionAutomationService {
                     "Automatic Turns cannot create further automation.",
                 ));
             }
+            // Plain User requests are judged by the model using the shipped Skills.
+            // A typed/leading-command selection still constrains its chosen mode.
             if explicit_automation_mode(&self.initial_input(&caller.turn_ref()).await?)?
-                != Some(mode)
+                .is_some_and(|selected| selected != mode)
             {
                 return Err(TalosError::new(
                     ErrorCode::PermissionDenied,
-                    "Automation activation requires an explicit original User request.",
+                    "Automation creation must match the explicitly selected mode.",
                 ));
             }
         } else if self

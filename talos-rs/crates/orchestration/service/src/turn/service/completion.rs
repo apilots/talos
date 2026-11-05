@@ -169,15 +169,24 @@ impl TurnService {
         automation_metrics: Option<&AgentRunMetrics>,
     ) -> TalosResult<()> {
         if let Some(automation) = self.automation.get() {
-            if let Some(session) = self
-                .execution
-                .sessions
-                .load_record(&event.identity.session_id)
-                .await?
-            {
-                automation
-                    .settle(&session, event, automation_metrics)
-                    .await?;
+            let result: TalosResult<()> = async {
+                if let Some(session) = self
+                    .execution
+                    .sessions
+                    .load_record(&event.identity.session_id)
+                    .await?
+                {
+                    automation
+                        .settle(&session, event, automation_metrics)
+                        .await?;
+                }
+                Ok(())
+            }
+            .await;
+            if let Err(error) = result {
+                self.execution
+                    .report_warning(&event.identity, error.context("settle Session automation"))
+                    .await;
             }
         }
         let profile_result = if matches!(event.payload, CanonicalAgentEventPayload::TurnFailed(_)) {

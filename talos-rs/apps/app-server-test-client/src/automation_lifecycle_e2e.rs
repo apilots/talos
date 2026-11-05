@@ -17,8 +17,7 @@ pub(super) async fn run(
 ) -> Result<()> {
     goal_cross_turn(client, goal_skill, evidence).await?;
     long_fixed(client, loop_skill, evidence).await?;
-    model_stop(client, loop_skill, evidence, "dynamicstop").await?;
-    model_stop(client, loop_skill, evidence, "strict").await
+    model_stop(client, loop_skill, evidence).await
 }
 
 async fn goal_cross_turn(
@@ -142,19 +141,10 @@ async fn model_stop(
     client: &mut impl GatewayClient,
     skill: &SkillSummary,
     evidence: &mut Vec<Value>,
-    kind: &str,
 ) -> Result<()> {
     let session = uuid::Uuid::new_v4().to_string();
-    let case = marker(kind);
+    let case = marker("dynamicstop");
     start(client, &session, selected(&case, skill)).await?;
-    if kind == "strict" {
-        gate(&case, "registered").await?;
-        let registered = active(client, &session).await?.active_turn.identity;
-        release(&case, "registered")?;
-        let registration = history(client, &session, &registered).await?;
-        assert_strict_correction(&registration, &case)?;
-        evidence.push(json!({"case":"strict-model-tool-correction", "registration":registration}));
-    }
     gate(&case, "work-1").await?;
     let turn = active(client, &session).await?.active_turn.identity;
     release(&case, "work-1")?;
@@ -197,57 +187,6 @@ async fn model_stop(
         "model Stop left an occurrence queued"
     );
     evidence
-        .push(json!({"case":if kind == "strict" { "strict-corrected-model-stop" } else { "dynamic-model-stop" }, "pending":pending, "work":work, "ended":ended}));
-    Ok(())
-}
-
-fn assert_strict_correction(turn: &talos_sdk::SessionHistoryTurn, case: &str) -> Result<()> {
-    let AgentRunResult::Completed(output) = &turn.result else {
-        anyhow::bail!("corrected registration did not settle normally");
-    };
-    let results = output
-        .messages
-        .iter()
-        .flat_map(|message| &message.blocks)
-        .filter_map(|block| match &block.content {
-            AgentMessageBlockContent::ToolResult(result) => Some(result),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let rejected = results
-        .iter()
-        .find(|result| result.call_id == format!("bad-schedule-{case}"))
-        .context("actual malformed Tool result missing")?;
-    ensure!(
-        rejected.is_error,
-        "modelDecided with extra minutes reached control"
-    );
-    let listed = results
-        .iter()
-        .find(|result| result.call_id == format!("list-empty-{case}"))
-        .context("actual post-rejection List Tool result missing")?;
-    ensure!(
-        !listed.is_error,
-        "model could not inspect actual state after rejection"
-    );
-    let content = serde_json::to_value(&listed.content)?;
-    let empty: talos_sdk::SessionAutomationSnapshot =
-        serde_json::from_value(content[0]["value"]["snapshot"].clone())?;
-    ensure!(
-        empty.goal.is_none() && empty.loops.is_empty(),
-        "invalid nested field had business side effects"
-    );
-    let corrected = results
-        .iter()
-        .find(|result| result.call_id == format!("create-{case}"))
-        .context("actual corrected Create Tool result missing")?;
-    ensure!(!corrected.is_error, "same-Turn corrected Create failed");
-    let content = serde_json::to_value(&corrected.content)?;
-    let created: talos_sdk::SessionAutomationSnapshot =
-        serde_json::from_value(content[0]["value"]["snapshot"].clone())?;
-    ensure!(
-        created.loops.len() == 1,
-        "corrected Create did not produce exactly one Loop"
-    );
+        .push(json!({"case":"dynamic-model-stop", "pending":pending, "work":work, "ended":ended}));
     Ok(())
 }

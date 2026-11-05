@@ -91,20 +91,6 @@
       "binaries": [
         "server"
       ]
-    },
-    "automation_e2e.sh": {
-      "checks": [],
-      "commands": [
-        "cargo",
-        "protoc",
-        "timeout",
-        "just"
-      ],
-      "binaries": [
-        "app_server",
-        "test_client",
-        "cli"
-      ]
     }
   }
 }

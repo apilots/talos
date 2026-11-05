@@ -142,26 +142,6 @@ def serve(directory):
                 self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
                 if kind == "pending":
                     self.gate(marker, "busy"); self.done("Ordinary User Turn finished")
-                elif iteration == 0 and kind == "strict":
-                    bad, listed, created = f"bad-schedule-{marker}", f"list-empty-{marker}", f"create-{marker}"
-                    assert "model decides the next check time" in json.dumps(messages[triggers[-1]])
-                    if bad not in calls:
-                        self.action(bad, {"target": "loop", "action": {"type": "create",
-                            "prompt": f"AUTO_CASE={marker} controlled Loop work; model decides the next check time",
-                            "schedule": {"type": "modelDecided", "minutes": 1}}})
-                    elif listed not in calls:
-                        record("strict-rejections.jsonl", calls[bad])
-                        self.action(listed, {"target": "loop", "action": {"type": "list"}})
-                    elif created not in calls:
-                        empty = snapshot(messages)
-                        assert empty["loops"] == [] and empty["goal"] is None, "rejected nested field created an automation definition"
-                        record("strict-no-side-effects.jsonl", empty)
-                        self.action(created, {"target": "loop", "action": {"type": "create",
-                            "prompt": f"AUTO_CASE={marker} controlled Loop work; model decides the next check time",
-                            "schedule": {"type": "modelDecided"}}})
-                    else:
-                        self.gate(marker, "registered")
-                        self.done("Strict correction registered once; first work still uses the original queue")
                 elif iteration == 0:
                     instruction = "check progress every 10081 minutes" if kind == "fixedlong" else (
                         "check progress; model decides the next check time" if kind in {"dynamic", "dynamicstop"} else "check progress every 1 minute")
@@ -202,7 +182,7 @@ def serve(directory):
                 elif kind in {"fixed", "fixedlong"}:
                     self.gate(marker, f"work-{iteration}")
                     self.done(f"Fixed Loop work {iteration} finished")
-                elif kind in {"dynamicstop", "strict"}:
+                elif kind == "dynamicstop":
                     read, stop = f"read-{marker}-{iteration}", f"stop-{marker}"
                     if read not in calls:
                         self.action(read, {"target": "loop", "action": {"type": "list"}})
@@ -215,7 +195,7 @@ def serve(directory):
                         self.action(stop, {"target": "loop", "action": {"type": "decide", "loopId": task["id"],
                             "configRevision": task["configRevision"], "decision": {"type": "stop", "reason": "Controlled task is complete; stop checking"}}})
                 elif kind == "dynamic":
-                    read, zero, valid = f"read-{marker}-{iteration}", f"zero-{marker}", f"continue-{marker}"
+                    read, valid = f"read-{marker}-{iteration}", f"continue-{marker}"
                     if read not in calls:
                         self.action(read, {"target": "loop", "action": {"type": "list"}})
                     elif valid in calls:
@@ -223,13 +203,10 @@ def serve(directory):
                         self.done("Old revision decision awaits normal settlement")
                     else:
                         task = snapshot(messages)["loops"][0]
-                        if zero not in calls:
-                            self.gate(marker, f"work-{iteration}")
-                        else:
-                            record("minimum-rejections.jsonl", calls[zero])
-                        self.action(valid if zero in calls else zero, {"target": "loop", "action": {
+                        self.gate(marker, f"work-{iteration}")
+                        self.action(valid, {"target": "loop", "action": {
                             "type": "decide", "loopId": task["id"], "configRevision": task["configRevision"],
-                            "decision": {"type": "continue", "delayMinutes": 1 if zero in calls else 0,
+                            "decision": {"type": "continue", "delayMinutes": 1,
                                          "reason": "Controlled model next check"}}})
                 else:
                     raise AssertionError(f"stopped Loop unexpectedly executed: {marker}")

@@ -94,7 +94,7 @@ async fn original_activation_is_explicit_in_actual_model_request_without_rewriti
             false,
             None,
             "使用 Goal 持续修复这些测试，直到全部通过。",
-            Some("explicit_activation"),
+            None,
         ),
         (
             AutomationMode::Goal,
@@ -153,10 +153,11 @@ async fn original_activation_is_explicit_in_actual_model_request_without_rewriti
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].messages.last().unwrap().content, input);
         assert_eq!(ctx.input.text, input);
-        let context = requests[0]
-            .messages
-            .iter()
-            .find(|message| message.content.contains("[AutomationInvocation]"));
+        let context = requests[0].messages.iter().find(|message| {
+            message
+                .content
+                .contains("[AutomationInvocation]\nBackend-confirmed facts")
+        });
         if let Some(expected) = expected_request {
             let context =
                 context.expect("backend invocation facts must reach the actual model request");
@@ -180,6 +181,16 @@ async fn original_activation_is_explicit_in_actual_model_request_without_rewriti
         } else {
             assert!(context.is_none());
             assert!(control.calls.lock().unwrap().is_empty());
+            let instructions = requests[0]
+                .messages
+                .iter()
+                .map(|message| message.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(instructions.contains("normal User Turn"));
+            for skill in talos_skills::builtin_automation_skills() {
+                assert!(instructions.contains(&format!("name: {}", skill.mode.skill_name())));
+            }
         }
     }
     std::fs::remove_dir_all(workspace).unwrap();
@@ -253,7 +264,11 @@ async fn activation_facts_survive_real_history_compaction_and_prompt_rebuild() {
     let facts = model_request
         .messages
         .iter()
-        .filter(|message| message.content.contains("[AutomationInvocation]"))
+        .filter(|message| {
+            message
+                .content
+                .contains("[AutomationInvocation]\nBackend-confirmed facts")
+        })
         .collect::<Vec<_>>();
     assert_eq!(facts.len(), 1);
     assert!(facts[0]

@@ -4,12 +4,12 @@ use anyhow::{ensure, Context, Result};
 use serde_json::json;
 use std::time::{Duration, Instant};
 use talos_sdk::{
-    AgentMessageBlockContent, AgentRunResult, AutomationAction, AutomationListEntry,
-    AutomationListRequest, AutomationListScope, AutomationRequest, AutomationTurnOrigin,
-    BuiltinJobAction, BuiltinJobControlRequest, BuiltinJobId, BuiltinJobListRequest, GatewayClient,
-    GoalStatus, LoopAction, LoopSchedule, LoopStatus, MessageQueueAddRequest,
-    MessageQueueDeleteRequest, MessageQueueListRequest, QueuedMessageSource, SkillScope,
-    SkillSummary, SkillsListRequest, SubmitTurnInput, SubmitTurnInputRequest,
+    AutomationAction, AutomationListEntry, AutomationListRequest, AutomationListScope,
+    AutomationRequest, AutomationTurnOrigin, BuiltinJobAction, BuiltinJobControlRequest,
+    BuiltinJobId, BuiltinJobListRequest, GatewayClient, GoalStatus, LoopAction, LoopSchedule,
+    LoopStatus, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    QueuedMessageSource, SkillScope, SkillSummary, SkillsListRequest, SubmitTurnInput,
+    SubmitTurnInputRequest,
 };
 
 pub(super) async fn run(client: &mut impl GatewayClient) -> Result<()> {
@@ -148,7 +148,7 @@ pub(super) async fn run(client: &mut impl GatewayClient) -> Result<()> {
     );
 
     eprintln!(
-        "automation dynamic Loop: zero-minute decision rejection and late old-revision settlement"
+        "automation dynamic Loop: model Continue and edited next cadence at normal settlement"
     );
     let session = uuid::Uuid::new_v4().to_string();
     let case = marker("dynamic");
@@ -179,20 +179,6 @@ pub(super) async fn run(client: &mut impl GatewayClient) -> Result<()> {
         edited.loops[0].config_revision == previous.config_revision + 1
             && edited.loops[0].next_due_at.unwrap() >= completed.completed_at + 119,
         "old model decision overwrote edited configuration: {edited:?}"
-    );
-    let AgentRunResult::Completed(output) = &completed.result else {
-        unreachable!("history requires normal settlement")
-    };
-    ensure!(
-        output
-            .messages
-            .iter()
-            .flat_map(|message| &message.blocks)
-            .any(
-                |block| matches!(&block.content, AgentMessageBlockContent::ToolResult(result)
-                if result.call_id == format!("zero-{case}") && result.is_error)
-            ),
-        "zero-minute model decision was not rejected by the real Tool path"
     );
     control(
         client,

@@ -100,7 +100,7 @@ impl TalosService {
         Ok(result)
     }
     /// Internal model port. The host authenticates invocation scope before entry;
-    /// policy verifies exact durable Session/Turn and original explicit input again.
+    /// policy verifies exact durable Session/Turn, selected mode and automatic binding.
     pub async fn execute_automation_model(
         &self,
         request: AutomationModelRequest,

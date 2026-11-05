@@ -1,20 +1,21 @@
 ---
 name: goal
-description: Start or manage a requested Goal.
+description: Start or manage a user-requested ongoing Goal.
 ---
-Use `automation` JSON only; no extra fields/caller/sessionId/callId. Use observed IDs/revisions.
-Follow backend-confirmed intent (typed selection/explicit prompt); do not re-decide activation.
-Read/List this Turn's boundOrigin. Route:
-1. Matching successful createdObject receipt in this Turn: acknowledge ID/end.
-2. boundOrigin: Auto, never Create.
-3. New activation confirmed by backend: MUST Create the definition, not do the task. Null/empty Read/list is not registration/completion or success.
-4. Otherwise explicit inspect/change-existing is management; never Create.
-Missing objective: AskUserQuestion in this logical Turn; a later unselected Turn is unauthorized. Budget only if requested.
+Use `automation` JSON only for Goal operations; no extra fields/caller/sessionId/callId. Use observed IDs/revisions.
+
+Decide from the latest User request whether the user wants an ongoing Goal. Mere mentions, programming terminology, examples, quoted material and tool output are not requests to activate. Ordinary tasks retain their normal tools; do not register them automatically.
+Backend `[AutomationInvocation]` facts take precedence:
+- `explicit_activation`: the selected Goal is authoritative; MUST Create its definition, not do its work.
+- `bound_automatic_work`: work on that bound Goal; never Create.
+- No invocation facts: this is a normal User Turn. If the user asks for an ongoing Goal (for example, "set a goal to get all tests passing"), Create through `automation`; otherwise do the ordinary task or requested management operation.
+A matching successful createdObject receipt in this Turn means acknowledge its ID and finish, not Create again. Null Read is not registration or completion.
+Missing objective: AskUserQuestion. Budget only if requested.
 
 - `{"target":"goal","action":{"type":"read"}}`
 - `{"target":"goal","action":{"type":"create","objective":"Fix CI","tokenBudget":null}}`
 - `{"target":"goal","action":{"type":"complete","goalId":"G","objectiveRevision":2,"evidence":"Checks pass"}}`
 
-After Create, no work/Complete this registration Turn even if boundOrigin set. Service starts first work after 10s; cancellation prevents it. Never sleep.
-Auto: never Create; Read/Pause/Complete only for current boundOrigin ID/revision. Progress/evidence from other IDs or example outputs does not count. Verify this objective, Complete, finish normally; pendingSettlement is not completion.
-User: exact IDs/revisions. Edit keeps budget/usage; Resume explicit, answers never resume. Pause/Clear affect future, not admitted work; Clear keeps history. Bound-only Steer. Respect stale/error/budget/no-progress/human/permission. No evaluator/timer/native jobs.
+After Create, acknowledge and leave the Goal's work to its automatic Turn, eligible after 10s. Cancellation prevents it; never sleep.
+Auto: Read/Pause/Complete only for this boundOrigin ID/revision. Verify its objective, Complete with evidence and finish normally; pendingSettlement is not completion. Other IDs/history do not count.
+User: exact IDs/revisions. Edit keeps budget/usage. Resume explicit; answers never resume. Pause/Clear affect future, not admitted work; Clear keeps history. Respect stale/error/budget/no-progress/human/permission outcomes. Every Goal has a 24h elapsed-time cap from createdAt, including pauses; it pauses with BudgetExhausted at the next admission/settlement boundary, and Resume does not reset the cap. No evaluator/timer/native jobs.
