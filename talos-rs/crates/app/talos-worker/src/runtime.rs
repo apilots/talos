@@ -31,6 +31,7 @@ pub struct TalosWorkerResources {
     pub attachment_reader: Arc<dyn AttachmentReader>,
     pub tool_image_store: Arc<dyn ToolImageStore>,
     pub agent_control: Option<Arc<dyn AgentControl>>,
+    pub automation_control: Option<Arc<dyn talos_tools::AutomationControl>>,
 }
 
 /// One Agent execution runtime shared by embedded and standalone hosts.
@@ -84,6 +85,9 @@ impl TalosWorker {
         let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
         let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
         tool_registry.set_image_store(resources.tool_image_store);
+        if let Some(automation) = resources.automation_control {
+            tool_registry.set_automation_control(automation);
+        }
         register_core_local_tools(tool_registry.as_ref());
         register_network_tools(tool_registry.as_ref());
         let collaboration_tools_enabled = config.agent.kernel.tools.enable_collaboration_tools;

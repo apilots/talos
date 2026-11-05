@@ -81,7 +81,7 @@ export function useComposerSuggestions({
       : [];
     return [
       ...commandSuggestions,
-      ...currentSkills.map((skill): ComposerSuggestion => ({ type: "skill", skill })),
+      ...currentSkills.filter((skill) => !(skill.scope === "system" && commands.some((command) => (command === "goal" || command === "loop") && command === skill.name))).map((skill): ComposerSuggestion => ({ type: "skill", skill })),
     ];
   }, [commands, currentSkills, open, trigger]);
 

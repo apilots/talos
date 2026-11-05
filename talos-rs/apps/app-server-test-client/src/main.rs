@@ -16,6 +16,9 @@ use talos_sdk::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+mod automation_e2e;
+mod automation_e2e_support;
+mod automation_restart_e2e;
 mod mcp_e2e;
 mod memory_e2e;
 mod message_queue_e2e;
@@ -32,8 +35,24 @@ use skills_e2e::{prepare_skills_fixture, skills_e2e};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--browser-mcp") {
+        talos_base::run_browser_mcp().await?;
+        return Ok(());
+    }
     let scenario = Scenario::parse(std::env::args().nth(1).as_deref())?;
+    if scenario == Scenario::AutomationEmbeddedE2e {
+        let server = talos_base::run_embedded_app_server(None).await?;
+        let _logging = server.log_guard;
+        let mut client =
+            talos_sdk_embedded::EmbeddedServerClient::from_runtime(server.runtime).await?;
+        let result = automation_e2e::run(&mut client).await;
+        GatewayClient::shutdown(&mut client).await?;
+        return result;
+    }
     let binary = std::env::var("TALOS_APP_SERVER_BIN").unwrap_or_else(|_| "app-server".to_string());
+    if scenario == Scenario::AutomationRestartE2e {
+        return automation_restart_e2e::run().await;
+    }
 
     if scenario == Scenario::Malformed {
         return malformed(&binary).await;
@@ -66,6 +85,9 @@ async fn main() -> Result<()> {
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
         Scenario::McpE2e => mcp_e2e(&mut client).await?,
         Scenario::MessageQueueE2e => message_queue_e2e(&mut client).await?,
+        Scenario::AutomationE2e => automation_e2e::run(&mut client).await?,
+        Scenario::AutomationEmbeddedE2e => unreachable!("embedded scenario owns its runtime"),
+        Scenario::AutomationRestartE2e => unreachable!("restart scenario owns its clients"),
     }
     GatewayClient::shutdown(&mut client).await?;
     Ok(())

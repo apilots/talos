@@ -48,6 +48,25 @@ pub(super) async fn send_message_queue_changed(
         .map_err(|_| ())
 }
 
+pub(super) async fn send_automation_changed(
+    change: talos_types::AutomationChangedNotification,
+    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
+) -> Result<(), ()> {
+    let params = serde_json::to_value(change).map_err(|error| {
+        report_error(&TalosError::internal_with_source(
+            "Serialize automation change",
+            error,
+        ));
+    })?;
+    outgoing_tx
+        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
+            "automation/changed",
+            Some(params),
+        )))
+        .await
+        .map_err(|_| ())
+}
+
 pub(super) fn map_subscription_close_reason(
     reason: TimelineSubscriptionCloseReason,
 ) -> SubscriptionTerminatedReason {

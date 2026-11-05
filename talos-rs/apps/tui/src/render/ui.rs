@@ -1,13 +1,12 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::render::{composer, frame::RenderFrame};
 use crate::TuiApp;
 
-const QUEUE_PANEL_HEIGHT: u16 = 5;
 const IDLE_TOP_GAP_HEIGHT: u16 = 2;
 const MIN_LIVE_CHAT_PANEL_HEIGHT: u16 = 1;
 const OVERLAY_VIEWPORT_HEIGHT: u16 = 18;
@@ -45,7 +44,7 @@ impl TuiApp {
         }
 
         let left_inner = area;
-        let show_queue_panel = !self.message_queue.messages.is_empty();
+        let show_queue_panel = self.task_panel_height() > 0;
         let composer_height = composer::height(self, left_inner.width);
         let transcript_composer_gap_height = self.transcript_composer_gap_height();
         let chat_panel_height = self.inline_chat_panel_height(
@@ -62,7 +61,7 @@ impl TuiApp {
                 Constraint::Length(top_gap_height),
                 Constraint::Length(chat_panel_height),
                 Constraint::Length(if show_queue_panel {
-                    QUEUE_PANEL_HEIGHT
+                    self.task_panel_height()
                 } else {
                     0
                 }),
@@ -91,15 +90,14 @@ impl TuiApp {
 
         if show_queue_panel {
             let queue_lines =
-                self.queue_panel_lines((left_chunks[2].height as usize).saturating_sub(1));
+                self.task_panel_lines((left_chunks[2].height as usize).saturating_sub(1));
             let queue = Paragraph::new(queue_lines)
                 .block(
                     Block::default()
                         .borders(Borders::TOP)
                         .border_style(Style::default().fg(Color::Rgb(88, 92, 102))),
                 )
-                .style(Style::default().fg(Color::Gray).add_modifier(Modifier::DIM))
-                .wrap(Wrap { trim: false });
+                .style(Style::default().fg(Color::Gray).add_modifier(Modifier::DIM));
             f.render_widget(queue, left_chunks[2]);
         }
 
@@ -121,10 +119,10 @@ impl TuiApp {
                     composer_height,
                     transcript_composer_gap_height,
                 ))
-                .saturating_add(if self.message_queue.messages.is_empty() {
+                .saturating_add(if self.task_panel_height() == 0 {
                     0
                 } else {
-                    QUEUE_PANEL_HEIGHT
+                    self.task_panel_height()
                 })
                 .saturating_add(transcript_composer_gap_height)
                 .saturating_add(composer_height)
@@ -184,10 +182,10 @@ impl TuiApp {
             .inline_top_gap_height()
             .saturating_add(composer_height)
             .saturating_add(transcript_composer_gap_height)
-            .saturating_add(if self.message_queue.messages.is_empty() {
+            .saturating_add(if self.task_panel_height() == 0 {
                 0
             } else {
-                QUEUE_PANEL_HEIGHT
+                self.task_panel_height()
             });
         let available_height = terminal_height.saturating_sub(reserved_height);
         if available_height == 0 {

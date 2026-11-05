@@ -10,6 +10,7 @@ license.workspace = true
 e2e = []
 
 [dependencies]
+chrono = { workspace = true }
 base64.workspace = true
 talos-browser.workspace = true
 talos-sync = { workspace = true }
@@ -63,7 +64,6 @@ axum = "0.7"
 talos-fs = { workspace = true }
 talos-plugin = { workspace = true }
 bytes = { workspace = true }
-chrono = { workspace = true }
 rcgen = "0.14"
 reqwest = { workspace = true }
 talos-mcp = { workspace = true }

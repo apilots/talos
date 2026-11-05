@@ -10,6 +10,7 @@ export const TALOS_IPC = {
   event: "talos:event",
   activeTurnChanged: "talos:active-turn-changed",
   messageQueueChanged: "talos:message-queue-changed",
+  automationChanged: "talos:automation-changed",
   invoke: "talos:invoke",
   openExternal: "talos:open-external",
   previewTargets: "talos:preview-targets",
@@ -36,6 +37,7 @@ export interface TalosDesktopBridge {
   ): Promise<AppProtocol.ApiResponse<T>>;
   openExternal(url: string): Promise<void>;
   onActiveTurnChanged(handler: (notification: AppProtocol.SessionActiveTurnChangedNotification) => void): () => void;
+  onAutomationChanged(handler: (notification: AppProtocol.AutomationChangedNotification) => void): () => void;
   onMessageQueueChanged(handler: (notification: AppProtocol.MessageQueueChangedNotification) => void): () => void;
   onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void;
   onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void;

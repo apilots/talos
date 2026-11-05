@@ -1,3 +1,4 @@
+mod automation;
 mod computers;
 mod config;
 mod file;

@@ -8,6 +8,10 @@ use talos_agent_api::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::*;
 
+#[cfg(test)]
+#[path = "coordinator_queue_source_tests.rs"]
+mod queue_source_tests;
+
 fn invalid() -> TalosError {
     TalosError::new(
         ErrorCode::InvalidRequest,
@@ -78,6 +82,7 @@ pub fn encode_request(
             Wire::UpdateMessage(pb::CoordinatorQueueMessage {
                 message_id: request.message_id,
                 input: Some(input(request.input)),
+                source: None,
             })
         }
         ActiveSessionCommand::DeleteMessage(request) => Wire::DeleteMessage(request.message_id),
@@ -156,6 +161,9 @@ pub fn decode_request(
             ActiveSessionCommand::ListMessages(MessageQueueListRequest { session_id: id })
         }
         Wire::UpdateMessage(value) => {
+            if value.source.is_some() {
+                return Err(invalid());
+            }
             ActiveSessionCommand::UpdateMessage(MessageQueueUpdateRequest {
                 session_id: id,
                 message_id: value.message_id,
@@ -210,6 +218,20 @@ pub fn encode_reply(reply: ActiveSessionReply) -> pb::ActiveSessionCommandRespon
                 .map(|message| pb::CoordinatorQueueMessage {
                     message_id: message.id,
                     input: Some(input(message.input)),
+                    source: Some(match message.source {
+                        QueuedMessageSource::User => {
+                            pb::coordinator_queue_message::Source::User(true)
+                        }
+                        QueuedMessageSource::Loop {
+                            loop_id,
+                            occurrence_id,
+                        } => pb::coordinator_queue_message::Source::Loop(
+                            pb::CoordinatorQueueLoopSource {
+                                loop_id,
+                                occurrence_id,
+                            },
+                        ),
+                    }),
                 })
                 .collect(),
         }),
@@ -255,6 +277,20 @@ pub fn decode_reply(reply: pb::ActiveSessionCommandResponse) -> TalosResult<Acti
                     Ok(QueuedMessage {
                         id: message.message_id,
                         input: read_input(message.input)?,
+                        source: match message.source {
+                            Some(pb::coordinator_queue_message::Source::Loop(value))
+                                if !value.loop_id.is_empty() && !value.occurrence_id.is_empty() =>
+                            {
+                                QueuedMessageSource::Loop {
+                                    loop_id: value.loop_id,
+                                    occurrence_id: value.occurrence_id,
+                                }
+                            }
+                            None | Some(pb::coordinator_queue_message::Source::User(true)) => {
+                                QueuedMessageSource::User
+                            }
+                            _ => return Err(invalid()),
+                        },
                     })
                 })
                 .collect::<TalosResult<_>>()?,

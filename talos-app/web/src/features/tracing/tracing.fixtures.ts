@@ -12,6 +12,7 @@ export const history: API.SessionHistoryResponse = {
   lastStableEventId: null,
   data: [
     {
+      automationInput: null,
       identity,
       completedAt: 2,
       completedEventSeq: 3,

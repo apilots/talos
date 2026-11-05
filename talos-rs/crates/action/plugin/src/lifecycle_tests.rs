@@ -107,7 +107,7 @@ Use this skill to translate text.
         .expect("skill roots should load");
     assert_eq!(roots.state_path, fixture.state.skills_state_path());
     let snapshot = talos_skills::refresh(&roots).expect("installed skill should load");
-    assert_eq!(snapshot.skills.len(), 1);
+    assert_eq!(snapshot.skills.len(), 3);
     assert_eq!(snapshot.skills[0].name, "translate");
     assert!(snapshot.skills[0].enabled);
     assert_eq!(
@@ -133,7 +133,11 @@ Use this skill to translate text.
             .expect("skill roots should load"),
     )
     .expect("installed skill should load");
-    assert!(snapshot.skills.is_empty());
+    assert_eq!(snapshot.skills.len(), 2);
+    assert!(snapshot
+        .skills
+        .iter()
+        .all(|skill| skill.scope == talos_skills::SkillScope::System));
 
     let install_id = installed.install.id.clone();
     let enabled = fixture
@@ -204,7 +208,8 @@ Use this skill to translate text.
         .skill_roots(&SkillsRuntimeConfig::default())
         .expect("skill roots should load")
         .roots
-        .is_empty());
+        .iter()
+        .all(|root| root.scope == talos_skills::SkillScope::System));
 }
 
 #[test]

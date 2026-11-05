@@ -487,12 +487,14 @@ async fn prepare_general_turn(
         missing_user_workspace_memory(),
         kernel_config,
         skill_options,
+        None,
         crate::test_run_tasks(),
     )
     .await
 }
 
 mod attachment_tests;
+mod automation_context_tests;
 mod compaction_loop_tests;
 mod dream_memory_tests;
 mod final_response_tests;

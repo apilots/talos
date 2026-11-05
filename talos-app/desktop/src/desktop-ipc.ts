@@ -116,3 +116,7 @@ export function broadcastActiveTurnChanged(notification: AppProtocol.SessionActi
 export function broadcastMessageQueueChanged(notification: AppProtocol.MessageQueueChangedNotification): void {
   for (const {view} of desktopWindows) view.webContents.send(TALOS_IPC.messageQueueChanged, notification);
 }
+
+export function broadcastAutomationChanged(notification: AppProtocol.AutomationChangedNotification): void {
+  for (const {view} of desktopWindows) view.webContents.send(TALOS_IPC.automationChanged, notification);
+}

@@ -72,6 +72,7 @@ async fn commit_completed_turn(
     completed_message.completed_at = Some(11);
     let admission = store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            automation_origin: None,
             events: vec![
                 AgentEvent {
                     identity: identity.clone(),

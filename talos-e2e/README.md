@@ -219,6 +219,29 @@ Computer live media teardown is covered separately by the Browser Worker
 acceptance and the owning ComputerDesktop component tests; this lightweight case
 does not claim a live remote desktop connection.
 
+`just e2e-case 09_app_server/automation_e2e` uses isolated homes and controlled
+loopback model/Auth upstreams with real System Skills, Automation Tool, Service,
+queue, settlement and History. It runs the shared business assertions through
+app-server and the embedded SDK, including a real one-minute fixed Loop interval
+in each transport, ordinary User Queue/Steer inside automatic Turns, dynamic
+decision validation, revision changes and Stop. The same real Tool path also
+checks model-decided Stop at normal settlement, a fixed next time beyond seven
+days (10081 minutes, no expiry field), and a Goal continuing through two Turns
+with unchanged creation time and a frozen completion update timestamp. A malformed
+nested model-decided schedule is rejected through the real Tool; the model
+then lists an empty state, corrects Create in the same Turn and finishes with
+a normal model Stop. Fixed and dynamic fixture inputs state their requested
+cadence explicitly; controlled responses do not prove general language inference. It also hard-restarts only its
+own app-server to distinguish durable definitions from the original memory queue.
+The script explicitly runs the ignored `automation_worker_business` tests with
+`just test -p talos-base --run-ignored only -E 'test(automation_worker_business)'`
+for real Direct/Outbound registered Workers. Default ignored status is not
+acceptance evidence. No provider credentials, private source or business API mocks
+are used; unrelated MCP tools are disabled. Browser input/rendering remains a
+separate Web/Desktop acceptance responsibility.
+
+The same Automation case also runs the actual `talos` CLI against the shared controlled model: Goal start/complete and pause/resume retain the foreground host; Loop survives first settlement and exits after a separate exact-ID Stop or its actual model-decided Stop. This short process check adds no second minute-cadence matrix.
+
 `09_app_server/desktop_recovery` uses the real controller, SDK, Server and
 app-server processes with controlled loopback Auth/model HTTP fixtures. It checks
 actual credential enforcement, SIGTERM replacement, exact delivered/history event

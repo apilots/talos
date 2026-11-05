@@ -3,6 +3,7 @@ use super::*;
 use agent_client::{AgentResourceRequests, AgentResourceResponses, AgentResourceRpcHandler};
 use futures_util::{future::BoxFuture, StreamExt};
 use pb::{
+    agent_automation_control_rpc_server::AgentAutomationControlRpc,
     agent_session_data_rpc_server::AgentSessionDataRpc,
     agent_subagent_control_rpc_server::AgentSubagentControlRpc,
 };
@@ -13,6 +14,7 @@ pub(crate) struct CoordinatorResources {
     pub(crate) data: NodeSessionDataRpc,
     pub(crate) images: NodeToolImageRpc,
     pub(crate) control: Arc<dyn AgentControl>,
+    pub(crate) automation: Arc<dyn talos_tools::AutomationControl>,
     pub(crate) files: Arc<talos_service::FileService>,
     pub(crate) auth: Arc<dyn talos_auth::AuthService>,
 }
@@ -75,6 +77,7 @@ impl AgentResourceRpcHandler for CoordinatorResources {
             let data = self.data.for_invocation(self.computer_id.clone(), caller);
             let images = self.images.clone().with_authorization(data.clone());
             let control = NodeSubagentControlRpc::new(data.clone(), self.control.clone());
+            let automation = NodeAutomationControlRpc::new(data.clone(), self.automation.clone());
             use pb::worker_rpc_call::Request as Call;
             use pb::worker_rpc_result::Response as Reply;
             macro_rules! unary {
@@ -111,6 +114,9 @@ impl AgentResourceRpcHandler for CoordinatorResources {
                     unary!(value, control, follow_up_subagent, FollowUpSubagent)
                 }
                 Call::ListSubagents(value) => unary!(value, control, list_subagents, ListSubagents),
+                Call::ExecuteAutomation(value) => {
+                    unary!(value, automation, execute_automation, ExecuteAutomation)
+                }
                 Call::ResolveAttachments(value) => {
                     if requests.next().await.transpose()?.is_some() {
                         return Err(invalid());

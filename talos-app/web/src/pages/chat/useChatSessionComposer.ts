@@ -1,5 +1,10 @@
-import { useState } from "react";
-import type { ModelListResponse, ModelRef, SessionInfo } from "@talos/sdk-browser";
+import { useSessionAutomation } from "@/features/automation";
+import { automationRequestError, prepareAutomationMessage } from "@/features/automation";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useProductScope } from "@/features/computers";
+import { getTalosClient } from "@/shared/api/client";
+import type { AutomationMode, ModelListResponse, ModelRef, SessionInfo } from "@talos/sdk-browser";
 
 import {
   modelInfoForRef,
@@ -29,6 +34,9 @@ interface UseChatSessionComposerOptions {
   projectsView: ReturnType<typeof useProjectsView>;
   session?: SessionInfo;
   sessionId: string;
+  nodeId?: string;
+  restoredAutomationMode?: AutomationMode;
+  onRestoredAutomationModeConsumed?: () => void;
 }
 
 /** Owns session-specific model, project, permission, and command wiring for the Composer. */
@@ -39,6 +47,9 @@ export function useChatSessionComposer({
   projectsView,
   session,
   sessionId,
+  nodeId,
+  restoredAutomationMode,
+  onRestoredAutomationModeConsumed,
 }: UseChatSessionComposerOptions) {
   const [draftModel, setDraftModel] = useState<ModelRef | undefined>(locationState?.initialModel);
   const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
@@ -89,7 +100,21 @@ export function useChatSessionComposer({
     ?? currentModel
     ?? "Unknown";
 
+  const automation = { ...useSessionAutomation(sessionId, Boolean(session)), activeTurn: chat.automationTurn };
+  const scope = useProductScope();
+  const owner = JSON.stringify([scope, sessionId, session?.nodeId ?? nodeId]);
+  const ownerRef = useRef<string | undefined>(owner);
+  ownerRef.current = owner;
+  useEffect(() => { ownerRef.current = owner; return () => { ownerRef.current = undefined; }; }, [owner]);
+  const initialCommands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
+    queryFn: () => getTalosClient().automation.commandCatalog({}),
+    enabled: !session && Boolean(nodeId), staleTime: Infinity });
+
   const props: ChatComposerProps = {
+    automation: session ? automation : undefined,
+    initialAutomationMode: restoredAutomationMode,
+    onRestoredAutomationModeConsumed,
+    automationCommands: session ? automation.commands : initialCommands.data?.data,
     activeProjectId: selectedProjectId,
     commandResponse: sessionCommands.response,
     commandStatus: {
@@ -170,22 +195,35 @@ export function useChatSessionComposer({
         });
       }
     },
-    onSend: (attachments) => {
+    onSend: async (attachments, mode) => {
+      const text = chat.draft;
+      const prepared = await prepareAutomationMessage(text, mode, session?.nodeId ?? nodeId);
+      if (ownerRef.current !== owner) throw new DOMException("The message could not be sent.", "AbortError");
+      if (prepared.kind === "management") {
+        if (!session) throw automationRequestError("chatRequired");
+        await automation.command(prepared.command);
+        chat.setDraft("");
+        return;
+      }
+      const skillSelection = prepared.skillSelection;
       const fileIds = attachments.map((file) => file.fileId);
-      const fileOptions = fileIds.length > 0 ? { fileIds } : {};
+      const fileOptions = { ...(fileIds.length > 0 ? { fileIds } : {}), ...(skillSelection ? { skillSelection } : {}) };
       if (!session) {
         const selectedProject = projectsView.projects.find(
           (entry) => entry.id === selectedProjectId,
         );
-        return chat.sendTurn({
+        const options = {
           modelSelection: modelSelectionForRef(models, currentModelRef, currentReasoningLevel),
-          nodeId: locationState?.initialNodeId,
+          nodeId,
           project: selectedProject,
           userPermissionMode: permissionMode.value,
           ...fileOptions,
-        });
+        };
+        return prepared.prompt !== text ? chat.sendTurn(options, prepared.prompt) : chat.sendTurn(options);
       }
-      return chat.sendTurn(fileOptions);
+      return prepared.prompt !== text
+        ? chat.sendTurn(fileOptions, prepared.prompt)
+        : chat.sendTurn(fileOptions);
     },
     permissionMode: permissionMode.value,
     permissionModeDisabled: permissionMode.disabled,

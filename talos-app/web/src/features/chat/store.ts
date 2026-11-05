@@ -9,6 +9,7 @@ import {
   updateTimelineToolInStream,
   upsertTimelineItemInStream,
 } from "./timeline-state";
+import { bindUserInputMetadata } from "./automation-runtime";
 import type { ChatSlice, ChatSliceSetter } from "./store.types";
 import { createBatchedChatSetter } from "./store-batch";
 
@@ -91,7 +92,7 @@ export function createChatSlice(commit: ChatSliceSetter): ChatSlice {
       }),
     restoreTurnContent: (sessionId, blocks, metrics) => updateStream(set, sessionId, (stream) => {
       const ids = new Set(blocks.map((block) => block.id));
-      return { ...stream, blocks: [...stream.blocks.filter((block) => block.kind === "notice" && !ids.has(block.id)), ...blocks], turnMetrics: metrics };
+      return { ...stream, blocks: [...stream.blocks.filter((block) => block.kind === "notice" && !ids.has(block.id)), ...bindUserInputMetadata(stream, blocks)], turnMetrics: metrics };
     }),
     upsertNotice: (sessionId, eventId, notice) => updateStream(set, sessionId, (stream) => ({
       ...stream,
@@ -119,20 +120,14 @@ export function createChatSlice(commit: ChatSliceSetter): ChatSlice {
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, blocks },
+            [sessionId]: { ...stream, blocks: bindUserInputMetadata(stream, blocks) },
           },
         };
       }),
     setPendingInput: (sessionId, pendingInput) =>
-      set((state) => {
-        const stream = ensureStreamState(state, sessionId);
-        return {
-          streams: {
-            ...state.streams,
-            [sessionId]: { ...stream, pendingInput },
-          },
-        };
-      }),
+      updateStream(set, sessionId, (stream) => ({
+        ...stream, pendingInput, blocks: bindUserInputMetadata({ ...stream, pendingInput }, stream.blocks),
+      })),
     upsertStreamTool: (sessionId, callId, payload) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
@@ -289,10 +284,14 @@ export function createChatSlice(commit: ChatSliceSetter): ChatSlice {
     setStreamMeta: (sessionId, meta) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
+        const next = { ...stream, ...meta };
+        // Current metrics belong to one Turn; retained history blocks keep theirs.
+        if (meta.activeTurnId && meta.activeTurnId !== stream.activeTurnId) next.turnMetrics = undefined;
+        if (meta.automationInput || (meta.activeTurnId && meta.activeTurnId !== stream.activeTurnId)) next.blocks = bindUserInputMetadata(next, next.blocks);
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, ...meta },
+            [sessionId]: next,
           },
         };
       }),

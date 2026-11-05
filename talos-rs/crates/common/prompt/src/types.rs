@@ -356,6 +356,52 @@ pub struct PromptAssembly {
     pub cache_state: PromptCacheState,
 }
 
+impl PromptAssembly {
+    /// Append trusted, uncached request metadata and account for its own increment.
+    /// Fresh assembly/rebuild callers preserve all existing runtime context.
+    pub fn append_runtime_context(&mut self, context: &str) -> TalosResult<()> {
+        if context.trim().is_empty() {
+            return Ok(());
+        }
+        let existing = self
+            .request_context_injection
+            .appended_system_context
+            .as_deref()
+            .unwrap_or_default();
+        if existing
+            .strip_suffix(context)
+            .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with("\n\n"))
+        {
+            return Ok(());
+        }
+        let next = if existing.is_empty() {
+            context.to_owned()
+        } else {
+            format!("{existing}\n\n{context}")
+        };
+        let increment = crate::budget::estimate_text_tokens(&next)
+            .saturating_sub(crate::budget::estimate_text_tokens(existing));
+        let add = |value: usize| {
+            value.checked_add(increment).ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ContextWindowExceeded,
+                    "Runtime context token estimate overflow.",
+                )
+            })
+        };
+        let diagnostics = &mut self.diagnostics;
+        diagnostics.dynamic_estimated_tokens = add(diagnostics.dynamic_estimated_tokens)?;
+        diagnostics.total_estimated_tokens = add(diagnostics.total_estimated_tokens)?;
+        let window = &mut diagnostics.window_usage;
+        window.dynamic_suffix_tokens = add(window.dynamic_suffix_tokens)?;
+        window.total_tokens = add(window.total_tokens)?;
+        window.within_effective_budget =
+            !window.window_resolved || window.total_tokens <= window.effective_prompt_budget;
+        self.request_context_injection.appended_system_context = Some(next);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RequestContextInjection {
     pub appended_system_context: Option<String>,

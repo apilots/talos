@@ -13,6 +13,7 @@ import type {
   TimelineEvent,
 } from "@talos/sdk-core";
 import { batchChatUpdates, chatBatchState } from "./store-batch";
+import { activationModeFromContent } from "./session-input";
 import { LiveTurnProjection } from "./live-turn-projection";
 import { decodeApiError, parseTimelineEvent } from "@talos/sdk-core";
 
@@ -72,6 +73,7 @@ export function buildBlocksFromHistorySnapshot(response: SessionHistoryResponse 
   const result: ChatTimelineBuildResult = { blocks: [], inputItems: [], messageIds: new Set() };
   for (const turn of response?.data ?? []) {
     const built = buildTurnBlocks({
+      automationInput: turn.automationInput,
       identity: turn.identity, messages: turn.result.result.messages, notices: turn.notices,
       metrics: toChatTurnMetrics(turn.result.result.metrics, turn.result.status === "completed" ? "completed" : "failed"),
       error: turn.result.status === "failed" ? turn.result.result.failure.error : undefined,
@@ -84,7 +86,8 @@ export function buildBlocksFromHistorySnapshot(response: SessionHistoryResponse 
   return result;
 }
 
-function buildTurnBlocks({ identity, messages, metrics, notices, error, live = false }: {
+function buildTurnBlocks({ identity, messages, metrics, notices, error, automationInput, live = false }: {
+  automationInput?: import("@talos/sdk-browser").AutomationInputOrigin | null;
   identity: ActiveTurnSnapshot["identity"]; messages: AgentMessage[];
   metrics: ChatTurnMetrics; notices: TimelineEvent[]; error?: AgentTurnFailed["error"]; live?: boolean;
 }): ChatTimelineBuildResult {
@@ -122,6 +125,8 @@ function buildTurnBlocks({ identity, messages, metrics, notices, error, live = f
       blocks.push({
         id: `user-${identity.turnId}-${message.messageId}`,
         kind: "user",
+        createdAt: message.createdAt,
+        ...(automationInput?.messageId === message.messageId ? { automationOrigin: automationInput.origin } : {}),
         ...input,
         live: false,
       });
@@ -324,6 +329,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEvent) {
 export function restoreActiveTurn(sessionId: string, snapshot: ActiveTurnSnapshot) {
   if (snapshot.identity.sessionId !== sessionId) return;
   const current = chatState().streams[sessionId];
+  if (current?.activeTurnId === snapshot.identity.turnId && snapshot.automationInput) chatState().setStreamMeta(sessionId, { automationInput: snapshot.automationInput });
   if ((current?.lastEventSeq ?? -1) > snapshot.lastEventSeq) return;
   if (current?.lastEventSeq === snapshot.lastEventSeq && current.activeTurnId === snapshot.identity.turnId) {
     batchChatUpdates(chatState(), () => applyActiveTurnSnapshot(sessionId, snapshot));
@@ -337,7 +343,13 @@ export function restoreActiveTurn(sessionId: string, snapshot: ActiveTurnSnapsho
     accumulator.restore(snapshot);
     const metrics = toChatTurnMetrics(snapshot.metrics, "running");
     const content = buildTurnBlocks({ ...snapshot, metrics, live: true });
-    chatState().restoreTurnContent(sessionId, content.blocks, metrics);
+    const previous = new Map(current?.blocks.map((block) => [block.id, block]));
+    const restored = content.blocks.map((block) => {
+      const known = previous.get(block.id);
+      return block.kind === "user" && !block.activationMode && known?.kind === "user" && known.activationMode
+        ? { ...block, activationMode: known.activationMode } : block;
+    });
+    chatState().restoreTurnContent(sessionId, restored, metrics);
     if (snapshot.pendingInput?.type === "userAction") {
       applyWaitingForUserAction(sessionId, snapshot.identity.turnId, snapshot.pendingInput.action, accumulator);
     }
@@ -363,6 +375,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TimelineA
   state.setSessionStatus(sessionId, "running");
   state.setTimelineLive(sessionId, true);
   state.setStreamMeta(sessionId, {
+    automationInput: activeTurn.automationInput ?? (turnChanged ? undefined : stream?.automationInput),
     activeTurnId: activeTurn.identity.turnId,
     activeMessageId: activeTurn.initialMessageId ?? undefined,
     lastEventSeq: stream?.lastEventSeq,
@@ -380,6 +393,7 @@ export function clearInactiveTurnSnapshot(sessionId: string) {
   state.setSessionStatus(sessionId, undefined);
   state.setTimelineLive(sessionId, false);
   state.setStreamMeta(sessionId, {
+    automationInput: undefined,
     activeTurnId: undefined,
     activeMessageId: undefined,
     isStreaming: false,
@@ -397,7 +411,7 @@ function applyMessageStarted(sessionId: string, turnId: string, message: AgentMe
   }
   const input = messageUserInput(message);
   if (hasUserInput(input)) {
-    state.upsertUserInputBlock(sessionId, turnId, message.messageId, input);
+    state.upsertUserInputBlock(sessionId, turnId, message.messageId, { ...input, createdAt: message.createdAt });
   }
   const pending = state.streams[sessionId]?.pendingInput;
   if (hasUserInput(input) && pending?.serverMessageId === message.messageId) {
@@ -680,7 +694,8 @@ function messageUserInput(message: AgentMessage): ChatUserInput {
       fileIds.push(content.fileId);
     }
   }
-  return { text: text.join("\n"), fileIds };
+  const activationMode = activationModeFromContent(message.blocks.flatMap((block) => block.content.type === "userContent" ? [block.content.data] : []));
+  return { text: text.join("\n"), fileIds, ...(activationMode ? { activationMode } : {}) };
 }
 
 function hasUserInput(input: ChatUserInput) {

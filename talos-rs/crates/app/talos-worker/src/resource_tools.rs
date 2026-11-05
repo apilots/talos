@@ -10,6 +10,7 @@ pub(crate) struct ResourceTools {
     pub registry: Arc<ToolRegistry>,
     pub images: Arc<dyn ToolImageStore>,
     pub control: Option<Arc<dyn AgentControl>>,
+    pub automation: Option<Arc<dyn talos_tools::AutomationControl>>,
 }
 impl ToolDefinitionProvider for ResourceTools {
     fn get_tool_definitions(&self) -> Vec<talos_llm_provider::ToolDefinition> {
@@ -58,8 +59,13 @@ impl ToolExecutorPort for ResourceTools {
             .registry
             .build_context(session_id, user_id, config)
             .with_image_store(self.images.clone());
-        if let Some(control) = &self.control {
+        let context = if let Some(control) = &self.control {
             context.with_agent_control(control.clone())
+        } else {
+            context
+        };
+        if let Some(automation) = &self.automation {
+            context.with_automation_control(automation.clone())
         } else {
             context
         }

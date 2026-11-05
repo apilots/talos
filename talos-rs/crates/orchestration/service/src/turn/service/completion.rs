@@ -92,7 +92,10 @@ impl TurnService {
                     )
                     .await;
             }
-            if let Err(error) = turn_service.finish_turn(&event, auto_dispatch_ready).await {
+            if let Err(error) = turn_service
+                .finish_turn(&event, auto_dispatch_ready, Some(&metrics))
+                .await
+            {
                 turn_service
                     .execution
                     .report_warning(
@@ -163,7 +166,20 @@ impl TurnService {
         &self,
         event: &talos_agent_api::AgentEvent,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
+        automation_metrics: Option<&AgentRunMetrics>,
     ) -> TalosResult<()> {
+        if let Some(automation) = self.automation.get() {
+            if let Some(session) = self
+                .execution
+                .sessions
+                .load_record(&event.identity.session_id)
+                .await?
+            {
+                automation
+                    .settle(&session, event, automation_metrics)
+                    .await?;
+            }
+        }
         let profile_result = if matches!(event.payload, CanonicalAgentEventPayload::TurnFailed(_)) {
             self.profile_store
                 .discard_turn_usage(&event.identity.session_id, &event.identity.turn_id)
@@ -188,6 +204,16 @@ impl TurnService {
                         .await;
                 }
                 return Err(error);
+            }
+        }
+        if auto_dispatch_session_from_event(event).is_some() {
+            if let Some(session) = self
+                .execution
+                .sessions
+                .load_record(&event.identity.session_id)
+                .await?
+            {
+                self.continue_goal(session, false).await?;
             }
         }
         profile_result

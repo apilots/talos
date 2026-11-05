@@ -216,7 +216,8 @@ pub(crate) async fn prepare_registered_worker(
             memory_progress_store: Arc::new(RemoteMemoryProgress(resources.clone())),
             attachment_reader: shared_resources.clone(),
             tool_image_store: shared_resources.clone(),
-            agent_control: Some(shared_resources),
+            agent_control: Some(shared_resources.clone()),
+            automation_control: Some(shared_resources),
         },
         talos_types::BrowserHostKind::Native,
     )

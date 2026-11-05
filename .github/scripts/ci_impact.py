@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CATEGORIES = ('webui', 'desktop', 'tui', 'server')
 SERVER_TARGETS = {
     'models': 'group:01_models',
-    'app-server': 'case:09_app_server/smoke_e2e\ncase:09_app_server/desktop_recovery',
+    'app-server': 'case:09_app_server/smoke_e2e\ncase:09_app_server/desktop_recovery\ncase:09_app_server/automation_e2e',
     'registration': 'case:09_app_server/computer_deletion',
     'files': 'group:12_files', 'sandbox': 'group:14_sandbox',
     'output-logs': 'case:06_tools/output_logs',
@@ -45,6 +45,7 @@ CONTAINER_CASES = client_group_targets('23_browser_container')
 BROWSER_CASES = (WORKSPACE_CASES['webui'] | WORKSPACE_CASES['desktop']
                  | NATIVE_BROWSER_CASES | CONTAINER_CASES['desktop'])
 RUNNING_TURN_TARGET = 'case:09_app_server/running_turn'
+AUTOMATION_TARGET = 'case:09_app_server/automation_e2e'
 TUI_TARGET = 'case:08_tui/controlled_chat'
 MEDIA_OWNERS = ('desktop-media', 'desktop-ipc', 'desktop-server-requests', 'ipc-guard',
                 'ipc.', 'preload.', 'app-server-controller')
@@ -234,6 +235,10 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 result.targets['tui'].add(TUI_TARGET)
             elif path in ('talos-e2e/scripts/running_turn.py', 'talos-e2e/scenarios/09_app_server/running_turn.sh'):
                 result.targets['webui'].add(RUNNING_TURN_TARGET)
+            elif path in ('talos-e2e/scripts/automation_model_fixture.py',
+                          'talos-e2e/scripts/automation_cli_acceptance.py',
+                          'talos-e2e/scenarios/09_app_server/automation_e2e.sh'):
+                result.targets['server'].add(AUTOMATION_TARGET)
             elif path == 'talos-e2e/scripts/computer_workspace/deletion.py':
                 result.targets['webui'].add(SERVER_TARGETS['registration'])
             elif path.startswith('talos-e2e/scripts/browser-worker/'):
@@ -295,6 +300,9 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                             'talos-rs/crates/infra/config/src/domains/storage')) for path in paths):
         for category, cases in PREVIEW_CASES.items():
             result.targets[category].update(cases)
+    if any(path.startswith(('talos-rs/apps/tui/src/automation',
+                            'talos-rs/apps/tui/src/cli/automation')) for path in paths):
+        result.targets['server'].add(AUTOMATION_TARGET)
     # Expand each owner's acceptance independently, then union the results. A
     # TUI+MCP edit must not accidentally take a broader route than those edits alone.
     for owner in direct_rust:

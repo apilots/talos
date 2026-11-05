@@ -380,3 +380,60 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
         .iter()
         .any(|section| section.kind == PromptSectionKind::PlanningInstruction));
 }
+
+#[tokio::test]
+async fn runtime_context_preserves_existing_metadata_and_accounts_only_its_increment() {
+    let mut assembly = PromptBuilder::new()
+        .user_input("original input")
+        .assemble()
+        .await
+        .unwrap();
+    let original = assembly
+        .request_context_injection
+        .appended_system_context
+        .clone()
+        .unwrap_or_default();
+    let before = assembly.diagnostics.clone();
+    // A controlled boundary proves the increment participates in the existing budget.
+    assembly.diagnostics.window_usage.window_resolved = true;
+    assembly.diagnostics.window_usage.effective_prompt_budget = before.window_usage.total_tokens;
+    let context = "[VerifiedRuntimeFact]\nactivation_requested: true";
+    assembly.append_runtime_context(context).unwrap();
+    let after = assembly.diagnostics.clone();
+    let combined = assembly
+        .request_context_injection
+        .appended_system_context
+        .as_ref()
+        .unwrap();
+    assert!(combined.starts_with(&original));
+    assert!(combined.ends_with(context));
+    let delta = crate::budget::estimate_text_tokens(combined)
+        - crate::budget::estimate_text_tokens(&original);
+    assert_eq!(
+        [
+            after.dynamic_estimated_tokens - before.dynamic_estimated_tokens,
+            after.total_estimated_tokens - before.total_estimated_tokens,
+            after.window_usage.dynamic_suffix_tokens - before.window_usage.dynamic_suffix_tokens,
+            after.window_usage.total_tokens - before.window_usage.total_tokens,
+        ],
+        [delta; 4]
+    );
+    assert!(!after.window_usage.within_effective_budget);
+    assembly.append_runtime_context(context).unwrap();
+    assert_eq!(
+        assembly.diagnostics.total_estimated_tokens,
+        after.total_estimated_tokens
+    );
+    let blocks = render_prompt_blocks(&assembly);
+    let block = blocks
+        .iter()
+        .find(|block| block.kind == PromptBlockKind::AppendedSystemContext)
+        .unwrap();
+    assert_eq!(block.cache_scope, PromptBlockCacheScope::NoCache);
+    assert_eq!(
+        block.input_origin.as_ref().unwrap().source,
+        talos_llm_provider::MessageInputSource::Runtime
+    );
+    assert_eq!(block.text.matches(context).count(), 1);
+    assert_eq!(assembly.user_input, "original input");
+}

@@ -11,6 +11,8 @@ use crate::AgentUserInput;
 pub struct QueuedMessage {
     pub id: String,
     pub input: AgentUserInput,
+    #[serde(default)]
+    pub source: crate::QueuedMessageSource,
 }
 
 /// The complete bounded message queue visible to clients for one session.

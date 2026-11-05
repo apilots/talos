@@ -16,6 +16,7 @@ impl EmbeddedServerClient {
         let mut events = subscription.events;
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         let (message_queue_tx, message_queue_rx) = tokio::sync::mpsc::channel(256);
+        let (automation_tx, automation_rx) = tokio::sync::mpsc::channel(256);
         let task = tokio::spawn(async move {
             while let Some(message) = events.recv().await {
                 match message {
@@ -32,6 +33,11 @@ impl EmbeddedServerClient {
                             return;
                         }
                     }
+                    TimelineSubscriptionMessage::AutomationChanged(change) => {
+                        if automation_tx.send(change).await.is_err() {
+                            return;
+                        }
+                    }
                     TimelineSubscriptionMessage::Closed(_) => return,
                 }
             }
@@ -44,6 +50,7 @@ impl EmbeddedServerClient {
             response,
             stream: TimelineEventStream::new(rx),
             message_queue_changes: MessageQueueChangeStream::new(message_queue_rx),
+            automation_changes: AutomationChangeStream::new(automation_rx),
         })
     }
 

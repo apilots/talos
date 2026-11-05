@@ -14,7 +14,7 @@ pub(crate) struct CommandSuggestion {
 
 impl CommandSuggestion {
     pub(crate) fn all() -> Vec<Self> {
-        vec![
+        let mut commands = vec![
             CommandSuggestion {
                 name: "help".to_string(),
                 insert_text: "/help".to_string(),
@@ -69,7 +69,35 @@ impl CommandSuggestion {
                 display_text: "/quit".to_string(),
                 description: "Exit application".to_string(),
             },
-        ]
+        ];
+        for (name, description) in [
+            (
+                "automation",
+                "List existing Session tasks; optional Computer for Jobs",
+            ),
+            (
+                "jobs",
+                "Manage owner-scoped Jobs: /jobs <computer> list|pause|resume|run-once [id]",
+            ),
+        ] {
+            commands.push(CommandSuggestion {
+                name: name.into(),
+                insert_text: format!("/{name}"),
+                display_text: format!("/{name}"),
+                description: description.into(),
+            });
+        }
+        commands.extend(
+            talos_sdk::automation_command_catalog()
+                .into_iter()
+                .map(|entry| CommandSuggestion {
+                    name: entry.mode.skill_name().into(),
+                    insert_text: entry.command.clone(),
+                    display_text: format!("{} [prompt]", entry.command),
+                    description: entry.description,
+                }),
+        );
+        commands
     }
 
     pub(crate) fn filter(query: &str) -> Vec<CommandSuggestion> {

@@ -17,6 +17,11 @@ fn main() {
         talos_app_protocol::schema::generate_json_schema(),
     )
     .expect("schema fixture should be written");
+    fs::write(
+        ts_path.with_file_name("automation.ts"),
+        talos_app_protocol::schema::generate_automation_typescript(),
+    )
+    .expect("automation typescript fixture should be written");
     fs::write(ts_path, talos_app_protocol::schema::generate_typescript())
         .expect("typescript fixture should be written");
 }

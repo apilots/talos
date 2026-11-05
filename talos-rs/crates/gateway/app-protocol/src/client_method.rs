@@ -7,6 +7,21 @@ use crate::errors::AppServerErrorBody;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub enum ClientMethod {
+    #[serde(rename = "automation/read")]
+    AutomationRead,
+    #[serde(rename = "automation/execute")]
+    AutomationExecute,
+    #[serde(rename = "automation/list")]
+    AutomationList,
+    #[serde(rename = "automation/commandCatalog")]
+    AutomationCommandCatalog,
+    #[serde(rename = "automation/resolveCommand")]
+    AutomationResolveCommand,
+    #[serde(rename = "builtinJob/list")]
+    BuiltinJobList,
+    #[serde(rename = "builtinJob/control")]
+    BuiltinJobControl,
+
     #[serde(rename = "initialize")]
     Initialize,
     #[serde(rename = "desktop/streamOpen")]
@@ -225,6 +240,14 @@ pub enum ClientMethod {
 impl ClientMethod {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::AutomationRead => "automation/read",
+            Self::AutomationExecute => "automation/execute",
+            Self::AutomationList => "automation/list",
+            Self::AutomationCommandCatalog => "automation/commandCatalog",
+            Self::AutomationResolveCommand => "automation/resolveCommand",
+            Self::BuiltinJobList => "builtinJob/list",
+            Self::BuiltinJobControl => "builtinJob/control",
+
             Self::Initialize => "initialize",
             Self::DesktopStreamOpen => "desktop/streamOpen",
             Self::DesktopStreamSend => "desktop/streamSend",
@@ -347,6 +370,14 @@ impl FromStr for ClientMethod {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
+            "automation/read" => Ok(Self::AutomationRead),
+            "automation/execute" => Ok(Self::AutomationExecute),
+            "automation/list" => Ok(Self::AutomationList),
+            "automation/commandCatalog" => Ok(Self::AutomationCommandCatalog),
+            "automation/resolveCommand" => Ok(Self::AutomationResolveCommand),
+            "builtinJob/list" => Ok(Self::BuiltinJobList),
+            "builtinJob/control" => Ok(Self::BuiltinJobControl),
+
             "initialize" => Ok(Self::Initialize),
             "desktop/streamOpen" => Ok(Self::DesktopStreamOpen),
             "desktop/streamSend" => Ok(Self::DesktopStreamSend),

@@ -64,7 +64,7 @@ impl TuiApp {
         self.request_chat_activity();
 
         self.render_runtime
-            .apply_agent_event_payload(event.payload.clone());
+            .apply_turn_event_payload(&event.identity.turn_id, event.payload.clone());
 
         match event.payload {
             AgentEventPayload::TurnStarted(_) => {
@@ -74,6 +74,8 @@ impl TuiApp {
             }
             AgentEventPayload::MessageStarted(started) => {
                 if started.message.role == AgentMessageRole::User {
+                    self.active_message
+                        .get_or_insert_with(|| "Session task".into());
                     self.pending_user_action = None;
                 }
             }
@@ -86,7 +88,12 @@ impl TuiApp {
             AgentEventPayload::MessageBlockCompleted(completed) => {
                 self.observe_completed_block(&completed.block.content);
             }
-            AgentEventPayload::MessageCompleted(_) => {}
+            AgentEventPayload::MessageCompleted(message) => {
+                if message.role == AgentMessageRole::User {
+                    self.active_message
+                        .get_or_insert_with(|| "Session task".into());
+                }
+            }
             AgentEventPayload::WaitingForInput(pending) => {
                 if let AgentPendingInput::UserAction { action } = pending {
                     self.pending_user_action = Some(crate::user_action::PendingActionState::new(
@@ -124,6 +131,12 @@ impl TuiApp {
 
     pub(crate) fn replay_recovery_snapshot(&mut self, response: RecoverTimelineResponse) -> usize {
         let active_turn = response.active_turn.clone();
+        if let Some(active) = &active_turn {
+            if let Some(input) = &active.automation_input {
+                self.render_runtime
+                    .set_automation_input(&active.identity.turn_id, input.clone());
+            }
+        }
         let mut events = response.replay.events;
         events.retain(|event| match &event.event {
             TimelineEventPayload::SystemNotice(_) => true,
@@ -144,6 +157,13 @@ impl TuiApp {
                 self.context_compaction_stage = None;
             }
             self.handle_stream_event(envelope);
+        }
+        if active_turn
+            .as_ref()
+            .is_some_and(|active| active.initial_message_id.is_some())
+        {
+            self.active_message
+                .get_or_insert_with(|| "Session task".into());
         }
         let should_reconnect = active_turn.is_some();
         if should_reconnect {
@@ -202,7 +222,7 @@ impl TuiApp {
                         }
                     }
                 }
-                let blocks = agent_message_to_blocks(&message)
+                let mut blocks = agent_message_to_blocks(&message)
                     .into_iter()
                     .map(|block| {
                         if block.kind == TranscriptBlockKind::UserInput {
@@ -214,6 +234,23 @@ impl TuiApp {
                         block
                     })
                     .collect::<Vec<_>>();
+                if let Some(input) = turn.automation_input.as_ref().filter(|input| {
+                    input.message_id == message.message_id && message.role == AgentMessageRole::User
+                }) {
+                    if let Some(block) = blocks
+                        .last_mut()
+                        .filter(|block| block.kind == TranscriptBlockKind::UserInput)
+                    {
+                        block
+                            .lines
+                            .push(crate::render_runtime::common::style::StyledLine::plain(
+                                match input.origin {
+                                    talos_sdk::AutomationTurnOrigin::Goal { .. } => "  ◎ Goal",
+                                    talos_sdk::AutomationTurnOrigin::Loop { .. } => "  ↻ Loop",
+                                },
+                            ));
+                    }
+                }
                 item_count += self.render_runtime.append_history(blocks);
             }
             if let Some(message) = failure {

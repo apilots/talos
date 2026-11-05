@@ -96,6 +96,22 @@ impl KernelMemoryProgressStore for TestMemoryProgress {
     }
 }
 
+struct TestAutomationControl;
+
+impl talos_tools::AutomationControl for TestAutomationControl {
+    fn execute(
+        &self,
+        _: talos_types::AutomationModelRequest,
+    ) -> talos_tools::AutomationControlFuture<'_> {
+        Box::pin(async {
+            Err(TalosError::new(
+                ErrorCode::ServiceUnavailable,
+                "Automation is not installed in this resource-only fixture",
+            ))
+        })
+    }
+}
+
 struct TestAgentControl;
 
 impl AgentControl for TestAgentControl {
@@ -500,9 +516,12 @@ async fn tls_client_and_runner_register_then_unregister_over_grpc() {
         nodes.clone(),
         Arc::new(TestAuth),
         coordinator.clone(),
-        session_data,
-        Arc::new(TestAgentControl),
-        NodeToolImageRpc::new(nodes.clone(), Arc::new(TestToolImages), 1024),
+        NodeResourceServices {
+            session_data,
+            agent_control: Arc::new(TestAgentControl),
+            automation_control: Arc::new(TestAutomationControl),
+            tool_images: NodeToolImageRpc::new(nodes.clone(), Arc::new(TestToolImages), 1024),
+        },
     )
     .unwrap();
     let stop_server = CancellationToken::new();
@@ -686,3 +705,12 @@ mod desktop_registration_tests;
 
 #[path = "agent_resource_tests.rs"]
 mod resources;
+
+#[path = "agent_resource_automation_tests.rs"]
+mod automation_resources;
+
+#[path = "application_automation_worker_tests.rs"]
+mod automation_worker_business;
+
+#[path = "application_automation_skill_tests.rs"]
+mod automation_skill_resolution;

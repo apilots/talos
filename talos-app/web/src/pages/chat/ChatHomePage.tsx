@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { automationRequestError, prepareAutomationMessage } from "@/features/automation";
+import { getTalosClient } from "@/shared/api/client";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -20,6 +23,7 @@ import { useComputers, useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type {
+  AutomationMode,
   FileInfo,
   ModelRef,
   UserPermissionMode,
@@ -45,6 +49,12 @@ export function ChatHomePage() {
   const computers = useComputers();
   const scope = useProductScope();
   const draftKey = JSON.stringify([scope, computers.selectedId, "home"]);
+  const ownerRef = useRef<string | undefined>(draftKey);
+  ownerRef.current = draftKey;
+  useEffect(() => { ownerRef.current = draftKey; return () => { ownerRef.current = undefined; }; }, [draftKey]);
+  const commands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
+    queryFn: () => getTalosClient().automation.commandCatalog({}),
+    enabled: Boolean(computers.selected?.available), staleTime: Infinity });
   const savedDraft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
   const saveDraft = useAppStore((state) => state.saveComposerDraft);
   const draft = locationState?.initialDraft ?? savedDraft;
@@ -84,9 +94,13 @@ export function ChatHomePage() {
   async function handleStartDraft(
     initialPrompt?: string,
     attachments: FileInfo[] = [],
+    mode?: AutomationMode,
   ) {
     if (!computers.selected?.available) return;
-    const trimmed = initialPrompt?.trim();
+    const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId);
+    if (ownerRef.current !== draftKey) return;
+    if (prepared.kind === "management") throw automationRequestError("chatRequired");
+    const trimmed = prepared.prompt.trim();
     setDraft("");
     const sessionId = generateSessionId();
     navigate(`/sessions/${sessionId}`, {
@@ -94,6 +108,7 @@ export function ChatHomePage() {
         ? {
             initialNodeId: computers.selectedId,
             initialPrompt: trimmed ?? "",
+            ...(prepared.skillSelection ? { initialSkillSelection: prepared.skillSelection } : {}),
             initialModel: selectedModel,
             initialReasoningLevel: selectedReasoningLevel,
             initialPermissionMode: permissionMode,
@@ -128,6 +143,8 @@ export function ChatHomePage() {
           {t("chat:startPromptTitle")}
         </h1>
         <ChatComposer
+          key={draftKey}
+          automationCommands={commands.data?.data}
           activeProjectId={activeProject?.id ?? activeProjectId}
           disabled={!computers.selected?.available}
           draft={draft}
@@ -146,7 +163,7 @@ export function ChatHomePage() {
           onPermissionModeChange={handlePermissionModeChange}
           onProjectChange={setActiveProjectId}
           onReasoningLevelChange={setSelectedReasoningLevel}
-          onSend={(attachments) => handleStartDraft(draft, attachments)}
+          onSend={(attachments, mode) => handleStartDraft(draft, attachments, mode)}
           permissionMode={permissionMode}
           projects={projects}
           selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}

@@ -7,6 +7,7 @@ import "memory.proto";
 import "types.proto";
 import "resources.proto";
 import "coordinator.proto";
+import "automation.proto";
 
 // Heartbeat frames are enabled only when Connect and Ready both opt in.
 message ConnectNodeRequest { NodeAuth auth = 1; Empty params = 2; bool stream_heartbeat = 3; }
@@ -41,6 +42,7 @@ message WorkerRpcCall {
   // Only reverse resource calls carry this context on their first frame.
   CoordinatorCallContext caller = 6;
   oneof request {
+    ExecuteAutomationRequest execute_automation = 126;
     SetRegistrationAdmissionRequest set_registration_admission = 117;
     ActiveSessionCommandRequest active_session_command = 116;
     ReadSessionExecutionStateRequest read_session_execution_state = 114;
@@ -125,6 +127,7 @@ message WorkerRpcResult {
   uint64 sequence = 2;
   bool completed = 3;
   oneof response {
+    ExecuteAutomationResponse execute_automation = 126;
     ActiveSessionCommandResponse active_session_command = 116;
     SessionExecutionStateResponse session_execution_state = 114;
     PeerFileReadResponse peer_file_read = 111;

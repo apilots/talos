@@ -1,6 +1,6 @@
 import {
   ErrorCode,
-  type ApiError, type BrowserCapabilityOperation, type BrowserCapabilityReason,
+  type ApiError, type AutomationRequestReason, type BrowserCapabilityOperation, type BrowserCapabilityReason,
   type ApiResponse,
   type TimelineEvent,
   type ErrorCode as ErrorCodeType,
@@ -154,6 +154,24 @@ export function decodeApiError(value: unknown): ApiError {
     }
     const descriptor = error.localization as Record<string, unknown>;
     switch (descriptor.type) {
+      case "automationRequest": {
+        const codes: Record<AutomationRequestReason, ErrorCodeType> = {
+          selectedModeManagementConflict: ErrorCode.Conflict,
+          selectedModeConflict: ErrorCode.Conflict,
+          computerRequired: ErrorCode.InvalidRequest,
+          chatRequired: ErrorCode.InvalidRequest,
+          taskNotFound: ErrorCode.ResourceNotFound,
+          goalNotFound: ErrorCode.ResourceNotFound,
+          systemSkillUnavailable: ErrorCode.ResourceNotFound,
+        };
+        const reason = descriptor.reason;
+        if (typeof reason !== "string" || !Object.hasOwn(codes, reason) ||
+            Object.keys(descriptor).length !== 2 || error.code !== codes[reason as AutomationRequestReason]) {
+          throw new Error("Invalid Talos API response.");
+        }
+        localization = { type: "automationRequest", reason: reason as AutomationRequestReason };
+        break;
+      }
       case "computerDeletionActive":
       case "computerRegistrationRemoved":
       case "computerDeletionUnverified": {

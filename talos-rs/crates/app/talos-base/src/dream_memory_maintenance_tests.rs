@@ -256,6 +256,7 @@ async fn dream_maintenance_uses_bound_worker_policy_for_two_user_scopes() {
             attachment_reader: file_service.clone(),
             tool_image_store: Arc::new(crate::tool_images::ToolImages(file_service.clone())),
             agent_control: None,
+            automation_control: None,
         },
     )
     .await
@@ -437,6 +438,7 @@ async fn commit_completed_history_turn(
     started_block.completed_at = None;
     let admission = store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            automation_origin: None,
             events: vec![
                 AgentEvent {
                     identity: identity.clone(),

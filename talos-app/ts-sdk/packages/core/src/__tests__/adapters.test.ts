@@ -22,6 +22,15 @@ describe("shared error contract", () => {
       expect(decodeApiError(JSON.parse(JSON.stringify(error)))).toEqual(error);
     }
   });
+  it("preserves Automation request reasons without interpreting display text", () => {
+    for (const [code, reason] of [
+      [ErrorCode.Conflict, "selectedModeConflict"],
+      [ErrorCode.ResourceNotFound, "goalNotFound"],
+    ] as const) {
+      const error = { code, message: "Client wording may change.", localization: { type: "automationRequest", reason } };
+      expect(decodeApiError(JSON.parse(JSON.stringify(error)))).toEqual(error);
+    }
+  });
 
   it.each([
     { ...valid, code: "futureCode" },

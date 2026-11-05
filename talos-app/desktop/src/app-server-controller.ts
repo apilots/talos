@@ -29,6 +29,7 @@ export interface AppServerBridge {
 export interface DesktopAppServerControllerOptions extends AppServerClientOptions {
   bridgeFactory?: (options: AppServerClientOptions) => AppServerBridge;
   onActiveTurnChanged?: (notification: AppProtocol.SessionActiveTurnChangedNotification) => void;
+  onAutomationChanged?: (notification: AppProtocol.AutomationChangedNotification) => void;
   onMessageQueueChanged?: (notification: AppProtocol.MessageQueueChangedNotification) => void;
   onEvent?: (event: AppProtocol.TimelineEvent) => void;
   onSubscriptionTerminated?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
@@ -165,6 +166,11 @@ export class DesktopAppServerController {
       if (notification.method === "session/activeTurnChanged") {
         const change = notification.params as AppProtocol.SessionActiveTurnChangedNotification;
         if (this.subscriptions.has(change.sessionId)) this.options.onActiveTurnChanged?.(change);
+        return;
+      }
+      if (notification.method === "automation/changed") {
+        const change = notification.params as AppProtocol.AutomationChangedNotification;
+        if (this.subscriptions.has(change.sessionId)) this.options.onAutomationChanged?.(change);
         return;
       }
       if (notification.method === "messageQueue/changed") {

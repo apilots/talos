@@ -1,3 +1,4 @@
+import { automationResources } from "./automationResources";
 import { tracingResources } from "./tracingResources";
 import { computerResources } from "./computerResources";
 export const defaultLocale = "en" as const;
@@ -11,13 +12,14 @@ import { webPreviewResources } from "./webPreviewResources";
 
 export const resources = {
   en: {
+    automation: automationResources.en,
     tracing: tracingResources.en,
     computers: computerResources.en,
     common: {
       navigation: {
         back: "Back", forward: "Forward", newChat: "New chat", history: "Navigation history",
         business: "Business area", sidebarControls: "Sidebar navigation", resizeSidebar: "Resize sidebar", sidebar: "Projects and chats", showSidebar: "Open sidebar", hideSidebar: "Collapse sidebar", settings: "Settings",
-        computers: "Computers", plugins: "Plugins", files: "Files", memory: "Memories",
+        automation: "Automation", computers: "Computers", plugins: "Plugins", files: "Files", memory: "Memories",
       },
       workspace: {
         resize: "Resize workspace", create: "New workspace tab", controls: "Workspace controls", navigation: "Application navigation", title: "Right workspace", windows: "Open windows",
@@ -51,6 +53,7 @@ export const resources = {
     },
     errors: errorResources.en,
     sidebar: {
+      automation: "Automation",
       webConsole: "Web console",
       threads: "Chats",
       allThreads: "All chats",
@@ -79,6 +82,12 @@ export const resources = {
       attachments: "Attachments",
       mentionFiles: "@ Mention files",
       ...composerResources.en,
+      clearAutomationMode: "Clear selected mode",
+      noSessionGoal: "No unfinished Goal in this chat.",
+      noSessionLoops: "No enabled Loops in this chat.",
+      automationTasksAndMessages: "Tasks and waiting messages",
+      commandGoalDescription: "Continue toward a verifiable objective",
+      commandLoopDescription: "Follow up at a fixed or model-decided interval",
       waitingResponseTitle: "Waiting for server response",
       waitingResponseDetail: "Talos is still preparing the first reply chunk.",
       stoppingResponseTitle: "Stopping response…",
@@ -87,6 +96,9 @@ export const resources = {
       renderingMessage: "Rendering message…",
       copyBlock: "Copy block",
       copiedBlock: "Copied block",
+      userInputMessage: "User input",
+      sentAsGoal: "Sent as goal",
+      sentAsLoop: "Sent as loop",
       helpful: "Helpful",
       notHelpful: "Not helpful",
       showEarlierSteps: "Show {{count}} earlier steps",
@@ -469,11 +481,12 @@ export const resources = {
     },
   },
   "zh-CN": {
+    automation: automationResources.zh,
     tracing: tracingResources.zh,
     computers: computerResources["zh-CN"],
     common: {
       navigation: {
-        back: "后退", forward: "前进", newChat: "新会话", history: "页面导航",
+        automation: "自动化", back: "后退", forward: "前进", newChat: "新会话", history: "页面导航",
         business: "业务区", sidebarControls: "侧栏导航", resizeSidebar: "调整侧栏宽度", sidebar: "项目与会话侧栏", showSidebar: "展开侧栏", hideSidebar: "收起侧栏", settings: "设置",
         computers: "Computer", plugins: "插件", files: "文件", memory: "记忆",
       },
@@ -512,6 +525,7 @@ export const resources = {
     },
     errors: errorResources.zh,
     sidebar: {
+      automation: "自动化",
       webConsole: "Web 控制台",
       threads: "会话",
       allThreads: "全部会话",
@@ -540,6 +554,12 @@ export const resources = {
       attachments: "附件",
       mentionFiles: "@ 引用文件",
       ...composerResources.zh,
+      clearAutomationMode: "移除待发送模式",
+      noSessionGoal: "当前会话没有未结束的 Goal。",
+      noSessionLoops: "当前会话没有已启用的 Loop。",
+      automationTasksAndMessages: "任务与待发送消息",
+      commandGoalDescription: "持续推进，直到目标达成",
+      commandLoopDescription: "按固定或模型决定的间隔跟进",
       waitingResponseTitle: "等待服务端返回",
       waitingResponseDetail: "Talos 正在准备首段回复内容。",
       stoppingResponseTitle: "正在停止回答…",
@@ -548,6 +568,9 @@ export const resources = {
       renderingMessage: "正在渲染消息…",
       copyBlock: "复制块内容",
       copiedBlock: "已复制块内容",
+      userInputMessage: "用户输入",
+      sentAsGoal: "以 Goal 发送",
+      sentAsLoop: "以 Loop 发送",
       helpful: "赞",
       notHelpful: "不赞",
       showEarlierSteps: "显示之前的 {{count}} 个步骤",

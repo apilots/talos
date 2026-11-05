@@ -43,6 +43,7 @@ impl ResourceBindings {
                     registry: tools.clone(),
                     images: resources.tool_image_store,
                     control: resources.agent_control,
+                    automation: resources.automation_control,
                 }),
             }))
         })
@@ -165,6 +166,7 @@ fn client_resources(client: AgentSessionDataClient) -> TalosWorkerResources {
         memory_progress_store: Arc::new(crate::standalone::RemoteMemoryProgress(client)),
         attachment_reader: shared.clone(),
         tool_image_store: shared.clone(),
-        agent_control: Some(shared),
+        agent_control: Some(shared.clone()),
+        automation_control: Some(shared),
     }
 }

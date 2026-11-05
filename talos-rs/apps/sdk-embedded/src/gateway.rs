@@ -2,9 +2,63 @@
 use super::*;
 
 mod timeline;
+mod transport;
 
 #[async_trait]
 impl GatewayClient for EmbeddedServerClient {
+    async fn session_automation(
+        &mut self,
+        request: talos_types::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_types::SessionAutomationSnapshot> {
+        self.gateway()
+            .session_automation(&self.actor, request)
+            .await
+    }
+    async fn execute_automation(
+        &mut self,
+        request: talos_types::AutomationRequest,
+    ) -> TalosResult<talos_types::AutomationControlResult> {
+        self.gateway()
+            .execute_automation(&self.actor, request)
+            .await
+    }
+    async fn list_automation(
+        &mut self,
+        request: talos_types::AutomationListRequest,
+    ) -> TalosResult<talos_types::AutomationListResponse> {
+        self.gateway().list_automation(&self.actor, request).await
+    }
+    async fn automation_command_catalog(
+        &mut self,
+        request: talos_types::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_types::AutomationCommandCatalogResponse> {
+        self.gateway()
+            .automation_command_catalog(&self.actor, request)
+            .await
+    }
+    async fn resolve_automation_command(
+        &mut self,
+        request: talos_types::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_types::AutomationCommandResolveResponse> {
+        self.gateway()
+            .resolve_automation_command(&self.actor, request)
+            .await
+    }
+    async fn list_builtin_jobs(
+        &mut self,
+        request: talos_types::BuiltinJobListRequest,
+    ) -> TalosResult<talos_types::BuiltinJobListResponse> {
+        self.gateway().list_builtin_jobs(&self.actor, request).await
+    }
+    async fn control_builtin_job(
+        &mut self,
+        request: talos_types::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_types::BuiltinJobInfo> {
+        self.gateway()
+            .control_builtin_job(&self.actor, request)
+            .await
+    }
+
     async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse> {
         self.runtime.service.sync_metrics(&self.actor).await
     }
@@ -13,58 +67,42 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_types::ComputerListRequest,
     ) -> TalosResult<talos_types::ComputerListResponse> {
-        self.runtime
-            .gateway
-            .list_computers(&self.actor, request)
-            .await
+        self.gateway().list_computers(&self.actor, request).await
     }
 
     async fn read_computer(
         &mut self,
         request: talos_types::GetNodeRequest,
     ) -> TalosResult<talos_types::NodeInfo> {
-        self.runtime
-            .gateway
-            .read_computer(&self.actor, request)
-            .await
+        self.gateway().read_computer(&self.actor, request).await
     }
 
     async fn create_computer(
         &mut self,
         request: talos_types::CreateNodeRequest,
     ) -> TalosResult<talos_types::CreatedNode> {
-        self.runtime
-            .gateway
-            .create_computer(&self.actor, request)
-            .await
+        self.gateway().create_computer(&self.actor, request).await
     }
 
     async fn rename_computer(
         &mut self,
         request: talos_types::RenameComputerRequest,
     ) -> TalosResult<talos_types::NodeInfo> {
-        self.runtime
-            .gateway
-            .rename_computer(&self.actor, request)
-            .await
+        self.gateway().rename_computer(&self.actor, request).await
     }
 
     async fn delete_computer(
         &mut self,
         request: talos_types::DeleteComputerRequest,
     ) -> TalosResult<talos_types::DeleteComputerResponse> {
-        self.runtime
-            .gateway
-            .delete_computer(&self.actor, request)
-            .await
+        self.gateway().delete_computer(&self.actor, request).await
     }
 
     async fn set_computer_status(
         &mut self,
         request: talos_types::SetComputerStatusRequest,
     ) -> TalosResult<talos_types::NodeInfo> {
-        self.runtime
-            .gateway
+        self.gateway()
             .set_computer_status(&self.actor, request)
             .await
     }
@@ -73,8 +111,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_types::RotateCredentialRequest,
     ) -> TalosResult<talos_types::NodeCredential> {
-        self.runtime
-            .gateway
+        self.gateway()
             .rotate_computer_credential(&self.actor, request)
             .await
     }
@@ -83,18 +120,14 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::McpServerImportRequest,
     ) -> TalosResult<talos_sdk::PluginInstallResponse> {
-        self.runtime
-            .gateway
-            .import_mcp_server(&self.actor, request)
-            .await
+        self.gateway().import_mcp_server(&self.actor, request).await
     }
 
     async fn start_mcp_authentication(
         &mut self,
         request: talos_sdk::McpAuthenticationStartRequest,
     ) -> TalosResult<talos_sdk::McpAuthenticationStartResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .start_mcp_authentication(&self.actor, request)
             .await
     }
@@ -103,8 +136,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::McpAuthenticationReadRequest,
     ) -> TalosResult<talos_sdk::McpAuthenticationResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .read_mcp_authentication(&self.actor, request)
             .await
     }
@@ -113,8 +145,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::McpCredentialsUpdateRequest,
     ) -> TalosResult<talos_sdk::McpAuthenticationResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .update_mcp_credentials(&self.actor, request)
             .await
     }
@@ -123,59 +154,48 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::DesktopOpenRequest,
     ) -> TalosResult<talos_sdk::DesktopViewGrant> {
-        self.runtime
-            .gateway
-            .open_desktop(&self.actor, request)
-            .await
+        self.gateway().open_desktop(&self.actor, request).await
     }
 
     async fn browser(
         &mut self,
         request: talos_sdk::BrowserRequest,
     ) -> TalosResult<talos_sdk::BrowserSnapshot> {
-        self.runtime.gateway.browser(&self.actor, request).await
+        self.gateway().browser(&self.actor, request).await
     }
 
     async fn list_mcp_servers(
         &mut self,
         request: talos_sdk::McpServerListRequest,
     ) -> TalosResult<talos_sdk::McpServerListResponse> {
-        self.runtime
-            .gateway
-            .list_mcp_servers(&self.actor, request)
-            .await
+        self.gateway().list_mcp_servers(&self.actor, request).await
     }
 
     async fn read_auth_session(
         &mut self,
         request: AuthSessionReadRequest,
     ) -> TalosResult<AuthSessionReadResponse> {
-        self.runtime
-            .gateway
-            .read_auth_session(&self.actor, request)
-            .await
+        self.gateway().read_auth_session(&self.actor, request).await
     }
 
     async fn clear_auth_session(
         &mut self,
         request: AuthSessionClearRequest,
     ) -> TalosResult<AuthSessionClearResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .clear_auth_session(&self.actor, request)
             .await
     }
 
     async fn auth_logout(&mut self, request: AuthLogoutRequest) -> TalosResult<AuthLogoutResponse> {
-        self.runtime.gateway.logout(&self.actor, request).await
+        self.gateway().logout(&self.actor, request).await
     }
 
     async fn start_cloud_login(
         &mut self,
         request: CloudLoginStartRequest,
     ) -> TalosResult<CloudLoginStartResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .start_cloud_login(&self.actor, request, CloudLoginPersistence::LocalCache)
             .await
     }
@@ -184,24 +204,14 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        let response = self
-            .runtime
-            .gateway
-            .cloud_login_status(&self.actor, request)
-            .await?;
-        if let CloudLoginStatusResponse::Authenticated { access_token, .. } = &response {
-            self.actor = authenticated_actor_from_access_token(&self.runtime, access_token).await?;
-            self.runtime.service.sync_status(&self.actor).await?;
-        }
-        Ok(response)
+        self.refresh_embedded_login(request).await
     }
 
     async fn cancel_cloud_login(
         &mut self,
         request: CloudLoginCancelRequest,
     ) -> TalosResult<CloudLoginCancelResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .cancel_cloud_login(&self.actor, request)
             .await
     }
@@ -210,129 +220,98 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: UserCurrentRequest,
     ) -> TalosResult<UserCurrentResponse> {
-        self.runtime
-            .gateway
-            .current_user(&self.actor, request)
-            .await
+        self.gateway().current_user(&self.actor, request).await
     }
 
     async fn read_profile(
         &mut self,
         request: ProfileReadRequest,
     ) -> TalosResult<ProfileReadResponse> {
-        self.runtime
-            .gateway
-            .read_profile(&self.actor, request)
-            .await
+        self.gateway().read_profile(&self.actor, request).await
     }
 
     async fn list_models(&mut self, request: ModelListRequest) -> TalosResult<ModelListResponse> {
-        self.runtime.gateway.list_models(&self.actor, request).await
+        self.gateway().list_models(&self.actor, request).await
     }
 
     async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigResponse> {
-        self.runtime.gateway.get_config(&self.actor, request).await
+        self.gateway().get_config(&self.actor, request).await
     }
 
     async fn update_config(&mut self, request: ConfigUpdateRequest) -> TalosResult<ConfigResponse> {
-        self.runtime
-            .gateway
-            .update_config(&self.actor, request)
-            .await
+        self.gateway().update_config(&self.actor, request).await
     }
 
     async fn delete_config(
         &mut self,
         request: ConfigDeleteRequest,
     ) -> TalosResult<ConfigDeleteResponse> {
-        self.runtime
-            .gateway
-            .delete_config(&self.actor, request)
-            .await
+        self.gateway().delete_config(&self.actor, request).await
     }
 
     async fn reload_config(
         &mut self,
         request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
-        self.runtime
-            .gateway
-            .reload_config(&self.actor, request)
-            .await
+        self.gateway().reload_config(&self.actor, request).await
     }
 
     async fn list_skills(
         &mut self,
         request: talos_sdk::SkillsListRequest,
     ) -> TalosResult<talos_sdk::SkillsListResponse> {
-        self.runtime.gateway.list_skills(&self.actor, request).await
+        self.gateway().list_skills(&self.actor, request).await
     }
 
     async fn refresh_skills(
         &mut self,
         request: talos_sdk::SkillsRefreshRequest,
     ) -> TalosResult<talos_sdk::SkillsListResponse> {
-        self.runtime
-            .gateway
-            .refresh_skills(&self.actor, request)
-            .await
+        self.gateway().refresh_skills(&self.actor, request).await
     }
 
     async fn suggest_skills(
         &mut self,
         request: talos_sdk::SkillsSuggestRequest,
     ) -> TalosResult<talos_sdk::SkillsSuggestResponse> {
-        self.runtime
-            .gateway
-            .suggest_skills(&self.actor, request)
-            .await
+        self.gateway().suggest_skills(&self.actor, request).await
     }
 
     async fn read_skill(
         &mut self,
         request: talos_sdk::SkillsReadRequest,
     ) -> TalosResult<SkillsReadResponse> {
-        self.runtime.gateway.read_skill(&self.actor, request).await
+        self.gateway().read_skill(&self.actor, request).await
     }
 
     async fn resolve_skills(
         &mut self,
         request: talos_sdk::SkillsResolveRequest,
     ) -> TalosResult<talos_sdk::SkillsResolveResponse> {
-        self.runtime
-            .gateway
-            .resolve_skills(&self.actor, request)
-            .await
+        self.gateway().resolve_skills(&self.actor, request).await
     }
 
     async fn list_sessions(
         &mut self,
         request: SessionListRequest,
     ) -> TalosResult<SessionListResponse> {
-        self.runtime
-            .gateway
-            .list_sessions(&self.actor, request)
-            .await
+        self.gateway().list_sessions(&self.actor, request).await
     }
 
     async fn get_session(&mut self, request: SessionGetRequest) -> TalosResult<SessionGetResponse> {
-        self.runtime.gateway.get_session(&self.actor, request).await
+        self.gateway().get_session(&self.actor, request).await
     }
 
     async fn trajectory_capabilities(
         &mut self,
     ) -> TalosResult<talos_sdk::trajectory::TrajectoryCapabilitiesResponse> {
-        self.runtime
-            .gateway
-            .trajectory_capabilities(&self.actor)
-            .await
+        self.gateway().trajectory_capabilities(&self.actor).await
     }
     async fn read_turn_trajectory(
         &mut self,
         request: talos_sdk::trajectory::TrajectoryReadTurnRequest,
     ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadTurnResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .read_turn_trajectory(&self.actor, request)
             .await
     }
@@ -340,8 +319,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::trajectory::TrajectoryReadModelRequestRequest,
     ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadModelRequestResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .read_request_trajectory(&self.actor, request)
             .await
     }
@@ -349,8 +327,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::trajectory::TrajectoryReadToolRequest,
     ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadToolResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .read_tool_trajectory(&self.actor, request)
             .await
     }
@@ -358,8 +335,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: talos_sdk::trajectory::TrajectoryReadPayloadRequest,
     ) -> TalosResult<talos_sdk::trajectory::TrajectoryReadPayloadResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .read_trajectory_payload(&self.actor, request)
             .await
     }
@@ -367,8 +343,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: SessionHistoryRequest,
     ) -> TalosResult<SessionHistoryResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .get_session_history(&self.actor, request)
             .await
     }
@@ -377,78 +352,56 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: SessionActiveTurnRequest,
     ) -> TalosResult<SessionActiveTurnResponse> {
-        self.runtime
-            .gateway
-            .get_active_turn(&self.actor, request)
-            .await
+        self.gateway().get_active_turn(&self.actor, request).await
     }
 
     async fn patch_session(
         &mut self,
         request: SessionPatchRequest,
     ) -> TalosResult<SessionUpdateResponse> {
-        self.runtime
-            .gateway
-            .patch_session(&self.actor, request)
-            .await
+        self.gateway().patch_session(&self.actor, request).await
     }
 
     async fn close_session(
         &mut self,
         request: SessionCloseRequest,
     ) -> TalosResult<SessionCloseResponse> {
-        self.runtime
-            .gateway
-            .close_session(&self.actor, request)
-            .await
+        self.gateway().close_session(&self.actor, request).await
     }
 
     async fn delete_session(
         &mut self,
         request: SessionDeleteRequest,
     ) -> TalosResult<SessionDeleteResponse> {
-        self.runtime
-            .gateway
-            .delete_session(&self.actor, request)
-            .await
+        self.gateway().delete_session(&self.actor, request).await
     }
 
     async fn compact_session(
         &mut self,
         request: SessionCompactRequest,
     ) -> TalosResult<SessionCompactResponse> {
-        self.runtime
-            .gateway
-            .compact_session(&self.actor, request)
-            .await
+        self.gateway().compact_session(&self.actor, request).await
     }
 
     async fn clear_session(
         &mut self,
         request: SessionClearRequest,
     ) -> TalosResult<SessionClearResponse> {
-        self.runtime
-            .gateway
-            .clear_session(&self.actor, request)
-            .await
+        self.gateway().clear_session(&self.actor, request).await
     }
 
     async fn recover_timeline(
         &mut self,
         request: RecoverTimelineRequest,
     ) -> TalosResult<RecoverTimelineResponse> {
-        self.runtime
-            .gateway
-            .recover_timeline(&self.actor, request)
-            .await
+        self.gateway().recover_timeline(&self.actor, request).await
     }
 
     async fn subscribe_timeline(
         &mut self,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<SubscribeTimelineResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .subscribe_timeline(&self.actor, request)
             .await
     }
@@ -468,34 +421,25 @@ impl GatewayClient for EmbeddedServerClient {
     }
 
     async fn start_turn(&mut self, request: StartTurnRequest) -> TalosResult<StartTurnResponse> {
-        let (request, source) = prepare_embedded_start_turn(request)?;
-        let idempotency_key = request.client_request_id.clone();
-        self.runtime
-            .gateway
-            .start_turn(&self.actor, source, request, idempotency_key)
-            .await
+        self.start_embedded_turn(request).await
     }
 
     async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<StartTurnResponse> {
-        self.runtime.gateway.retry_turn(&self.actor, request).await
+        self.gateway().retry_turn(&self.actor, request).await
     }
 
     async fn interrupt_turn(
         &mut self,
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
-        self.runtime
-            .gateway
-            .interrupt_turn(&self.actor, request)
-            .await
+        self.gateway().interrupt_turn(&self.actor, request).await
     }
 
     async fn add_queued_message(
         &mut self,
         request: MessageQueueAddRequest,
     ) -> TalosResult<MessageQueue> {
-        self.runtime
-            .gateway
+        self.gateway()
             .add_queued_message(&self.actor, request)
             .await
     }
@@ -504,8 +448,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: MessageQueueListRequest,
     ) -> TalosResult<MessageQueue> {
-        self.runtime
-            .gateway
+        self.gateway()
             .list_message_queue(&self.actor, request)
             .await
     }
@@ -514,8 +457,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: MessageQueueUpdateRequest,
     ) -> TalosResult<MessageQueue> {
-        self.runtime
-            .gateway
+        self.gateway()
             .update_queued_message(&self.actor, request)
             .await
     }
@@ -524,8 +466,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: MessageQueueDeleteRequest,
     ) -> TalosResult<MessageQueue> {
-        self.runtime
-            .gateway
+        self.gateway()
             .delete_queued_message(&self.actor, request)
             .await
     }
@@ -534,8 +475,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: MessageQueueReorderRequest,
     ) -> TalosResult<MessageQueue> {
-        self.runtime
-            .gateway
+        self.gateway()
             .reorder_message_queue(&self.actor, request)
             .await
     }
@@ -544,8 +484,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: MessageQueueStartRequest,
     ) -> TalosResult<StartTurnResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .start_queued_message(&self.actor, request)
             .await
     }
@@ -554,75 +493,56 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse> {
-        self.runtime
-            .gateway
-            .submit_turn_input(&self.actor, request)
-            .await
+        self.gateway().submit_turn_input(&self.actor, request).await
     }
 
     async fn list_projects(
         &mut self,
         request: ProjectListRequest,
     ) -> TalosResult<ProjectListResponse> {
-        self.runtime
-            .gateway
-            .list_projects(&self.actor, request)
-            .await
+        self.gateway().list_projects(&self.actor, request).await
     }
 
     async fn get_project(
         &mut self,
         request: ProjectReadRequest,
     ) -> TalosResult<ProjectReadResponse> {
-        self.runtime.gateway.get_project(&self.actor, request).await
+        self.gateway().get_project(&self.actor, request).await
     }
 
     async fn create_project(
         &mut self,
         request: ProjectCreateRequest,
     ) -> TalosResult<ProjectCreateResponse> {
-        self.runtime
-            .gateway
-            .create_project(&self.actor, request)
-            .await
+        self.gateway().create_project(&self.actor, request).await
     }
 
     async fn patch_project(
         &mut self,
         request: ProjectPatchRequest,
     ) -> TalosResult<ProjectPatchResponse> {
-        self.runtime
-            .gateway
-            .patch_project(&self.actor, request)
-            .await
+        self.gateway().patch_project(&self.actor, request).await
     }
 
     async fn delete_project(
         &mut self,
         request: ProjectDeleteRequest,
     ) -> TalosResult<ProjectDeleteResponse> {
-        self.runtime
-            .gateway
-            .delete_project(&self.actor, request)
-            .await
+        self.gateway().delete_project(&self.actor, request).await
     }
 
     async fn read_fs_directory(
         &mut self,
         request: FsDirectoryReadRequest,
     ) -> TalosResult<FsDirectoryReadResponse> {
-        self.runtime
-            .gateway
-            .read_fs_directory(&self.actor, request)
-            .await
+        self.gateway().read_fs_directory(&self.actor, request).await
     }
 
     async fn create_fs_directory(
         &mut self,
         request: FsDirectoryCreateRequest,
     ) -> TalosResult<FsDirectoryCreateResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .create_fs_directory(&self.actor, request)
             .await
     }
@@ -631,8 +551,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: PluginSourceListRequest,
     ) -> TalosResult<PluginSourceListResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .list_plugin_sources(&self.actor, request)
             .await
     }
@@ -641,18 +560,14 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        self.runtime
-            .gateway
-            .add_plugin_source(&self.actor, request)
-            .await
+        self.gateway().add_plugin_source(&self.actor, request).await
     }
 
     async fn refresh_plugin_source(
         &mut self,
         request: PluginSourceRefreshRequest,
     ) -> TalosResult<PluginSourceRefreshResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .refresh_plugin_source(&self.actor, request)
             .await
     }
@@ -661,8 +576,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: PluginSourceRemoveRequest,
     ) -> TalosResult<PluginSourceRemoveResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .remove_plugin_source(&self.actor, request)
             .await
     }
@@ -671,74 +585,53 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: PluginSearchRequest,
     ) -> TalosResult<PluginSearchResponse> {
-        self.runtime
-            .gateway
-            .search_plugins(&self.actor, request)
-            .await
+        self.gateway().search_plugins(&self.actor, request).await
     }
 
     async fn list_plugins(
         &mut self,
         request: PluginListRequest,
     ) -> TalosResult<PluginListResponse> {
-        self.runtime
-            .gateway
-            .list_plugins(&self.actor, request)
-            .await
+        self.gateway().list_plugins(&self.actor, request).await
     }
 
     async fn read_plugin(&mut self, request: PluginReadRequest) -> TalosResult<PluginReadResponse> {
-        self.runtime.gateway.read_plugin(&self.actor, request).await
+        self.gateway().read_plugin(&self.actor, request).await
     }
 
     async fn install_plugin(
         &mut self,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
-        self.runtime
-            .gateway
-            .install_plugin(&self.actor, request)
-            .await
+        self.gateway().install_plugin(&self.actor, request).await
     }
 
     async fn update_plugin(
         &mut self,
         request: PluginUpdateRequest,
     ) -> TalosResult<PluginUpdateResponse> {
-        self.runtime
-            .gateway
-            .update_plugin(&self.actor, request)
-            .await
+        self.gateway().update_plugin(&self.actor, request).await
     }
 
     async fn uninstall_plugin(
         &mut self,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        self.runtime
-            .gateway
-            .uninstall_plugin(&self.actor, request)
-            .await
+        self.gateway().uninstall_plugin(&self.actor, request).await
     }
 
     async fn enable_plugin(
         &mut self,
         request: PluginEnableRequest,
     ) -> TalosResult<PluginEnableResponse> {
-        self.runtime
-            .gateway
-            .enable_plugin(&self.actor, request)
-            .await
+        self.gateway().enable_plugin(&self.actor, request).await
     }
 
     async fn disable_plugin(
         &mut self,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        self.runtime
-            .gateway
-            .disable_plugin(&self.actor, request)
-            .await
+        self.gateway().disable_plugin(&self.actor, request).await
     }
 
     async fn upload_file(
@@ -746,108 +639,76 @@ impl GatewayClient for EmbeddedServerClient {
         request: FileUploadRequest,
         data: Bytes,
     ) -> TalosResult<FileUploadResponse> {
-        self.runtime
-            .gateway
-            .upload_file(
-                &self.actor,
-                request,
-                Box::pin(futures_util::stream::iter([Ok(data)])),
-            )
-            .await
+        self.upload_embedded_file(request, data).await
     }
 
     async fn list_files(&mut self, request: FileListRequest) -> TalosResult<FileListResponse> {
-        self.runtime.gateway.list_files(&self.actor, request).await
+        self.gateway().list_files(&self.actor, request).await
     }
 
     async fn read_file(&mut self, request: FileReadRequest) -> TalosResult<FileReadResponse> {
-        self.runtime.gateway.read_file(&self.actor, request).await
+        self.gateway().read_file(&self.actor, request).await
     }
 
     async fn read_file_content(
         &mut self,
         request: FileReadRequest,
     ) -> TalosResult<talos_sdk::FileDownloadResponse> {
-        let content = self
-            .runtime
-            .service
-            .files
-            .read_content(&self.actor, request)
-            .await?;
-        Ok(talos_sdk::FileDownloadResponse {
-            file: content.file,
-            data: content.bytes,
-        })
+        self.read_embedded_file_content(request).await
     }
 
     async fn update_file(&mut self, request: FileUpdateRequest) -> TalosResult<FileUpdateResponse> {
-        self.runtime.gateway.update_file(&self.actor, request).await
+        self.gateway().update_file(&self.actor, request).await
     }
 
     async fn delete_file(&mut self, request: FileDeleteRequest) -> TalosResult<FileDeleteResponse> {
-        self.runtime.gateway.delete_file(&self.actor, request).await
+        self.gateway().delete_file(&self.actor, request).await
     }
 
     async fn list_memory_files(
         &mut self,
         request: MemoryFileListRequest,
     ) -> TalosResult<MemoryFileListResponse> {
-        self.runtime
-            .gateway
-            .list_memory_files(&self.actor, request)
-            .await
+        self.gateway().list_memory_files(&self.actor, request).await
     }
 
     async fn read_memory_file(
         &mut self,
         request: MemoryFileReadRequest,
     ) -> TalosResult<MemoryFileReadResponse> {
-        self.runtime
-            .gateway
-            .read_memory_file(&self.actor, request)
-            .await
+        self.gateway().read_memory_file(&self.actor, request).await
     }
 
     async fn write_memory_file(
         &mut self,
         request: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileWriteResponse> {
-        self.runtime
-            .gateway
-            .write_memory_file(&self.actor, request)
-            .await
+        self.gateway().write_memory_file(&self.actor, request).await
     }
 
     async fn search_memory(
         &mut self,
         request: MemorySearchRequest,
     ) -> TalosResult<MemorySearchResponse> {
-        self.runtime
-            .gateway
-            .search_memory(&self.actor, request)
-            .await
+        self.gateway().search_memory(&self.actor, request).await
     }
 
     async fn get_memory(&mut self, request: MemoryGetRequest) -> TalosResult<MemoryGetResponse> {
-        self.runtime.gateway.get_memory(&self.actor, request).await
+        self.gateway().get_memory(&self.actor, request).await
     }
 
     async fn workspace_info(
         &mut self,
         request: WorkspaceInfoRequest,
     ) -> TalosResult<WorkspaceInfoResponse> {
-        self.runtime
-            .gateway
-            .workspace_info(&self.actor, request)
-            .await
+        self.gateway().workspace_info(&self.actor, request).await
     }
 
     async fn list_workspace_docs(
         &mut self,
         request: WorkspaceDocListRequest,
     ) -> TalosResult<WorkspaceDocListResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .list_workspace_docs(&self.actor, request)
             .await
     }
@@ -856,8 +717,7 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: WorkspaceDocReadRequest,
     ) -> TalosResult<WorkspaceDocReadResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .read_workspace_doc(&self.actor, request)
             .await
     }
@@ -866,18 +726,12 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
-        self.runtime
-            .gateway
+        self.gateway()
             .write_workspace_doc(&self.actor, request)
             .await
     }
 
     async fn shutdown(&mut self) -> TalosResult<()> {
-        for (_, task) in self.subscriptions.drain() {
-            task.abort();
-            let _ = task.await;
-        }
-        self.runtime.shutdown().await?;
-        Ok(())
+        self.shutdown_embedded_runtime().await
     }
 }

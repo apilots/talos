@@ -30,6 +30,7 @@ pub(crate) fn map_timeline_record(
 
 pub(crate) fn map_timeline_active_turn(record: AgentActiveTurnRecord) -> TimelineActiveTurn {
     TimelineActiveTurn {
+        automation_input: None,
         identity: record.identity,
         initial_message_id: record.initial_message_id,
         state: record.state,

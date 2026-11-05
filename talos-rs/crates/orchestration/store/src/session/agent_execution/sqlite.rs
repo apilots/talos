@@ -15,6 +15,13 @@ const MAX_EVENT_READ_LIMIT: usize = 10_000;
 
 #[async_trait]
 impl AgentExecutionStore for DatabaseSessionStore {
+    async fn read_automation_input_origins(
+        &self,
+        identities: &[AgentTurnRef],
+    ) -> TalosResult<Vec<(AgentTurnRef, talos_types::AutomationInputOrigin)>> {
+        self.automation_store().input_origins(identities).await
+    }
+
     fn supports_history_supplements(&self) -> bool {
         true
     }
@@ -93,6 +100,7 @@ impl AgentExecutionStore for DatabaseSessionStore {
         let initial_message = tx.query("SELECT json_extract(payload_json, '$.data.messageId') AS message_id FROM agent_events WHERE session_id = ? AND turn_id = ? AND json_extract(payload_json, '$.type') = 'messageCompleted' AND json_extract(payload_json, '$.data.role') = 'user' ORDER BY sequence LIMIT 1", &[session_id, &last.identity.turn_id]).await?.first().and_then(|r| r.get_string("message_id"));
         tx.commit().await?;
         Ok(Some(talos_agent_api::TimelineActiveTurn {
+            automation_input: None,
             identity: last.identity,
             initial_message_id: initial_message,
             state,

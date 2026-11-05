@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn automation_request_reasons_preserve_business_codes_and_localization() {
+    for (reason, code) in [
+        (
+            AutomationRequestReason::SelectedModeConflict,
+            ErrorCode::Conflict,
+        ),
+        (
+            AutomationRequestReason::GoalNotFound,
+            ErrorCode::ResourceNotFound,
+        ),
+    ] {
+        let error = ApiError::localized(ErrorLocalization::AutomationRequest { reason });
+        assert_eq!(error.code, code);
+        assert_eq!(
+            serde_json::from_value::<ApiError>(serde_json::to_value(&error).unwrap()).unwrap(),
+            error
+        );
+    }
+}
+
+#[test]
 fn localized_failure_has_one_english_and_wire_meaning() {
     let error = ApiError::localized(ErrorLocalization::AttachmentCountExceeded {
         limit: 4,

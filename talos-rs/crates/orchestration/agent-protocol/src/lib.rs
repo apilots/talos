@@ -2,6 +2,7 @@
 //!
 //! The existing product messages and events remain in `talos-agent-api`.
 
+pub mod automation_pb;
 mod capability;
 mod checkpoint;
 pub mod connection_pb;

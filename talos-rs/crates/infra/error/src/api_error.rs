@@ -66,6 +66,18 @@ pub enum BrowserCapabilityReason {
     ClientMismatch,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AutomationRequestReason {
+    SelectedModeManagementConflict,
+    SelectedModeConflict,
+    ComputerRequired,
+    ChatRequired,
+    TaskNotFound,
+    GoalNotFound,
+    SystemSkillUnavailable,
+}
+
 /// Exact business explanations with real localized consumers.
 /// Extend only when a domain has a stable, parameterized message; never add
 /// arbitrary translation keys, diagnostic data, or presentation policy here.
@@ -73,6 +85,9 @@ pub enum BrowserCapabilityReason {
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type", rename_all = "camelCase")]
 pub enum ErrorLocalization {
+    AutomationRequest {
+        reason: AutomationRequestReason,
+    },
     BrowserCapabilityUnavailable {
         operation: BrowserCapabilityOperation,
         reason: BrowserCapabilityReason,
@@ -95,6 +110,15 @@ pub enum ErrorLocalization {
 impl ErrorLocalization {
     pub fn code(&self) -> ErrorCode {
         match self {
+            Self::AutomationRequest { reason } => match reason {
+                AutomationRequestReason::SelectedModeManagementConflict
+                | AutomationRequestReason::SelectedModeConflict => ErrorCode::Conflict,
+                AutomationRequestReason::ComputerRequired
+                | AutomationRequestReason::ChatRequired => ErrorCode::InvalidRequest,
+                AutomationRequestReason::TaskNotFound
+                | AutomationRequestReason::GoalNotFound
+                | AutomationRequestReason::SystemSkillUnavailable => ErrorCode::ResourceNotFound,
+            },
             Self::BrowserCapabilityUnavailable { .. } => ErrorCode::InvalidRequest,
             Self::ComputerDeletionActive => ErrorCode::ActiveTurnRunning,
             Self::ComputerRegistrationRemoved => ErrorCode::ResourceExpired,
@@ -106,6 +130,15 @@ impl ErrorLocalization {
 
     pub fn english_message(&self) -> String {
         match self {
+            Self::AutomationRequest { reason } => match reason {
+                AutomationRequestReason::SelectedModeManagementConflict => "Clear the selected automation mode before sending a management command.",
+                AutomationRequestReason::SelectedModeConflict => "The command conflicts with the selected automation mode.",
+                AutomationRequestReason::ComputerRequired => "Select a Computer before using automation.",
+                AutomationRequestReason::ChatRequired => "Automation management requires an existing chat.",
+                AutomationRequestReason::TaskNotFound => "The requested automation task was not found.",
+                AutomationRequestReason::GoalNotFound => "No Goal exists in this chat.",
+                AutomationRequestReason::SystemSkillUnavailable => "The built-in automation Skill is unavailable on this Computer.",
+            }.into(),
             Self::BrowserCapabilityUnavailable { operation, reason } => {
                 let operation = match operation { BrowserCapabilityOperation::RemoteDesktop=>"Remote desktop", BrowserCapabilityOperation::TakeControl=>"Remote control", BrowserCapabilityOperation::ReleaseControl=>"Releasing remote control", BrowserCapabilityOperation::OpenLocal=>"Local browser presentation" };
                 let reason = match reason { BrowserCapabilityReason::NativeHost=>"this Computer does not share its native desktop", BrowserCapabilityReason::NotBundled=>"the required runtime is not bundled on this Computer", BrowserCapabilityReason::HostPolicy=>"the host policy does not allow it", BrowserCapabilityReason::UnsupportedVersion=>"this runtime version does not support it", BrowserCapabilityReason::ClientMismatch=>"this client is not the browser's Desktop host" };
@@ -125,6 +158,7 @@ impl ErrorLocalization {
 
     fn is_valid(&self) -> bool {
         match self {
+            Self::AutomationRequest { .. } => true,
             Self::BrowserCapabilityUnavailable { .. } => true,
             Self::ComputerDeletionActive
             | Self::ComputerRegistrationRemoved

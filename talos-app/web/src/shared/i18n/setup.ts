@@ -12,6 +12,7 @@ void i18n.use(initReactI18next).init({
   },
   defaultNS: "common",
   ns: [
+    "automation",
     "common",
     "computers",
     "errors",

@@ -40,6 +40,9 @@ impl TalosService {
         let deleted = self.sessions.delete_session(session).await?;
         if deleted {
             self.message_queue.clear_session(session_id)?;
+            if let Some(automation) = self.turns.installed_automation() {
+                automation.forget_session_dispatch(session_id);
+            }
         }
         Ok(deleted)
     }

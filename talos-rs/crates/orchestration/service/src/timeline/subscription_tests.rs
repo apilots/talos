@@ -486,3 +486,68 @@ async fn dropping_an_idle_subscription_releases_its_producer_without_another_eve
     .expect("unsubscribing must release an idle producer without publishing an event");
     assert_eq!(Arc::strong_count(&events), 2);
 }
+
+#[tokio::test]
+async fn automation_invalidation_is_session_scoped_and_does_not_consume_an_event_offset() {
+    let (store, events, subscriptions) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let commit =
+        commit_test_running_turn(store.as_ref(), identity.clone(), user_message(&identity)).await;
+    let (queue_tx, _) = tokio::sync::broadcast::channel(8);
+    let (automation_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut subscription = subscriptions
+        .subscribe_with_changes(
+            TimelineSubscribeCommand {
+                session_id: "session-1".into(),
+                turn_id: None,
+                after_event_id: Some(TimelineEventId::from_seq(commit.active_turn.last_event_seq)),
+                replay_limit: 10,
+                close_when_idle: false,
+                close_on_terminal: false,
+            },
+            queue_tx.subscribe(),
+            Some(automation_tx.subscribe()),
+        )
+        .await
+        .unwrap();
+    automation_tx
+        .send(talos_types::AutomationChangedNotification {
+            session_id: "other-session".into(),
+        })
+        .unwrap();
+    automation_tx
+        .send(talos_types::AutomationChangedNotification {
+            session_id: "session-1".into(),
+        })
+        .unwrap();
+    let change = tokio::time::timeout(Duration::from_secs(1), subscription.events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(change, TimelineSubscriptionMessage::AutomationChanged(change) if change.session_id=="session-1")
+    );
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity,
+                sequence: commit.events.last().unwrap().sequence + 1,
+                occurred_at: 12,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq: commit.active_turn.last_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .unwrap();
+    let next_seq = terminal.event_seq;
+    events.publish_committed([terminal]);
+    let next = tokio::time::timeout(Duration::from_secs(1), subscription.events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(next, TimelineSubscriptionMessage::Event(event) if event.event_seq==next_seq));
+    drop(queue_tx);
+}

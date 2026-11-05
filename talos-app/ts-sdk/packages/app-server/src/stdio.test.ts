@@ -189,6 +189,18 @@ describe("JsonRpcStdioTransport responses", () => {
 });
 
 describe("JsonRpcStdioTransport notifications", () => {
+  it("routes validated automation changes and rejects malformed identities", () => {
+    const transport = createTransportHarness();
+    const changes: unknown[] = [];
+    const stop = transport.instance.onAutomationChanged((change) => changes.push(change));
+    for (const params of [{ sessionId: "s1" }, { sessionId: 1 }, null]) {
+      transport.handleLine(JSON.stringify({ jsonrpc: "2.0", method: "automation/changed", params }));
+    }
+    stop();
+    transport.handleLine(JSON.stringify({ jsonrpc: "2.0", method: "automation/changed", params: { sessionId: "s2" } }));
+    expect(changes).toEqual([{ sessionId: "s1" }]);
+  });
+
   it("emits typed message queue change notifications", () => {
     const transport = createTransportHarness();
     const changes: unknown[] = [];

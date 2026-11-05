@@ -3,6 +3,51 @@ use super::*;
 
 #[async_trait]
 impl GatewayClient for AppServerClient {
+    async fn session_automation(
+        &mut self,
+        request: talos_types::SessionAutomationReadRequest,
+    ) -> TalosResult<talos_types::SessionAutomationSnapshot> {
+        self.request_typed("automation/read", request).await
+    }
+    async fn execute_automation(
+        &mut self,
+        request: talos_types::AutomationRequest,
+    ) -> TalosResult<talos_types::AutomationControlResult> {
+        self.request_typed("automation/execute", request).await
+    }
+    async fn list_automation(
+        &mut self,
+        request: talos_types::AutomationListRequest,
+    ) -> TalosResult<talos_types::AutomationListResponse> {
+        self.request_typed("automation/list", request).await
+    }
+    async fn automation_command_catalog(
+        &mut self,
+        request: talos_types::AutomationCommandCatalogRequest,
+    ) -> TalosResult<talos_types::AutomationCommandCatalogResponse> {
+        self.request_typed("automation/commandCatalog", request)
+            .await
+    }
+    async fn resolve_automation_command(
+        &mut self,
+        request: talos_types::AutomationCommandResolveRequest,
+    ) -> TalosResult<talos_types::AutomationCommandResolveResponse> {
+        self.request_typed("automation/resolveCommand", request)
+            .await
+    }
+    async fn list_builtin_jobs(
+        &mut self,
+        request: talos_types::BuiltinJobListRequest,
+    ) -> TalosResult<talos_types::BuiltinJobListResponse> {
+        self.request_typed("builtinJob/list", request).await
+    }
+    async fn control_builtin_job(
+        &mut self,
+        request: talos_types::BuiltinJobControlRequest,
+    ) -> TalosResult<talos_types::BuiltinJobInfo> {
+        self.request_typed("builtinJob/control", request).await
+    }
+
     async fn sync_metrics(&mut self) -> TalosResult<talos_types::SyncMetricsResponse> {
         self.request_typed("sync/metrics", Option::<()>::None).await
     }
@@ -291,6 +336,7 @@ impl GatewayClient for AppServerClient {
         let subscription_id = response.subscription_id.clone();
         let (tx, rx) = mpsc::channel(256);
         let (message_queue_tx, message_queue_rx) = mpsc::channel(256);
+        let (automation_tx, automation_rx) = mpsc::channel(256);
         {
             let mut streams = self.subscription_senders.lock().await;
             let buffered_events = self
@@ -310,6 +356,7 @@ impl GatewayClient for AppServerClient {
                     session_id,
                     sender: tx,
                     message_queue_sender: message_queue_tx,
+                    automation_sender: automation_tx,
                 },
             );
         }
@@ -317,6 +364,7 @@ impl GatewayClient for AppServerClient {
             response,
             stream: TimelineEventStream::new(rx),
             message_queue_changes: MessageQueueChangeStream::new(message_queue_rx),
+            automation_changes: AutomationChangeStream::new(automation_rx),
         })
     }
 

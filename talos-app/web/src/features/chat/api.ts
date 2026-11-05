@@ -74,6 +74,7 @@ export function generateSessionId() {
 }
 
 interface InitialTurnOptions {
+  skillSelection?: { name: string; path: string };
   nodeId?: string;
   fileIds?: string[];
   modelSelection?: ModelSelection;
@@ -88,6 +89,7 @@ export function createInitialTurnRequest(
 ): StartTurnRequest {
   const fileIds = options.fileIds ?? [];
   const content: AgentUserContent[] = [
+    ...(options.skillSelection ? [{ type: "skillSelection" as const, ...options.skillSelection }] : []),
     ...(text ? [{ type: "text" as const, text }] : []),
     ...fileIds.map((fileId) => ({ type: "file" as const, fileId })),
   ];

@@ -480,7 +480,15 @@ async fn verify_memory_and_skills(
             .list_skills(context.clone(), Default::default())
             .await
             .unwrap();
-        assert_eq!(list.data.len(), 1);
+        assert_eq!(list.data.len(), 3);
+        for name in ["goal", "loop"] {
+            assert!(list.data.iter().any(|skill| {
+                skill.name == name
+                    && skill.scope == talos_types::SkillScope::System
+                    && skill.read_only
+                    && skill.enabled
+            }));
+        }
         assert_eq!(
             port.refresh_skills(context.clone(), Default::default())
                 .await
@@ -521,7 +529,13 @@ async fn verify_memory_and_skills(
             )
             .await
             .unwrap();
-        assert_eq!(resolved.data, list.data);
+        assert_eq!(
+            resolved.data,
+            list.data
+                .into_iter()
+                .filter(|skill| skill.name == "review")
+                .collect::<Vec<_>>()
+        );
         assert!(resolved.warnings.is_empty());
     }
 }

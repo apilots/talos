@@ -6,8 +6,8 @@ use talos_llm_provider::{
 };
 
 #[derive(Default)]
-struct RecordingAttachmentProvider {
-    requests: Mutex<Vec<ChatRequest>>,
+pub(super) struct RecordingAttachmentProvider {
+    pub(super) requests: Mutex<Vec<ChatRequest>>,
 }
 
 #[async_trait]

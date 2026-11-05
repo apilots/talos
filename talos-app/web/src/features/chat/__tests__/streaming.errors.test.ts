@@ -15,6 +15,7 @@ it("retains the same public error in live state and historical timeline", () => 
   record.event.data.payload = { type: "turnFailed", data: { error, retryable: false } };
   applyStreamEvent("sess-1", record);
   const history = buildBlocksFromHistorySnapshot({ data: [{
+    automationInput: null,
     notices: [], identity: record.event.data.identity, completedEventSeq: 1, completedAt: 1,
     result: { status: "failed", result: {
       messages: [], metrics: executionMetrics(), failure: { error, retryable: false },

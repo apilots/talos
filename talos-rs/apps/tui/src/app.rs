@@ -53,6 +53,11 @@ impl TuiApp {
             rendered_chat_cache_key: None,
             chat_content_rect: None,
             chat_viewport_height: 0,
+            automation_snapshot: None,
+            automation_error: None,
+            automation_edit: None,
+            selected_automation: None,
+            tasks_expanded: false,
             message_queue: MessageQueue {
                 revision: 0,
                 max_messages: 0,

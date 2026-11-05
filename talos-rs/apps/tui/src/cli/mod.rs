@@ -17,6 +17,7 @@ use talos_tui::{display_tool_name, GatewayClient as TerminalGatewayClient, Termi
 use tokio::sync::{mpsc, Mutex};
 use tracing::error;
 
+mod automation;
 mod plugin;
 mod types;
 
@@ -53,11 +54,44 @@ pub(crate) async fn run_cli_with_client(
         Commands::Models(cmd) => execute_models_command(client.clone(), cmd).await,
         Commands::Session(cmd) => execute_session_command(client.clone(), cmd).await,
         Commands::Status => execute_status_command(client.clone()).await,
+        Commands::Goal(cmd) => {
+            run_foreground_result(client.clone(), automation::goal(client.clone(), cmd).await).await
+        }
+        Commands::Loop(cmd) => {
+            run_foreground_result(
+                client.clone(),
+                automation::loop_task(client.clone(), cmd).await,
+            )
+            .await
+        }
+        Commands::Automation(cmd) => {
+            print_automation_result(automation::management(client.clone(), cmd).await)
+        }
         Commands::Tui | Commands::Plugin(_) => unreachable!(),
     };
     let shutdown_result = client.shutdown().await;
     result?;
     shutdown_result?;
+    Ok(())
+}
+
+async fn run_foreground_result(
+    client: Arc<dyn TerminalGatewayClient>,
+    result: talos_error::TalosResult<automation::CommandOutput>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output = result?;
+    println!("{}", serde_json::to_string_pretty(&output.value)?);
+    if let Some((session, object)) = output.foreground {
+        eprintln!("Keeping this embedded automation owner in the foreground. Keep this process running; Ctrl-C retains the existing process termination behavior.");
+        talos_tui::wait_for_session_automation(client, session, object).await?;
+    }
+    Ok(())
+}
+
+fn print_automation_result(
+    result: talos_error::TalosResult<serde_json::Value>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", serde_json::to_string_pretty(&result?)?);
     Ok(())
 }
 

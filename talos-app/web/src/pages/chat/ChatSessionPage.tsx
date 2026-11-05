@@ -42,6 +42,7 @@ export function ChatSessionPage() {
   const locationState = location.state as SessionLocationState | null;
   const [pendingInitialSessionId, setPendingInitialSessionId] =
     useState<string>();
+  const [restoredAutomationMode, setRestoredAutomationMode] = useState<{ scope: string; sessionId: string; mode: "goal" | "loop" }>();
   const sessionQuery = useSessionQuery(
     sessionId,
     !hasInitialSessionInput(locationState) &&
@@ -102,9 +103,13 @@ export function ChatSessionPage() {
     projectsView,
     session,
     sessionId,
+    nodeId,
+    restoredAutomationMode: restoredAutomationMode?.scope === scope && restoredAutomationMode.sessionId === sessionId ? restoredAutomationMode.mode : undefined,
+    onRestoredAutomationModeConsumed: () => setRestoredAutomationMode(undefined),
   });
   useInitialSessionInput({
     onPendingSessionChange: setPendingInitialSessionId,
+    onRestoreAutomationMode: (mode) => setRestoredAutomationMode({ scope, sessionId, mode }),
     locationPathname: location.pathname,
     locationState,
     models,
@@ -209,6 +214,7 @@ export function ChatSessionPage() {
       <div className={view === "conversation" ? "mt-4 shrink-0" : "hidden"}>
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
           <ChatComposer
+            key={JSON.stringify([scope, sessionId])}
             {...sessionComposer.props}
             disabled={
               !target.data?.available ||

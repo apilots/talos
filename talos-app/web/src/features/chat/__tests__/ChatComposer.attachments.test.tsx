@@ -87,7 +87,7 @@ describe("ChatComposer attachments", () => {
     });
     const csv = new File(["a,b"], "data.csv", { type: "text/csv" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     fireEvent.click(screen.getByRole("button", { name: "Upload a file" }));
     const input = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).toHaveAttribute("multiple");
@@ -134,7 +134,7 @@ describe("ChatComposer attachments", () => {
       supportedAttachmentKinds: ["file"],
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add attachment" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     fireEvent.click(screen.getByRole("button", { name: "Choose an existing file" }));
     fireEvent.click(await screen.findByRole("button", { name: /existing\.pdf/i }));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -147,7 +147,7 @@ describe("ChatComposer attachments", () => {
   it("disables attachment controls when the model has no attachment input", () => {
     renderComposer();
 
-    expect(screen.getByRole("button", { name: "Add attachment" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
   });
 });
 

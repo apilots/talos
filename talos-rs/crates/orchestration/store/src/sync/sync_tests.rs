@@ -190,6 +190,7 @@ async fn run(peer: &Peer, session: &str, turn: &str) {
     let commit = peer
         .sessions
         .commit_initial_admission(CommitInitialAdmissionParams {
+            automation_origin: None,
             events: vec![started, message],
             command: None,
         })
@@ -405,6 +406,7 @@ async fn failed_store_admission_rolls_back_facts_and_capture_together() {
     let error = a
         .sessions
         .commit_initial_admission(CommitInitialAdmissionParams {
+            automation_origin: None,
             events: vec![event(
                 "session-1",
                 "turn-1",

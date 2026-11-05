@@ -43,8 +43,12 @@ export type StreamConnectionState =
   | "cancelling";
 
 export interface ChatUserInput {
+  /** Explicit Skill selected on this Input; not an execution/object binding. */
+  activationMode?: import("@talos/sdk-browser").AutomationMode;
   text: string;
   fileIds: string[];
+  /** Observed canonical User message time in Unix seconds, never enqueue time. */
+  createdAt?: number;
 }
 
 export type ChatRenderBlock =
@@ -57,6 +61,9 @@ export type ChatRenderBlock =
   | {
       id: string;
       kind: "user";
+      activationMode?: import("@talos/sdk-browser").AutomationMode;
+      automationOrigin?: import("@talos/sdk-browser").AutomationTurnOrigin;
+      createdAt?: number;
       text: string;
       fileIds: string[];
       live?: boolean;
@@ -204,6 +211,7 @@ export interface StreamSessionState {
   lastEventSeq?: number;
   lastSequence?: number;
   activeTurnId?: string;
+  automationInput?: import("@talos/sdk-browser").AutomationInputOrigin | null;
   activeMessageId?: string;
   reconnectAttempt?: number;
   showReconnectControls?: boolean;

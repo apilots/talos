@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::TimelineEventService;
 use talos_agent_api::TimelineEvent;
 use talos_error::TalosResult;
-use talos_types::MessageQueueChangedNotification;
+use talos_types::{AutomationChangedNotification, MessageQueueChangedNotification};
 use tokio::sync::{broadcast, mpsc};
 
 use super::types::{
@@ -26,21 +26,26 @@ impl TimelineSubscriptionService {
         &self,
         params: TimelineSubscribeCommand,
     ) -> TalosResult<TimelineSubscription> {
-        self.subscribe_inner(params, None).await
+        self.subscribe_inner(params, None, None).await
     }
 
-    pub(crate) async fn subscribe_with_queue_changes(
+    /// Merge metadata invalidations into the existing authorized Session stream.
+    /// Changes do not advance the canonical replay cursor or execute any work.
+    pub async fn subscribe_with_changes(
         &self,
         params: TimelineSubscribeCommand,
         queue_changes: broadcast::Receiver<MessageQueueChangedNotification>,
+        automation_changes: Option<broadcast::Receiver<AutomationChangedNotification>>,
     ) -> TalosResult<TimelineSubscription> {
-        self.subscribe_inner(params, Some(queue_changes)).await
+        self.subscribe_inner(params, Some(queue_changes), automation_changes)
+            .await
     }
 
     async fn subscribe_inner(
         &self,
         params: TimelineSubscribeCommand,
         queue_changes: Option<broadcast::Receiver<MessageQueueChangedNotification>>,
+        automation_changes: Option<broadcast::Receiver<AutomationChangedNotification>>,
     ) -> TalosResult<TimelineSubscription> {
         let live_events = self.subscribe_live_events();
         let active_changes = self.inner.active_tx.subscribe();
@@ -81,6 +86,7 @@ impl TimelineSubscriptionService {
             close_when_idle: params.close_when_idle,
             close_on_terminal: params.close_on_terminal,
             queue_changes,
+            automation_changes,
         });
         Ok(TimelineSubscription {
             subscription_id: format!("sub_{}", uuid::Uuid::new_v4().simple()),
@@ -124,6 +130,7 @@ struct SubscriptionStreamParams {
     close_when_idle: bool,
     close_on_terminal: bool,
     queue_changes: Option<broadcast::Receiver<MessageQueueChangedNotification>>,
+    automation_changes: Option<broadcast::Receiver<AutomationChangedNotification>>,
 }
 
 fn spawn_subscription_stream(
@@ -146,6 +153,7 @@ fn spawn_subscription_stream(
             close_when_idle,
             close_on_terminal,
             mut queue_changes,
+            mut automation_changes,
         } = params;
         let mut last_sent_seq = last_consumed_seq;
         let mut replay_events = replay_events;
@@ -215,7 +223,7 @@ fn spawn_subscription_stream(
             change = active_changes.recv() => {
                 match change {
                     Ok(change) if change.session_id == session_id => {
-                        if tx.send(TimelineSubscriptionMessage::ActiveTurnChanged(change)).await.is_err() { return; }
+                        if tx.send(TimelineSubscriptionMessage::ActiveTurnChanged(Box::new(change))).await.is_err() { return; }
                     }
                     Ok(_) => {}
                     Err(_) => {
@@ -272,6 +280,22 @@ fn spawn_subscription_stream(
                     )
                     .await;
                     return;
+                }
+            },
+            automation_change = recv_automation_change(&mut automation_changes), if automation_changes.is_some() => {
+                match automation_change {
+                    Ok(change) if change.session_id == session_id => {
+                        if tx.send(TimelineSubscriptionMessage::AutomationChanged(change)).await.is_err() { return; }
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let _ = send_subscription_closed(&tx, TimelineSubscriptionCloseReason::Lagged, "automation metadata requires refresh").await;
+                        return;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        let _ = send_subscription_closed(&tx, TimelineSubscriptionCloseReason::ServerShutdown, "automation metadata source closed").await;
+                        return;
+                    }
                 }
             },
             queue_change = recv_queue_change(&mut queue_changes), if queue_changes.is_some() => {
@@ -359,6 +383,16 @@ async fn recv_queue_change(
     receiver
         .as_mut()
         .expect("queue change branch requires a receiver")
+        .recv()
+        .await
+}
+
+async fn recv_automation_change(
+    receiver: &mut Option<broadcast::Receiver<AutomationChangedNotification>>,
+) -> Result<AutomationChangedNotification, broadcast::error::RecvError> {
+    receiver
+        .as_mut()
+        .expect("automation branch requires a receiver")
         .recv()
         .await
 }

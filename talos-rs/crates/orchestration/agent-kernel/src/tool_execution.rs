@@ -21,8 +21,11 @@ use talos_types::{ToolExecutionMetrics, UserActionResponse};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+pub(crate) mod registration;
+
 #[derive(Clone)]
 pub struct ToolExecutionContext {
+    pub(crate) registration: Option<Arc<registration::RegistrationGuard>>,
     pub browser_uploads: Vec<talos_types::ToolInputFile>,
     pub session_id: String,
     pub turn_id: String,
@@ -250,21 +253,26 @@ async fn execute_single_tool_call(
         &call.call_id,
         progress_emitter,
     );
-    let result = match tool_context {
-        Ok(tool_context) => match call.build_invocation(registry.as_ref()) {
-            Ok(invocation) => {
-                execute_tool_invocation(
-                    registry,
-                    &execution_context.run_tasks,
-                    invocation,
-                    tool_context,
-                )
+    let result: ToolDispatchResult<ToolDispatchOutcome> = async {
+        let tool_context = tool_context.map_err(ToolDispatchFailure::from)?;
+        if let Some(guard) = &execution_context.registration {
+            guard
+                .check(&tool_context, &call.call_id, &call.tool_name)
                 .await
-            }
-            Err(error) => Err(error.into()),
-        },
-        Err(error) => Err(error.into()),
-    };
+                .map_err(ToolDispatchFailure::from)?;
+        }
+        let invocation = call
+            .build_invocation(registry.as_ref())
+            .map_err(ToolDispatchFailure::from)?;
+        execute_tool_invocation(
+            registry,
+            &execution_context.run_tasks,
+            invocation,
+            tool_context,
+        )
+        .await
+    }
+    .await;
     let metrics = Some(ToolExecutionMetrics {
         queued_at_ms: Some(queued_at.timestamp_ms),
         started_at_ms: Some(started_at_ms),

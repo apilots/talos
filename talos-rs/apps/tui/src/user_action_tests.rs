@@ -328,6 +328,7 @@ async fn recovery_restores_the_server_owned_pending_action() {
             cursor_status: talos_sdk::TimelineCursorStatus::Current,
         },
         active_turn: Some(talos_sdk::TimelineActiveTurn {
+            automation_input: None,
             identity: talos_sdk::AgentTurnRef::new("sess-test", "turn-test"),
             initial_message_id: Some("msg-1".to_string()),
             state: talos_sdk::ActiveTurnState::WaitingForInput,

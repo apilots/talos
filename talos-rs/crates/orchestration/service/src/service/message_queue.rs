@@ -25,7 +25,23 @@ impl TalosService {
             return Ok(reply);
         }
         TurnService::validate_message_queue_input(&request.input)?;
-        self.message_queue.add(&request.session_id, request.input)?;
+        let automation = self.turns.installed_automation();
+        let guard = if let Some(a) = automation.as_ref() {
+            Some(a.lock(&request.session_id).await)
+        } else {
+            None
+        };
+        if let Some(a) = automation.as_ref() {
+            a.validate_user_input(&request.session_id, &request.input, None)
+                .await?;
+        }
+        let input = if let Some(a) = automation.as_ref() {
+            a.normalize_activation(&session, request.input).await?
+        } else {
+            request.input
+        };
+        self.message_queue.add(&request.session_id, input)?;
+        drop(guard);
         if let Err(error) = self.turns.try_dispatch_next(&request.session_id).await {
             tracing::warn!(
                 session_id = %request.session_id,
@@ -86,6 +102,20 @@ impl TalosService {
             return Ok(reply);
         }
         TurnService::validate_message_queue_input(&request.input)?;
+        let automation = self.turns.installed_automation();
+        let _guard = if let Some(a) = automation.as_ref() {
+            Some(a.lock(&request.session_id).await)
+        } else {
+            None
+        };
+        if let Some(a) = automation.as_ref() {
+            a.validate_user_input(
+                &request.session_id,
+                &request.input,
+                Some(&request.message_id),
+            )
+            .await?;
+        }
         self.message_queue
             .update(&request.session_id, &request.message_id, request.input)
     }
@@ -166,6 +196,17 @@ impl TalosService {
                 ));
             };
             return Ok(reply);
+        }
+        let queue = self.message_queue.list(&request.session_id)?;
+        let selected = match request.message_id.as_deref() {
+            Some(id) => queue.messages.iter().find(|m| m.id == id),
+            None => queue.messages.first(),
+        };
+        if selected.is_some_and(|m| m.source != talos_types::QueuedMessageSource::User) {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Automatic Loop messages are read-only.",
+            ));
         }
         self.turns
             .start_queued_message(session, request.message_id.as_deref())

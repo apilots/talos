@@ -302,3 +302,67 @@ async fn queued_messages_continue_after_a_failed_turn() {
         "{content}"
     );
 }
+
+#[tokio::test]
+async fn automatic_dispatch_contention_yields_but_manual_start_stays_busy() {
+    let execution = Arc::new(RecordingAgentExecution::default());
+    execution.hold_admission.store(true, Ordering::SeqCst);
+    let (service, timeline, store, queue) = test_service(execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    let queued = queue
+        .add("s1", test_user_input("run exactly once"))
+        .unwrap();
+    let message_id = queued.messages[0].id.clone();
+    let winner = tokio::spawn({
+        let service = service.clone();
+        async move { service.try_dispatch_next("s1").await }
+    });
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        execution.admission_reached.notified(),
+    )
+    .await
+    .expect("first dispatcher must hold the original reservation before admission");
+    assert!(store.get_agent_active_turn("s1").await.unwrap().is_none());
+    let automatic = service.try_dispatch_next("s1").await;
+    let manual = service
+        .start_queued_message(test_session(), Some(&message_id))
+        .await;
+    // Always release the original owner before asserting, including the red run.
+    execution.admission_release.notify_one();
+    winner.await.unwrap().unwrap().unwrap();
+    wait_for_canonical_terminal(store.as_ref()).await;
+    assert!(automatic.unwrap().is_none());
+    assert!(manual
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::MessageQueueBusy));
+    assert_eq!(execution.stream_requests.lock().unwrap().len(), 1);
+    assert!(queue.list("s1").unwrap().messages.is_empty());
+    let events = timeline.list_events_after("s1", None, 100).await.unwrap();
+    assert!(!events.iter().any(|record| matches!(
+        record.event,
+        talos_agent_api::TimelineEventPayload::SystemNotice(_)
+    )));
+}
+
+#[tokio::test]
+async fn automatic_dispatch_preserves_busy_errors_after_reservation() {
+    let execution = Arc::new(RecordingAgentExecution {
+        stream_error: Mutex::new(Some(TalosError::new(
+            talos_error::ErrorCode::MessageQueueBusy,
+            "Worker admission is busy",
+        ))),
+        ..Default::default()
+    });
+    let (service, _, store, queue) = test_service(execution).await;
+    create_test_session_record(store).await;
+    queue
+        .add("s1", test_user_input("retain admission failure"))
+        .unwrap();
+    let error = service.try_dispatch_next("s1").await.unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::MessageQueueBusy));
+    assert_eq!(queue.list("s1").unwrap().messages.len(), 1);
+    // The failed later phase must release its reservation, not strand the row.
+    let reservation = queue.reserve_front("s1").unwrap().unwrap();
+    queue.release(reservation).unwrap();
+}

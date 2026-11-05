@@ -11,14 +11,16 @@ use talos_config::AgentNodeControlConfig;
 use talos_coordinator::CoordinatorImpl;
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::{Actor, AgentNodeService};
-use talos_tools::AgentControl;
+use talos_tools::{AgentControl, AutomationControl};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 
 #[path = "agent_node_resources_rpc.rs"]
 mod resources;
-pub use resources::{NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc};
+pub use resources::{
+    NodeAutomationControlRpc, NodeSessionDataRpc, NodeSubagentControlRpc, NodeToolImageRpc,
+};
 #[path = "agent_node_connect.rs"]
 mod connect;
 #[path = "agent_coordinator_rpc.rs"]
@@ -35,6 +37,14 @@ use resource_routing::ResourceRoutes;
 mod resource_dispatch;
 pub(crate) use resource_dispatch::CoordinatorResources;
 
+/// Original resource owners shared by TLS and protected loopback listeners.
+pub struct NodeResourceServices {
+    pub session_data: NodeSessionDataRpc,
+    pub agent_control: Arc<dyn AgentControl>,
+    pub automation_control: Arc<dyn AutomationControl>,
+    pub tool_images: NodeToolImageRpc,
+}
+
 pub struct NodeRpcServer {
     bind_address: SocketAddr,
     identity: Identity,
@@ -42,6 +52,7 @@ pub struct NodeRpcServer {
     auth_service: Arc<dyn AuthService>,
     session_data: NodeSessionDataRpc,
     subagent_control: NodeSubagentControlRpc,
+    automation_control: NodeAutomationControlRpc,
     tool_images: NodeToolImageRpc,
     remote_publisher: RemoteNodePublisher,
     worker_adapter: Option<agent_client::AgentHarnessRpcAdapter>,
@@ -56,10 +67,14 @@ impl NodeRpcServer {
         nodes: AgentNodeService,
         auth_service: Arc<dyn AuthService>,
         coordinator: Arc<CoordinatorImpl>,
-        session_data: NodeSessionDataRpc,
-        agent_control: Arc<dyn AgentControl>,
-        tool_images: NodeToolImageRpc,
+        resources: NodeResourceServices,
     ) -> TalosResult<Self> {
+        let NodeResourceServices {
+            session_data,
+            agent_control,
+            automation_control,
+            tool_images,
+        } = resources;
         let bind_address = config.bind_address.parse().map_err(|error| {
             TalosError::from_source(
                 ErrorCode::InvalidRequest,
@@ -102,6 +117,8 @@ impl NodeRpcServer {
         let session_data = session_data.with_routes(remote_publisher.resource_routes.clone());
         let tool_images = tool_images.with_routes(remote_publisher.resource_routes.clone());
         let subagent_control = NodeSubagentControlRpc::new(session_data.clone(), agent_control);
+        let automation_control =
+            NodeAutomationControlRpc::new(session_data.clone(), automation_control);
         Ok(Self {
             bind_address,
             identity: Identity::from_pem(certificate, private_key),
@@ -109,6 +126,7 @@ impl NodeRpcServer {
             auth_service,
             session_data,
             subagent_control,
+            automation_control,
             tool_images,
             remote_publisher,
             worker_adapter: None,
@@ -168,6 +186,10 @@ impl NodeRpcServer {
             );
         let tool_images =
             pb::agent_tool_image_rpc_server::AgentToolImageRpcServer::new(self.tool_images);
+        let automation_control =
+            pb::agent_automation_control_rpc_server::AgentAutomationControlRpcServer::new(
+                self.automation_control,
+            );
         Server::builder()
             .tls_config(ServerTlsConfig::new().identity(self.identity))
             .map_err(|error| {
@@ -183,6 +205,7 @@ impl NodeRpcServer {
             .add_service(peer_files)
             .add_service(session_data)
             .add_service(subagent_control)
+            .add_service(automation_control)
             .add_service(tool_images)
             .add_optional_service(
                 self.worker_adapter

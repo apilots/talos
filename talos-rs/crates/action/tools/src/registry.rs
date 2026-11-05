@@ -13,8 +13,8 @@ use crate::spec::{
     ToolSelectionRequest, ToolSource, ToolVisibility,
 };
 use crate::state::get_session_tool_state;
-use crate::AgentControl;
 use crate::ToolContext;
+use crate::{AgentControl, AutomationControl};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
@@ -136,6 +136,7 @@ pub struct ToolRegistry {
     router: ToolRouter,
     policy_checker: ToolPolicyChecker,
     agent_control: DashMap<&'static str, Arc<dyn AgentControl>>,
+    automation_control: DashMap<&'static str, Arc<dyn AutomationControl>>,
     mcp_manager: DashMap<&'static str, Arc<McpConnectionManager>>,
     image_store: DashMap<&'static str, Arc<dyn crate::ToolImageStore>>,
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
@@ -406,6 +407,7 @@ impl ToolRegistry {
             router: ToolRouter,
             policy_checker: ToolPolicyChecker::new(policy),
             agent_control: DashMap::new(),
+            automation_control: DashMap::new(),
             memory_reader: DashMap::new(),
             mcp_manager: DashMap::new(),
             image_store: DashMap::new(),
@@ -696,6 +698,15 @@ impl ToolRegistry {
         } else {
             ctx
         };
+        let ctx = if let Some(control) = self
+            .automation_control
+            .get("default")
+            .map(|entry| entry.value().clone())
+        {
+            ctx.with_automation_control(control)
+        } else {
+            ctx
+        };
         let ctx = if let Some(reader) = self
             .memory_reader
             .get("default")
@@ -719,6 +730,12 @@ impl ToolRegistry {
     /// Configures the application-owned child Session control port.
     pub fn set_agent_control(&self, control: Arc<dyn AgentControl>) {
         self.agent_control.insert("default", control);
+    }
+
+    /// Configures the application-owned Goal/Loop operation port.
+    /// Worker invocation composition may override it in ToolContext.
+    pub fn set_automation_control(&self, control: Arc<dyn AutomationControl>) {
+        self.automation_control.insert("default", control);
     }
 
     pub fn set_image_store(&self, store: Arc<dyn crate::ToolImageStore>) {

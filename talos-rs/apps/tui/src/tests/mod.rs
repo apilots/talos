@@ -10,3 +10,5 @@ mod model_picker_input_tests;
 mod notice_tests;
 mod pasted_image_tests;
 mod scroll_render_tests;
+
+mod automation_tests;

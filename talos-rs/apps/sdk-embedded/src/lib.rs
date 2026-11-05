@@ -21,9 +21,9 @@ use talos_auth::{
 use talos_base::TalosApplicationRuntime;
 use talos_error::TalosResult;
 use talos_sdk::{
-    GatewayClient, InterruptTurnRequest, InterruptTurnResponse, MessageQueueChangeStream,
-    RecoverTimelineResponse, SessionActiveTurnResponse, SessionHistoryResponse,
-    SubmitTurnInputRequest, SubmitTurnInputResponse, TimelineEventStream,
+    AutomationChangeStream, GatewayClient, InterruptTurnRequest, InterruptTurnResponse,
+    MessageQueueChangeStream, RecoverTimelineResponse, SessionActiveTurnResponse,
+    SessionHistoryResponse, SubmitTurnInputRequest, SubmitTurnInputResponse, TimelineEventStream,
     TimelineStreamSubscription,
 };
 use talos_service::{Actor, TimelineSubscriptionMessage};

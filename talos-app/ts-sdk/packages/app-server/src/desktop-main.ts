@@ -3,6 +3,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import type {
   AppServerErrorHandler,
   AppServerEventHandler,
+  AppServerAutomationChangedHandler,
   AppServerMessageQueueChangedHandler,
   AppServerRequestOptions,
   AppServerSubscriptionTerminatedHandler,
@@ -40,6 +41,10 @@ export class DesktopMainAppServerBridge {
 
   onEvent(handler: AppServerEventHandler): () => void {
     return this.client.onEvent(handler);
+  }
+
+  onAutomationChanged(handler: AppServerAutomationChangedHandler): () => void {
+    return this.client.onAutomationChanged(handler);
   }
 
   onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {

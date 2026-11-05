@@ -34,6 +34,21 @@ pub use client_method::ClientMethod;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ClientRequestParams {
+    #[serde(rename = "automation/read")]
+    AutomationRead(talos_types::SessionAutomationReadRequest),
+    #[serde(rename = "automation/execute")]
+    AutomationExecute(talos_types::AutomationRequest),
+    #[serde(rename = "automation/list")]
+    AutomationList(talos_types::AutomationListRequest),
+    #[serde(rename = "automation/commandCatalog")]
+    AutomationCommandCatalog(talos_types::AutomationCommandCatalogRequest),
+    #[serde(rename = "automation/resolveCommand")]
+    AutomationResolveCommand(talos_types::AutomationCommandResolveRequest),
+    #[serde(rename = "builtinJob/list")]
+    BuiltinJobList(talos_types::BuiltinJobListRequest),
+    #[serde(rename = "builtinJob/control")]
+    BuiltinJobControl(talos_types::BuiltinJobControlRequest),
+
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
     #[serde(rename = "desktop/streamOpen")]
@@ -279,6 +294,28 @@ impl ClientRequest {
             _ => serde_json::Value::Object(Default::default()),
         });
         let params = match method_kind {
+            ClientMethod::AutomationRead => {
+                ClientRequestParams::AutomationRead(decode(params_value)?)
+            }
+            ClientMethod::AutomationExecute => {
+                ClientRequestParams::AutomationExecute(decode(params_value)?)
+            }
+            ClientMethod::AutomationList => {
+                ClientRequestParams::AutomationList(decode(params_value)?)
+            }
+            ClientMethod::AutomationCommandCatalog => {
+                ClientRequestParams::AutomationCommandCatalog(decode(params_value)?)
+            }
+            ClientMethod::AutomationResolveCommand => {
+                ClientRequestParams::AutomationResolveCommand(decode(params_value)?)
+            }
+            ClientMethod::BuiltinJobList => {
+                ClientRequestParams::BuiltinJobList(decode(params_value)?)
+            }
+            ClientMethod::BuiltinJobControl => {
+                ClientRequestParams::BuiltinJobControl(decode(params_value)?)
+            }
+
             ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
             ClientMethod::DesktopStreamOpen => {
                 ClientRequestParams::DesktopStreamOpen(decode(params_value)?)

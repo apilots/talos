@@ -14,7 +14,7 @@ import {
   isLiveRecoverableActiveTurn,
   useChatSessionTimelineLifecycle,
 } from "./useChatSessionTimelineLifecycle";
-import { createInitialTurnRequest, isActiveTurnRunningError } from "../api";
+import { createInitialTurnRequest } from "../api";
 import {
   clearInactiveTurnSnapshot,
 } from "../stream-events";
@@ -24,6 +24,7 @@ export type { SendTextOptions } from "../session-input";
 import { useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { buildSessionInputHistory, sessionInputHistoryHasMessage } from "../session-input-history";
+import { automationTurnTiming } from "../automation-runtime";
 
 const ACTIVE_TURN_NOT_FOUND_CODES = [
   AppProtocol.ErrorCode.ResourceNotFound,
@@ -151,9 +152,9 @@ export function useChatSession(
       return Promise.resolve();
     }
     if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
-      return Promise.resolve();
+      return Promise.reject(new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null }));
     }
-    if (activeTurnId) {
+    if (activeTurnId || isStreaming) {
       return messageQueue.add(buildQueuedInput(content, options)).then(() => undefined);
     }
     const request = options
@@ -163,6 +164,7 @@ export function useChatSession(
           {
             ...(options.nodeId ? { nodeId: options.nodeId } : {}),
             fileIds,
+            skillSelection: options.skillSelection,
             modelSelection: options.modelSelection,
             project: options.project,
             userPermissionMode: options.userPermissionMode,
@@ -178,40 +180,37 @@ export function useChatSession(
     draft,
     setDraft,
     sendText,
-    sendTurn: (options?: SendTextOptions) => {
-      const text = draft.trim();
+    sendTurn: (options?: SendTextOptions, promptOverride?: string) => {
+      const text = (promptOverride ?? draft).trim();
       const fileIds = options?.fileIds ?? [];
       if (!text && fileIds.length === 0) {
         return Promise.resolve();
       }
       if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
-        return Promise.resolve();
+        return Promise.reject(new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null }));
       }
-      if (activeTurnId) {
+      if (activeTurnId || isStreaming) {
         return messageQueue.add(buildQueuedInput(text, options)).then(() => {
-          setDraft("");
+          if (useAppStore.getState().composerDrafts[draftKey] === draft) setDraft("");
         });
       }
-      setDraft("");
       const request = options
         ? createInitialTurnRequest(
             sessionId,
             text,
             {
               ...(options.nodeId ? { nodeId: options.nodeId } : {}),
-            fileIds,
+              fileIds,
+              skillSelection: options.skillSelection,
               modelSelection: options.modelSelection,
               project: options.project,
               userPermissionMode: options.userPermissionMode,
             },
           )
         : undefined;
-      return sendMutation.mutateAsync({ text, request }).catch((error: unknown) => {
-        if (isActiveTurnRunningError(error)) {
-          setDraft(text);
-          return;
-        }
-        throw error;
+      return sendMutation.mutateAsync({ text, request }).then(() => {
+        // A rejected admission keeps the original draft and one-shot Skill mode.
+        if (useAppStore.getState().composerDrafts[draftKey] === draft) setDraft("");
       });
     },
     retryStream: retryTimeline,
@@ -223,9 +222,12 @@ export function useChatSession(
     contextCompaction,
     setCompactionObservationActive,
     activeTurnId,
+    automationTurn: automationTurnTiming(sessionId, activeTurnId, streamState, activeTurn),
     messageQueue: {
       ...messageQueue,
       activeTurnId,
+      canStart: !isStreaming && !activeTurnId && !streamState?.pendingUserAction,
+      canSteer: !streamState?.pendingUserAction && activeTurn?.state !== "waitingForInput",
       start: async (messageId?: string) => {
         const response = await messageQueue.start(messageId);
         await activeTurnQuery.refetch();

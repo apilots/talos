@@ -1,3 +1,4 @@
+import type * as AutomationProtocol from "./generated/app-protocol";
 import { createTrajectoryClient } from "./trajectory";
 import type * as TrajectoryAPI from "./generated/app-protocol";
 import { createFilePreviewClient } from "./file-preview";
@@ -152,6 +153,7 @@ interface RequestControlOptions {
 export interface SessionEventStreamOptions {
   persistent?: boolean;
   onOpen?: () => void;
+  onAutomationChanged?: (notification: AutomationProtocol.AutomationChangedNotification) => void;
   onMessageQueueChanged?: (notification: MessageQueueChangedNotification) => void;
   onActiveTurnChanged?: (notification: SessionActiveTurnChangedNotification) => void;
 }
@@ -649,6 +651,19 @@ export class TalosClient {
       }),
   };
 
+  automation = {
+    read: (request: AutomationProtocol.SessionAutomationReadRequest): Promise<AutomationProtocol.SessionAutomationSnapshot> => this.http.request<AutomationProtocol.SessionAutomationSnapshot>(this.url("/v1/automation/read"), { method: "POST", body: JSON.stringify(request) }),
+    execute: (request: AutomationProtocol.AutomationRequest): Promise<AutomationProtocol.AutomationControlResult> => this.http.request<AutomationProtocol.AutomationControlResult>(this.url("/v1/automation/execute"), { method: "POST", body: JSON.stringify(request) }),
+    list: (request: AutomationProtocol.AutomationListRequest): Promise<AutomationProtocol.AutomationListResponse> => this.http.request<AutomationProtocol.AutomationListResponse>(this.url("/v1/automation/list"), { method: "POST", body: JSON.stringify(request) }),
+    commandCatalog: (request: AutomationProtocol.AutomationCommandCatalogRequest): Promise<AutomationProtocol.AutomationCommandCatalogResponse> => this.http.request<AutomationProtocol.AutomationCommandCatalogResponse>(this.url("/v1/automation/command-catalog"), { method: "POST", body: JSON.stringify(request) }),
+    resolveCommand: (request: AutomationProtocol.AutomationCommandResolveRequest): Promise<AutomationProtocol.AutomationCommandResolveResponse> => this.http.request<AutomationProtocol.AutomationCommandResolveResponse>(this.url("/v1/automation/resolve-command"), { method: "POST", body: JSON.stringify(request) }),
+  };
+
+  builtinJobs = {
+    list: (request: AutomationProtocol.BuiltinJobListRequest): Promise<AutomationProtocol.BuiltinJobListResponse> => this.http.request<AutomationProtocol.BuiltinJobListResponse>(this.url("/v1/builtin-job/list"), { method: "POST", body: JSON.stringify(request) }),
+    control: (request: AutomationProtocol.BuiltinJobControlRequest): Promise<AutomationProtocol.BuiltinJobInfo> => this.http.request<AutomationProtocol.BuiltinJobInfo>(this.url("/v1/builtin-job/control"), { method: "POST", body: JSON.stringify(request) }),
+  };
+
   messageQueue = {
     add: (request: MessageQueueAddRequest): Promise<MessageQueue> =>
       this.http.request<MessageQueue>(this.url("/v1/message-queue/add"), {
@@ -752,6 +767,10 @@ export class TalosClient {
           const payload = parseTalosJson(data);
           if (event === "session/activeTurnChanged") {
             options?.onActiveTurnChanged?.(payload as SessionActiveTurnChangedNotification);
+            return;
+          }
+          if (event === "automation/changed") {
+            options?.onAutomationChanged?.(payload as AutomationProtocol.AutomationChangedNotification);
             return;
           }
           if (event === "messageQueue/changed") {

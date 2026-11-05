@@ -109,6 +109,7 @@ async fn test_recovery_keeps_running_context_compaction_for_follow_up_delta() {
             cursor_status: TimelineCursorStatus::Current,
         },
         active_turn: Some(TimelineActiveTurn {
+            automation_input: None,
             identity: AgentTurnRef::new("sess-test", "turn-test"),
             initial_message_id: Some("msg-compact".to_string()),
             state: ActiveTurnState::Running,

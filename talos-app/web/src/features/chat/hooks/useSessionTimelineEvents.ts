@@ -55,6 +55,7 @@ export function useSessionTimelineEvents(
 
     const initialState = historyOptionsRef.current.activeTurnState;
     const initialSnapshot = initialState?.activeTurn;
+    if (initialSnapshot && stream?.activeTurnId === initialSnapshot.identity.turnId) restoreActiveTurn(sessionId, initialSnapshot);
     // A cached idle query must not rewind an already committed local stream.
     let needsBootstrap = initialSnapshot !== undefined &&
       (initialSnapshot === null ? !stream?.isStreaming :
@@ -123,16 +124,43 @@ export function useSessionTimelineEvents(
             subscriptionController.signal,
             subscriptionCursor,
             {
-              onOpen: () => queueRef.current?.onOpen((error) => {
-                if (disposed || subscriptionController.signal.aborted) return;
-                reconciliationError = error;
-                subscriptionController.abort();
-              }),
+              onOpen: () => {
+                if (disposed || subscriptionController.signal.aborted || connectionScope(useAppStore.getState().connection) !== scope) return;
+                queueRef.current?.onOpen((error) => {
+                  if (disposed || subscriptionController.signal.aborted) return;
+                  reconciliationError = error;
+                  subscriptionController.abort();
+                });
+                // Skill registration can bind provenance after the initial read,
+                // without advancing the canonical event offset.
+                void (async () => {
+                  await Promise.all([
+                    // Definitions must not wait for the full running-Turn read.
+                    onTerminalTurnRef.current?.(),
+                    getActiveTurn(sessionId).then((current) => {
+                      if (disposed || subscriptionController.signal.aborted || connectionScope(useAppStore.getState().connection) !== scope) return;
+                      if (current.activeTurn) restoreActiveTurn(sessionId, current.activeTurn);
+                    }),
+                  ]);
+                })().catch((error) => { reconciliationError = error; subscriptionController.abort(); });
+              },
               onActiveTurnChanged: (notice) => {
                 if (disposed || subscriptionController.signal.aborted || connectionScope(useAppStore.getState().connection) !== scope) return;
                 if (notice.state.activeTurn) applyActiveTurnSnapshot(sessionId, notice.state.activeTurn);
                 else clearInactiveTurnSnapshot(sessionId);
                 void onTerminalTurnRef.current?.();
+              },
+              onAutomationChanged: (change) => {
+                if (change.sessionId !== sessionId || disposed || subscriptionController.signal.aborted || connectionScope(useAppStore.getState().connection) !== scope) return;
+                void (async () => {
+                  await Promise.all([
+                    onTerminalTurnRef.current?.(),
+                    getActiveTurn(sessionId).then((current) => {
+                      if (disposed || subscriptionController.signal.aborted || connectionScope(useAppStore.getState().connection) !== scope) return;
+                      if (current.activeTurn) restoreActiveTurn(sessionId, current.activeTurn);
+                    }),
+                  ]);
+                })().catch((error) => { reconciliationError = error; subscriptionController.abort(); });
               },
               onMessageQueueChanged: (change) => queueRef.current?.onMessageQueueChanged(change),
             },

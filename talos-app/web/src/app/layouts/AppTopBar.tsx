@@ -39,7 +39,7 @@ export function AppSessionContext() {
   const project = session?.projectId ? normalizeProjects(projects).find(entry => entry.id === session.projectId) : undefined;
   const page = location.pathname.startsWith("/settings") ? "settings" : location.pathname.startsWith("/computers") ? "computers"
     : location.pathname.startsWith("/plugins") ? "plugins" : location.pathname.startsWith("/files") ? "files"
-    : location.pathname.startsWith("/memory") ? "memory" : "newChat";
+    : location.pathname.startsWith("/automation") ? "automation" : location.pathname.startsWith("/memory") ? "memory" : "newChat";
   const title = session?.title ?? t(`navigation.${page}`);
   return <div className="flex min-w-0 flex-1 items-center gap-2">
     <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">

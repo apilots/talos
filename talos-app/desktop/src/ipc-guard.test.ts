@@ -114,6 +114,32 @@ describe("desktop IPC guard", () => {
     })).not.toThrow();
   });
 
+  it("allows typed automation envelopes and keeps native jobs on their own methods", () => {
+    const valid = [
+      ["automation/read", { sessionId: "session-1" }],
+      ["automation/execute", { sessionId: "session-1", action: { target: "goal", action: { type: "pause", goalId: "goal-1" } } }],
+      ["automation/list", { sessionId: null, scope: "unfinished", cursor: null, limit: null }],
+      ["automation/commandCatalog", {}],
+      ["automation/resolveCommand", { text: "/loop 5m check CI" }],
+      ["builtinJob/list", { computerId: "computer-1" }],
+      ["builtinJob/control", { computerId: "computer-1", executionInstanceId: "instance-1", jobId: "profileUsageRetention", action: "pause" }],
+    ] as const;
+    for (const [method, params] of valid) {
+      expect(() => assertDesktopRendererInvoke(method, params)).not.toThrow();
+    }
+    const invalid = [
+      ["automation/read", {}],
+      ["automation/execute", { sessionId: "session-1", action: { target: "builtinJob", action: { type: "pause" } } }],
+      ["automation/execute", { sessionId: "session-1", action: { target: "loop", action: "stop" } }],
+      ["automation/resolveCommand", { text: 5 }],
+      ["builtinJob/list", {}],
+      ["builtinJob/control", { computerId: "computer-1", jobId: "profileUsageRetention", action: "pause" }],
+    ] as const;
+    for (const [method, params] of invalid) {
+      expect(() => assertDesktopRendererInvoke(method, params)).toThrow();
+    }
+  });
+
   it("allows llm config methods", () => {
     expect(isDesktopRendererMethod("config/get")).toBe(true);
     expect(isDesktopRendererMethod("config/reload")).toBe(true);

@@ -282,3 +282,93 @@ fn concurrent_adds_are_serialized_without_losing_messages() {
     assert_eq!(queue.messages.len(), 8);
     assert_eq!(texts.len(), 8);
 }
+
+#[test]
+fn automation_sources_share_capacity_preserve_human_priority_and_are_read_only() {
+    let queue = SessionMessageQueueService::new(3).unwrap();
+    queue
+        .add_loop("s", text_input("Loop one"), "l1".into(), "o1".into())
+        .unwrap();
+    queue
+        .add_loop("s", text_input("Loop two"), "l2".into(), "o2".into())
+        .unwrap();
+    queue
+        .add_loop(
+            "s",
+            text_input("Duplicate ignored"),
+            "l1".into(),
+            "different-occurrence".into(),
+        )
+        .unwrap();
+    let current = queue.add("s", text_input("User first")).unwrap();
+    assert_eq!(current.messages.len(), 3);
+    assert_eq!(current.messages[0].input, text_input("User first"));
+    assert!(queue
+        .update("s", &current.messages[1].id, text_input("Edited automatic"))
+        .is_err());
+    assert!(queue.delete("s", &current.messages[1].id).is_err());
+    assert!(queue
+        .reorder(
+            "s",
+            &[
+                current.messages[1].id.clone(),
+                current.messages[0].id.clone(),
+                current.messages[2].id.clone()
+            ]
+        )
+        .is_err());
+    assert!(queue
+        .reorder(
+            "s",
+            &[
+                current.messages[0].id.clone(),
+                current.messages[2].id.clone(),
+                current.messages[1].id.clone()
+            ]
+        )
+        .is_err());
+    assert!(queue
+        .add_loop("s", text_input("Overflow"), "l3".into(), "o3".into())
+        .unwrap_err()
+        .is_code(ErrorCode::MessageQueueFull));
+}
+#[test]
+fn pending_activation_exclusion_is_atomic_in_the_original_queue() {
+    let queue = SessionMessageQueueService::new(10).unwrap();
+    let selected = |name: &str| talos_types::AgentUserInput {
+        content: vec![
+            talos_types::AgentUserContent::Text {
+                text: "Task".into(),
+            },
+            talos_types::AgentUserContent::SkillSelection {
+                name: name.into(),
+                path: format!("/system/{name}"),
+            },
+        ],
+    };
+    let first = queue.add("s", selected("goal")).unwrap();
+    assert!(queue
+        .add("s", selected("loop"))
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    assert!(queue
+        .add("s", selected("goal"))
+        .unwrap_err()
+        .is_code(ErrorCode::Conflict));
+    queue.delete("s", &first.messages[0].id).unwrap();
+    queue.add("s", selected("loop")).unwrap();
+    queue.add("s", selected("loop")).unwrap();
+    assert_eq!(queue.list("s").unwrap().messages.len(), 2);
+}
+#[test]
+fn stopping_loop_does_not_remove_a_reserved_admission_under_its_owner() {
+    let queue = SessionMessageQueueService::new(10).unwrap();
+    queue
+        .add_loop("s", text_input("Task"), "loop".into(), "occ".into())
+        .unwrap();
+    let reservation = queue.reserve_front("s").unwrap().unwrap();
+    queue.remove_loop("s", "loop").unwrap();
+    assert_eq!(queue.list("s").unwrap().messages.len(), 1);
+    queue.discard(reservation).unwrap();
+    assert!(queue.list("s").unwrap().messages.is_empty());
+}

@@ -29,6 +29,8 @@ use super::{
     PreparedTurnSubmission, StartTurnReservation, TurnRetryParams,
 };
 
+#[path = "../automation/goal_loop/turn.rs"]
+mod automation_runtime;
 mod completion;
 mod input;
 mod interrupt;
@@ -44,6 +46,8 @@ const TURN_SUBMISSION_LEASE_MS: i64 = 30_000;
 #[derive(Clone)]
 pub(crate) struct TurnService {
     execution: AgentExecutionDriver,
+    automation:
+        Arc<std::sync::OnceLock<Arc<crate::automation::goal_loop::SessionAutomationService>>>,
     profile_store: Arc<dyn ProfileStore>,
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
@@ -51,6 +55,8 @@ pub(crate) struct TurnService {
 }
 
 struct TurnSubmission {
+    queue_message_id: Option<String>,
+    origin: Option<talos_types::AutomationTurnOrigin>,
     input: AgentUserInput,
     retry_of_message_id: Option<String>,
 }
@@ -66,6 +72,7 @@ impl TurnService {
     ) -> Self {
         Self {
             execution,
+            automation: Default::default(),
             profile_store,
             message_queue,
             base_config,
@@ -240,6 +247,8 @@ impl TurnService {
         self.submit_turn(
             session,
             TurnSubmission {
+                origin: None,
+                queue_message_id: None,
                 input: request.input,
                 retry_of_message_id: None,
             },
@@ -276,11 +285,60 @@ impl TurnService {
     async fn submit_turn_owned(
         &self,
         session: SessionRecord,
-        submission: TurnSubmission,
+        mut submission: TurnSubmission,
         idempotency_key: Option<String>,
         prepared: Option<PreparedTurnSubmission>,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<StartTurnResponse> {
+        let automation = self.automation.get().cloned();
+        let _automation_guard = if let Some(automation) = automation.as_ref() {
+            Some(automation.lock(&session.id).await)
+        } else {
+            None
+        };
+        if let Some(automation) = automation.as_ref() {
+            if let Some(origin) = submission.origin.as_ref() {
+                if !self
+                    .can_dispatch_automation(
+                        &session.id,
+                        &crate::automation::goal_loop::automation_object(origin),
+                    )
+                    .await?
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
+                        "Automatic work must wait for an explicit request after cancellation.",
+                    ));
+                }
+                // Recheck after asynchronous Skill resolution under the same owner gate
+                // used by User enqueue. An unadmitted automatic turn never jumps User work.
+                let waiting = self.message_queue.list(&session.id)?.messages;
+                let human_waiting = waiting
+                    .iter()
+                    .any(|message| message.source == talos_types::QueuedMessageSource::User);
+                if human_waiting
+                    || (matches!(origin, talos_types::AutomationTurnOrigin::Goal { .. })
+                        && !waiting.is_empty())
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
+                        "Automatic work must wait for queued User messages.",
+                    ));
+                }
+            }
+            if submission.origin.is_none() {
+                automation
+                    .validate_user_input(
+                        &session.id,
+                        &submission.input,
+                        submission.queue_message_id.as_deref(),
+                    )
+                    .await?;
+                submission.input = automation
+                    .normalize_activation(&session, submission.input)
+                    .await?;
+            }
+        }
         let _admission_guard = self
             .execution_gate
             .for_node(&session.execution_node_id)
@@ -292,7 +350,10 @@ impl TurnService {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut request_id = format!("req_{}", Uuid::new_v4().simple());
         let mut turn_id = format!("turn_{}", Uuid::new_v4().simple());
-        let mut message_id = format!("msg_{}", Uuid::new_v4().simple());
+        let mut message_id = submission
+            .queue_message_id
+            .clone()
+            .unwrap_or_else(|| format!("msg_{}", Uuid::new_v4().simple()));
         let mut command_lease = None;
 
         let has_prepared = prepared.is_some();
@@ -382,25 +443,36 @@ impl TurnService {
         };
         let profile_context = self.profile_turn_context(&session, request_id.clone());
 
-        let completion = match self
-            .execution
-            .start(
-                AgentRunParams {
-                    context,
-                    input,
-                    checkpoint: None,
-                    continuation: None,
-                },
-                command_lease.clone(),
-            )
-            .await
-        {
+        let params = AgentRunParams {
+            context,
+            input,
+            checkpoint: None,
+            continuation: None,
+        };
+        let automation_object = submission
+            .origin
+            .as_ref()
+            .map(crate::automation::goal_loop::automation_object);
+        let execution_result = if let Some(origin) = submission.origin {
+            self.execution
+                .start_automation(params, command_lease.clone(), Some(origin))
+                .await
+        } else {
+            self.execution.start(params, command_lease.clone()).await
+        };
+        let completion = match execution_result {
             Ok(completion) => completion,
             Err(error) => {
                 self.release_command(command_lease.take()).await;
                 return Err(error);
             }
         };
+        if let Some(automation) = self.automation.get() {
+            if let Some(object) = automation_object {
+                automation.forget_explicit_dispatch(&session_id, &object);
+            }
+            automation.emit(&session_id);
+        }
         self.spawn_turn_completion(
             AgentTurnRef::new(&session_id, &turn_id),
             profile_context,
@@ -428,6 +500,8 @@ impl TurnService {
         self.submit_turn(
             session,
             TurnSubmission {
+                origin: None,
+                queue_message_id: None,
                 input: request.input,
                 retry_of_message_id: Some(request.retry_of_message_id),
             },

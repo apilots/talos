@@ -10,6 +10,7 @@ use crate::PluginStateStore;
 mod matchers;
 mod preparation;
 mod source_refresh;
+mod system_skills;
 pub use preparation::PreparedPluginChange;
 mod mcp;
 pub use mcp::{McpChangeHook, McpDiscovery};
@@ -492,6 +493,7 @@ impl PluginManager {
         self.state.with_exclusive_lock("plugin.skill_roots", || {
             self.state.cleanup_install_temps()?;
             let mut roots = self.configured_skill_root_entries();
+            roots.push(self.materialize_system_skills()?);
             roots.extend(
                 self.state
                     .load_installs()?

@@ -1048,3 +1048,6 @@ mod plugin_preparation_tests;
 
 #[path = "trajectory_tests.rs"]
 mod trajectory_tests;
+
+#[path = "../automation/goal_loop/facade_tests.rs"]
+mod automation_runtime_tests;

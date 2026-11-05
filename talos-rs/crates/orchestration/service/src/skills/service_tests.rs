@@ -44,14 +44,43 @@ fn skills_service_lists_suggests_reads_and_resolves_from_configured_roots() {
     );
 
     let listed = service.list(false).expect("skills should list");
-    assert_eq!(listed.skills.len(), 1);
-    assert_eq!(listed.skills[0].name, "review");
+    let mut names: Vec<_> = listed
+        .skills
+        .iter()
+        .map(|skill| skill.name.as_str())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["goal", "loop", "review"]);
+    let review = listed
+        .skills
+        .iter()
+        .find(|skill| skill.name == "review")
+        .unwrap();
+    assert_eq!(review.scope, talos_types::SkillScope::External);
+    assert_eq!(review.path, skill_root.join("SKILL.md"));
+    for builtin in talos_skills::builtin_automation_skills() {
+        let skill = listed
+            .skills
+            .iter()
+            .find(|skill| skill.name == builtin.mode.skill_name())
+            .unwrap();
+        assert_eq!(skill.scope, talos_types::SkillScope::System);
+        assert!(skill.read_only && skill.enabled);
+        let document = service
+            .read_document(&SkillSelector::selection(&skill.name, &skill.path))
+            .unwrap();
+        assert_eq!(document.contents, builtin.contents);
+    }
 
     let suggestions = service
         .suggest("rev", 10)
         .expect("skills should suggest by query");
-    assert_eq!(suggestions.len(), 1);
+    assert_eq!(suggestions[0].name, "review");
+    assert_eq!(suggestions[0].scope, talos_types::SkillScope::External);
     assert_eq!(suggestions[0].path, skill_root.join("SKILL.md"));
+    assert!(suggestions
+        .iter()
+        .all(|skill| ["goal", "loop", "review"].contains(&skill.name.as_str())));
 
     let document = service
         .read_document(&SkillSelector::by_path(skill_root.join("SKILL.md")))

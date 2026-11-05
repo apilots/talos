@@ -112,6 +112,7 @@ pub async fn execute_general_turn_loop_with_policy(
                     execution_mode: execution_settings.tool_execution_mode,
                     max_parallelism: kernel_config.tool_parallelism,
                     execution_context: ToolExecutionContext {
+                        registration: prepared.registration.clone(),
                         browser_uploads: prepared
                             .browser_uploads
                             .iter()

@@ -31,7 +31,7 @@ describe("same-turn user input streaming", () => {
       event: { type: "agent", data: { ...started.event.data, sequence: 12, payload: { type: "messageCompleted", data: completedMessage } } },
     });
     expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual([
-      { id: "user-turn-1-msg-current", kind: "user", text: "Current question", fileIds: [], live: false },
+      { id: "user-turn-1-msg-current", kind: "user", text: "Current question", fileIds: [], createdAt: 1, live: false },
     ]);
   });
 

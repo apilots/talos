@@ -76,6 +76,10 @@ impl PluginStateStore {
         self.root.join("skills")
     }
 
+    pub(crate) fn system_skills_dir(&self) -> PathBuf {
+        self.skill_installs_dir().join(".system")
+    }
+
     pub fn mcp_installs_dir(&self) -> PathBuf {
         self.root.join("mcp")
     }

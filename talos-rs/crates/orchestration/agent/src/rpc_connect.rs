@@ -55,6 +55,7 @@ impl AgentHarnessRpcAdapter {
                 unary!(value, set_registration_admission, Empty)
             }
             Call::ActiveSessionCommand(_)
+            | Call::ExecuteAutomation(_)
             | Call::PeerFileRead(_)
             | Call::PeerFileUpdate(_)
             | Call::PeerFileDelete(_)

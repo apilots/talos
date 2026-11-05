@@ -16,6 +16,10 @@ impl TestTuiAppExt for TuiApp {
 }
 
 pub(crate) struct MockGatewayState {
+    pub(crate) automation: Option<talos_sdk::SessionAutomationSnapshot>,
+    pub(crate) automation_reads: usize,
+    pub(crate) automation_requests: Vec<talos_sdk::AutomationRequest>,
+    pub(crate) builtin_jobs: Vec<talos_sdk::BuiltinJobInfo>,
     pub(crate) models: Vec<ModelInfo>,
     pub(crate) default_model: talos_sdk::ModelRef,
     pub(crate) session_id: String,
@@ -35,6 +39,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) shutdown_calls: usize,
     pub(crate) cancelled_sessions: Vec<String>,
     pub(crate) active_turn_id: Option<String>,
+    pub(crate) active_input_origin: Option<talos_sdk::AutomationInputOrigin>,
     pub(crate) session_usage: talos_types::talos::TokenUsage,
     pub(crate) session_context_usage: Option<talos_sdk::ContextUsage>,
     pub(crate) compact_calls: usize,

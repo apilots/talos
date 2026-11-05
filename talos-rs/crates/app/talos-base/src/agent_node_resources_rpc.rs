@@ -24,10 +24,13 @@ mod authorization;
 #[path = "agent_resource_history_append.rs"]
 mod history_append;
 use authorization::ResourceAuthority;
+#[path = "agent_resource_automation.rs"]
+mod automation;
 #[path = "agent_resource_images.rs"]
 mod images;
 #[path = "agent_resource_subagents.rs"]
 mod subagents;
+pub use automation::NodeAutomationControlRpc;
 pub use images::NodeToolImageRpc;
 pub use subagents::NodeSubagentControlRpc;
 

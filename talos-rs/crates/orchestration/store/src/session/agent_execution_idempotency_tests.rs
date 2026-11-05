@@ -50,6 +50,7 @@ async fn turn_admission_atomically_completes_its_idempotency_record() {
 
     let commit = store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            automation_origin: None,
             events: admission(),
             command: Some(lease),
         })
@@ -107,6 +108,7 @@ async fn expired_completed_record_releases_its_key_for_a_new_command() {
     );
     store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            automation_origin: None,
             events: admission(),
             command: Some(lease),
         })

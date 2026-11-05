@@ -121,6 +121,11 @@ pub struct DatabaseSessionStore {
 }
 
 impl DatabaseSessionStore {
+    /// Constructs automation persistence on the exact original transaction owner.
+    pub fn automation_store(&self) -> crate::automation::goal_loop::DatabaseAutomationStore {
+        crate::automation::goal_loop::DatabaseAutomationStore::new(self.storage.clone())
+    }
+
     pub async fn new(storage: Arc<dyn Storage>) -> TalosResult<Self> {
         Ok(Self {
             storage,

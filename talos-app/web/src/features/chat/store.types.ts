@@ -91,6 +91,7 @@ export interface ChatSlice {
       Pick<
         StreamSessionState,
         | "isStreaming"
+        | "automationInput"
         | "activeTurnId"
         | "activeMessageId"
         | "lastEventId"

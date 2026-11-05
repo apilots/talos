@@ -178,12 +178,18 @@ impl TuiApp {
             return Ok(false);
         }
 
+        if self.handle_automation_input(key_event).await? {
+            return Ok(false);
+        }
+
         if key_event.code == KeyCode::Char('q')
             && key_event.modifiers.intersects(KeyModifiers::CONTROL)
         {
             if self.selected_queue_message.is_some() {
                 self.selected_queue_message = None;
             } else {
+                self.tasks_expanded = true;
+                self.selected_automation = None;
                 self.select_message_queue();
             }
             return Ok(false);
@@ -257,6 +263,12 @@ impl TuiApp {
 
         // Command autocomplete navigation
         if self.show_command_autocomplete {
+            if matches!(key_event.code, KeyCode::Char(' ')) {
+                self.insert_char(' ');
+                self.show_command_autocomplete = false;
+                self.command_input_buffer.clear();
+                return Ok(false);
+            }
             match key_event.code {
                 KeyCode::Esc => {
                     self.show_command_autocomplete = false;
@@ -275,11 +287,25 @@ impl TuiApp {
                     }
                     return Ok(false);
                 }
-                KeyCode::Enter => {
+                KeyCode::Enter | KeyCode::Tab => {
                     if let Some(cmd) = self
                         .command_suggestions
                         .get(self.command_autocomplete_selected)
                     {
+                        let mode = match cmd.name.as_str() {
+                            "goal" => Some(talos_sdk::AutomationMode::Goal),
+                            "loop" => Some(talos_sdk::AutomationMode::Loop),
+                            _ => None,
+                        };
+                        if let Some(mode) = mode {
+                            if let Err(error) = self.stage_automation_mode(mode).await {
+                                self.show_status_hint(
+                                    error.to_api_error().message,
+                                    Duration::from_secs(3),
+                                );
+                            }
+                            return Ok(false);
+                        }
                         self.input_buffer = cmd.insert_text.clone();
                         self.cursor_index = self.input_buffer.chars().count();
                         self.show_command_autocomplete = false;
@@ -475,8 +501,11 @@ impl TuiApp {
             self.show_skill_autocomplete = false;
             self.skill_suggestions.clear();
             self.skill_autocomplete_selected = 0;
-            self.selected_skills
-                .retain(|skill| self.input_buffer.contains(&format!("${}", skill.name)));
+            self.selected_skills.retain(|skill| {
+                (skill.scope == talos_sdk::SkillScope::System
+                    && matches!(skill.name.as_str(), "goal" | "loop"))
+                    || self.input_buffer.contains(&format!("${}", skill.name))
+            });
             return;
         };
         if self.show_command_autocomplete {

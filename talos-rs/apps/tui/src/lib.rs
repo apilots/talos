@@ -4,6 +4,8 @@
 
 mod app;
 mod attachments;
+mod automation;
+mod automation_management;
 mod chat;
 mod client;
 mod clipboard;
@@ -31,6 +33,7 @@ mod types;
 mod user_action;
 mod utils;
 
+pub use automation::foreground::wait_for_session_automation;
 pub use client::{GatewayClient, SessionSubscription};
 pub use run::run_tui_app_with_gateway_client;
 pub use turn_request::TerminalTurnRequest;
@@ -95,6 +98,11 @@ pub struct TuiApp {
     pub(crate) rendered_chat_cache_key: Option<ChatRenderCacheKey>,
     pub(crate) chat_content_rect: Option<Rect>,
     pub(crate) chat_viewport_height: usize,
+    pub(crate) automation_snapshot: Option<talos_sdk::SessionAutomationSnapshot>,
+    pub(crate) automation_error: Option<String>,
+    pub(crate) automation_edit: Option<automation::AutomationEdit>,
+    pub(crate) selected_automation: Option<usize>,
+    pub(crate) tasks_expanded: bool,
     pub(crate) message_queue: MessageQueue,
     pub(crate) session_subscription: Option<client::SessionSubscription>,
     pub(crate) session_subscription_session_id: Option<String>,

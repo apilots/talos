@@ -6,7 +6,14 @@ pub use talos_error::{TalosError, TalosResult};
 
 pub mod agent_input;
 pub mod auth_api;
+mod automation;
+mod automation_action;
+mod automation_command;
+mod automation_intent;
+#[cfg(test)]
+mod automation_tests;
 pub mod browser;
+mod builtin_job;
 pub mod config_api;
 pub mod event_api;
 pub mod file_api;
@@ -34,7 +41,12 @@ pub mod user_action;
 
 pub use agent_input::*;
 pub use auth_api::*;
+pub use automation::*;
+pub use automation_action::*;
+pub use automation_command::*;
+pub use automation_intent::explicit_automation_mode;
 pub use browser::*;
+pub use builtin_job::*;
 pub use config_api::*;
 pub use event_api::*;
 pub use file_api::*;

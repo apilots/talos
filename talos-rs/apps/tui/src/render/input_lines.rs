@@ -177,6 +177,19 @@ impl TuiApp {
         } else {
             base
         };
+        if let Some(mode) = self.selected_skills.iter().find(|skill| {
+            skill.scope == talos_sdk::SkillScope::System
+                && matches!(skill.name.as_str(), "goal" | "loop")
+        }) {
+            text = format!(
+                "[{}] {text}",
+                if mode.name == "goal" {
+                    "◎ Goal"
+                } else {
+                    "↻ Loop"
+                }
+            );
+        }
         text = format!("{}{}", " ".repeat(CHAT_CONTENT_PADDING_LEFT as usize), text);
 
         let max = width.saturating_sub(1);
