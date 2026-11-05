@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Start or manage a user-requested ongoing Goal.
+description: Use when the user asks to keep working on a task until its objective is complete.
 ---
 Use `automation` JSON only for Goal operations; no extra fields/caller/sessionId/callId. Use observed IDs/revisions.
 

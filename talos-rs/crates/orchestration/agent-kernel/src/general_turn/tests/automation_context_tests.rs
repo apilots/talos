@@ -187,9 +187,10 @@ async fn original_activation_is_explicit_in_actual_model_request_without_rewriti
                 .map(|message| message.content.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            assert!(instructions.contains("normal User Turn"));
+            assert!(instructions.contains("Available skills:"));
             for skill in talos_skills::builtin_automation_skills() {
-                assert!(instructions.contains(&format!("name: {}", skill.mode.skill_name())));
+                assert!(instructions.contains(&format!("{} [system]", skill.mode.skill_name())));
+                assert!(!instructions.contains(skill.contents));
             }
         }
     }

@@ -1,6 +1,6 @@
 ---
 name: loop
-description: Start or manage user-requested repeated follow-ups.
+description: Use when the user asks to repeat a check at a fixed or model-decided interval.
 ---
 Use `automation` JSON only for Loop operations; no extra fields/caller/sessionId/callId. Use observed IDs/revisions.
 

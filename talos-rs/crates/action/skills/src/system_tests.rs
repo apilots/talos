@@ -96,28 +96,18 @@ fn original_command_and_selection_resolve_the_protected_system_document() {
 }
 
 #[test]
-fn ordinary_prompts_receive_both_builtin_instructions_without_selecting_a_mode() {
+fn ordinary_prompts_discover_automation_in_the_existing_catalog() {
     let temp = tempfile::tempdir().unwrap();
-    let roots = roots(&temp);
-    let context = LocalSkillProvider::new(roots)
+    let context = LocalSkillProvider::new(roots(&temp))
         .prompt_context(SkillPromptRequest {
             text: "用 loop 每 10 分钟检查 CI".into(),
             selected: Vec::new(),
             budget: SkillPromptBudget::default(),
         })
         .unwrap();
-    assert_eq!(
-        context
-            .injections
-            .iter()
-            .map(|skill| skill.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["goal", "loop"]
-    );
-    for injection in context.injections {
-        assert!(injection.contents.contains("normal User Turn"));
-        assert!(injection.contents.contains("latest User request"));
-    }
+    assert!(context.available_summary.contains("goal [system]"));
+    assert!(context.available_summary.contains("loop [system]"));
+    assert!(context.injections.is_empty());
 }
 
 #[test]

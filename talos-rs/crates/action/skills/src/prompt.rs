@@ -1,6 +1,6 @@
 use crate::catalog::{refresh, resolve};
 use crate::loader::read_skill_contents;
-use crate::model::{SkillScope, SkillSelector, SkillWarning, SkillWarningCode};
+use crate::model::{SkillSelector, SkillWarning, SkillWarningCode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use talos_error::{TalosError, TalosResult};
@@ -87,27 +87,7 @@ impl SkillProvider for LocalSkillProvider {
             snapshot.skills.iter().filter(|skill| skill.enabled),
             roots.max_available_summary_bytes,
         );
-        let (mut selected, warnings) = resolve(&roots, &request.text, &request.selected)?;
-        // Ordinary requests still receive the two shipped activation instructions.
-        // Prompt availability is not a typed selection or a registration-only Turn.
-        if !selected.iter().any(|skill| {
-            skill.scope == SkillScope::System
-                && skill.read_only
-                && matches!(skill.name.as_str(), "goal" | "loop")
-        }) {
-            selected.extend(
-                snapshot
-                    .skills
-                    .iter()
-                    .filter(|skill| {
-                        skill.scope == SkillScope::System
-                            && skill.read_only
-                            && skill.enabled
-                            && matches!(skill.name.as_str(), "goal" | "loop")
-                    })
-                    .cloned(),
-            );
-        }
+        let (selected, warnings) = resolve(&roots, &request.text, &request.selected)?;
         let mut prompt_warnings = warnings
             .into_iter()
             .map(SkillPromptWarning::from)
