@@ -47,6 +47,8 @@ Web / Desktop 提供两个等价入口（TUI 仅 slash，不增加 Add 菜单）
 
 TUI 支持直接输入 `/goal <目标提示词>` 或 `/loop <任务提示词>` 并提交，触发对应任务的登记与后续执行；只保留原 slash 入口，不增加 Alt+G / Alt+L 或 Add 入口。命令携带原始任务与受保护 System SkillSelection，空闲时沿原 SDK Start、忙时沿原 SDK Queue 提交，复用同一后端处理，不增加启用专用通道；裸 `/goal`、`/loop` 的查看行为保持下表约定。TUI 任务区仅保留 active / paused Goal 与 active Loop；结束对象仍可沿原查看 / 历史访问，移出任务区后释放任务焦点，普通输入继续进入原输入框；不要求复刻 Web 布局。
 
+非交互 CLI 的 Start / Resume 使用原嵌入运行时并在前台观察精确对象。暂停 / 停止 / 清除只阻止后续工作；本对象已有 Running / Cancelling Turn 时，前台等待其结算后再沿原 shutdown 退出，避免把暂停隐式变成取消当前工作。等待人工输入时沿原可恢复边界处理，不新增后台守护进程、客户端调度或持久执行状态。
+
 `goal`、`loop` 分别提供对话中的内置 Skill 入口。slash 建议项与 Add 选择收敛为相同的类型化 Skill 待发模式；完整命令带 prompt 发送则直接表达该次调用，裸命令按下表查看，不因出现 `/goal` 就创建目标。自然语言例如“使用 Goal 持续修复直到测试通过”“用 Loop 每 5 分钟检查 CI”同样可由模型根据用户请求调用，不要求命令前缀。两个 System Skill 提示模型区分任务委托与仅提及、讨论、引用；不因普通任务看似适合自动化就自行登记。信息明确时直接执行，缺少必要任务信息或要求一期不支持的周期才澄清，不增加强制确认。澄清复用原 AskUserQuestion，续接同一 logical Turn；显式选中的模式沿该次原输入保留，普通自然语言仍由模型结合用户请求判断，不伪造 SkillSelection。日历周期如“每天 9 点”一期不支持，不能静默变成每 1440 分钟；未指定周期通常直接采用 modelDecided。同名项目 Skill 不能覆盖保留命令。共享 `AutomationCommand::Activate` 仅含 `mode` 与原始 `prompt`，不含 schedule 或时间解析；裸命令和显式管理命令仍沿原合同分发。
 
 产品入口与执行机制分三层：**两个 Skill** 写明 Goal 推进 / 完成和 Loop 唤醒规则；**一个 AutomationTool** 通过类型化参数和受限执行端口到达 Service，是对话模型路径；**Service / Store / 调度器** 拥有唯一业务校验、状态、计时和准入。UI 启用消息携带显式 Skill 选择，经 SDK 进入原会话执行；列表、暂停、停止、编辑等管理操作可经 SDK 直达同一 Service，不强制再调用模型。已启用的自动 Turn 注入对应 Skill 规则与当前状态，不重新创建能力。

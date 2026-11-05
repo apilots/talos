@@ -30,39 +30,76 @@ async fn invalidate(client: &MockGatewayClient) {
     }
 }
 #[tokio::test]
-async fn foreground_keeps_owner_alive_until_observed_goal_pause_then_original_shutdown_can_run() {
-    let client = Arc::new(MockGatewayClient::new());
-    client.state.lock().unwrap().automation = Some(snapshot(AutomationMode::Goal));
-    let observer = tokio::spawn(wait_for_session_automation(
-        client.clone(),
-        "sess-test".into(),
-        AutomationObjectRef::Goal {
-            goal_id: "goal-1".into(),
-        },
-    ));
-    observed_active(&client).await;
-    assert!(!observer.is_finished());
-    assert_eq!(client.state.lock().unwrap().shutdown_calls, 0);
-    client
-        .state
-        .lock()
-        .unwrap()
-        .automation
-        .as_mut()
-        .unwrap()
-        .goal
-        .as_mut()
-        .unwrap()
-        .status = GoalStatus::Paused;
-    invalidate(&client).await;
-    tokio::time::timeout(Duration::from_secs(1), observer)
+async fn foreground_preserves_admitted_work_after_goal_pause_or_loop_stop() {
+    for mode in [AutomationMode::Goal, AutomationMode::Loop] {
+        let client = Arc::new(MockGatewayClient::new());
+        let (object, origin) = match mode {
+            AutomationMode::Goal => (
+                AutomationObjectRef::Goal {
+                    goal_id: "goal-1".into(),
+                },
+                AutomationTurnOrigin::Goal {
+                    goal_id: "goal-1".into(),
+                    objective_revision: 4,
+                },
+            ),
+            AutomationMode::Loop => (
+                AutomationObjectRef::Loop {
+                    loop_id: "loop-1".into(),
+                },
+                AutomationTurnOrigin::Loop {
+                    loop_id: "loop-1".into(),
+                    occurrence_id: "occurrence".into(),
+                    config_revision: 3,
+                },
+            ),
+        };
+        {
+            let mut state = client.state.lock().unwrap();
+            state.automation = Some(snapshot(mode));
+            state.active_turn_id = Some("running-1".into());
+            state.active_input_origin = Some(AutomationInputOrigin {
+                message_id: "input".into(),
+                origin,
+            });
+        }
+        let observer = tokio::spawn(wait_for_session_automation(
+            client.clone(),
+            "sess-test".into(),
+            object,
+        ));
+        observed_active(&client).await;
+        {
+            let mut state = client.state.lock().unwrap();
+            let automation = state.automation.as_mut().unwrap();
+            match mode {
+                AutomationMode::Goal => {
+                    automation.goal.as_mut().unwrap().status = GoalStatus::Paused
+                }
+                AutomationMode::Loop => automation.loops[0].status = LoopStatus::Stopped,
+            }
+        }
+        invalidate(&client).await;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while client.state.lock().unwrap().automation_reads < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
         .await
-        .unwrap()
-        .unwrap()
         .unwrap();
-    client.shutdown().await.unwrap();
-    assert_eq!(client.state.lock().unwrap().shutdown_calls, 1);
-    assert!(client.state.lock().unwrap().automation_requests.is_empty());
+        assert!(!observer.is_finished());
+        assert_eq!(client.state.lock().unwrap().shutdown_calls, 0);
+        client.state.lock().unwrap().active_turn_id = None;
+        invalidate(&client).await;
+        tokio::time::timeout(Duration::from_secs(1), observer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        client.shutdown().await.unwrap();
+        assert_eq!(client.state.lock().unwrap().shutdown_calls, 1);
+        assert!(client.state.lock().unwrap().automation_requests.is_empty());
+    }
 }
 #[tokio::test]
 async fn foreground_tracks_exact_loop_id_among_identical_prompts() {

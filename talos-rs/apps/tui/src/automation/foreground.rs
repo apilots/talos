@@ -4,14 +4,16 @@ use std::sync::Arc;
 use std::time::Duration;
 use talos_error::TalosResult;
 use talos_sdk::{
-    AutomationObjectRef, GoalStatus, LoopStatus, SessionAutomationReadRequest,
-    SessionAutomationSnapshot,
+    ActiveTurnState, AutomationObjectRef, AutomationTurnOrigin, GoalStatus, LoopStatus,
+    SessionAutomationReadRequest, SessionAutomationSnapshot,
 };
 
 /// Observe one exact created object using the existing Session stream and reads.
 /// A second management process shares durable state but not this process' event
 /// channel, so a low-frequency read also observes its changes. Reads cannot tick,
-/// resume, reconstruct or schedule work. The caller retains normal shutdown/SIGINT.
+/// resume, reconstruct or schedule work. Already-admitted running work settles
+/// before normal shutdown; pending human input keeps its original exit boundary.
+/// The caller retains normal shutdown/SIGINT.
 pub async fn wait_for_session_automation(
     client: Arc<dyn GatewayClient>,
     session_id: String,
@@ -36,7 +38,30 @@ pub async fn wait_for_session_automation(
             })
             .await?;
         if !is_active(&state, &object) {
-            return Ok(());
+            // Pause/Stop only control future work. Shutting this embedded owner
+            // down before its admitted Turn settles would cancel that work.
+            let admitted = client
+                .get_active_turn(&session_id)
+                .await?
+                .is_some_and(|turn| {
+                    turn.state != ActiveTurnState::WaitingForInput
+                        && turn.automation_input.is_some_and(|input| {
+                            match (&object, input.origin) {
+                                (
+                                    AutomationObjectRef::Goal { goal_id },
+                                    AutomationTurnOrigin::Goal { goal_id: bound, .. },
+                                ) => goal_id == &bound,
+                                (
+                                    AutomationObjectRef::Loop { loop_id },
+                                    AutomationTurnOrigin::Loop { loop_id: bound, .. },
+                                ) => loop_id == &bound,
+                                _ => false,
+                            }
+                        })
+                });
+            if !admitted {
+                return Ok(());
+            }
         }
         tokio::select! {
             _=refresh.tick()=>{},
