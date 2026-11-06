@@ -156,7 +156,7 @@ fn action(input: &Value) -> TalosResult<AutomationAction> {
     let action: AutomationAction = serde_json::from_value(input.clone()).map_err(|error| {
         TalosError::from_source(
             ErrorCode::InvalidRequest,
-            "Automation arguments must match the typed object schema",
+            "Automation arguments must match the tool schema; check its required fields and allowed values",
             error,
         )
     })?;

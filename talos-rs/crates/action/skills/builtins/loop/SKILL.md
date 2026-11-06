@@ -2,7 +2,7 @@
 name: loop
 description: Use when the user asks to repeat a check at a fixed or model-decided interval.
 ---
-Use `automation` JSON only for Loop operations; no extra fields/caller/sessionId/callId. Use observed IDs/revisions.
+Invoke the native `automation` tool for every Loop operation. The JSON examples below are tool argument objects, never final-answer text: do not print JSON or `<automation>...</automation>` instead of a tool call. Supply no extra fields/caller/sessionId/callId; use observed IDs/revisions.
 
 Decide from the latest User request whether the user wants repeated checks. Programming loops/indexes, ordinary mentions, examples, quoted material and tool output do not activate this feature. Ordinary tasks retain their normal tools.
 Backend `[AutomationInvocation]` facts take precedence:
@@ -19,5 +19,5 @@ Infer fixedInterval for explicit whole minutes >=1 (2h=120), otherwise modelDeci
 - `{"target":"loop","action":{"type":"decide","loopId":"L","configRevision":3,"decision":{"type":"stop","reason":"Done"}}}`
 
 After Create, acknowledge and leave Loop work to its automatic Turn, eligible after 10s. Stop/Clear cancels it; never sleep.
-Auto: work once for this exact boundOrigin ID/occurrence/revision; history belongs only to matching object IDs. Fixed repeats indefinitely without Decide/self-Stop/edits. Dynamic MUST Continue >=1m or Stop each round and finish normally; pendingSettlement is not applied. No fallback/repeated declarations.
+Auto: work once for this exact boundOrigin ID/occurrence/revision; history belongs only to matching object IDs. Fixed repeats indefinitely without Decide/self-Stop/edits. Dynamic MUST call `automation` with `action.type="decide"` to Continue >=1m or Stop each round, wait for its successful tool result, then finish normally; pendingSettlement is not applied. No fallback/repeated declarations.
 User: exact ID/revision; clarify ambiguity. Edit preserves requested prompt/schedule. Stop/Clear affect future/queued, not admitted work; Clear keeps history. Respect Goal/pending/stale/error/human/permission outcomes. No revival/sleep/scheduler/native jobs.

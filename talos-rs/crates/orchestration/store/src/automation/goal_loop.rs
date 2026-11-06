@@ -4,7 +4,7 @@
 //! the canonical typed domain values, never exposing row/cursor/transaction data.
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
-use talos_agent_api::AgentTurnRef;
+use talos_agent_api::{AgentEventPayload, AgentMessageBlockContent, AgentTurnRef, AgentUserInput};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::{Row, Storage, StorageTransaction};
 use talos_types::{
@@ -329,6 +329,37 @@ impl DatabaseAutomationStore {
         rows.first()
             .and_then(|r| r.get_string("automation_origin_json"))
             .map(|raw| decode(&raw))
+            .transpose()
+    }
+    /// A Loop registration is recorded by its creating Tool call, not an
+    /// automatic-work origin. Clear preserves this receipt on the original row.
+    pub async fn has_loop_activation(&self, turn: &AgentTurnRef) -> TalosResult<bool> {
+        Ok(!self.storage.query("SELECT 1 WHERE EXISTS(SELECT 1 FROM session_loops WHERE session_id=? AND activation_turn_id=?)", &[&turn.session_id, &turn.turn_id]).await?.is_empty())
+    }
+    /// Read the original canonical User input after terminal settlement has
+    /// released the active Turn. Later Steer messages must not replace it.
+    pub async fn initial_user_input(
+        &self,
+        turn: &AgentTurnRef,
+    ) -> TalosResult<Option<AgentUserInput>> {
+        let rows = self.storage.query("SELECT payload_json FROM agent_events WHERE session_id=? AND turn_id=? AND sequence IS NOT NULL AND json_extract(payload_json,'$.type')='messageCompleted' AND json_extract(payload_json,'$.data.role')='user' ORDER BY sequence LIMIT 1", &[&turn.session_id, &turn.turn_id]).await?;
+        rows.first()
+            .map(|row| {
+                let payload = row.get_string("payload_json").ok_or_else(missing)?;
+                match decode::<AgentEventPayload>(&payload)? {
+                    AgentEventPayload::MessageCompleted(message) => Ok(AgentUserInput {
+                        content: message
+                            .blocks
+                            .into_iter()
+                            .filter_map(|block| match block.content {
+                                AgentMessageBlockContent::UserContent(content) => Some(content),
+                                _ => None,
+                            })
+                            .collect(),
+                    }),
+                    _ => Err(conflict()),
+                }
+            })
             .transpose()
     }
     /// Exact triggering User input only; later Steer messages share the logical
