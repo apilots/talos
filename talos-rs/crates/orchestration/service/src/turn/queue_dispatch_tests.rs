@@ -1,6 +1,22 @@
 use super::*;
 use talos_agent_api::AgentTurnRef;
 
+struct TestAutomationSkills;
+impl crate::automation::goal_loop::AutomationSkillResolver for TestAutomationSkills {
+    fn resolve<'a>(
+        &'a self,
+        _: &'a SessionRecord,
+        mode: talos_types::AutomationMode,
+    ) -> futures_util::future::BoxFuture<'a, TalosResult<talos_types::SkillSelector>> {
+        Box::pin(async move {
+            Ok(talos_types::SkillSelector::selection(
+                mode.skill_name(),
+                format!("/verified-system/{}/SKILL.md", mode.skill_name()),
+            ))
+        })
+    }
+}
+
 fn log_dispatch(path: &std::path::Path) -> tracing::Dispatch {
     tracing::Dispatch::new(
         tracing_subscriber::fmt()
@@ -369,16 +385,6 @@ async fn automatic_dispatch_preserves_busy_errors_after_reservation() {
 
 #[tokio::test]
 async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work() {
-    struct UnusedSkills;
-    impl crate::automation::goal_loop::AutomationSkillResolver for UnusedSkills {
-        fn resolve<'a>(
-            &'a self,
-            _: &'a SessionRecord,
-            _: talos_types::AutomationMode,
-        ) -> futures_util::future::BoxFuture<'a, TalosResult<talos_types::SkillSelector>> {
-            unreachable!("ordinary queued input does not select an automation Skill")
-        }
-    }
     let logs = tempfile::tempdir().unwrap();
     let log_path = logs.path().join("automation.log");
     let dispatch = log_dispatch(&log_path);
@@ -392,7 +398,7 @@ async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work()
     )
     .await;
     service
-        .install_automation(store.automation_store(), Arc::new(UnusedSkills))
+        .install_automation(store.automation_store(), Arc::new(TestAutomationSkills))
         .unwrap();
     create_test_session_record(store.clone()).await;
     let identity = AgentTurnRef::new("s1", "recovered-turn");
@@ -445,4 +451,73 @@ async fn automation_settlement_warning_preserves_usage_cleanup_and_queued_work()
     assert!(std::fs::read_to_string(log_path)
         .unwrap()
         .contains("settle Session automation"));
+}
+
+#[tokio::test]
+async fn explicit_automation_without_registration_keeps_completion_and_publishes_notice() {
+    for mode in [
+        talos_types::AutomationMode::Goal,
+        talos_types::AutomationMode::Loop,
+    ] {
+        let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+        let execution = Arc::new(RecordingAgentExecution::default());
+        let (service, timeline, store, queue) = test_service_with_storage(
+            execution.clone(),
+            Arc::new(RecordingAgentCoordinator::default()),
+            storage,
+        )
+        .await;
+        service
+            .install_automation(store.automation_store(), Arc::new(TestAutomationSkills))
+            .unwrap();
+        create_test_session_record(store.clone()).await;
+        let mut input = test_user_input("Register this task");
+        input.content.push(AgentUserContent::SkillSelection {
+            name: mode.skill_name().into(),
+            path: format!("/verified-system/{}/SKILL.md", mode.skill_name()),
+        });
+        queue.add("s1", input).unwrap();
+        queue
+            .add("s1", test_user_input("Next ordinary work"))
+            .unwrap();
+        let first = service.try_dispatch_next("s1").await.unwrap().unwrap();
+        wait_for_stream_requests(execution.as_ref(), 2).await;
+
+        let history = crate::SessionHistoryService::new(timeline.clone())
+            .read("s1", None, None)
+            .await
+            .unwrap();
+        let turn = history
+            .data
+            .iter()
+            .find(|turn| turn.identity.turn_id == first.turn_id)
+            .unwrap();
+        assert!(matches!(
+            turn.result,
+            talos_agent_api::AgentRunResult::Completed(_)
+        ));
+        assert_eq!(turn.notices.len(), 1);
+        let notice = &turn.notices[0];
+        let talos_agent_api::TimelineEventPayload::SystemNotice(data) = &notice.event else {
+            unreachable!()
+        };
+        let talos_agent_api::SystemNoticeContent::Error(error) = &data.notice.content else {
+            unreachable!()
+        };
+        assert_eq!(error.code, talos_error::ErrorCode::ToolExecutionFailed);
+        assert_eq!(
+            error.message,
+            match mode {
+                talos_types::AutomationMode::Goal => "No Goal was created in this Turn.",
+                talos_types::AutomationMode::Loop => "No Loop was created in this Turn.",
+            }
+        );
+        assert!(timeline
+            .list_events_after("s1", None, 100)
+            .await
+            .unwrap()
+            .contains(notice));
+        let snapshot = store.automation_store().snapshot("s1").await.unwrap();
+        assert!(snapshot.goal.is_none() && snapshot.loops.is_empty());
+    }
 }

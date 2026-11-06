@@ -17,7 +17,7 @@ def terminal(connection, mode, marker):
     task = definition(connection, mode, marker)
     if task["status"] != ("complete" if mode == "goal" else "stopped"):
         return False
-    events = connection.execute("SELECT payload_json FROM agent_events WHERE turn_id=?", (task["latest_turn_id"],))
+    events = connection.execute("SELECT payload_json FROM agent_events WHERE turn_id=? AND sequence IS NOT NULL", (task["latest_turn_id"],))
     return any(json.loads(row[0])["type"] == "turnCompleted" for row in events)
 
 
@@ -29,7 +29,11 @@ def verify(connection, goal_marker, loop_marker):
     assert tasks["goal"]["status"] == "complete", tasks["goal"]
     assert tasks["loop"]["stop_reason"] == "modelStopped", tasks["loop"]
     turns = {}
-    events = connection.execute("SELECT * FROM agent_events WHERE session_id=? ORDER BY event_seq", (session_id,))
+    product_errors = [json.loads(row[0]) for row in connection.execute(
+        "SELECT payload_json FROM agent_events WHERE session_id=? AND sequence IS NULL AND json_extract(payload_json,'$.content.type')='error' ORDER BY event_seq",
+        (session_id,))]
+    assert not product_errors, {"unexpectedProductErrors": product_errors}
+    events = connection.execute("SELECT * FROM agent_events WHERE session_id=? AND sequence IS NOT NULL ORDER BY event_seq", (session_id,))
     for row in events:
         event = json.loads(row["payload_json"])
         turn = turns.setdefault(row["turn_id"], {"turnId": row["turn_id"]})
