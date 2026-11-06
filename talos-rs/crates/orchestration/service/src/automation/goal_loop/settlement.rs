@@ -49,6 +49,22 @@ impl SessionAutomationService {
         if !waiting && !normal && failed.is_none() {
             return Ok(());
         }
+        if normal && origin.is_none() {
+            if let Some(input) = self.store.initial_user_input(&event.identity).await? {
+                if let Some(mode) = explicit_automation_mode(&input)? {
+                    // The execution outcome is already committed. The original
+                    // completion owner publishes this missing product effect as
+                    // a notice without rewriting the Turn or creating a task.
+                    return Err(TalosError::new(
+                        ErrorCode::ToolExecutionFailed,
+                        match mode {
+                            AutomationMode::Goal => "No Goal was created in this Turn.",
+                            AutomationMode::Loop => "No Loop was created in this Turn.",
+                        },
+                    ));
+                }
+            }
+        }
         if let Some(origin) = origin.as_ref() {
             self.forget_explicit_dispatch(&session.id, &automation_object(origin));
         }

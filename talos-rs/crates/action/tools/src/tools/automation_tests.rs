@@ -137,6 +137,78 @@ async fn registry_dispatch_reaches_the_same_typed_control_port() {
 }
 
 #[tokio::test]
+async fn schema_feedback_allows_correcting_real_automation_arguments_through_registry() {
+    let loop_create = json!({
+        "target": "loop",
+        "action": {
+            "type": "create", "prompt": "Check CI", "schedule": {"type": "modelDecided"}
+        }
+    });
+    let mut missing_operation = loop_create.clone();
+    missing_operation["action"]
+        .as_object_mut()
+        .unwrap()
+        .remove("type")
+        .unwrap();
+    let mut invalid_schedule = loop_create.clone();
+    invalid_schedule["action"]["schedule"]["type"] = json!("invalidSchedule");
+    let goal_read = json!({"target": "goal", "action": {"type": "read"}});
+    let mut extra_read = goal_read.clone();
+    extra_read["action"]["read"] = json!({});
+
+    for (invalid, corrected, field) in [
+        (missing_operation, loop_create.clone(), "/action/type"),
+        (invalid_schedule, loop_create, "/action/schedule/type"),
+        (extra_read, goal_read, "/action/read"),
+    ] {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(AutomationTool));
+        let control = control(AutomationEffect::Applied);
+        let invocation = registry
+            .build_function_invocation("invalid-input", "automation", invalid)
+            .unwrap();
+        let failure = registry
+            .execute_invocation_with_context(invocation, context(control.clone()))
+            .await
+            .unwrap_err();
+        assert!(failure.error().is_code(ErrorCode::InvalidRequest));
+        assert!(std::error::Error::source(failure.error())
+            .unwrap()
+            .is::<serde_json::Error>());
+        let message = failure.error().to_api_error().message;
+        eprintln!("schema diagnostic ({field}): {message}");
+        assert!(message.contains(field), "{message}");
+        assert!(!message.contains("invalidSchedule"), "{message}");
+        let crate::ToolDispatchOutcome::Executed { payload } = failure.into_outcome() else {
+            panic!("Invalid arguments must use the existing tool-result projection");
+        };
+        assert_eq!(
+            payload.structured_content().unwrap(),
+            &json!({
+                "error": message,
+                "error_kind": "validation_failure",
+                "gate_source": "tool_semantic"
+            })
+        );
+        assert!(control.requests.lock().unwrap().is_empty());
+
+        let invocation = registry
+            .build_function_invocation("corrected-input", "automation", corrected.clone())
+            .unwrap();
+        registry
+            .execute_invocation_with_context(invocation, context(control.clone()))
+            .await
+            .unwrap();
+        let requests = control.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&requests[0].action).unwrap(),
+            corrected
+        );
+    }
+}
+
+#[tokio::test]
 async fn distinct_runtime_calls_in_one_turn_keep_distinct_create_identities() {
     let control = control(AutomationEffect::Applied);
     for call_id in ["first-call", "second-call"] {
