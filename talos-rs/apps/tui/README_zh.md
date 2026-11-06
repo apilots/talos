@@ -40,7 +40,7 @@ Command mode 复用 TUI `GatewayClient` adapter，不维护独立 CLI Runtime。
 ## Interactive TUI
 
 TUI 支持聊天与 Timeline streaming、模型选择、Session history、工具执行状态以及
-`/models`、`/history`、`/sessions`、`/status`、`/compact`、`/clear`、`/quit`
+`/models`、`/sessions`、`/status`、`/compact`、`/clear`、`/quit`
 等命令。
 
 ## Runtime
