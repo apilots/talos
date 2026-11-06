@@ -60,7 +60,7 @@ The TUI supports:
 - Model selection and model switching.
 - Session history and session switching.
 - Tool execution status panels.
-- Slash commands such as `/models`, `/history`, `/sessions`, `/status`,
+- Slash commands such as `/models`, `/sessions`, `/status`,
   `/compact`, `/clear`, and `/quit`.
 
 ## Runtime
