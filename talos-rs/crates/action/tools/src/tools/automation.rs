@@ -1,7 +1,4 @@
-use std::sync::LazyLock;
-
 use async_trait::async_trait;
-use jsonschema::error::{ValidationError, ValidationErrorKind};
 use serde_json::{json, Value};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
@@ -15,44 +12,6 @@ use crate::{Tool, ToolContext, ToolOutputPayload};
 
 // Leave room for the existing result envelope in the final model projection.
 const MAX_RESULT_BYTES: usize = MAX_MODEL_TOOL_BYTES * 3 / 4;
-
-// One generated definition feeds both the model catalog and failure diagnostics.
-static AUTOMATION_SCHEMA: LazyLock<Option<Value>> = LazyLock::new(automation_schema);
-static AUTOMATION_VALIDATOR: LazyLock<TalosResult<jsonschema::Validator>> = LazyLock::new(|| {
-    let schema = AUTOMATION_SCHEMA
-        .as_ref()
-        .ok_or_else(|| TalosError::internal("Automation tool schema could not be constructed."))?;
-    jsonschema::options()
-        .offline()
-        .build(schema)
-        .map_err(|error| {
-            TalosError::internal_with_source("Automation tool schema could not be compiled.", error)
-        })
-});
-
-fn automation_schema() -> Option<Value> {
-    let mut schema = serde_json::to_value(schemars::schema_for!(AutomationAction)).ok()?;
-    // Providers inspect direct properties to distinguish objects from strings.
-    // Keep the generated tagged-union constraints and shared definitions.
-    let action_variants: Vec<Value> = schema
-        .get("oneOf")?
-        .as_array()?
-        .iter()
-        .map(|variant| variant.get("properties")?.get("action").cloned())
-        .collect::<Option<_>>()?;
-    let object = schema.as_object_mut()?;
-    object.insert("type".into(), json!("object"));
-    object.insert("required".into(), json!(["target", "action"]));
-    object.insert("additionalProperties".into(), json!(false));
-    object.insert(
-        "properties".into(),
-        json!({
-            "target": {"type": "string", "enum": ["goal", "loop"]},
-            "action": {"type": "object", "anyOf": action_variants}
-        }),
-    );
-    Some(schema)
-}
 
 /// Shared model operation adapter for the independent Goal and Loop Skills.
 /// It owns no authorization, scheduling, completion, or native Job operations.
@@ -69,7 +28,27 @@ impl Tool for AutomationTool {
     }
 
     fn parameters_schema(&self) -> Option<Value> {
-        (*AUTOMATION_SCHEMA).clone()
+        let mut schema = serde_json::to_value(schemars::schema_for!(AutomationAction)).ok()?;
+        // Providers inspect direct properties to distinguish objects from strings.
+        // Keep the generated tagged-union constraints and shared definitions.
+        let action_variants: Vec<Value> = schema
+            .get("oneOf")?
+            .as_array()?
+            .iter()
+            .map(|variant| variant.get("properties")?.get("action").cloned())
+            .collect::<Option<_>>()?;
+        let object = schema.as_object_mut()?;
+        object.insert("type".into(), json!("object"));
+        object.insert("required".into(), json!(["target", "action"]));
+        object.insert("additionalProperties".into(), json!(false));
+        object.insert(
+            "properties".into(),
+            json!({
+                "target": {"type": "string", "enum": ["goal", "loop"]},
+                "action": {"type": "object", "anyOf": action_variants}
+            }),
+        );
+        Some(schema)
     }
 
     fn parallelism(&self) -> ToolParallelism {
@@ -174,16 +153,13 @@ fn model_result(result: AutomationControlResult) -> TalosResult<ToolOutputPayloa
 }
 
 fn action(input: &Value) -> TalosResult<AutomationAction> {
-    let action: AutomationAction = match serde_json::from_value(input.clone()) {
-        Ok(action) => action,
-        Err(error) => {
-            return Err(TalosError::from_source(
-                ErrorCode::InvalidRequest,
-                action_error_message(input)?,
-                error,
-            ));
-        }
-    };
+    let action: AutomationAction = serde_json::from_value(input.clone()).map_err(|error| {
+        TalosError::from_source(
+            ErrorCode::InvalidRequest,
+            "Automation arguments must match the tool schema; check its required fields and allowed values",
+            error,
+        )
+    })?;
     match &action {
         AutomationAction::Loop {
             action: LoopAction::Create { schedule, .. } | LoopAction::Edit { schedule, .. },
@@ -206,62 +182,6 @@ fn action(input: &Value) -> TalosResult<AutomationAction> {
         _ => {}
     }
     Ok(action)
-}
-
-/// Summarize library errors without exposing input values or dependency diagnostics.
-/// Candidate union branches are alternatives, not cumulative field requirements.
-fn action_error_message(input: &Value) -> TalosResult<String> {
-    let validator = AUTOMATION_VALIDATOR.as_ref().map_err(Clone::clone)?;
-    let mut hints = Vec::new();
-    for error in validator.iter_errors(input) {
-        schema_error_hints(&error, &mut hints);
-    }
-    if hints.is_empty() {
-        return Ok(
-            "Automation arguments could not be decoded; follow the tool's object schema".into(),
-        );
-    }
-    Ok(format!(
-        "Automation arguments could not be decoded. Check the tool schema. Candidate fields from failing alternatives (not all apply): {}",
-        hints.join("; ")
-    ))
-}
-
-fn schema_error_hints(error: &ValidationError<'_>, hints: &mut Vec<String>) {
-    const MAX_HINTS: usize = 16;
-    if hints.len() >= MAX_HINTS {
-        return;
-    }
-    match error.kind() {
-        ValidationErrorKind::AnyOf { context } | ValidationErrorKind::OneOfNotValid { context } => {
-            for child in context.iter().flatten() {
-                schema_error_hints(child, hints);
-            }
-        }
-        ValidationErrorKind::AdditionalProperties { unexpected } => {
-            for property in unexpected.iter().take(MAX_HINTS - hints.len()) {
-                let path = error.instance_path().join(property.as_str());
-                let hint = format!("{path}: unexpected property");
-                if !hints.contains(&hint) {
-                    hints.push(hint);
-                }
-            }
-        }
-        kind => {
-            let hint = match kind {
-                ValidationErrorKind::Required { property } => {
-                    let path = error
-                        .instance_path()
-                        .join(property.as_str().unwrap_or_default());
-                    format!("{path}: required property missing")
-                }
-                _ => format!("{}: violates {}", error.instance_path(), kind.keyword()),
-            };
-            if !hints.contains(&hint) {
-                hints.push(hint);
-            }
-        }
-    }
 }
 
 fn trusted_caller(context: &ToolContext) -> TalosResult<AgentCaller> {

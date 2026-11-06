@@ -331,6 +331,11 @@ impl DatabaseAutomationStore {
             .map(|raw| decode(&raw))
             .transpose()
     }
+    /// A Loop registration is recorded by its creating Tool call, not an
+    /// automatic-work origin. Clear preserves this receipt on the original row.
+    pub async fn has_loop_activation(&self, turn: &AgentTurnRef) -> TalosResult<bool> {
+        Ok(!self.storage.query("SELECT 1 WHERE EXISTS(SELECT 1 FROM session_loops WHERE session_id=? AND activation_turn_id=?)", &[&turn.session_id, &turn.turn_id]).await?.is_empty())
+    }
     /// Read the original canonical User input after terminal settlement has
     /// released the active Turn. Later Steer messages must not replace it.
     pub async fn initial_user_input(

@@ -52,6 +52,11 @@ impl SessionAutomationService {
         if normal && origin.is_none() {
             if let Some(input) = self.store.initial_user_input(&event.identity).await? {
                 if let Some(mode) = explicit_automation_mode(&input)? {
+                    if mode == AutomationMode::Loop
+                        && self.store.has_loop_activation(&event.identity).await?
+                    {
+                        return Ok(());
+                    }
                     // The execution outcome is already committed. The original
                     // completion owner publishes this missing product effect as
                     // a notice without rewriting the Turn or creating a task.
