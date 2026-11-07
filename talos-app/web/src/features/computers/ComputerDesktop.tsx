@@ -99,6 +99,8 @@ export function ComputerDesktop({ nodeId, expanded, onExitInput }: { nodeId: str
 
   useEffect(() => {
     if (!grant || !screen.current) return;
+    // The previous viewer has been disposed. A failure now belongs to this grant.
+    switching.current = false;
     let active = true;
     let socket: WebSocket | null = null;
     let rfb: RFB | null = null;

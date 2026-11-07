@@ -37,19 +37,23 @@ impl DesktopMedia {
         if uuid::Uuid::parse_str(&params.stream_id).is_err() {
             return Err(denied());
         }
-        let mut streams = self.streams.lock().await;
-        streams.retain(|_, stream| !stream.stop.is_cancelled() && !stream.input.is_closed());
-        if streams.len() >= 2 || streams.contains_key(&params.stream_id) {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "Desktop viewer capacity exhausted.",
-            ));
+        {
+            let mut streams = self.streams.lock().await;
+            streams.retain(|_, stream| !stream.stop.is_cancelled() && !stream.input.is_closed());
+            if streams.len() >= 2 || streams.contains_key(&params.stream_id) {
+                return Err(TalosError::new(
+                    ErrorCode::Conflict,
+                    "Desktop viewer capacity exhausted.",
+                ));
+            }
         }
+        // Open requests are serialized by the app-server. Existing viewers
+        // can send input while this viewer's remote admission is pending.
         let mut transport = service
             .consume_desktop_ticket(actor, params.ticket, Some(&params.stream_id))
             .await?;
         let stop = CancellationToken::new();
-        streams.insert(
+        self.streams.lock().await.insert(
             params.stream_id.clone(),
             Stream {
                 user: actor.user_id.clone(),
@@ -61,7 +65,18 @@ impl DesktopMedia {
         let host = self.host.clone();
         tokio::spawn(async move {
             loop {
-                let data = tokio::select! {_=stop.cancelled()=>break,frame=transport.incoming.recv()=>match frame{Some(Ok(data)) if data.len()<=64*1024=>data,_=>break}};
+                let frame = tokio::select! {
+                    _ = stop.cancelled() => break,
+                    frame = transport.incoming.recv() => frame,
+                };
+                let data = match frame {
+                    Some(Ok(data)) if data.len() <= 64 * 1024 => data,
+                    Some(Err(error)) => {
+                        talos_logging::report_error(&error);
+                        break;
+                    }
+                    Some(Ok(_)) | None => break,
+                };
                 let frame = DesktopMediaFrame {
                     stream_id: params.stream_id.clone(),
                     data_base64: Some(base64::engine::general_purpose::STANDARD.encode(data)),
@@ -74,8 +89,14 @@ impl DesktopMedia {
                 }
             }
             drop(transport);
-            all.lock().await.remove(&params.stream_id);
-            if !stop.is_cancelled() {
+            let notify_viewer = {
+                let mut streams = all.lock().await;
+                // Removing the stream cancels its token. Capture explicit closure first.
+                let notify = !stop.is_cancelled();
+                streams.remove(&params.stream_id);
+                notify
+            };
+            if notify_viewer {
                 if let Err(error) = host
                     .media(DesktopMediaFrame {
                         stream_id: params.stream_id,

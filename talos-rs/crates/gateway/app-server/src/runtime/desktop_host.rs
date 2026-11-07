@@ -42,7 +42,7 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
         }
         if matches!(result, Ok(BoundedLineRead::Line)) {
             if local_requests
-                .dispatch(&line, &reader_tx, &mut local_tasks)
+                .dispatch(&line, host.is_some(), &reader_tx, &mut local_tasks)
                 .await
             {
                 continue;

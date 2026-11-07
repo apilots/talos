@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn retained_queries_and_deletions_remain_authenticated_and_responsive_during_remote_wait() {
+async fn local_requests_and_desktop_input_remain_authenticated_and_responsive_during_remote_wait() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let app = Arc::new(MockApp {
@@ -18,12 +18,13 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
         Arc::new(ExistingTokenValidator),
         AppServerConfig {
             auth_enabled: true,
+            desktop_host: Some(crate::DesktopHostBridge::new()),
             ..Default::default()
         },
     ));
     let mut output = BufReader::new(client_read).lines();
     client_write
-        .write_all(initialize_request("unused").as_bytes())
+        .write_all(initialize_request_for_kind("desktop").as_bytes())
         .await
         .unwrap();
     read_output_line(&mut output).await;
@@ -35,6 +36,10 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
         .unwrap();
     entered.notified().await;
     for (index, (method, params)) in [
+        (
+            "desktop/streamSend",
+            json!({"streamId":"fixture-stream","dataBase64":"UkZC"}),
+        ),
         ("sync/status", json!(null)),
         ("session/list", json!({})),
         ("session/get", json!({"sessionId":"s1"})),
@@ -97,7 +102,7 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
     .await
     .unwrap();
     assert_eq!(result_error(&denied)["code"], "unauthenticated");
-    let expected_actors = ["user-1"; 9]
+    let expected_actors = ["user-1"; 10]
         .into_iter()
         .chain(["anonymous"; 2])
         .collect::<Vec<_>>();
@@ -105,6 +110,69 @@ async fn retained_queries_and_deletions_remain_authenticated_and_responsive_duri
         app.dispatched_actors.lock().unwrap().as_slice(),
         expected_actors
     );
+    release.notify_one();
+    assert_eq!(read_output_line(&mut output).await["id"], 10);
+    client_write.shutdown().await.unwrap();
+    runtime.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn desktop_viewer_admission_completes_while_computer_list_is_blocked() {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let app = Arc::new(MockApp {
+        blocked_remote: Some((entered.clone(), release.clone())),
+        ..Default::default()
+    });
+    let (client, server) = duplex(128 * 1024);
+    let (client_read, mut client_write) = split(client);
+    let (server_read, server_write) = split(server);
+    let runtime = tokio::spawn(run_jsonl(
+        server_read,
+        server_write,
+        app.clone(),
+        Arc::new(ExistingTokenValidator),
+        AppServerConfig {
+            auth_enabled: true,
+            desktop_host: Some(crate::DesktopHostBridge::new()),
+            ..Default::default()
+        },
+    ));
+    let mut output = BufReader::new(client_read).lines();
+    client_write
+        .write_all(initialize_request_for_kind("desktop").as_bytes())
+        .await
+        .unwrap();
+    read_output_line(&mut output).await;
+
+    let credentials = json!({"credential":{"type":"existing_session_token","token":"user-token"}});
+    let list = json!({"jsonrpc":"2.0","id":10,"method":"computer/list","params":{},"actor_credentials":credentials});
+    client_write
+        .write_all(format!("{list}\n").as_bytes())
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+        .await
+        .expect("computer list entered its remote wait");
+
+    let open = json!({"jsonrpc":"2.0","id":11,"method":"desktop/streamOpen","params":{
+        "streamId":"71f38d28-9990-4674-a4ce-b8c42e3c65c7",
+        "ticket":"119dcd45-351f-4a7c-a27b-9be30b46ced3"
+    },"actor_credentials":credentials});
+    client_write
+        .write_all(format!("{open}\n").as_bytes())
+        .await
+        .unwrap();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        read_output_line(&mut output),
+    )
+    .await
+    .expect("viewer admission must complete before the computer list is released");
+    assert_eq!(response["id"], 11);
+    assert_eq!(result_data(&response), &json!({"ok":true}));
+    assert_eq!(app.dispatched_actors.lock().unwrap().as_slice(), ["user-1"]);
+
     release.notify_one();
     assert_eq!(read_output_line(&mut output).await["id"], 10);
     client_write.shutdown().await.unwrap();
