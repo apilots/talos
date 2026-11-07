@@ -44,7 +44,9 @@ impl AppServerApplication for MockApp {
         request: talos_app_protocol::requests::ClientRequest,
     ) -> ApplicationResult<ApplicationResponse> {
         let blocked = match request.method {
-            ClientMethod::ModelList | ClientMethod::UserCurrent => self.blocked_remote.as_ref(),
+            ClientMethod::ComputerList | ClientMethod::ModelList | ClientMethod::UserCurrent => {
+                self.blocked_remote.as_ref()
+            }
             ClientMethod::SessionDelete => self.blocked_deletion.as_ref(),
             _ => None,
         };

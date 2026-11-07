@@ -12,7 +12,7 @@ import { AppNavigation, AppTopBar, WorkspaceControls } from "@/app/layouts/AppTo
 import { useRef } from "react";
 import { MemoryRouter } from "react-router-dom";
 
-const fixture=vi.hoisted(()=>({scope:"alice",operate:vi.fn(),open:vi.fn(),socket:vi.fn(),rfbs:[] as Array<EventTarget & {disconnect:ReturnType<typeof vi.fn>;viewOnly:boolean;focus:ReturnType<typeof vi.fn>}>}));
+const fixture=vi.hoisted(()=>({scope:"alice",connectRfb:true,operate:vi.fn(),open:vi.fn(),socket:vi.fn(),rfbs:[] as Array<EventTarget & {disconnect:ReturnType<typeof vi.fn>;viewOnly:boolean;focus:ReturnType<typeof vi.fn>}>}));
 vi.mock("./hooks",()=>({useProductScope:()=>fixture.scope,useComputers:()=>({localId:"worker"}),useComputer:(nodeId:string)=>({data:{displayName:nodeId,available:true}}),useSelectedComputerId:()=>"worker"}));
 vi.mock("@/features/chat",()=>({useSessionQuery:()=>({data:undefined}),useProjectsQuery:()=>({data:[]})}));
 function WorkspaceHarness() {
@@ -29,7 +29,7 @@ vi.mock("@novnc/novnc/lib/rfb",()=>({default:class extends EventTarget {
   viewOnly=true; scaleViewport=false;resizeSession=false;qualityLevel=0;compressionLevel=0;
   disconnect=vi.fn(()=>this.dispatchEvent(new Event("disconnect")));
   focus:ReturnType<typeof vi.fn>;
-  constructor(element:HTMLElement){super();const canvas=document.createElement("canvas");canvas.tabIndex=-1;element.append(canvas);this.focus=vi.fn(()=>canvas.focus());fixture.rfbs.push(this);queueMicrotask(()=>this.dispatchEvent(new Event("connect")));}
+  constructor(element:HTMLElement){super();const canvas=document.createElement("canvas");canvas.tabIndex=-1;element.append(canvas);this.focus=vi.fn(()=>canvas.focus());fixture.rfbs.push(this);if(fixture.connectRfb)queueMicrotask(()=>this.dispatchEvent(new Event("connect")));}
 }}));
 beforeEach(()=>{
  vi.stubGlobal("matchMedia",()=>({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
@@ -55,7 +55,7 @@ function show(value:BrowserSnapshot) {
   const view=render(<QueryClientProvider client={query}><WorkspaceHarness/></QueryClientProvider>);
   return {query,...view};
 }
-afterEach(async()=>{cleanup();useAppStore.setState({workspaceWindows:[],workspaceActiveKey:null,workspaceOpen:false,workspaceExpanded:false});fixture.rfbs.length=0;fixture.scope="alice";vi.unstubAllGlobals();vi.resetAllMocks();await i18n.changeLanguage("en");});
+afterEach(async()=>{cleanup();useAppStore.setState({workspaceWindows:[],workspaceActiveKey:null,workspaceOpen:false,workspaceExpanded:false});fixture.rfbs.length=0;fixture.scope="alice";fixture.connectRfb=true;vi.unstubAllGlobals();vi.resetAllMocks();await i18n.changeLanguage("en");});
 
 it("opens Your computer without randomUUID on an HTTP origin", async () => {
   vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
@@ -66,6 +66,22 @@ it("opens Your computer without randomUUID on an HTTP origin", async () => {
     viewerId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
     inputMode: "readOnly",
   }));
+  query.clear();
+});
+
+it("reports a disconnect before the first frame and can request a fresh view", async () => {
+  fixture.connectRfb = false;
+  const { query } = show(snapshot());
+  fireEvent.click(await screen.findByRole("button", { name: "View computer" }));
+  await waitFor(() => expect(fixture.rfbs).toHaveLength(1));
+  act(() => fixture.rfbs[0].dispatchEvent(new Event("disconnect")));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The view disconnected");
+  fixture.connectRfb = true;
+  fixture.open.mockResolvedValueOnce(grant("readOnly", 1));
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect view" }));
+  await screen.findByText("Agent can operate");
+  expect(fixture.open).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   query.clear();
 });
 

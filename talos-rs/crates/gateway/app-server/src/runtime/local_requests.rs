@@ -1,6 +1,5 @@
-//! Retained-data/bootstrap queries and bounded deletion share the original dispatch/auth
-//! contract independently of Worker commands. Deletions have a separate capacity
-//! so their remote verification cannot exhaust the local query lane.
+//! Dispatch independent requests with the original auth contract. Desktop
+//! input runs inline in the reader to preserve byte order.
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, OnceLock,
@@ -26,6 +25,7 @@ pub(super) struct LocalRequests {
     validator: Arc<dyn ActorCredentialValidator>,
     auth_enabled: bool,
     query_capacity: Arc<Semaphore>,
+    computer_list_capacity: Arc<Semaphore>,
     deletion_capacity: Arc<Semaphore>,
 }
 
@@ -44,6 +44,7 @@ impl LocalRequests {
             validator,
             auth_enabled,
             query_capacity: Arc::new(Semaphore::new(16)),
+            computer_list_capacity: Arc::new(Semaphore::new(4)),
             deletion_capacity: Arc::new(Semaphore::new(4)),
         }
     }
@@ -55,6 +56,7 @@ impl LocalRequests {
     pub(super) async fn dispatch(
         self: &Arc<Self>,
         line: &[u8],
+        desktop_host: bool,
         outgoing: &tokio::sync::mpsc::Sender<OutgoingMessage>,
         tasks: &mut JoinSet<()>,
     ) -> bool {
@@ -80,29 +82,32 @@ impl LocalRequests {
         let Ok(method) = request.method.parse::<ClientMethod>() else {
             return false;
         };
-        if !matches!(
-            method,
+        let capacity = match method {
+            ClientMethod::DesktopStreamSend if desktop_host => None,
+            // Listing can wait on remote Computer metadata. Keep that wait
+            // outside the ordered viewer admission and teardown path.
+            ClientMethod::ComputerList if desktop_host => Some(&self.computer_list_capacity),
+            ClientMethod::SessionDelete | ClientMethod::ProjectDelete => {
+                Some(&self.deletion_capacity)
+            }
             ClientMethod::EventSubscribe
-                | ClientMethod::SyncStatus
-                | ClientMethod::EventUnsubscribe
-                | ClientMethod::DesktopWorkerIdentity
-                | ClientMethod::AuthSessionRead
-                | ClientMethod::SessionList
-                | ClientMethod::SessionGet
-                | ClientMethod::SessionHistory
-                | ClientMethod::TrajectoryCapabilities
-                | ClientMethod::TrajectoryReadTurn
-                | ClientMethod::TrajectoryReadRequest
-                | ClientMethod::TrajectoryReadTool
-                | ClientMethod::TrajectoryReadPayload
-                | ClientMethod::SessionActiveTurn
-                | ClientMethod::ProjectList
-                | ClientMethod::ProjectRead
-                | ClientMethod::SessionDelete
-                | ClientMethod::ProjectDelete
-        ) {
-            return false;
-        }
+            | ClientMethod::SyncStatus
+            | ClientMethod::EventUnsubscribe
+            | ClientMethod::DesktopWorkerIdentity
+            | ClientMethod::AuthSessionRead
+            | ClientMethod::SessionList
+            | ClientMethod::SessionGet
+            | ClientMethod::SessionHistory
+            | ClientMethod::TrajectoryCapabilities
+            | ClientMethod::TrajectoryReadTurn
+            | ClientMethod::TrajectoryReadRequest
+            | ClientMethod::TrajectoryReadTool
+            | ClientMethod::TrajectoryReadPayload
+            | ClientMethod::SessionActiveTurn
+            | ClientMethod::ProjectList
+            | ClientMethod::ProjectRead => Some(&self.query_capacity),
+            _ => return false,
+        };
         if matches!(
             method,
             ClientMethod::EventSubscribe | ClientMethod::EventUnsubscribe
@@ -117,26 +122,25 @@ impl LocalRequests {
                 return true;
             }
         };
-        let capacity = if matches!(
-            method,
-            ClientMethod::SessionDelete | ClientMethod::ProjectDelete
-        ) {
-            &self.deletion_capacity
+        let permit = if let Some(capacity) = capacity {
+            match capacity.clone().try_acquire_owned() {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    let _ = send_application_error(
+                        outgoing.clone(),
+                        request.id,
+                        ApiError::new(ErrorCode::Conflict),
+                    )
+                    .await;
+                    return true;
+                }
+            }
         } else {
-            &self.query_capacity
-        };
-        let Ok(permit) = capacity.clone().try_acquire_owned() else {
-            let _ = send_application_error(
-                outgoing.clone(),
-                request.id,
-                ApiError::new(ErrorCode::Conflict),
-            )
-            .await;
-            return true;
+            None
         };
         let requests = self.clone();
         let outgoing = outgoing.clone();
-        tasks.spawn(async move {
+        let dispatch = async move {
             let _permit = permit;
             let actor = match resolve_request_actor(
                 requests.initialized_actor.get(),
@@ -181,7 +185,12 @@ impl LocalRequests {
                     let _ = send_application_error(outgoing, request.id, error).await;
                 }
             }
-        });
+        };
+        if capacity.is_none() {
+            dispatch.await;
+        } else {
+            tasks.spawn(dispatch);
+        }
         true
     }
 }
