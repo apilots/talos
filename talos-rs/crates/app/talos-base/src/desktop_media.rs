@@ -49,14 +49,25 @@ impl DesktopMedia {
         }
         // Open requests are serialized by the app-server. Existing viewers
         // can send input while this viewer's remote admission is pending.
-        let mut transport = service
+        let transport = service
             .consume_desktop_ticket(actor, params.ticket, Some(&params.stream_id))
             .await?;
+        self.start_stream(actor.user_id.clone(), params.stream_id, transport)
+            .await;
+        Ok(())
+    }
+
+    async fn start_stream(
+        &self,
+        user: String,
+        stream_id: String,
+        mut transport: talos_browser::DesktopTransport,
+    ) {
         let stop = CancellationToken::new();
         self.streams.lock().await.insert(
-            params.stream_id.clone(),
+            stream_id.clone(),
             Stream {
-                user: actor.user_id.clone(),
+                user,
                 input: transport.outgoing.clone(),
                 stop: stop.clone(),
             },
@@ -78,7 +89,7 @@ impl DesktopMedia {
                     Some(Ok(_)) | None => break,
                 };
                 let frame = DesktopMediaFrame {
-                    stream_id: params.stream_id.clone(),
+                    stream_id: stream_id.clone(),
                     data_base64: Some(base64::engine::general_purpose::STANDARD.encode(data)),
                 };
                 let result =
@@ -93,13 +104,13 @@ impl DesktopMedia {
                 let mut streams = all.lock().await;
                 // Removing the stream cancels its token. Capture explicit closure first.
                 let notify = !stop.is_cancelled();
-                streams.remove(&params.stream_id);
+                streams.remove(&stream_id);
                 notify
             };
             if notify_viewer {
                 if let Err(error) = host
                     .media(DesktopMediaFrame {
-                        stream_id: params.stream_id,
+                        stream_id,
                         data_base64: None,
                     })
                     .await
@@ -108,7 +119,6 @@ impl DesktopMedia {
                 }
             }
         });
-        Ok(())
     }
     pub(crate) async fn send(&self, actor: &Actor, params: DesktopStreamSend) -> TalosResult<()> {
         if params.data_base64.len() > 88 * 1024 {
@@ -154,3 +164,7 @@ fn denied() -> TalosError {
         "The Desktop media stream is invalid or belongs to another account.",
     )
 }
+
+#[cfg(test)]
+#[path = "desktop_media_tests.rs"]
+mod tests;
