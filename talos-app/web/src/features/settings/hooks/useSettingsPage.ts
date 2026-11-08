@@ -11,6 +11,7 @@ export type SettingsSection =
   | "personalization"
   | "web-search"
   | "mcp-servers"
+  | "runtime"
   | "server";
 
 export const settingsSections: SettingsSection[] = [
@@ -21,6 +22,7 @@ export const settingsSections: SettingsSection[] = [
   "personalization",
   "web-search",
   "mcp-servers",
+  "runtime",
   "server",
 ];
 

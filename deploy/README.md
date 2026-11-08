@@ -12,6 +12,7 @@ deploy/
 |-- caddy/          Caddy reverse-proxy example
 |-- docker/         Docker Compose deployment
 |-- install/        TUI release installer and documentation
+|-- kubernetes/     Kubernetes Server and Worker deployment
 `-- nginx/          Nginx reverse-proxy example
 ```
 
@@ -31,6 +32,9 @@ publish Server and Worker images for both `linux/amd64` and `linux/arm64`.
 The examples under `caddy/`, `nginx/`, and `docker/` are the maintained starting
 points. Review authentication, TLS, persistence, resource limits, and secrets
 before production use.
+
+For Kubernetes, use the [namespaced deployment guide](kubernetes/README.md)
+for Server, manually registered Worker, managed Talo and the local k3d profile.
 
 Start the Docker Compose example after setting a provider key in its `.env`:
 

@@ -5,6 +5,7 @@ import {
   Bot,
   Boxes,
   Brush,
+  Cpu,
   ServerCog,
   Settings2,
   Search,
@@ -42,6 +43,7 @@ type SettingsNavigationProps = {
   activeSection: SettingsSection;
   canOpenAccount: boolean;
   canManageConfig: boolean;
+  canManageRuntime: boolean;
 };
 
 const personalNavigation: SettingsNavigationItem[] = [
@@ -59,6 +61,7 @@ const extensionNavigation: SettingsNavigationItem[] = [
 ];
 
 const advancedNavigation: SettingsNavigationItem[] = [
+  { id: "runtime", icon: Cpu },
   { id: "server", icon: ServerCog },
 ];
 
@@ -68,7 +71,7 @@ export const settingsNavigation: SettingsNavigationItem[] = [
   ...advancedNavigation,
 ];
 
-export function SettingsNavigation({ activeSection, canManageConfig, canOpenAccount }: SettingsNavigationProps) {
+export function SettingsNavigation({ activeSection, canManageConfig, canManageRuntime, canOpenAccount }: SettingsNavigationProps) {
   const { t } = useTranslation(["settings", "common"]);
   const [accountOpenError, setAccountOpenError] = useState(false);
   const visiblePersonalNavigation = canManageConfig
@@ -119,7 +122,7 @@ export function SettingsNavigation({ activeSection, canManageConfig, canOpenAcco
         <NavigationGroup
           activeSection={activeSection}
           canOpenAccount={canOpenAccount}
-          items={advancedNavigation}
+          items={advancedNavigation.filter((item) => canManageRuntime || item.id !== "runtime")}
           label={t("settings:navigation.advanced")}
           onAccountClick={openAccount}
         />

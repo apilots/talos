@@ -1,4 +1,6 @@
 import { useCanManageComputer } from "@/features/computers";
+import { getDesktopBridge } from "@/shared/api/desktop-client";
+import { connectionScope } from "@/shared/store/connection-scope";
 import { Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
@@ -11,6 +13,7 @@ import {
   SettingsModelsSection,
   SettingsNavigation,
   SettingsProfileSection,
+  SettingsRuntimeSection,
   SettingsServerSection,
   SettingsWebSearchSection,
   isSettingsSection,
@@ -38,8 +41,16 @@ export function SettingsPage() {
   const activeSection: SettingsSection = isSettingsSection(requestedSection) ? requestedSection : "profile";
   const managementPermission = useCanManageComputer();
   const canManageConfig = managementPermission === true;
+  const canManageRuntime =
+    connection.authStatus === "authenticated" && connection.authRole === "admin" && !getDesktopBridge();
 
   if (requestedSection && !isSettingsSection(requestedSection)) {
+    return <Navigate replace to="/settings" />;
+  }
+  if (activeSection === "runtime" && (connection.authStatus === "unknown" || connection.authStatus === "loading")) {
+    return <div className="p-8 text-sm text-muted">{t("common:loading")}</div>;
+  }
+  if (activeSection === "runtime" && !canManageRuntime) {
     return <Navigate replace to="/settings" />;
   }
   if ((activeSection === "models" || activeSection === "web-search") && managementPermission === undefined) {
@@ -54,6 +65,7 @@ export function SettingsPage() {
       <SettingsNavigation
         activeSection={activeSection}
         canManageConfig={canManageConfig}
+        canManageRuntime={canManageRuntime}
         canOpenAccount={connection.authStatus === "authenticated"}
       />
       <div className="min-h-0 overflow-y-auto">
@@ -96,6 +108,10 @@ export function SettingsPage() {
             {activeSection === "mcp-servers" ? <SettingsMcpServersSection /> : null}
 
             {activeSection === "web-search" ? <SettingsWebSearchSection /> : null}
+
+            {activeSection === "runtime" ? (
+              <SettingsRuntimeSection scope={connectionScope(connection)} />
+            ) : null}
 
             {activeSection === "server" ? (
               <SettingsServerSection

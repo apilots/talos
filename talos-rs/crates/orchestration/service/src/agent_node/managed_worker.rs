@@ -4,8 +4,11 @@
 mod reconcile;
 
 use super::*;
+use crate::worker_runtime_settings::KUBERNETES_HOME_BYTES;
 use std::time::Duration;
-use talos_config::{ServerRuntimePolicy, WorkerRuntimeConfig};
+use talos_config::{
+    domains::managed_worker::WorkerRuntimeKind, ServerRuntimePolicy, WorkerRuntimeConfig,
+};
 use talos_store::node::{
     ManagedWorkerAction as Action, ManagedWorkerDesired as Desired, ManagedWorkerRecord,
     ManagedWorkerStep as Step, ManagedWorkerWrite as Write,
@@ -15,8 +18,8 @@ use talos_types::{
     ManagedWorkerInfo, ManagedWorkerOperation, ManagedWorkerPhase as Phase, ManagedWorkerResponse,
 };
 use talos_worker_runtime::{
-    ContainerState, DesiredRuntimeState, ManagedWorkerRuntime, RuntimeError, RuntimeIdentity,
-    WorkerSpec,
+    ContainerState, DesiredRuntimeState, HomeCapacity, ManagedWorkerRuntime, RuntimeError,
+    RuntimeIdentity, WorkerSpec,
 };
 use tokio::sync::watch;
 
@@ -40,11 +43,45 @@ pub(super) struct ManagedWorkers {
     config: WorkerRuntimeConfig,
     policy: ServerRuntimePolicy,
     trusted_ca: Option<Vec<u8>>,
-    submit: Mutex<()>,
     changed: watch::Sender<()>,
 }
 
+impl ManagedWorkers {
+    fn home_capacity(&self) -> HomeCapacity {
+        match self.config.kind {
+            WorkerRuntimeKind::DockerEngine => HomeCapacity::Unrestricted,
+            WorkerRuntimeKind::Kubernetes => HomeCapacity::LimitedBytes(KUBERNETES_HOME_BYTES),
+        }
+    }
+
+    fn disk_quota(&self) -> ManagedWorkerDiskQuota {
+        if self.config.kind == WorkerRuntimeKind::Kubernetes
+            && self.config.kubernetes.home_quota_enforced
+        {
+            ManagedWorkerDiskQuota::Enforced
+        } else {
+            ManagedWorkerDiskQuota::Unsupported
+        }
+    }
+}
+
 impl AgentNodeService {
+    /// Serialize saving the next Server Runtime with Talo creation.
+    /// The callback receives whether any managed resource record exists and
+    /// returns whether the persisted settings are pending restart.
+    pub async fn with_managed_runtime_update<T, F>(
+        &self,
+        operation: impl FnOnce(bool) -> F,
+    ) -> TalosResult<T>
+    where
+        F: std::future::Future<Output = TalosResult<(T, bool)>> + Send,
+    {
+        let mut pending = self.managed_submission.lock().await;
+        let (result, restart_required) = operation(self.store.has_managed_workers().await?).await?;
+        *pending = restart_required;
+        Ok(result)
+    }
+
     /// Configure the runtime once, on the authenticated management Server only.
     pub fn install_managed_worker_runtime(
         &self,
@@ -59,7 +96,6 @@ impl AgentNodeService {
                 config,
                 policy,
                 trusted_ca,
-                submit: Mutex::new(()),
                 changed: watch::channel(()).0,
             })
             .map_err(|_| conflict())
@@ -94,9 +130,15 @@ impl AgentNodeService {
     pub async fn create_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerInfo> {
         ensure_management_actor(actor)?;
         let managed = self.managed_runtime()?;
-        let _submit = managed.submit.lock().await;
+        let pending = self.managed_submission.lock().await;
         if let Some(record) = self.store.managed_worker(&actor.user_id).await? {
             return self.managed_worker_info(&record).await;
+        }
+        if *pending {
+            return Err(TalosError::new(
+                ErrorCode::Conflict,
+                "The Worker Runtime has a saved change awaiting Server restart.",
+            ));
         }
         let now_at = now();
         let record = ManagedWorkerRecord {
@@ -118,7 +160,7 @@ impl AgentNodeService {
         };
         self.store.reserve_managed_worker(&record).await?;
         managed.changed.send_replace(());
-        Ok(worker_info(&record, /* available */ false))
+        Ok(worker_info(&record, false, managed.disk_quota()))
     }
 
     pub async fn start_managed_worker(
@@ -178,7 +220,7 @@ impl AgentNodeService {
     ) -> TalosResult<ManagedWorkerInfo> {
         ensure_management_actor(actor)?;
         let managed = self.managed_runtime()?;
-        let _submit = managed.submit.lock().await;
+        let _submit = self.managed_submission.lock().await;
         let Some(mut record) = self
             .store
             .managed_worker(&actor.user_id)
@@ -205,7 +247,7 @@ impl AgentNodeService {
                     operation: Some(ManagedWorkerOperation::Delete),
                     cpu_cores: CPU_CORES,
                     memory_bytes: MEMORY_BYTES,
-                    disk_quota: ManagedWorkerDiskQuota::Unsupported,
+                    disk_quota: managed.disk_quota(),
                     error: None,
                 });
             }
@@ -234,7 +276,7 @@ impl AgentNodeService {
             && record.desired == Desired::Running
             && self.managed_node_is_available(&record.node_id).await?
         {
-            return Ok(worker_info(&record, /* available */ true));
+            return Ok(worker_info(&record, true, managed.disk_quota()));
         }
         let expected_generation = record.generation;
         let retry = record.error.is_some();
@@ -301,7 +343,7 @@ impl AgentNodeService {
             Action::Create | Action::Wake | Action::Sleep => unreachable!(),
         }
         managed.changed.send_replace(());
-        Ok(worker_info(&record, /* available */ false))
+        Ok(worker_info(&record, false, managed.disk_quota()))
     }
 
     async fn suspend_managed_worker(
@@ -495,7 +537,7 @@ impl AgentNodeService {
                 },
             );
         }
-        let _submit = managed.submit.lock().await;
+        let _submit = self.managed_submission.lock().await;
         let Some(mut record) = self.store.managed_worker_by_node(node_id).await? else {
             return Err(not_found());
         };
@@ -610,7 +652,11 @@ impl AgentNodeService {
         record: &ManagedWorkerRecord,
     ) -> TalosResult<ManagedWorkerInfo> {
         let available = self.managed_node_is_available(&record.node_id).await?;
-        Ok(worker_info(record, available))
+        let quota = self.managed.get().map_or(
+            ManagedWorkerDiskQuota::Unsupported,
+            ManagedWorkers::disk_quota,
+        );
+        Ok(worker_info(record, available, quota))
     }
 
     fn managed_runtime(&self) -> TalosResult<&ManagedWorkers> {
@@ -623,8 +669,8 @@ impl AgentNodeService {
     }
 }
 
-pub(super) fn worker_info(record: &ManagedWorkerRecord, available: bool) -> ManagedWorkerInfo {
-    let phase = match (
+pub(super) fn worker_phase(record: &ManagedWorkerRecord, available: bool) -> Phase {
+    match (
         record.desired,
         record.step,
         record.operation,
@@ -645,7 +691,15 @@ pub(super) fn worker_info(record: &ManagedWorkerRecord, available: bool) -> Mana
         (_, Step::RemoveForDelete | Step::RemoveHome | Step::FinalizeDelete, _, _) => {
             Phase::Deleting
         }
-    };
+    }
+}
+
+fn worker_info(
+    record: &ManagedWorkerRecord,
+    available: bool,
+    disk_quota: ManagedWorkerDiskQuota,
+) -> ManagedWorkerInfo {
+    let phase = worker_phase(record, available);
     let operation = record.operation.map(|action| match action {
         Action::Create => ManagedWorkerOperation::Create,
         Action::Start | Action::Wake => ManagedWorkerOperation::Start,
@@ -666,7 +720,7 @@ pub(super) fn worker_info(record: &ManagedWorkerRecord, available: bool) -> Mana
         },
         cpu_cores: CPU_CORES,
         memory_bytes: MEMORY_BYTES,
-        disk_quota: ManagedWorkerDiskQuota::Unsupported,
+        disk_quota,
         error: if phase == Phase::Ready {
             None
         } else {
@@ -716,6 +770,7 @@ pub(super) fn runtime_error(error: RuntimeError) -> TalosError {
         RuntimeError::Missing { .. }
         | RuntimeError::UnexpectedState { .. }
         | RuntimeError::Docker { .. }
+        | RuntimeError::Kubernetes { .. }
         | RuntimeError::SeedIo(_) => ErrorCode::ServiceUnavailable,
     };
     TalosError::from_source(code, "The Talo Worker runtime operation failed.", error)

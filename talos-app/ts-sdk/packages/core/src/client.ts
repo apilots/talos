@@ -4,6 +4,7 @@ import type * as TrajectoryAPI from "./generated/app-protocol";
 import { createFilePreviewClient } from "./file-preview";
 import { decodeFileContent } from "./file-content";
 import type { DeleteManagedWorkerRequest, ManagedWorkerActionRequest, ManagedWorkerResponse } from "./generated/app-protocol";
+import type { WorkerRuntimeCandidate, WorkerRuntimeSettingsResponse } from "./generated/app-protocol";
 import type { DesktopStreamAdapter, FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import { decodeManagedWorkerResponse, parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
@@ -217,6 +218,16 @@ export class TalosClient {
         method: "POST",
       });
     },
+  };
+
+  /** Server-owned administration. The selected Computer does not scope these calls. */
+  workerRuntime = {
+    read: (): Promise<WorkerRuntimeSettingsResponse> =>
+      this.http.request(this.url("/v1/worker-runtime")),
+    validate: (candidate: WorkerRuntimeCandidate): Promise<null> =>
+      this.http.request(this.url("/v1/worker-runtime/validate"), { method: "POST", body: JSON.stringify(candidate) }),
+    update: (candidate: WorkerRuntimeCandidate): Promise<WorkerRuntimeSettingsResponse> =>
+      this.http.request(this.url("/v1/worker-runtime"), { method: "PUT", body: JSON.stringify(candidate) }),
   };
 
   user = {

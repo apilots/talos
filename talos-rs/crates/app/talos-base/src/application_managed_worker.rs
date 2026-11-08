@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use talos_config::Config;
+use talos_config::{domains::managed_worker::WorkerRuntimeKind, Config};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::{FileLock, FileSystem};
-use talos_service::AgentNodeService;
-use talos_worker_runtime::{DockerEngine, DEFAULT_SECCOMP_PROFILE};
+use talos_service::{
+    connect_docker_worker_runtime, connect_kubernetes_worker_runtime, AgentNodeService,
+};
+use talos_worker_runtime::ManagedWorkerRuntime;
 
-/// Attach the single-host manager only to the public authenticated Server.
+/// Attach the configured Worker Runtime to the authenticated management Server.
 pub(crate) async fn configure(
     config: &Config,
     nodes: &AgentNodeService,
@@ -22,9 +24,15 @@ pub(crate) async fn configure(
                 "Another Server already manages Talo for this home.",
             )
         })?;
-    let engine = DockerEngine::connect(&runtime.docker_engine.socket_path, DEFAULT_SECCOMP_PROFILE)
-        .map_err(engine_unavailable)?;
-    engine.check().await.map_err(engine_unavailable)?;
+    let backend: Arc<dyn ManagedWorkerRuntime> = match runtime.kind {
+        WorkerRuntimeKind::DockerEngine => {
+            Arc::new(connect_docker_worker_runtime(&runtime.docker_engine).await?)
+        }
+        WorkerRuntimeKind::Kubernetes => Arc::new(
+            connect_kubernetes_worker_runtime(&runtime.kubernetes, &config.talos_paths(), None)
+                .await?,
+        ),
+    };
     let trusted_ca = runtime
         .trusted_ca_file
         .as_ref()
@@ -34,18 +42,10 @@ pub(crate) async fn configure(
             TalosError::internal_with_source("Read the managed Worker trusted CA.", error)
         })?;
     nodes.install_managed_worker_runtime(
-        Arc::new(engine),
+        backend,
         runtime.clone(),
         config.talos.server.runtime.clone(),
         trusted_ca,
     )?;
     Ok(Some((nodes.clone(), lock)))
-}
-
-fn engine_unavailable(error: talos_worker_runtime::RuntimeError) -> TalosError {
-    TalosError::from_source(
-        ErrorCode::ServiceUnavailable,
-        "The local Docker Engine is unavailable.",
-        error,
-    )
 }

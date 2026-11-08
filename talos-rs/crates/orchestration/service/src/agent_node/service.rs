@@ -53,6 +53,7 @@ pub struct AgentNodeService {
     lifecycle: Arc<Mutex<()>>,
     admission: Arc<crate::turn::NodeAdmissionGates>,
     managed: Arc<std::sync::OnceLock<managed_worker::ManagedWorkers>>,
+    managed_submission: Arc<Mutex<bool>>,
 }
 
 struct CurrentRegistration {
@@ -72,6 +73,7 @@ impl AgentNodeService {
             lifecycle: Arc::new(Mutex::new(())),
             admission: Default::default(),
             managed: Default::default(),
+            managed_submission: Default::default(),
         }
     }
 

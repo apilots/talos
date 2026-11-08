@@ -8,6 +8,13 @@ use super::network::{GatewayConfig, LlmConfig};
 use super::sync::SyncConfig;
 use crate::{Config, ModelRef, WorkspaceConfig};
 
+#[path = "kubernetes_worker.rs"]
+mod kubernetes;
+pub use kubernetes::{
+    read_pasted_kubeconfig, write_pasted_kubeconfig, KubeconfigSource, KubernetesConfig,
+    KubernetesCredential,
+};
+
 /// Runtime configuration is opt-in. An ordinary Server or Worker remains unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -22,7 +29,7 @@ pub struct WorkerRuntimeSelection {
     pub runtime: Option<WorkerRuntimeConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerRuntimeConfig {
     pub kind: WorkerRuntimeKind,
@@ -32,6 +39,8 @@ pub struct WorkerRuntimeConfig {
     pub trusted_ca_file: Option<PathBuf>,
     #[serde(default)]
     pub docker_engine: DockerEngineConfig,
+    #[serde(default)]
+    pub kubernetes: KubernetesConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -40,7 +49,7 @@ pub enum WorkerRuntimeKind {
     Kubernetes,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DockerEngineConfig {
     pub socket_path: PathBuf,
@@ -80,11 +89,6 @@ impl TalosRuntimeConfig {
             return Ok(());
         };
         let invalid = |message| TalosError::new(ErrorCode::InvalidRequest, message);
-        if runtime.kind != WorkerRuntimeKind::DockerEngine {
-            return Err(invalid(
-                "talos.worker.runtime.kind Kubernetes is not supported.",
-            ));
-        }
         if !config.gateway.auth || config.agent_node.control_plane.is_none() {
             return Err(invalid("The managed Worker runtime requires an authenticated Server with an Agent node control plane."));
         }
@@ -93,10 +97,17 @@ impl TalosRuntimeConfig {
                 "talos.server.runtime.idle_timeout_seconds must be positive.",
             ));
         }
-        if !runtime.docker_engine.socket_path.is_absolute() {
-            return Err(invalid(
-                "The Docker Engine socket must be an absolute Unix socket path.",
-            ));
+        match runtime.kind {
+            WorkerRuntimeKind::DockerEngine => {
+                if !runtime.docker_engine.socket_path.is_absolute() {
+                    return Err(invalid(
+                        "The Docker Engine socket must be an absolute Unix socket path.",
+                    ));
+                }
+            }
+            WorkerRuntimeKind::Kubernetes => {
+                runtime.kubernetes.validate(&config.talos_paths())?;
+            }
         }
         if !runtime
             .image

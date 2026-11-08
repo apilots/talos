@@ -7,63 +7,7 @@ use futures_util::TryStreamExt;
 use tokio::io::AsyncWriteExt;
 
 use super::{engine_error, DockerEngine, Names, HOME_PATH, NO_NEW_PRIVILEGES, WORKER_USER};
-use crate::{RuntimeError, SeedFile, SeedMode, WorkerSpec};
-
-// The helper runs without a network and uses the same unprivileged UID as the Worker.
-// Secret bytes travel over exec stdin. Positional arguments contain only file metadata.
-const WRITE_FILE: &str = r#"
-set -eu
-cd "$1"
-target=$2
-while [ "${target#*/}" != "$target" ]; do
-    part=${target%%/*}
-    test ! -L "$part"
-    if [ ! -d "$part" ]; then
-        mkdir -m 700 -- "$part"
-        sync .
-    fi
-    cd -- "$part"
-    target=${target#*/}
-done
-test ! -L "$target"
-if [ -e "$target" ]; then
-    test -f "$target"
-fi
-temp=$(mktemp -- .talos-seed.XXXXXXXX)
-trap 'rm -f -- "$temp"' EXIT
-cat > "$temp"
-test "$(wc -c < "$temp")" -eq "$4"
-sync "$temp"
-if [ "$3" = replace ]; then
-    mv -T -- "$temp" "$target"
-elif [ ! -e "$target" ]; then
-    ln -T -- "$temp" "$target"
-fi
-sync .
-"#;
-
-pub(super) fn validate_paths(files: &[SeedFile]) -> Result<Vec<&str>, RuntimeError> {
-    files
-        .iter()
-        .map(|file| {
-            file.path
-                .to_str()
-                .filter(|path| {
-                    path.split('/').all(|part| {
-                        !part.is_empty()
-                            && part != "."
-                            && part != ".."
-                            && part
-                                .bytes()
-                                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
-                    })
-                })
-                .ok_or(RuntimeError::InvalidSpec(
-                    "Home file paths must contain only normal relative components",
-                ))
-        })
-        .collect()
-}
+use crate::{seed::WRITE_FILE, RuntimeError, SeedFile, SeedMode, WorkerSpec};
 
 impl DockerEngine {
     pub(super) async fn seed_home(

@@ -1,0 +1,35 @@
+workspaces:
+  default_workspace_id: default
+  definitions:
+    - workspace_id: default
+      root_prefix: workspace-talos
+agent:
+  name: talos
+gateway:
+  host: 0.0.0.0
+  port: 8080
+  auth: true
+llm:
+  provider: deepseek
+  model: deepseek-v4-flash
+agent_node:
+  control_plane:
+    bind_address: 0.0.0.0:9443
+    tls_certificate_file: /run/talos-tls/tls.crt
+    tls_private_key_file: /run/talos-tls/tls.key
+    trusted_node_ca_file: /run/talos-tls/ca.crt
+cloud:
+  agent_base_url: https://talos-server.talos.svc:9443
+  agent_trusted_ca_file: /run/talos-tls/ca.crt
+talos:
+  worker:
+    runtime:
+      kind: Kubernetes
+      image: ghcr.io/apilots/talos-worker@sha256:<worker-image-digest>
+      control_plane_endpoint: https://talos-server.talos.svc:9443
+      trusted_ca_file: /run/talos-tls/ca.crt
+      kubernetes:
+        namespace: talos
+        storage_class: talos-xfs-quota
+        seccomp_profile: talos/chromium-seccomp.json
+        home_quota_enforced: false

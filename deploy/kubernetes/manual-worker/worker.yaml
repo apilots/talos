@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: talos-personal-worker-home
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: talos-personal-worker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: talos-personal-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: talos-personal-worker
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: Localhost
+          localhostProfile: talos/chromium-seccomp.json
+      initContainers:
+        - name: seed-home
+          image: ghcr.io/apilots/talos-worker:configure
+          command: [/bin/bash, -ec]
+          args:
+            - |
+              umask 077
+              conf=/home/talos/.talos/conf
+              mkdir -p "$conf"
+              if [[ ! -e "$conf/talos.yaml" ]]; then
+                install -m 0600 /bootstrap/talos.yaml "$conf/talos.yaml.bootstrap"
+                mv -f "$conf/talos.yaml.bootstrap" "$conf/talos.yaml"
+              fi
+              for file in node.credential ca.crt; do
+                install -m 0600 "/bootstrap/$file" "$conf/$file.bootstrap"
+                mv -f "$conf/$file.bootstrap" "$conf/$file"
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: home
+              mountPath: /home/talos/.talos
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      containers:
+        - name: worker
+          image: ghcr.io/apilots/talos-worker:configure
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/talos/.talos
+            - name: TALOS_HOME
+              value: /home/talos/.talos
+            - name: TALOS_CONFIG
+              value: /home/talos/.talos/conf/talos.yaml
+            - name: TALOS_WORKER_NODE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: talos-personal-worker-bootstrap
+                  key: node-id
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: home
+              mountPath: /home/talos/.talos
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: talos-personal-worker-home
+        - name: bootstrap
+          secret:
+            secretName: talos-personal-worker-bootstrap
+            defaultMode: 0440
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

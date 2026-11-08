@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use talos_config::AgentNodeRunnerConfig;
 use talos_store::node::SetNodeStatusParams;
-use talos_worker_runtime::{HomeCapacity, SeedFile, SeedMode};
+use talos_worker_runtime::{SeedFile, SeedMode};
 use tokio_util::sync::CancellationToken;
 
 const CREDENTIAL_LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
@@ -135,7 +135,7 @@ impl AgentNodeService {
 
     async fn sleep_managed_worker(&self, record: &mut ManagedWorkerRecord) -> TalosResult<()> {
         let managed = self.managed_runtime()?;
-        let _submit = managed.submit.lock().await;
+        let _submit = self.managed_submission.lock().await;
         let _admission = self
             .admission
             .for_node(&record.node_id)
@@ -185,7 +185,7 @@ impl AgentNodeService {
                 runtime
                     .ensure_home(
                         &spec,
-                        HomeCapacity::Unrestricted,
+                        managed.home_capacity(),
                         &files,
                         SeedMode::CreateMissing,
                     )
@@ -314,11 +314,12 @@ impl AgentNodeService {
                 now_at: now(),
             })
             .await?;
-        self.managed_runtime()?
+        let managed = self.managed_runtime()?;
+        managed
             .runtime
             .ensure_home(
                 spec,
-                HomeCapacity::Unrestricted,
+                managed.home_capacity(),
                 &[SeedFile::new(CREDENTIAL_PATH, token.into_bytes())],
                 SeedMode::Replace,
             )

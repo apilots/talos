@@ -68,7 +68,7 @@ impl AgentNodeService {
                 .filter(|managed| managed.node_id == node.node_id)
             {
                 node.managed_worker_phase =
-                    Some(super::managed_worker::worker_info(managed, node.available).phase);
+                    Some(super::managed_worker::worker_phase(managed, node.available));
             }
             data.push(node);
         }
@@ -102,8 +102,10 @@ impl AgentNodeService {
         }
         let mut node = self.node_info(record).await;
         if let Some(managed) = self.store.managed_worker_by_node(&node.node_id).await? {
-            node.managed_worker_phase =
-                Some(super::managed_worker::worker_info(&managed, node.available).phase);
+            node.managed_worker_phase = Some(super::managed_worker::worker_phase(
+                &managed,
+                node.available,
+            ));
         }
         Ok(node)
     }

@@ -28,6 +28,7 @@ mod skills;
 mod state;
 mod trajectory;
 mod user_profile;
+mod worker_runtime;
 mod workspace_docs;
 
 use std::path::PathBuf;
@@ -208,6 +209,7 @@ impl HttpServer {
             )
             .merge(computers::routes())
             .merge(sync::routes())
+            .merge(worker_runtime::routes())
             .route(
                 "/v1/trajectory/capabilities",
                 get(trajectory::trajectory_capabilities),

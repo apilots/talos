@@ -61,6 +61,10 @@ pub use workspace_docs::WorkspaceDocService;
 
 mod worker_environment;
 pub use worker_environment::WorkerEnvironmentService;
+mod worker_runtime_settings;
+pub use worker_runtime_settings::{
+    connect_docker_worker_runtime, connect_kubernetes_worker_runtime,
+};
 
 pub use service::ManagementSync;
 

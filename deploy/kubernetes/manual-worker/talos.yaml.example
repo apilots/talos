@@ -1,0 +1,23 @@
+workspaces:
+  default_workspace_id: default
+  definitions:
+    - workspace_id: default
+      root_prefix: workspace-talos
+agent:
+  name: talos
+gateway:
+  host: 127.0.0.1
+  port: 8080
+  auth: true
+llm:
+  provider: deepseek
+  model: deepseek-v4-flash
+agent_node:
+  runner:
+    node_id: ${TALOS_WORKER_NODE_ID}
+    control_plane_endpoint: https://talos-server.talos.svc:9443
+    credential_file: /home/talos/.talos/conf/node.credential
+    trusted_ca_file: /home/talos/.talos/conf/ca.crt
+    transport: outbound
+sync:
+  enabled: false

@@ -4,10 +4,14 @@ import type {
   ProfileReadResponse,
   WebSearchToolConfig,
 } from "@talos/sdk-browser";
-import { getTalosClient } from "@/shared/api/client";
+import { getServerTalosClient, getTalosClient } from "@/shared/api/client";
 
 export type LlmConfigResponse = Extract<ConfigResponse, { type: "llm" }>;
 export type WebSearchConfigResponse = Extract<ConfigResponse, { type: "webSearch" }>;
+
+export function workerRuntimeClient() {
+  return getServerTalosClient().workerRuntime;
+}
 
 function expectLlmConfig(response: ConfigResponse): LlmConfigResponse {
   if (response.type !== "llm") {

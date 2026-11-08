@@ -1,4 +1,5 @@
 """Secretless Talo acceptance against a disposable Server, registry and Worker."""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -28,7 +29,10 @@ from http.server import ThreadingHTTPServer
 from threading import Event, Thread
 import os, select, socket, socketserver, subprocess
 import json
-from fixture import Fixture, auxiliary_response
+from fixture import Fixture, USER, auxiliary_response
+
+if os.environ.get("TALOS_E2E_ADMIN_ACCOUNT") == "1":
+    USER["role"] = "admin"
 
 blocked = Event()
 
@@ -83,7 +87,10 @@ Thread(target=server.serve_forever, daemon=True).start()
 if os.environ.get("TALOS_E2E_TALO_RECOVERY") == "1":
     relay = socketserver.ThreadingTCPServer(("0.0.0.0", 9444), RegistrationRelay)
     Thread(target=relay.serve_forever, daemon=True).start()
-raise SystemExit(subprocess.call(["/opt/talos/bin/talos-server"]))
+if os.environ.get("TALOS_E2E_FIXTURE_SIDECAR") == "1":
+    Event().wait()
+else:
+    raise SystemExit(subprocess.call(["/opt/talos/bin/talos-server"]))
 """
 
 
@@ -133,6 +140,38 @@ def managed_resource(kind, instance):
     return docker(*args, "--filter", f"label={LABEL}={instance}", "--format", "{{.ID}}" if kind == "container" else "{{.Name}}").splitlines()
 
 
+class DockerObservations:
+    disk_quota = "unsupported"
+    start_reuses_compute = True
+
+    def compute(self, instance):
+        [container] = managed_resource("container", instance)
+        return container
+
+    def identity(self, container):
+        return docker("inspect", "--format", "{{.Id}}", container)
+
+    def replacement(self, instance, previous_id):
+        containers = managed_resource("container", instance)
+        return next((container for container in containers if self.identity(container) != previous_id), None)
+
+    def home(self, instance):
+        [volume] = managed_resource("volume", instance)
+        return volume
+
+    def stopped(self, instance, container):
+        return docker("inspect", "--format", "{{.State.Status}}", container) == "exited"
+
+    def running(self, instance):
+        return docker("inspect", "--format", "{{.State.Running}}", self.compute(instance)) == "true"
+
+    def execute(self, container, *command):
+        return docker("exec", container, *command)
+
+    def assert_removed(self, instance):
+        assert not any(managed_resource(kind, instance) for kind in ("container", "volume"))
+
+
 def phase(base, expected):
     snapshot = data(http(base + ASSISTANT))["instance"]
     if snapshot and snapshot["phase"] == "failed":
@@ -140,7 +179,7 @@ def phase(base, expected):
     return snapshot if snapshot and snapshot["phase"] == expected else None
 
 
-def exercise(base, instances, worker_model, faults):
+def exercise(base, instances, worker_model, faults, observed, before_delete=None):
     for token, user in ACCOUNTS.items():
         assert data(http(base + "/v1/user", token=token))["user"]["user_id"] == user["user_id"]
     bob = next(token for token in ACCOUNTS if token != TOKEN)
@@ -160,44 +199,48 @@ def exercise(base, instances, worker_model, faults):
         }, token=token)
 
     ready = wait(lambda: phase(base, "ready"), "authenticated TLS registration", seconds=130)
-    assert ready["nodeId"] == node and ready["diskQuota"] == "unsupported", ready
+    assert ready["nodeId"] == node and ready["diskQuota"] == observed.disk_quota, ready
     assert data(http(base + f"/v1/computers/{node}"))["available"]
     assert http(base + f"/v1/computers/{node}", token=bob)["status"] != "success"
     assert action("stop", ready, token=bob)["status"] != "success"
     assert action("delete", ready, confirmDataLoss=False)["status"] != "success"
     print("PASS create -> outbound TLS registration -> Ready; instance is account-scoped", flush=True)
 
-    [worker] = managed_resource("container", instance)
-    [volume] = managed_resource("volume", instance)
-    first_id = docker("inspect", "--format", "{{.Id}}", worker)
-    docker("exec", worker, "/bin/bash", "-ec", 'umask 077; printf t > "$TALOS_HOME/e2e-retain"')
+    worker = observed.compute(instance)
+    volume = observed.home(instance)
+    first_id = observed.identity(worker)
+    observed.execute(worker, "/bin/bash", "-ec", 'umask 077; printf t > "$TALOS_HOME/e2e-retain"')
     data(action("stop", ready))
     stopped = wait(lambda: phase(base, "stopped"), "manual stop")
-    assert docker("inspect", "--format", "{{.State.Status}}", first_id) == "exited"
+    assert observed.stopped(instance, worker)
     assert action("start", ready)["status"] != "success"  # stale generation
     data(action("start", stopped))
     ready = wait(lambda: phase(base, "ready"), "same Worker start and registration")
-    assert managed_resource("container", instance) == [worker]
+    started_id = observed.identity(observed.compute(instance))
+    assert (started_id == first_id) == observed.start_reuses_compute
     data(action("reset", ready))
     ready = wait(lambda: phase(base, "ready"), "replacement Worker registration")
-    [replacement] = managed_resource("container", instance)
-    assert docker("inspect", "--format", "{{.Id}}", replacement) != first_id
+    replacement = observed.compute(instance)
+    replacement_id = observed.identity(replacement)
+    assert replacement_id != started_id
     assert ready["nodeId"] == node and ready["instanceId"] == instance
     assert ready["conversationSessionId"] == created["conversationSessionId"]
-    assert managed_resource("volume", instance) == [volume]
-    assert docker("exec", replacement, "/bin/bash", "-ec", 'cat "$TALOS_HOME/e2e-retain"') == "t"
-    print("PASS manual stop, stale generation rejection, same-Worker Start and Home-preserving Reset", flush=True)
+    assert observed.home(instance) == volume
+    assert observed.execute(replacement, "/bin/bash", "-ec", 'cat "$TALOS_HOME/e2e-retain"') == "t"
+    print("PASS manual stop, stale generation rejection, Worker Start and Home-preserving Reset", flush=True)
 
     sleeping = wait(lambda: phase(base, "sleeping"), "idle sleep", seconds=45)
-    assert docker("inspect", "--format", "{{.State.Status}}", replacement) == "exited"
+    assert observed.stopped(instance, replacement)
     directory = base + f"/v1/fs/directory?nodeId={node}"
     assert http(directory)["status"] != "success"
     assert phase(base, "sleeping")["generation"] == sleeping["generation"]
     assert data(http(directory + "&wakeIfSleeping=true"))["directory"]["readable"]
     ready = wait(lambda: phase(base, "ready"), "Worker registration after explicit directory access")
     assert ready["generation"] > sleeping["generation"] and ready["nodeId"] == node
-    assert managed_resource("container", instance) == [replacement]
-    print("PASS idle sleep; passive read leaves it stopped and explicit access wakes the same Worker", flush=True)
+    awake = observed.compute(instance)
+    assert (observed.identity(awake) == replacement_id) == observed.start_reuses_compute
+    assert observed.home(instance) == volume
+    print("PASS idle sleep; passive read leaves it stopped and explicit access wakes the same Computer", flush=True)
 
     headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
     request = urllib.request.Request(base + f"/v1/llm?nodeId={node}",
@@ -259,21 +302,33 @@ def exercise(base, instances, worker_model, faults):
     assert saved["id"] == session and saved["nodeId"] == node and saved["projectId"] is None
     print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 
-    media(base, node, replacement, http, data, wait, REPORT)
+    media(base, node, observed.compute(instance), http, data, wait, REPORT, observed.execute)
     if RECOVERY:
-        ready = recovery(base, faults, instance, node, ready, action, worker_model, session, start_first_turn, turn)
+        recovery(base, faults, instance, node, ready, action, worker_model, session, start_first_turn, turn, observed)
+    if before_delete:
+        before_delete()
+        data(http(base + "/v1/user"))
+        restarted = data(http(base + ASSISTANT))["instance"]
+        assert restarted["instanceId"] == instance and restarted["nodeId"] == node
+        if restarted["phase"] == "sleeping":
+            data(http(directory + "&wakeIfSleeping=true"))
+        wait(lambda: phase(base, "ready"), "ready after Server restart")
+        assert observed.home(instance) == volume
+        print("PASS Server restart preserves the managed instance, Computer and Home", flush=True)
 
-    data(action("delete", ready, confirmDataLoss=True))
+    current = data(http(base + ASSISTANT))["instance"]
+    data(action("delete", current, confirmDataLoss=True))
     wait(lambda: data(http(base + ASSISTANT))["instance"] is None, "Talo deletion")
-    assert not any(managed_resource(kind, instance) for kind in ("container", "volume"))
+    observed.assert_removed(instance)
     assert http(base + f"/v1/computers/{node}")["status"] != "success"
-    print("PASS confirmed Delete removed compute, Home and Computer registration", flush=True)
+    print("PASS confirmed Delete removed runtime resources, Home and Computer registration", flush=True)
 
 
-def recovery(base, faults, instance, node, ready, action, worker_model, session, start_first_turn, first_turn):
+def recovery(base, faults, instance, node, ready, action, worker_model, session, start_first_turn, first_turn, observed):
     evidence = []
-    [worker] = managed_resource("container", instance)
-    [volume] = managed_resource("volume", instance)
+    worker = observed.compute(instance)
+    worker_id = observed.identity(worker)
+    volume = observed.home(instance)
     check_node = lambda: data(http(base + f"/v1/computers/{node}"))
     if probe := os.environ.get("TALOS_E2E_TALO_DESKTOP_PROBE"):
         subprocess.run([probe, base, node, str(REPORT), "before-reset"], check=True, timeout=100)
@@ -281,12 +336,12 @@ def recovery(base, faults, instance, node, ready, action, worker_model, session,
     http(faults + "/fault/drop")
     offline = wait(lambda: phase(base, "offline"), "Worker disconnect")
     assert offline["generation"] == ready["generation"] and not check_node()["available"]
-    assert managed_resource("container", instance) == [worker]
+    assert observed.identity(observed.compute(instance)) == worker_id
     http(faults + "/fault/restore")
     ready = wait(lambda: phase(base, "ready"), "Worker reconnect", seconds=45)
     assert ready["generation"] == offline["generation"] and ready["nodeId"] == node
-    evidence.append({"case": "worker-reconnect", "generation": ready["generation"], "sameContainer": True})
-    print("PASS Worker drops offline and reconnects without replacing its container or generation", flush=True)
+    evidence.append({"case": "worker-reconnect", "generation": ready["generation"], "sameCompute": True})
+    print("PASS Worker drops offline and reconnects without replacing its compute or generation", flush=True)
 
     sleeping = wait(lambda: phase(base, "sleeping"), "idle sleep before queued Turn", seconds=65)
     assert start_first_turn() == first_turn
@@ -342,7 +397,7 @@ def recovery(base, faults, instance, node, ready, action, worker_model, session,
     elapsed = round(time.monotonic() - started, 2)
     assert 44 <= elapsed < 65
     assert http(base + f"/v1/sessions/{missed_session}")["status"] != "success"
-    assert docker("inspect", "--format", "{{.State.Running}}", worker) == "true"
+    assert observed.running(instance)
 
     def operation_timeout():
         snapshot = data(http(base + ASSISTANT))["instance"]
@@ -350,11 +405,11 @@ def recovery(base, faults, instance, node, ready, action, worker_model, session,
 
     failed = wait(operation_timeout, "overall Wake timeout", seconds=92)
     assert failed["error"]["code"] == "timeout" and failed["generation"] == sleeping["generation"] + 1
-    assert docker("inspect", "--format", "{{.State.Running}}", worker) == "true"
+    assert observed.running(instance)
     evidence.append({"case": "wake-timeout", "requestSeconds": elapsed,
                      "operationSeconds": round(time.monotonic() - started, 2),
-                     "containerRunning": True, "turnCreated": False})
-    print("PASS Wake request and operation time out with no Turn and leave the started container running", flush=True)
+                     "computeRunning": True, "turnCreated": False})
+    print("PASS Wake request and operation time out with no Turn and leave the started compute running", flush=True)
     http(faults + "/fault/restore")
     def late_registration():
         snapshot = data(http(base + ASSISTANT))["instance"]
@@ -364,27 +419,27 @@ def recovery(base, faults, instance, node, ready, action, worker_model, session,
     assert ready["generation"] == failed["generation"] and http(base + f"/v1/sessions/{missed_session}")["status"] != "success"
     evidence.append({"case": "late-registration", "generation": ready["generation"], "turnReplayed": False})
 
+    previous_id = observed.identity(observed.compute(instance))
     http(faults + "/fault/drop")
     offline = wait(lambda: phase(base, "offline"), "offline before Reset")
     data(action("reset", offline))
     wait(lambda: phase(base, "waitingForRegistration"), "replacement starts while registration is cut")
-    [replacement] = managed_resource("container", instance)
-    assert replacement != worker and managed_resource("volume", instance) == [volume]
+    replacement = wait(lambda: observed.replacement(instance, previous_id), "replacement compute")
+    assert observed.home(instance) == volume
     http(faults + "/fault/restore")
     ready = wait(lambda: phase(base, "ready"), "offline Reset registration", seconds=45)
     assert ready["nodeId"] == node and ready["instanceId"] == instance
-    assert docker("exec", replacement, "/bin/bash", "-ec", 'cat "$TALOS_HOME/e2e-retain"') == "t"
+    assert observed.execute(replacement, "/bin/bash", "-ec", 'cat "$TALOS_HOME/e2e-retain"') == "t"
     llm = data(http(base + f"/v1/llm?nodeId={node}"))["config"]
     assert llm["openai"]["base_url"] == worker_model["openai"]["base_url"]
     assert data(http(base + f"/v1/sessions/{session}"))["session"]["nodeId"] == node
-    evidence.append({"case": "offline-reset", "newContainer": True, "sameVolume": True,
+    evidence.append({"case": "offline-reset", "newCompute": True, "sameHome": True,
                      "sameNode": True, "fileRetained": True, "providerRetained": True, "sessionRetained": True})
     if probe := os.environ.get("TALOS_E2E_TALO_DESKTOP_PROBE"):
         subprocess.run([probe, base, node, str(REPORT), "after-reset"], check=True, timeout=100)
-        ready = wait(lambda: phase(base, "ready"), "ready after replacement desktop")
+        wait(lambda: phase(base, "ready"), "ready after replacement desktop")
     (REPORT / "managed-talo-recovery.json").write_text(json.dumps(evidence, indent=2))
     print("PASS offline Reset replaces compute and preserves Home, Computer, model configuration and Session", flush=True)
-    return ready
 
 
 def server_healthy(container, base):
@@ -393,7 +448,7 @@ def server_healthy(container, base):
     return http(base + "/health")
 
 
-def run(files):
+def run(files, parity=False):
     files.chmod(0o755)
     run_id = uuid.uuid4().hex[:10]
     registry, server = f"talo-e2e-registry-{run_id}", f"talo-e2e-server-{run_id}"
@@ -410,6 +465,7 @@ def run(files):
         pinned_worker = next(item for item in digests if item.startswith(tag.rsplit(":", 1)[0] + "@sha256:"))
         gateway = docker("network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}")
         rpc_port, model_port = free_port(), free_port()
+        http_binding = f"127.0.0.1:{free_port()}:8080" if parity else "127.0.0.1::8080"
         fault_port = free_port()
         recovery_args = ["--publish", f"127.0.0.1:{fault_port}:18080",
                          "--env", "TALOS_E2E_TALO_RECOVERY=1"] if RECOVERY else []
@@ -432,7 +488,7 @@ def run(files):
                 "--mount", f"type=bind,src={ROOT / 'conf/migrations'},dst=/opt/talos/conf/migrations,readonly",
             ]
         docker("run", "-d", *container_args(server), "--group-add", gid, *mounts,
-               "--publish", "127.0.0.1::8080", "--publish", f"{gateway}:{rpc_port}:{ingress_port}",
+               "--publish", http_binding, "--publish", f"{gateway}:{rpc_port}:{ingress_port}",
                "--publish", f"{gateway}:{model_port}:18080", *recovery_args,
                "--security-opt", "no-new-privileges:true", "--security-opt",
                "seccomp=" + str(ROOT / "deploy/docker/talos-worker/chromium-seccomp.json"),
@@ -444,7 +500,16 @@ def run(files):
                SERVER_IMAGE, "python3", "-c", FIXTURE_PROGRAM)
         base = "http://" + docker("port", server, "8080/tcp")
         wait(lambda: server_healthy(server, base), "Server health")
-        exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}")
+        restart = None
+        if parity:
+            from managed_talo_personal import docker_personal
+            docker_personal(files, base, worker_model, WORKER_IMAGE, docker, container_args)
+
+            def restart():
+                docker("restart", server)
+                wait(lambda: server_healthy(server, base), "Server restart")
+
+        exercise(base, instances, worker_model, f"http://127.0.0.1:{fault_port}", DockerObservations(), restart)
     finally:
         (REPORT / "managed-talo-server.log").write_text(docker("logs", server, check=False))
         docker("rm", "-fv", server, check=False)
@@ -460,7 +525,10 @@ def run(files):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--parity", action="store_true", help="Include personal registration and Server restart")
+    args = parser.parse_args()
     tmp_root = Path(os.environ["TALOS_E2E_TMP_ROOT"])
     tmp_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="talo-e2e-", dir=tmp_root) as directory:
-        run(Path(directory))
+        run(Path(directory), args.parity)

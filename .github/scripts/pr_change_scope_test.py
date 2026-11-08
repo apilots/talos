@@ -104,6 +104,16 @@ class ChangeScopeTests(unittest.TestCase):
                          client_group_targets('23_browser_container')['desktop'])
         self.assertFalse(helper.rust or helper.frontend)
 
+    def test_managed_talo_full_topology_stays_local(self):
+        result = plan([
+            'talos-e2e/scenarios/25_managed_talo/05_kubernetes_recovery_desktop.sh',
+            'talos-e2e/scripts/browser-worker/managed_talo.py',
+        ])
+        hosted = {case for category in result['categories'].values()
+                  for task in category['scenarios']['include'] for case in task['cases']}
+        self.assertIn('23_browser_container/03_managed_talo.sh', hosted)
+        self.assertFalse(any(case.startswith('25_managed_talo/') for case in hosted))
+
     def test_running_turn_snapshot_and_render_owners_select_the_json_browser_case(self):
         for path in ['talos-app/web/src/features/chat/hooks/useSessionTimelineEvents.ts',
                      'talos-app/web/src/pages/chat/useChatSessionAutoScroll.ts',

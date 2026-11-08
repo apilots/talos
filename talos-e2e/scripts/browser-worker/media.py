@@ -8,9 +8,11 @@ import zlib
 from websockets.sync.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
-def shift_pressed(container):
+def shift_pressed(container, execute=None):
     """Observe applied input for both HTTP and Desktop IPC viewers."""
     code="import ctypes,os; os.environ['DISPLAY']=':99'; os.environ['XAUTHORITY']='/home/talos/.talos/browser/Xauthority'; x=ctypes.CDLL('libX11.so.6'); x.XOpenDisplay.restype=ctypes.c_void_p; d=x.XOpenDisplay(None); assert d; x.XKeysymToKeycode.argtypes=[ctypes.c_void_p,ctypes.c_ulong]; k=x.XKeysymToKeycode(d,0xffe1); b=ctypes.create_string_buffer(32); x.XQueryKeymap.argtypes=[ctypes.c_void_p,ctypes.c_void_p]; x.XQueryKeymap(d,b); print(bool(b.raw[k//8] & (1 << (k%8))))"
+    if execute is not None:
+        return execute(container, 'python3', '-c', code).strip() == 'True'
     return subprocess.check_output(['docker','exec',container,'python3','-c',code],text=True,timeout=5).strip()=='True'
 
 class Viewer:
@@ -79,7 +81,7 @@ class Viewer:
     def close(self):
         self.socket.close()
 
-def media(url,node,container,http,data,wait,report):
+def media(url,node,container,http,data,wait,report,execute=None):
     def state():return data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':'read'}}))
     def operate(kind,**values):
         return data(http(url+'/v1/browser',{'nodeId':node,'operation':{'kind':kind,'expectedRevision':state()['control']['revision'],**values}}))
@@ -129,10 +131,10 @@ def media(url,node,container,http,data,wait,report):
         control.frame()  # The same original RFB socket must remain usable.
         control.key(0xffe1,True)
         time.sleep(.15)
-        wait(lambda:shift_pressed(container),'Human Shift reached actual X display')
+        wait(lambda:shift_pressed(container, execute),'Human Shift reached actual X display')
         released=operate('releaseControl',controllerId=controller)
         assert released['control']['owner']['kind']=='idle'
-        assert not shift_pressed(container),'Held Shift survived handoff ACK'
+        assert not shift_pressed(container, execute),'Held Shift survived handoff ACK'
         # A spectator survives control-epoch changes and continues receiving real pixels.
         b.frame()
         next_handoff=operate('takeControl')

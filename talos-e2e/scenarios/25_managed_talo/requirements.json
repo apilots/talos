@@ -1,0 +1,28 @@
+{
+  "default": {
+    "commands": ["docker", "openssl", "python3"],
+    "python_modules": ["yaml", "websockets"],
+    "checks": ["docker", "server_image", "worker_image"]
+  },
+  "cases": {
+    "02_docker_recovery_desktop.sh": {
+      "commands": ["docker", "node", "openssl", "pnpm", "python3"],
+      "python_modules": ["playwright", "yaml", "websockets"],
+      "checks": ["docker", "server_image", "worker_image", "display"]
+    },
+    "03_kubernetes_preflight.sh": {
+      "commands": ["docker", "k3d", "kubectl", "openssl", "python3"],
+      "env": ["TALOS_E2E_K3D_CLUSTER"]
+    },
+    "04_kubernetes_lifecycle.sh": {
+      "commands": ["docker", "k3d", "kubectl", "openssl", "python3"],
+      "env": ["TALOS_E2E_K3D_CLUSTER"]
+    },
+    "05_kubernetes_recovery_desktop.sh": {
+      "commands": ["docker", "k3d", "kubectl", "node", "openssl", "pnpm", "python3"],
+      "env": ["TALOS_E2E_K3D_CLUSTER"],
+      "python_modules": ["playwright", "yaml", "websockets"],
+      "checks": ["docker", "server_image", "worker_image", "display"]
+    }
+  }
+}

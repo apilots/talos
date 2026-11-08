@@ -17,6 +17,7 @@ const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint
 #[async_trait]
 pub trait AgentNodeStore: Send + Sync {
     async fn reserve_managed_worker(&self, record: &ManagedWorkerRecord) -> TalosResult<()>;
+    async fn has_managed_workers(&self) -> TalosResult<bool>;
     async fn managed_worker(&self, owner: &str) -> TalosResult<Option<ManagedWorkerRecord>>;
     async fn managed_worker_by_node(
         &self,
@@ -140,6 +141,13 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             .await
             .map_err(|error| database_error("reserve Talo lifecycle", error))?;
         tx.commit().await
+    }
+
+    async fn has_managed_workers(&self) -> TalosResult<bool> {
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM managed_workers)")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|error| database_error("check owned Talo resources", error))
     }
 
     async fn managed_worker(&self, owner: &str) -> TalosResult<Option<ManagedWorkerRecord>> {
