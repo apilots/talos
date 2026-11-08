@@ -10,8 +10,9 @@ reach Workers through the Server relay.
 | Docker Engine | One Linux host and one Docker Engine. Docker Compose runs Server. The managed overlay mounts the host Docker Unix socket into Server. | Named Docker volume. |
 | Kubernetes | One Server Deployment and ClusterIP Service. The Runtime uses the Kubernetes API through a namespace-scoped identity. | Independent `100G` PVC. Hard quota depends on the verified StorageClass. |
 
-Use the [Kubernetes deployment guide](kubernetes/README.md) for Server,
-namespace RBAC, StorageClass, and manual Worker setup. Start with the
+Use the [local k3d quick start](kubernetes/README.md#quick-start-with-local-k3d)
+to create a disposable cluster. The [Kubernetes deployment guide](kubernetes/README.md)
+covers Server, namespace RBAC, StorageClass, and manual Worker setup. Start with the
 in-cluster ServiceAccount, or configure a mounted kubeconfig Secret or a
 write-only pasted kubeconfig in **Settings → Runtime**. Saved Runtime changes
 take effect after a controlled Server restart. Changing the target requires
