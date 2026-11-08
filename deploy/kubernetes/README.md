@@ -12,6 +12,47 @@ forward the Server HTTP Service to the workstation loopback as shown below.
 For public access, reuse the cluster's existing ingress with the Server
 routing described in the [Cloud deployment guide](../TALOS_CLOUD_DEPLOY.md#local-access-and-public-ingress).
 
+## Quick start with local k3d
+
+Use a disposable single-node k3d cluster to try this deployment locally.
+Install Docker, [k3d](https://k3d.io/v5.6.3/#installation), and [kubectl
+compatible with Kubernetes 1.28](https://kubernetes.io/releases/version-skew-policy/#kubectl). Run from the repository root in a dedicated
+terminal and choose a cluster name that is unused in `k3d cluster list`. The
+image below matches the local acceptance environment.
+
+```bash
+export K3D_CLUSTER=talos-local
+export KUBE_CONTEXT="k3d-$K3D_CLUSTER"
+k3d cluster create "$K3D_CLUSTER" --servers 1 --agents 0 \
+  --image rancher/k3s:v1.28.8-k3s1 --api-port 127.0.0.1:6550 --no-lb \
+  --k3s-arg '--disable=traefik@server:0' \
+  --kubeconfig-update-default=false --kubeconfig-switch-context=false
+```
+
+After the cluster is created successfully, save a dedicated kubeconfig and
+create the `talos` namespace for the storage probe and Server.
+
+```bash
+export KUBECONFIG="$(mktemp "${TMPDIR:-/tmp}/talos-kubeconfig.XXXXXX")"
+k3d kubeconfig get "$K3D_CLUSTER" > "$KUBECONFIG"
+kubectl --context "$KUBE_CONTEXT" wait --for=condition=Ready nodes --all --timeout=120s
+kubectl --context "$KUBE_CONTEXT" apply -f deploy/kubernetes/namespace.yaml
+```
+
+The dedicated kubeconfig keeps your existing default context intact. If
+`6550` is in use, choose another loopback port for the Kubernetes API. The
+Talos HTTP endpoint remains `127.0.0.1:8080`.
+Follow the [disposable k3d profile](#disposable-k3d-profile) to prepare the
+node's seccomp profile and quota-backed storage, then [deploy Server](#deploy-server).
+Workers use `https://talos-server.talos.svc:9443`. Forward the Server HTTP
+Service to `127.0.0.1:8080` for Web and Electron as shown in the deployment
+steps. These addresses remain the same across Server Pod restarts. If a
+restart ends the port-forward process, rerun the same command.
+
+When the cluster's data is disposable, run `k3d cluster delete "$K3D_CLUSTER"`
+in the same terminal with the dedicated kubeconfig still set. Then remove
+that kubeconfig.
+
 ## Cluster preparation
 
 Use a cluster with NetworkPolicy enforcement and filesystem storage writable
