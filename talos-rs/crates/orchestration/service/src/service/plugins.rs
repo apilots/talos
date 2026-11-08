@@ -268,7 +268,14 @@ impl TalosService {
                 "Select a Computer for Browser settings.",
             )
         })?;
-        let environment = self.worker_environment(actor, Some(&node)).await?;
+        let node = self.connect_selected_computer(actor, &node).await?;
+        let _admission = match request.operation {
+            BrowserOperation::Connect { .. } | BrowserOperation::TakeControl { .. } => {
+                self.nodes.acquire_managed_worker(actor, &node).await?
+            }
+            _ => None,
+        };
+        let environment = self.access.worker_environment(actor, &node).await?;
         if matches!(
             request.operation,
             BrowserOperation::TakeControl { .. } | BrowserOperation::ReleaseControl { .. }

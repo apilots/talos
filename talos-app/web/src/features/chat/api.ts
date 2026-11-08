@@ -124,7 +124,7 @@ export async function createProject(input: string | CreateProjectInput) {
 }
 
 export async function readFsDirectory(path?: string | null) {
-  const response = await getTalosClient().fs.directory.read({ path: path ?? null });
+  const response = await getTalosClient().fs.directory.read({ path: path ?? null, wakeIfSleeping: true });
   return response.directory;
 }
 

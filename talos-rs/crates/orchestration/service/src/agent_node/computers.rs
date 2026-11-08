@@ -55,9 +55,22 @@ impl AgentNodeService {
                 limit: request.limit.unwrap_or(50).clamp(1, 200),
             })
             .await?;
+        let managed = if actor.auth_disabled {
+            None
+        } else {
+            self.store.managed_worker(&actor.user_id).await?
+        };
         let mut data = Vec::with_capacity(page.data.len());
         for record in page.data {
-            data.push(self.node_info(record).await);
+            let mut node = self.node_info(record).await;
+            if let Some(managed) = managed
+                .as_ref()
+                .filter(|managed| managed.node_id == node.node_id)
+            {
+                node.managed_worker_phase =
+                    Some(super::managed_worker::worker_info(managed, node.available).phase);
+            }
+            data.push(node);
         }
         Ok(ComputerListResponse {
             data,
@@ -87,7 +100,12 @@ impl AgentNodeService {
         {
             return Err(not_found());
         }
-        Ok(self.node_info(record).await)
+        let mut node = self.node_info(record).await;
+        if let Some(managed) = self.store.managed_worker_by_node(&node.node_id).await? {
+            node.managed_worker_phase =
+                Some(super::managed_worker::worker_info(&managed, node.available).phase);
+        }
+        Ok(node)
     }
 
     /// Changes only the name, preserving concurrent status, endpoint and lease updates.
@@ -134,6 +152,7 @@ impl AgentNodeService {
         let _lifecycle = self.lock_lifecycle().await;
         let mut current = self.current.lock().await;
         self.owned_node(actor, &request.node_id).await?;
+        self.reject_managed_node_mutation(&request.node_id).await?;
         let record = self
             .store
             .set_status(SetNodeStatusParams {

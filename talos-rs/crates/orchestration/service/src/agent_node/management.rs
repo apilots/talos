@@ -149,6 +149,7 @@ impl AgentNodeService {
         let _lifecycle = self.lock_lifecycle().await;
         let mut current = self.current.lock().await;
         let old = self.owned_node(actor, &request.node_id).await?;
+        self.reject_managed_node_mutation(&request.node_id).await?;
         let revoked = old.endpoint != request.endpoint || request.status == NodeStatus::Disabled;
         let record = self
             .store
@@ -187,6 +188,7 @@ impl AgentNodeService {
         let _lifecycle = self.lock_lifecycle().await;
         let mut current = self.current.lock().await;
         self.owned_node(actor, &request.node_id).await?;
+        self.reject_managed_node_mutation(&request.node_id).await?;
         validate_expiry(request.expires_at, now())?;
         let token = new_token()?;
         self.store

@@ -10,6 +10,8 @@ const AutomationPage = lazy(() => import("@/pages/automation/AutomationPage").th
 
 const ComputersPage = lazy(() => import("@/pages/computers/ComputersPage").then((module) => ({ default: module.ComputersPage })));
 
+const TaloPage = lazy(() => import("@/pages/home/TaloPage").then((module) => ({ default: module.TaloPage })));
+
 const ChatHomePage = lazy(() =>
   import("@/pages/chat/ChatHomePage").then((module) => ({ default: module.ChatHomePage })),
 );
@@ -88,6 +90,7 @@ export const router = createRouter([
     children: [
       { path: "automation", element: withSuspense(<AutomationPage />) },
       { path: "computers", element: withSuspense(<ComputersPage />) },
+      { path: "talo", element: withSuspense(<TaloPage />) },
       {
         index: true,
         element: withSuspense(<ChatHomePage />),

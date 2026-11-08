@@ -54,3 +54,12 @@ impl ServiceGateway {
         self.service.nodes.rotate_credential(actor, request).await
     }
 }
+
+pub(crate) fn managed_worker_response(
+    instance: talos_types::ManagedWorkerInfo,
+) -> talos_types::ManagedWorkerResponse {
+    talos_types::ManagedWorkerResponse {
+        enabled: true,
+        instance: Some(instance),
+    }
+}

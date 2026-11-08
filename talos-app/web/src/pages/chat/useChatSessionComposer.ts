@@ -35,6 +35,7 @@ interface UseChatSessionComposerOptions {
   session?: SessionInfo;
   sessionId: string;
   nodeId?: string;
+  sleepingTalo: boolean;
   restoredAutomationMode?: AutomationMode;
   onRestoredAutomationModeConsumed?: () => void;
 }
@@ -48,6 +49,7 @@ export function useChatSessionComposer({
   session,
   sessionId,
   nodeId,
+  sleepingTalo,
   restoredAutomationMode,
   onRestoredAutomationModeConsumed,
 }: UseChatSessionComposerOptions) {
@@ -197,7 +199,7 @@ export function useChatSessionComposer({
     },
     onSend: async (attachments, mode) => {
       const text = chat.draft;
-      const prepared = await prepareAutomationMessage(text, mode, session?.nodeId ?? nodeId);
+      const prepared = await prepareAutomationMessage(text, mode, session?.nodeId ?? nodeId, sleepingTalo);
       if (ownerRef.current !== owner) throw new DOMException("The message could not be sent.", "AbortError");
       if (prepared.kind === "management") {
         if (!session) throw automationRequestError("chatRequired");

@@ -1,0 +1,21 @@
+[package]
+name = "talos-worker-runtime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Infrastructure lifecycle for managed Talos Workers"
+
+[dependencies]
+bollard = { version = "0.21.1", default-features = false, features = ["pipe"] }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

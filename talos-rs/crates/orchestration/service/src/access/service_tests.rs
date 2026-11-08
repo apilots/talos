@@ -85,6 +85,7 @@ fn recording_access_service(
         crate::test_support::with_environment(coordinator, config),
         sessions,
         projects,
+        false,
     )
 }
 

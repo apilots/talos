@@ -55,6 +55,7 @@ export function ChatSessionPage() {
   const nodeId =
     session?.nodeId ?? locationState?.initialNodeId ?? computers.selectedId;
   const target = useComputer(nodeId);
+  const sleepingTalo = target.data?.managedWorkerPhase === "sleeping";
   useEffect(() => {
     if (session?.nodeId) selectComputer(scope, session.nodeId);
   }, [session?.nodeId, sessionId, scope, selectComputer]);
@@ -104,6 +105,7 @@ export function ChatSessionPage() {
     session,
     sessionId,
     nodeId,
+    sleepingTalo,
     restoredAutomationMode: restoredAutomationMode?.scope === scope && restoredAutomationMode.sessionId === sessionId ? restoredAutomationMode.mode : undefined,
     onRestoredAutomationModeConsumed: () => setRestoredAutomationMode(undefined),
   });
@@ -217,7 +219,7 @@ export function ChatSessionPage() {
             key={JSON.stringify([scope, sessionId])}
             {...sessionComposer.props}
             disabled={
-              !target.data?.available ||
+              (!target.data?.available && !sleepingTalo) ||
               (sessionQuery.isPending &&
                 !locationState &&
                 pendingInitialSessionId !== sessionId)

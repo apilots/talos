@@ -17,15 +17,15 @@ import { createUuid } from "@/shared/lib/uuid";
 import { useBrowser } from "./browser-query";
 
 /** Capability-gated entry, reused by the existing session header and Computer inspector. */
-export function ComputerDesktopButton({ nodeId, online, remoteOnly = false, label, className }: { nodeId?: string; online: boolean; remoteOnly?: boolean; label?: string; className?: string }) {
+export function ComputerDesktopButton({ nodeId, online }: { nodeId?: string; online: boolean }) {
   const { t } = useTranslation("computers");
   const open = useAppStore((state) => state.openWorkspaceWindow);
   const browser = useBrowser(nodeId, online);
   const snapshot=browser.data;
-  if (remoteOnly && (snapshot?.host !== "docker" || snapshot.display.kind !== "dockerDesktop")) return null;
   if (!nodeId || !snapshot?.enabled || (snapshot.display.kind !== "dockerDesktop" && !snapshot.targets.length)) return null;
-  return <Button variant="ghost" className={cn("shrink-0 gap-2 whitespace-nowrap px-2 py-2 text-xs sm:px-3.5",className)} aria-label={label ?? t(snapshot.display.kind === "dockerDesktop" ? "desktop.open" : "desktop.browser")} title={label ?? t(snapshot.display.kind === "dockerDesktop" ? "desktop.open" : "desktop.browser")} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
-    <Monitor aria-hidden="true" size={16} /><span className={label ? undefined : "hidden sm:inline"}>{label ?? t(snapshot.display.kind === "dockerDesktop" ? "desktop.open" : "desktop.browser")}</span>
+  const label = t(snapshot.display.kind === "dockerDesktop" ? "desktop.open" : "desktop.browser");
+  return <Button variant="ghost" className="shrink-0 gap-2 whitespace-nowrap px-2 py-2 text-xs sm:px-3.5" aria-label={label} title={label} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
+    <Monitor aria-hidden="true" size={16} /><span className="hidden sm:inline">{label}</span>
   </Button>;
 }
 

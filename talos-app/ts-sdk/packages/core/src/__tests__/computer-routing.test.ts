@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TalosClient } from "../client";
 import { AppServerClient } from "../app-server";
 import type { HttpAdapter, StreamAdapter } from "../adapters";
+import type { ManagedWorkerResponse } from "../generated/app-protocol";
 import { RecordingTransport } from "./app-server.fixture";
 
 describe("Computer routing through both client transports", () => {
@@ -138,4 +139,40 @@ it("exposes owner deletion with the same response over HTTP and JSON-RPC", async
   const app = new AppServerClient(transport);
   await expect(app.computers.delete(response)).resolves.toEqual(response);
   expect(transport.request).toHaveBeenCalledWith("computer/delete", response);
+});
+
+it("routes the same account-scoped Talo lifecycle through HTTP and JSON-RPC", async () => {
+  const response: ManagedWorkerResponse = { enabled: true, instance: null };
+  const request = vi.fn().mockResolvedValue(response);
+  const http = new TalosClient({ request }, noopStreamAdapter(), "http://localhost:8080");
+  const transport = new RecordingTransport();
+  const rpcRequest = vi.spyOn(transport, "request").mockResolvedValue(response);
+  const rpc = new AppServerClient(transport);
+  const action = { instanceId: "talo/1", expectedGeneration: 3 };
+  const removal = { ...action, confirmDataLoss: true };
+  for (const client of [http.computers, rpc.computers]) {
+    await expect(client.readManagedWorker()).resolves.toEqual(response);
+    await expect(client.createManagedWorker()).resolves.toEqual(response);
+    await expect(client.startManagedWorker(action)).resolves.toEqual(response);
+    await expect(client.stopManagedWorker(action)).resolves.toEqual(response);
+    await expect(client.resetManagedWorker(action)).resolves.toEqual(response);
+    await expect(client.deleteManagedWorker(removal)).resolves.toEqual(response);
+  }
+  const base = "http://localhost:8080/v1/computers/managed-worker";
+  expect(request.mock.calls).toEqual([
+    [base],
+    [base, { method: "POST", body: "{}" }],
+    ...["start", "stop", "reset", "delete"].map((operation) => [
+      `${base}/talo%2F1/${operation}`,
+      { method: "POST", body: JSON.stringify({ expectedGeneration: 3, ...(operation === "delete" ? { confirmDataLoss: true } : {}) }) },
+    ]),
+  ]);
+  expect(rpcRequest.mock.calls).toEqual([
+    ["computer/readManagedWorker", {}],
+    ["computer/createManagedWorker", {}],
+    ["computer/startManagedWorker", action],
+    ["computer/stopManagedWorker", action],
+    ["computer/resetManagedWorker", action],
+    ["computer/deleteManagedWorker", removal],
+  ]);
 });

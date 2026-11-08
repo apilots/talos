@@ -62,11 +62,12 @@ impl AgentNodeService {
             {
                 return Err(not_found());
             }
+            self.reject_managed_node_mutation(&request.node_id).await?;
             let prepare = current
                 .get(&request.node_id)
                 .and_then(|registration| registration.prepare_deletion.clone());
             if let Some(prepare) = &prepare {
-                if let Err(error) = prepare(/* blocked */ true).await {
+                if let Err(error) = prepare(agent_protocol::RegistrationAdmission::Block).await {
                     // An expired, unreachable publication cannot admit remote work.
                     // Offline removal therefore does not require its source to reconnect.
                     let expired = node.lease_expires_at.is_none_or(|expires| expires <= now());
@@ -78,7 +79,9 @@ impl AgentNodeService {
                             | ErrorCode::Timeout
                     );
                     if !(expired && unavailable) {
-                        if let Err(cleanup) = prepare(/* blocked */ false).await {
+                        if let Err(cleanup) =
+                            prepare(agent_protocol::RegistrationAdmission::Unblock).await
+                        {
                             talos_logging::report_error(&cleanup);
                         }
                         return Err(if unavailable {
@@ -102,7 +105,9 @@ impl AgentNodeService {
                 .await
             {
                 if let Some(prepare) = prepare {
-                    if let Err(cleanup) = prepare(/* blocked */ false).await {
+                    if let Err(cleanup) =
+                        prepare(agent_protocol::RegistrationAdmission::Unblock).await
+                    {
                         talos_logging::report_error(&cleanup);
                     }
                 }

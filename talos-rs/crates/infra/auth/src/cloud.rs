@@ -368,6 +368,10 @@ impl AuthService for CloudAuthService {
         self.contexts.identity(token)
     }
 
+    fn has_verified_admin(&self, user_id: &str) -> bool {
+        self.contexts.has_verified_admin(user_id)
+    }
+
     fn invalidate_access_token(&self, token: &str) {
         self.contexts.invalidate(token);
     }

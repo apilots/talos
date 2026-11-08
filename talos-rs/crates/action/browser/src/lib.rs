@@ -16,7 +16,7 @@ pub use managed::ManagedBrowser;
 mod stdio;
 
 pub use action::{BrowserAction, BrowserActionExt, BrowserTabAction};
-pub use runtime::desktop::{DesktopConnector, DesktopTransport};
+pub use runtime::desktop::{DesktopConnector, DesktopTransport, ManagedDesktopFence};
 pub use runtime::{
     BrowserBackend, BrowserDispatch, BrowserFuture, BrowserInvocationIdentity,
     BrowserInvocationLease, BrowserRuntime, PluginEnabledReader, PreparedBrowserEnvironment,

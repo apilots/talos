@@ -168,7 +168,12 @@ impl TurnService {
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         automation_metrics: Option<&AgentRunMetrics>,
     ) -> TalosResult<()> {
-        if let Some(automation) = self.automation.get() {
+        if self.automation.get().is_some()
+            || self
+                .nodes
+                .as_ref()
+                .is_some_and(crate::AgentNodeService::managed_worker_enabled)
+        {
             let result: TalosResult<()> = async {
                 if let Some(session) = self
                     .execution
@@ -176,9 +181,19 @@ impl TurnService {
                     .load_record(&event.identity.session_id)
                     .await?
                 {
-                    automation
-                        .settle(&session, event, automation_metrics)
-                        .await?;
+                    if let Some(nodes) = &self.nodes {
+                        if let Err(error) = nodes
+                            .record_managed_activity(&session.execution_node_id)
+                            .await
+                        {
+                            self.execution.report_warning(&event.identity, error).await;
+                        }
+                    }
+                    if let Some(automation) = self.automation.get() {
+                        automation
+                            .settle(&session, event, automation_metrics)
+                            .await?;
+                    }
                 }
                 Ok(())
             }

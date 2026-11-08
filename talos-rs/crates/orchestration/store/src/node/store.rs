@@ -6,15 +6,44 @@ use talos_storage::database_error;
 use agent_protocol::{NodeHealth, NodeMode, NodeStatus};
 
 use super::{
-    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, NodeAuthenticationRecord,
-    NodeListScope, NodePageRecord, NodeRecord, RegisterNodeParams, RenameNodeParams,
-    RenewNodeParams, RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
+    CreateNodeParams, HeartbeatNodeParams, LeaseCheck, ListNodesParams, ManagedWorkerDeletion,
+    ManagedWorkerRecord, ManagedWorkerWrite, NodeAuthenticationRecord, NodeListScope,
+    NodePageRecord, NodeRecord, RegisterNodeParams, RenameNodeParams, RenewNodeParams,
+    RotateCredentialParams, SetNodeStatusParams, UpdateNodeParams,
 };
 
 const NODE_COLUMNS: &str = "node_id, owner_user_id, display_name, mode, endpoint, status, credential_hash, credential_expires_at, lease_token_hash, lease_expires_at, last_heartbeat_at, health, created_at, updated_at, system_info";
 
 #[async_trait]
 pub trait AgentNodeStore: Send + Sync {
+    async fn reserve_managed_worker(&self, record: &ManagedWorkerRecord) -> TalosResult<()>;
+    async fn managed_worker(&self, owner: &str) -> TalosResult<Option<ManagedWorkerRecord>>;
+    async fn managed_worker_by_node(
+        &self,
+        node_id: &str,
+    ) -> TalosResult<Option<ManagedWorkerRecord>>;
+    async fn managed_workers_needing_attention(
+        &self,
+        idle_before: i64,
+    ) -> TalosResult<Vec<ManagedWorkerRecord>>;
+    async fn write_managed_worker(
+        &self,
+        record: &ManagedWorkerRecord,
+        expected_generation: u32,
+        write: ManagedWorkerWrite,
+    ) -> TalosResult<()>;
+    async fn record_managed_worker_activity(&self, node_id: &str, now_at: i64) -> TalosResult<()>;
+    async fn finalize_managed_worker_deletion(
+        &self,
+        record: &ManagedWorkerRecord,
+        now_at: i64,
+    ) -> TalosResult<()>;
+    async fn managed_worker_deletion(
+        &self,
+        owner: &str,
+        instance_id: &str,
+    ) -> TalosResult<Option<ManagedWorkerDeletion>>;
+
     async fn upsert_embedded(&self, status: NodeStatus, now_at: i64) -> TalosResult<NodeRecord>;
     async fn create(&self, params: CreateNodeParams) -> TalosResult<NodeRecord>;
     async fn get(&self, node_id: &str) -> TalosResult<Option<NodeRecord>>;
@@ -78,6 +107,168 @@ impl DatabaseAgentNodeStore {
 
 #[async_trait]
 impl AgentNodeStore for DatabaseAgentNodeStore {
+    async fn reserve_managed_worker(&self, record: &ManagedWorkerRecord) -> TalosResult<()> {
+        let mut tx = self.begin_write(&record.node_id).await?;
+        sqlx::query("INSERT INTO agent_nodes(node_id, owner_user_id, display_name, mode, status, created_at, updated_at) VALUES (?, ?, 'Talo', 'remote', 'disabled', ?, ?)")
+            .bind(&record.node_id)
+            .bind(&record.owner_user_id)
+            .bind(record.operation_at)
+            .bind(record.operation_at)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| database_error("reserve Talo Computer", error))?;
+        sqlx::query("INSERT INTO managed_workers(instance_id, owner_user_id, node_id, short_id, image, revision, generation, desired, operation, step, home_ready, last_activity_at, operation_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(&record.instance_id)
+            .bind(&record.owner_user_id)
+            .bind(&record.node_id)
+            .bind(&record.short_id)
+            .bind(&record.image)
+            .bind(record.revision)
+            .bind(record.generation)
+            .bind(record.desired)
+            .bind(record.operation)
+            .bind(record.step)
+            .bind(record.home_ready)
+            .bind(record.last_activity_at)
+            .bind(record.operation_at)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| database_error("reserve Talo lifecycle", error))?;
+        tx.commit().await
+    }
+
+    async fn managed_worker(&self, owner: &str) -> TalosResult<Option<ManagedWorkerRecord>> {
+        sqlx::query_as("SELECT * FROM managed_workers WHERE owner_user_id = ?")
+            .bind(owner)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| database_error("read Talo lifecycle", error))
+    }
+
+    async fn managed_worker_by_node(
+        &self,
+        node_id: &str,
+    ) -> TalosResult<Option<ManagedWorkerRecord>> {
+        sqlx::query_as("SELECT * FROM managed_workers WHERE node_id = ?")
+            .bind(node_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| database_error("read managed Computer lifecycle", error))
+    }
+
+    async fn managed_workers_needing_attention(
+        &self,
+        idle_before: i64,
+    ) -> TalosResult<Vec<ManagedWorkerRecord>> {
+        sqlx::query_as("SELECT * FROM managed_workers WHERE step = 'wait' OR (step <> 'stable' AND error IS NULL) OR (step = 'stable' AND desired = 'running' AND last_activity_at <= ?)")
+            .bind(idle_before)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|error| database_error("scan Talo lifecycles", error))
+    }
+
+    async fn write_managed_worker(
+        &self,
+        record: &ManagedWorkerRecord,
+        expected_generation: u32,
+        write: ManagedWorkerWrite,
+    ) -> TalosResult<()> {
+        let mut tx = self.begin_write(&record.node_id).await?;
+        if let ManagedWorkerWrite::Suspend = write {
+            super::managed_worker::ensure_node_has_no_active_turn(&mut tx, &record.node_id).await?;
+            sqlx::query("UPDATE agent_nodes SET status = 'disabled', lease_token_hash = NULL, lease_expires_at = NULL, last_heartbeat_at = NULL, health = 'unknown', updated_at = ? WHERE node_id = ?")
+                .bind(record.operation_at)
+                .bind(&record.node_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|error| database_error("suspend Talo registration", error))?;
+        }
+        let affected = sqlx::query("UPDATE managed_workers SET image = ?, revision = ?, generation = ?, desired = ?, operation = ?, step = ?, home_ready = ?, last_activity_at = max(last_activity_at, ?), operation_at = ?, error = ? WHERE instance_id = ? AND generation = ?")
+            .bind(&record.image)
+            .bind(record.revision)
+            .bind(record.generation)
+            .bind(record.desired)
+            .bind(record.operation)
+            .bind(record.step)
+            .bind(record.home_ready)
+            .bind(record.last_activity_at)
+            .bind(record.operation_at)
+            .bind(&record.error)
+            .bind(&record.instance_id)
+            .bind(expected_generation)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| database_error("checkpoint Talo lifecycle", error))?
+            .rows_affected();
+        if affected != 1 {
+            return Err(TalosError::new(
+                ErrorCode::Conflict,
+                "Talo lifecycle changed.",
+            ));
+        }
+        tx.commit().await
+    }
+
+    async fn record_managed_worker_activity(&self, node_id: &str, now_at: i64) -> TalosResult<()> {
+        sqlx::query("UPDATE managed_workers SET last_activity_at = max(last_activity_at, ?) WHERE node_id = ? AND desired = 'running'")
+            .bind(now_at)
+            .bind(node_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|error| database_error("record Talo activity", error))?;
+        Ok(())
+    }
+
+    async fn finalize_managed_worker_deletion(
+        &self,
+        record: &ManagedWorkerRecord,
+        now_at: i64,
+    ) -> TalosResult<()> {
+        let mut tx = self.begin_write(&record.node_id).await?;
+        let affected = sqlx::query("DELETE FROM managed_workers WHERE instance_id = ? AND generation = ? AND step = 'finalize_delete'")
+            .bind(&record.instance_id)
+            .bind(record.generation)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| database_error("release Talo account slot", error))?
+            .rows_affected();
+        if affected != 1 {
+            return Err(TalosError::new(
+                ErrorCode::Conflict,
+                "Talo lifecycle changed.",
+            ));
+        }
+        super::deletion::delete_registration_in(
+            &mut tx,
+            &record.node_id,
+            &record.owner_user_id,
+            now_at,
+        )
+        .await?;
+        sqlx::query("INSERT INTO managed_worker_deletions(instance_id, owner_user_id, node_id, generation) VALUES (?, ?, ?, ?)")
+            .bind(&record.instance_id)
+            .bind(&record.owner_user_id)
+            .bind(&record.node_id)
+            .bind(record.generation)
+            .execute(&mut *tx)
+            .await
+            .map_err(|error| database_error("retain Talo deletion receipt", error))?;
+        tx.commit().await
+    }
+
+    async fn managed_worker_deletion(
+        &self,
+        owner: &str,
+        instance_id: &str,
+    ) -> TalosResult<Option<ManagedWorkerDeletion>> {
+        sqlx::query_as("SELECT instance_id, node_id, generation FROM managed_worker_deletions WHERE instance_id = ? AND owner_user_id = ?")
+            .bind(instance_id)
+            .bind(owner)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| database_error("read Talo deletion receipt", error))
+    }
+
     async fn deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>> {
         self.read_deletion_owner(node_id).await
     }

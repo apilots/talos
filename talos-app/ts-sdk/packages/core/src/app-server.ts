@@ -2,7 +2,7 @@ import { createTrajectoryClient } from "./trajectory";
 import { createFilePreviewClient } from "./file-preview";
 import { decodeFileContent } from "./file-content";
 import type * as AppProtocol from "./generated/app-protocol";
-import type { FileUploadOptions } from "./adapters";
+import { decodeManagedWorkerResponse, type FileUploadOptions } from "./adapters";
 import type {
   MemoryFileListResponse,
   MemoryFileReadRequest,
@@ -433,6 +433,18 @@ export class AppServerClient {
   };
 
   computers = {
+    readManagedWorker: (): Promise<AppProtocol.ManagedWorkerResponse> =>
+      this.transport.request<AppProtocol.ManagedWorkerResponse>("computer/readManagedWorker", {}).then(decodeManagedWorkerResponse),
+    createManagedWorker: (): Promise<AppProtocol.ManagedWorkerResponse> =>
+      this.transport.request<AppProtocol.ManagedWorkerResponse>("computer/createManagedWorker", {}).then(decodeManagedWorkerResponse),
+    startManagedWorker: (params: AppProtocol.ManagedWorkerActionRequest): Promise<AppProtocol.ManagedWorkerResponse> =>
+      this.transport.request<AppProtocol.ManagedWorkerResponse>("computer/startManagedWorker", params).then(decodeManagedWorkerResponse),
+    stopManagedWorker: (params: AppProtocol.ManagedWorkerActionRequest): Promise<AppProtocol.ManagedWorkerResponse> =>
+      this.transport.request<AppProtocol.ManagedWorkerResponse>("computer/stopManagedWorker", params).then(decodeManagedWorkerResponse),
+    resetManagedWorker: (params: AppProtocol.ManagedWorkerActionRequest): Promise<AppProtocol.ManagedWorkerResponse> =>
+      this.transport.request<AppProtocol.ManagedWorkerResponse>("computer/resetManagedWorker", params).then(decodeManagedWorkerResponse),
+    deleteManagedWorker: (params: AppProtocol.DeleteManagedWorkerRequest): Promise<AppProtocol.ManagedWorkerResponse> =>
+      this.transport.request<AppProtocol.ManagedWorkerResponse>("computer/deleteManagedWorker", params).then(decodeManagedWorkerResponse),
     delete: (params: AppProtocol.DeleteComputerRequest): Promise<AppProtocol.DeleteComputerResponse> =>
       this.transport.request("computer/delete", params),
     list: (params: AppProtocol.ComputerListRequest = {}): Promise<AppProtocol.ComputerListResponse> =>

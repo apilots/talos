@@ -28,7 +28,7 @@ export function AppNavigation({ sidebarAvailable, sidebarToggleRef, sidebarVisib
 
 /** Session/project context and Computer actions belong to the main business column. */
 export function AppSessionContext() {
-  const { t } = useTranslation("common");
+  const { t } = useTranslation(["common", "computers"]);
   const location = useLocation();
   const navigate = useNavigate();
   const setActiveProject = useAppStore(state => state.setActiveProjectId);
@@ -40,7 +40,7 @@ export function AppSessionContext() {
   const page = location.pathname.startsWith("/settings") ? "settings" : location.pathname.startsWith("/computers") ? "computers"
     : location.pathname.startsWith("/plugins") ? "plugins" : location.pathname.startsWith("/files") ? "files"
     : location.pathname.startsWith("/automation") ? "automation" : location.pathname.startsWith("/memory") ? "memory" : "newChat";
-  const title = session?.title ?? t(`navigation.${page}`);
+  const title = session?.title ?? (location.pathname === "/talo" ? t("computers:talo.title") : t(`common:navigation.${page}`));
   return <div className="flex min-w-0 flex-1 items-center gap-2">
     <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
       <FileText aria-hidden="true" size={14} className="hidden shrink-0 text-muted sm:block" />

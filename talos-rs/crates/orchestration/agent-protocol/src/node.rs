@@ -68,3 +68,12 @@ mod tests {
         }
     }
 }
+
+/// The existing registration admission fence also protects the managed desktop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationAdmission {
+    Block,
+    Unblock,
+    StopManaged,
+    SleepManaged { idle_before: i64 },
+}

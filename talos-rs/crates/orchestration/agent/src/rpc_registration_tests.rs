@@ -32,10 +32,11 @@ fn request(blocked: bool) -> pb::SetRegistrationAdmissionRequest {
             token: "remote-lease".into(),
         }),
         blocked,
+        managed_desktop: None,
     }
 }
-#[test]
-fn deletion_blocks_remote_credentials_and_stale_admission_without_revoking_local_auth() {
+#[tokio::test]
+async fn deletion_blocks_remote_credentials_and_stale_admission_without_revoking_local_auth() {
     let home = tempfile::tempdir().unwrap();
     let adapter = adapter(home.path());
     let remote = NodeAuth {
@@ -50,6 +51,7 @@ fn deletion_blocks_remote_credentials_and_stale_admission_without_revoking_local
     adapter.install_local_auth(&local).unwrap();
     adapter
         .registration_admission(request(/* blocked */ true))
+        .await
         .unwrap();
     assert!(adapter.authorize(&remote).is_err());
     assert!(adapter.authorize_admission(&previously_authorized).is_err());
@@ -57,11 +59,12 @@ fn deletion_blocks_remote_credentials_and_stale_admission_without_revoking_local
     assert!(adapter.validate_connection_auth(&remote).is_ok());
     adapter
         .registration_admission(request(/* blocked */ false))
+        .await
         .unwrap();
     assert!(adapter.authorize(&remote).is_ok());
 }
-#[test]
-fn waiting_turn_marker_prevents_registration_deletion_after_worker_restart() {
+#[tokio::test]
+async fn waiting_turn_marker_prevents_registration_deletion_after_worker_restart() {
     let home = tempfile::tempdir().unwrap();
     let adapter = adapter(home.path());
     let context = agent_protocol::AgentSessionContext {
@@ -90,6 +93,7 @@ fn waiting_turn_marker_prevents_registration_deletion_after_worker_restart() {
     let restarted = self::adapter(home.path());
     assert!(restarted
         .registration_admission(request(/* blocked */ true))
+        .await
         .unwrap_err()
         .is_code(ErrorCode::ActiveTurnRunning));
 }

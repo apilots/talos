@@ -35,6 +35,9 @@ mod account_sync;
 mod computers;
 #[path = "deletion.rs"]
 mod deletion;
+#[path = "managed_worker.rs"]
+mod managed_worker;
+pub(crate) use managed_worker::ManagedDispatch;
 #[path = "management.rs"]
 mod management;
 
@@ -48,6 +51,8 @@ pub struct AgentNodeService {
     account_sync: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn crate::ManagementSync>>>>,
     current: Arc<Mutex<HashMap<String, CurrentRegistration>>>,
     lifecycle: Arc<Mutex<()>>,
+    admission: Arc<crate::turn::NodeAdmissionGates>,
+    managed: Arc<std::sync::OnceLock<managed_worker::ManagedWorkers>>,
 }
 
 struct CurrentRegistration {
@@ -65,6 +70,8 @@ impl AgentNodeService {
             account_sync: Default::default(),
             current: Arc::new(Mutex::new(HashMap::new())),
             lifecycle: Arc::new(Mutex::new(())),
+            admission: Default::default(),
+            managed: Default::default(),
         }
     }
 
@@ -501,6 +508,7 @@ fn to_info(record: NodeRecord) -> NodeInfo {
         owner_user_id: record.owner_user_id,
         available: record.mode == NodeMode::Embedded && record.status == NodeStatus::Enabled,
         credential_expires_at: record.credential_expires_at,
+        managed_worker_phase: None,
     }
 }
 

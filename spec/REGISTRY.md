@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 054 |
+| `feat` | 055 |
 | `fix` | 013 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-054 | [Talo managed AI assistant](feat-054-managed-talo/design.md) | implemented |
 | feat-053 | [Session Goal and Loop](feat-053-session-goal-loop/design.md) | verified |
 | fix-012 | [Capture contention and terminal logging lifetime](fix-012-capture-and-tui-shutdown/design.md) | active |
 | feat-052 | [Turn trajectory and model request inspection](feat-052-turn-trajectory/design.md) | active |

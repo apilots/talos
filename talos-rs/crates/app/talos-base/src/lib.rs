@@ -34,6 +34,7 @@ pub use agent_node_rpc::{
 };
 mod application_automation;
 mod application_desktop;
+mod application_managed_worker;
 mod application_runtime;
 mod application_storage;
 mod application_sync;
@@ -79,6 +80,7 @@ pub struct TalosServerRuntime {
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
     node_rpc_server: Option<agent_node_rpc::NodeRpcServer>,
+    managed_worker: Option<(AgentNodeService, talos_fs::FileLock)>,
     coordinator: Arc<CoordinatorImpl>,
     gateway_url: String,
     shutdown_token: CancellationToken,
@@ -472,6 +474,7 @@ impl TalosServerRuntime {
             http_server,
             channel_server,
             node_rpc_server,
+            managed_worker,
             coordinator,
             gateway_url: _,
             shutdown_token,
@@ -501,6 +504,14 @@ impl TalosServerRuntime {
         });
 
         let mut tasks = JoinSet::new();
+        if let Some((nodes, lock)) = managed_worker {
+            let shutdown = shutdown_token.clone();
+            tasks.spawn(async move {
+                let _lock = lock;
+                nodes.run_managed_workers(shutdown).await;
+                Ok(())
+            });
+        }
         let shutdown_token_for_http = shutdown_token.clone();
         tasks.spawn(async move { http_server.run_with_shutdown(shutdown_token_for_http).await });
         if let Some(channel_server) = channel_server {
@@ -568,6 +579,9 @@ async fn start_server_after_startup(
     let config = apply_runtime_options(config, options.as_ref());
     config.validate_runtime()?;
     let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
+
+    let managed_worker =
+        application_managed_worker::configure(&config, &runtime.node_service).await?;
 
     let node_rpc_server = config
         .agent_node
@@ -657,6 +671,7 @@ async fn start_server_after_startup(
         http_server,
         channel_server,
         node_rpc_server,
+        managed_worker,
     })
 }
 

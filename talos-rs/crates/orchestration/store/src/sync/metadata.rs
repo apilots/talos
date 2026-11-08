@@ -34,6 +34,7 @@ pub(super) async fn read(
                 return Ok(None);
             }
             Some(SyncResourceSnapshot::Computer(NodeInfo {
+                managed_worker_phase: None,
                 system_info: row
                     .get_string("system_info")
                     .map(|value| serde_json::from_str(&value))

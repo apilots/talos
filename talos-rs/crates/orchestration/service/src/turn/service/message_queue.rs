@@ -55,6 +55,16 @@ impl TurnService {
                 return Err(error);
             }
         };
+        match self
+            .defer_managed_dispatch(&session, super::managed_wake::WakeCandidate::Queue)
+            .await
+        {
+            Ok(false) => {}
+            result => {
+                self.message_queue.release(reservation)?;
+                return result.map(|_| None);
+            }
+        }
         match self.submit_queue_reservation(session, reservation).await {
             Ok(result) => Ok(Some(result)),
             Err(error) if error.is_code(talos_error::ErrorCode::ActiveTurnRunning) => Ok(None),

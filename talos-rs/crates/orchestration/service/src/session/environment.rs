@@ -20,6 +20,14 @@ impl SessionService {
         node_id: &str,
         user_id: &str,
     ) -> TalosResult<Arc<dyn WorkerEnvironment>> {
+        if node_id == "embedded"
+            && self
+                .embedded_admin_auth
+                .as_ref()
+                .is_some_and(|auth| !auth.has_verified_admin(user_id))
+        {
+            return Err(crate::access::embedded_access_denied());
+        }
         self.coordinator.worker_environment(node_id, user_id).await
     }
     pub(super) async fn model_info_for_selection(

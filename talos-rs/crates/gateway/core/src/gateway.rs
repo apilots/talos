@@ -127,6 +127,40 @@ pub trait Gateway: Send + Sync {
         request: talos_types::RotateCredentialRequest,
     ) -> TalosResult<talos_types::NodeCredential>;
 
+    async fn read_managed_worker(
+        &self,
+        actor: &Actor,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn create_managed_worker(
+        &self,
+        actor: &Actor,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn start_managed_worker(
+        &self,
+        actor: &Actor,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn stop_managed_worker(
+        &self,
+        actor: &Actor,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn reset_managed_worker(
+        &self,
+        actor: &Actor,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn delete_managed_worker(
+        &self,
+        actor: &Actor,
+        request: talos_types::DeleteManagedWorkerRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
     /// Reads the authenticated caller's Profile usage view.
     async fn read_profile(
         &self,

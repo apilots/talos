@@ -6,12 +6,11 @@ import { StrictMode, useEffect, type ReactNode } from "react";
 import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
 import { AppLayout } from "./AppLayout";
-const fixture = vi.hoisted(() => ({ browserRequest: vi.fn(async()=>null), wide: true, selectedId: "selected-worker" as string | undefined, available: true, mounted: [] as string[], closed: [] as string[], entries: [] as string[] }));
+const fixture = vi.hoisted(() => ({ browserRequest: vi.fn(async()=>null), wide: true, selectedId: "selected-worker" as string | undefined, available: true, mounted: [] as string[], closed: [] as string[] }));
 vi.mock("@/features/computers", () => ({
   ComputerRail: () => <nav aria-label="Computer rail" />,
   useComputers: () => ({ selected: { available: fixture.available } }), useSelectedComputerId: () => fixture.selectedId, useProductScope: () => "account",
   useComputer: (nodeId: string) => ({ data: { displayName: nodeId, available: true } }),
-  ComputerDesktopButton: ({ nodeId, label }: { nodeId?: string; label?: string }) => nodeId ? <button onClick={() => { fixture.entries.push(nodeId); useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId }); }}>{label ?? "View computer"}</button> : null,
   ComputerDesktop: ({ nodeId }: { nodeId: string }) => {
     useEffect(() => { fixture.mounted.push(nodeId); return () => { fixture.closed.push(nodeId); }; }, [nodeId]);
     return <section aria-label="Computer viewer">{nodeId}<button>Worker action</button></section>;
@@ -27,7 +26,7 @@ vi.mock("@/features/files", () => ({ useFileMetadata: () => ({ data: { originalF
 vi.mock("@/features/web-preview", () => ({ DesktopBrowserPage: () => <section aria-label="Native webpage" />, desktopBrowserRequest: fixture.browserRequest, useDesktopBrowserWorkspace: () => {}, useWorkspaceWebpageCreation: () => ({create: useAppStore.getState().createWorkspaceWebpage, disabled:false,error:false}), OpenWebpageButton: ({ icon }: { icon: string }) => <button>{icon === "plus" ? "New webpage tab" : "Open webpage preview"}</button>, WebPagePreview: ({ url }: { url: string }) => <section aria-label="Webpage preview">{url}<input aria-label="Preview address" /><iframe title="Preview content" /></section> }));
 beforeEach(() => {
   fixture.browserRequest.mockReset().mockResolvedValue(null);
-  fixture.wide = true; fixture.selectedId = "selected-worker"; fixture.available = true; fixture.mounted = []; fixture.closed = []; fixture.entries = [];
+  fixture.wide = true; fixture.selectedId = "selected-worker"; fixture.available = true; fixture.mounted = []; fixture.closed = [];
   vi.stubGlobal("matchMedia", () => ({ get matches() { return fixture.wide; }, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   HTMLElement.prototype.setPointerCapture=vi.fn();HTMLElement.prototype.hasPointerCapture=vi.fn(()=>true);HTMLElement.prototype.releasePointerCapture=vi.fn();
   HTMLDialogElement.prototype.showModal = function () { this.open = true;this.querySelector<HTMLElement>("button,input,[tabindex]")?.focus(); };
@@ -36,7 +35,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals();vi.restoreAllMocks(); });
 export function show(path = "/sessions/session", strict = false) {
-  const content=<MemoryRouter initialEntries={[path]}><Routes><Route element={<AppLayout />}><Route path="*" element={<div>Page content<Link to="/settings/mcp-servers">Settings</Link><Link to="/files">Files page</Link><Link to="/sessions/second">Second session</Link><Link to="/sessions/session">First session</Link></div>} /></Route></Routes></MemoryRouter>;
+  const content=<MemoryRouter initialEntries={[path]}><Routes><Route element={<AppLayout />}><Route path="talo" element={<h1>Talo page</h1>} /><Route path="*" element={<div>Page content<Link to="/settings/mcp-servers">Settings</Link><Link to="/files">Files page</Link><Link to="/sessions/second">Second session</Link><Link to="/sessions/session">First session</Link></div>} /></Route></Routes></MemoryRouter>;
   return render(strict ? <StrictMode>{content}</StrictMode> : content);
 }
 export function open(nodeId: string) { act(() => useAppStore.getState().openWorkspaceWindow({ kind: "computer", nodeId })); }

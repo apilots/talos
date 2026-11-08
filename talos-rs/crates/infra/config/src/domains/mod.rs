@@ -4,6 +4,7 @@ pub mod automation;
 pub mod cloud;
 pub mod fs;
 pub mod kernel;
+pub mod managed_worker;
 pub mod mcp_auth;
 pub mod memory;
 pub mod model_selection;

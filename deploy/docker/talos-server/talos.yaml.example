@@ -42,6 +42,20 @@ agent_node:
     bind_address: 127.0.0.1:0
     tls: null
 
+# Optional Talo Runtime. Use the managed Worker Compose overlay before enabling.
+# talos:
+#   worker:
+#     runtime:
+#       kind: DockerEngine
+#       image: ghcr.io/apilots/talos-worker@sha256:<published-image-digest>
+#       control_plane_endpoint: https://agent.example.com
+#       # trusted_ca_file: /run/talos-tls/worker-ca.pem
+#       docker_engine:
+#         socket_path: /var/run/docker.sock
+#   server:
+#     runtime:
+#       idle_timeout_seconds: 900
+
 cloud:
   agent_base_url: https://agent.talos.love
   agent_trusted_ca_file: null

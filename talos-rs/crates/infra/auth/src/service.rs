@@ -18,6 +18,12 @@ pub trait AuthService: Send + Sync {
     }
 
     /// Invalidate before logout/cache removal; pending verification cannot restore it.
+    /// Whether a currently valid authenticated context grants administrator access.
+    /// Used for autonomous work where no incoming request carries an Actor.
+    fn has_verified_admin(&self, _user_id: &str) -> bool {
+        false
+    }
+
     fn invalidate_access_token(&self, _token: &str) {}
 
     /// Explicit account admission; reuses an existing context or verifies remotely.

@@ -16,6 +16,10 @@ describe("desktop IPC guard", () => {
     expect(() => assertDesktopRendererInvoke("computer/create", { displayName: "Laptop", credentialExpiresAt: 2000000000 })).toThrow();
     expect(() => assertDesktopRendererInvoke("computer/rotateCredential", { nodeId: "node-1", expiresAt: 2000000000 })).toThrow();
   });
+  it("allows standalone Desktop to read Talo capability while management stays with the Server", () => {
+    expect(() => assertDesktopRendererInvoke("computer/readManagedWorker", {})).not.toThrow();
+    expect(isDesktopRendererMethod("computer/createManagedWorker")).toBe(false);
+  });
   it("allows typed file methods without duplicating file business validation", () => {
     expect(() =>
       assertDesktopRendererInvoke("file/upload", {

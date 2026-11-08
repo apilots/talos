@@ -39,7 +39,7 @@ pub use node::{
     heartbeat_is_recent, CreateNodeRequest, CreatedNode, Deployment, GetNodeRequest,
     HeartbeatParams, HeartbeatResult, LeaseValidity, ListNodesRequest, NodeAuth, NodeCredential,
     NodeHealth, NodeInfo, NodeMode, NodePage, NodeRequest, NodeStatus, RegisterParams,
-    Registration, RotateCredentialRequest, UpdateNodeRequest,
+    Registration, RegistrationAdmission, RotateCredentialRequest, UpdateNodeRequest,
 };
 pub use port::{AgentFuture, AgentHarness, DreamMemoryModelCall};
 pub use run::{

@@ -845,3 +845,39 @@ fn upgrade_preserves_custom_providers_when_legacy_template_omits_section() {
     assert_eq!(std::fs::read(&paths.config_file).unwrap(), original);
     assert_eq!(backup_count(), backups_before);
 }
+
+#[test]
+fn packaged_template_preserves_an_enabled_talo_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = TalosPaths::from_home(dir.path().join(".talos"));
+    let template_path = dir.path().join("talos.yaml.template");
+    let template = include_str!("../../../../../conf/talos-prod.yaml");
+    std::fs::write(&template_path, template).unwrap();
+    let mut config: YamlValue = serde_yaml::from_str(template).unwrap();
+    set_path_for_test(&mut config, &["gateway", "auth"], YamlValue::Bool(true));
+    set_path_for_test(
+        &mut config,
+        &["agent_node", "control_plane"],
+        serde_yaml::from_str(
+            "bind_address: 127.0.0.1:9443\ntls_certificate_file: /fixture/tls.crt\ntls_private_key_file: /fixture/tls.key",
+        )
+        .unwrap(),
+    );
+    let runtime: YamlValue = serde_yaml::from_str(
+        "kind: DockerEngine\nimage: registry.example/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000\ncontrol_plane_endpoint: https://agent.example",
+    )
+    .unwrap();
+    set_path_for_test(
+        &mut config,
+        &["talos", "worker", "runtime"],
+        runtime.clone(),
+    );
+    write_existing(&paths, &config);
+
+    upgrade_default_config_from_template(&paths, &template_path).unwrap();
+    let normalized = read_yaml_file(&paths.config_file).unwrap();
+    assert_eq!(
+        get_path_for_test(&normalized, &["talos", "worker", "runtime"]),
+        Some(&runtime)
+    );
+}

@@ -4233,6 +4233,128 @@
           "properties": {
             "method": {
               "enum": [
+                "computer/readManagedWorker"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ManagedWorkerParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/createManagedWorker"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ManagedWorkerParams"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/startManagedWorker"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ManagedWorkerActionRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/stopManagedWorker"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ManagedWorkerActionRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/resetManagedWorker"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ManagedWorkerActionRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "computer/deleteManagedWorker"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/DeleteManagedWorkerRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "profile/read"
               ],
               "type": "string"
@@ -6609,6 +6731,29 @@
       ],
       "type": "object"
     },
+    "DeleteManagedWorkerRequest": {
+      "additionalProperties": false,
+      "description": "Destructive action requiring explicit confirmation of permanent Home deletion.",
+      "properties": {
+        "confirmDataLoss": {
+          "type": "boolean"
+        },
+        "expectedGeneration": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "confirmDataLoss",
+        "expectedGeneration",
+        "instanceId"
+      ],
+      "type": "object"
+    },
     "DesktopMediaFrame": {
       "description": "Protected Desktop IPC last mile for the separate Agent media stream.",
       "properties": {
@@ -7635,6 +7780,14 @@
             "string",
             "null"
           ]
+        },
+        "wakeIfSleeping": {
+          "default": null,
+          "description": "Explicit interactive access may wake an automatically sleeping managed Worker.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8469,6 +8622,147 @@
           "type": "object"
         }
       ]
+    },
+    "ManagedWorkerActionRequest": {
+      "additionalProperties": false,
+      "description": "The caller must act on the instance generation it last observed.",
+      "properties": {
+        "expectedGeneration": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expectedGeneration",
+        "instanceId"
+      ],
+      "type": "object"
+    },
+    "ManagedWorkerDiskQuota": {
+      "enum": [
+        "unsupported",
+        "enforced"
+      ],
+      "type": "string"
+    },
+    "ManagedWorkerInfo": {
+      "description": "Current lifecycle snapshot. Registration credentials and runtime resource IDs stay private.",
+      "properties": {
+        "cpuCores": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "diskQuota": {
+          "$ref": "#/definitions/ManagedWorkerDiskQuota"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ApiError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "generation": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "memoryBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ManagedWorkerOperation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "$ref": "#/definitions/ManagedWorkerPhase"
+        }
+      },
+      "required": [
+        "cpuCores",
+        "diskQuota",
+        "generation",
+        "instanceId",
+        "memoryBytes",
+        "nodeId",
+        "phase"
+      ],
+      "type": "object"
+    },
+    "ManagedWorkerOperation": {
+      "enum": [
+        "create",
+        "start",
+        "stop",
+        "reset",
+        "delete"
+      ],
+      "type": "string"
+    },
+    "ManagedWorkerParams": {
+      "additionalProperties": false,
+      "description": "Empty params for account-scoped managed Worker reads and creation.",
+      "type": "object"
+    },
+    "ManagedWorkerPhase": {
+      "enum": [
+        "provisioning",
+        "starting",
+        "waitingForRegistration",
+        "ready",
+        "sleeping",
+        "stopped",
+        "offline",
+        "stopping",
+        "resetting",
+        "deleting",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ManagedWorkerResponse": {
+      "description": "Deployment capability and the authenticated account's current instance, if any.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "instance": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ManagedWorkerInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
     },
     "MarketplaceSourceId": {
       "type": "string"
@@ -9927,6 +10221,17 @@
             "integer",
             "null"
           ]
+        },
+        "managedWorkerPhase": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ManagedWorkerPhase"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present only for a server-managed Computer."
         },
         "mode": {
           "$ref": "#/definitions/NodeMode"
@@ -16220,6 +16525,9 @@
     "loop_wake_decision": {
       "$ref": "#/definitions/LoopWakeDecision"
     },
+    "managed_worker_response": {
+      "$ref": "#/definitions/ManagedWorkerResponse"
+    },
     "mcp_authentication_response": {
       "$ref": "#/definitions/McpAuthenticationResponse"
     },
@@ -16422,6 +16730,7 @@
     "loop_status",
     "loop_stop_reason",
     "loop_wake_decision",
+    "managed_worker_response",
     "mcp_authentication_response",
     "mcp_authentication_start_response",
     "mcp_server_list_response",

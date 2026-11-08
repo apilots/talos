@@ -15,7 +15,11 @@ export type TalosWebClient = {
   automation: BrowserTalosClient["automation"];
   builtinJobs: BrowserTalosClient["builtinJobs"];
   sync: Methods<BrowserTalosClient["sync"], "status" | "enable" | "disable" | "metrics">;
-  computers: Methods<BrowserTalosClient["computers"], "list" | "read" | "rename" | "setStatus" | "delete">;
+  computers: Methods<
+    BrowserTalosClient["computers"],
+    "list" | "read" | "rename" | "setStatus" | "delete" |
+    "readManagedWorker" | "createManagedWorker" | "startManagedWorker" | "stopManagedWorker" | "resetManagedWorker" | "deleteManagedWorker"
+  >;
   auth: Methods<BrowserTalosClient["auth"], "logout">;
   user: Methods<BrowserTalosClient["user"], "current">;
   profile: Methods<BrowserTalosClient["profile"], "read">;

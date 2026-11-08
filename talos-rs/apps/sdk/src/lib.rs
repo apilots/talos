@@ -104,6 +104,10 @@ pub use talos_types::{
     RenameComputerRequest, RotateCredentialRequest, SetComputerStatusRequest, SkillPlugin,
 };
 pub use talos_types::{
+    DeleteManagedWorkerRequest, ManagedWorkerActionRequest, ManagedWorkerDiskQuota,
+    ManagedWorkerInfo, ManagedWorkerOperation, ManagedWorkerPhase, ManagedWorkerResponse,
+};
+pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
     SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
     SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,

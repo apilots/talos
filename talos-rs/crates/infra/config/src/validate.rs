@@ -546,6 +546,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
     config.agent_node.validate(&config.gateway)?;
+    config.talos.validate(config)?;
 
     if config.logging.level.trim().is_empty() || is_unresolved_placeholder(&config.logging.level) {
         return Err(TalosError::new(

@@ -35,6 +35,13 @@ impl TalosService {
             a.validate_user_input(&request.session_id, &request.input, None)
                 .await?;
         }
+        let admission = if talos_types::explicit_automation_mode(&request.input)?.is_some() {
+            self.nodes
+                .acquire_managed_worker(actor, &session.execution_node_id)
+                .await?
+        } else {
+            None
+        };
         let input = if let Some(a) = automation.as_ref() {
             a.normalize_activation(&session, request.input).await?
         } else {
@@ -42,6 +49,7 @@ impl TalosService {
         };
         self.message_queue.add(&request.session_id, input)?;
         drop(guard);
+        drop(admission);
         if let Err(error) = self.turns.try_dispatch_next(&request.session_id).await {
             tracing::warn!(
                 session_id = %request.session_id,
@@ -207,6 +215,11 @@ impl TalosService {
                 talos_error::ErrorCode::InvalidRequest,
                 "Automatic Loop messages are read-only.",
             ));
+        }
+        if selected.is_some() {
+            self.nodes
+                .acquire_managed_worker(actor, &session.execution_node_id)
+                .await?;
         }
         self.turns
             .start_queued_message(session, request.message_id.as_deref())

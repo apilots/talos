@@ -25,6 +25,16 @@ import { resolveAppServerEnvironment } from "./shell-environment";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const rendererDevUrl = process.env.TALOS_DESKTOP_RENDERER_URL;
+const serverUrl = process.env.TALOS_DESKTOP_SERVER_URL?.trim();
+
+function managedServerUrl(value: string): URL {
+  const url = new URL(value);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
+    throw new Error("The Desktop Server URL must use HTTPS or loopback HTTP without credentials.");
+  }
+  return url;
+}
 
 let controller: DesktopAppServerController | undefined;
 
@@ -55,7 +65,7 @@ async function createController(): Promise<DesktopAppServerController> {
   });
 }
 
-async function createMainWindow(): Promise<BaseWindow> {
+async function createMainWindow(server?: URL): Promise<BaseWindow> {
   const {window,view} = createDesktopWindow({
     width: 1280,
     height: 820,
@@ -66,10 +76,13 @@ async function createMainWindow(): Promise<BaseWindow> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: path.join(dirname, "preload.cjs"),
+      preload: server ? undefined : path.join(dirname, "preload.cjs"),
   });
 
-  if (rendererDevUrl) {
+  if (server) {
+    // The hosted product uses its own HTTP and desktop WebSocket. It has no local IPC bridge.
+    await view.webContents.loadURL(server.href);
+  } else if (rendererDevUrl) {
     desktopBrowserHost.workspace.setWindow(window,view,rendererDevUrl);
     await view.webContents.loadURL(rendererDevUrl);
   } else {
@@ -88,14 +101,17 @@ async function createMainWindow(): Promise<BaseWindow> {
 registerFilePreviewScheme();
 
 app.whenReady().then(async () => {
-  controller = await createController();
-  registerDesktopIpcHandlers(controller);
+  const server = serverUrl ? managedServerUrl(serverUrl) : undefined;
+  if (!server) {
+    controller = await createController();
+    registerDesktopIpcHandlers(controller);
+  }
   // The renderer owns initialization so startup failures remain visible through IPC.
-  await createMainWindow();
+  await createMainWindow(server);
 
   app.on("activate", async () => {
     if (desktopWindows.size === 0) {
-      await createMainWindow();
+      await createMainWindow(server);
     }
   });
 });

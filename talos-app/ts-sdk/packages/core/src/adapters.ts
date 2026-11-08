@@ -2,6 +2,7 @@ import {
   ErrorCode,
   type ApiError, type AutomationRequestReason, type BrowserCapabilityOperation, type BrowserCapabilityReason,
   type ApiResponse,
+  type ManagedWorkerResponse,
   type TimelineEvent,
   type ErrorCode as ErrorCodeType,
 } from "./generated/app-protocol";
@@ -131,6 +132,13 @@ export function unwrapTalosApiResponse<T>(value: unknown): T {
 }
 
 /** Validate the shared public failure at transport and event ingress. */
+export function decodeManagedWorkerResponse(response: ManagedWorkerResponse): ManagedWorkerResponse {
+  if (response.instance?.error != null) {
+    return { ...response, instance: { ...response.instance, error: decodeApiError(response.instance.error) } };
+  }
+  return response;
+}
+
 export function decodeApiError(value: unknown): ApiError {
   if (!value || typeof value !== "object") {
     throw new Error("Invalid Talos API response.");

@@ -122,3 +122,48 @@ async fn computer_http_management_preserves_identity_and_redacts_directory_secre
         .to_string()
         .contains(rotated["data"]["token"].as_str().unwrap()));
 }
+
+#[tokio::test]
+async fn managed_worker_read_uses_its_static_route_on_an_unconfigured_server() {
+    let state = test_state(false).await;
+    let app = super::super::computers::routes()
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+    let (status, _, body) = call(
+        &app,
+        "GET",
+        "/v1/computers/managed-worker",
+        Some("owner"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["data"],
+        serde_json::json!({ "enabled": false, "instance": null })
+    );
+}
+
+#[tokio::test]
+async fn socket_enabled_server_guards_default_and_explicit_embedded_workspace_access() {
+    let mut config = test_config();
+    config.talos.worker.runtime = Some(talos_config::WorkerRuntimeConfig {
+        kind: talos_config::domains::managed_worker::WorkerRuntimeKind::DockerEngine,
+        image: "example.test/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        control_plane_endpoint: "https://agent.example.test".into(),
+        trusted_ca_file: None,
+        docker_engine: Default::default(),
+    });
+    let state = test_state_with_config(config, false).await;
+    let app = Router::new()
+        .route(
+            "/v1/workspace/info",
+            axum::routing::get(workspace_info_handler),
+        )
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+    for path in ["/v1/workspace/info", "/v1/workspace/info?nodeId=embedded"] {
+        let (status, _, _) = call(&app, "GET", path, Some("owner"), Value::Null).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}

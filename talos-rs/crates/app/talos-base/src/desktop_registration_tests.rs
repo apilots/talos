@@ -308,6 +308,7 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .await
         .unwrap();
     let directory = talos_types::FsDirectoryReadRequest {
+        wake_if_sleeping: None,
         node_id: None,
         path: Some(fixture.home.path().join("same-worker")),
     };

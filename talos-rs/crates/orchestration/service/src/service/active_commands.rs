@@ -16,6 +16,17 @@ impl TalosService {
         session: &SessionRecord,
         command: agent_protocol::ActiveSessionCommand,
     ) -> ServiceResult<Option<agent_protocol::ActiveSessionReply>> {
+        self.access
+            .ensure_worker_access(actor, &session.execution_node_id)?;
+        // Only this management Server coordinates Talo Sessions, including while Talo sleeps.
+        if self.nodes.managed_worker_enabled()
+            && self
+                .nodes
+                .is_managed_worker_node(&session.execution_node_id)
+                .await?
+        {
+            return Ok(None);
+        }
         let Some(target) = self.sessions.remote_active_target(session).await? else {
             return Ok(None);
         };

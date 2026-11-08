@@ -16,6 +16,10 @@
 !talos/build/worker/
 !talos/build/worker/browser/
 !talos/build/worker/browser/**
+!talos/deploy/
+!talos/deploy/docker/
+!talos/deploy/docker/talos-worker/
+!talos/deploy/docker/talos-worker/chromium-seccomp.json
 !talos/conf/
 !talos/conf/**
 !talos/talos-app/

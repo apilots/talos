@@ -56,6 +56,18 @@ pub enum ClientMethod {
     ComputerSetStatus,
     #[serde(rename = "computer/rotateCredential")]
     ComputerRotateCredential,
+    #[serde(rename = "computer/readManagedWorker")]
+    ComputerReadManagedWorker,
+    #[serde(rename = "computer/createManagedWorker")]
+    ComputerCreateManagedWorker,
+    #[serde(rename = "computer/startManagedWorker")]
+    ComputerStartManagedWorker,
+    #[serde(rename = "computer/stopManagedWorker")]
+    ComputerStopManagedWorker,
+    #[serde(rename = "computer/resetManagedWorker")]
+    ComputerResetManagedWorker,
+    #[serde(rename = "computer/deleteManagedWorker")]
+    ComputerDeleteManagedWorker,
     #[serde(rename = "profile/read")]
     ProfileRead,
     #[serde(rename = "trajectory/capabilities")]
@@ -265,6 +277,12 @@ impl ClientMethod {
             Self::ComputerDelete => "computer/delete",
             Self::ComputerSetStatus => "computer/setStatus",
             Self::ComputerRotateCredential => "computer/rotateCredential",
+            Self::ComputerReadManagedWorker => "computer/readManagedWorker",
+            Self::ComputerCreateManagedWorker => "computer/createManagedWorker",
+            Self::ComputerStartManagedWorker => "computer/startManagedWorker",
+            Self::ComputerStopManagedWorker => "computer/stopManagedWorker",
+            Self::ComputerResetManagedWorker => "computer/resetManagedWorker",
+            Self::ComputerDeleteManagedWorker => "computer/deleteManagedWorker",
             Self::ProfileRead => "profile/read",
             Self::TrajectoryCapabilities => "trajectory/capabilities",
             Self::TrajectoryReadTurn => "trajectory/readTurn",
@@ -395,6 +413,12 @@ impl FromStr for ClientMethod {
             "computer/delete" => Ok(Self::ComputerDelete),
             "computer/setStatus" => Ok(Self::ComputerSetStatus),
             "computer/rotateCredential" => Ok(Self::ComputerRotateCredential),
+            "computer/readManagedWorker" => Ok(Self::ComputerReadManagedWorker),
+            "computer/createManagedWorker" => Ok(Self::ComputerCreateManagedWorker),
+            "computer/startManagedWorker" => Ok(Self::ComputerStartManagedWorker),
+            "computer/stopManagedWorker" => Ok(Self::ComputerStopManagedWorker),
+            "computer/resetManagedWorker" => Ok(Self::ComputerResetManagedWorker),
+            "computer/deleteManagedWorker" => Ok(Self::ComputerDeleteManagedWorker),
             "profile/read" => Ok(Self::ProfileRead),
             "trajectory/capabilities" => Ok(Self::TrajectoryCapabilities),
             "trajectory/readTurn" => Ok(Self::TrajectoryReadTurn),

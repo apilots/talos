@@ -7,6 +7,9 @@ import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 export function SidebarHomeEntry({ computer }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo }) {
   const { t } = useTranslation("computers");
+  const phase = computer?.managedWorkerPhase;
+  const status = phase && phase !== "ready" ? t(`talo.phase.${phase}`)
+    : computer ? t(computer.available ? "connectedTo" : "offlineComputer", { name: computer.displayName }) : t("choose");
 
   return (
     <Link
@@ -22,7 +25,7 @@ export function SidebarHomeEntry({ computer }: { computer?: import("@talos/sdk-c
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold leading-5">Talos</span>
         <span className="mt-0.5 flex items-center gap-2 text-xs leading-4 text-muted">
-          <span className="truncate" title={computer?.displayName}>{computer ? t(computer.available ? "connectedTo" : "offlineComputer", { name: computer.displayName }) : t("choose")}</span>
+          <span className="truncate" title={computer?.displayName}>{status}</span>
           <span className={`size-1.5 shrink-0 rounded-full ${computer?.available ? "bg-success" : "bg-muted/50"}`} />
         </span>
       </span>
