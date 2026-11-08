@@ -373,3 +373,11 @@ export type FileDownloadResponse = {
 };
 
 export type { AutomationMode, LoopSchedule, GoalStatus, GoalPauseReason, LoopStatus, LoopStopReason, SessionGoal, SessionLoop, AutomationTurnOrigin, AutomationInputOrigin, SessionAutomationSnapshot, SessionAutomationReadRequest, AutomationListEntry, AutomationListScope, AutomationListRequest, AutomationListResponse, AutomationChangedNotification, AutomationAction, GoalAction, LoopAction, LoopWakeDecision, AutomationRequest, AutomationEffect, AutomationControlResult, AutomationObjectRef, AutomationCommandDescriptor, AutomationCommandCatalogRequest, AutomationCommandCatalogResponse, AutomationCommand, AutomationCommandResolveRequest, AutomationCommandResolveResponse, BuiltinJobId, BuiltinJobAction, BuiltinJobOutcome, BuiltinJobInfo, BuiltinJobListRequest, BuiltinJobListResponse, BuiltinJobControlRequest, QueuedMessageSource } from "./generated/app-protocol";
+export type {
+  WorkerKubeconfigAuthentication,
+  WorkerKubeconfigSource,
+  WorkerKubernetesSettings,
+  WorkerRuntimeBackend,
+  WorkerRuntimeCandidate,
+  WorkerRuntimeSettingsResponse,
+} from "./generated/app-protocol";

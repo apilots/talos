@@ -16248,6 +16248,217 @@
       },
       "type": "object"
     },
+    "WorkerKubeconfigAuthentication": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "inCluster"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "context": {
+              "description": "Omitted or null uses the kubeconfig's current context.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "mounted"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "context": {
+              "description": "Omitted or null uses the kubeconfig's current context.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "pasted"
+              ],
+              "type": "string"
+            },
+            "kubeconfig": {
+              "description": "Omitted or null keeps the Server's saved pasted credential. Write only.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkerKubeconfigSource": {
+      "enum": [
+        "inCluster",
+        "mounted",
+        "pasted"
+      ],
+      "type": "string"
+    },
+    "WorkerKubernetesSettings": {
+      "properties": {
+        "authenticationSource": {
+          "$ref": "#/definitions/WorkerKubeconfigSource"
+        },
+        "context": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mountedKubeconfigPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authenticationSource",
+        "namespace",
+        "storageClass"
+      ],
+      "type": "object"
+    },
+    "WorkerRuntimeBackend": {
+      "enum": [
+        "dockerEngine",
+        "kubernetes"
+      ],
+      "type": "string"
+    },
+    "WorkerRuntimeCandidate": {
+      "description": "A candidate can select a deployed backend and change its namespace, class and authentication.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "dockerEngine"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "authentication": {
+              "$ref": "#/definitions/WorkerKubeconfigAuthentication"
+            },
+            "kind": {
+              "enum": [
+                "kubernetes"
+              ],
+              "type": "string"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "storageClass": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "authentication",
+            "kind",
+            "namespace",
+            "storageClass"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkerRuntimeSettingsResponse": {
+      "description": "Effective backend and saved settings. The Server never returns pasted credentials or their references.",
+      "properties": {
+        "activeBackend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkerRuntimeBackend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "configuredBackend": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkerRuntimeBackend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dockerSocketPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kubernetes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkerKubernetesSettings"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restartRequired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "restartRequired"
+      ],
+      "type": "object"
+    },
     "WorkspaceDocKind": {
       "enum": [
         "soul",
@@ -16669,6 +16880,12 @@
     },
     "user_current_response": {
       "$ref": "#/definitions/UserCurrentResponse"
+    },
+    "worker_runtime_candidate": {
+      "$ref": "#/definitions/WorkerRuntimeCandidate"
+    },
+    "worker_runtime_settings_response": {
+      "$ref": "#/definitions/WorkerRuntimeSettingsResponse"
     }
   },
   "required": [
@@ -16782,7 +16999,9 @@
     "trajectory_readrequest_response",
     "trajectory_readtool_response",
     "trajectory_readturn_response",
-    "user_current_response"
+    "user_current_response",
+    "worker_runtime_candidate",
+    "worker_runtime_settings_response"
   ],
   "title": "AppProtocolSchemaRoot",
   "type": "object"

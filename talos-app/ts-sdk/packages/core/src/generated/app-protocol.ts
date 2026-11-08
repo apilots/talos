@@ -404,6 +404,30 @@ localComputerId: string | null,
  */
 canClaimLocalHistory: boolean, };
 
+export type WorkerRuntimeCandidate = { "kind": "dockerEngine" } | { "kind": "kubernetes", namespace: string, storageClass: string, authentication: WorkerKubeconfigAuthentication, };
+
+export type WorkerRuntimeSettingsResponse = { activeBackend: WorkerRuntimeBackend | null, configuredBackend: WorkerRuntimeBackend | null, dockerSocketPath: string | null, kubernetes: WorkerKubernetesSettings | null, restartRequired: boolean, };
+
+export type WorkerRuntimeBackend = "dockerEngine" | "kubernetes";
+
+export type WorkerKubernetesSettings = { namespace: string, storageClass: string, authenticationSource: WorkerKubeconfigSource, mountedKubeconfigPath: string | null, context: string | null, };
+
+export type WorkerKubeconfigAuthentication = { "kind": "inCluster" } | { "kind": "mounted",
+/**
+ * Omitted or null uses the kubeconfig's current context.
+ */
+context?: string | null, } | { "kind": "pasted",
+/**
+ * Omitted or null uses the kubeconfig's current context.
+ */
+context?: string | null,
+/**
+ * Omitted or null keeps the Server's saved pasted credential. Write only.
+ */
+kubeconfig?: string | null, };
+
+export type WorkerKubeconfigSource = "inCluster" | "mounted" | "pasted";
+
 export type SyncEnableRequest = {
 /**
  * Explicitly claim this trusted local host's anonymous history. Omission means false.

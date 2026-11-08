@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: talos-worker-no-ingress
+spec:
+  podSelector:
+    matchLabels:
+      io.talos.managed-worker.resource: worker
+  policyTypes: [Ingress]
+  ingress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: talos-seeder-isolation
+spec:
+  podSelector:
+    matchLabels:
+      io.talos.managed-worker.resource: seeder
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []

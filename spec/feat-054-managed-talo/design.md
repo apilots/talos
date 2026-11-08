@@ -8,9 +8,9 @@
 
 ## 1. 需求背景与一期边界
 
-Talos 是产品名，Talo 是 Talos 提供的托管 AI 助手。未选电脑时，用户从右侧电脑选择页的「Talo」标签进入。已选个人电脑时，用户从中间侧栏的「Talo」进入同一初始化页面。就绪后沿用现有 Computer 身份和桌面流程。一个已认证账号最多拥有一台 Talo。固定计算规格为 4 核 CPU 和 8 GB 内存。Docker 一期提供持久 Home，就绪后在「连接桌面」下显示当前运行环境不支持限制磁盘配额。100 GB 硬配额留给未来 Kubernetes Runtime。服务端负责准备持久 Home、初始化 Worker、登记 Computer 并绑定当前用户。计算停止后 Home 保留，重置更换运行容器，删除销毁 Home。
+Talos 是产品名，Talo 是 Talos 提供的托管 AI 助手。未选电脑时，用户从右侧电脑选择页的「Talo」标签进入。已选个人电脑时，用户从中间侧栏的「Talo」进入同一初始化页面。就绪后沿用现有 Computer 身份和桌面流程。一个已认证账号最多拥有一台 Talo。固定计算规格为 4 核 CPU 和 8 GB 内存。Docker 提供普通持久 Home，就绪后在「连接桌面」下显示当前运行环境不支持限制磁盘配额。Kubernetes 请求 100 GB 持久卷，配额能力取决于部署选择并实测的 StorageClass。服务端负责准备持久 Home、初始化 Worker、登记 Computer 并绑定当前用户。计算停止后 Home 保留，重置更换运行容器，删除销毁 Home。
 
-**部署前提是单台 Linux 主机、一个 Docker Engine、一个 Talos Server。** Server 由现有 Compose 部署，Server 与它创建的 Talo Worker 共用同一个 Engine。Worker 使用本机普通持久卷。托管部署由统一配置选择 Runtime。一期只实现单机 Docker Engine；未来跨机器和 100 GB 硬配额由 Kubernetes Runtime 实现。控制台、远程桌面和 AI Turn 沿用原有执行和权限链。
+**每套部署只有一个管理 Server 和一个生效的托管 Runtime。** Docker 模式通过现有 Compose 部署，Server 与 Talo Worker 共用一台 Linux 主机的 Docker Engine。Kubernetes 模式通过独立清单部署，Server 使用 Kubernetes API 管理同一 Namespace 的 Talo 工作负载与 PVC。两个模式沿用相同的控制台、远程桌面和 AI Turn 执行权限链。
 
 ## 2. 当前行为与改动归属
 
@@ -53,7 +53,7 @@ flowchart TB
 
 ### 3.1 共用 Worker 状态与管理归属
 
-`NodeInfo` 是现有 Computer 身份与状态合同，`mode` 表示 `embedded` 或 `remote`，`status` 表示节点启用状态，`health` 和 `available` 用于健康及在线判定。手动注册的独立 Worker 和 Talo 都是 `remote`，用同一套在线、忙碌、排队和错误语义。Talo 的托管身份来自 `node_id` 对应的托管记录。Docker 或 Kubernetes 是生命周期适配器的选择，不进入 `NodeMode`，也不改变 RPC 身份或执行语义。[NodeInfo](../../talos-rs/crates/common/types/src/node.rs) · [可用性投影](../../talos-rs/crates/orchestration/service/src/agent_node/service.rs)
+`NodeInfo` 是现有 Computer 身份与状态合同，`mode` 表示 `embedded` 或 `remote`，`status` 表示节点启用状态，`health` 和 `available` 用于健康及在线判定。手动注册的独立 Worker 和 Talo 都是 `remote`，用同一套在线、忙碌、排队和错误语义。Talo 的托管身份来自 `node_id` 对应的 `managed_workers` 持久记录。`NodeInfo.managedWorkerPhase` 为客户端提供可空的托管状态投影。自建 Worker 的生命周期仍归其部署者，普通 Computer 删除只撤销登记和凭证。Docker 或 Kubernetes 是生命周期适配器的选择，不进入 `NodeMode`，也不改变 RPC 身份或执行语义。[NodeInfo](../../talos-rs/crates/common/types/src/node.rs) · [可用性投影](../../talos-rs/crates/orchestration/service/src/agent_node/service.rs)
 
 只有受托管理计算资源的实例有明确的 Server 生命周期意图。托管的休眠和手动停机从该记录得出；手动注册的 Worker 失去连接时显示现有离线状态，Server 无法据此推断它的宿主机是关机还是网络中断。内嵌 Worker 的运行由 Server 进程持有，继续走现有本地路径。正常执行前按 §4.3 检查就绪，业务忙碌和调用失败沿同一条错误路径。
 
@@ -191,7 +191,7 @@ flowchart TD
 
 ### 6.1 独立 Runtime Library 与持久 Home
 
-新增独立 Rust Library crate `talos-worker-runtime`，放在基础设施层，提供 `ManagedWorkerRuntime` 接口、资源描述、实际状态观测与结构化运行时错误。DockerEngine 实现和 Bollard 依赖留在 Library；未来 Kubernetes 实现复用同一接口。Server 装配选择后端，业务代码调用接口管理容器、网络与 Home。Library 的输入是实例标识、运行时修订、计算规格和资源标识，依赖方向从 Server 指向 Library。Library 独立于 Computer、Session、Turn、用户授权和 Worker RPC。
+新增独立 Rust Library crate `talos-worker-runtime`，放在基础设施层，提供 `ManagedWorkerRuntime` 接口、资源描述、实际状态观测与结构化运行时错误。DockerEngine 实现和 Bollard 依赖留在 Library；Kubernetes 适配器用 kube-rs 复用同一接口。Server 装配选择后端，业务代码调用接口管理容器、网络与 Home。Library 的输入是实例标识、运行时修订、计算规格和资源标识，依赖方向从 Server 指向 Library。Library 独立于 Computer、Session、Turn、用户授权和 Worker RPC。
 
 Server 组合两类独立信号。Runtime Library 负责报告容器是否存在、运行或退出以及卷是否挂载；Worker RPC 和 Coordinator 提供身份、租约和在线就绪；Session/Turn 继续处理忙碌、排队和调用结果。Server 结合这两类信号及自己的休眠或停机意图决定是否启动、等待、派发或报错。Docker 状态留在 Library 的观测模型，Worker RPC 状态继续沿用既有业务模型。
 
@@ -204,7 +204,7 @@ Server 组合两类独立信号。Runtime Library 负责报告容器是否存在
 | `remove_runtime` | 移除实例容器，保留 Home 和 Engine 的共享 Worker 网络。 |
 | `remove_home` | 确认计算已移除后，删除该实例名下的 Docker 卷并核验结果。 |
 
-创建时选择 `HomeCapacity::Unrestricted`，表示普通持久卷。服务端通过 API 报告磁盘配额 `unsupported`，用户可以正常创建和启动。未来的 Kubernetes 适配器复用这六个方法与 Home 合同。100 GB 硬配额由该后端实际执行并核验，具体集群与存储配置另行设计。
+Docker 创建使用 `HomeCapacity::Unrestricted`，普通持久卷报告磁盘配额 `unsupported`。Kubernetes 使用 `HomeCapacity::LimitedBytes(100_000_000_000)` 申请 PVC。部署验证 StorageClass 的容量强制执行后才配置 `home_quota_enforced`，API 随之报告 `enforced`。PVC 申请值和实际文件系统硬限制分别验收。
 
 ### Talo 专属对话
 
@@ -226,13 +226,34 @@ Talos Server 的 Compose 服务把宿主的 `/var/run/docker.sock` 绑定到 Ser
 
 **容器命名。** Docker Worker 名称为 `talos-worker-talo-<short_id>`，例如 `talos-worker-talo-k7m2p4x9`。短 ID 使用 8 位小写字母或数字，由 Server 在实例创建时随机生成并持久化。重试和 Reset 沿用同名，先删除旧容器再创建新容器。Library 以完整实例 ID 的标签核验归属；同名但归属不同的容器返回冲突，原容器保留。
 
-### 6.3 创建、重置、删除
+### 6.3 Kubernetes 接入
+
+Server 复用现有 OCI 镜像和单管理进程，部署在目标 Namespace。Kubernetes 适配器通过 kube-rs 创建每个 Talo 的单副本 StatefulSet、独立 PVC 和短期初始化资源。动态对象由 Rust 类型构造，部署清单提供镜像、Namespace、StorageClass、Service 地址、证书和权限。`deploy/kubernetes` 管理 Server、Service、RBAC、专用存储配置及自建 Worker 示例。用户从 Talo 页面发起初始化。
+
+```mermaid
+flowchart LR
+    D["Web / 本机 Electron"] -->|"入口或回环转发 · HTTP / WebSocket"| SVC["Talos Server ClusterIP Service"]
+    subgraph N["Kubernetes Namespace"]
+        SVC --> S["Talos Server · 生命周期与 RPC"]
+        M["部署者创建的 Worker"] -->|"出站 TLS gRPC"| SVC
+        T["Talo Worker Pod"] -->|"出站 TLS gRPC"| SVC
+        V["独立 Home PVC"] --- T
+        S --> K["Kubernetes Runtime · kube-rs"]
+    end
+    K -->|"Namespace RBAC"| API["Kubernetes API"]
+    API --> T
+    API --> V
+```
+
+休眠和 Stop 将工作负载缩到零副本并等待 Pod 退出。Start 扩回一副本，复用原 PVC 和 Computer。Reset 删除旧计算修订并保留 PVC，再按期望状态建立新修订。确认 Delete 删除本实例计算和 PVC。StorageClass 使用 `Delete` 回收策略，由部署预检和实际删除验收确认底层卷回收。Server 运行身份使用 Namespace 权限，StorageClass 和 provisioner 由部署者准备。Worker Pods 使用同一个 Server Service 的 TLS Agent 入口，桌面和文件不需要 Worker Service 或宿主端口。
+
+### 6.4 创建、重置、删除
 
 ```mermaid
 flowchart TD
     A["校验登录账号、托管实例身份和请求代数"] --> B{"用户操作"}
     B -->|Create| C["事务占用唯一名额，分配节点并签发凭证"]
-    C --> D["创建本机普通持久卷，磁盘配额不支持"]
+    C --> D["Runtime 创建或复用持久 Home"]
     D --> E["Bollard 挂载 Home 并启动 Worker"]
     E --> F["出站注册，校验当前 Worker 就绪"]
     F --> G["既有 Computer 列表和执行链"]
@@ -253,7 +274,7 @@ flowchart TD
 ## 7. API、配置与客户端
 
 - 在现有 Gateway/SDK Computer 命名空间增加 `computer/readManagedWorker`、`computer/createManagedWorker`、`computer/startManagedWorker`、`computer/stopManagedWorker`、`computer/resetManagedWorker`、`computer/deleteManagedWorker`。HTTP 对应 `GET/POST /v1/computers/managed-worker` 与 `POST /v1/computers/managed-worker/{instanceId}/{start|stop|reset|delete}`，固定子路径需覆盖现有 `:node_id` 路由匹配的测试。读取与变更统一返回 `ManagedWorkerResponse { enabled, instance }`。实例尚未创建或已删除时，读取返回 `instance: null`。Create 无客户提供的 owner、镜像或容量参数；动作包含 `expectedGeneration`，Delete 额外要求 `confirmDataLoss: true`。成功响应给出已提交的操作和状态，UI 用同一 Read 有界轮询，终态后刷新现有 Computer 列表。调用人始终由服务器认证身份确定。
-- `ManagedWorkerInfo` 只包含 `instanceId`、`nodeId`、`generation`、期望状态/进度、计算规格、磁盘配额状态及可展示的 `ApiError`。一期磁盘配额状态为 `unsupported`；就绪界面的提示按该能力字段显示，见 §7.2。Computer 列表项新增兼容的托管标记或窄状态投影以区分睡眠、启动和离线，桌面和模型状态保持各自原契约。HTTP、JSON-RPC、Rust SDK/embedded 与 Web/Desktop SDK 共用 DTO。维护当前协议 schema 和生成产物。客户端根据类型化状态与 `ApiError` 渲染；忙碌复用 `ActiveTurnRunning` 或 `Conflict`，关闭功能和不可用沿 `ServiceUnavailable`，非 owner 返回资源不可见，超时使用 `Timeout`。普通删除、状态变更、凭证导出/轮换在节点服务的权威入口拒绝托管资源，覆盖 HTTP、App Server 和 Node Management RPC。托管生命周期使用同一节点服务的受控内部调用。所有注册和资源入口继续核对实际 owner。
+- `ManagedWorkerInfo` 只包含 `instanceId`、`nodeId`、`generation`、期望状态/进度、计算规格、磁盘配额状态及可展示的 `ApiError`。磁盘配额状态由生效的 Runtime 和已验证的存储能力决定；就绪界面的提示按该字段显示，见 §7.2。Computer 列表项新增兼容的托管标记或窄状态投影以区分睡眠、启动和离线，桌面和模型状态保持各自原契约。HTTP、JSON-RPC、Rust SDK/embedded 与 Web/Desktop SDK 共用 DTO。维护当前协议 schema 和生成产物。客户端根据类型化状态与 `ApiError` 渲染；忙碌复用 `ActiveTurnRunning` 或 `Conflict`，关闭功能和不可用沿 `ServiceUnavailable`，非 owner 返回资源不可见，超时使用 `Timeout`。普通删除、状态变更、凭证导出/轮换在节点服务的权威入口拒绝托管资源，覆盖 HTTP、App Server 和 Node Management RPC。托管生命周期使用同一节点服务的受控内部调用。所有注册和资源入口继续核对实际 owner。
 - Web/Desktop 复用现有电脑首页、电脑选取组件和工作区导航，按 §7.2 接入同一个 Talo 页面。用户从当前实例状态看到创建、显式启动、停止、重置和删除。Computer 列表继续提供同一节点选择；休眠可选，手动停机沿用离线限制。过渡状态由现有请求层有界轮询，面板打开时按 Computer 列表相同的五秒间隔刷新稳定状态。被动刷新可显示离线、休眠和重新就绪，读取本身不唤醒 Worker。复用现有 Tab 键盘规则和窄屏侧栏。SDK、协议与 UI 规则分别沿用仓库契约。[API](../../docs/development/API.md) · [错误](../../docs/architecture/ERROR_MODEL.md) · [UI](../../docs/architecture/CLIENT_ARCHITECTURE.md#ui-implementation)
 
 ### 7.1 Runtime 配置
@@ -275,7 +296,25 @@ talos:
 ```
 
 - 每套 Server 部署使用一个 Worker Runtime。缺省不开启托管 Worker。Server 装配读取 `talos.worker.runtime`，验证后把所选 Library 实现交给业务层。DockerEngine 使用本机 Unix Socket，默认 `/var/run/docker.sock`。Worker 使用 `control_plane_endpoint` 与系统信任或运维配置的 `trusted_ca_file`；服务端将 CA 随受控配置供给。
-- `Kubernetes` 是 `kind` 的未来选项。一期选择该值会明确报配置错误，后端参数随 Kubernetes 实现补充。
+Kubernetes 模式的 `talos.worker.runtime` 配置示例：
+
+```yaml
+kind: Kubernetes
+image: "ghcr.io/apilots/talos-worker@sha256:<digest>"
+control_plane_endpoint: "https://talos-server.talos.svc:9443"
+trusted_ca_file: /run/talos-tls/ca.crt
+kubernetes:
+  namespace: talos
+  storage_class: talos-xfs-quota
+  seccomp_profile: talos/chromium-seccomp.json
+  kubeconfig_source: InCluster
+  home_quota_enforced: true
+```
+
+上述 `home_quota_enforced` 表示部署者已经验证所选存储配置。对于部署挂载的凭证，设置 `kubeconfig_source: Mounted`、`kubeconfig_path` 和可选的 `kubeconfig_context`。粘贴模式的私有文件引用由 Server 生成。
+
+- `Kubernetes` 使用 `kubernetes.namespace`、`storage_class`、`seccomp_profile` 及认证设置。集群内优先使用 Namespace 专用 ServiceAccount。运维可以提供只读 Secret 挂载的 kubeconfig。管理员也可以在 Settings → Runtime 粘贴自包含 kubeconfig 和 context，验证后通过现有安全文件存储保存到持久 Server Home。读取接口仅返回安全配置和凭证状态。
+- Settings → Runtime 由已认证管理员访问，普通用户的 Talo 和 Worker 模型设置沿用原授权。Docker Socket 路径在页面只读。设置保存后受控重启生效。若还有托管资源，切换后端、集群、Namespace 或 StorageClass 会被拒绝。已保存且等待重启的变更会阻止新建 Talo。
 - `talos.server.runtime` 持有管理策略，例如默认 900 秒的空闲阈值，重启后生效；它不选择第二个 Worker 后端。内嵌和手动注册 Worker 沿用现有配置与 RPC。
 
 ### 7.2 Talo 初始化交互
@@ -287,7 +326,7 @@ talos:
 
 Talo 页面按当前账号读取托管实例。两个入口都显示同一实例的状态。尚未初始化时提供「初始化 Talo」，该流程省略硬件规格。
 
-提交后按 Server 的当前进度显示「初始化 Talo」「启动 Talo」「等待 Worker 注册」。切换 Tab、离开页面或刷新后，由同一个 Read 恢复当前进度。Coordinator 确认就绪后提供「连接桌面」。点击时通过既有 Computer 选取和桌面入口，以该 Talo 的节点身份连接。Docker Engine 在该按钮下方显示「当前运行环境不支持限制磁盘配额」。未来支持硬配额的 Kubernetes Runtime 省略该提示。初始化失败显示现有类型化错误；已有实例时重试启动原实例。模型连接沿用 Worker 配置。
+提交后按 Server 的当前进度显示「初始化 Talo」「启动 Talo」「等待 Worker 注册」。切换 Tab、离开页面或刷新后，由同一个 Read 恢复当前进度。Coordinator 确认就绪后提供「连接桌面」。点击时通过既有 Computer 选取和桌面入口，以该 Talo 的节点身份连接。Docker Engine 在该按钮下方显示「当前运行环境不支持限制磁盘配额」。已验证强制限额的 Kubernetes 配置省略该提示。初始化失败显示现有类型化错误；已有实例时重试启动原实例。模型连接沿用 Worker 配置。
 
 ## 8. 验收设计
 
@@ -300,10 +339,10 @@ Talo 页面按当前账号读取托管实例。两个入口都显示同一实例
 | Docker 首次可用与唤醒入口 | 从空卷自动初始化后，通过现有桌面和 AI Turn 验收；首次创建中断后对原实例执行 Start，可按检查点恢复且不登记第二个节点。对已休眠的 Talo，冷刷新后可直接发送新会话首条消息或点击打开桌面。验证休眠时显式重试 Turn 与入队 `/goal`、`/loop` 可唤醒，且被动刷新、预取和 Timeline 订阅不会唤醒。 |
 | Automation | 对普通 Worker 先表征到期 Loop、队列准备/准入失败、Goal 首轮/续跑和重启/重连；对 Talo 的手动停机断言相同业务结果。自动休眠分别覆盖用户、Loop 与合格 Goal 的唤醒，以及仅有 User 消息的 Session 在 Wake 后获得一次派发机会。断言 deadline、原 occurrence、取消边界和已有队列恢复规则。 |
 | Docker 资源与数据 | 在可销毁 Docker 环境验证普通卷创建成功，API 报告磁盘配额不支持且可启动，提示仅出现在就绪后「连接桌面」下方，初始化流程不展示硬件规格。验证 4 vCPU、8 GB RAM 限制和跨租户卷隔离。对比 Reset 前后容器 ID、Computer ID、Home ID、工作文件、凭证配置及 Chromium 登录状态。验证删除取消、分步失败重试、卷删除和个人电脑不受影响。注入卷创建或删除已完成但检查点未提交的崩溃，验证使用原卷身份收敛。覆盖掉线的 `Running` 实例被显式 Reset 后重新启动，及已停止实例 Reset 后保持停止。 |
-| Runtime Library 与配置 | 独立验证 Library 对指定容器和卷的生命周期；验证 `DockerEngine` 注入本机适配器，`Kubernetes` 一期明确报错。验证容器名为 `talos-worker-talo-<8 位短 ID>`，重试和 Reset 保持原名，归属冲突时保留其他资源。 |
+| Runtime Library 与配置 | 独立验证 Library 对指定容器和卷的生命周期；验证 `DockerEngine` 注入本机适配器，`Kubernetes` 注入 kube-rs 适配器。验证容器名为 `talos-worker-talo-<8 位短 ID>`，重试和 Reset 保持原名，归属冲突时保留其他资源。 |
 | 单机接入、安全与故障 | 在同一 Linux 主机、同一个 Engine 上用 Compose 启动 Server，验证 Bollard 通过挂载的 Socket 管理 Worker。以发布镜像的非 root 用户验证 Socket 可用。覆盖缺省/显式 embedded 目标、已有 Session 与桌面授权，验证普通账号无法借公开入口进入 Server 内嵌执行。验证托管 Worker 从自身网络完成 TLS 注册，且只挂自己的 Home，过时操作和旧桌面票据失效，重启继续部分操作，凭证/环境变量/宿主诊断不进入外部 DTO 和日志。凭证到期后以拥有者的显式启动触发内部轮换，恢复同一节点并保留其文件。旧租约不满足启动就绪。 |
 
-实现阶段使用现有 Computer、Worker、Automation 和 Desktop 夹具，运行 `just test -p talos-service`、`just test -p talos-store` 及实际改动包的检查；协议变更运行 `just gen-app-protocol`，配置走所属 schema 生成器。GitHub PR 门禁复用 [容器 Worker/桌面](../../talos-e2e/scenarios/23_browser_container/README.md)、[Automation](../../talos-e2e/scenarios/24_automation/requirements.json) 的设施，增加受支持 Runner 可执行的代表场景。使用可销毁实例开展验收。未来 Kubernetes 的 100 GB 硬配额随该后端独立验收。
+实现阶段使用现有 Computer、Worker、Automation 和 Desktop 夹具，运行 `just test -p talos-service`、`just test -p talos-store` 及实际改动包的检查；协议变更运行 `just gen-app-protocol`，配置走所属 schema 生成器。GitHub PR 门禁复用 [容器 Worker/桌面](../../talos-e2e/scenarios/23_browser_container/README.md)、[Automation](../../talos-e2e/scenarios/24_automation/requirements.json) 的设施，增加受支持 Runner 可执行的代表场景。使用可销毁实例开展验收。完整 Docker 与 Kubernetes 故障矩阵使用独立的本地 `25_managed_talo` 组。Kubernetes 额外验证 Namespace RBAC、Service DNS/TLS、专用 StorageClass 实际拒绝超额写入、PVC 留存与回收，以及管理员 Runtime 设置和凭证持久化。
 
 ## 9. 评审决策
 

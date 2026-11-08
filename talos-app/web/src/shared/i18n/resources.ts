@@ -263,6 +263,7 @@ export const resources = {
         appearance: "Appearance",
         "mcp-servers": "MCP servers",
         "web-search": "Web Search",
+        runtime: "Runtime",
         server: "Server",
       },
       navigation: {
@@ -732,6 +733,7 @@ export const resources = {
         appearance: "外观",
         "mcp-servers": "MCP servers",
         "web-search": "Web Search",
+        runtime: "运行时",
         server: "服务端",
       },
       navigation: {

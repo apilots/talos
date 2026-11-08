@@ -20,6 +20,7 @@ vi.mock("@/features/settings", async () => {
     SettingsMcpServersSection: () => <div>MCP servers content</div>,
     SettingsModelsSection: () => <div>Models content</div>,
     SettingsProfileSection: () => <div>Profile content</div>,
+    SettingsRuntimeSection: () => <div>Runtime content</div>,
     SettingsServerSection: () => <div>Advanced content</div>,
     SettingsWebSearchSection: () => <div>Web Search content</div>,
     useSettingsPage: () => useSettingsPageMock(),
@@ -121,6 +122,24 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("Advanced content")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Server" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("shows Runtime to a Server administrator who does not own the selected Computer", () => {
+    renderSettings("/settings/runtime", "authenticated", "admin", false);
+
+    expect(screen.getByText("Runtime content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Runtime" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it.each([
+    ["authenticated", "user"],
+    ["open", "admin"],
+  ] as const)("hides Runtime in %s mode with role %s", (status, role) => {
+    renderSettings("/settings/runtime", status, role, true);
+
+    expect(screen.getByText("Profile content")).toBeTruthy();
+    expect(screen.queryByText("Runtime content")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Runtime" })).toBeNull();
   });
 
   it("renders the web search settings section", () => {

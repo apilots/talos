@@ -18,7 +18,8 @@ use tokio::sync::Mutex;
 
 use crate::{
     ContainerState, DesiredRuntimeState, HomeCapacity, ManagedWorkerRuntime, RuntimeError,
-    RuntimeFuture, RuntimeIdentity, RuntimeObservation, SeedFile, SeedMode, WorkerSpec,
+    RuntimeFuture, RuntimeIdentity, RuntimeObservation, SeedFile, SeedMode, WorkerSpec, HOME_PATH,
+    INSTANCE_LABEL, RESOURCE_LABEL, REVISION_LABEL, SHM_BYTES,
 };
 
 mod seed;
@@ -26,12 +27,7 @@ mod seed;
 pub const DEFAULT_SECCOMP_PROFILE: &str =
     include_str!("../../../../../deploy/docker/talos-worker/chromium-seccomp.json");
 
-const INSTANCE_LABEL: &str = "io.talos.managed-worker.instance";
-const RESOURCE_LABEL: &str = "io.talos.managed-worker.resource";
-const REVISION_LABEL: &str = "io.talos.managed-worker.revision";
-const HOME_PATH: &str = "/home/talos/.talos";
 const WORKER_USER: &str = "10001:10001";
-const SHM_BYTES: i64 = 1 << 30;
 const NO_NEW_PRIVILEGES: &str = "no-new-privileges:true";
 const WORKER_NETWORK: &str = "talos-managed-workers";
 const BRIDGE_ICC: &str = "com.docker.network.bridge.enable_icc";
@@ -84,7 +80,7 @@ impl DockerEngine {
             return Err(RuntimeError::UnsupportedCapacity);
         }
         let names = Names::new(&spec.identity)?;
-        let paths = seed::validate_paths(files)?;
+        let paths = crate::seed::validate_paths(files)?;
         if !files.is_empty()
             && self
                 .inspect_worker(spec, &names)
@@ -471,18 +467,8 @@ struct Names {
 
 impl Names {
     fn new(identity: &RuntimeIdentity) -> Result<Self, RuntimeError> {
-        if identity.short_id.len() != 8
-            || !identity
-                .short_id
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-        {
-            return Err(RuntimeError::InvalidSpec(
-                "Worker short ID must use eight lowercase letters or digits",
-            ));
-        }
         Ok(Self {
-            container: format!("talos-worker-talo-{}", identity.short_id),
+            container: identity.resource_name()?,
             instance: identity.instance_id.to_string(),
         })
     }

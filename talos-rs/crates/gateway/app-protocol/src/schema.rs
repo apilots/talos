@@ -1,10 +1,11 @@
 use schemars::schema::{InstanceType, Schema, SchemaObject};
 use schemars::{schema_for, JsonSchema};
 use serde::Serialize;
-use ts_rs::TS;
 
 mod automation;
+mod typescript;
 pub use automation::generate_typescript as generate_automation_typescript;
+use typescript::export;
 
 use crate::errors::{AppServerErrorBody, AppServerErrorCode};
 use crate::jsonrpc::JsonRpcMessage;
@@ -25,6 +26,8 @@ pub struct AppProtocolSchemaRoot {
     pub error: AppServerErrorBody,
     pub sync_metrics_response: talos_types::SyncMetricsResponse,
     pub sync_status_response: talos_types::SyncStatusResponse,
+    pub worker_runtime_candidate: talos_types::WorkerRuntimeCandidate,
+    pub worker_runtime_settings_response: talos_types::WorkerRuntimeSettingsResponse,
     pub delete_computer_response: talos_types::DeleteComputerResponse,
     pub managed_worker_response: talos_types::ManagedWorkerResponse,
     pub computer_list_response: talos_types::ComputerListResponse,
@@ -322,6 +325,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SyncPeerMetrics>());
     output.push_str(&export::<talos_types::SyncMetadataCounts>());
     output.push_str(&export::<talos_types::SyncStatusResponse>());
+    typescript::export_worker_runtime(&mut output);
     output.push_str(&export::<talos_types::SyncEnableRequest>());
     output.push_str(&export::<talos_types::ComputerListRequest>());
     output.push_str(&export::<crate::requests::ManagedWorkerParams>());
@@ -757,10 +761,6 @@ fn export_app_server_error_code() -> String {
          export const AppServerErrorCode = {{\n{entries}\n\
          }} as const satisfies Record<string, AppServerErrorCode>;\n\n"
     )
-}
-
-fn export<T: TS>() -> String {
-    format!("export {}\n\n", T::decl())
 }
 
 fn export_error_code_runtime_enum() -> String {

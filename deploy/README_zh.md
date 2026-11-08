@@ -14,6 +14,7 @@ deploy/
 |-- caddy/          Caddy reverse-proxy example
 |-- docker/         Docker Compose deployment
 |-- install/        TUI release installer and documentation
+|-- kubernetes/     Kubernetes Server and Worker deployment
 `-- nginx/          Nginx reverse-proxy example
 ```
 
@@ -40,6 +41,8 @@ curl http://127.0.0.1:8080/health
 ```
 
 `agent.talos.love` 上 Talos Server 的生产配置、Compose、TLS 入口、升级回滚及验收见 [Talos Server 部署手册](TALOS_SERVER.md)。普通 Compose 示例不会自动开启注册 listener。
+
+Kubernetes 下的 Server、手动注册 Worker、托管 Talo 及本地 k3d 验收见 [Kubernetes 部署手册](kubernetes/README.md)。
 
 ## 终端安装
 

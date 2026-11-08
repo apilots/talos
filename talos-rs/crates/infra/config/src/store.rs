@@ -12,6 +12,7 @@ use crate::{
 
 mod custom_provider;
 mod host;
+mod worker_runtime;
 
 const ANTHROPIC_API_KEY_ENV: &str = "TALOS_LLM_ANTHROPIC_API_KEY";
 const OPENAI_API_KEY_ENV: &str = "TALOS_LLM_OPENAI_API_KEY";

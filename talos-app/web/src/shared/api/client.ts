@@ -71,6 +71,11 @@ function createDefaultBrowserClient() {
   const desktopBridge = getDesktopBridge();
   if (desktopBridge) return createDesktopTalosClient(desktopBridge, getAuthTokenForRequests);
 
+  return getServerTalosClient();
+}
+
+/** HTTP client for the management Server, without a selected Computer binding. */
+export function getServerTalosClient() {
   return createBrowserTalosClient({
     baseUrl: resolveServerBaseUrl(),
     getToken: getAuthTokenForRequests,

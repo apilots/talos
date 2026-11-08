@@ -67,14 +67,18 @@ def free_port():
         return sock.getsockname()[1]
 
 def http(url, body=None, token=TOKEN):
+    return http_response(url, body, token)[1]
+
+
+def http_response(url, body=None, token=TOKEN, *, method=None):
     req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(),
-        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token})
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token}, method=method)
     try:
         response = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=30)
     except urllib.error.HTTPError as error:
         response = error
     with response:
-        return json.load(response)
+        return response.status, json.load(response)
 
 def data(response):
     require(response.get('status') == 'success', 'Public API failed: ' + str(response.get('error')))

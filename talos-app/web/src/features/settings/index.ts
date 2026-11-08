@@ -19,6 +19,7 @@ export {
   SettingsModelsSection,
   SettingsNavigation,
   SettingsProfileSection,
+  SettingsRuntimeSection,
   SettingsServerSection,
   SettingsWebSearchSection,
 } from "./components";

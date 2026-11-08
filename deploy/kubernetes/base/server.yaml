@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: talos-server-home
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: talos-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: talos-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: talos-server
+    spec:
+      serviceAccountName: talos-server
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: Localhost
+          localhostProfile: talos/chromium-seccomp.json
+      initContainers:
+        - name: seed-home
+          image: ghcr.io/apilots/talos-server:configure
+          command: [/bin/bash, -ec]
+          args:
+            - |
+              umask 077
+              mkdir -p /home/talos/.talos/conf
+              config=/home/talos/.talos/conf/talos.yaml
+              if [[ ! -e "$config" ]]; then
+                install -m 0600 /bootstrap/talos.yaml "$config.bootstrap"
+                mv -f "$config.bootstrap" "$config"
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: home
+              mountPath: /home/talos/.talos
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      containers:
+        - name: server
+          image: ghcr.io/apilots/talos-server:configure
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TALOS_HOME
+              value: /home/talos/.talos
+            - name: TALOS_CONFIG
+              value: /home/talos/.talos/conf/talos.yaml
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: worker-tls
+              containerPort: 9443
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 3
+          volumeMounts:
+            - name: home
+              mountPath: /home/talos/.talos
+            - name: tls
+              mountPath: /run/talos-tls
+              readOnly: true
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: talos-server-home
+        - name: bootstrap
+          configMap:
+            name: talos-server-bootstrap
+        - name: tls
+          secret:
+            secretName: talos-server-tls
+            defaultMode: 0440
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: talos-server
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: talos-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: worker-tls
+      port: 9443
+      targetPort: worker-tls

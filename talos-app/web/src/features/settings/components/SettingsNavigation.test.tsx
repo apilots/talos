@@ -42,7 +42,7 @@ describe("SettingsNavigation", () => {
 
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canManageConfig canOpenAccount />
+        <SettingsNavigation activeSection="profile" canManageConfig canManageRuntime={false} canOpenAccount />
       </MemoryRouter>,
     );
 
@@ -61,7 +61,7 @@ describe("SettingsNavigation", () => {
   it("keeps the account entry disabled for open mode", () => {
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canManageConfig canOpenAccount={false} />
+        <SettingsNavigation activeSection="profile" canManageConfig canManageRuntime={false} canOpenAccount={false} />
       </MemoryRouter>,
     );
 
@@ -81,7 +81,7 @@ describe("SettingsNavigation", () => {
 
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canManageConfig canOpenAccount />
+        <SettingsNavigation activeSection="profile" canManageConfig canManageRuntime={false} canOpenAccount />
       </MemoryRouter>,
     );
 
@@ -97,7 +97,7 @@ describe("SettingsNavigation", () => {
   it("hides config management entries for regular users", () => {
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canManageConfig={false} canOpenAccount />
+        <SettingsNavigation activeSection="profile" canManageConfig={false} canManageRuntime={false} canOpenAccount />
       </MemoryRouter>,
     );
 

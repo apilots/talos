@@ -39,6 +39,7 @@ mod talos_content_display;
 pub mod turn_api;
 pub mod usage;
 pub mod user_action;
+mod worker_runtime_settings;
 
 pub use agent_input::*;
 pub use auth_api::*;
@@ -71,6 +72,7 @@ pub use talos::*;
 pub use turn_api::*;
 pub use usage::*;
 pub use user_action::*;
+pub use worker_runtime_settings::*;
 
 #[cfg(test)]
 #[path = "types_tests.rs"]

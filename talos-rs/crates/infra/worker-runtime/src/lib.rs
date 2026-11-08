@@ -4,12 +4,21 @@
 //! Host observations are independent of Worker registration and RPC readiness.
 
 mod docker;
+mod kubernetes;
+mod seed;
 
 pub use docker::{DockerEngine, DEFAULT_SECCOMP_PROFILE};
+pub use kubernetes::{Kubernetes, KubernetesOptions};
 
 use std::{future::Future, path::PathBuf, pin::Pin};
 
 use uuid::Uuid;
+
+const INSTANCE_LABEL: &str = "io.talos.managed-worker.instance";
+const RESOURCE_LABEL: &str = "io.talos.managed-worker.resource";
+const REVISION_LABEL: &str = "io.talos.managed-worker.revision";
+const HOME_PATH: &str = "/home/talos/.talos";
+const SHM_BYTES: i64 = 1 << 30;
 
 /// A stable resource identity, reused across resets and retries.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +26,22 @@ pub struct RuntimeIdentity {
     pub instance_id: Uuid,
     /// Eight lowercase ASCII letters or digits, allocated by the caller.
     pub short_id: String,
+}
+
+impl RuntimeIdentity {
+    fn resource_name(&self) -> Result<String, RuntimeError> {
+        if self.short_id.len() != 8
+            || !self
+                .short_id
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        {
+            return Err(RuntimeError::InvalidSpec(
+                "Worker short ID must use eight lowercase letters or digits",
+            ));
+        }
+        Ok(format!("talos-worker-talo-{}", self.short_id))
+    }
 }
 
 /// Desired compute revision and deployment-controlled image and resource limits.
@@ -29,7 +54,7 @@ pub struct WorkerSpec {
     pub memory_bytes: u64,
 }
 
-/// Storage capacity to provision and enforce.
+/// Storage capacity requested from the backend. Enforcement depends on the backing storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HomeCapacity {
     Unrestricted,
@@ -82,7 +107,7 @@ pub struct RuntimeObservation {
 pub enum RuntimeError {
     #[error("Invalid Worker runtime input: {0}")]
     InvalidSpec(&'static str),
-    #[error("This Worker runtime does not enforce a Home capacity limit")]
+    #[error("This Worker runtime does not support the requested Home capacity")]
     UnsupportedCapacity,
     #[error("Worker runtime resource is missing: {resource}")]
     Missing { resource: &'static str },
@@ -92,6 +117,12 @@ pub enum RuntimeError {
     UnexpectedState { resource: &'static str },
     #[error("Could not {operation} through Docker Engine")]
     Docker {
+        operation: &'static str,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("Could not {operation} through Kubernetes")]
+    Kubernetes {
         operation: &'static str,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -129,6 +160,6 @@ pub trait ManagedWorkerRuntime: Send + Sync {
     /// Remove stopped compute of the specified revision and retain Home.
     fn remove_runtime<'a>(&'a self, spec: &'a WorkerSpec) -> RuntimeFuture<'a, ()>;
 
-    /// Delete Home once no Worker container remains.
+    /// Delete Home once no Worker compute remains.
     fn remove_home<'a>(&'a self, identity: &'a RuntimeIdentity) -> RuntimeFuture<'a, ()>;
 }

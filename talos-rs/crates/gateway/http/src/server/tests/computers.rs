@@ -145,6 +145,62 @@ async fn managed_worker_read_uses_its_static_route_on_an_unconfigured_server() {
 }
 
 #[tokio::test]
+async fn worker_runtime_settings_require_the_authenticated_server_admin() {
+    let state = test_state(false).await;
+    let routes = super::super::worker_runtime::routes().with_state(state.clone());
+    let app = routes
+        .clone()
+        .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+    for (method, path) in [
+        ("GET", "/v1/worker-runtime"),
+        ("POST", "/v1/worker-runtime/validate"),
+        ("PUT", "/v1/worker-runtime"),
+    ] {
+        let (status, _, body) = call(
+            &app,
+            method,
+            path,
+            Some("owner"),
+            serde_json::json!({
+                "kind": "kubernetes",
+                "namespace": "talos",
+                "storageClass": "local-path",
+                "authentication": { "kind": "pasted", "kubeconfig": "private-fixture-token" }
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!body.to_string().contains("private-fixture-token"));
+    }
+
+    let admin = RequestIdentity {
+        role: talos_auth::UserRole::Admin,
+        access_token: Some("admin-token".into()),
+        ..test_auth()
+    };
+    let (status, headers, body) = call(
+        &routes.layer(axum::Extension(admin)),
+        "GET",
+        "/v1/worker-runtime",
+        None,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers["cache-control"], "no-store");
+    assert_eq!(
+        body["data"],
+        serde_json::json!({
+            "activeBackend": null,
+            "configuredBackend": null,
+            "dockerSocketPath": null,
+            "kubernetes": null,
+            "restartRequired": false
+        })
+    );
+}
+
+#[tokio::test]
 async fn socket_enabled_server_guards_default_and_explicit_embedded_workspace_access() {
     let mut config = test_config();
     config.talos.worker.runtime = Some(talos_config::WorkerRuntimeConfig {
@@ -153,6 +209,7 @@ async fn socket_enabled_server_guards_default_and_explicit_embedded_workspace_ac
         control_plane_endpoint: "https://agent.example.test".into(),
         trusted_ca_file: None,
         docker_engine: Default::default(),
+        kubernetes: Default::default(),
     });
     let state = test_state_with_config(config, false).await;
     let app = Router::new()
