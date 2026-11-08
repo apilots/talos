@@ -21,9 +21,13 @@ export async function prepareAutomationMessage(
   }
   const selectedMode = command?.type === "activate" ? command.mode : mode;
   if (selectedMode && !nodeId) throw automationRequestError("computerRequired");
-  // The Server wakes the Worker before resolving the protected Skill for an explicit command.
-  if (sleepingTalo && command?.type === "activate") {
-    return { kind: "message" as const, prompt: text, skillSelection: undefined };
+  // Turn admission wakes Talo and resolves the protected Skill on the Worker.
+  if (sleepingTalo && selectedMode) {
+    return {
+      kind: "message" as const,
+      prompt: text,
+      skillSelection: command?.type === "activate" ? undefined : { name: selectedMode, path: "" },
+    };
   }
   return { kind: "message" as const, prompt: command?.type === "activate" ? command.prompt : text,
     skillSelection: selectedMode && nodeId ? await automationSkill(selectedMode, nodeId) : undefined };

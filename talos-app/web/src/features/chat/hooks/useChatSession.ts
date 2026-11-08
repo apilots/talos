@@ -34,6 +34,7 @@ const ACTIVE_TURN_NOT_FOUND_CODES = [
 export function useChatSession(
   sessionId: string,
   serverMessageCount?: number,
+  managedWorkerPhase?: AppProtocol.NodeInfo["managedWorkerPhase"],
 ) {
   useTranslation("errors");
   const scope = useProductScope();
@@ -78,6 +79,7 @@ export function useChatSession(
   const blocks = useSessionBlocks({
     sessionId,
     streamState,
+    managedWorkerPhase,
     sessionHistory: sessionHistoryQuery.data,
   });
   const inputHistory = useMemo(

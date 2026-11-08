@@ -48,6 +48,16 @@ describe("explicit composer automation entry", () => {
     });
     expect(mocks.list).not.toHaveBeenCalled();
   });
+  it.each([
+    ["goal", "pause the deployment until CI is green"],
+    ["loop", "5m Check CI"],
+  ] as const)("submits menu-selected %s on sleeping Talo without a Skill read", async (mode, prompt) => {
+    const mocks = client();
+    expect(await prepareAutomationMessage(prompt, mode, "talo", true)).toEqual({
+      kind: "message", prompt, skillSelection: { name: mode, path: "" },
+    });
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
   it("keeps ordinary conversation untouched and does not discover automation from vague tasks", async () => {
     const mocks = client();
     expect(await prepareAutomationMessage("Keep working until tests pass", undefined, "node")).toEqual({ kind: "message", prompt: "Keep working until tests pass", skillSelection: undefined });

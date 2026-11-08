@@ -209,7 +209,10 @@ def exercise(base, instances, worker_model, faults):
         "sessionId": session,
         "nodeId": node,
         "modelSelection": {"modelRef": {"provider": "openai", "id": "browser-fixture"}, "reasoningEffort": None},
-        "input": {"content": [{"type": "text", "text": "Talo first Turn after sleep"}]},
+        "input": {"content": [
+            {"type": "skillSelection", "name": "goal", "path": ""},
+            {"type": "text", "text": "pause the deployment until the tests pass"},
+        ]},
     }
 
     def start_first_turn():
@@ -222,6 +225,7 @@ def exercise(base, instances, worker_model, faults):
     events = urllib.request.Request(base + f"/v1/sessions/{session}/events?limit=1000&turn_id={turn['turnId']}",
                                     headers=headers)
     answer = False
+    resolved_goal = False
     with urllib.request.urlopen(events, timeout=45) as response:
         for line in response:
             if not line.startswith(b"data: "):
@@ -230,14 +234,21 @@ def exercise(base, instances, worker_model, faults):
             if record.get("type") != "agent":
                 continue
             event = record["data"]["payload"]
+            if event["type"] == "messageBlockStarted":
+                content = event["data"]["block"]["content"]
+                if content["type"] == "userContent":
+                    selection = content["data"]
+                    resolved_goal = resolved_goal or (
+                        selection["type"] == "skillSelection" and selection["name"] == "goal" and bool(selection["path"])
+                    )
             answer = answer or b"TALO_WAKE_OK" in line
             if event["type"] in {"turnCompleted", "turnFailed", "turnCancelled"}:
-                assert event["type"] == "turnCompleted" and answer, event
+                assert event["type"] == "turnCompleted" and answer and resolved_goal, event
                 break
         else:
             raise AssertionError("Talo Turn did not publish a terminal event")
     ready = wait(lambda: phase(base, "ready"), "ready after first Turn")
-    print("PASS first Turn wakes Talo and executes through its Worker-local model configuration", flush=True)
+    print("PASS menu-selected Goal wakes Talo and executes through its Worker-local model configuration", flush=True)
 
     media(base, node, replacement, http, data, wait, REPORT)
     if RECOVERY:

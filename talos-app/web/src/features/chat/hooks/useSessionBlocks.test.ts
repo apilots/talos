@@ -1,3 +1,8 @@
+// @vitest-environment jsdom
+
+
+import { renderHook } from "@testing-library/react";
+import type { AppProtocol } from "@talos/sdk-browser";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -9,11 +14,40 @@ import {
 } from "../__tests__/streaming-fixtures";
 import { applyStreamEvent, buildBlocksFromHistorySnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
-import { buildSessionBlocks } from "./useSessionBlocks";
+import { buildSessionBlocks, useSessionBlocks } from "./useSessionBlocks";
 
 describe("buildSessionBlocks", () => {
   beforeEach(() => {
     useAppStore.getState().resetStream("sess-1");
+  });
+
+  it("shows Talo's observed startup phases until Turn output replaces the waiting row", () => {
+    const store = useAppStore.getState();
+    store.setStreamMeta("sess-1", { isStreaming: true, connectionState: "awaiting" });
+    const { result, rerender } = renderHook(
+      ({ phase }: { phase: AppProtocol.ManagedWorkerPhase }) =>
+        useSessionBlocks({ sessionId: "sess-1", managedWorkerPhase: phase, streamState: useAppStore.getState().streams["sess-1"] }),
+      { initialProps: { phase: "sleeping" } },
+    );
+
+    expect(result.current.at(-1)).toMatchObject({ kind: "status", title: "Starting Talo…", detail: "Your message will run once Talo connects." });
+    rerender({ phase: "waitingForRegistration" });
+    expect(result.current.at(-1)).toMatchObject({ kind: "status", title: "Wait for Worker registration" });
+    rerender({ phase: "ready" });
+    expect(result.current.at(-1)).toMatchObject({ kind: "status", title: "Talo is ready" });
+
+    applyStreamEvent("sess-1", userInputStarted("input-1", "First question", 1));
+    store.upsertTimelineItem("sess-1", "turn-1", {
+      itemId: "notice", kind: "system_notice", phase: "system", status: "completed",
+      text: "Startup notice", startedAtMs: 0, completedAtMs: 0,
+    });
+    rerender({ phase: "ready" });
+    expect(result.current.at(-1)).toMatchObject({ kind: "status", title: "Talo is working…", detail: "Waiting for the first reply." });
+
+    applyStreamEvent("sess-1", itemStarted("answer-1", "assistant_text", "final_answer", 2));
+    applyStreamEvent("sess-1", textDelta("answer-1", "Ready to help.", 3));
+    rerender({ phase: "ready" });
+    expect(result.current.some((block) => block.kind === "status")).toBe(false);
   });
 
   it("renders one user block when history and the live stream own the same message", () => {

@@ -35,6 +35,8 @@ export function MessageList({
   const helpfulLabel = t("helpful");
   const notHelpfulLabel = t("notHelpful");
   const lastUserIndex = blocks.reduce((last, block, index) => block.kind === "user" ? index : last, -1);
+  const lastBlock = blocks.at(-1);
+  const showingWaitStatus = lastBlock?.kind === "status" && lastBlock.variant === "thinking";
 
   if (blocks.length === 0) {
     return (
@@ -58,7 +60,7 @@ export function MessageList({
         if (block.kind === "timeline") {
           return (
             <MessageTimelineBlock
-              block={index < lastUserIndex ? { ...block, live: false } : block}
+              block={index < lastUserIndex || showingWaitStatus ? { ...block, live: false } : block}
               copiedLabel={copiedBlockLabel}
               copyLabel={copyBlockLabel}
               helpfulLabel={helpfulLabel}

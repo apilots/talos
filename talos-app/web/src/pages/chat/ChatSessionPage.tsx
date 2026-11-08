@@ -67,7 +67,7 @@ export function ChatSessionPage() {
     // Another client may have created this Project while the sidebar stayed mounted.
     if (session?.projectId) void refetchProjects();
   }, [session?.projectId, session?.nodeId, refetchProjects]);
-  const chat = useChatSession(sessionId, session?.messageCount);
+  const chat = useChatSession(sessionId, session?.messageCount, target.data?.managedWorkerPhase);
   const {
     blocks,
     setDraft,

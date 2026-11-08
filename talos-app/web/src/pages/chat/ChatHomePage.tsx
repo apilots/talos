@@ -56,7 +56,7 @@ export function ChatHomePage() {
   useEffect(() => { ownerRef.current = draftKey; return () => { ownerRef.current = undefined; }; }, [draftKey]);
   const commands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
     queryFn: () => getTalosClient().automation.commandCatalog({}),
-    enabled: Boolean(computers.selected?.available), staleTime: Infinity });
+    enabled: canSend, staleTime: Infinity });
   const savedDraft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
   const saveDraft = useAppStore((state) => state.saveComposerDraft);
   const draft = locationState?.initialDraft ?? savedDraft;

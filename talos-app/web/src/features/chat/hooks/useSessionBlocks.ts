@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { AppProtocol } from "@talos/sdk-browser";
 
 import type { ChatRenderBlock, StreamSessionState } from "@/shared/types/ui";
 import { buildBlocksFromHistorySnapshot } from "../stream-events";
@@ -9,28 +10,51 @@ export function useSessionBlocks({
   sessionId,
   streamState,
   sessionHistory,
+  managedWorkerPhase,
 }: {
   sessionId: string;
   streamState?: StreamSessionState;
   sessionHistory?: ChatApiSessionHistory;
+  managedWorkerPhase?: AppProtocol.NodeInfo["managedWorkerPhase"];
 }) {
-  const { t } = useTranslation("chat");
+  const { t } = useTranslation(["chat", "computers"]);
+  let waitingResponseTitle = t("waitingResponseTitle");
+  let waitingResponseDetail = t("waitingResponseDetail");
+  if (managedWorkerPhase) {
+    if (streamState?.activeTurnId) {
+      waitingResponseTitle = t("computers:talo.processing");
+      waitingResponseDetail = t("computers:talo.processingHelp");
+    } else if (managedWorkerPhase === "sleeping" || managedWorkerPhase === "starting") {
+      waitingResponseTitle = t("computers:talo.waking");
+      waitingResponseDetail = t("computers:talo.wakeHelp");
+    } else if (managedWorkerPhase === "waitingForRegistration") {
+      waitingResponseTitle = t("computers:talo.phase.waitingForRegistration");
+      waitingResponseDetail = t("computers:talo.wakeHelp");
+    } else if (managedWorkerPhase === "ready") {
+      waitingResponseTitle = t("computers:talo.phase.ready");
+      waitingResponseDetail = t("computers:talo.dispatchHelp");
+    }
+  }
 
   const history = useMemo(() => buildBlocksFromHistorySnapshot(sessionHistory), [sessionHistory]);
   return useMemo(() => {
     return buildSessionBlocks({
       sessionId,
       streamState,
+      managedWorkerPhase,
       history,
-      waitingResponseDetail: t("waitingResponseDetail"),
-      waitingResponseTitle: t("waitingResponseTitle"),
+      waitingResponseDetail,
+      waitingResponseTitle,
       stoppingResponseDetail: t("stoppingResponseDetail"),
       stoppingResponseTitle: t("stoppingResponseTitle"),
     });
   }, [
     sessionId,
     streamState,
+    managedWorkerPhase,
     history,
+    waitingResponseDetail,
+    waitingResponseTitle,
     t,
   ]);
 }
@@ -38,6 +62,7 @@ export function useSessionBlocks({
 export function buildSessionBlocks({
   sessionId,
   streamState,
+  managedWorkerPhase,
   history,
   waitingResponseDetail,
   waitingResponseTitle,
@@ -46,6 +71,7 @@ export function buildSessionBlocks({
 }: {
   sessionId: string;
   streamState?: StreamSessionState;
+  managedWorkerPhase?: AppProtocol.NodeInfo["managedWorkerPhase"];
   history: ReturnType<typeof buildBlocksFromHistorySnapshot>;
   waitingResponseDetail: string;
   waitingResponseTitle: string;
@@ -98,9 +124,10 @@ export function buildSessionBlocks({
     (block) =>
       block.kind === "assistant" ||
       block.kind === "thinking" ||
-      block.kind === "system" ||
       block.kind === "tool" ||
-      block.kind === "timeline",
+      block.kind === "system" ||
+      (block.kind === "timeline" &&
+        (!managedWorkerPhase || block.items.some((item) => item.kind !== "system_notice"))),
   );
   const shouldShowWaitingPlaceholder =
     Boolean(streamState?.isStreaming) &&
