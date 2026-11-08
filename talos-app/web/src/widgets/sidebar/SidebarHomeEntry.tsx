@@ -8,6 +8,7 @@ import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 export function SidebarHomeEntry({ computer }: { computer?: import("@talos/sdk-core").AppProtocol.NodeInfo }) {
   const { t } = useTranslation("computers");
   const phase = computer?.managedWorkerPhase;
+  const starting = phase === "provisioning" || phase === "starting" || phase === "waitingForRegistration";
   const status = phase && phase !== "ready" ? t(`talo.phase.${phase}`)
     : computer ? t(computer.available ? "connectedTo" : "offlineComputer", { name: computer.displayName }) : t("choose");
 
@@ -24,9 +25,15 @@ export function SidebarHomeEntry({ computer }: { computer?: import("@talos/sdk-c
       </span>
       <span className="min-w-0">
         <span className="block truncate text-sm font-semibold leading-5">Talos</span>
-        <span className="mt-0.5 flex items-center gap-2 text-xs leading-4 text-muted">
+        <span className={cn(
+          "mt-0.5 flex items-center gap-2 text-xs leading-4",
+          starting ? "text-[color:color-mix(in_srgb,rgb(var(--color-warning))_70%,rgb(var(--color-ink)))]" : "text-muted",
+        )}>
           <span className="truncate" title={computer?.displayName}>{status}</span>
-          <span className={`size-1.5 shrink-0 rounded-full ${computer?.available ? "bg-success" : "bg-muted/50"}`} />
+          <span aria-hidden="true" className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            starting ? "bg-warning" : computer?.available ? "bg-success" : "bg-muted/50",
+          )} />
         </span>
       </span>
     </Link>

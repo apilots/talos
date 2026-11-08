@@ -60,7 +60,7 @@ export function MessageList({
         if (block.kind === "timeline") {
           return (
             <MessageTimelineBlock
-              block={index < lastUserIndex || showingWaitStatus ? { ...block, live: false } : block}
+              block={index < lastUserIndex ? { ...block, live: false } : block}
               copiedLabel={copiedBlockLabel}
               copyLabel={copyBlockLabel}
               helpfulLabel={helpfulLabel}
@@ -68,6 +68,7 @@ export function MessageList({
               notHelpfulLabel={notHelpfulLabel}
               pendingUserAction={pendingUserAction}
               renderUserAction={renderUserAction}
+              showWaitingIndicator={!showingWaitStatus}
             />
           );
         }

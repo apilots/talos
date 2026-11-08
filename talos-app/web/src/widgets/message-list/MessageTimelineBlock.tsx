@@ -38,6 +38,7 @@ interface MessageTimelineBlockProps {
   notHelpfulLabel: string;
   pendingUserAction?: PendingUserAction;
   renderUserAction?: (action: PendingUserAction) => ReactNode;
+  showWaitingIndicator?: boolean;
 }
 
 const PROCESS_PAGE_SIZE = 64;
@@ -53,6 +54,7 @@ export function MessageTimelineBlock({
   notHelpfulLabel,
   pendingUserAction,
   renderUserAction,
+  showWaitingIndicator = true,
 }: MessageTimelineBlockProps) {
   const { t } = useTranslation("chat");
   const { items, id: timelineId } = block;
@@ -203,7 +205,7 @@ export function MessageTimelineBlock({
                 </li>
               );
             })}
-            {isAwaitingTimelineDelta ? (
+            {isAwaitingTimelineDelta && showWaitingIndicator ? (
               <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key="timeline-waiting-indicator">
                 <span
                   aria-label="Waiting for timeline update"
