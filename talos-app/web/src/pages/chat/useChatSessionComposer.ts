@@ -21,6 +21,7 @@ import {
   type useChatSession,
   type useProjectsView,
 } from "@/features/chat";
+import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ReasoningLevel } from "@/shared/types/ui";
 import type { SessionLocationState } from "./chatSessionLocation";
 import { useSessionCommands } from "./useSessionCommands";
@@ -36,6 +37,7 @@ interface UseChatSessionComposerOptions {
   sessionId: string;
   nodeId?: string;
   sleepingTalo: boolean;
+  taloConversation?: boolean;
   restoredAutomationMode?: AutomationMode;
   onRestoredAutomationModeConsumed?: () => void;
 }
@@ -50,6 +52,7 @@ export function useChatSessionComposer({
   sessionId,
   nodeId,
   sleepingTalo,
+  taloConversation = false,
   restoredAutomationMode,
   onRestoredAutomationModeConsumed,
 }: UseChatSessionComposerOptions) {
@@ -91,7 +94,7 @@ export function useChatSessionComposer({
     sessionId,
   });
   const { boundProject, selectedProjectId } = useSelectedSessionProject({
-    activeProjectId: projectsView.activeProjectId,
+    activeProjectId: taloConversation ? UNBOUND_PROJECT_ID : projectsView.activeProjectId,
     draftProjectId,
     projects: projectsView.projects,
     sessionExists: Boolean(session),

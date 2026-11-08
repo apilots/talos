@@ -46,6 +46,7 @@ pub struct ManagedWorkerRecord {
     pub instance_id: String,
     pub owner_user_id: String,
     pub node_id: String,
+    pub conversation_session_id: String,
     pub short_id: String,
     pub image: String,
     pub revision: i64,

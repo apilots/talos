@@ -416,7 +416,11 @@ export type ManagedWorkerParams = Record<string, never>;
 
 export type ManagedWorkerResponse = { enabled: boolean, instance: ManagedWorkerInfo | null, };
 
-export type ManagedWorkerInfo = { instanceId: string, nodeId: string, generation: number, phase: ManagedWorkerPhase, operation: ManagedWorkerOperation | null, cpuCores: number, memoryBytes: number, diskQuota: ManagedWorkerDiskQuota, error: ApiError | null, };
+export type ManagedWorkerInfo = { instanceId: string, nodeId: string,
+/**
+ * Server-reserved Session identity. The Session itself is created by its first Turn.
+ */
+conversationSessionId: string | null, generation: number, phase: ManagedWorkerPhase, operation: ManagedWorkerOperation | null, cpuCores: number, memoryBytes: number, diskQuota: ManagedWorkerDiskQuota, error: ApiError | null, };
 
 export type ManagedWorkerPhase = "provisioning" | "starting" | "waitingForRegistration" | "ready" | "sleeping" | "stopped" | "offline" | "stopping" | "resetting" | "deleting" | "failed";
 

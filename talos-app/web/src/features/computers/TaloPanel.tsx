@@ -1,14 +1,16 @@
-import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppProtocol } from "@talos/sdk-core";
-import { Bot, Check, Circle, Loader2 } from "lucide-react";
+import { Bot, Check, Circle, Ellipsis, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getTalosClient } from "@/shared/api/client";
 import { apiErrorMessage, userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
+import { workspaceWindowKey } from "@/shared/store/workspace-window";
 import { connectionScope } from "@/shared/store/connection-scope";
 import { Button } from "@/shared/ui/Button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/shared/ui/DropdownMenu";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogTitle,
@@ -24,23 +26,19 @@ const pollLimitMs = 120_000;
 type Action = AppProtocol.ManagedWorkerOperation | "connect";
 type Confirmation = { kind: "reset" | "delete"; instance: AppProtocol.ManagedWorkerInfo };
 
-export function TaloPanel() {
-  const { t } = useTranslation(["computers", "common"]);
+export function useManagedWorkerStatus(enabled = true) {
   const scope = useProductScope();
-  const queries = useQueryClient();
   const queryKey = ["talos", scope, "managed-worker"];
   const poll = useRef<{ instanceId: string; generation: number; until: number } | null>(null);
-  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const [desktopIntent, setDesktopIntent] = useState<{ instanceId: string; generation: number }>();
-  const confirmationTrigger = useRef<HTMLButtonElement>(null);
-
   const status = useQuery({
+    enabled,
     queryKey,
     queryFn: () => getTalosClient().computers.readManagedWorker(),
     retry: false,
     refetchInterval: (query) => {
       const instance = query.state.data?.instance;
-      const enabled = !query.state.error && query.state.data?.enabled;
+      const enabled = query.state.data?.enabled;
+      if (query.state.error) return enabled ? 5_000 : false;
       if (!enabled || !instance || !pendingPhases.has(instance.phase)) {
         poll.current = null;
         return enabled ? 5_000 : false;
@@ -49,9 +47,30 @@ export function TaloPanel() {
         poll.current = { instanceId: instance.instanceId, generation: instance.generation, until: Date.now() + pollLimitMs };
       }
       const remaining = poll.current.until - Date.now();
-      return remaining > 0 ? Math.min(2_000, remaining) : false;
+      return remaining > 0 ? Math.min(2_000, remaining) : 5_000;
     },
   });
+  return { status, queryKey, poll };
+}
+
+export function taloHasConversation(instance: AppProtocol.ManagedWorkerInfo | null | undefined):
+  instance is AppProtocol.ManagedWorkerInfo & { conversationSessionId: string } {
+  return Boolean(instance?.conversationSessionId && (instance.operation !== "create" || instance.phase === "failed"));
+}
+
+export function TaloPanel({ desktopNodeId, desktopButton = false }: {
+  desktopNodeId?: string;
+  desktopButton?: boolean;
+} = {}) {
+  const { t } = useTranslation(["computers", "common"]);
+  const scope = useProductScope();
+  const queries = useQueryClient();
+  const { status, queryKey, poll } = useManagedWorkerStatus();
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [desktopIntent, setDesktopIntent] = useState<{ instanceId: string; generation: number }>();
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const [desktopPortal, setDesktopPortal] = useState<HTMLElement | null>(null);
+
   const instance = status.data?.instance;
   const phase = instance?.phase;
   const operation = instance?.operation;
@@ -120,10 +139,75 @@ export function TaloPanel() {
     action.mutate({ kind, current });
   }
 
-  function confirm(kind: Confirmation["kind"], event: MouseEvent<HTMLButtonElement>) {
-    if (!instance) return;
-    confirmationTrigger.current = event.currentTarget;
-    setConfirmation({ kind, instance });
+  useEffect(() => {
+    if (desktopNodeId && status.isSuccess && status.data.instance?.nodeId !== desktopNodeId) {
+      useAppStore.getState().closeWorkspaceWindow(workspaceWindowKey({ kind: "computer", nodeId: desktopNodeId }));
+    }
+  }, [desktopNodeId, status.isSuccess, status.data?.instance?.nodeId]);
+
+  const error = action.error ? userVisibleErrorMessage(action.error, t("computers:talo.actionError"))
+    : instance?.error ? apiErrorMessage(instance.error) : null;
+  const dialog = confirmation ? (
+        <AlertDialog open onOpenChange={open => { if (!open) setConfirmation(null); }}>
+          <AlertDialogContent container={desktopPortal} onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            menuTrigger.current?.focus();
+          }}>
+            <AlertDialogTitle className="text-lg font-semibold">{t(confirmation.kind === "delete" ? "computers:talo.confirmDelete" : "computers:talo.confirmReset")}</AlertDialogTitle>
+            <AlertDialogDescription className="mt-3 space-y-2 text-sm leading-6 text-muted" asChild>
+              <div>
+                <p>{t(confirmation.kind === "delete" ? "computers:talo.deleteHelp" : "computers:talo.resetHelp")}</p>
+                {confirmation.kind === "delete" ? <p>{t("computers:talo.retainedHistory")}</p> : null}
+              </div>
+            </AlertDialogDescription>
+            <div className="mt-5 flex justify-end gap-2">
+              <AlertDialogCancel asChild><Button type="button" variant="ghost">{t("common:cancel")}</Button></AlertDialogCancel>
+              <AlertDialogAction asChild><Button type="button" variant={confirmation.kind === "delete" ? "danger" : "primary"} onClick={() => perform(confirmation.kind, confirmation.instance)}>
+                {t(confirmation.kind === "delete" ? "computers:talo.delete" : "computers:talo.reset")}
+              </Button></AlertDialogAction>
+            </div>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null;
+
+  if (desktopNodeId) {
+    if (instance?.nodeId !== desktopNodeId) return null;
+    const canStop = phase === "ready" || phase === "sleeping";
+    const canStart = phase === "stopped" || phase === "sleeping" || phase === "offline" ||
+      (phase === "failed" && (operation === "create" || operation === "start"));
+    return <>
+      {error ? <p role="alert" className="max-w-40 truncate text-xs text-danger" title={error}>{error}</p> : null}
+      <DropdownMenu modal={false} onOpenChange={open => {
+        if (open) setDesktopPortal(menuTrigger.current?.closest("dialog") ?? null);
+      }}>
+        <DropdownMenuTrigger asChild>
+          <Button ref={menuTrigger} type="button" variant="ghost" className="p-2" aria-label={t("computers:talo.manage")}>
+            <Ellipsis size={16} aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent container={desktopPortal} align="end">
+          {canStart ? <DropdownMenuItem disabled={busy} onSelect={() => perform("start")}>{t("computers:talo.start")}</DropdownMenuItem> : null}
+          {canStop || (phase === "failed" && operation === "stop") ? <DropdownMenuItem disabled={busy} onSelect={() => perform("stop")}>{t("computers:talo.stop")}</DropdownMenuItem> : null}
+          <DropdownMenuItem disabled={busy || operation === "delete"} onSelect={() => setConfirmation({ kind: "reset", instance })}>{t("computers:talo.reset")}</DropdownMenuItem>
+          <DropdownMenuItem disabled={busy} className="text-danger" onSelect={() => setConfirmation({ kind: "delete", instance })}>{t("computers:talo.delete")}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {dialog}
+    </>;
+  }
+
+  if (desktopButton) {
+    if (!instance) return null;
+    return <div className="flex items-center gap-2">
+      {error ? <p role="alert" className="text-xs text-danger">{error}</p> : null}
+      <Button type="button" variant="ghost" disabled={action.isPending || (Boolean(desktopIntent) && transitioning)}
+        onClick={() => {
+          if (phase === "ready" || phase === "sleeping") perform("connect");
+          else openDesktop(instance.nodeId);
+        }}>
+        {t("computers:talo.connect")}
+      </Button>
+    </div>;
   }
 
   if (status.isPending) return <p role="status" className="py-6 text-sm text-muted">{t("common:loading")}</p>;
@@ -140,17 +224,12 @@ export function TaloPanel() {
       : phase === "offline" ? "offlineHelp" : phase ? null : "initializeHelp";
   const title = stepIndex !== -1 ? "initializing" : phase ? `phase.${phase}` as const : "initialize";
   const failedDelete = phase === "failed" && operation === "delete";
-  const failedReset = phase === "failed" && operation === "reset";
   const primary = !instance ? { label: "initialize", run: () => perform("create") }
     : phase === "ready" || phase === "sleeping" ? { label: "connect", run: () => perform("connect") }
     : phase === "failed" && operation === "stop" ? { label: "retryStop", run: () => perform("stop") }
-    : failedReset ? { label: "retryReset", run: (event: MouseEvent<HTMLButtonElement>) => confirm("reset", event) }
     : failedDelete ? null
     : phase === "stopped" ? { label: "start", run: () => perform("start") }
     : phase === "offline" || phase === "failed" ? { label: "retryStart", run: () => perform("start") } : null;
-
-  const error = action.error ? userVisibleErrorMessage(action.error, t("computers:talo.actionError"))
-    : instance?.error ? apiErrorMessage(instance.error) : null;
 
   return (
     <>
@@ -185,12 +264,7 @@ export function TaloPanel() {
       ) : null}
 
       <div className="mt-3 flex flex-wrap items-start justify-between gap-3 border-t border-border pt-4">
-        {!instance ? <p className="my-auto text-xs text-muted">{t("computers:talo.accountLimit")}</p>
-          : !busy ? <div className="flex flex-wrap items-center gap-1">
-            {phase === "ready" || phase === "sleeping" ? <Button type="button" variant="ghost" onClick={() => perform("stop")}>{t("computers:talo.stop")}</Button> : null}
-            {!failedDelete && !failedReset ? <Button type="button" variant="ghost" onClick={(event) => confirm("reset", event)}>{t("computers:talo.reset")}</Button> : null}
-            <Button type="button" variant="ghost" onClick={(event) => confirm("delete", event)}>{t("computers:talo.delete")}</Button>
-          </div> : null}
+        {!instance ? <p className="my-auto text-xs text-muted">{t("computers:talo.accountLimit")}</p> : null}
         <div className="ml-auto flex flex-col items-end gap-2">
           {pollExpired ? <Button type="button" variant="ghost" onClick={() => {
             poll.current = null;
@@ -202,29 +276,6 @@ export function TaloPanel() {
           {phase === "ready" && instance?.diskQuota === "unsupported" ? <p className="max-w-56 text-right text-xs leading-5 text-muted">{t("computers:talo.quotaUnsupported")}</p> : null}
         </div>
       </div>
-
-      {confirmation ? (
-        <AlertDialog open onOpenChange={open => { if (!open) setConfirmation(null); }}>
-          <AlertDialogContent onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            confirmationTrigger.current?.focus();
-          }}>
-            <AlertDialogTitle className="text-lg font-semibold">{t(confirmation.kind === "delete" ? "computers:talo.confirmDelete" : "computers:talo.confirmReset")}</AlertDialogTitle>
-            <AlertDialogDescription className="mt-3 space-y-2 text-sm leading-6 text-muted" asChild>
-              <div>
-                <p>{t(confirmation.kind === "delete" ? "computers:talo.deleteHelp" : "computers:talo.resetHelp")}</p>
-                {confirmation.kind === "delete" ? <p>{t("computers:talo.retainedHistory")}</p> : null}
-              </div>
-            </AlertDialogDescription>
-            <div className="mt-5 flex justify-end gap-2">
-              <AlertDialogCancel asChild><Button type="button" variant="ghost">{t("common:cancel")}</Button></AlertDialogCancel>
-              <AlertDialogAction asChild><Button type="button" variant={confirmation.kind === "delete" ? "danger" : "primary"} onClick={() => perform(confirmation.kind, confirmation.instance)}>
-                {t(confirmation.kind === "delete" ? "computers:talo.delete" : "computers:talo.reset")}
-              </Button></AlertDialogAction>
-            </div>
-          </AlertDialogContent>
-        </AlertDialog>
-      ) : null}
     </>
   );
 }

@@ -48,6 +48,8 @@ pub enum ManagedWorkerDiskQuota {
 pub struct ManagedWorkerInfo {
     pub instance_id: String,
     pub node_id: String,
+    /// Server-reserved Session identity. The Session itself is created by its first Turn.
+    pub conversation_session_id: Option<String>,
     pub generation: u32,
     pub phase: ManagedWorkerPhase,
     pub operation: Option<ManagedWorkerOperation>,

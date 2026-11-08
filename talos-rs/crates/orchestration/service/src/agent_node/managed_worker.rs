@@ -103,6 +103,7 @@ impl AgentNodeService {
             instance_id: uuid::Uuid::new_v4().to_string(),
             owner_user_id: actor.user_id.clone(),
             node_id: uuid::Uuid::new_v4().to_string(),
+            conversation_session_id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
             short_id: uuid::Uuid::new_v4().simple().to_string()[..8].to_owned(),
             image: managed.config.image.clone(),
             revision: 1,
@@ -198,6 +199,7 @@ impl AgentNodeService {
                 return Ok(ManagedWorkerInfo {
                     instance_id: receipt.instance_id,
                     node_id: receipt.node_id,
+                    conversation_session_id: None,
                     generation: receipt.generation,
                     phase: Phase::Deleting,
                     operation: Some(ManagedWorkerOperation::Delete),
@@ -388,6 +390,36 @@ impl AgentNodeService {
             Some(node) => Ok(self.node_info(node).await.available),
             None => Ok(false),
         }
+    }
+
+    pub(crate) async fn managed_conversation_node(
+        &self,
+        actor: &Actor,
+        request: &talos_types::StartTurnRequest,
+    ) -> TalosResult<Option<String>> {
+        let Some(record) = self
+            .store
+            .managed_worker_by_conversation(&request.session_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        ensure_management_actor(actor)?;
+        if record.owner_user_id != actor.user_id {
+            return Err(not_found());
+        }
+        if request.project_id.is_some()
+            || request
+                .node_id
+                .as_deref()
+                .is_some_and(|node| node != record.node_id)
+        {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "The Talo conversation belongs to its Talo and cannot use a Project.",
+            ));
+        }
+        Ok(Some(record.node_id))
     }
 
     pub(crate) async fn managed_request_wait(&self, node_id: &str) -> TalosResult<Duration> {
@@ -624,6 +656,7 @@ pub(super) fn worker_info(record: &ManagedWorkerRecord, available: bool) -> Mana
     ManagedWorkerInfo {
         instance_id: record.instance_id.clone(),
         node_id: record.node_id.clone(),
+        conversation_session_id: Some(record.conversation_session_id.clone()),
         generation: record.generation,
         phase,
         operation: if record.step == Step::Stable && record.error.is_none() {

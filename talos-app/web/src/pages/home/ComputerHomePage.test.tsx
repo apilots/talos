@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -11,6 +11,7 @@ import { resetTalosClientFactory, setTalosClientFactory, type TalosWebClient } f
 import { connectionScope } from "@/shared/store/connection-scope";
 import { useAppStore } from "@/shared/store/app-store";
 import { topologyNodes } from "@/shared/test/computer-topology.fixture";
+import { TaloPanel } from "@/features/computers";
 import { ComputerHomePage } from "./ComputerHomePage";
 
 vi.mock("@/shared/api/desktop-client", () => ({ getDesktopBridge: () => undefined }));
@@ -20,14 +21,14 @@ const createManagedWorker = vi.fn();
 const startManagedWorker = vi.fn();
 const deleteManagedWorker = vi.fn();
 const worker = {
-  instanceId: "talo-instance", nodeId: "talo-node", generation: 1, phase: "waitingForRegistration",
+  instanceId: "talo-instance", nodeId: "talo-node", conversationSessionId: "sess_talo", generation: 1, phase: "waitingForRegistration",
   operation: "create", cpuCores: 4, memoryBytes: 8 * 1024 ** 3, diskQuota: "unsupported", error: null,
 } satisfies AppProtocol.ManagedWorkerInfo;
 const query = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
 
 function Location() { return <output aria-label="Location">{useLocation().pathname}</output>; }
-function show(path = "/files") {
-  return render(<StrictMode><QueryClientProvider client={query}><MemoryRouter initialEntries={[path]}><ComputerHomePage /><Location /></MemoryRouter></QueryClientProvider></StrictMode>);
+function show(path = "/files", content: ReactNode = <ComputerHomePage />) {
+  return render(<StrictMode><QueryClientProvider client={query}><MemoryRouter initialEntries={[path]}>{content}<Location /></MemoryRouter></QueryClientProvider></StrictMode>);
 }
 
 beforeEach(() => {
@@ -208,14 +209,17 @@ it("wakes Talo on an explicit desktop request when it has gone to sleep since th
 
 it("requires explicit confirmation for Talo deletion", async () => {
   readManagedWorker.mockResolvedValue({ enabled: true, instance: { ...worker, phase: "stopped", operation: null } });
-  show("/talo");
-  const button = await screen.findByRole("button", { name: "Delete Talo" });
-  fireEvent.click(button);
+  show("/talo", <TaloPanel desktopNodeId={worker.nodeId} />);
+  const menu = await screen.findByRole("button", { name: "Manage Talo" });
+  fireEvent.keyDown(menu, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete Talo" }));
   const dialog = await screen.findByRole("alertdialog", { name: "Delete Talo?" });
   expect(dialog).toHaveTextContent(/will be permanently deleted/);
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   expect(deleteManagedWorker).not.toHaveBeenCalled();
-  fireEvent.click(button);
+  await waitFor(() => expect(menu).toHaveFocus());
+  fireEvent.keyDown(menu, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete Talo" }));
   fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete Talo" }));
   await waitFor(() => expect(deleteManagedWorker).toHaveBeenCalledExactlyOnceWith({
     instanceId: worker.instanceId, expectedGeneration: worker.generation, confirmDataLoss: true,

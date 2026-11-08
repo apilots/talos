@@ -22,6 +22,10 @@ pub trait AgentNodeStore: Send + Sync {
         &self,
         node_id: &str,
     ) -> TalosResult<Option<ManagedWorkerRecord>>;
+    async fn managed_worker_by_conversation(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<ManagedWorkerRecord>>;
     async fn managed_workers_needing_attention(
         &self,
         idle_before: i64,
@@ -117,7 +121,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             .execute(&mut *tx)
             .await
             .map_err(|error| database_error("reserve Talo Computer", error))?;
-        sqlx::query("INSERT INTO managed_workers(instance_id, owner_user_id, node_id, short_id, image, revision, generation, desired, operation, step, home_ready, last_activity_at, operation_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO managed_workers(instance_id, owner_user_id, node_id, short_id, image, revision, generation, desired, operation, step, home_ready, last_activity_at, operation_at, conversation_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
             .bind(&record.instance_id)
             .bind(&record.owner_user_id)
             .bind(&record.node_id)
@@ -131,6 +135,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             .bind(record.home_ready)
             .bind(record.last_activity_at)
             .bind(record.operation_at)
+            .bind(&record.conversation_session_id)
             .execute(&mut *tx)
             .await
             .map_err(|error| database_error("reserve Talo lifecycle", error))?;
@@ -154,6 +159,17 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             .fetch_optional(&self.pool)
             .await
             .map_err(|error| database_error("read managed Computer lifecycle", error))
+    }
+
+    async fn managed_worker_by_conversation(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<ManagedWorkerRecord>> {
+        sqlx::query_as("SELECT * FROM managed_workers WHERE conversation_session_id = ?")
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|error| database_error("read Talo conversation binding", error))
     }
 
     async fn managed_workers_needing_attention(

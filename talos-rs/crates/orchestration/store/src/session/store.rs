@@ -363,12 +363,18 @@ impl SessionStore for DatabaseSessionStore {
             .collect::<Vec<_>>()
             .join(", ");
         let params = values.iter().map(String::as_str).collect::<Vec<_>>();
-        transaction
+        let inserted = transaction
             .execute(
-                &format!("INSERT INTO sessions ({columns}) VALUES ({placeholders})"),
+                &format!("INSERT INTO sessions ({columns}) VALUES ({placeholders}) ON CONFLICT(session_key) DO NOTHING"),
                 &params,
             )
             .await?;
+        if inserted == 0 {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::AlreadyExists,
+                "The Session already exists.",
+            ));
+        }
         transaction.commit().await?;
         Ok(())
     }

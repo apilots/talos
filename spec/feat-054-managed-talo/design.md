@@ -206,6 +206,12 @@ Server 组合两类独立信号。Runtime Library 负责报告容器是否存在
 
 创建时选择 `HomeCapacity::Unrestricted`，表示普通持久卷。服务端通过 API 报告磁盘配额 `unsupported`，用户可以正常创建和启动。未来的 Kubernetes 适配器复用这六个方法与 Home 合同。100 GB 硬配额由该后端实际执行并核验，具体集群与存储配置另行设计。
 
+### Talo 专属对话
+
+Server 在 `managed_workers.conversation_session_id` 中为每个实例预留唯一 ID，通过现有托管 Worker 读取接口返回给前端。进入页面只读 Session 和历史。首次发送使用现有 Turn API，由 Service 校验账号、目标 Worker 和空的 Project 绑定，再通过现有 Session 创建流程物化会话。后续发送查询并复用同一个 Session。并发首次发送以 Session 主键收敛到同一个会话，执行仍使用现有 Turn 准入。Stop、Wake 和 Reset 保留绑定。删除 Talo 不级联删除历史，重新初始化分配新 ID。
+
+Talo 页复用 Session 详情的消息历史和底部输入框。右侧桌面沿用 Server 中转，启停、Reset 和删除放在对应 Talo 桌面 Tab 的菜单内。
+
 ### 6.2 单机 Docker 接入
 
 Talos Server 的 Compose 服务把宿主的 `/var/run/docker.sock` 绑定到 Server 容器内同一路径。现有镜像以非 root 的 `talos` 用户运行；按宿主 Socket 的数字 GID 配置 Compose 补充组，启动时用 Bollard 检查访问权限。Bollard 通过 Unix Socket 调用同一个 Engine 的容器、网络和卷 API。Server 与动态 Worker 是该 Engine 上的容器；动态 Worker 沿用现有出站 Agent RPC 与 Server 通信，Server 将部署指定的 HTTPS 注册地址和必要的 CA 写入现有 Worker runner 配置。该地址须从 Worker 网络可达，证书名称须匹配；Server 当前发布在宿主 loopback 的端口不能直接作为 Worker 的地址。一期复用部署已有的 Agent ingress，不新增代理。Compose 管理 Server 的部署，Talo 生命周期由 Computer Service 管理。[Server Compose](../../deploy/docker/talos-server/compose.production.yml) · [Worker 部署](../../deploy/docker/talos-worker/README.md) · [Bollard API](https://docs.rs/bollard/latest/bollard/struct.Docker.html)

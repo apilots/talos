@@ -20,6 +20,6 @@ export const DialogContent = forwardRef<ElementRef<typeof DialogPrimitive.Conten
   return <DialogPrimitive.Portal><DialogPrimitive.Overlay className={overlayClass}><DialogPrimitive.Content {...props} className={cn(contentClass, className)} ref={ref} /></DialogPrimitive.Overlay></DialogPrimitive.Portal>;
 });
 
-export const AlertDialogContent = forwardRef<ElementRef<typeof AlertPrimitive.Content>, ComponentPropsWithoutRef<typeof AlertPrimitive.Content>>(function AlertDialogContent({ className, ...props }, ref) {
-  return <AlertPrimitive.Portal><AlertPrimitive.Overlay className={overlayClass}><AlertPrimitive.Content {...props} className={cn(contentClass, className)} ref={ref} /></AlertPrimitive.Overlay></AlertPrimitive.Portal>;
+export const AlertDialogContent = forwardRef<ElementRef<typeof AlertPrimitive.Content>, ComponentPropsWithoutRef<typeof AlertPrimitive.Content> & { container?: HTMLElement | null }>(function AlertDialogContent({ className, container, ...props }, ref) {
+  return <AlertPrimitive.Portal container={container}><AlertPrimitive.Overlay className={overlayClass}><AlertPrimitive.Content {...props} className={cn(contentClass, className)} ref={ref} /></AlertPrimitive.Overlay></AlertPrimitive.Portal>;
 });

@@ -183,6 +183,7 @@ def exercise(base, instances, worker_model, faults):
     [replacement] = managed_resource("container", instance)
     assert docker("inspect", "--format", "{{.Id}}", replacement) != first_id
     assert ready["nodeId"] == node and ready["instanceId"] == instance
+    assert ready["conversationSessionId"] == created["conversationSessionId"]
     assert managed_resource("volume", instance) == [volume]
     assert docker("exec", replacement, "/bin/bash", "-ec", 'cat "$TALOS_HOME/e2e-retain"') == "t"
     print("PASS manual stop, stale generation rejection, same-Worker Start and Home-preserving Reset", flush=True)
@@ -204,16 +205,22 @@ def exercise(base, instances, worker_model, faults):
     with urllib.request.urlopen(request, timeout=30) as response:
         data(json.load(response))
     wait(lambda: phase(base, "sleeping"), "idle sleep before first Turn", seconds=45)
-    session = f"sess_talo_{uuid.uuid4().hex}"
+    session = ready["conversationSessionId"]
+    assert http(base + f"/v1/sessions/{session}")["error"]["code"] == "resourceNotFound"
     start_payload = {
         "sessionId": session,
-        "nodeId": node,
         "modelSelection": {"modelRef": {"provider": "openai", "id": "browser-fixture"}, "reasoningEffort": None},
         "input": {"content": [
             {"type": "skillSelection", "name": "goal", "path": ""},
             {"type": "text", "text": "pause the deployment until the tests pass"},
         ]},
     }
+
+    start_url = base + "/v1/turns/start"
+    assert http(start_url, start_payload, token=bob)["error"]["code"] == "resourceNotFound"
+    assert http(start_url, {**start_payload, "nodeId": "embedded"})["error"]["code"] == "invalidRequest"
+    assert http(start_url, {**start_payload, "projectId": "other-project"})["error"]["code"] == "invalidRequest"
+    assert phase(base, "sleeping")
 
     def start_first_turn():
         request = urllib.request.Request(base + "/v1/turns/start", data=json.dumps(start_payload).encode(),
@@ -248,7 +255,9 @@ def exercise(base, instances, worker_model, faults):
         else:
             raise AssertionError("Talo Turn did not publish a terminal event")
     ready = wait(lambda: phase(base, "ready"), "ready after first Turn")
-    print("PASS menu-selected Goal wakes Talo and executes through its Worker-local model configuration", flush=True)
+    saved = data(http(base + f"/v1/sessions/{session}"))["session"]
+    assert saved["id"] == session and saved["nodeId"] == node and saved["projectId"] is None
+    print("PASS first Turn materializes the bound non-Project Talo Session and resolves the Goal Skill after Wake", flush=True)
 
     media(base, node, replacement, http, data, wait, REPORT)
     if RECOVERY:

@@ -8652,6 +8652,13 @@
     "ManagedWorkerInfo": {
       "description": "Current lifecycle snapshot. Registration credentials and runtime resource IDs stay private.",
       "properties": {
+        "conversationSessionId": {
+          "description": "Server-reserved Session identity. The Session itself is created by its first Turn.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cpuCores": {
           "format": "uint16",
           "minimum": 0.0,
