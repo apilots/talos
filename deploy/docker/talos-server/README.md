@@ -76,8 +76,12 @@ origin and the Worker connects out to the Server. Standalone Desktop continues
 to use its local App Server.
 
 The Docker socket grants host administration privileges. Apply the overlay to
-a trusted Server deployment. Its Worker containers have an isolated network,
-their own ordinary Docker volumes and no Docker socket. Each Talo Worker
+a trusted Server deployment. Managed Workers use one Docker bridge with
+inter-container connectivity disabled and keep their own Docker volumes.
+Use a Linux Docker Engine that enforces bridge firewall rules.
+They publish no host ports and have no Docker socket. Docker restarts
+unexpectedly exited Workers with `unless-stopped`, while Server Stop and
+sleep leave their containers stopped. Each Talo Worker
 uses its own Provider configuration and API key. Docker supplies persistent
 Home storage without a disk quota.
 

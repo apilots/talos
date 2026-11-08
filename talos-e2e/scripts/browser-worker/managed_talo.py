@@ -245,9 +245,9 @@ def exercise(base, instances, worker_model, faults):
 
     data(action("delete", ready, confirmDataLoss=True))
     wait(lambda: data(http(base + ASSISTANT))["instance"] is None, "Talo deletion")
-    assert not any(managed_resource(kind, instance) for kind in ("container", "volume", "network"))
+    assert not any(managed_resource(kind, instance) for kind in ("container", "volume"))
     assert http(base + f"/v1/computers/{node}")["status"] != "success"
-    print("PASS confirmed Delete removed compute, network, Home and Computer registration", flush=True)
+    print("PASS confirmed Delete removed compute, Home and Computer registration", flush=True)
 
 
 def recovery(base, faults, instance, node, ready, action, worker_model, session, start_first_turn, first_turn):
@@ -429,7 +429,7 @@ def run(files):
         (REPORT / "managed-talo-server.log").write_text(docker("logs", server, check=False))
         docker("rm", "-fv", server, check=False)
         for instance in instances:
-            for kind in ("container", "network", "volume"):
+            for kind in ("container", "volume"):
                 for resource in managed_resource(kind, instance):
                     if kind == "container":
                         (REPORT / f"managed-talo-worker-{resource}.log").write_text(docker("logs", resource, check=False))

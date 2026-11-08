@@ -63,7 +63,7 @@ flowchart TB
 
 | 持久期望 | UI 状态 | 进入及退出规则 |
 | --- | --- | --- |
-| `Running` | 创建中 / 启动中 / 在线 / 离线或失败 | 创建、显式启动或从休眠唤醒写入。启动需确认 Docker 当前修订的容器在运行，以及原节点的新有效发布和可调用 Harness。异常掉线沿用原离线处理，显式 Start 可重试。 |
+| `Running` | 创建中 / 启动中 / 在线 / 离线或失败 | 创建、显式启动或从休眠唤醒写入。启动需确认 Docker 当前修订的容器在运行，以及原节点的新有效发布和可调用 Harness。Docker Engine 按容器重启策略恢复异常退出，RPC 掉线仍沿用原离线处理，显式 Start 可重试。 |
 | `IdleSleep` | 休眠中 / 已休眠 | 自动空闲检查写入并由 Runtime 停止 Worker。合格请求可写入新一代 `Running`；手动 Stop 可直接切换为 `ManualStop`。 |
 | `ManualStop` | 停止中 / 手动停止（离线） | Stop 获得准入栅栏后写入。只有显式 Start 可使其重新运行。Reset 在原模式完成后仍处于离线。 |
 | `Deleting` | 删除中 / 删除待重试 | 经确认后提交。收敛前继续占用单实例名额。完成后保留最小删除回执，释放名额。 |
@@ -198,10 +198,10 @@ Server 组合两类独立信号。Runtime Library 负责报告容器是否存在
 | 接口 | 一期完成条件 |
 | --- | --- |
 | `ensure_home` | 创建或复用归属已核验的 Home，保持同一 `home_id`。Docker 适配器使用本机 named volume。Library 应用受信调用方提供的初始化文件；显式凭证恢复时按指定文件替换，保留其他数据。 |
-| `ensure_runtime` | 创建或复用指定修订的 Worker 容器及网络，挂载原 Home。替换时确认旧容器已退出。 |
+| `ensure_runtime` | 创建或复用指定修订的 Worker 容器，接入 Runtime 网络并挂载原 Home。替换时确认旧容器已退出。 |
 | `set_running` | 用 Bollard 启动或停止指定容器，并观测到目标状态。 |
 | `inspect` | 核验容器状态、归属、运行时修订与 Home 挂载。区分缺失、Engine 不可达和归属冲突。 |
-| `remove_runtime` | 移除实例容器及专用网络，保留 Home。 |
+| `remove_runtime` | 移除实例容器，保留 Home 和 Engine 的共享 Worker 网络。 |
 | `remove_home` | 确认计算已移除后，删除该实例名下的 Docker 卷并核验结果。 |
 
 创建时选择 `HomeCapacity::Unrestricted`，表示普通持久卷。服务端通过 API 报告磁盘配额 `unsupported`，用户可以正常创建和启动。未来的 Kubernetes 适配器复用这六个方法与 Home 合同。100 GB 硬配额由该后端实际执行并核验，具体集群与存储配置另行设计。
@@ -216,7 +216,7 @@ Talos Server 的 Compose 服务把宿主的 `/var/run/docker.sock` 绑定到 Ser
 
 - 每台 Worker 挂载独占 named volume 到 `/home/talos/.talos`，将 `HOME` 与 `TALOS_HOME` 指向该目录。首次供给时按现有 Worker 配置模板初始化，保证 UID/GID 10001 可写、凭证文件权限为 0600。Reset 保留原卷、节点身份和用户文件。[Worker 镜像](../../build/worker/README.md)
 - 模型由每台 Worker 自己的持久配置管理，复用现有 Provider 适配器以及模型服务地址、模型和 API key 配置。Talos 提供 Provider 接入能力；一期没有公共模型网关或凭证签发服务。Talo 初始化准备 Computer 和 Home，模型配置沿现有 Worker 配置入口管理。端到端 AI 验收在可销毁实例中配置可用的 Worker 本地 Provider 和测试凭证。[独立 Worker 配置](../../deploy/docker/talos-worker/README.md)
-- 复用 Worker 镜像、Chromium seccomp、私有 shm、`no-new-privileges` 和现有桌面 relay。现有 Chromium seccomp JSON 随 Server 发布资源提供，Docker 适配器通过 Bollard 的容器安全选项应用该 profile。容器的 CPU 与 RAM 硬限制为 4 vCPU 和 8 GB，禁用 Engine 自动重启以保留 Stop 与 Sleep 的语义。每台 Worker 使用隔离网络，可访问既有 Server 注册入口。这样一个账号在 Worker 内启动的监听器不会直接暴露给其他账号的 Worker。
+- 复用 Worker 镜像、Chromium seccomp、私有 shm、`no-new-privileges` 和现有桌面 relay。现有 Chromium seccomp JSON 随 Server 发布资源提供，Docker 适配器通过 Bollard 的容器安全选项应用该 profile。容器的 CPU 与 RAM 硬限制为 4 vCPU 和 8 GB。Engine 使用 `unless-stopped` 恢复异常退出，Server 的主动 Stop 与 Sleep 保持容器停止。托管 Worker 共用 Engine 上的一个 bridge，配置禁用容器间直连，保留出站注册和 Provider 访问。部署要求 Linux Docker Engine 执行 bridge 防火墙规则。各 Worker 保有独立网络命名空间，且不发布宿主机端口。
 
 **容器命名。** Docker Worker 名称为 `talos-worker-talo-<short_id>`，例如 `talos-worker-talo-k7m2p4x9`。短 ID 使用 8 位小写字母或数字，由 Server 在实例创建时随机生成并持久化。重试和 Reset 沿用同名，先删除旧容器再创建新容器。Library 以完整实例 ID 的标签核验归属；同名但归属不同的容器返回冲突，原容器保留。
 

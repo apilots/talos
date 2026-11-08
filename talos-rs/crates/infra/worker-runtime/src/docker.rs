@@ -4,7 +4,7 @@ use bollard::{
     errors::Error,
     models::{
         ContainerCreateBody, ContainerInspectResponse, ContainerStateStatusEnum, HostConfig,
-        HostConfigLogConfig, Mount, MountType, NetworkCreateRequest, NetworkInspect, RestartPolicy,
+        HostConfigLogConfig, Mount, MountType, NetworkCreateRequest, RestartPolicy,
         RestartPolicyNameEnum, Volume, VolumeCreateRequest,
     },
     query_parameters::{
@@ -14,6 +14,7 @@ use bollard::{
     Docker,
 };
 use futures_util::TryStreamExt;
+use tokio::sync::Mutex;
 
 use crate::{
     ContainerState, DesiredRuntimeState, HomeCapacity, ManagedWorkerRuntime, RuntimeError,
@@ -32,11 +33,14 @@ const HOME_PATH: &str = "/home/talos/.talos";
 const WORKER_USER: &str = "10001:10001";
 const SHM_BYTES: i64 = 1 << 30;
 const NO_NEW_PRIVILEGES: &str = "no-new-privileges:true";
+const WORKER_NETWORK: &str = "talos-managed-workers";
+const BRIDGE_ICC: &str = "com.docker.network.bridge.enable_icc";
 
 /// Same-host Docker Engine adapter. Uses an explicit Unix socket path.
 pub struct DockerEngine {
     client: Docker,
     seccomp: String,
+    network_creation: Mutex<()>,
 }
 
 impl DockerEngine {
@@ -47,6 +51,7 @@ impl DockerEngine {
         Ok(Self {
             client: connect_socket(socket_path)?,
             seccomp: format!("seccomp={}", serde_json::Value::Object(profile)),
+            network_creation: Mutex::new(()),
         })
     }
 
@@ -129,21 +134,7 @@ impl DockerEngine {
         }
 
         self.ensure_image(&spec.image).await?;
-        let network = match self.network(&names).await? {
-            Some(id) => id,
-            None => {
-                self.client
-                    .create_network(NetworkCreateRequest {
-                        name: names.network(),
-                        driver: Some("bridge".into()),
-                        labels: Some(names.labels("network")),
-                        ..Default::default()
-                    })
-                    .await
-                    .map_err(engine_error("create Worker network"))?
-                    .id
-            }
-        };
+        let network = self.ensure_network().await?;
 
         let mut labels = names.labels("worker");
         labels.insert(REVISION_LABEL.into(), spec.revision.to_string());
@@ -169,7 +160,7 @@ impl DockerEngine {
                         nano_cpus: Some(i64::from(spec.cpu_cores) * 1_000_000_000),
                         shm_size: Some(SHM_BYTES),
                         restart_policy: Some(RestartPolicy {
-                            name: Some(RestartPolicyNameEnum::NO),
+                            name: Some(RestartPolicyNameEnum::UNLESS_STOPPED),
                             ..Default::default()
                         }),
                         security_opt: Some(vec![self.seccomp.clone(), NO_NEW_PRIVILEGES.into()]),
@@ -266,12 +257,6 @@ impl DockerEngine {
             }
             self.remove_container(&worker.id, None).await?;
         }
-        if let Some(network) = self.network(&names).await? {
-            optional(
-                self.client.remove_network(&network).await,
-                "remove Worker network",
-            )?;
-        }
         Ok(())
     }
 
@@ -334,14 +319,45 @@ impl DockerEngine {
         Ok(volume)
     }
 
-    async fn network(&self, names: &Names) -> Result<Option<String>, RuntimeError> {
-        let network = optional(
-            self.client.inspect_network(&names.network(), None).await,
-            "inspect Worker network",
-        )?;
-        network
-            .map(|network| names.verify_network(network))
-            .transpose()
+    async fn ensure_network(&self) -> Result<String, RuntimeError> {
+        let _guard = self.network_creation.lock().await;
+        if let Some(network) = optional(
+            self.client.inspect_network(WORKER_NETWORK, None).await,
+            "inspect managed Worker network",
+        )? {
+            let label = network
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get(RESOURCE_LABEL));
+            let icc = network
+                .options
+                .as_ref()
+                .and_then(|options| options.get(BRIDGE_ICC));
+            if network.driver.as_deref() != Some("bridge")
+                || label.map(String::as_str) != Some("network")
+                || icc.map(String::as_str) != Some("false")
+                || network.internal == Some(true)
+            {
+                return Err(RuntimeError::Conflict {
+                    resource: "managed Worker network configuration",
+                });
+            }
+            return network.id.ok_or(RuntimeError::UnexpectedState {
+                resource: "network ID",
+            });
+        }
+        let network = self
+            .client
+            .create_network(NetworkCreateRequest {
+                name: WORKER_NETWORK.into(),
+                driver: Some("bridge".into()),
+                labels: Some(HashMap::from([(RESOURCE_LABEL.into(), "network".into())])),
+                options: Some(HashMap::from([(BRIDGE_ICC.into(), "false".into())])),
+                ..Default::default()
+            })
+            .await
+            .map_err(engine_error("create managed Worker network"))?;
+        Ok(network.id)
     }
 
     async fn container(
@@ -377,7 +393,9 @@ impl DockerEngine {
             resource: "Worker ID",
         })?;
         let state = match container.state.and_then(|state| state.status) {
-            Some(ContainerStateStatusEnum::RUNNING) => ContainerState::Running,
+            Some(ContainerStateStatusEnum::RUNNING | ContainerStateStatusEnum::RESTARTING) => {
+                ContainerState::Running
+            }
             Some(
                 ContainerStateStatusEnum::CREATED
                 | ContainerStateStatusEnum::EXITED
@@ -473,10 +491,6 @@ impl Names {
         format!("{}-home", self.container)
     }
 
-    fn network(&self) -> String {
-        format!("{}-net", self.container)
-    }
-
     fn seeder(&self) -> String {
         format!("{}-seed", self.container)
     }
@@ -512,20 +526,6 @@ impl Names {
             });
         }
         Ok(())
-    }
-
-    fn verify_network(&self, network: NetworkInspect) -> Result<String, RuntimeError> {
-        self.verify_labels(network.labels.as_ref(), "network")?;
-        if network.name.as_deref() != Some(&self.network())
-            || network.driver.as_deref() != Some("bridge")
-        {
-            return Err(RuntimeError::Conflict {
-                resource: "network configuration",
-            });
-        }
-        network.id.ok_or(RuntimeError::UnexpectedState {
-            resource: "network ID",
-        })
     }
 
     fn home_mount(&self) -> Mount {

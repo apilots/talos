@@ -1,8 +1,8 @@
-//! Run with a disposable Linux Engine and a Talos Worker image whose CMD stays running.
+//! Run with a disposable Linux Engine and a Worker image running a long-lived child under init.
 
 #![cfg(unix)]
 
-use std::{env, path::PathBuf};
+use std::{env, path::PathBuf, time::Duration};
 
 use bollard::{exec::StartExecResults, models::ExecConfig, Docker, API_DEFAULT_VERSION};
 use futures_util::TryStreamExt;
@@ -131,9 +131,23 @@ async fn exercise_lifecycle(
     let config = existing.host_config.unwrap();
     assert_eq!(config.nano_cpus, Some(4_000_000_000));
     assert_eq!(config.memory, Some(8 << 30));
+    assert_eq!(
+        config.restart_policy.unwrap().name,
+        Some(bollard::models::RestartPolicyNameEnum::UNLESS_STOPPED)
+    );
     assert!(config
         .port_bindings
         .is_none_or(|bindings| bindings.is_empty()));
+    let network = config.network_mode.unwrap();
+    let network_config = docker.inspect_network(&network, None).await.unwrap();
+    assert_eq!(
+        network_config.name.as_deref(),
+        Some("talos-managed-workers")
+    );
+    assert_eq!(
+        network_config.options.unwrap()["com.docker.network.bridge.enable_icc"],
+        "false"
+    );
     assert_eq!(existing.mounts.unwrap().len(), 1);
     assert_eq!(
         existing.config.unwrap().user.as_deref(),
@@ -172,10 +186,55 @@ async fn exercise_lifecycle(
         Err(RuntimeError::Conflict { .. })
     ));
 
+    // Let Docker monitor a successfully started container before killing its child.
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    let crash = docker
+        .create_exec(
+            &first_id,
+            ExecConfig {
+                cmd: Some(vec![
+                    "/bin/sh".into(),
+                    "-c".into(),
+                    "kill -KILL $(cat /proc/1/task/1/children)".into(),
+                ]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    docker
+        .start_exec(
+            &crash.id,
+            Some(bollard::exec::StartExecOptions {
+                detach: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let observed = docker.inspect_container(&first_id, None).await.unwrap();
+            if observed.restart_count.unwrap_or_default() > 0
+                && observed.state.unwrap().status
+                    == Some(bollard::models::ContainerStateStatusEnum::RUNNING)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("Docker did not restart the Worker after its child crashed");
+
     runtime
         .set_running(spec, DesiredRuntimeState::Stopped)
         .await
         .unwrap();
+    assert_eq!(
+        runtime.inspect(spec).await.unwrap().container,
+        ContainerState::Stopped
+    );
     runtime.remove_runtime(spec).await.unwrap();
     runtime.remove_runtime(spec).await.unwrap();
     let reset = WorkerSpec {
@@ -199,12 +258,12 @@ async fn exercise_lifecycle(
         .set_running(&reset, DesiredRuntimeState::Running)
         .await
         .unwrap();
-    let reset_id = docker
-        .inspect_container(worker_name, None)
-        .await
-        .unwrap()
-        .id
-        .unwrap();
+    let replacement = docker.inspect_container(worker_name, None).await.unwrap();
+    assert_eq!(
+        replacement.host_config.unwrap().network_mode.as_deref(),
+        Some(network.as_str())
+    );
+    let reset_id = replacement.id.unwrap();
     assert_ne!(reset_id, first_id);
     assert_eq!(
         read_file(docker, &reset_id, "conf/node.credential").await,
