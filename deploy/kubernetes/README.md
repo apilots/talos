@@ -7,6 +7,11 @@ ClusterIP Service has HTTP port 8080 and outbound Worker registration port
 The separate manual Worker example uses an explicitly issued Computer
 credential and has no Service.
 
+Workers use the Server Service DNS inside the cluster. For local k3d access,
+forward the Server HTTP Service to the workstation loopback as shown below.
+For public access, reuse the cluster's existing ingress with the Server
+routing described in the [Cloud deployment guide](../TALOS_CLOUD_DEPLOY.md#local-access-and-public-ingress).
+
 ## Cluster preparation
 
 Use a cluster with NetworkPolicy enforcement and filesystem storage writable
@@ -97,7 +102,7 @@ cluster default unless an operator overlay explicitly names another class.
    ```bash
    deploy/kubernetes/check-runtime-access.sh "$KUBE_CONTEXT" talos-xfs-quota
    "${kube[@]}" rollout status deployment/talos-server --timeout=180s
-   "${kube[@]}" port-forward service/talos-server 8080:8080
+   "${kube[@]}" port-forward --address 127.0.0.1 service/talos-server 8080:8080
    ```
 
    Check `http://127.0.0.1:8080/health` and open the Web UI or start native

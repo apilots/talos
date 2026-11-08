@@ -18,6 +18,10 @@ deploy/
 
 ## Server deployment
 
+Use the [Talos Cloud deployment guide](TALOS_CLOUD_DEPLOY.md) to choose a
+Runtime and locate the deployment and network instructions. The guide covers
+local loopback access and public Server ingress.
+
 `talos-server` exposes HTTP APIs, the Web UI, and SSE Timeline streams. Reverse
 proxies must disable response buffering and compression for
 `/v1/sessions/*/events` so events are delivered incrementally.
@@ -49,9 +53,9 @@ Before using the example, select an image version matching your SDK/UI and data
 format. The Compose sample's pinned release is not a promise that every current
 source-tree capability exists in that image.
 
-For Talos Server at `agent.talos.love`, including Computer registration and RPC, use the
-[Talos Server deployment guide](TALOS_SERVER.md), production profile and Compose file. The
-general example above does not enable the registration listener.
+For Computer registration and RPC at `agent.talos.love`, use the
+[Docker production profile](TALOS_CLOUD_DEPLOY.md#docker-production-on-talos-host).
+The general example above serves Web and HTTP API on loopback.
 
 ## Computer identity, transport and configuration access
 
@@ -67,8 +71,8 @@ Worker connection policy uses `agent_node.runner.transport` (`outbound` by
 default, or `direct`) and the Server's node `endpoint`. An outbound Worker opens
 an authenticated bidirectional Connect stream; it does not need a public listener.
 A direct Worker needs a reachable TLS endpoint. Transport does not describe the
-Computer's origin or change its owner. There is no deployment or Desktop
-connection mode setting.
+Computer's origin or change its owner. The Server selects the managed Talo
+Runtime independently of Worker transport.
 
 Configuration, models and MCP operations authorize the selected Computer owner.
 Authentication remains controlled by `gateway.auth`; Sync preferences remain

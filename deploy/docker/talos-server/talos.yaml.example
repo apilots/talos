@@ -42,7 +42,8 @@ agent_node:
     bind_address: 127.0.0.1:0
     tls: null
 
-# Optional Talo Runtime. Use the managed Worker Compose overlay before enabling.
+# Optional Docker Engine Runtime. Apply compose.managed-worker.yml to this Server.
+# Use a TLS Agent endpoint reachable from the managed Worker bridge networks.
 # talos:
 #   worker:
 #     runtime:

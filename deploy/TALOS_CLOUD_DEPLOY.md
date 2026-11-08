@@ -1,13 +1,82 @@
-# Talos Server production deployment
+# Talos Cloud deployment
 
-Scope: the Talos service under `/opt/talos-server` on `talos-host`. Apply this
-runbook only in a separately authorized deployment window. Preparing files,
-validating Compose and local acceptance do not authorize production changes.
-Do not change Cloud, Sync, sibling service directories or global proxy settings.
+Choose a Runtime for the managed Talo lifecycle on each Talos Server. The
+Server runs one active Runtime when Talo is enabled. The manual Worker examples
+use outbound Connect and leave deployment under operator control. Clients
+reach Workers through the Server relay.
 
-## Deployment products
+| Runtime | Deployment | Talo Home |
+| --- | --- | --- |
+| Docker Engine | One Linux host and one Docker Engine. Docker Compose runs Server. The managed overlay mounts the host Docker Unix socket into Server. | Named Docker volume. |
+| Kubernetes | One Server Deployment and ClusterIP Service. The Runtime uses the Kubernetes API through a namespace-scoped identity. | Independent `100G` PVC. Hard quota depends on the verified StorageClass. |
 
-- `talos-server` is the cloud Docker service for Web/API, Computer registration,
+Use the [Kubernetes deployment guide](kubernetes/README.md) for Server,
+namespace RBAC, StorageClass, and manual Worker setup. Start with the
+in-cluster ServiceAccount, or configure a mounted kubeconfig Secret or a
+write-only pasted kubeconfig in **Settings → Runtime**. Saved Runtime changes
+take effect after a controlled Server restart. Changing the target requires
+that the Server own no managed Talo resources.
+
+### Network boundary
+
+- Desktop and Web use the Server origin for HTTP, SSE and desktop WebSocket
+  traffic. Outbound Workers initiate their TLS connection to the Server Agent
+  endpoint.
+- Docker-managed Talos share a bridge with inter-container connectivity disabled
+  on Linux Engines that enforce bridge firewall rules. Talo containers and the
+  standalone Worker Compose example publish no host ports. In the
+  Docker production profile, only Server publishes host loopback ports
+  `8080` and `9443` for the host proxy.
+- Kubernetes Workers run in separate Pod network namespaces and use the
+  Server ClusterIP Service. The Worker manifests and Runtime add no Worker
+  Service or host port. Managed Pod ingress is denied by NetworkPolicy on a
+  cluster that enforces it.
+- Browser, CDP and VNC listeners stay on the Worker loopback. The Server relays
+  desktop media through a dedicated Worker-initiated Agent stream. The Worker
+  keeps its own Provider configuration.
+
+### Local access and public ingress
+
+For local k3d, Workers use `https://talos-server.talos.svc:9443` with the
+configured TLS trust. That DNS name is scoped to the cluster. On the
+workstation, forward only the Server HTTP Service and open
+`http://127.0.0.1:8080` in Web or set it as `TALOS_DESKTOP_SERVER_URL`:
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n talos port-forward --address 127.0.0.1 service/talos-server 8080:8080
+```
+
+For production access from outside the host or cluster, reuse an existing
+reverse proxy or ingress for one HTTPS Server domain. The
+[Caddy](caddy/Caddyfile.example) and [NGINX](nginx/talos.conf.example) host
+examples use Docker loopback upstreams.
+For Kubernetes, point the existing ingress at the Server Service and preserve
+the same protocol routing:
+
+| Request path | Server upstream |
+| --- | --- |
+| `/talos.agent.v1.*` | TLS Agent port `9443` with HTTP/2 and verified upstream TLS. Keep the original path. |
+| `/v1/sessions/*/events` | HTTP port `8080` with SSE buffering and compression disabled. |
+| `/v1/desktop/stream` | HTTP port `8080` with WebSocket upgrade and the original Host and Origin. |
+| Other Web and API routes | HTTP port `8080`. |
+
+Cluster Workers continue to use Service DNS. External outbound Workers
+connecting through the ingress use its HTTPS Agent origin. Use a local domain when testing DNS or TLS ingress behavior.
+The loopback workflow is sufficient for routine local verification.
+
+See [Kubernetes Service DNS](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/),
+[Kubernetes port forwarding](https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/)
+and [NGINX WebSocket proxying](https://nginx.org/en/docs/http/websocket.html).
+
+## Docker production on talos-host
+
+This runbook applies to the existing Talos service at `/opt/talos-server`.
+Apply production changes only in an authorized deployment window. Cloud, Sync
+and shared proxy settings have their own rollout procedures.
+
+### Deployment products
+
+- `talos-server` is the Compose service for Web/API, Computer registration,
   leases and authenticated execution/resource relay.
 - `talos-worker` is the independent execution process and Docker image. It uses
   its owned Computer credential to register with Talos Server; see the
@@ -15,7 +84,7 @@ Do not change Cloud, Sync, sibling service directories or global proxy settings.
 - Desktop and TUI are user-side clients. Desktop may start an embedded Worker;
   that does not introduce another cloud service or deployment product.
 
-## Ownership and release
+### Ownership and release
 
 | Endpoint | Owner |
 | --- | --- |
@@ -29,25 +98,24 @@ no management Session DB or Sync client. Desktop login automatically enrolls its
 embedded Worker; standalone Workers receive an owned UUID and credential through
 the authenticated Computer API. Registration never accepts a self-selected owner.
 
-Use a published Server version, such as **0.1.10**, not `latest` or a development build:
+Set `TALOS_SERVER_IMAGE` and `TALOS_SERVER_VERSION` in the deployment
+`.env` to a published image containing the selected Runtime. When enabling
+managed Talo, also pin its compatible Worker image by digest in
+`talos.worker.runtime.image`. Published versions provide amd64/arm64 images.
+Route HTTP and gRPC to the same Server instance because its live Registry and
+Connect handles belong to that process.
 
-```text
-TALOS_SERVER_IMAGE=ghcr.io/apilots/talos-server
-TALOS_SERVER_VERSION=v0.1.10
-```
-
-The published version tag provides amd64/arm64 images. No build or new package
-is required. Keep HTTP and all gRPC services on the same instance;
-a shared DB does not share live Registry/Connect handles across replicas.
-
-## Deployment files
+### Deployment files
 
 - [Production config](docker/talos-server/talos.yaml.example): complete deployment profile
-  for this release, authentication, TLS control-plane listener on9443,
+  for this release, authentication, TLS control-plane listener on 9443,
   private embedded Worker loopback listener, and the existing Cloud/Sync URLs.
-- [Production Compose](docker/talos-server/compose.production.yml): loopback8080/9443, external
-  existing home volume, read-only TLS directory and current one-GiB resource cap.
-  That cap is inherited from the observed deployment, not a measured capacity claim.
+- [Production Compose](docker/talos-server/compose.production.yml): loopback 8080/9443, external
+  existing home volume, a read-only TLS directory and 1 GiB of shared memory.
+- [Managed Docker Engine overlay](docker/talos-server/compose.managed-worker.yml):
+  adds the Docker socket and its group to Server when enabling managed Talo.
+  Follow the [Docker Runtime setup](docker/talos-server/README.md#talo-on-a-single-docker-host)
+  for the Server configuration and Worker-reachable TLS endpoint.
 - [Deployment environment](docker/talos-server/.env.example): copy to `.env` beside
   the Compose file. Comments separate the image version, existing volume name and
   absolute TLS directory from provider secrets. This is the only deployment env file.
@@ -62,7 +130,7 @@ model/provider and any existing instance-specific resources before rollout;
 private remote Workers retain their own model/search configuration and keys.
 Do not copy a macOS PATH or browser executable into the Linux service.
 
-## Persistence and configuration
+### Persistence and configuration
 
 The observed home volume is `talos-server_talos-data`, mounted at
 `/home/talos/.talos`. Compose declares it **external** so a wrong/missing name
@@ -75,7 +143,7 @@ UUID, credential and enrollment state when adapting retained configuration.
 Never overlay an existing identity with the template's `runner: null`.
 
 Install the reviewed configuration as `conf/talos.yaml` **inside that home**.
-Keep its directory and file writable by UID/GID10001: account enrollment updates
+Keep its directory and file writable by UID/GID 10001: account enrollment updates
 YAML with atomic replacement. A read-only or single-file bind mount of the live
 config prevents that lifecycle. TLS files are a separate read-only bind mount;
 `create_host_path: false` prevents an accidental empty certificate directory.
@@ -96,14 +164,14 @@ the coordinated backup/upgrade procedure in [deployment guidance](README.md#data
 The runtime derives SQLite paths from `TALOS_HOME`; do not add
 `storage.connection_string` or `logging.file` overrides.
 
-## TLS and proxy routing
+### TLS and proxy routing
 
 The public origin is `https://agent.talos.love:443`. Route
 `/talos.agent.v1.*` to `https://127.0.0.1:9443` without stripping paths; this covers
 NodeControl, NodeManagement, Coordinator, peer files and resource callbacks.
-Other HTTP/Web requests go to8080; SSE `/v1/sessions/*/events` must flush without
-buffering or compression. Preserve authentication metadata and bidirectional
-HTTP/2 streams. The host proxy samples assume a proxy on the host, not in a
+Web and API requests go to 8080. Preserve the original Host and Origin on
+the desktop WebSocket, flush SSE without buffering or compression, and preserve
+authentication metadata and bidirectional HTTP/2 streams. The host proxy samples assume a proxy on the host, not in a
 separate container where loopback points elsewhere.
 
 The current control listener requires its own TLS identity. Prepare a private
@@ -141,15 +209,15 @@ The RPC listener reads its certificate at startup; certificate replacement needs
 a controlled Talos restart, followed by reconnect acceptance.
 
 The public endpoint currently traverses Cloudflare. Confirm gRPC is enabled and
-TLS/HTTP2 ALPN is supported on443 before public acceptance. Cloudflare documents
-403 responses when zone gRPC is disabled; the observed403 HTML is evidence of a
+TLS/HTTP2 ALPN is supported on 443 before public acceptance. Cloudflare documents
+403 responses when zone gRPC is disabled; the observed 403 HTML is evidence of a
 blocked path, not proof of the exact setting. Account-wide changes can affect
 other sites and need separate review; this preparation does not change them.
 See [Cloudflare gRPC requirements](https://developers.cloudflare.com/network/grpc-connections/),
 [Caddy upstream TLS](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 and [Nginx gRPC](https://nginx.org/en/docs/http/ngx_http_grpc_module.html).
 
-## Configuration-only redeployment
+### Configuration-only redeployment
 
 For deployment-file changes using the same published Server version, preserve
 its named volume, runtime YAML, product-writable `.env` and TLS identity. No
@@ -164,13 +232,20 @@ Install `deploy/docker/talos-worker/chromium-seccomp.json` at
 `TALOS_CHROMIUM_SECCOMP_PROFILE=/opt/talos-server/chromium-seccomp.json`
 in that deployment `.env`. The shared profile and 1 GiB shared memory support
 the Server image's embedded Browser without disabling Chromium's sandbox.
-From `/opt/talos-server`, explicitly select that installed production file:
+For managed Talo, also install `compose.managed-worker.yml` beside it, set
+the Docker socket GID in `.env`, and configure `DockerEngine` in the
+persistent Server YAML. Use the same Compose files for validation, rollout,
+and status checks:
 
 ```bash
-docker compose -f /opt/talos-server/docker-compose.yml config --quiet
-docker compose -f /opt/talos-server/docker-compose.yml pull talos-server
-docker compose -f /opt/talos-server/docker-compose.yml up -d --no-deps --no-build --pull never talos-server
-docker compose -f /opt/talos-server/docker-compose.yml ps
+cd /opt/talos-server
+compose=(docker compose -f docker-compose.yml)
+# Add the overlay for a Server configured to manage Talo with Docker Engine.
+# compose+=(-f compose.managed-worker.yml)
+"${compose[@]}" config --quiet
+"${compose[@]}" pull talos-server
+"${compose[@]}" up -d --no-deps --no-build --pull never talos-server
+"${compose[@]}" ps
 ```
 
 Check the configured image/version, unchanged volume/TLS mounts, preserved
@@ -179,7 +254,7 @@ HTTPS/gRPC paths. Run the full acceptance checklist for a first production
 rollout or relevant product changes, rather than repeating unrelated business
 flows for deployment-file naming changes.
 
-## Version or data upgrades
+### Version or data upgrades
 
 1. Record the current container/image digest, Compose/env hashes, volume and health
    using only `/opt/talos-server` and its own container. Do not print secret values.
@@ -196,8 +271,10 @@ flows for deployment-file naming changes.
    ```
 
    This only validates configuration. Use placeholder secrets for local checks;
-   production `.env` must remain private with mode 0600. Do not paste resolved
-   production config into reports because Compose can expand its provider secrets.
+   production `.env` must remain private with mode 0600. If the deployment
+   enables Docker-managed Talo, render again with the managed overlay and a
+   test socket GID. Keep resolved production config private because Compose can
+   expand provider secrets.
 4. **Stop here without deployment authorization.** Later, stop writers for this
    Talos service, take a consistent access-controlled backup of its entire home,
    and verify that the backup restores in isolation with the original image.
@@ -215,7 +292,7 @@ old image digest together**. Binary-only rollback after migration is unsafe;
 restoring a backup loses later writes. Record that cutoff. Retain the failed
 upgrade's data separately for investigation. Never restore over a live writer.
 
-## Acceptance and launch gates
+### Acceptance and launch gates
 
 Use an explicitly authorized acceptance account and private isolated local homes.
 Do not record passwords, access/refresh tokens, node credentials, device codes or
