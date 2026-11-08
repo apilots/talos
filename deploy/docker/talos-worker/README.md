@@ -68,9 +68,10 @@ Keep `chromium-seccomp.json` beside `docker-compose.yml`; the standard image's
 managed Chromium requires the supplied user-namespace seccomp allowances and
 private shared memory. The browser, virtual display and VNC processes start
 lazily as the Worker user. No Worker port mapping is added. Browser/CDP/VNC
-ports stay private to the container; the product viewer uses the configured
-trusted Agent ingress and the authenticated same-origin WSS route. It does not
-share the Docker host or a native Desktop screen.
+ports stay private to the container. The product viewer opens an authenticated
+WebSocket on the Talos Server origin. The Server relays media through a
+dedicated Worker-initiated Agent stream. See the [Cloud deployment guide](../../TALOS_CLOUD_DEPLOY.md#network-boundary)
+for the Server and Worker network paths.
 
 See [Worker image browser boundary](../../../build/worker/README.md#managed-browser-boundary)
 for pins, profile origin and sandbox requirements. Retain the Worker home when

@@ -20,6 +20,8 @@ deploy/
 
 ## 服务端部署
 
+[云部署手册](TALOS_CLOUD_DEPLOY.md)汇总 Docker Engine 和 Kubernetes 的选择、部署入口和网络边界，也说明本地回环访问和生产域名入口。
+
 `talos-server` 暴露 HTTP API、Web UI 和 SSE Timeline stream。反向代理必须对
 `/v1/sessions/*/events` 禁用响应缓冲和压缩，确保事件增量送达。
 
@@ -40,7 +42,7 @@ docker compose up -d
 curl http://127.0.0.1:8080/health
 ```
 
-`agent.talos.love` 上 Talos Server 的生产配置、Compose、TLS 入口、升级回滚及验收见 [Talos Server 部署手册](TALOS_SERVER.md)。普通 Compose 示例不会自动开启注册 listener。
+`agent.talos.love` 的生产配置、TLS 入口、升级回滚及验收见 [Docker 生产部署](TALOS_CLOUD_DEPLOY.md#docker-production-on-talos-host)。普通 Compose 示例在回环地址提供 Web 和 HTTP API。
 
 Kubernetes 下的 Server、手动注册 Worker、托管 Talo 及本地 k3d 验收见 [Kubernetes 部署手册](kubernetes/README.md)。
 
