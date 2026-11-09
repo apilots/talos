@@ -6,6 +6,7 @@ mod automation;
 mod typescript;
 pub use automation::generate_typescript as generate_automation_typescript;
 use typescript::export;
+pub use typescript::generate_worker_runtime_typescript;
 
 use crate::errors::{AppServerErrorBody, AppServerErrorCode};
 use crate::jsonrpc::JsonRpcMessage;
@@ -325,7 +326,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SyncPeerMetrics>());
     output.push_str(&export::<talos_types::SyncMetadataCounts>());
     output.push_str(&export::<talos_types::SyncStatusResponse>());
-    typescript::export_worker_runtime(&mut output);
+    output.push_str("export type * from \"./worker-runtime\";\n\n");
     output.push_str(&export::<talos_types::SyncEnableRequest>());
     output.push_str(&export::<talos_types::ComputerListRequest>());
     output.push_str(&export::<crate::requests::ManagedWorkerParams>());

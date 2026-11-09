@@ -16337,6 +16337,14 @@
             "null"
           ]
         },
+        "homeBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "homeQuotaEnforced": {
+          "type": "boolean"
+        },
         "mountedKubeconfigPath": {
           "type": [
             "string",
@@ -16346,13 +16354,19 @@
         "namespace": {
           "type": "string"
         },
+        "seccompProfile": {
+          "type": "string"
+        },
         "storageClass": {
           "type": "string"
         }
       },
       "required": [
         "authenticationSource",
+        "homeBytes",
+        "homeQuotaEnforced",
         "namespace",
+        "seccompProfile",
         "storageClass"
       ],
       "type": "object"
@@ -16365,11 +16379,22 @@
       "type": "string"
     },
     "WorkerRuntimeCandidate": {
-      "description": "A candidate can select a deployed backend and change its namespace, class and authentication.",
+      "description": "The kind must match the Server deployment.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
+            "edits": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/WorkerRuntimeEdits"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "kind": {
               "enum": [
                 "dockerEngine"
@@ -16387,6 +16412,17 @@
           "properties": {
             "authentication": {
               "$ref": "#/definitions/WorkerKubeconfigAuthentication"
+            },
+            "edits": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/WorkerRuntimeEdits"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "kind": {
               "enum": [
@@ -16410,6 +16446,83 @@
           "type": "object"
         }
       ]
+    },
+    "WorkerRuntimeConnection": {
+      "properties": {
+        "controlPlaneEndpoint": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "trustedCaFile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "controlPlaneEndpoint",
+        "image"
+      ],
+      "type": "object"
+    },
+    "WorkerRuntimeEdits": {
+      "additionalProperties": false,
+      "description": "Edits to the deployed backend and the shared Server policy.",
+      "properties": {
+        "idleTimeoutSeconds": {
+          "description": "Omitted or null preserves the common idle timeout.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "worker": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkerRuntimeConnection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omitted or null preserves the existing connection. A null CA uses system trust."
+        }
+      },
+      "type": "object"
+    },
+    "WorkerRuntimeProfile": {
+      "properties": {
+        "cpuCores": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "memoryBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "shmBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "worker": {
+          "$ref": "#/definitions/WorkerRuntimeConnection"
+        }
+      },
+      "required": [
+        "cpuCores",
+        "memoryBytes",
+        "shmBytes",
+        "worker"
+      ],
+      "type": "object"
     },
     "WorkerRuntimeSettingsResponse": {
       "description": "Effective backend and saved settings. The Server never returns pasted credentials or their references.",
@@ -16450,12 +16563,63 @@
             }
           ]
         },
+        "profile": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkerRuntimeProfile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "restartRequired": {
           "type": "boolean"
+        },
+        "timing": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkerRuntimeTiming"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "restartRequired"
+      ],
+      "type": "object"
+    },
+    "WorkerRuntimeTiming": {
+      "properties": {
+        "idleTimeoutSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "requestWaitSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "startTimeoutSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "wakeCooldownSeconds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "idleTimeoutSeconds",
+        "requestWaitSeconds",
+        "startTimeoutSeconds",
+        "wakeCooldownSeconds"
       ],
       "type": "object"
     },

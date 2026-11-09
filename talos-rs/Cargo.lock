@@ -7249,6 +7249,7 @@ dependencies = [
  "mime_guess",
  "opendal",
  "process-wrap",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",

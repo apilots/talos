@@ -22,6 +22,11 @@ fn main() {
         talos_app_protocol::schema::generate_automation_typescript(),
     )
     .expect("automation typescript fixture should be written");
+    fs::write(
+        ts_path.with_file_name("worker-runtime.ts"),
+        talos_app_protocol::schema::generate_worker_runtime_typescript(),
+    )
+    .expect("worker runtime typescript fixture should be written");
     fs::write(ts_path, talos_app_protocol::schema::generate_typescript())
         .expect("typescript fixture should be written");
 }

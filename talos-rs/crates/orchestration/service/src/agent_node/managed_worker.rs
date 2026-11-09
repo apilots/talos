@@ -4,10 +4,10 @@
 mod reconcile;
 
 use super::*;
-use crate::worker_runtime_settings::KUBERNETES_HOME_BYTES;
 use std::time::Duration;
 use talos_config::{
-    domains::managed_worker::WorkerRuntimeKind, ServerRuntimePolicy, WorkerRuntimeConfig,
+    domains::managed_worker::{WorkerConnectionConfig, WorkerResources, WorkerRuntimeKind},
+    ServerRuntimePolicy, WorkerRuntimeConfig,
 };
 use talos_store::node::{
     ManagedWorkerAction as Action, ManagedWorkerDesired as Desired, ManagedWorkerRecord,
@@ -23,13 +23,6 @@ use talos_worker_runtime::{
 };
 use tokio::sync::watch;
 
-const CPU_CORES: u16 = 4;
-const MEMORY_BYTES: u64 = 8 * 1024 * 1024 * 1024;
-
-const WAKE_COOLDOWN_SECONDS: i64 = 60;
-const REQUEST_WAIT: Duration = Duration::from_secs(45);
-const START_TIMEOUT: Duration = Duration::from_secs(120);
-
 /// Existing dispatch may proceed or defer its current candidate during shared Wake.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ManagedDispatch {
@@ -41,6 +34,7 @@ pub(crate) enum ManagedDispatch {
 pub(super) struct ManagedWorkers {
     runtime: Arc<dyn ManagedWorkerRuntime>,
     config: WorkerRuntimeConfig,
+    connection: WorkerConnectionConfig,
     policy: ServerRuntimePolicy,
     trusted_ca: Option<Vec<u8>>,
     changed: watch::Sender<()>,
@@ -50,7 +44,9 @@ impl ManagedWorkers {
     fn home_capacity(&self) -> HomeCapacity {
         match self.config.kind {
             WorkerRuntimeKind::DockerEngine => HomeCapacity::Unrestricted,
-            WorkerRuntimeKind::Kubernetes => HomeCapacity::LimitedBytes(KUBERNETES_HOME_BYTES),
+            WorkerRuntimeKind::Kubernetes => {
+                HomeCapacity::LimitedBytes(self.config.kubernetes.home_bytes)
+            }
         }
     }
 
@@ -93,6 +89,7 @@ impl AgentNodeService {
         self.managed
             .set(ManagedWorkers {
                 runtime,
+                connection: config.connection(config.kind),
                 config,
                 policy,
                 trusted_ca,
@@ -147,7 +144,7 @@ impl AgentNodeService {
             node_id: uuid::Uuid::new_v4().to_string(),
             conversation_session_id: format!("sess_{}", uuid::Uuid::new_v4().simple()),
             short_id: uuid::Uuid::new_v4().simple().to_string()[..8].to_owned(),
-            image: managed.config.image.clone(),
+            image: managed.connection.image.clone(),
             revision: 1,
             generation: 1,
             desired: Desired::Running,
@@ -160,7 +157,7 @@ impl AgentNodeService {
         };
         self.store.reserve_managed_worker(&record).await?;
         managed.changed.send_replace(());
-        Ok(worker_info(&record, false, managed.disk_quota()))
+        Ok(worker_info(&record, false, Some(managed)))
     }
 
     pub async fn start_managed_worker(
@@ -245,8 +242,8 @@ impl AgentNodeService {
                     generation: receipt.generation,
                     phase: Phase::Deleting,
                     operation: Some(ManagedWorkerOperation::Delete),
-                    cpu_cores: CPU_CORES,
-                    memory_bytes: MEMORY_BYTES,
+                    cpu_cores: managed.config.resources(managed.config.kind).cpu_cores,
+                    memory_bytes: managed.config.resources(managed.config.kind).memory_bytes,
                     disk_quota: managed.disk_quota(),
                     error: None,
                 });
@@ -276,7 +273,7 @@ impl AgentNodeService {
             && record.desired == Desired::Running
             && self.managed_node_is_available(&record.node_id).await?
         {
-            return Ok(worker_info(&record, true, managed.disk_quota()));
+            return Ok(worker_info(&record, true, Some(managed)));
         }
         let expected_generation = record.generation;
         let retry = record.error.is_some();
@@ -343,7 +340,7 @@ impl AgentNodeService {
             Action::Create | Action::Wake | Action::Sleep => unreachable!(),
         }
         managed.changed.send_replace(());
-        Ok(worker_info(&record, false, managed.disk_quota()))
+        Ok(worker_info(&record, false, Some(managed)))
     }
 
     async fn suspend_managed_worker(
@@ -469,7 +466,9 @@ impl AgentNodeService {
             && node_id != "embedded"
             && self.is_managed_worker_node(node_id).await?
         {
-            return Ok(REQUEST_WAIT);
+            return Ok(Duration::from_secs(
+                self.managed_runtime()?.policy.request_wait_seconds.into(),
+            ));
         }
         Ok(Duration::ZERO)
     }
@@ -489,7 +488,11 @@ impl AgentNodeService {
         ensure_management_actor(actor)?;
         ensure_owner(&record, &actor.user_id)?;
         let generation = self
-            .wait_managed_worker(&actor.user_id, node_id, REQUEST_WAIT)
+            .wait_managed_worker(
+                &actor.user_id,
+                node_id,
+                Duration::from_secs(self.managed_runtime()?.policy.request_wait_seconds.into()),
+            )
             .await?;
         let admission = self.admission.for_node(node_id).read_owned().await;
         let current = self
@@ -558,7 +561,9 @@ impl AgentNodeService {
                 ManagedDispatch::Waking
             });
         }
-        if record.error.is_some() && now() - record.operation_at < WAKE_COOLDOWN_SECONDS {
+        if record.error.is_some()
+            && now() - record.operation_at < i64::from(managed.policy.wake_cooldown_seconds)
+        {
             return Ok(ManagedDispatch::Deferred);
         }
         let expected_generation = record.generation;
@@ -578,9 +583,13 @@ impl AgentNodeService {
         owner: &str,
         node_id: &str,
     ) -> TalosResult<()> {
-        self.wait_managed_worker(owner, node_id, START_TIMEOUT)
-            .await
-            .map(|_| ())
+        self.wait_managed_worker(
+            owner,
+            node_id,
+            Duration::from_secs(self.managed_runtime()?.policy.start_timeout_seconds.into()),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// A successful return names the checked operation generation.
@@ -652,11 +661,7 @@ impl AgentNodeService {
         record: &ManagedWorkerRecord,
     ) -> TalosResult<ManagedWorkerInfo> {
         let available = self.managed_node_is_available(&record.node_id).await?;
-        let quota = self.managed.get().map_or(
-            ManagedWorkerDiskQuota::Unsupported,
-            ManagedWorkers::disk_quota,
-        );
-        Ok(worker_info(record, available, quota))
+        Ok(worker_info(record, available, self.managed.get()))
     }
 
     fn managed_runtime(&self) -> TalosResult<&ManagedWorkers> {
@@ -697,8 +702,11 @@ pub(super) fn worker_phase(record: &ManagedWorkerRecord, available: bool) -> Pha
 fn worker_info(
     record: &ManagedWorkerRecord,
     available: bool,
-    disk_quota: ManagedWorkerDiskQuota,
+    managed: Option<&ManagedWorkers>,
 ) -> ManagedWorkerInfo {
+    let resources = managed.map_or_else(WorkerResources::default, |managed| {
+        managed.config.resources(managed.config.kind)
+    });
     let phase = worker_phase(record, available);
     let operation = record.operation.map(|action| match action {
         Action::Create => ManagedWorkerOperation::Create,
@@ -718,9 +726,12 @@ fn worker_info(
         } else {
             operation
         },
-        cpu_cores: CPU_CORES,
-        memory_bytes: MEMORY_BYTES,
-        disk_quota,
+        cpu_cores: resources.cpu_cores,
+        memory_bytes: resources.memory_bytes,
+        disk_quota: managed.map_or(
+            ManagedWorkerDiskQuota::Unsupported,
+            ManagedWorkers::disk_quota,
+        ),
         error: if phase == Phase::Ready {
             None
         } else {
@@ -737,7 +748,10 @@ fn update_intent(record: &mut ManagedWorkerRecord, action: Action) -> TalosResul
     Ok(())
 }
 
-fn runtime_spec(record: &ManagedWorkerRecord) -> TalosResult<WorkerSpec> {
+fn runtime_spec(
+    record: &ManagedWorkerRecord,
+    resources: WorkerResources,
+) -> TalosResult<WorkerSpec> {
     Ok(WorkerSpec {
         identity: RuntimeIdentity {
             instance_id: uuid::Uuid::parse_str(&record.instance_id).map_err(|error| {
@@ -749,8 +763,9 @@ fn runtime_spec(record: &ManagedWorkerRecord) -> TalosResult<WorkerSpec> {
             TalosError::internal_with_source("Invalid persisted Talo revision.", error)
         })?,
         image: record.image.clone(),
-        cpu_cores: u32::from(CPU_CORES),
-        memory_bytes: MEMORY_BYTES,
+        cpu_cores: u32::from(resources.cpu_cores),
+        memory_bytes: resources.memory_bytes,
+        shm_bytes: resources.shm_bytes,
     })
 }
 

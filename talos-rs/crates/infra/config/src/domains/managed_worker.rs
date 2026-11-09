@@ -33,7 +33,9 @@ pub struct WorkerRuntimeSelection {
 #[serde(deny_unknown_fields)]
 pub struct WorkerRuntimeConfig {
     pub kind: WorkerRuntimeKind,
+    #[serde(default)]
     pub image: String,
+    #[serde(default)]
     pub control_plane_endpoint: String,
     #[serde(default)]
     pub trusted_ca_file: Option<PathBuf>,
@@ -41,6 +43,59 @@ pub struct WorkerRuntimeConfig {
     pub docker_engine: DockerEngineConfig,
     #[serde(default)]
     pub kubernetes: KubernetesConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerConnectionConfig {
+    pub image: String,
+    pub control_plane_endpoint: String,
+    #[serde(default)]
+    pub trusted_ca_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorkerResources {
+    pub cpu_cores: u16,
+    pub memory_bytes: u64,
+    pub shm_bytes: u64,
+}
+
+impl Default for WorkerResources {
+    fn default() -> Self {
+        Self {
+            cpu_cores: 4,
+            memory_bytes: 8 << 30,
+            shm_bytes: 1 << 30,
+        }
+    }
+}
+
+impl WorkerRuntimeConfig {
+    pub fn connection_override(&self, kind: WorkerRuntimeKind) -> &Option<WorkerConnectionConfig> {
+        match kind {
+            WorkerRuntimeKind::DockerEngine => &self.docker_engine.worker,
+            WorkerRuntimeKind::Kubernetes => &self.kubernetes.worker,
+        }
+    }
+
+    pub fn connection(&self, kind: WorkerRuntimeKind) -> WorkerConnectionConfig {
+        self.connection_override(kind)
+            .clone()
+            .unwrap_or_else(|| WorkerConnectionConfig {
+                image: self.image.clone(),
+                control_plane_endpoint: self.control_plane_endpoint.clone(),
+                trusted_ca_file: self.trusted_ca_file.clone(),
+            })
+    }
+
+    pub fn resources(&self, kind: WorkerRuntimeKind) -> WorkerResources {
+        match kind {
+            WorkerRuntimeKind::DockerEngine => self.docker_engine.resources,
+            WorkerRuntimeKind::Kubernetes => self.kubernetes.resources,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,12 +108,16 @@ pub enum WorkerRuntimeKind {
 #[serde(default, deny_unknown_fields)]
 pub struct DockerEngineConfig {
     pub socket_path: PathBuf,
+    pub worker: Option<WorkerConnectionConfig>,
+    pub resources: WorkerResources,
 }
 
 impl Default for DockerEngineConfig {
     fn default() -> Self {
         Self {
             socket_path: "/var/run/docker.sock".into(),
+            worker: None,
+            resources: WorkerResources::default(),
         }
     }
 }
@@ -69,16 +128,22 @@ pub struct ServerRuntimeSelection {
     pub runtime: ServerRuntimePolicy,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerRuntimePolicy {
     pub idle_timeout_seconds: u32,
+    pub request_wait_seconds: u32,
+    pub start_timeout_seconds: u32,
+    pub wake_cooldown_seconds: u32,
 }
 
 impl Default for ServerRuntimePolicy {
     fn default() -> Self {
         Self {
             idle_timeout_seconds: 900,
+            request_wait_seconds: 45,
+            start_timeout_seconds: 120,
+            wake_cooldown_seconds: 60,
         }
     }
 }
@@ -92,7 +157,14 @@ impl TalosRuntimeConfig {
         if !config.gateway.auth || config.agent_node.control_plane.is_none() {
             return Err(invalid("The managed Worker runtime requires an authenticated Server with an Agent node control plane."));
         }
-        if self.server.runtime.idle_timeout_seconds == 0 {
+        let policy = &self.server.runtime;
+        if policy.request_wait_seconds == 0
+            || policy.request_wait_seconds > policy.start_timeout_seconds
+            || policy.wake_cooldown_seconds == 0
+        {
+            return Err(invalid("Runtime timing must be positive and the request wait must not exceed the start timeout."));
+        }
+        if policy.idle_timeout_seconds == 0 {
             return Err(invalid(
                 "talos.server.runtime.idle_timeout_seconds must be positive.",
             ));
@@ -109,7 +181,30 @@ impl TalosRuntimeConfig {
                 runtime.kubernetes.validate(&config.talos_paths())?;
             }
         }
-        if !runtime
+        runtime.resources(runtime.kind).validate()?;
+        runtime.connection(runtime.kind).validate()?;
+        Ok(())
+    }
+}
+
+impl WorkerResources {
+    fn validate(self) -> TalosResult<()> {
+        if self.cpu_cores == 0
+            || self.memory_bytes == 0
+            || self.memory_bytes > i64::MAX as u64
+            || self.shm_bytes == 0
+            || self.shm_bytes > self.memory_bytes
+        {
+            return Err(TalosError::new(ErrorCode::InvalidRequest, "Worker CPU, memory and shared memory must be positive. Shared memory cannot exceed Worker memory."));
+        }
+        Ok(())
+    }
+}
+
+impl WorkerConnectionConfig {
+    fn validate(&self) -> TalosResult<()> {
+        let invalid = |message| TalosError::new(ErrorCode::InvalidRequest, message);
+        if !self
             .image
             .rsplit_once("@sha256:")
             .is_some_and(|(repository, digest)| {
@@ -122,7 +217,7 @@ impl TalosRuntimeConfig {
                 "The managed Worker image must be pinned by SHA-256 digest.",
             ));
         }
-        let origin = url::Url::parse(&runtime.control_plane_endpoint)
+        let origin = url::Url::parse(&self.control_plane_endpoint)
             .map_err(|_| invalid("The managed Worker control plane must be an HTTPS origin."))?;
         if origin.scheme() != "https"
             || origin.host().is_none()
@@ -136,7 +231,7 @@ impl TalosRuntimeConfig {
                 "The managed Worker control plane must be an HTTPS origin.",
             ));
         }
-        if runtime
+        if self
             .trusted_ca_file
             .as_ref()
             .is_some_and(|path| path.as_os_str().is_empty())

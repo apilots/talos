@@ -1,15 +1,22 @@
-use std::time::Duration;
+use std::{path::Path, time::Duration};
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use rustls::{
+    pki_types::{pem::PemObject, CertificateDer},
+    RootCertStore,
+};
 
 use talos_auth::UserRole;
 use talos_config::domains::managed_worker::{
     read_pasted_kubeconfig, write_pasted_kubeconfig, DockerEngineConfig, KubeconfigSource,
-    KubernetesConfig, KubernetesCredential, WorkerRuntimeKind,
+    KubernetesConfig, KubernetesCredential, WorkerConnectionConfig, WorkerRuntimeKind,
 };
-use talos_config::{Config, TalosPaths, WorkerRuntimeConfig, YamlConfigStore};
+use talos_config::{Config, ServerRuntimePolicy, TalosPaths, WorkerRuntimeConfig, YamlConfigStore};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
     WorkerKubeconfigAuthentication, WorkerKubeconfigSource, WorkerKubernetesSettings,
-    WorkerRuntimeBackend, WorkerRuntimeCandidate, WorkerRuntimeSettingsResponse,
+    WorkerRuntimeBackend, WorkerRuntimeCandidate, WorkerRuntimeConnection, WorkerRuntimeProfile,
+    WorkerRuntimeSettingsResponse, WorkerRuntimeTiming,
 };
 use talos_worker_runtime::{
     DockerEngine, Kubernetes, KubernetesOptions, RuntimeError, DEFAULT_SECCOMP_PROFILE,
@@ -17,8 +24,6 @@ use talos_worker_runtime::{
 use uuid::Uuid;
 
 use crate::{Actor, TalosService};
-
-pub(crate) const KUBERNETES_HOME_BYTES: u64 = 100_000_000_000;
 
 const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_KUBECONFIG_BYTES: usize = 256 * 1024;
@@ -32,11 +37,11 @@ impl TalosService {
     ) -> TalosResult<WorkerRuntimeSettingsResponse> {
         require_admin(actor)?;
         let saved = if active.talos.worker.runtime.is_some() {
-            active.reload()?.talos.worker.runtime
+            active.reload()?
         } else {
-            None
+            active.clone()
         };
-        Ok(settings(active, saved.as_ref()))
+        Ok(settings(active, &saved))
     }
 
     /// Check a candidate's configuration, connectivity and permissions without saving it.
@@ -47,8 +52,7 @@ impl TalosService {
         request: WorkerRuntimeCandidate,
     ) -> TalosResult<()> {
         require_admin(actor)?;
-        let saved = load_saved(active)?;
-        let (candidate, inline) = candidate(&saved, request)?;
+        let (candidate, inline) = candidate(load_saved(active)?, request)?;
         preflight(active, &candidate, inline.as_deref()).await
     }
 
@@ -63,24 +67,36 @@ impl TalosService {
         self.nodes
             .with_managed_runtime_update(|has_instances| async move {
                 let saved = load_saved(active)?;
-                let (candidate, inline) = candidate(&saved, request)?;
-                let response = settings(active, Some(&candidate));
-                if response.restart_required && has_instances {
+                let (candidate, inline) = candidate(saved.clone(), request)?;
+                let target_changed = runtime_changed(
+                    active.talos.worker.runtime.as_ref(),
+                    candidate.talos.worker.runtime.as_ref(),
+                );
+                let response = settings(active, &candidate);
+                if target_changed && has_instances {
                     return Err(TalosError::new(
                         ErrorCode::Conflict,
                         "The runtime target cannot change while managed Talos still own resources.",
                     ));
                 }
                 preflight(active, &candidate, inline.as_deref()).await?;
+                let runtime = configured_runtime(&candidate)?;
+                let previous = configured_runtime(&saved)?;
                 if let Some(contents) = inline {
-                    let reference = candidate.kubernetes.pasted_kubeconfig.ok_or_else(|| {
+                    let reference = runtime.kubernetes.pasted_kubeconfig.ok_or_else(|| {
                         TalosError::internal("The runtime credential reference is missing.")
                     })?;
                     write_pasted_kubeconfig(&active.talos_paths(), reference, &contents)?;
                 }
-                let persisted = if saved != candidate {
-                    YamlConfigStore::new(active.source_path())
-                        .save_worker_runtime_selection(&saved, &candidate)
+                let persisted = if previous != runtime
+                    || saved.talos.server.runtime != candidate.talos.server.runtime
+                {
+                    YamlConfigStore::new(active.source_path()).save_worker_runtime_selection(
+                        previous,
+                        runtime,
+                        &saved.talos.server.runtime,
+                        &candidate.talos.server.runtime,
+                    )
                 } else {
                     Ok(())
                 };
@@ -94,8 +110,7 @@ impl TalosService {
                     });
                     return Ok((Err(error), pending));
                 }
-                let restart_required = response.restart_required;
-                Ok((Ok(response), restart_required))
+                Ok((Ok(response), target_changed))
             })
             .await?
     }
@@ -111,25 +126,31 @@ fn require_admin(actor: &Actor) -> TalosResult<()> {
     Ok(())
 }
 
-fn load_saved(active: &Config) -> TalosResult<WorkerRuntimeConfig> {
+fn load_saved(active: &Config) -> TalosResult<Config> {
+    configured_runtime(active)?;
+    active.reload()
+}
+
+fn configured_runtime(config: &Config) -> TalosResult<&WorkerRuntimeConfig> {
     let unconfigured = || {
         TalosError::new(
             ErrorCode::ServiceUnavailable,
-            "A Server operator must configure the Worker image and control plane before selecting a runtime.",
+            "A Server operator must configure the Worker image and control plane before editing runtime settings.",
         )
     };
-    if active.talos.worker.runtime.is_none() {
-        return Err(unconfigured());
-    }
-    active
-        .reload()?
+    config
         .talos
         .worker
         .runtime
+        .as_ref()
         .ok_or_else(unconfigured)
 }
 
-fn settings(active: &Config, saved: Option<&WorkerRuntimeConfig>) -> WorkerRuntimeSettingsResponse {
+fn settings(active: &Config, saved: &Config) -> WorkerRuntimeSettingsResponse {
+    let runtime = saved.talos.worker.runtime.as_ref();
+    let policy = &saved.talos.server.runtime;
+    let restart_required = runtime_changed(active.talos.worker.runtime.as_ref(), runtime)
+        || (runtime.is_some() && &active.talos.server.runtime != policy);
     let active = active.talos.worker.runtime.as_ref();
     let backend = |config: &WorkerRuntimeConfig| match config.kind {
         WorkerRuntimeKind::DockerEngine => WorkerRuntimeBackend::DockerEngine,
@@ -137,15 +158,17 @@ fn settings(active: &Config, saved: Option<&WorkerRuntimeConfig>) -> WorkerRunti
     };
     WorkerRuntimeSettingsResponse {
         active_backend: active.map(backend),
-        configured_backend: saved.map(backend),
-        docker_socket_path: saved.map(|runtime| {
+        configured_backend: runtime.map(backend),
+        profile: runtime.map(profile),
+        timing: runtime.map(|_| timing(policy)),
+        docker_socket_path: runtime.map(|runtime| {
             runtime
                 .docker_engine
                 .socket_path
                 .to_string_lossy()
                 .into_owned()
         }),
-        kubernetes: saved.map(|runtime| {
+        kubernetes: runtime.map(|runtime| {
             let kube = &runtime.kubernetes;
             WorkerKubernetesSettings {
                 namespace: kube.namespace.clone(),
@@ -160,9 +183,38 @@ fn settings(active: &Config, saved: Option<&WorkerRuntimeConfig>) -> WorkerRunti
                     .as_ref()
                     .map(|path| path.to_string_lossy().into_owned()),
                 context: kube.kubeconfig_context.clone(),
+                seccomp_profile: kube.seccomp_profile.clone(),
+                home_bytes: kube.home_bytes,
+                home_quota_enforced: kube.home_quota_enforced,
             }
         }),
-        restart_required: runtime_changed(active, saved),
+        restart_required,
+    }
+}
+
+fn profile(runtime: &WorkerRuntimeConfig) -> WorkerRuntimeProfile {
+    let worker = runtime.connection(runtime.kind);
+    let resources = runtime.resources(runtime.kind);
+    WorkerRuntimeProfile {
+        worker: WorkerRuntimeConnection {
+            image: worker.image,
+            control_plane_endpoint: worker.control_plane_endpoint,
+            trusted_ca_file: worker
+                .trusted_ca_file
+                .map(|path| path.to_string_lossy().into_owned()),
+        },
+        cpu_cores: resources.cpu_cores,
+        memory_bytes: resources.memory_bytes,
+        shm_bytes: resources.shm_bytes,
+    }
+}
+
+fn timing(policy: &ServerRuntimePolicy) -> WorkerRuntimeTiming {
+    WorkerRuntimeTiming {
+        idle_timeout_seconds: policy.idle_timeout_seconds,
+        request_wait_seconds: policy.request_wait_seconds,
+        start_timeout_seconds: policy.start_timeout_seconds,
+        wake_cooldown_seconds: policy.wake_cooldown_seconds,
     }
 }
 
@@ -174,9 +226,7 @@ fn runtime_changed(
         (None, None) => false,
         (Some(active), Some(saved)) => {
             active.kind != saved.kind
-                || active.image != saved.image
-                || active.control_plane_endpoint != saved.control_plane_endpoint
-                || active.trusted_ca_file != saved.trusted_ca_file
+                || active.connection(active.kind) != saved.connection(active.kind)
                 || match active.kind {
                     WorkerRuntimeKind::DockerEngine => active.docker_engine != saved.docker_engine,
                     WorkerRuntimeKind::Kubernetes => active.kubernetes != saved.kubernetes,
@@ -187,21 +237,72 @@ fn runtime_changed(
 }
 
 fn candidate(
-    saved: &WorkerRuntimeConfig,
+    mut config: Config,
     request: WorkerRuntimeCandidate,
-) -> TalosResult<(WorkerRuntimeConfig, Option<String>)> {
-    let mut candidate = saved.clone();
-    let WorkerRuntimeCandidate::Kubernetes {
-        namespace,
-        storage_class,
-        authentication,
-    } = request
-    else {
-        candidate.kind = WorkerRuntimeKind::DockerEngine;
-        return Ok((candidate, None));
+) -> TalosResult<(Config, Option<String>)> {
+    let saved = configured_runtime(&config)?;
+    let mut runtime = saved.clone();
+    let (edits, inline) = match (runtime.kind, request) {
+        (WorkerRuntimeKind::DockerEngine, WorkerRuntimeCandidate::DockerEngine { edits }) => {
+            (edits, None)
+        }
+        (
+            WorkerRuntimeKind::Kubernetes,
+            WorkerRuntimeCandidate::Kubernetes {
+                namespace,
+                storage_class,
+                authentication,
+                edits,
+            },
+        ) => {
+            let inline = edit_kubernetes(
+                &mut runtime.kubernetes,
+                namespace,
+                storage_class,
+                authentication,
+            )?;
+            if runtime.kubernetes != saved.kubernetes {
+                runtime.kubernetes.home_quota_enforced = false;
+            }
+            (edits, inline)
+        }
+        _ => {
+            return Err(TalosError::new(
+                ErrorCode::InvalidRequest,
+                "The Worker runtime kind is set by the Server deployment.",
+            ))
+        }
     };
-    candidate.kind = WorkerRuntimeKind::Kubernetes;
-    let kubernetes = &mut candidate.kubernetes;
+    if let Some(edits) = edits {
+        if let Some(idle_timeout_seconds) = edits.idle_timeout_seconds {
+            config.talos.server.runtime.idle_timeout_seconds = idle_timeout_seconds;
+        }
+        if let Some(worker) = edits.worker {
+            let connection = WorkerConnectionConfig {
+                image: worker.image.trim().into(),
+                control_plane_endpoint: worker.control_plane_endpoint.trim().into(),
+                trusted_ca_file: worker.trusted_ca_file.map(Into::into),
+            };
+            if connection != runtime.connection(runtime.kind) {
+                match runtime.kind {
+                    WorkerRuntimeKind::DockerEngine => {
+                        runtime.docker_engine.worker = Some(connection)
+                    }
+                    WorkerRuntimeKind::Kubernetes => runtime.kubernetes.worker = Some(connection),
+                }
+            }
+        }
+    }
+    config.talos.worker.runtime = Some(runtime);
+    Ok((config, inline))
+}
+
+fn edit_kubernetes(
+    kubernetes: &mut KubernetesConfig,
+    namespace: String,
+    storage_class: String,
+    authentication: WorkerKubeconfigAuthentication,
+) -> TalosResult<Option<String>> {
     kubernetes.namespace = namespace.trim().into();
     kubernetes.storage_class = storage_class.trim().into();
     let (source, context, inline) = match authentication {
@@ -234,30 +335,65 @@ fn candidate(
     } else if inline.is_some() {
         kubernetes.pasted_kubeconfig = Some(Uuid::new_v4());
     }
-    if *kubernetes != saved.kubernetes {
-        kubernetes.home_quota_enforced = false;
-    }
-    Ok((candidate, inline))
+    Ok(inline)
 }
 
-async fn preflight(
-    active: &Config,
-    runtime: &WorkerRuntimeConfig,
-    inline: Option<&str>,
-) -> TalosResult<()> {
+async fn preflight(active: &Config, candidate: &Config, inline: Option<&str>) -> TalosResult<()> {
     let mut config = active.clone();
-    config.talos.worker.runtime = Some(runtime.clone());
+    config.talos = candidate.talos.clone();
     config.validate_runtime()?;
+    let runtime = configured_runtime(candidate)?;
+    read_worker_trusted_ca(runtime.connection(runtime.kind).trusted_ca_file.as_deref())?;
     match runtime.kind {
         WorkerRuntimeKind::DockerEngine => {
             connect_docker_worker_runtime(&runtime.docker_engine).await?;
         }
         WorkerRuntimeKind::Kubernetes => {
-            connect_kubernetes_worker_runtime(&runtime.kubernetes, &active.talos_paths(), inline)
+            connect_kubernetes_worker_runtime(&runtime.kubernetes, &config.talos_paths(), inline)
                 .await?;
         }
     }
     Ok(())
+}
+
+/// Read only validated certificates, so an editable path cannot copy other file contents into Worker Home.
+pub fn read_worker_trusted_ca(path: Option<&Path>) -> TalosResult<Option<Vec<u8>>> {
+    let Some(path) = path else { return Ok(None) };
+    let invalid = || {
+        TalosError::new(
+            ErrorCode::InvalidRequest,
+            "The Worker CA file must contain usable PEM certificates.",
+        )
+    };
+    let read_error = |error| {
+        TalosError::from_source(
+            ErrorCode::InvalidRequest,
+            "Cannot read the Worker CA file.",
+            error,
+        )
+    };
+    if !path.metadata().map_err(read_error)?.is_file() {
+        return Err(invalid());
+    }
+    let file = std::fs::File::open(path).map_err(read_error)?;
+    let mut roots = RootCertStore::empty();
+    let mut pem = String::new();
+    for certificate in CertificateDer::pem_reader_iter(file) {
+        let certificate = certificate.map_err(|_| invalid())?;
+        if roots.add(certificate.clone()).is_err() {
+            continue;
+        }
+        pem.push_str("-----BEGIN CERTIFICATE-----\n");
+        for line in STANDARD.encode(&certificate).as_bytes().chunks(64) {
+            pem.extend(line.iter().copied().map(char::from));
+            pem.push('\n');
+        }
+        pem.push_str("-----END CERTIFICATE-----\n");
+    }
+    if roots.is_empty() {
+        return Err(invalid());
+    }
+    Ok(Some(pem.into_bytes()))
 }
 
 /// Check the deployment-mounted Docker Engine used by a Server or candidate.
@@ -313,7 +449,7 @@ pub async fn connect_kubernetes_worker_runtime(
             };
             TalosError::from_source(code, "The Kubernetes runtime credential or target configuration is invalid.", error)
         })?;
-        runtime.check(KUBERNETES_HOME_BYTES).await.map_err(|error| {
+        runtime.check(config.home_bytes).await.map_err(|error| {
             TalosError::from_source(
                 ErrorCode::ServiceUnavailable,
                 "Kubernetes connectivity or the required namespace permissions could not be verified.",

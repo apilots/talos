@@ -4,7 +4,8 @@ use talos_config::{domains::managed_worker::WorkerRuntimeKind, Config};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::{FileLock, FileSystem};
 use talos_service::{
-    connect_docker_worker_runtime, connect_kubernetes_worker_runtime, AgentNodeService,
+    connect_docker_worker_runtime, connect_kubernetes_worker_runtime, read_worker_trusted_ca,
+    AgentNodeService,
 };
 use talos_worker_runtime::ManagedWorkerRuntime;
 
@@ -33,14 +34,8 @@ pub(crate) async fn configure(
                 .await?,
         ),
     };
-    let trusted_ca = runtime
-        .trusted_ca_file
-        .as_ref()
-        .map(std::fs::read)
-        .transpose()
-        .map_err(|error| {
-            TalosError::internal_with_source("Read the managed Worker trusted CA.", error)
-        })?;
+    let connection = runtime.connection(runtime.kind);
+    let trusted_ca = read_worker_trusted_ca(connection.trusted_ca_file.as_deref())?;
     nodes.install_managed_worker_runtime(
         backend,
         runtime.clone(),

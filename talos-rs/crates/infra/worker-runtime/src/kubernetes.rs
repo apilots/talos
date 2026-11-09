@@ -98,18 +98,7 @@ impl Kubernetes {
             }
         };
         require_usable_home(&home)?;
-        if home
-            .spec
-            .as_ref()
-            .and_then(|spec| spec.resources.as_ref())
-            .and_then(|resources| resources.requests.as_ref())
-            .and_then(|requests| requests.get("storage"))
-            .is_none_or(|capacity| capacity.0 != storage)
-        {
-            return Err(RuntimeError::Conflict {
-                resource: "Home capacity",
-            });
-        }
+        // Existing claims retain their provisioned capacity. The profile sizes new claims.
         if !files.is_empty() {
             self.seed_home(spec, &names, files, &paths, mode).await?;
         }

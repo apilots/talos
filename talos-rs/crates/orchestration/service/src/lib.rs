@@ -63,7 +63,7 @@ mod worker_environment;
 pub use worker_environment::WorkerEnvironmentService;
 mod worker_runtime_settings;
 pub use worker_runtime_settings::{
-    connect_docker_worker_runtime, connect_kubernetes_worker_runtime,
+    connect_docker_worker_runtime, connect_kubernetes_worker_runtime, read_worker_trusted_ca,
 };
 
 pub use service::ManagementSync;
