@@ -78,6 +78,7 @@ async fn accepts_admission_changes_to_owned_worker_template() {
         image: "registry.example/talos-worker:fixture".into(),
         cpu_cores: 2,
         memory_bytes: 2 << 30,
+        shm_bytes: 1 << 30,
     };
     let names = Names::new(&spec.identity).unwrap();
     let mut worker = runtime.worker_workload(&spec, &names);

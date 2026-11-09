@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_fs::FileSystem;
 
 use super::{nested_mapping, parse_yaml_root, YamlConfigStore};
-use crate::WorkerRuntimeConfig;
+use crate::{domains::managed_worker::WorkerRuntimeKind, ServerRuntimePolicy, WorkerRuntimeConfig};
 
 impl YamlConfigStore {
     /// Patch the admin-editable keys, preserving deployment fields and environment placeholders.
@@ -12,6 +12,8 @@ impl YamlConfigStore {
         &self,
         previous: &WorkerRuntimeConfig,
         next: &WorkerRuntimeConfig,
+        previous_policy: &ServerRuntimePolicy,
+        next_policy: &ServerRuntimePolicy,
     ) -> TalosResult<()> {
         let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
         let mut root = parse_yaml_root(&self.read_config_text()?)?;
@@ -24,7 +26,46 @@ impl YamlConfigStore {
             .get_mut("runtime")
             .and_then(Value::as_mapping_mut)
             .ok_or_else(|| TalosError::internal("The Server runtime configuration is missing."))?;
-        set_changed(runtime, "kind", &previous.kind, &next.kind)?;
+        let before = previous.connection(next.kind);
+        let after = next.connection(next.kind);
+        if before != after {
+            let backend = match next.kind {
+                WorkerRuntimeKind::DockerEngine => "docker_engine",
+                WorkerRuntimeKind::Kubernetes => "kubernetes",
+            };
+            let inherited = if previous.connection_override(next.kind).is_none() {
+                ["image", "control_plane_endpoint", "trusted_ca_file"]
+                    .into_iter()
+                    .filter_map(|key| {
+                        runtime
+                            .get(key)
+                            .cloned()
+                            .map(|value| (Value::String(key.into()), value))
+                    })
+                    .collect::<Mapping>()
+            } else {
+                Mapping::new()
+            };
+            let backend = nested_mapping(runtime, backend)?;
+            if backend.get("worker").is_some_and(Value::is_null) {
+                backend.remove("worker");
+            }
+            let worker = nested_mapping(backend, "worker")?;
+            worker.extend(inherited);
+            set_changed(worker, "image", &before.image, &after.image)?;
+            set_changed(
+                worker,
+                "control_plane_endpoint",
+                &before.control_plane_endpoint,
+                &after.control_plane_endpoint,
+            )?;
+            set_changed(
+                worker,
+                "trusted_ca_file",
+                &before.trusted_ca_file,
+                &after.trusted_ca_file,
+            )?;
+        }
         if previous.kubernetes != next.kubernetes {
             let kubernetes = nested_mapping(runtime, "kubernetes")?;
             let previous = &previous.kubernetes;
@@ -64,6 +105,15 @@ impl YamlConfigStore {
                 "home_quota_enforced",
                 &previous.home_quota_enforced,
                 &next.home_quota_enforced,
+            )?;
+        }
+        if previous_policy.idle_timeout_seconds != next_policy.idle_timeout_seconds {
+            let policy = nested_mapping(nested_mapping(talos, "server")?, "runtime")?;
+            set_changed(
+                policy,
+                "idle_timeout_seconds",
+                &previous_policy.idle_timeout_seconds,
+                &next_policy.idle_timeout_seconds,
             )?;
         }
         let text = serde_yaml::to_string(&root).map_err(|error| {

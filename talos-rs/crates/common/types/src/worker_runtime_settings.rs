@@ -27,6 +27,38 @@ pub struct WorkerKubernetesSettings {
     pub authentication_source: WorkerKubeconfigSource,
     pub mounted_kubeconfig_path: Option<String>,
     pub context: Option<String>,
+    pub seccomp_profile: String,
+    #[ts(type = "number")]
+    pub home_bytes: u64,
+    pub home_quota_enforced: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRuntimeConnection {
+    pub image: String,
+    pub control_plane_endpoint: String,
+    pub trusted_ca_file: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRuntimeProfile {
+    pub worker: WorkerRuntimeConnection,
+    pub cpu_cores: u16,
+    #[ts(type = "number")]
+    pub memory_bytes: u64,
+    #[ts(type = "number")]
+    pub shm_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRuntimeTiming {
+    pub idle_timeout_seconds: u32,
+    pub request_wait_seconds: u32,
+    pub start_timeout_seconds: u32,
+    pub wake_cooldown_seconds: u32,
 }
 
 /// Effective backend and saved settings. The Server never returns pasted credentials or their references.
@@ -36,21 +68,42 @@ pub struct WorkerRuntimeSettingsResponse {
     pub active_backend: Option<WorkerRuntimeBackend>,
     pub configured_backend: Option<WorkerRuntimeBackend>,
     pub docker_socket_path: Option<String>,
+    pub profile: Option<WorkerRuntimeProfile>,
+    pub timing: Option<WorkerRuntimeTiming>,
     pub kubernetes: Option<WorkerKubernetesSettings>,
     pub restart_required: bool,
 }
 
-/// A candidate can select a deployed backend and change its namespace, class and authentication.
+/// Edits to the deployed backend and the shared Server policy.
+#[derive(Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkerRuntimeEdits {
+    /// Omitted or null preserves the existing connection. A null CA uses system trust.
+    #[ts(optional = nullable)]
+    pub worker: Option<WorkerRuntimeConnection>,
+    /// Omitted or null preserves the common idle timeout.
+    #[ts(optional = nullable)]
+    pub idle_timeout_seconds: Option<u32>,
+}
+
+/// The kind must match the Server deployment.
 #[derive(Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 #[ts(tag = "kind", rename_all = "camelCase")]
 pub enum WorkerRuntimeCandidate {
-    DockerEngine,
+    DockerEngine {
+        #[serde(default)]
+        #[ts(optional)]
+        edits: Option<WorkerRuntimeEdits>,
+    },
     Kubernetes {
         namespace: String,
         #[serde(rename = "storageClass")]
         storage_class: String,
         authentication: WorkerKubeconfigAuthentication,
+        #[serde(default)]
+        #[ts(optional)]
+        edits: Option<WorkerRuntimeEdits>,
     },
 }
 

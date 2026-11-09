@@ -116,7 +116,10 @@ impl AgentNodeService {
     }
 
     async fn recover_failed_wake(&self, record: &mut ManagedWorkerRecord, error: &TalosError) {
-        let (Ok(managed), Ok(spec)) = (self.managed_runtime(), runtime_spec(record)) else {
+        let Ok(managed) = self.managed_runtime() else {
+            return;
+        };
+        let Ok(spec) = runtime_spec(record, managed.config.resources(managed.config.kind)) else {
             return;
         };
         let Ok(observation) = managed.runtime.inspect(&spec).await else {
@@ -162,7 +165,7 @@ impl AgentNodeService {
 
     async fn advance_managed_worker(&self, record: &mut ManagedWorkerRecord) -> TalosResult<()> {
         let managed = self.managed_runtime()?;
-        let spec = runtime_spec(record)?;
+        let spec = runtime_spec(record, managed.config.resources(managed.config.kind))?;
         let runtime = &managed.runtime;
         let mut committed = record.clone();
         let next = match record.step {
@@ -170,7 +173,7 @@ impl AgentNodeService {
                 let path_in_home = |path| PathBuf::from(WORKER_HOME).join(path);
                 let runner = AgentNodeRunnerConfig {
                     node_id: record.node_id.clone(),
-                    control_plane_endpoint: managed.config.control_plane_endpoint.clone(),
+                    control_plane_endpoint: managed.connection.control_plane_endpoint.clone(),
                     credential_file: path_in_home(CREDENTIAL_PATH),
                     trusted_ca_file: managed.trusted_ca.as_ref().map(|_| path_in_home(CA_PATH)),
                     transport: None,
@@ -240,7 +243,9 @@ impl AgentNodeService {
                     Step::Stable
                 } else if record.error.is_some() {
                     return Ok(());
-                } else if now() - record.operation_at >= START_TIMEOUT.as_secs() as i64 {
+                } else if now() - record.operation_at
+                    >= i64::from(managed.policy.start_timeout_seconds)
+                {
                     return Err(TalosError::new(
                         ErrorCode::Timeout,
                         "Timed out waiting for Talo Worker registration.",
@@ -257,7 +262,7 @@ impl AgentNodeService {
                 stop_container(&**runtime, &spec).await?;
                 runtime.remove_runtime(&spec).await.map_err(runtime_error)?;
                 committed.revision = record.revision.checked_add(1).ok_or_else(conflict)?;
-                committed.image.clone_from(&managed.config.image);
+                committed.image.clone_from(&managed.connection.image);
                 Step::Ensure
             }
             Step::RecoverCredential => {

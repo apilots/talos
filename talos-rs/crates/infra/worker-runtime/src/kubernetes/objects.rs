@@ -17,7 +17,7 @@ use k8s_openapi::{
 };
 
 use super::{has_revision, Kubernetes, Names};
-use crate::{RuntimeError, WorkerSpec, HOME_PATH, REVISION_LABEL, SHM_BYTES};
+use crate::{RuntimeError, WorkerSpec, HOME_PATH, REVISION_LABEL};
 
 const HOME_VOLUME: &str = "home";
 const SHM_VOLUME: &str = "shm";
@@ -110,7 +110,7 @@ impl Kubernetes {
                     name: SHM_VOLUME.into(),
                     empty_dir: Some(EmptyDirVolumeSource {
                         medium: Some("Memory".into()),
-                        size_limit: Some(Quantity(format!("{}Gi", SHM_BYTES >> 30))),
+                        size_limit: Some(Quantity(decimal_quantity(spec.shm_bytes))),
                     }),
                     ..Default::default()
                 },

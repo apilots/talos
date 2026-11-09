@@ -36,6 +36,7 @@ async fn managed_lifecycle_preserves_home_and_rejects_conflicts() {
         image,
         cpu_cores: 4,
         memory_bytes: 8 << 30,
+        shm_bytes: 1 << 30,
     };
     let worker_name = format!("talos-worker-talo-{}", spec.identity.short_id);
     let test_result = tokio::spawn({

@@ -379,5 +379,7 @@ export type {
   WorkerKubernetesSettings,
   WorkerRuntimeBackend,
   WorkerRuntimeCandidate,
+  WorkerRuntimeConnection,
+  WorkerRuntimeProfile,
   WorkerRuntimeSettingsResponse,
 } from "./generated/app-protocol";

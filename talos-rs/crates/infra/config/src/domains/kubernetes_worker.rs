@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use crate::TalosPaths;
 
+use super::{WorkerConnectionConfig, WorkerResources};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KubeconfigSource {
     InCluster,
@@ -19,6 +21,9 @@ pub struct KubernetesConfig {
     pub namespace: String,
     pub storage_class: String,
     pub seccomp_profile: String,
+    pub worker: Option<WorkerConnectionConfig>,
+    pub resources: WorkerResources,
+    pub home_bytes: u64,
     /// Operator assertion for the verified cluster, namespace and StorageClass.
     pub home_quota_enforced: bool,
     pub kubeconfig_source: Option<KubeconfigSource>,
@@ -31,8 +36,11 @@ impl Default for KubernetesConfig {
     fn default() -> Self {
         Self {
             namespace: "default".into(),
-            storage_class: String::new(),
+            storage_class: "talos-xfs-quota".into(),
             seccomp_profile: "talos/chromium-seccomp.json".into(),
+            worker: None,
+            resources: WorkerResources::default(),
+            home_bytes: 100_000_000_000,
             home_quota_enforced: false,
             kubeconfig_source: None,
             kubeconfig_path: None,
@@ -102,6 +110,9 @@ impl KubernetesConfig {
             return Err(invalid(
                 "An explicit Kubernetes StorageClass name is required.",
             ));
+        }
+        if self.home_bytes == 0 || self.home_bytes > i64::MAX as u64 {
+            return Err(invalid("The Kubernetes Home volume capacity must be positive and fit a signed 64-bit byte count."));
         }
         if self.seccomp_profile.is_empty()
             || !Path::new(&self.seccomp_profile)

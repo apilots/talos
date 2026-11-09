@@ -56,8 +56,21 @@ class KubeObservations:
         assert claim["spec"]["resources"]["requests"]["storage"] == "100G", claim["spec"]
         assert claim["spec"]["storageClassName"] == STORAGE_CLASS
         pv = claim["spec"]["volumeName"]
-        assert self.fixture.read("pv", pv)["spec"]["persistentVolumeReclaimPolicy"] == "Delete"
-        self.volumes[instance] = pv
+        [pod] = self.select("pods", instance, "worker")
+        node = pod["spec"]["nodeName"]
+        if instance in self.volumes:
+            assert self.volumes[instance] == (pv, node), (self.volumes[instance], pv, node)
+        else:
+            volume = self.fixture.read("pv", pv)["spec"]
+            assert volume["persistentVolumeReclaimPolicy"] == "Delete"
+            affinity = volume["nodeAffinity"]["required"]["nodeSelectorTerms"]
+            hostname = self.fixture.read("node", node)["metadata"]["labels"]["kubernetes.io/hostname"]
+            assert any(entry["key"] == "kubernetes.io/hostname" and entry["operator"] == "In"
+                       and hostname in entry["values"] for term in affinity for entry in term["matchExpressions"])
+            [shm] = [volume for volume in pod["spec"]["volumes"] if volume["name"] == "shm"]
+            assert shm["emptyDir"]["sizeLimit"] in ("512Mi", str(512 * 1024 * 1024))
+            print(f"PASS local Home PV {pv} pins the Talo Pod to {node}", flush=True)
+        self.volumes[instance] = (pv, node)
         return claim["metadata"]["uid"]
 
     def stopped(self, instance, _pod):
@@ -73,7 +86,7 @@ class KubeObservations:
     def assert_removed(self, instance):
         for resource in ("statefulsets", "pods", "pvc", "jobs", "secrets"):
             assert not self.fixture.items(resource, f"{LABEL}={instance}"), resource
-        self.fixture.kube("wait", "--for=delete", f"pv/{self.volumes[instance]}", "--timeout=120s")
+        self.fixture.kube("wait", "--for=delete", f"pv/{self.volumes[instance][0]}", "--timeout=120s")
 
 
 class Fixture:
@@ -167,6 +180,12 @@ class Fixture:
             profile["talos"]["worker"]["runtime"]["kubernetes"].update(
                 kubeconfig_source="InCluster", kubeconfig_path="/var/run/secrets/talos-kubernetes/kubeconfig",
             )
+        else:
+            runtime = profile["talos"]["worker"]["runtime"]
+            runtime["kubernetes"]["worker"] = {
+                field: runtime.pop(field) for field in ("image", "control_plane_endpoint", "trusted_ca_file")
+            }
+            runtime["kubernetes"]["resources"] = {"shm_bytes": 512 * 1024 * 1024}
         config = self.files / "talos.yaml"
         config.write_text(yaml.safe_dump(profile, sort_keys=False))
         self.worker_model = profile["llm"]
@@ -393,6 +412,8 @@ def run_preflight(fixture):
         active = data(response)
         assert status == 200 and active["activeBackend"] == "kubernetes" and not active["restartRequired"]
         assert active["kubernetes"]["authenticationSource"] == "inCluster"
+        for method, validate in (("POST", True), ("PUT", False)):
+            assert runtime_request(fixture.base, TOKEN, method, {"kind": "dockerEngine"}, validate)[0] == 400
         for valid in (in_cluster, operator_mounted, pasted):
             status, response = runtime_request(fixture.base, TOKEN, "POST", valid, validate=True)
             assert status == 200 and data(response) is None, response
@@ -401,7 +422,12 @@ def run_preflight(fixture):
         status, response = runtime_request(fixture.base, TOKEN, "PUT", invalid)
         assert 400 <= status < 500 and token not in json.dumps(response)
         assert data(runtime_request(fixture.base, TOKEN)[1]) == active
-        status, response = runtime_request(fixture.base, TOKEN, "PUT", pasted)
+        assert active["timing"] == {"idleTimeoutSeconds": 12, "requestWaitSeconds": 45,
+                                    "startTimeoutSeconds": 120, "wakeCooldownSeconds": 60}
+        assert active["kubernetes"]["homeBytes"] == 100_000_000_000
+        worker = {**active["profile"]["worker"], "controlPlaneEndpoint": f"https://{HOST}:9443/"}
+        edited = {**pasted, "edits": {"worker": worker, "idleTimeoutSeconds": 20}}
+        status, response = runtime_request(fixture.base, TOKEN, "PUT", edited)
         assert status == 200 and token not in json.dumps(response)
         pending = data(response)
         assert pending["restartRequired"] and pending["kubernetes"]["authenticationSource"] == "pasted"
@@ -414,18 +440,24 @@ def run_preflight(fixture):
         saved = data(response)
         assert status == 200 and saved["activeBackend"] == "kubernetes" and not saved["restartRequired"]
         assert saved["kubernetes"]["authenticationSource"] == "pasted"
+        assert saved["profile"]["worker"] == worker
+        assert saved["timing"]["idleTimeoutSeconds"] == 20
         assert token not in json.dumps(response)
     assert fixture.read("pvc", SERVICE + "-home")["metadata"]["uid"] == home
     persisted = fixture.kube("exec", "deployment/" + SERVICE, "-c", "server", "--", "cat",
                              "/home/talos/.talos/conf/talos.yaml")
     assert token not in persisted
-    ref = yaml.safe_load(persisted)["talos"]["worker"]["runtime"]["kubernetes"]["pasted_kubeconfig"]
+    runtime = yaml.safe_load(persisted)["talos"]["worker"]["runtime"]
+    assert runtime["kind"] == "Kubernetes"
+    assert runtime["control_plane_endpoint"] == active["profile"]["worker"]["controlPlaneEndpoint"]
+    assert runtime["kubernetes"]["worker"]["control_plane_endpoint"] == worker["controlPlaneEndpoint"]
+    ref = runtime["kubernetes"]["pasted_kubeconfig"]
     credential_directory = "/home/talos/.talos/data/worker-runtime-credentials"
     permissions = fixture.kube("exec", "deployment/" + SERVICE, "-c", "server", "--",
                                "stat", "-c", "%a", credential_directory, f"{credential_directory}/{ref}.yaml")
     assert permissions.splitlines() == ["700", "600"]
     (REPORT / "kubernetes-runtime-settings.json").write_text(json.dumps(saved, indent=2))
-    print("PASS Runtime admin gating, three authentication sources, invalid save isolation and restart persistence", flush=True)
+    print("PASS Runtime admin gating, three authentication sources, independent profiles and shared idle policy after restart", flush=True)
 
 
 def run(files, preflight):

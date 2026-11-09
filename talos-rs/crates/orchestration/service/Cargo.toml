@@ -25,6 +25,7 @@ opendal = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 getrandom = { workspace = true }
 subtle = { workspace = true }
 agent-protocol = { workspace = true }

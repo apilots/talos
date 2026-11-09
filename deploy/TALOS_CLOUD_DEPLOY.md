@@ -8,7 +8,7 @@ reach Workers through the Server relay.
 | Runtime | Deployment | Talo Home |
 | --- | --- | --- |
 | Docker Engine | One Linux host and one Docker Engine. Docker Compose runs Server. The managed overlay mounts the host Docker Unix socket into Server. | Named Docker volume. |
-| Kubernetes | One Server Deployment and ClusterIP Service. The Runtime uses the Kubernetes API through a namespace-scoped identity. | Independent `100G` PVC. Hard quota depends on the verified StorageClass. |
+| Kubernetes | One Server Deployment and ClusterIP Service. The Runtime uses the Kubernetes API through a namespace-scoped identity. | Independent PVC, `100G` by default. Hard quota depends on the verified StorageClass. |
 
 Use the [local k3d quick start](kubernetes/README.md#quick-start-with-local-k3d)
 to create a disposable cluster. The [Kubernetes deployment guide](kubernetes/README.md)
@@ -17,6 +17,41 @@ in-cluster ServiceAccount, or configure a mounted kubeconfig Secret or a
 write-only pasted kubeconfig in **Settings → Runtime**. Saved Runtime changes
 take effect after a controlled Server restart. Changing the target requires
 that the Server own no managed Talo resources.
+
+### Runtime profiles and defaults
+
+`talos.worker.runtime.kind` is set by the Server deployment and selects
+one of the two profiles. Settings displays the configured kind as read-only.
+Each backend can define `worker` with its own digest-pinned `image`,
+`control_plane_endpoint` (the HTTPS Agent origin reachable from the Worker)
+and `trusted_ca_file` (a PEM certificate bundle available to Server, or
+`null` for system trust). A backend without a `worker` block inherits the
+legacy connection fields directly under `talos.worker.runtime`. The Server
+validates the deployed profile. In Settings, saving that profile preserves
+the other profile. The idle sleep timeout is shared.
+
+Server YAML owns deployment settings, including the Docker Unix socket,
+mounted kubeconfig path, Kubernetes seccomp profile and the defaults below.
+Settings shows deployment-only fields as read-only.
+
+| YAML setting | Default | Effect |
+| --- | --- | --- |
+| `resources.cpu_cores` | 4 | Worker CPU limit. |
+| `resources.memory_bytes` | 8 GiB | Worker memory limit. |
+| `resources.shm_bytes` | 1 GiB | Worker shared memory size. |
+| `kubernetes.home_bytes` | 100 GB | Capacity requested for each new Home PVC. Existing PVCs retain their size. |
+| `server.runtime.idle_timeout_seconds` | 900 s | Time before an idle Talo sleeps. Administrators can also edit this field in Settings. |
+| `server.runtime.request_wait_seconds` | 45 s | How long an interactive request waits for a Worker. |
+| `server.runtime.start_timeout_seconds` | 120 s | Worker startup and registration deadline. |
+| `server.runtime.wake_cooldown_seconds` | 60 s | Retry interval after a failed Wake. |
+
+Resource settings apply when creating a compute revision. Docker Home uses a
+named volume without a disk quota. With the bundled local Kubernetes
+StorageClass, the first consumer places the Home volume and the bound PV's
+node affinity constrains every replacement Worker Pod. Stop, Start and Reset
+keep the PVC. If the volume's node is unavailable, the Pod waits for that
+node. See [Kubernetes local volumes](https://kubernetes.io/docs/concepts/storage/volumes/#local)
+and [volume binding mode](https://kubernetes.io/docs/concepts/storage/storage-classes/#volume-binding-mode).
 
 ### Network boundary
 
@@ -102,7 +137,7 @@ the authenticated Computer API. Registration never accepts a self-selected owner
 Set `TALOS_SERVER_IMAGE` and `TALOS_SERVER_VERSION` in the deployment
 `.env` to a published image containing the selected Runtime. When enabling
 managed Talo, also pin its compatible Worker image by digest in
-`talos.worker.runtime.image`. Published versions provide amd64/arm64 images.
+the selected profile or legacy `talos.worker.runtime.image`. Published versions provide amd64/arm64 images.
 Route HTTP and gRPC to the same Server instance because its live Registry and
 Connect handles belong to that process.
 

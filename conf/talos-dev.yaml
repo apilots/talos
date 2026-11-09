@@ -38,6 +38,9 @@ talos:
   server:
     runtime:
       idle_timeout_seconds: 900
+      request_wait_seconds: 45
+      start_timeout_seconds: 120
+      wake_cooldown_seconds: 60
 
 cloud:
   api_base_url: http://127.0.0.1:8787

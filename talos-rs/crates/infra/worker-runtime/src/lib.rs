@@ -18,7 +18,6 @@ const INSTANCE_LABEL: &str = "io.talos.managed-worker.instance";
 const RESOURCE_LABEL: &str = "io.talos.managed-worker.resource";
 const REVISION_LABEL: &str = "io.talos.managed-worker.revision";
 const HOME_PATH: &str = "/home/talos/.talos";
-const SHM_BYTES: i64 = 1 << 30;
 
 /// A stable resource identity, reused across resets and retries.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +51,7 @@ pub struct WorkerSpec {
     pub image: String,
     pub cpu_cores: u32,
     pub memory_bytes: u64,
+    pub shm_bytes: u64,
 }
 
 /// Storage capacity requested from the backend. Enforcement depends on the backing storage.

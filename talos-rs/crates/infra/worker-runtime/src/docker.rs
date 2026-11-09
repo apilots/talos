@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use crate::{
     ContainerState, DesiredRuntimeState, HomeCapacity, ManagedWorkerRuntime, RuntimeError,
     RuntimeFuture, RuntimeIdentity, RuntimeObservation, SeedFile, SeedMode, WorkerSpec, HOME_PATH,
-    INSTANCE_LABEL, RESOURCE_LABEL, REVISION_LABEL, SHM_BYTES,
+    INSTANCE_LABEL, RESOURCE_LABEL, REVISION_LABEL,
 };
 
 mod seed;
@@ -154,7 +154,9 @@ impl DockerEngine {
                         memory: Some(memory),
                         memory_swap: Some(memory),
                         nano_cpus: Some(i64::from(spec.cpu_cores) * 1_000_000_000),
-                        shm_size: Some(SHM_BYTES),
+                        shm_size: Some(i64::try_from(spec.shm_bytes).map_err(|_| {
+                            RuntimeError::InvalidSpec("invalid Worker shared memory")
+                        })?),
                         restart_policy: Some(RestartPolicy {
                             name: Some(RestartPolicyNameEnum::UNLESS_STOPPED),
                             ..Default::default()

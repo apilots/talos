@@ -1,5 +1,5 @@
 use super::*;
-use crate::domains::managed_worker::{KubeconfigSource, WorkerRuntimeKind};
+use crate::domains::managed_worker::{KubeconfigSource, WorkerConnectionConfig, WorkerRuntimeKind};
 
 #[test]
 fn runtime_selection_preserves_operator_fields_and_other_settings() {
@@ -12,7 +12,7 @@ gateway:
 talos:
   worker:
     runtime:
-      kind: DockerEngine
+      kind: Kubernetes
       image: ${WORKER_IMAGE}
       control_plane_endpoint: ${WORKER_ENDPOINT}
       kubernetes:
@@ -28,13 +28,22 @@ talos:
     previous.control_plane_endpoint = "https://agent.example.test".into();
     previous.kubernetes.kubeconfig_path = Some("/mnt/kubeconfig".into());
     let mut next = previous.clone();
-    next.kind = WorkerRuntimeKind::Kubernetes;
     next.kubernetes.storage_class = "new".into();
     next.kubernetes.kubeconfig_source = Some(KubeconfigSource::Pasted);
     next.kubernetes.pasted_kubeconfig = Some(uuid::Uuid::new_v4());
 
+    next.kubernetes.worker = Some(WorkerConnectionConfig {
+        control_plane_endpoint: "https://worker.talos.svc".into(),
+        ..previous.connection(WorkerRuntimeKind::Kubernetes)
+    });
+    let previous_policy = ServerRuntimePolicy::default();
+    let next_policy = ServerRuntimePolicy {
+        idle_timeout_seconds: 600,
+        ..previous_policy.clone()
+    };
+
     YamlConfigStore::new(config_path.clone())
-        .save_worker_runtime_selection(&previous, &next)
+        .save_worker_runtime_selection(&previous, &next, &previous_policy, &next_policy)
         .unwrap();
 
     let saved: Value =
@@ -47,6 +56,9 @@ image: ${{WORKER_IMAGE}}
 control_plane_endpoint: ${{WORKER_ENDPOINT}}
 kubernetes:
   storage_class: new
+  worker:
+    image: ${{WORKER_IMAGE}}
+    control_plane_endpoint: https://worker.talos.svc
   kubeconfig_path: ${{MOUNTED_KUBECONFIG}}
   kubeconfig_source: Pasted
   pasted_kubeconfig: {}
@@ -54,5 +66,6 @@ kubernetes:
         next.kubernetes.pasted_kubeconfig.unwrap()
     ))
     .unwrap();
+    expected["talos"]["server"]["runtime"]["idle_timeout_seconds"] = 600.into();
     assert_eq!(saved, expected);
 }

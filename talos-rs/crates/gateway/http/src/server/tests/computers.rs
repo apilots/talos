@@ -194,6 +194,8 @@ async fn worker_runtime_settings_require_the_authenticated_server_admin() {
             "activeBackend": null,
             "configuredBackend": null,
             "dockerSocketPath": null,
+            "profile": null,
+            "timing": null,
             "kubernetes": null,
             "restartRequired": false
         })
