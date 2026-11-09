@@ -45,6 +45,9 @@ export function AppLayout() {
   const talo = useManagedWorkerStatus(taloPage && !computerId).status.data?.instance;
   const choosingComputer = !computerId && !standalonePage && !location.pathname.startsWith("/sessions/") &&
     !(taloPage && taloHasConversation(talo));
+  const contentKey = choosingComputer ? "chooser"
+    : location.pathname.startsWith("/sessions/") ? "session"
+    : taloPage ? "talo" : computerId ?? "pending";
   const sidebarAvailable = !choosingComputer && !standalonePage;
   const showSidebar = sidebarAvailable && (wide ? sidebarOpen : sidebarDrawerOpen);
   const workspaceVisible = workspaceOpen && windows.length > 0;
@@ -80,7 +83,7 @@ export function AppLayout() {
   return <div className="flex h-screen overflow-hidden bg-surface text-ink">
     <div className="h-full w-14 shrink-0"><ComputerRail /></div>
     <AppBusinessRegion inactive={workspaceModal} headerVisible={!choosingComputer} sidebarExpanded={sidebarExpanded} sidebarWidth={sizes.sidebar} sidebarMax={sizes.sidebarMax} navigation={!sidebarModal ? navigation : undefined} mainHeader={!sidebarModal ? mainHeader : null} sidebar={wide ? sidebarRegion : null}>
-      <AppMainContent key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : taloPage ? "talo" : computerId ?? "pending"}`}>
+      <AppMainContent key={`${scope}:${contentKey}`}>
         {choosingComputer ? <ComputerHomePage /> : <Outlet />}
       </AppMainContent>
     </AppBusinessRegion>
