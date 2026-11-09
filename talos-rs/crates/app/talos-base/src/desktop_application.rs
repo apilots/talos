@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 pub(crate) struct DesktopApplication {
     service: Arc<talos_service::TalosService>,
     media: crate::desktop_media::DesktopMedia,
+    account_change: Mutex<()>,
     pub(crate) config: Config,
     pub(crate) store: YamlConfigStore,
     pub(crate) account: AccountService,
@@ -38,6 +39,7 @@ impl DesktopApplication {
         Self {
             service: runtime.service.clone(),
             media: crate::desktop_media::DesktopMedia::new(host),
+            account_change: Mutex::new(()),
             sync_host: runtime.sync_host.clone(),
             store: YamlConfigStore::new(runtime.config.source_path()),
             config: runtime.config.clone(),
@@ -66,30 +68,24 @@ impl DesktopApplication {
     ) -> TalosResult<serde_json::Value> {
         match request.params {
             ClientRequestParams::DesktopStreamOpen(params) => {
-                value(self.media.open(&self.service, actor, params).await?)
+                let viewer = self.media.reserve(actor, params.stream_id)?;
+                self.media
+                    .open(&self.service, actor, params.ticket, viewer)
+                    .await?;
+                value(())
             }
             ClientRequestParams::DesktopStreamSend(params) => {
-                value(self.media.send(actor, params).await?)
+                self.media.send(actor, params)?;
+                value(())
             }
             ClientRequestParams::DesktopStreamClose(params) => {
-                value(self.media.close(actor, params).await?)
+                self.media.close(actor, params)?;
+                value(())
             }
             ClientRequestParams::DesktopWorkerIdentity(_) => value(self.worker_identity().await?),
             ClientRequestParams::DesktopWorkerEnroll(params) => {
-                if actor.access_token.is_some()
-                    && self
-                        .account
-                        .read_auth_session(actor, Default::default())
-                        .map_err(project_error)?
-                        .session
-                        .is_none()
-                {
-                    return Err(TalosError::new(
-                        ErrorCode::Unauthenticated,
-                        "Enrollment credentials do not match the Desktop login",
-                    ));
-                }
-                value(self.enroll_worker(params.node_id).await?)
+                let _account_change = self.account_change.lock().await;
+                value(self.enroll_worker(params.node_id, Some(actor)).await?)
             }
             _ => Err(TalosError::new(
                 ErrorCode::InvalidRequest,
@@ -108,6 +104,42 @@ impl DesktopApplication {
 
 #[async_trait]
 impl AppServerApplication for DesktopApplication {
+    fn prepare_request(
+        self: Arc<Self>,
+        actor: Actor,
+        request: ClientRequest,
+    ) -> futures_util::future::BoxFuture<'static, ApplicationResult<ApplicationResponse>> {
+        match request.params {
+            ClientRequestParams::DesktopStreamOpen(params) => {
+                let viewer = self
+                    .media
+                    .reserve(&actor, params.stream_id)
+                    .map_err(project_error);
+                Box::pin(async move {
+                    self.media
+                        .open(&self.service, &actor, params.ticket, viewer?)
+                        .await
+                        .map_err(project_error)?;
+                    Ok(ApplicationResponse {
+                        body: serde_json::Value::Null,
+                        started_turn: None,
+                    })
+                })
+            }
+            ClientRequestParams::DesktopStreamSend(params) => {
+                media_response(self.media.send(&actor, params))
+            }
+            ClientRequestParams::DesktopStreamClose(params) => {
+                media_response(self.media.close(&actor, params))
+            }
+            _ => Box::pin(async move { self.dispatch(&actor, request).await }),
+        }
+    }
+
+    fn close_connection(&self) {
+        self.media.close_all();
+    }
+
     fn subscribe_worker_failures(
         &self,
     ) -> Option<tokio::sync::watch::Receiver<Option<talos_error::ApiError>>> {
@@ -171,6 +203,7 @@ impl AppServerApplication for DesktopApplication {
                 request.params,
                 ClientRequestParams::AuthLogout(_) | ClientRequestParams::AuthSessionClear(_)
             ) {
+                let _media_suspension = self.media.suspend();
                 // Enrollment may hold the Worker lock while G is unavailable.
                 // Cancel its account owner before taking that lock for logout.
                 let account = if matches!(request.params, ClientRequestParams::AuthSessionClear(_))
@@ -189,7 +222,9 @@ impl AppServerApplication for DesktopApplication {
                         .await
                         .map_err(project_error)?;
                 }
-                self.media.close_all().await;
+                // Keep explicit enrollment out until the account is cleared.
+                // Shared Sync can acquire the Worker lock under its own lifecycle.
+                let _account_change = self.account_change.lock().await;
                 let browser = self.execution.browser().reset_account(&actor.user_id).await;
                 let cleanup = self.stop_registration().await;
                 let cleanup = browser.and(cleanup);
@@ -238,10 +273,22 @@ impl AppServerApplication for DesktopApplication {
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
         self.sync_host.shutdown_refreshes().await;
-        self.media.close_all().await;
+        self.media.close_all();
         self.stop_registration().await?;
         self.local.drain_background_tasks(timeout).await
     }
+}
+
+fn media_response(
+    result: TalosResult<()>,
+) -> futures_util::future::BoxFuture<'static, ApplicationResult<ApplicationResponse>> {
+    Box::pin(async move {
+        result.map_err(project_error)?;
+        Ok(ApplicationResponse {
+            body: serde_json::Value::Null,
+            started_turn: None,
+        })
+    })
 }
 
 fn value<T: Serialize>(value: T) -> TalosResult<serde_json::Value> {

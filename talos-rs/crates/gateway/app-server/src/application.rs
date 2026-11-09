@@ -49,7 +49,20 @@ pub struct ApplicationResponse {
 }
 
 #[async_trait]
-pub trait AppServerApplication: Send + Sync {
+pub trait AppServerApplication: Send + Sync + 'static {
+    /// Capture any synchronous, arrival-ordered resource admission before
+    /// running a request concurrently. I/O belongs in the returned future.
+    fn prepare_request(
+        self: Arc<Self>,
+        actor: Actor,
+        request: ClientRequest,
+    ) -> futures_util::future::BoxFuture<'static, ApplicationResult<ApplicationResponse>> {
+        Box::pin(async move { self.dispatch(&actor, request).await })
+    }
+
+    /// Cancel resources owned by this connection before its requests drain.
+    fn close_connection(&self) {}
+
     /// Desktop-only terminal registration feedback; never a product event or durable state.
     fn subscribe_worker_failures(&self) -> Option<tokio::sync::watch::Receiver<Option<ApiError>>> {
         None
