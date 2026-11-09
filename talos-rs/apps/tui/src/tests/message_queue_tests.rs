@@ -161,7 +161,9 @@ async fn steer_rejects_skill_and_interrupt_keeps_the_queue() {
     app.select_message_queue();
     app.start_or_steer_selected_queued_message().await;
     app.selected_queue_message = None;
-    app.cancel_active_turn().await;
+    app.cancel_active_turn();
+    tokio::task::yield_now().await;
+    app.poll_interrupt().await;
 
     assert_eq!(
         app.message_queue.messages,

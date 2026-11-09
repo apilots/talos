@@ -33,6 +33,8 @@ impl TuiApp {
             selected_pasted_block: None,
             pasted_image_attachments: Vec::new(),
             pasted_image_sequence: 0,
+            pending_image_upload: None,
+            pending_interrupt: None,
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
             current_project_id: None,
@@ -81,6 +83,7 @@ impl TuiApp {
             pending_session_task: None,
             pending_stream_connect: None,
             pending_stream_task: None,
+            pending_reconnect: None,
             pending_stream: None,
             pending_command_update: None,
             pending_command_task: None,
@@ -226,6 +229,20 @@ impl TuiApp {
         self.connection_status = "connected".to_string();
         self.push_right_event("draft chat ready".to_string());
         self.sync_session_header();
+    }
+
+    pub(crate) async fn shutdown_terminal_client(&mut self) -> talos_error::TalosResult<()> {
+        self.pending_image_upload = None;
+        self.pending_interrupt = None;
+        self.pending_reconnect = None;
+        if let (false, false, Some(client)) = (
+            self.client_shutdown_completed,
+            self.force_exit_without_shutdown,
+            &self.gateway_client,
+        ) {
+            client.shutdown().await?;
+        }
+        Ok(())
     }
 
     async fn refresh_models_with_retry(&mut self) -> talos_error::TalosResult<()> {

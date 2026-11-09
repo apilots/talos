@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use talos_error::{TalosError, TalosResult};
-use talos_sdk::{FileScope, FileUploadRequest, ModelInputKind};
+use talos_sdk::{FileScope, FileUploadRequest, ModelInputKind, SkillSuggestion};
+use tokio::task::JoinHandle;
 
-use crate::types::PastedImageState;
+use crate::types::{PastedImageAttachment, PastedImageState};
 use crate::utils::byte_index_at_char;
 use crate::TuiApp;
 
@@ -117,10 +118,11 @@ impl TuiApp {
             .collect()
     }
 
-    pub(crate) async fn upload_pending_image_attachments(&mut self) -> TalosResult<Vec<String>> {
-        if self.pasted_image_attachments.is_empty() {
-            return Ok(Vec::new());
+    pub(crate) fn start_image_upload(&mut self, submission: ImageSubmission) -> TalosResult<()> {
+        if self.pending_image_upload.is_some() {
+            return Ok(());
         }
+        let draft_text = self.compose_user_input_text()?;
         let ordered_indices = self.ordered_pasted_image_attachment_indices()?;
         if !self
             .current_model_info()
@@ -128,7 +130,7 @@ impl TuiApp {
         {
             return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
-                "the active model does not support image attachments".to_string(),
+                "the active model does not support image attachments",
             ));
         }
 
@@ -138,46 +140,203 @@ impl TuiApp {
             .map_or(FileScope::Personal, |project_id| FileScope::Project {
                 project_id,
             });
-        for &index in &ordered_indices {
-            let pending = match &self.pasted_image_attachments[index].state {
-                PastedImageState::Pending { png_bytes } => Some((
-                    self.pasted_image_attachments[index].filename.clone(),
-                    png_bytes.clone(),
-                )),
-                PastedImageState::Uploaded { .. } => None,
-            };
-            let Some((filename, png_bytes)) = pending else {
-                continue;
-            };
-            let client = self
-                .gateway_client
-                .clone()
-                .ok_or_else(|| TalosError::internal("gateway client unavailable"))?;
-            let response = client
-                .upload_file(
-                    FileUploadRequest {
-                        filename,
-                        scope: scope.clone(),
-                        tags: Vec::new(),
-                        metadata: BTreeMap::new(),
-                    },
-                    png_bytes,
-                )
-                .await?;
-            self.pasted_image_attachments[index].state = PastedImageState::Uploaded {
-                file_id: response.file.file_id,
-            };
+        let client = self
+            .gateway_client
+            .clone()
+            .ok_or_else(|| TalosError::internal("gateway client unavailable"))?;
+        let attachments = self.pasted_image_attachments.clone();
+        let uploads = ordered_indices
+            .iter()
+            .filter_map(|&index| {
+                let attachment = &attachments[index];
+                match &attachment.state {
+                    PastedImageState::Pending { png_bytes } => {
+                        Some((index, attachment.filename.clone(), png_bytes.clone()))
+                    }
+                    PastedImageState::Uploaded { .. } => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        let task = tokio::spawn(async move {
+            let mut uploaded = Vec::with_capacity(uploads.len());
+            for (index, filename, png_bytes) in uploads {
+                match client
+                    .upload_file(
+                        FileUploadRequest {
+                            filename,
+                            scope: scope.clone(),
+                            tags: Vec::new(),
+                            metadata: BTreeMap::new(),
+                        },
+                        png_bytes,
+                    )
+                    .await
+                {
+                    Ok(response) => uploaded.push((index, response.file.file_id)),
+                    Err(error) => {
+                        return UploadResult {
+                            uploaded,
+                            result: Err(error),
+                        }
+                    }
+                }
+            }
+            UploadResult {
+                uploaded,
+                result: Ok(()),
+            }
+        });
+        self.pending_image_upload = Some(PendingImageUpload {
+            task,
+            session_id: self.session_id.clone(),
+            project_id: self.current_project_id.clone(),
+            draft_text,
+            submission: Some(submission),
+            skills: self.selected_skills.clone(),
+            attachments,
+            ordered_indices,
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn poll_image_upload(&mut self) {
+        if !self
+            .pending_image_upload
+            .as_ref()
+            .is_some_and(|upload| upload.task.is_finished())
+        {
+            return;
+        }
+        let mut upload = self
+            .pending_image_upload
+            .take()
+            .expect("finished image upload");
+        let result = (&mut upload.task).await;
+        if self.session_id != upload.session_id
+            || self.current_project_id != upload.project_id
+            || self.close_in_progress
+        {
+            return;
         }
 
-        ordered_indices
-            .into_iter()
-            .map(|index| match &self.pasted_image_attachments[index].state {
+        let UploadResult { uploaded, result } = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.report_image_upload_failure(TalosError::internal_with_source(
+                    "image upload task failed",
+                    error,
+                ));
+                return;
+            }
+        };
+        let draft_matches = self.pasted_image_attachments == upload.attachments
+            && self.selected_skills == upload.skills
+            && self
+                .compose_user_input_text()
+                .is_ok_and(|text| text == upload.draft_text)
+            && self
+                .ordered_pasted_image_attachment_indices()
+                .is_ok_and(|indices| indices == upload.ordered_indices);
+        for (index, file_id) in uploaded {
+            if let Some(attachment) = self
+                .pasted_image_attachments
+                .iter_mut()
+                .find(|attachment| **attachment == upload.attachments[index])
+            {
+                attachment.state = PastedImageState::Uploaded { file_id };
+            }
+        }
+        if let Err(error) = result {
+            self.report_image_upload_failure(error);
+            return;
+        }
+        if !draft_matches {
+            self.show_status_hint(
+                "Draft changed during upload. Press Enter to send the updated draft.",
+                std::time::Duration::from_secs(4),
+            );
+            return;
+        }
+        if !self
+            .current_model_info()
+            .is_some_and(|model| model.model.input.contains(&ModelInputKind::Image))
+        {
+            self.report_image_upload_failure(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "the active model does not support image attachments",
+            ));
+            return;
+        }
+
+        let file_ids = upload
+            .ordered_indices
+            .iter()
+            .map(|&index| match &self.pasted_image_attachments[index].state {
                 PastedImageState::Uploaded { file_id } => Ok(file_id.clone()),
-                PastedImageState::Pending { .. } => Err(TalosError::new(
-                    talos_error::ErrorCode::InvalidRequest,
-                    "pasted image upload did not produce a file id".to_string(),
+                PastedImageState::Pending { .. } => Err(TalosError::internal(
+                    "image upload did not produce a file id",
                 )),
             })
-            .collect()
+            .collect::<TalosResult<Vec<_>>>();
+        let file_ids = match file_ids {
+            Ok(file_ids) => file_ids,
+            Err(error) => {
+                self.report_image_upload_failure(error);
+                return;
+            }
+        };
+        let result = match upload.submission.take().expect("image submission") {
+            ImageSubmission::Message(text) => self.submit_composed_message(text, file_ids).await,
+            ImageSubmission::Automation { prompt, skills } => {
+                let result = self
+                    .send_user_message_with_skills(prompt, skills, file_ids)
+                    .await;
+                if matches!(result, Ok(true)) {
+                    self.reset_input();
+                }
+                result
+            }
+        };
+        if let Err(error) = result {
+            self.report_input_failure(error);
+        }
     }
+
+    pub(crate) fn report_image_upload_failure(&mut self, error: TalosError) {
+        self.push_system_notice(format!(
+            "Failed to upload image attachment: {}",
+            error.to_api_error().message
+        ));
+        self.push_right_event("image attachment upload failed".to_string());
+    }
+}
+
+pub(crate) enum ImageSubmission {
+    Message(String),
+    Automation {
+        prompt: String,
+        skills: Vec<SkillSuggestion>,
+    },
+}
+
+pub(crate) struct PendingImageUpload {
+    task: JoinHandle<UploadResult>,
+    session_id: Option<String>,
+    project_id: Option<String>,
+    draft_text: String,
+    submission: Option<ImageSubmission>,
+    skills: Vec<SkillSuggestion>,
+    attachments: Vec<PastedImageAttachment>,
+    ordered_indices: Vec<usize>,
+}
+
+impl Drop for PendingImageUpload {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+struct UploadResult {
+    uploaded: Vec<(usize, String)>,
+    result: TalosResult<()>,
 }

@@ -166,15 +166,21 @@ impl TuiApp {
                     ));
                 }
                 let skill = system_skill(client.as_ref(), self.session_id.as_deref(), mode).await?;
-                let files = self.upload_pending_image_attachments().await?;
                 let mut skills = self.selected_skills.clone();
                 skills.retain(|entry| !matches!(entry.name.as_str(), "goal" | "loop"));
                 skills.push(skill);
-                if self
-                    .send_user_message_with_skills(prompt, skills, files)
-                    .await?
-                {
-                    self.reset_input();
+                if self.pasted_image_attachments.is_empty() {
+                    if self
+                        .send_user_message_with_skills(prompt, skills, Vec::new())
+                        .await?
+                    {
+                        self.reset_input();
+                    }
+                } else {
+                    self.start_image_upload(crate::attachments::ImageSubmission::Automation {
+                        prompt,
+                        skills,
+                    })?;
                 }
             }
             AutomationCommand::Read { mode } => {

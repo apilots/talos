@@ -66,11 +66,23 @@ impl EmbeddedServerClient {
     }
 
     pub(super) async fn shutdown_embedded_runtime(&mut self) -> TalosResult<()> {
-        for (_, task) in self.subscriptions.drain() {
-            task.abort();
-            let _ = task.await;
-        }
-        self.runtime.shutdown().await?;
-        Ok(())
+        self.shutdown_result
+            .get_or_init(|| async {
+                let subscriptions = self
+                    .subscriptions
+                    .lock()
+                    .expect("embedded subscription lock poisoned")
+                    .take()
+                    .unwrap_or_default();
+                for task in subscriptions.values() {
+                    task.abort();
+                }
+                for (_, task) in subscriptions {
+                    let _ = task.await;
+                }
+                self.runtime.shutdown().await
+            })
+            .await
+            .clone()
     }
 }

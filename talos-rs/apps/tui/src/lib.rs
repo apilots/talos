@@ -78,6 +78,8 @@ pub struct TuiApp {
     pub(crate) selected_pasted_block: Option<usize>,
     pub(crate) pasted_image_attachments: Vec<PastedImageAttachment>,
     pub(crate) pasted_image_sequence: u64,
+    pub(crate) pending_interrupt: Option<input::PendingInterrupt>,
+    pub(crate) pending_image_upload: Option<attachments::PendingImageUpload>,
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) current_project_id: Option<String>,
@@ -122,6 +124,7 @@ pub struct TuiApp {
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream_connect:
         Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TimelineEvent>>>>,
+    pub(crate) pending_reconnect: Option<stream::PendingReconnect>,
     pub(crate) pending_stream_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEvent>>,
     pub(crate) pending_command_update: Option<mpsc::Receiver<CommandUpdate>>,

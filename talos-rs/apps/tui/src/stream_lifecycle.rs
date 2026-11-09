@@ -101,6 +101,7 @@ impl TuiApp {
     }
 
     pub(crate) fn abort_pending_stream_task(&mut self) {
+        self.pending_reconnect = None;
         if let Some(handle) = self.pending_stream_task.take() {
             handle.abort();
         }

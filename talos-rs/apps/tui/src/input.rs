@@ -350,7 +350,7 @@ impl TuiApp {
                     return Ok(false);
                 }
                 if self.in_flight {
-                    self.cancel_active_turn().await;
+                    self.cancel_active_turn();
                     return Ok(false);
                 }
                 self.selected_pasted_block = None;
@@ -470,6 +470,7 @@ impl TuiApp {
     }
 
     pub(crate) fn reset_input(&mut self) {
+        self.pending_image_upload = None;
         self.input_buffer.clear();
         self.cursor_index = 0;
         self.pasted_blocks.clear();
@@ -564,7 +565,10 @@ impl TuiApp {
         self.status_hint = Some((message.into(), Instant::now() + ttl));
     }
 
-    pub(crate) async fn cancel_active_turn(&mut self) {
+    pub(crate) fn cancel_active_turn(&mut self) {
+        if self.pending_interrupt.is_some() {
+            return;
+        }
         let Some(session_id) = self.session_id.clone() else {
             self.show_status_hint("No active session to cancel.", Duration::from_secs(2));
             return;
@@ -573,34 +577,67 @@ impl TuiApp {
             self.show_status_hint("Gateway client unavailable.", Duration::from_secs(2));
             return;
         };
-        let active_turn = match client.get_active_turn(&session_id).await {
-            Ok(active_turn) => active_turn,
-            Err(err) => {
-                self.push_system_notice(format!(
-                    "Failed to read active turn: {}",
-                    err.to_api_error().message
+        let task = tokio::spawn(async move {
+            let result = match client.get_active_turn(&session_id).await {
+                Ok(Some(turn)) => client
+                    .cancel_active_turn(&session_id, &turn.identity.turn_id)
+                    .await
+                    .map(|()| true)
+                    .map_err(|error| ("cancel turn", error)),
+                Ok(None) => Ok(false),
+                Err(error) => Err(("read active turn", error)),
+            };
+            (session_id, result)
+        });
+        self.pending_interrupt = Some(PendingInterrupt(task));
+    }
+
+    pub(crate) async fn poll_interrupt(&mut self) {
+        if !self
+            .pending_interrupt
+            .as_ref()
+            .is_some_and(|interrupt| interrupt.0.is_finished())
+        {
+            return;
+        }
+        let mut interrupt = self.pending_interrupt.take().expect("finished interrupt");
+        let (session_id, result) = match (&mut interrupt.0).await {
+            Ok(result) => result,
+            Err(error) => {
+                self.report_input_failure(talos_error::TalosError::internal_with_source(
+                    "interrupt task failed",
+                    error,
                 ));
-                self.push_right_event("cancel request failed".to_string());
                 return;
             }
         };
-        let Some(turn_id) = active_turn.map(|active| active.identity.turn_id) else {
-            self.show_status_hint("No active turn to cancel.", Duration::from_secs(2));
+        if self.session_id.as_deref() != Some(session_id.as_str()) {
             return;
-        };
-        match client.cancel_active_turn(&session_id, &turn_id).await {
-            Ok(()) => {
-                self.push_right_event(format!("cancel requested for session {}", session_id));
+        }
+        match result {
+            Ok(true) => {
+                self.push_right_event(format!("cancel requested for session {session_id}"));
                 self.show_status_hint("Cancelling current turn...", Duration::from_secs(2));
             }
-            Err(err) => {
+            Ok(false) => self.show_status_hint("No active turn to cancel.", Duration::from_secs(2)),
+            Err((action, error)) => {
                 self.push_system_notice(format!(
-                    "Failed to cancel turn: {}",
-                    err.to_api_error().message
+                    "Failed to {action}: {}",
+                    error.to_api_error().message
                 ));
                 self.push_right_event("cancel request failed".to_string());
             }
         }
+    }
+}
+
+type InterruptResult = Result<bool, (&'static str, talos_error::TalosError)>;
+
+pub(crate) struct PendingInterrupt(tokio::task::JoinHandle<(String, InterruptResult)>);
+
+impl Drop for PendingInterrupt {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
