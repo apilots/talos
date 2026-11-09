@@ -8,6 +8,7 @@ import { useAppStore } from "@/shared/store/app-store";
 import { AppLayout } from "./AppLayout";
 const fixture = vi.hoisted(() => ({ browserRequest: vi.fn(async()=>null), wide: true, selectedId: "selected-worker" as string | undefined, available: true, mounted: [] as string[], closed: [] as string[] }));
 vi.mock("@/features/computers", () => ({
+  SessionDesktopShortcut: () => null,
   useManagedWorkerStatus: () => ({ status: {} }),
   taloHasConversation: () => false,
   ComputerRail: () => <nav aria-label="Computer rail" />,
