@@ -58,6 +58,7 @@ impl MockGatewayClient {
                 close_session_failures_remaining: 0,
                 shutdown_calls: 0,
                 cancelled_sessions: Vec::new(),
+                last_cancelled_turn_id: None,
                 active_turn_id: None,
                 active_input_origin: None,
                 session_usage: talos_types::talos::TokenUsage::default(),
@@ -76,6 +77,7 @@ impl MockGatewayClient {
                 sent_requests: Vec::new(),
                 upload_requests: Vec::new(),
                 upload_failure_calls: Vec::new(),
+                start_gate: None,
                 upload_gate: None,
                 message_queue: MessageQueue {
                     revision: 0,
@@ -303,12 +305,10 @@ impl GatewayClient for MockGatewayClient {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, session_id: &str, _turn_id: &str) -> TalosResult<()> {
-        self.state
-            .lock()
-            .unwrap()
-            .cancelled_sessions
-            .push(session_id.to_string());
+    async fn cancel_active_turn(&self, session_id: &str, turn_id: &str) -> TalosResult<()> {
+        let mut state = self.state.lock().unwrap();
+        state.cancelled_sessions.push(session_id.to_string());
+        state.last_cancelled_turn_id = Some(turn_id.to_string());
         Ok(())
     }
 
@@ -561,8 +561,9 @@ impl GatewayClient for MockGatewayClient {
     async fn start_turn_stream(
         &self,
         request: StartTurnRequest,
+        accepted_turn: Option<tokio::sync::oneshot::Sender<String>>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
-        let (delay, should_fail) = {
+        let (delay, should_fail, gate) = {
             let mut state = self.state.lock().unwrap();
             state.sent_requests.push(request.clone());
             let should_fail = if state.stream_failures_remaining > 0 {
@@ -571,13 +572,20 @@ impl GatewayClient for MockGatewayClient {
             } else {
                 false
             };
-            (state.connect_delay_ms, should_fail)
+            (state.connect_delay_ms, should_fail, state.start_gate.take())
         };
+        if let Some((entered, release)) = gate {
+            entered.notify_one();
+            release.notified().await;
+        }
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
         if should_fail {
             return Err(TalosError::internal("mock stream connect failure"));
+        }
+        if let Some(accepted_turn) = accepted_turn {
+            let _ = accepted_turn.send("turn-test".to_string());
         }
 
         let (tx, rx) = mpsc::channel(32);

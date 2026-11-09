@@ -119,7 +119,9 @@ async fn execute_exec_command(
         client_request_id: Some(format!("cli-{}", uuid::Uuid::new_v4().simple())),
     }
     .build();
-    let events = client.start_turn_stream(request).await?;
+    let events = client
+        .start_turn_stream(request, /*accepted_turn*/ None)
+        .await?;
     render_timeline_events(events).await?;
     Ok(())
 }

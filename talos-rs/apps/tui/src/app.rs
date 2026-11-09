@@ -82,6 +82,7 @@ impl TuiApp {
             pending_session_connect: None,
             pending_session_task: None,
             pending_stream_connect: None,
+            pending_turn_start: None,
             pending_stream_task: None,
             pending_reconnect: None,
             pending_stream: None,

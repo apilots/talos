@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::session_picker::SessionPickerEvent;
+use crate::stream_lifecycle::PendingTurnStart;
 use crate::types::{CommandSuggestion, PastedTextBlock};
 use crate::utils::byte_index_at_char;
 use crate::{TuiApp, PASTED_BLOCK_CHAR_THRESHOLD};
@@ -577,15 +578,35 @@ impl TuiApp {
             self.show_status_hint("Gateway client unavailable.", Duration::from_secs(2));
             return;
         };
+        let turn_ack = match self.pending_turn_start.take() {
+            Some(PendingTurnStart::AwaitingAck(turn_ack)) => {
+                self.pending_turn_start = Some(PendingTurnStart::InterruptRequested);
+                Some(turn_ack)
+            }
+            Some(PendingTurnStart::InterruptRequested) => {
+                self.pending_turn_start = Some(PendingTurnStart::InterruptRequested);
+                return;
+            }
+            None => None,
+        };
         let task = tokio::spawn(async move {
-            let result = match client.get_active_turn(&session_id).await {
-                Ok(Some(turn)) => client
-                    .cancel_active_turn(&session_id, &turn.identity.turn_id)
+            let turn_id = match turn_ack {
+                Some(turn_ack) => match turn_ack.await {
+                    Ok(turn_id) => Some(turn_id),
+                    Err(_) => return (session_id, Ok(InterruptOutcome::StartFailed)),
+                },
+                None => match client.get_active_turn(&session_id).await {
+                    Ok(turn) => turn.map(|turn| turn.identity.turn_id),
+                    Err(error) => return (session_id, Err(("read active turn", error))),
+                },
+            };
+            let result = match turn_id {
+                Some(turn_id) => client
+                    .cancel_active_turn(&session_id, &turn_id)
                     .await
-                    .map(|()| true)
+                    .map(|()| InterruptOutcome::Sent)
                     .map_err(|error| ("cancel turn", error)),
-                Ok(None) => Ok(false),
-                Err(error) => Err(("read active turn", error)),
+                None => Ok(InterruptOutcome::NoActiveTurn),
             };
             (session_id, result)
         });
@@ -615,11 +636,14 @@ impl TuiApp {
             return;
         }
         match result {
-            Ok(true) => {
+            Ok(InterruptOutcome::Sent) => {
                 self.push_right_event(format!("cancel requested for session {session_id}"));
                 self.show_status_hint("Cancelling current turn...", Duration::from_secs(2));
             }
-            Ok(false) => self.show_status_hint("No active turn to cancel.", Duration::from_secs(2)),
+            Ok(InterruptOutcome::NoActiveTurn) => {
+                self.show_status_hint("No active turn to cancel.", Duration::from_secs(2));
+            }
+            Ok(InterruptOutcome::StartFailed) => {}
             Err((action, error)) => {
                 self.push_system_notice(format!(
                     "Failed to {action}: {}",
@@ -631,7 +655,13 @@ impl TuiApp {
     }
 }
 
-type InterruptResult = Result<bool, (&'static str, talos_error::TalosError)>;
+enum InterruptOutcome {
+    Sent,
+    NoActiveTurn,
+    StartFailed,
+}
+
+type InterruptResult = Result<InterruptOutcome, (&'static str, talos_error::TalosError)>;
 
 pub(crate) struct PendingInterrupt(tokio::task::JoinHandle<(String, InterruptResult)>);
 

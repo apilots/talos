@@ -5,6 +5,7 @@ use talos_sdk::TimelineEvent;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 
+use crate::stream_lifecycle::PendingTurnStart;
 use crate::{TuiApp, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
 fn is_active_turn_conflict(error: &TalosError) -> bool {
@@ -54,6 +55,11 @@ impl TuiApp {
             }
         }
 
+        let interrupted_start = should_clear
+            && matches!(
+                self.pending_turn_start.take(),
+                Some(PendingTurnStart::InterruptRequested)
+            );
         if should_clear {
             self.pending_stream_connect = None;
             self.pending_stream_task = None;
@@ -64,6 +70,13 @@ impl TuiApp {
                 self.pending_stream = Some(receiver);
                 self.last_stream_event_at = Some(Instant::now());
                 self.push_right_event("stream channel connected".to_string());
+            }
+            Some(Err(error)) if interrupted_start => {
+                self.finish_active_stream("interrupted stream start failed", true, false);
+                self.push_system_notice(format!(
+                    "Failed to start stream: {}",
+                    error.to_api_error().message
+                ));
             }
             Some(Err(error)) => {
                 if let (true, Some(client), Some(session_id)) = (
@@ -220,6 +233,7 @@ impl TuiApp {
                 self.finish_stalled_stream();
             }
         } else if !self.close_in_progress
+            && self.pending_turn_start.is_none()
             && self.in_flight
             && self
                 .last_stream_event_at

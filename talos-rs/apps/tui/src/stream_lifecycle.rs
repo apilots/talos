@@ -2,12 +2,17 @@ use std::time::Instant;
 
 use talos_error::TalosResult;
 use talos_sdk::SkillSuggestion;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
 use crate::render_runtime::render::user_input_display;
 use crate::utils::summarize_for_queue;
 use crate::{TerminalTurnRequest, TuiApp};
+
+pub(crate) enum PendingTurnStart {
+    AwaitingAck(oneshot::Receiver<String>),
+    InterruptRequested,
+}
 
 impl TuiApp {
     pub(crate) async fn start_stream_for_message_with_skills(
@@ -84,10 +89,12 @@ impl TuiApp {
 
         let (tx, rx) = mpsc::channel(1);
         self.pending_stream_connect = Some(rx);
+        let (accepted_turn, turn_ack) = oneshot::channel();
+        self.pending_turn_start = Some(PendingTurnStart::AwaitingAck(turn_ack));
         self.push_right_event(format!("message dispatched to session {}", session_id));
 
         let handle = tokio::spawn(async move {
-            let result = client.start_turn_stream(request).await;
+            let result = client.start_turn_stream(request, Some(accepted_turn)).await;
             if tx.send(result).await.is_err() {
                 error!(
                     session_id = %session_id,
@@ -102,6 +109,7 @@ impl TuiApp {
 
     pub(crate) fn abort_pending_stream_task(&mut self) {
         self.pending_reconnect = None;
+        self.pending_turn_start = None;
         if let Some(handle) = self.pending_stream_task.take() {
             handle.abort();
         }

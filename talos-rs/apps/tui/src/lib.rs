@@ -124,6 +124,7 @@ pub struct TuiApp {
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream_connect:
         Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TimelineEvent>>>>,
+    pub(crate) pending_turn_start: Option<stream_lifecycle::PendingTurnStart>,
     pub(crate) pending_reconnect: Option<stream::PendingReconnect>,
     pub(crate) pending_stream_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEvent>>,

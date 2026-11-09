@@ -17,7 +17,7 @@ use talos_sdk::{
     TimelineActiveTurn, TimelineEvent, UserPermissionMode,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::sync::{Mutex, MutexGuard};
 
 /// Receives queue invalidations and product notices on the shared Session stream.
@@ -167,9 +167,11 @@ pub trait GatewayClient: Send + Sync {
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistoryResponse>;
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<TimelineActiveTurn>>;
+    /// Reports the accepted Turn ID before opening its Timeline stream.
     async fn start_turn_stream(
         &self,
         request: StartTurnRequest,
+        accepted_turn: Option<oneshot::Sender<String>>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>>;
     async fn reconnect_active_turn_stream(
         &self,
@@ -564,6 +566,7 @@ impl<C: SdkRequestSource> GatewayClient for C {
     async fn start_turn_stream(
         &self,
         mut request: StartTurnRequest,
+        accepted_turn: Option<oneshot::Sender<String>>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
         let session_id = request.session_id.clone();
         if request.client_request_id.is_none() {
@@ -571,6 +574,9 @@ impl<C: SdkRequestSource> GatewayClient for C {
         }
         let mut client = self.request().await;
         let response = SdkGatewayClient::start_turn(client.client(), request).await?;
+        if let Some(accepted_turn) = accepted_turn {
+            let _ = accepted_turn.send(response.turn_id.clone());
+        }
         let subscription = SdkGatewayClient::open_timeline_stream(
             client.client(),
             SubscribeTimelineRequest {

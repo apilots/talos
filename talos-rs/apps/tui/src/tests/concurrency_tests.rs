@@ -96,3 +96,45 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
     assert!(interactive_transcript_text(&app).contains("recovered reply"));
     assert!(!interactive_transcript_text(&app).contains("Failed to start stream"));
 }
+
+#[tokio::test]
+async fn escape_during_start_interrupts_the_acknowledged_turn() {
+    let client = Arc::new(MockGatewayClient::new());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    client.state.lock().unwrap().start_gate = Some((entered.clone(), release.clone()));
+    let mut app = TuiApp::new_with_gateway_client(client.clone());
+    app.input_buffer = "start a turn".to_string();
+    app.cursor_index = app.input_buffer.len();
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .unwrap();
+        entered.notified().await;
+        let session_id = app.session_id.clone().unwrap();
+        assert!(client.get_active_turn(&session_id).await.unwrap().is_none());
+
+        for key in [KeyCode::Esc, KeyCode::Esc, KeyCode::Char('x')] {
+            app.handle_input(KeyEvent::new(key, KeyModifiers::NONE))
+                .await
+                .unwrap();
+        }
+        app.on_tick().await;
+        assert_eq!(app.input_buffer, "x");
+        assert!(client.state.lock().unwrap().cancelled_sessions.is_empty());
+
+        release.notify_one();
+        while app.pending_stream_connect.is_some() || app.pending_interrupt.is_some() {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+        }
+
+        let state = client.state.lock().unwrap();
+        assert_eq!(state.sent_requests.len(), 1);
+        assert_eq!(state.cancelled_sessions, vec![session_id]);
+        assert_eq!(state.last_cancelled_turn_id.as_deref(), Some("turn-test"));
+    })
+    .await
+    .expect("Esc reaches the Turn after start acknowledgement");
+}
