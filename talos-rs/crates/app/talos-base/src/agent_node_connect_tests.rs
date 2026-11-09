@@ -430,7 +430,7 @@ async fn connect_replaces_only_the_live_stream_and_disable_revokes_it() {
     // Give the superseded stream's cleanup task the lifecycle lock before checking publication.
     tokio::task::yield_now().await;
     {
-        let _lifecycle = fixture.publisher.nodes.lock_lifecycle().await;
+        let _lifecycle = fixture.publisher.nodes.lock_lifecycle(&auth.node_id).await;
         fixture
             .publisher
             .coordinator

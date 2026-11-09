@@ -138,7 +138,7 @@ impl AgentNodeService {
 
     async fn sleep_managed_worker(&self, record: &mut ManagedWorkerRecord) -> TalosResult<()> {
         let managed = self.managed_runtime()?;
-        let _submit = self.managed_submission.lock().await;
+        let _intent = self.lock_managed_intent(&record.owner_user_id).await;
         let _admission = self
             .admission
             .for_node(&record.node_id)

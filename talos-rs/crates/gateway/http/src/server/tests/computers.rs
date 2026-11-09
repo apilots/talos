@@ -226,3 +226,146 @@ async fn socket_enabled_server_guards_default_and_explicit_embedded_workspace_ac
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
 }
+
+#[tokio::test]
+async fn held_http_deletion_isolates_other_computer_reads_and_lifecycle() {
+    use agent_protocol::{
+        HeartbeatParams, NodeAuth, NodeHealth, RegisterParams, RegistrationAdmission,
+    };
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    let state = test_state(false).await;
+    let nodes = state.app.nodes.clone();
+    let app = super::super::computers::routes()
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, auth_middleware));
+    let owner = talos_service::Actor::regular("owner");
+    let create = |name: &'static str| {
+        nodes.create_node(
+            &owner,
+            talos_service::CreateNodeRequest {
+                display_name: name.into(),
+                endpoint: None,
+                owner_user_id: None,
+                credential_expires_at: chrono::Utc::now().timestamp() + 3600,
+            },
+        )
+    };
+    let first = create("First Computer").await.unwrap();
+    let second = create("Other Computer").await.unwrap();
+    let first_id = first.node.node_id;
+    let second_id = second.node.node_id;
+    let register = |credential: NodeAuth| {
+        let nodes = nodes.clone();
+        async move {
+            let _lifecycle = nodes.lock_lifecycle(&credential.node_id).await;
+            let principal = nodes.authenticate_registration(&credential).await.unwrap();
+            let registered = nodes
+                .register(
+                    &principal,
+                    RegisterParams {
+                        system_info: None,
+                        deployments: vec![agent_protocol::Deployment {
+                            agent_id: "default".into(),
+                        }],
+                    },
+                )
+                .await
+                .unwrap();
+            let lease = NodeAuth {
+                node_id: credential.node_id,
+                token: registered.lease_token,
+            };
+            nodes
+                .mark_registration_published(&lease, Arc::new(|| Box::pin(async {})))
+                .await
+                .unwrap();
+            lease
+        }
+    };
+    let first_auth = NodeAuth {
+        node_id: first_id.clone(),
+        token: first.credential.token,
+    };
+    let first_lease = register(first_auth).await;
+    let first_principal = nodes.authenticate_lease(&first_lease).await.unwrap();
+    let second_lease = register(NodeAuth {
+        node_id: second_id.clone(),
+        token: second.credential.token,
+    })
+    .await;
+    let second_principal = nodes.authenticate_lease(&second_lease).await.unwrap();
+    let healthy = || HeartbeatParams {
+        health: NodeHealth::Healthy,
+    };
+    nodes.heartbeat(&second_principal, healthy()).await.unwrap();
+
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let hook_entered = entered.clone();
+    let hook_release = release.clone();
+    nodes
+        .set_registration_deletion_hook(
+            &first_lease,
+            Arc::new(move |admission| {
+                let entered = hook_entered.clone();
+                let release = hook_release.clone();
+                Box::pin(async move {
+                    if admission == RegistrationAdmission::Block {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                    Ok(())
+                })
+            }),
+        )
+        .await
+        .unwrap();
+
+    let delete_app = app.clone();
+    let first_path = format!("/v1/computers/{first_id}");
+    let deletion = tokio::spawn(async move {
+        call(
+            &delete_app,
+            "DELETE",
+            &first_path,
+            Some("owner"),
+            Value::Null,
+        )
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(3), entered.notified())
+        .await
+        .expect("HTTP deletion entered remote preparation");
+    let mut renewal = Box::pin(nodes.renew_lease(&first_principal));
+    assert!(futures_util::poll!(&mut renewal).is_pending());
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        let path = format!("/v1/computers/{second_id}");
+        let (status, _, read) = call(&app, "GET", &path, Some("owner"), Value::Null).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(read["data"]["available"], true);
+        let heartbeat = nodes.heartbeat(&second_principal, healthy()).await.unwrap();
+        assert!(!heartbeat.registration_required);
+        let (status, _, rotated) = call(
+            &app,
+            "POST",
+            &format!("{path}/credential"),
+            Some("owner"),
+            serde_json::json!({ "nodeId": second_id, "expiresAt": chrono::Utc::now().timestamp() + 7200 }),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(rotated["data"]["nodeId"], second_id);
+    }).await.expect("the other Computer can be read, send a heartbeat and rotate its credential");
+    assert!(!deletion.is_finished());
+
+    release.notify_one();
+    let (status, _, deleted) = deletion.await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(deleted["data"]["nodeId"], first_id);
+    assert!(renewal
+        .await
+        .unwrap_err()
+        .is_code(talos_error::ErrorCode::Unauthenticated));
+}

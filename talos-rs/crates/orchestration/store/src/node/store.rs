@@ -58,7 +58,14 @@ pub trait AgentNodeStore: Send + Sync {
         node_id: &str,
     ) -> TalosResult<Option<NodeAuthenticationRecord>>;
     async fn deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>>;
-    async fn delete_owned(&self, node_id: &str, owner: &str, now_at: i64) -> TalosResult<()>;
+    /// Delete only the registration that was inspected by the caller.
+    async fn delete_owned(
+        &self,
+        node_id: &str,
+        owner: &str,
+        expected_lease_token_hash: Option<[u8; 32]>,
+        now_at: i64,
+    ) -> TalosResult<()>;
     async fn list(&self, params: ListNodesParams) -> TalosResult<NodePageRecord>;
     async fn register(&self, params: RegisterNodeParams) -> TalosResult<NodeRecord>;
     async fn renew(&self, params: RenewNodeParams) -> TalosResult<NodeRecord>;
@@ -266,6 +273,7 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
             &mut tx,
             &record.node_id,
             &record.owner_user_id,
+            /*expected_lease_token_hash*/ None,
             now_at,
         )
         .await?;
@@ -296,8 +304,15 @@ impl AgentNodeStore for DatabaseAgentNodeStore {
     async fn deletion_owner(&self, node_id: &str) -> TalosResult<Option<String>> {
         self.read_deletion_owner(node_id).await
     }
-    async fn delete_owned(&self, node_id: &str, owner: &str, now_at: i64) -> TalosResult<()> {
-        self.delete_registration(node_id, owner, now_at).await
+    async fn delete_owned(
+        &self,
+        node_id: &str,
+        owner: &str,
+        expected_lease_token_hash: Option<[u8; 32]>,
+        now_at: i64,
+    ) -> TalosResult<()> {
+        self.delete_registration(node_id, owner, expected_lease_token_hash, now_at)
+            .await
     }
 
     async fn upsert_embedded(&self, status: NodeStatus, now_at: i64) -> TalosResult<NodeRecord> {

@@ -151,8 +151,7 @@ impl AgentNodeService {
         if let Some(remote) = remote {
             return remote.set_status(actor, request).await;
         }
-        let _lifecycle = self.lock_lifecycle().await;
-        let mut current = self.current.lock().await;
+        let _lifecycle = self.lock_lifecycle(&request.node_id).await;
         self.owned_node(actor, &request.node_id).await?;
         self.reject_managed_node_mutation(&request.node_id).await?;
         let record = self
@@ -164,11 +163,10 @@ impl AgentNodeService {
             })
             .await?;
         let previous = if request.status == NodeStatus::Disabled {
-            current.remove(&request.node_id)
+            self.current.lock().await.remove(&request.node_id)
         } else {
             None
         };
-        drop(current);
         revoke_registration(previous).await;
         Ok(self.node_info(record).await)
     }

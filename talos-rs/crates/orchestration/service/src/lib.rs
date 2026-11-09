@@ -8,6 +8,7 @@ pub mod file;
 mod fs;
 mod history;
 mod inner_model;
+mod keyed_gates;
 mod memory;
 mod message_queue;
 mod model;

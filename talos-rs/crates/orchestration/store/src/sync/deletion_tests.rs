@@ -13,7 +13,15 @@ async fn deleted_computer_still_satisfies_history_dependencies_on_a_new_manageme
     run(&source, "retained-history", "turn-1").await;
     let nodes = DatabaseAgentNodeStore::new(source.storage.pool().clone())
         .with_sync(source.adapter.clone());
-    nodes.delete_owned(COMPUTER, "account-1", 20).await.unwrap();
+    nodes
+        .delete_owned(
+            COMPUTER,
+            "account-1",
+            /*expected_lease_token_hash*/ None,
+            20,
+        )
+        .await
+        .unwrap();
     exchange(
         &source,
         &target,
@@ -264,7 +272,12 @@ async fn imported_own_deletion_snapshots_history_before_new_local_work() {
     run(&target, "pre-import-history", "turn-1").await;
     DatabaseAgentNodeStore::new(source.storage.pool().clone())
         .with_sync(source.adapter.clone())
-        .delete_owned(COMPUTER, "account-1", 20)
+        .delete_owned(
+            COMPUTER,
+            "account-1",
+            /*expected_lease_token_hash*/ None,
+            20,
+        )
         .await
         .unwrap();
     exchange(

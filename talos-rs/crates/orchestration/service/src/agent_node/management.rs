@@ -146,8 +146,7 @@ impl AgentNodeService {
         if let Some(endpoint) = &request.endpoint {
             validate_endpoint(endpoint)?;
         }
-        let _lifecycle = self.lock_lifecycle().await;
-        let mut current = self.current.lock().await;
+        let _lifecycle = self.lock_lifecycle(&request.node_id).await;
         let old = self.owned_node(actor, &request.node_id).await?;
         self.reject_managed_node_mutation(&request.node_id).await?;
         let revoked = old.endpoint != request.endpoint || request.status == NodeStatus::Disabled;
@@ -162,11 +161,10 @@ impl AgentNodeService {
             })
             .await?;
         let previous = if revoked {
-            current.remove(&request.node_id)
+            self.current.lock().await.remove(&request.node_id)
         } else {
             None
         };
-        drop(current);
         revoke_registration(previous).await;
         Ok(self.node_info(record).await)
     }
@@ -185,8 +183,7 @@ impl AgentNodeService {
             return remote.rotate_credential(actor, request).await;
         }
 
-        let _lifecycle = self.lock_lifecycle().await;
-        let mut current = self.current.lock().await;
+        let _lifecycle = self.lock_lifecycle(&request.node_id).await;
         self.owned_node(actor, &request.node_id).await?;
         self.reject_managed_node_mutation(&request.node_id).await?;
         validate_expiry(request.expires_at, now())?;
@@ -199,8 +196,7 @@ impl AgentNodeService {
                 now_at: now(),
             })
             .await?;
-        let previous = current.remove(&request.node_id);
-        drop(current);
+        let previous = self.current.lock().await.remove(&request.node_id);
         revoke_registration(previous).await;
         Ok(NodeCredential {
             node_id: request.node_id,

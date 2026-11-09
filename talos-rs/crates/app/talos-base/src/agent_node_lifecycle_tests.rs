@@ -466,7 +466,11 @@ async fn overlapping_unregister_and_register_keep_the_new_registration() {
             .unwrap()
             .into_inner(),
     );
-    let guard = fixture.publisher.nodes.lock_lifecycle().await;
+    let guard = fixture
+        .publisher
+        .nodes
+        .lock_lifecycle(&fixture.credential.node_id)
+        .await;
     let mut unregister = Box::pin(fixture.control.unregister(Request::new(
         pb::UnregisterRequest {
             auth: Some(pb::NodeAuth {

@@ -49,11 +49,12 @@ impl DatabaseAgentNodeStore {
         &self,
         node_id: &str,
         owner: &str,
+        expected_lease_token_hash: Option<[u8; 32]>,
         now_at: i64,
     ) -> TalosResult<()> {
         let mut tx = self.begin_write(node_id).await?;
         super::managed_worker::ensure_node_has_no_active_turn(&mut tx, node_id).await?;
-        delete_registration_in(&mut tx, node_id, owner, now_at).await?;
+        delete_registration_in(&mut tx, node_id, owner, expected_lease_token_hash, now_at).await?;
         tx.commit().await
     }
 }
@@ -62,13 +63,15 @@ pub(super) async fn delete_registration_in(
     tx: &mut sqlx::SqliteConnection,
     node_id: &str,
     owner: &str,
+    expected_lease_token_hash: Option<[u8; 32]>,
     now_at: i64,
 ) -> TalosResult<()> {
     let affected = sqlx::query(
-        "DELETE FROM agent_nodes WHERE node_id = ? AND owner_user_id = ? AND mode = 'remote'",
+        "DELETE FROM agent_nodes WHERE node_id = ? AND owner_user_id = ? AND mode = 'remote' AND lease_token_hash IS ?",
     )
     .bind(node_id)
     .bind(owner)
+    .bind(expected_lease_token_hash.as_ref().map(|hash| hash.as_slice()))
     .execute(&mut *tx)
     .await
     .map_err(|error| database_error("delete Computer registration", error))?

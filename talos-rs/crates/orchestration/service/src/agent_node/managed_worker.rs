@@ -72,10 +72,15 @@ impl AgentNodeService {
     where
         F: std::future::Future<Output = TalosResult<(T, bool)>> + Send,
     {
-        let mut pending = self.managed_submission.lock().await;
+        let mut pending = self.managed_runtime_update.lock().await;
         let (result, restart_required) = operation(self.store.has_managed_workers().await?).await?;
         *pending = restart_required;
         Ok(result)
+    }
+
+    // Each account has one managed Worker, including during its initial creation.
+    async fn lock_managed_intent(&self, owner: &str) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+        self.managed_intent.for_node(owner).write_owned().await
     }
 
     /// Configure the runtime once, on the authenticated management Server only.
@@ -127,8 +132,10 @@ impl AgentNodeService {
     pub async fn create_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerInfo> {
         ensure_management_actor(actor)?;
         let managed = self.managed_runtime()?;
-        let pending = self.managed_submission.lock().await;
+        let _intent = self.lock_managed_intent(&actor.user_id).await;
+        let pending = self.managed_runtime_update.lock().await;
         if let Some(record) = self.store.managed_worker(&actor.user_id).await? {
+            drop(pending);
             return self.managed_worker_info(&record).await;
         }
         if *pending {
@@ -156,6 +163,7 @@ impl AgentNodeService {
             error: None,
         };
         self.store.reserve_managed_worker(&record).await?;
+        drop(pending);
         managed.changed.send_replace(());
         Ok(worker_info(&record, false, Some(managed)))
     }
@@ -216,8 +224,27 @@ impl AgentNodeService {
         action: Action,
     ) -> TalosResult<ManagedWorkerInfo> {
         ensure_management_actor(actor)?;
+        let service = self.clone();
+        let actor = actor.clone();
+        // Once remote admission is changed, the commit or rollback must survive
+        // the HTTP request disconnecting.
+        tokio::spawn(async move {
+            service
+                .apply_managed_worker_action(&actor, request, action)
+                .await
+        })
+        .await
+        .map_err(|error| TalosError::internal_with_source("Talo lifecycle task failed", error))?
+    }
+
+    async fn apply_managed_worker_action(
+        &self,
+        actor: &Actor,
+        request: ManagedWorkerActionRequest,
+        action: Action,
+    ) -> TalosResult<ManagedWorkerInfo> {
         let managed = self.managed_runtime()?;
-        let _submit = self.managed_submission.lock().await;
+        let _intent = self.lock_managed_intent(&actor.user_id).await;
         let Some(mut record) = self
             .store
             .managed_worker(&actor.user_id)
@@ -362,7 +389,7 @@ impl AgentNodeService {
         record: &ManagedWorkerRecord,
         expected_generation: u32,
     ) -> TalosResult<()> {
-        let _lifecycle = self.lock_lifecycle().await;
+        let _lifecycle = self.lock_lifecycle(&record.node_id).await;
         let prepare = self
             .current
             .lock()
@@ -540,7 +567,7 @@ impl AgentNodeService {
                 },
             );
         }
-        let _submit = self.managed_submission.lock().await;
+        let _intent = self.lock_managed_intent(owner).await;
         let Some(mut record) = self.store.managed_worker_by_node(node_id).await? else {
             return Err(not_found());
         };
