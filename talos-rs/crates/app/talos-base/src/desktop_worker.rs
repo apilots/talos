@@ -28,6 +28,7 @@ impl DesktopApplication {
     pub(crate) async fn enroll_worker(
         &self,
         recover_node_id: Option<String>,
+        request_actor: Option<&talos_service::Actor>,
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
         WorkerEnrollment {
             sync_host: &self.sync_host,
@@ -41,7 +42,7 @@ impl DesktopApplication {
             device_name: &self.device_name,
             worker_failures: &self.worker_failures,
         }
-        .enroll_worker(recover_node_id, None)
+        .enroll(recover_node_id, None, request_actor)
         .await
     }
 }
@@ -52,8 +53,31 @@ impl WorkerEnrollment<'_> {
         recover_node_id: Option<String>,
         signed_in: Option<&talos_auth::RequestIdentity>,
     ) -> TalosResult<DesktopWorkerIdentityResponse> {
+        self.enroll(recover_node_id, signed_in, None).await
+    }
+
+    async fn enroll(
+        &self,
+        recover_node_id: Option<String>,
+        signed_in: Option<&talos_auth::RequestIdentity>,
+        request_actor: Option<&talos_service::Actor>,
+    ) -> TalosResult<DesktopWorkerIdentityResponse> {
         // Serialize host enrollment and shutdown; ConfigStore's barrier also prevents a second process creating a duplicate.
         let mut active = self.worker.lock().await;
+        let expected_token = match request_actor {
+            Some(actor) if actor.access_token.is_some() => {
+                if self
+                    .account
+                    .read_auth_session(actor, Default::default())?
+                    .session
+                    .is_none()
+                {
+                    return Err(enrollment_account_mismatch());
+                }
+                actor.access_token.as_deref()
+            }
+            _ => None,
+        };
         let previous_runner = self.store.load_agent_node()?.runner;
         if recover_node_id.is_some() {
             if let Some(worker) = active.take() {
@@ -67,7 +91,7 @@ impl WorkerEnrollment<'_> {
             }
         }
         let mut result = self
-            .prepare_worker_identity(recover_node_id, signed_in)
+            .prepare_worker_identity(recover_node_id, signed_in, expected_token)
             .await;
         if intentional
             && result
@@ -78,7 +102,9 @@ impl WorkerEnrollment<'_> {
             if let Some(worker) = active.take() {
                 worker.shutdown().await?;
             }
-            result = self.prepare_worker_identity(None, None).await;
+            result = self
+                .prepare_worker_identity(None, None, expected_token)
+                .await;
         }
         let config = match result {
             Ok(config) => config,
@@ -146,6 +172,7 @@ impl WorkerEnrollment<'_> {
         &self,
         recover_node_id: Option<String>,
         signed_in: Option<&talos_auth::RequestIdentity>,
+        expected_token: Option<&str>,
     ) -> TalosResult<talos_config::Config> {
         let cache = CloudSessionCache::for_talos_home(self.config.talos_paths().talos_home);
         let session = if signed_in.is_none() {
@@ -180,6 +207,9 @@ impl WorkerEnrollment<'_> {
                     "Enrollment requires a signed-in account.",
                 )
             })?;
+        if expected_token.is_some_and(|expected| expected != token) {
+            return Err(enrollment_account_mismatch());
+        }
         let actor = match self.auth.verify_access_token(token).await {
             Ok(actor) => actor,
             Err(error) => {
@@ -437,4 +467,11 @@ impl WorkerEnrollment<'_> {
         config.agent_node.runner = Some(runner);
         Ok(config)
     }
+}
+
+fn enrollment_account_mismatch() -> TalosError {
+    TalosError::new(
+        ErrorCode::Unauthenticated,
+        "Enrollment credentials do not match the Desktop login",
+    )
 }

@@ -1,4 +1,4 @@
-//! Bounded Desktop host framing and correlation alongside serialized business dispatch.
+//! Bounded Desktop host framing and correlation alongside concurrent request dispatch.
 use std::sync::Arc;
 
 use talos_app_protocol::jsonrpc::{
@@ -11,7 +11,12 @@ use tokio::io::{AsyncRead, BufReader};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
-use super::{read_bounded_line, send_application_error, BoundedLineRead, OutgoingMessage};
+use super::{
+    business_requests::is_control, read_bounded_line, send_application_error, BoundedLineRead,
+    OutgoingMessage,
+};
+
+pub(super) const CONTROL_QUEUE_CAPACITY: usize = 4;
 
 pub(super) type IncomingFrame = (
     std::io::Result<BoundedLineRead>,
@@ -30,6 +35,7 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
 ) {
     let mut local_tasks = tokio::task::JoinSet::new();
     let queued_bytes = Arc::new(Semaphore::new(68 * 1024 * 1024));
+    let control_bytes = Arc::new(Semaphore::new(1024 * 1024));
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
     loop {
@@ -64,18 +70,24 @@ pub(super) async fn read_requests<R: AsyncRead + Unpin>(
             }
         }
         let terminal = !matches!(result, Ok(BoundedLineRead::Line));
-        let permit = {
-            match u32::try_from(line.len())
-                .ok()
-                .and_then(|size| queued_bytes.clone().try_acquire_many_owned(size).ok())
-            {
-                Some(permit) => Some(permit),
-                None => {
-                    reject_queued_request(&reader_tx, &line).await;
-                    continue;
-                }
-            }
+        let size = u32::try_from(line.len()).ok();
+        let permit = if terminal {
+            None
+        } else if let Some(permit) = size.and_then(|size| {
+            (line_tx.capacity() > CONTROL_QUEUE_CAPACITY)
+                .then(|| queued_bytes.clone().try_acquire_many_owned(size).ok())
+                .flatten()
+        }) {
+            Some(permit)
+        } else if is_control_request(&line) {
+            size.and_then(|size| control_bytes.clone().try_acquire_many_owned(size).ok())
+        } else {
+            None
         };
+        if permit.is_none() && !terminal {
+            reject_queued_request(&reader_tx, &line).await;
+            continue;
+        }
         let packet = (result, std::mem::take(&mut line), permit);
         if !terminal {
             match line_tx.try_send(packet) {
@@ -146,6 +158,16 @@ pub(super) async fn forward_requests(
         }
     }
     drop(host_tx);
+}
+
+fn is_control_request(line: &[u8]) -> bool {
+    std::str::from_utf8(line)
+        .ok()
+        .and_then(|text| match parse_message_line(text).ok()? {
+            JsonRpcMessage::Request(request) => request.method.parse().ok(),
+            _ => None,
+        })
+        .is_some_and(is_control)
 }
 
 async fn reject_queued_request(outgoing: &mpsc::Sender<OutgoingMessage>, line: &[u8]) {

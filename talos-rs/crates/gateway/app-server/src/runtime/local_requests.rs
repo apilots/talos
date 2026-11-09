@@ -1,5 +1,4 @@
-//! Dispatch independent requests with the original auth contract. Desktop
-//! input runs inline in the reader to preserve byte order.
+//! Independent admission for local queries, subscriptions and metadata deletion.
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, OnceLock,
@@ -83,13 +82,8 @@ impl LocalRequests {
             return false;
         };
         let capacity = match method {
-            ClientMethod::DesktopStreamSend if desktop_host => None,
-            // Listing can wait on remote Computer metadata. Keep that wait
-            // outside the ordered viewer admission and teardown path.
-            ClientMethod::ComputerList if desktop_host => Some(&self.computer_list_capacity),
-            ClientMethod::SessionDelete | ClientMethod::ProjectDelete => {
-                Some(&self.deletion_capacity)
-            }
+            ClientMethod::ComputerList if desktop_host => &self.computer_list_capacity,
+            ClientMethod::SessionDelete | ClientMethod::ProjectDelete => &self.deletion_capacity,
             ClientMethod::EventSubscribe
             | ClientMethod::SyncStatus
             | ClientMethod::EventUnsubscribe
@@ -105,7 +99,7 @@ impl LocalRequests {
             | ClientMethod::TrajectoryReadPayload
             | ClientMethod::SessionActiveTurn
             | ClientMethod::ProjectList
-            | ClientMethod::ProjectRead => Some(&self.query_capacity),
+            | ClientMethod::ProjectRead => &self.query_capacity,
             _ => return false,
         };
         if matches!(
@@ -122,25 +116,18 @@ impl LocalRequests {
                 return true;
             }
         };
-        let permit = if let Some(capacity) = capacity {
-            match capacity.clone().try_acquire_owned() {
-                Ok(permit) => Some(permit),
-                Err(_) => {
-                    let _ = send_application_error(
-                        outgoing.clone(),
-                        request.id,
-                        ApiError::new(ErrorCode::Conflict),
-                    )
-                    .await;
-                    return true;
-                }
-            }
-        } else {
-            None
+        let Ok(permit) = capacity.clone().try_acquire_owned() else {
+            let _ = send_application_error(
+                outgoing.clone(),
+                request.id,
+                ApiError::new(ErrorCode::Conflict),
+            )
+            .await;
+            return true;
         };
         let requests = self.clone();
         let outgoing = outgoing.clone();
-        let dispatch = async move {
+        tasks.spawn(async move {
             let _permit = permit;
             let actor = match resolve_request_actor(
                 requests.initialized_actor.get(),
@@ -185,12 +172,7 @@ impl LocalRequests {
                     let _ = send_application_error(outgoing, request.id, error).await;
                 }
             }
-        };
-        if capacity.is_none() {
-            dispatch.await;
-        } else {
-            tasks.spawn(dispatch);
-        }
+        });
         true
     }
 }

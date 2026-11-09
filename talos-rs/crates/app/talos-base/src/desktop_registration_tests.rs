@@ -230,12 +230,12 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
     }
     let host = Arc::new(fixture.host("Original laptop"));
     assert!(host
-        .enroll_worker(None)
+        .enroll_worker(None, None)
         .await
         .unwrap_err()
         .is_code(ErrorCode::Unauthenticated));
     fixture.login("user-1");
-    let identity = host.enroll_worker(None).await.unwrap();
+    let identity = host.enroll_worker(None, None).await.unwrap();
     let node_id = identity.node_id.clone().unwrap();
     use talos_app_server::AppServerApplication;
     let reply = host
@@ -409,17 +409,17 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .await
         .is_err());
     let restarted = fixture.host("Changed hostname");
-    assert_eq!(restarted.enroll_worker(None).await.unwrap(), identity);
+    assert_eq!(restarted.enroll_worker(None, None).await.unwrap(), identity);
     assert_eq!(
         fixture.registered(&node_id).await.display_name,
         "User renamed laptop"
     );
     restarted.stop_registration().await.unwrap();
     std::fs::remove_file(&saved.credential_file).unwrap();
-    assert!(restarted.enroll_worker(None).await.is_err());
+    assert!(restarted.enroll_worker(None, None).await.is_err());
     assert_eq!(
         restarted
-            .enroll_worker(Some(node_id.clone()))
+            .enroll_worker(Some(node_id.clone()), None)
             .await
             .unwrap(),
         identity
@@ -451,7 +451,7 @@ async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentia
         .lease_expires_at
         .is_none());
     fixture.login("user-2");
-    assert!(restarted.enroll_worker(None).await.is_err());
+    assert!(restarted.enroll_worker(None, None).await.is_err());
     let nodes = fixture
         .nodes
         .list_nodes(
@@ -475,7 +475,7 @@ async fn desktop_observes_revoked_saved_registration_and_recovers_same_uuid() {
     let fixture = DesktopFixture::new().await;
     fixture.login("user-1");
     let first = fixture.host("Laptop");
-    let identity = first.enroll_worker(None).await.unwrap();
+    let identity = first.enroll_worker(None, None).await.unwrap();
     let node_id = identity.node_id.clone().unwrap();
     fixture.registered(&node_id).await;
     first.stop_registration().await.unwrap();
@@ -519,7 +519,7 @@ async fn desktop_observes_revoked_saved_registration_and_recovers_same_uuid() {
         .unwrap();
     replies.next_line().await.unwrap().unwrap();
     let mut failures = restored.subscribe_worker_failures().unwrap();
-    assert_eq!(restored.enroll_worker(None).await.unwrap(), identity);
+    assert_eq!(restored.enroll_worker(None, None).await.unwrap(), identity);
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         while failures.borrow().is_none() {
             failures.changed().await.unwrap();
@@ -552,7 +552,7 @@ async fn desktop_observes_revoked_saved_registration_and_recovers_same_uuid() {
         .unwrap()
         .is_some());
     assert_eq!(
-        restored.enroll_worker(Some(node_id)).await.unwrap(),
+        restored.enroll_worker(Some(node_id), None).await.unwrap(),
         identity
     );
     restored.stop_registration().await.unwrap();
@@ -589,13 +589,13 @@ async fn desktop_pending_first_enrollment_requires_explicit_owned_uuid() {
     let store = YamlConfigStore::new(fixture.config.source_path());
     let host = fixture.host("Renamed host");
     assert!(host
-        .enroll_worker(None)
+        .enroll_worker(None, None)
         .await
         .unwrap_err()
         .is_code(ErrorCode::Conflict));
     assert!(store.load_agent_node().unwrap().runner.is_none());
     let identity = host
-        .enroll_worker(Some(created.node.node_id.clone()))
+        .enroll_worker(Some(created.node.node_id.clone()), None)
         .await
         .unwrap();
     assert_eq!(
@@ -633,7 +633,12 @@ async fn desktop_source_files_cross_outgoing_peer_stream_without_session_and_kee
     let fixture = DesktopFixture::new().await;
     fixture.login("user-1");
     let host = fixture.host("Source laptop");
-    let node_id = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    let node_id = host
+        .enroll_worker(None, None)
+        .await
+        .unwrap()
+        .node_id
+        .unwrap();
     fixture.registered(&node_id).await;
     let gateway = agent_client::AgentNodeClient::connect(
         &fixture.config.cloud.agent_base_url,
@@ -790,7 +795,12 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
     let fixture = DesktopFixture::new().await;
     fixture.login("user-1");
     let host = fixture.host("Disposable laptop");
-    let old = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    let old = host
+        .enroll_worker(None, None)
+        .await
+        .unwrap()
+        .node_id
+        .unwrap();
     fixture.registered(&old).await;
     let proof = fixture.home.path().join("keep-workspace.txt");
     std::fs::write(&proof, "retained").unwrap();
@@ -818,7 +828,12 @@ async fn deleted_desktop_registration_preserves_local_worker_and_explicitly_enro
         "embedded"
     );
     assert!(!host.rpc.is_finished());
-    let new = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    let new = host
+        .enroll_worker(None, None)
+        .await
+        .unwrap()
+        .node_id
+        .unwrap();
     assert_ne!(new, old);
     fixture.registered(&new).await;
     let deleted = fixture
@@ -887,7 +902,12 @@ async fn retained_metadata_and_identity_do_not_wait_for_registration_retirement(
     let fixture = DesktopFixture::new().await;
     fixture.login("user-1");
     let host = fixture.host("Local metadata");
-    let registered = host.enroll_worker(None).await.unwrap().node_id.unwrap();
+    let registered = host
+        .enroll_worker(None, None)
+        .await
+        .unwrap()
+        .node_id
+        .unwrap();
     let retirement = fixture
         .runtime
         .sync_host
@@ -951,6 +971,49 @@ async fn retained_metadata_and_identity_do_not_wait_for_registration_retirement(
     drop(retirement);
     host.stop_registration().await.unwrap();
     fixture.runtime.shutdown().await.unwrap();
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn desktop_sign_out_releases_worker_lock_before_shared_sync_cleanup() {
+    use talos_app_protocol::requests::ClientRequest;
+    use talos_app_server::AppServerApplication;
+
+    let fixture = DesktopFixture::new().await;
+    fixture.login("user-1");
+    let host = fixture.host("Desktop");
+    let registration = host.worker.lock().await;
+    let anonymous = Actor::regular("anonymous");
+    let clear = host.dispatch(
+        &anonymous,
+        ClientRequest::decode("auth/session/clear", None).unwrap(),
+    );
+    tokio::pin!(clear);
+    assert!(futures_util::poll!(&mut clear).is_pending());
+    assert!(!host.sync_host.account_connections_allowed("user-1"));
+
+    // Model Sync enable holding its lifecycle lock while it needs the Worker.
+    // The first suspend has finished and sign-out is waiting for registration.
+    let lifecycle = host.sync_host.lifecycle.try_lock().unwrap();
+    drop(registration);
+    assert!(futures_util::poll!(&mut clear).is_pending());
+    assert!(host.worker.try_lock().is_ok());
+
+    let actor = Actor::regular("user-1").with_access_token("user-1");
+    let enroll = host.dispatch(
+        &actor,
+        ClientRequest::decode("desktop/workerEnroll", Some(serde_json::json!({}))).unwrap(),
+    );
+    tokio::pin!(enroll);
+    assert!(futures_util::poll!(&mut enroll).is_pending());
+
+    drop(lifecycle);
+    assert_eq!(
+        clear.await.unwrap().body,
+        serde_json::json!({"success": true})
+    );
+    assert!(matches!(enroll.await, Err(error) if error.code == ErrorCode::Unauthenticated));
     fixture.stop.cancel();
     fixture.server.await.unwrap().unwrap();
 }
