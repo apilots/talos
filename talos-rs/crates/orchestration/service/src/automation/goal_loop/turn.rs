@@ -21,12 +21,15 @@ impl TurnService {
         resolver: Arc<dyn AutomationSkillResolver>,
     ) -> TalosResult<()> {
         self.automation
-            .set(Arc::new(SessionAutomationService::new(
-                store,
-                self.execution.execution_store.clone(),
-                self.message_queue.clone(),
-                resolver,
-            )))
+            .set(Arc::new(
+                SessionAutomationService::new(
+                    store,
+                    self.execution.execution_store.clone(),
+                    self.message_queue.clone(),
+                    resolver,
+                )
+                .with_managed_workers(self.nodes.clone()),
+            ))
             .map_err(|_| {
                 TalosError::new(
                     talos_error::ErrorCode::Conflict,
@@ -82,6 +85,15 @@ impl TurnService {
                 < goal
                     .created_at
                     .saturating_add(talos_types::AUTOMATION_INITIAL_DELAY_SECONDS)
+        {
+            return Ok(());
+        }
+        if self
+            .defer_managed_dispatch(
+                &session,
+                super::managed_wake::WakeCandidate::Goal { explicit },
+            )
+            .await?
         {
             return Ok(());
         }

@@ -32,8 +32,10 @@ impl TalosService {
         mut params: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileWriteResponse> {
         let node_id = params.node_id.take();
-        self.worker_environment(actor, node_id.as_deref())
-            .await?
+        let (_admission, environment) = self
+            .active_worker_environment(actor, node_id.as_deref())
+            .await?;
+        environment
             .write_memory_file(actor.worker_environment_context(), params)
             .await
     }
@@ -143,8 +145,10 @@ impl TalosService {
         mut params: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
         let node_id = params.node_id.take();
-        self.worker_environment(actor, node_id.as_deref())
-            .await?
+        let (_admission, environment) = self
+            .active_worker_environment(actor, node_id.as_deref())
+            .await?;
+        environment
             .write_workspace_doc(actor.worker_environment_context(), params)
             .await
     }

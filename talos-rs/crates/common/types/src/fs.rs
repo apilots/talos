@@ -11,6 +11,10 @@ pub struct FsDirectoryReadRequest {
     pub node_id: Option<String>,
     #[serde(default)]
     pub path: Option<PathBuf>,
+    /// Explicit interactive access may wake an automatically sleeping managed Worker.
+    #[serde(default, rename = "wakeIfSleeping")]
+    #[ts(rename = "wakeIfSleeping", optional = nullable)]
+    pub wake_if_sleeping: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

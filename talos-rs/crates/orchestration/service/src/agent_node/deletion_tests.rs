@@ -151,7 +151,10 @@ async fn waiting_turn_prevents_deletion_and_failure_restores_worker_admission() 
                 token: lease.lease_token.clone(),
             },
             Arc::new(move |blocked| {
-                observed.lock().unwrap().push(blocked);
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(blocked == agent_protocol::RegistrationAdmission::Block);
                 Box::pin(async { Ok(()) })
             }),
         )
@@ -227,7 +230,7 @@ async fn expired_unreachable_publication_can_be_removed_but_busy_worker_cannot()
             Arc::new(move |blocked| {
                 let busy = observed.load(std::sync::atomic::Ordering::SeqCst);
                 Box::pin(async move {
-                    if !blocked {
+                    if blocked == agent_protocol::RegistrationAdmission::Unblock {
                         return Ok(());
                     }
                     if busy {

@@ -81,8 +81,9 @@ export function ComputerInspector({
       </p>
     );
   const peers = computerPeers(metrics, node.nodeId);
+  const phase = node.managedWorkerPhase;
   const personal =
-    node.mode === "remote" && node.ownerUserId === connection.userId;
+    !phase && node.mode === "remote" && node.ownerUserId === connection.userId;
   const canRecover =
     Boolean(getDesktopBridge()) &&
     personal &&
@@ -95,7 +96,7 @@ export function ComputerInspector({
         <h2>{node.displayName}</h2>
         <p className="cmp-muted">
           {t(
-            node.status === "disabled"
+            phase && phase !== "ready" ? `computers:talo.phase.${phase}` : node.status === "disabled"
               ? "computers:remoteDisabled"
               : node.available
                 ? "computers:connected"
@@ -106,7 +107,7 @@ export function ComputerInspector({
       <Button className="w-full" onClick={() => onOpen(node.nodeId)}>
         {t("computers:open")}
       </Button>
-      {!node.available ? (
+      {!phase && !node.available ? (
         <p className="cmp-footnote">{t("computers:offlineHelp")}</p>
       ) : null}
       <ComputerDesktopButton nodeId={node.nodeId} online={node.available} />

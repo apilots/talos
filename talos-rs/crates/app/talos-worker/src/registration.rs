@@ -235,6 +235,33 @@ pub(crate) async fn prepare_registered_worker(
     )
     .with_environment(worker.environment())
     .with_resource_binder(worker.resource_binder())
+    .with_managed_desktop_admission({
+        let browser = worker.browser();
+        Arc::new(move |admission, registration| {
+            let browser = browser.clone();
+            Box::pin(async move {
+                use agent_protocol::RegistrationAdmission;
+                use talos_browser::ManagedDesktopFence;
+                match admission {
+                    RegistrationAdmission::StopManaged => {
+                        browser
+                            .fence_managed_desktop(ManagedDesktopFence::Stop, registration)
+                            .await
+                    }
+                    RegistrationAdmission::SleepManaged { idle_before } => {
+                        browser
+                            .fence_managed_desktop(
+                                ManagedDesktopFence::Sleep { idle_before },
+                                registration,
+                            )
+                            .await
+                    }
+                    RegistrationAdmission::Unblock => browser.clear_managed_desktop_fence(),
+                    RegistrationAdmission::Block => Ok(()),
+                }
+            })
+        })
+    })
     .with_registration_revocation_hook(Arc::new(move || {
         authorization_owner.cancel_remote_mcp_authorizations();
         if let Err(error) = browser_owner.registration_revoked() {

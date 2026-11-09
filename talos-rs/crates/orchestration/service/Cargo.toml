@@ -45,6 +45,7 @@ talos-skills = { workspace = true }
 talos-store = { workspace = true }
 talos-sync = { workspace = true }
 talos-types = { workspace = true }
+talos-worker-runtime = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

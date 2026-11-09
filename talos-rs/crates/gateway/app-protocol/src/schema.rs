@@ -26,6 +26,7 @@ pub struct AppProtocolSchemaRoot {
     pub sync_metrics_response: talos_types::SyncMetricsResponse,
     pub sync_status_response: talos_types::SyncStatusResponse,
     pub delete_computer_response: talos_types::DeleteComputerResponse,
+    pub managed_worker_response: talos_types::ManagedWorkerResponse,
     pub computer_list_response: talos_types::ComputerListResponse,
     pub desktop_worker_identity_response: talos_types::DesktopWorkerIdentityResponse,
     pub node_info: talos_types::NodeInfo,
@@ -323,6 +324,14 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SyncStatusResponse>());
     output.push_str(&export::<talos_types::SyncEnableRequest>());
     output.push_str(&export::<talos_types::ComputerListRequest>());
+    output.push_str(&export::<crate::requests::ManagedWorkerParams>());
+    output.push_str(&export::<talos_types::ManagedWorkerResponse>());
+    output.push_str(&export::<talos_types::ManagedWorkerInfo>());
+    output.push_str(&export::<talos_types::ManagedWorkerPhase>());
+    output.push_str(&export::<talos_types::ManagedWorkerOperation>());
+    output.push_str(&export::<talos_types::ManagedWorkerDiskQuota>());
+    output.push_str(&export::<talos_types::ManagedWorkerActionRequest>());
+    output.push_str(&export::<talos_types::DeleteManagedWorkerRequest>());
     output.push_str(&export::<talos_types::ComputerListResponse>());
     output.push_str(&export::<talos_types::RenameComputerRequest>());
     output.push_str(&export::<talos_types::DeleteComputerRequest>());

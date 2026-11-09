@@ -19,6 +19,7 @@ pub(crate) struct ResourceAccessService {
     coordinator: Arc<dyn AgentCoordinator>,
     sessions: Arc<SessionService>,
     projects: Arc<ProjectService>,
+    restrict_embedded: bool,
 }
 
 /// Request accepted by `TalosService` when a caller needs a session handle.
@@ -37,12 +38,24 @@ impl ResourceAccessService {
         coordinator: Arc<dyn AgentCoordinator>,
         sessions: Arc<SessionService>,
         projects: Arc<ProjectService>,
+        restrict_embedded: bool,
     ) -> Self {
         Self {
             coordinator,
             sessions,
             projects,
+            restrict_embedded,
         }
+    }
+
+    pub(crate) fn ensure_worker_access(&self, actor: &Actor, node_id: &str) -> TalosResult<()> {
+        if self.restrict_embedded
+            && node_id == "embedded"
+            && (actor.auth_disabled || actor.role != talos_auth::UserRole::Admin)
+        {
+            return Err(embedded_access_denied());
+        }
+        Ok(())
     }
 
     pub(crate) async fn create_session(
@@ -231,6 +244,7 @@ impl ResourceAccessService {
         actor: &Actor,
         node_id: &str,
     ) -> TalosResult<Arc<dyn agent_protocol::WorkerEnvironment>> {
+        self.ensure_worker_access(actor, node_id)?;
         self.coordinator
             .worker_environment(node_id, &actor.user_id)
             .await
@@ -335,6 +349,13 @@ impl ResourceAccessService {
             ))
             .await
     }
+}
+
+pub(crate) fn embedded_access_denied() -> TalosError {
+    TalosError::new(
+        talos_error::ErrorCode::PermissionDenied,
+        "The Server's embedded Worker requires an administrator.",
+    )
 }
 
 #[cfg(test)]

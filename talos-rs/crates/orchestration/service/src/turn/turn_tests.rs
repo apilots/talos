@@ -89,7 +89,7 @@ async fn submit_test_start(
     idempotency_key: Option<&str>,
 ) -> TalosResult<StartTurnResponse> {
     match service
-        .reserve_start_turn(&request, idempotency_key)
+        .reserve_start_turn(&request, idempotency_key, std::time::Duration::ZERO)
         .await?
     {
         StartTurnReservation::Ready(prepared) => {

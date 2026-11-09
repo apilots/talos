@@ -52,46 +52,41 @@ impl DatabaseAgentNodeStore {
         now_at: i64,
     ) -> TalosResult<()> {
         let mut tx = self.begin_write(node_id).await?;
-        let active: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sessions s WHERE s.execution_node_id = ? AND (
-                EXISTS(SELECT 1 FROM agent_active_turns a WHERE a.session_id = s.session_key)
-                OR (SELECT json_extract(e.payload_json, '$.type') FROM agent_events e
-                    WHERE e.session_id = s.session_key AND e.sequence IS NOT NULL
-                    ORDER BY e.event_seq DESC LIMIT 1) NOT IN ('turnCompleted', 'turnFailed')))",
-        )
-        .bind(node_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|error| database_error("check Computer active Turns", error))?;
-        if active != 0 {
-            return Err(TalosError::localized(
-                talos_error::ErrorLocalization::ComputerDeletionActive,
-            ));
-        }
-        let affected = sqlx::query(
-            "DELETE FROM agent_nodes WHERE node_id = ? AND owner_user_id = ? AND mode = 'remote'",
-        )
-        .bind(node_id)
-        .bind(owner)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| database_error("delete Computer registration", error))?
-        .rows_affected();
-        if affected != 1 {
-            return Err(TalosError::new(
-                ErrorCode::ResourceNotFound,
-                "Computer registration was not found.",
-            ));
-        }
-        sqlx::query(
-            "INSERT INTO computer_deletions(node_id, owner_user_id, deleted_at) VALUES (?, ?, ?)",
-        )
-        .bind(node_id)
-        .bind(owner)
-        .bind(now_at)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| database_error("record Computer deletion", error))?;
+        super::managed_worker::ensure_node_has_no_active_turn(&mut tx, node_id).await?;
+        delete_registration_in(&mut tx, node_id, owner, now_at).await?;
         tx.commit().await
     }
+}
+
+pub(super) async fn delete_registration_in(
+    tx: &mut sqlx::SqliteConnection,
+    node_id: &str,
+    owner: &str,
+    now_at: i64,
+) -> TalosResult<()> {
+    let affected = sqlx::query(
+        "DELETE FROM agent_nodes WHERE node_id = ? AND owner_user_id = ? AND mode = 'remote'",
+    )
+    .bind(node_id)
+    .bind(owner)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| database_error("delete Computer registration", error))?
+    .rows_affected();
+    if affected != 1 {
+        return Err(TalosError::new(
+            ErrorCode::ResourceNotFound,
+            "Computer registration was not found.",
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO computer_deletions(node_id, owner_user_id, deleted_at) VALUES (?, ?, ?)",
+    )
+    .bind(node_id)
+    .bind(owner)
+    .bind(now_at)
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| database_error("record Computer deletion", error))?;
+    Ok(())
 }

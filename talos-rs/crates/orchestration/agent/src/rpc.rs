@@ -53,6 +53,15 @@ pub type AgentInvocationResourceBinder = Arc<
         + Sync,
 >;
 
+pub type ManagedDesktopAdmission = Arc<
+    dyn Fn(
+            agent_protocol::RegistrationAdmission,
+            CancellationToken,
+        ) -> agent_protocol::AgentFuture<'static, TalosResult<()>>
+        + Send
+        + Sync,
+>;
+
 #[derive(Clone, PartialEq, Eq)]
 enum AuthorizationOwner {
     Host,
@@ -108,6 +117,7 @@ pub struct AgentHarnessRpcAdapter {
     resource_binder: Option<AgentInvocationResourceBinder>,
     environment: Option<Arc<dyn agent_protocol::WorkerEnvironment>>,
     registration_revoked: Option<Arc<dyn Fn() + Send + Sync>>,
+    managed_desktop_admission: Option<ManagedDesktopAdmission>,
     config: Arc<std::sync::RwLock<Config>>,
     harnesses: Arc<Mutex<HashMap<String, Arc<dyn AgentHarness>>>>,
     lease: Arc<Mutex<Option<Lease>>>,
@@ -135,6 +145,7 @@ impl AgentHarnessRpcAdapter {
             environment: None,
             resource_binder: None,
             registration_revoked: None,
+            managed_desktop_admission: None,
             config,
             harnesses: Arc::new(Mutex::new(harnesses.into_iter().collect())),
             lease: Arc::new(Mutex::new(None)),
@@ -222,6 +233,13 @@ impl AgentHarnessRpcAdapter {
             }
         }
         Ok(())
+    }
+
+    /// Attach the Worker desktop check to the existing registration fence.
+    #[must_use]
+    pub fn with_managed_desktop_admission(mut self, admission: ManagedDesktopAdmission) -> Self {
+        self.managed_desktop_admission = Some(admission);
+        self
     }
 
     /// Hosts attach node-local authorization cancellation to the existing lease lifecycle.
@@ -357,7 +375,7 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
         request: Request<pb::SetRegistrationAdmissionRequest>,
     ) -> Result<Response<pb::EmptyResponse>, Status> {
         Ok(Response::new(empty_response(
-            self.registration_admission(request.into_inner()),
+            self.registration_admission(request.into_inner()).await,
         )))
     }
 

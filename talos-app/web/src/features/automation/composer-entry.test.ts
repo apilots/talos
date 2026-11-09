@@ -38,6 +38,26 @@ describe("explicit composer automation entry", () => {
     expect(mocks.resolveCommand).toHaveBeenCalledTimes(1);
     expect(mocks.resolveCommand).toHaveBeenCalledWith({ text: "/loop " + prompt });
   });
+  it.each(["goal", "loop"] as const)("preserves a sleeping Talo’s /%s command for Server admission", async (mode) => {
+    const mocks = client();
+    const prompt = "Check  the deployment";
+    const text = `/${mode} ${prompt}`;
+    mocks.resolveCommand.mockResolvedValue({ command: { type: "activate", mode, prompt } });
+    expect(await prepareAutomationMessage(text, undefined, "talo", true)).toEqual({
+      kind: "message", prompt: text, skillSelection: undefined,
+    });
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["goal", "pause the deployment until CI is green"],
+    ["loop", "5m Check CI"],
+  ] as const)("submits menu-selected %s on sleeping Talo without a Skill read", async (mode, prompt) => {
+    const mocks = client();
+    expect(await prepareAutomationMessage(prompt, mode, "talo", true)).toEqual({
+      kind: "message", prompt, skillSelection: { name: mode, path: "" },
+    });
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
   it("keeps ordinary conversation untouched and does not discover automation from vague tasks", async () => {
     const mocks = client();
     expect(await prepareAutomationMessage("Keep working until tests pass", undefined, "node")).toEqual({ kind: "message", prompt: "Keep working until tests pass", skillSelection: undefined });

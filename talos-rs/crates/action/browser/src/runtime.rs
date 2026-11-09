@@ -108,6 +108,8 @@ struct State {
     views: HashMap<String, desktop::View>,
     controller_stream: Option<String>,
     desktop_cleanup_error: Option<talos_error::ApiError>,
+    last_desktop_input_at: Option<i64>,
+    managed_desktop_fence: Option<CancellationToken>,
 }
 
 pub struct BrowserRuntime {
@@ -164,6 +166,8 @@ impl BrowserRuntime {
                 views: HashMap::new(),
                 controller_stream: None,
                 desktop_cleanup_error: None,
+                last_desktop_input_at: None,
+                managed_desktop_fence: None,
             }),
             backend: RwLock::new(None),
             input: Arc::new(AsyncMutex::new(())),

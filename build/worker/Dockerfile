@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libsqlite3-dev libssl-dev pkg-config protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 COPY talos/talos-rs ./talos/talos-rs
+COPY talos/deploy/docker/talos-worker/chromium-seccomp.json ./talos/deploy/docker/talos-worker/chromium-seccomp.json
 ARG TARGETPLATFORM
 RUN --mount=type=cache,id=talos-worker-target-${TARGETPLATFORM},target=/workspace/talos/talos-rs/target \
     --mount=type=cache,id=talos-worker-cargo-registry,target=/usr/local/cargo/registry \

@@ -7,15 +7,19 @@ import { useAppStore } from "@/shared/store/app-store";
 import { fixture, show, open } from "./AppLayout.test-utils";
 import { workspaceWindowKey } from "@/shared/store/workspace-window";
 
-it("has one outer navigation and routes the Session computer entry to its bound node", () => {
+it("opens Talo from the middle sidebar and retains the selected Computer and original Session", () => {
   show();
   expect(screen.getAllByRole("banner", { name: "Application navigation" })).toHaveLength(1);
   expect(screen.getAllByRole("button", { name: "Back" })).toHaveLength(1);
   expect(screen.getByText("Bound session")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button",{name:"Open sidebar"}));
-  fireEvent.click(screen.getByRole("button", { name: "Your computer" }));
-  expect(fixture.entries).toEqual(["session-worker"]);
-  expect(screen.getByRole("region", { name: "Computer viewer" })).toHaveTextContent("session-worker");
+  fireEvent.click(screen.getByRole("link", { name: "Talo" }));
+  expect(screen.getByRole("heading", { name: "Talo page" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Talo" })).toHaveAttribute("aria-current", "page");
+  expect(fixture.selectedId).toBe("selected-worker");
+  expect(useAppStore.getState().workspaceWindows).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  expect(screen.getByText("Bound session")).toBeInTheDocument();
 });
 it("moves sidebar toggling and project navigation into the outer header", () => {
   show();fireEvent.click(screen.getByRole("button", { name: "Open sidebar" }));
@@ -201,8 +205,8 @@ it("aligns three full-height regions and keeps business versus workspace control
  const workspace=screen.getByRole("dialog",{name:"Right workspace"});
  expect(workspace.parentElement).toBe(business.parentElement);
  expect(within(business).getByRole("main")).toBeInTheDocument();
- expect(within(business).getByRole("button",{name:"Your computer"})).toBeInTheDocument();
- expect(within(business).getByRole("banner",{name:"Application navigation"})).not.toContainElement(screen.getByRole("button",{name:"Your computer"}));
+ expect(within(business).getByRole("link",{name:"Talo"})).toBeInTheDocument();
+ expect(within(business).getByRole("banner",{name:"Application navigation"})).not.toContainElement(screen.getByRole("link",{name:"Talo"}));
  expect(within(business).getByText("Bound session")).toBeInTheDocument();
  expect(within(business).queryByRole("group",{name:"Workspace controls"})).not.toBeInTheDocument();
  const controls=within(workspace).getByRole("banner",{name:"Workspace controls"});

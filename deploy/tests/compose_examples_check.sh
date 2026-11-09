@@ -9,11 +9,14 @@ mkdir -p "$fixture/server" "$fixture/talos-worker"
 cp "$root/deploy/docker/talos-server/.env.example" "$fixture/server/.env"
 cp "$root/deploy/docker/talos-server/docker-compose.yml" "$fixture/server/"
 cp "$root/deploy/docker/talos-server/compose.production.yml" "$fixture/server/"
+cp "$root/deploy/docker/talos-server/compose.managed-worker.yml" "$fixture/server/"
 cp "$root/deploy/docker/talos-worker/.env.example" "$fixture/talos-worker/.env"
 cp "$root/deploy/docker/talos-worker/docker-compose.yml" "$fixture/talos-worker/"
 cp "$root/deploy/docker/talos-worker/chromium-seccomp.json" "$fixture/talos-worker/"
 (cd "$fixture/server" && docker compose config --format json) > "$fixture/basic.json"
 (cd "$fixture/server" && docker compose -f compose.production.yml config --format json) > "$fixture/production.json"
+(cd "$fixture/server" && TALOS_DOCKER_GID=123 TALOS_DOCKER_SOCKET=/var/run/docker.sock docker compose -f compose.production.yml \
+  -f compose.managed-worker.yml config --format json) > "$fixture/managed-worker.json"
 # This is an isolated rendering identity, never registered or started.
 (cd "$fixture/talos-worker" && TALOS_WORKER_NODE_ID=00000000-0000-0000-0000-000000000001 \
   docker compose config --format json) > "$fixture/worker.json"
@@ -26,6 +29,7 @@ fixture = Path(sys.argv[1])
 basic = json.loads((fixture / "basic.json").read_text())
 production = json.loads((fixture / "production.json").read_text())
 worker = json.loads((fixture / "worker.json").read_text())
+managed = json.loads((fixture / "managed-worker.json").read_text())
 for config, product in [(basic, "server"), (production, "server"), (worker, "worker")]:
     service_name = "talos-" + product
     assert set(config["services"]) == {service_name}
@@ -47,6 +51,14 @@ assert {port["target"] for port in service["ports"]} == {8080, 9443}
 tls = next(mount for mount in service["volumes"] if mount["target"] == "/run/talos-tls")
 assert tls["read_only"] and not tls.get("bind", {}).get("create_host_path", False)
 assert service["environment"]["TALOS_HOME"] == "/home/talos/.talos"
+for profile in (basic, production):
+    assert all(mount["target"] != "/var/run/docker.sock" for mount in profile["services"]["talos-server"]["volumes"])
+assert set(managed["services"]) == {"talos-server"}
+managed_server = managed["services"]["talos-server"]
+assert managed_server["group_add"] == ["123"]
+socket = next(mount for mount in managed_server["volumes"] if mount["target"] == "/var/run/docker.sock")
+assert socket["type"] == "bind" and socket["source"] == "/var/run/docker.sock"
+assert not socket.get("bind", {}).get("create_host_path", False)
 service = worker["services"]["talos-worker"]
 assert not service.get("ports") and not service.get("healthcheck")
 assert service["environment"]["TALOS_WORKER_NODE_ID"] == "00000000-0000-0000-0000-000000000001"
@@ -54,5 +66,5 @@ assert len(service["volumes"]) == 1
 home = service["volumes"][0]
 assert home["type"] == "bind" and home["target"] == "/home/talos/.talos"
 assert not home.get("bind", {}).get("create_host_path", False)
-print("PASS: Server basic/production and outbound Worker Compose examples; optional provider keys remain omitted.")
+print("PASS: Server basic/production, managed Worker overlay, and outbound Worker Compose examples; optional provider keys remain omitted.")
 PY

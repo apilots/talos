@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use talos_agent_api::{
     InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineResponse,
@@ -11,69 +9,14 @@ use talos_auth::{
     CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
-use talos_service::{Actor, FileByteStream, TalosService};
-use talos_types::{
-    AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
-    AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
-    ConfigDeleteResponse, ConfigGetRequest, ConfigReloadRequest, ConfigReloadResponse,
-    ConfigResponse, ConfigUpdateRequest, FileDeleteRequest, FileDeleteResponse, FileListRequest,
-    FileListResponse, FileReadRequest, FileReadResponse, FileUpdateRequest, FileUpdateResponse,
-    FileUploadRequest, FileUploadResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
-    FsDirectoryReadRequest, FsDirectoryReadResponse, MemoryFileListRequest, MemoryFileListResponse,
-    MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse,
-    MemoryGetRequest, MemoryGetResponse, MemorySearchRequest, MemorySearchResponse, MessageQueue,
-    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
-    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
-    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
-    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
-    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
-    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
-    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
-    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
-    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
-    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
-    SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
-    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
-    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
-    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
-    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
-    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
-};
-use tracing::info;
+use talos_service::{Actor, FileByteStream};
+use talos_types::*;
 
+use crate::computers::managed_worker_response;
 use crate::gateway::Gateway;
 
-pub struct ServiceGateway {
-    pub(crate) service: Arc<TalosService>,
-}
-
-impl ServiceGateway {
-    pub fn new(service: Arc<TalosService>) -> Self {
-        Self { service }
-    }
-
-    pub(crate) async fn start(&self) -> TalosResult<()> {
-        info!("Starting gateway...");
-        Ok(())
-    }
-}
-
-pub(crate) fn require_non_empty(value: &str, field: &str) -> TalosResult<()> {
-    if value.trim().is_empty() {
-        return Err(talos_error::TalosError::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("{field} is required"),
-        ));
-    }
-    Ok(())
-}
+pub(crate) use crate::require_non_empty;
+pub use crate::ServiceGateway;
 
 #[async_trait]
 impl Gateway for ServiceGateway {
@@ -176,6 +119,66 @@ impl Gateway for ServiceGateway {
         request: talos_types::RotateCredentialRequest,
     ) -> TalosResult<talos_types::NodeCredential> {
         ServiceGateway::rotate_computer_credential(self, actor, request).await
+    }
+
+    async fn read_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerResponse> {
+        self.service.nodes.read_managed_worker(actor).await
+    }
+
+    async fn create_managed_worker(&self, actor: &Actor) -> TalosResult<ManagedWorkerResponse> {
+        let nodes = &self.service.nodes;
+        nodes
+            .create_managed_worker(actor)
+            .await
+            .map(managed_worker_response)
+    }
+
+    async fn start_managed_worker(
+        &self,
+        actor: &Actor,
+        request: ManagedWorkerActionRequest,
+    ) -> TalosResult<ManagedWorkerResponse> {
+        let nodes = &self.service.nodes;
+        nodes
+            .start_managed_worker(actor, request)
+            .await
+            .map(managed_worker_response)
+    }
+
+    async fn stop_managed_worker(
+        &self,
+        actor: &Actor,
+        request: ManagedWorkerActionRequest,
+    ) -> TalosResult<ManagedWorkerResponse> {
+        let nodes = &self.service.nodes;
+        nodes
+            .stop_managed_worker(actor, request)
+            .await
+            .map(managed_worker_response)
+    }
+
+    async fn reset_managed_worker(
+        &self,
+        actor: &Actor,
+        request: ManagedWorkerActionRequest,
+    ) -> TalosResult<ManagedWorkerResponse> {
+        let nodes = &self.service.nodes;
+        nodes
+            .reset_managed_worker(actor, request)
+            .await
+            .map(managed_worker_response)
+    }
+
+    async fn delete_managed_worker(
+        &self,
+        actor: &Actor,
+        request: DeleteManagedWorkerRequest,
+    ) -> TalosResult<ManagedWorkerResponse> {
+        let nodes = &self.service.nodes;
+        nodes
+            .delete_managed_worker(actor, request)
+            .await
+            .map(managed_worker_response)
     }
 
     async fn read_profile(

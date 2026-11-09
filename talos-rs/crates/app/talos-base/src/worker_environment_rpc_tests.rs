@@ -266,6 +266,7 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
         .await
         .unwrap();
     let params = FsDirectoryReadRequest {
+        wake_if_sleeping: None,
         node_id: None,
         path: Some(home.path().into()),
     };
@@ -288,6 +289,7 @@ async fn embedded_direct_and_outbound_environment_share_paths_under_computer_aut
             .read_directory(
                 context.clone(),
                 FsDirectoryReadRequest {
+                    wake_if_sleeping: None,
                     node_id: None,
                     path: Some(home.path().into())
                 }

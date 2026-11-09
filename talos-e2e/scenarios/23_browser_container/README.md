@@ -6,12 +6,23 @@ separate from lightweight workspace tabs (22) and native Browser/MCP (20).
 ```bash
 just e2e-group 23_browser_container
 just e2e-case 23_browser_container/01_docker_worker
+just e2e-case 23_browser_container/03_managed_talo
 ```
 
 | Case | Product journey | Assertions |
 | --- | --- | --- |
 | `01_docker_worker` | Outbound Docker Worker → ordinary task/tools → private live desktop → restart/profile recovery | First non-navigation tool opens a task tab while preserving the private HTTP homepage; navigation/DOM/files and forged attachment rejection; default homepage, background after closing all browser windows and working Browser/Terminal/Files launchers; authenticated media, three consecutive rejected Worker admissions release their candidate reservations while preserving the live controller, input/control fencing, held-key release, backpressure, expiry and viewer teardown; replacement Worker reuses its owned profile. |
 | `02_docker_server` | Packaged anonymous Server → shared CLI/PTY TUI → model edit/add → restart → desktop viewing/control → embedded Browser MCP | Real RFB pixels and X11 key state prove anonymous viewing and input; release clears held input and permits an Agent task; disconnect suspends automation, clears input, and explicit resume permits another task. Each task performs seven real Browser actions and a File API screenshot. Model edits persist across a Server process restart; the TUI exercises DEL and Ctrl-H. Docker networking is disabled and model/page fixtures remain local. |
+| `03_managed_talo` | Authenticated Server with a local Docker socket → managed Talo Worker → lifecycle | Uses a disposable local registry for the Worker image digest. Verifies Worker registration over TLS, account-scoped ownership, initialization retry, manual stop and start, stale generation rejection, Home retention across Reset, idle sleep, explicit Wake, a first Turn with Worker-local model configuration, the same live Desktop media and control case as the personal Worker, and cleanup after confirmed Delete. |
+
+Run the same case with `TALOS_E2E_TALO_RECOVERY=1` to exercise a disposable TLS
+relay fault. The recovery path covers command replay without Wake, a queued
+Turn that survives delayed registration, both real Wake deadlines, and offline
+Reset retention. For local native Electron
+acceptance, pass `TALOS_WEBUI_DIR` and an executable
+`TALOS_E2E_TALO_DESKTOP_PROBE`. The case invokes the probe with the Server URL,
+Computer ID, report directory and stage before and after Reset.
+
 
 Case 01 checks the installed source commit, dependency lock and actual browser-use
 version, reuses matching preinstallation across replacement and unchanged updates,
@@ -56,6 +67,12 @@ restart with the same home and the embedded local media route, independently of
 the registered Worker's authenticated Cloud media route. Actual pixels and
 state records are grouped under `scenarios/01-view`, `02-takeover`,
 `03-release-agent` and `04-disconnect-recover` in the case report directory.
+Case 03 uses both current images and a temporary registry on loopback. The Server
+runs as its image's non-root user with the Unix socket's supplemental group.
+The Worker reaches the test Agent endpoint from its own Docker bridge. The
+case requires a local Linux Docker Engine (including a Linux VM on macOS) and
+uses the existing mock account service plus a per-run TLS certificate.
+
 All profiles, endpoints and containers created by these cases are disposable;
 they must not attach to a user's interactive browser or retained review Worker.
 

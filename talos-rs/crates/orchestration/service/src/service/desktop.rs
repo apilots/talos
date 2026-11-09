@@ -54,6 +54,7 @@ impl TalosService {
         if actor.auth_disabled && node_id != "embedded" {
             return Err(denied());
         }
+        let _admission = self.nodes.acquire_managed_worker(actor, &node_id).await?;
         let environment = self.access.worker_environment(actor, &node_id).await?;
         let snapshot = environment
             .browser(

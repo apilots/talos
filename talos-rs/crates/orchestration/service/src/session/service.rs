@@ -32,6 +32,7 @@ pub(crate) struct SessionService {
     base_config: Arc<RwLock<TalosConfig>>,
     coordinator: Arc<dyn talos_coordinator::AgentCoordinator>,
     sync: Arc<RwLock<execution_boundary::SessionSyncState>>,
+    embedded_admin_auth: Option<Arc<dyn talos_auth::AuthService>>,
 }
 
 impl SessionService {
@@ -76,7 +77,16 @@ impl SessionService {
             base_config: Arc::new(RwLock::new(base_config)),
             coordinator,
             sync: Default::default(),
+            embedded_admin_auth: None,
         }
+    }
+
+    pub(crate) fn with_embedded_admin_auth(
+        mut self,
+        auth: Arc<dyn talos_auth::AuthService>,
+    ) -> Self {
+        self.embedded_admin_auth = Some(auth);
+        self
     }
 
     async fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {

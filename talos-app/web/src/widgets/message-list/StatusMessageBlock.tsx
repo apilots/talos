@@ -23,7 +23,7 @@ export function StatusMessageBlock({
       </div>
       <div className="flex-1 rounded-[var(--radius-panel)] border border-brand/[0.16] bg-card px-5 py-4 text-ink">
         <div className="text-[11px] uppercase tracking-[0.16em] text-brand/80">{t("assistantLabel")}</div>
-        <div className="mt-2 text-sm font-medium text-ink">{title}</div>
+        <div className="mt-2 text-sm font-medium text-ink" role="status">{title}</div>
         <p className="mt-1.5 text-sm leading-6 text-muted">{detail}</p>
       </div>
     </div>

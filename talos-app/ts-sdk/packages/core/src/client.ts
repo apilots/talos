@@ -3,8 +3,9 @@ import { createTrajectoryClient } from "./trajectory";
 import type * as TrajectoryAPI from "./generated/app-protocol";
 import { createFilePreviewClient } from "./file-preview";
 import { decodeFileContent } from "./file-content";
+import type { DeleteManagedWorkerRequest, ManagedWorkerActionRequest, ManagedWorkerResponse } from "./generated/app-protocol";
 import type { DesktopStreamAdapter, FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
-import { parseTalosJson, parseTimelineEvent } from "./adapters";
+import { decodeManagedWorkerResponse, parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
   BrowserRequest, BrowserSnapshot, DesktopOpenRequest, DesktopViewGrant,  SyncMetricsResponse, SyncEnableRequest, SyncStatusResponse,
   ComputerListRequest,
@@ -461,7 +462,29 @@ export class TalosClient {
       }),
   };
 
+  private managedWorkerAction(
+    action: "start" | "stop" | "reset" | "delete",
+    { instanceId, ...body }: ManagedWorkerActionRequest | DeleteManagedWorkerRequest,
+  ): Promise<ManagedWorkerResponse> {
+    return this.http.request<ManagedWorkerResponse>(
+      this.url(`/v1/computers/managed-worker/${encodeURIComponent(instanceId)}/${action}`),
+      { method: "POST", body: JSON.stringify(body) },
+    ).then(decodeManagedWorkerResponse);
+  }
+
   computers = {
+    readManagedWorker: (): Promise<ManagedWorkerResponse> =>
+      this.http.request<ManagedWorkerResponse>(this.url("/v1/computers/managed-worker")).then(decodeManagedWorkerResponse),
+    createManagedWorker: (): Promise<ManagedWorkerResponse> =>
+      this.http.request<ManagedWorkerResponse>(this.url("/v1/computers/managed-worker"), { method: "POST", body: "{}" }).then(decodeManagedWorkerResponse),
+    startManagedWorker: (request: ManagedWorkerActionRequest): Promise<ManagedWorkerResponse> =>
+      this.managedWorkerAction("start", request),
+    stopManagedWorker: (request: ManagedWorkerActionRequest): Promise<ManagedWorkerResponse> =>
+      this.managedWorkerAction("stop", request),
+    resetManagedWorker: (request: ManagedWorkerActionRequest): Promise<ManagedWorkerResponse> =>
+      this.managedWorkerAction("reset", request),
+    deleteManagedWorker: (request: DeleteManagedWorkerRequest): Promise<ManagedWorkerResponse> =>
+      this.managedWorkerAction("delete", request),
     delete: (request: DeleteComputerRequest): Promise<DeleteComputerResponse> =>
       this.http.request<DeleteComputerResponse>(this.url(`/v1/computers/${encodeURIComponent(request.nodeId)}`), { method: "DELETE" }),
     list: (request: ComputerListRequest = {}): Promise<ComputerListResponse> => {
@@ -599,6 +622,7 @@ export class TalosClient {
           this.urlWithQuery("/v1/fs/directory", {
             path: query?.path ?? undefined,
             nodeId: query?.nodeId ?? undefined,
+            wakeIfSleeping: query?.wakeIfSleeping ?? undefined,
           }),
         ),
       create: (body: FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> =>

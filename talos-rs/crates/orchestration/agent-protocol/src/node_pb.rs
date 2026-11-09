@@ -252,6 +252,7 @@ pub fn decode_info(value: pb::NodeInfo) -> TalosResult<NodeInfo> {
         pb::NodeMode::Unspecified => return Err(invalid_response()),
     };
     Ok(NodeInfo {
+        managed_worker_phase: None,
         system_info: value.system_info.map(decode_system_info).transpose()?,
         node_id: value.node_id,
         display_name: value.display_name,

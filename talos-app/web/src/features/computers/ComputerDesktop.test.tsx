@@ -19,7 +19,7 @@ function WorkspaceHarness() {
  const windows=useAppStore(state=>state.workspaceWindows),expanded=useAppStore(state=>state.workspaceExpanded),visible=useAppStore(state=>state.workspaceOpen);
  const toggle=useRef<HTMLButtonElement>(null),sidebar=useRef<HTMLButtonElement>(null);
  const navigation=<AppNavigation sidebarVisible={false} sidebarAvailable={false} sidebarToggleRef={sidebar} onToggleSidebar={()=>{}}/>;
- return <MemoryRouter><ComputerDesktopButton nodeId="worker" online/><ComputerDesktopButton nodeId="worker" online remoteOnly label="Your computer"/>{!expanded?<AppTopBar>{navigation}{!visible?<WorkspaceControls toggleRef={toggle}/>:null}</AppTopBar>:null}{windows.length?<RightWorkspace modal={expanded} toggleRef={toggle} width={600} maxWidth={900}/>:null}</MemoryRouter>;
+ return <MemoryRouter><ComputerDesktopButton nodeId="worker" online/>{!expanded?<AppTopBar>{navigation}{!visible?<WorkspaceControls toggleRef={toggle}/>:null}</AppTopBar>:null}{windows.length?<RightWorkspace modal={expanded} toggleRef={toggle} width={600} maxWidth={900}/>:null}</MemoryRouter>;
 }
 vi.mock("@/shared/api/desktop-client",()=>({isDesktopRuntime:()=>true,getDesktopBridge:()=>null}));
 vi.mock("@/shared/api/client",()=>({
@@ -57,10 +57,10 @@ function show(value:BrowserSnapshot) {
 }
 afterEach(async()=>{cleanup();useAppStore.setState({workspaceWindows:[],workspaceActiveKey:null,workspaceOpen:false,workspaceExpanded:false});fixture.rfbs.length=0;fixture.scope="alice";fixture.connectRfb=true;vi.unstubAllGlobals();vi.resetAllMocks();await i18n.changeLanguage("en");});
 
-it("opens Your computer without randomUUID on an HTTP origin", async () => {
+it("opens the computer without randomUUID on an HTTP origin", async () => {
   vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
   const { query } = show(snapshot());
-  fireEvent.click(await screen.findByRole("button", { name: "Your computer" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View computer" }));
   await screen.findByText("Agent can operate");
   expect(fixture.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     viewerId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
@@ -89,7 +89,6 @@ it("does not advertise or request a remote stream for a native Desktop",async()=
   const {query}=show(snapshot("desktop"));
   await waitFor(()=>expect(fixture.operate).toHaveBeenCalled());
   expect(screen.queryByRole("button",{name:"View computer"})).not.toBeInTheDocument();
-  expect(screen.queryByRole("button",{name:"Your computer"})).not.toBeInTheDocument();
   act(()=>useAppStore.getState().openWorkspaceWindow({kind:"computer",nodeId:"worker"}));
   await screen.findByText("Browser unavailable");
   expect(fixture.open).not.toHaveBeenCalled();query.clear();
@@ -112,7 +111,6 @@ it("keeps the same read-only stream through a locale change and closes it on an 
 });
 it("requests a fresh immutable stream for takeover instead of upgrading the old RFB connection",async()=>{
   const value=snapshot();const {query}=show(value);
-  expect(await screen.findByRole("button",{name:"Your computer"})).toBeInTheDocument();
   fireEvent.click(await screen.findByRole("button",{name:"View computer"}));
   await screen.findByText("Agent can operate");
   fixture.operate.mockImplementation(async({operation})=>{

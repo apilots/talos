@@ -44,6 +44,7 @@ talos-channel = { workspace = true }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-error = { workspace = true }
+talos-fs = { workspace = true }
 talos-app-server = { workspace = true }
 talos-gateway = { path = "../../gateway/core" }
 talos-gateway-http = { path = "../../gateway/http" }
@@ -55,13 +56,13 @@ talos-store = { workspace = true }
 talos-storage = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
+talos-worker-runtime = { workspace = true }
 talos-upgrade = { workspace = true }
 talos-worker = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 axum = "0.7"
-talos-fs = { workspace = true }
 talos-plugin = { workspace = true }
 bytes = { workspace = true }
 rcgen = "0.14"

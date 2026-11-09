@@ -171,6 +171,50 @@ impl GatewayClient for EmbeddedServerClient {
         self.gateway().list_mcp_servers(&self.actor, request).await
     }
 
+    async fn read_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.gateway().read_managed_worker(&self.actor).await
+    }
+
+    async fn create_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.gateway().create_managed_worker(&self.actor).await
+    }
+
+    async fn start_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.gateway()
+            .start_managed_worker(&self.actor, request)
+            .await
+    }
+
+    async fn stop_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.gateway()
+            .stop_managed_worker(&self.actor, request)
+            .await
+    }
+
+    async fn reset_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.gateway()
+            .reset_managed_worker(&self.actor, request)
+            .await
+    }
+
+    async fn delete_managed_worker(
+        &mut self,
+        request: talos_types::DeleteManagedWorkerRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.gateway()
+            .delete_managed_worker(&self.actor, request)
+            .await
+    }
+
     async fn read_auth_session(
         &mut self,
         request: AuthSessionReadRequest,

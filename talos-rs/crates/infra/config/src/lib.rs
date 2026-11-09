@@ -60,6 +60,9 @@ pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
 };
+pub use domains::managed_worker::{
+    managed_worker_seed_config, ServerRuntimePolicy, TalosRuntimeConfig, WorkerRuntimeConfig,
+};
 pub use domains::memory::MemoryConfig;
 pub use domains::model_selection::{ModelSelectionCapabilities, ReasoningControl};
 pub use domains::network::{
@@ -122,6 +125,10 @@ pub struct Config {
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]
     pub timezone: String,
+
+    /// Opt-in managed Worker runtime and Server policy.
+    #[serde(default)]
+    pub talos: TalosRuntimeConfig,
 
     /// Scheduled maintenance configuration.
     #[serde(default)]
@@ -201,6 +208,7 @@ impl Default for Config {
             source_path: None,
             runtime_paths: None,
             timezone: default_timezone(),
+            talos: TalosRuntimeConfig::default(),
             automation: AutomationConfig::default(),
             memory: MemoryConfig::default(),
             workspaces: WorkspaceConfig::default(),

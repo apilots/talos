@@ -99,6 +99,7 @@ pub fn encode_read(value: FsDirectoryReadRequest) -> TalosResult<pb::DirectoryRe
 }
 pub fn decode_read(value: Option<pb::DirectoryReadParams>) -> TalosResult<FsDirectoryReadRequest> {
     Ok(FsDirectoryReadRequest {
+        wake_if_sleeping: None,
         node_id: None,
         path: value.ok_or_else(invalid)?.path.map(PathBuf::from),
     })

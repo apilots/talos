@@ -102,6 +102,48 @@ impl GatewayClient for AppServerClient {
             .await
     }
 
+    async fn read_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.request_typed("computer/readManagedWorker", Option::<()>::None)
+            .await
+    }
+
+    async fn create_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.request_typed("computer/createManagedWorker", Option::<()>::None)
+            .await
+    }
+
+    async fn start_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.request_typed("computer/startManagedWorker", request)
+            .await
+    }
+
+    async fn stop_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.request_typed("computer/stopManagedWorker", request)
+            .await
+    }
+
+    async fn reset_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.request_typed("computer/resetManagedWorker", request)
+            .await
+    }
+
+    async fn delete_managed_worker(
+        &mut self,
+        request: talos_types::DeleteManagedWorkerRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse> {
+        self.request_typed("computer/deleteManagedWorker", request)
+            .await
+    }
+
     async fn read_auth_session(
         &mut self,
         request: AuthSessionReadRequest,

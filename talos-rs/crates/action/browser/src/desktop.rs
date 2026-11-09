@@ -24,7 +24,47 @@ pub(super) struct View {
     pub(super) stop: CancellationToken,
 }
 
+/// Managed worker stop rejects active control. Idle sleep ignores stale input.
+pub enum ManagedDesktopFence {
+    Stop,
+    Sleep { idle_before: i64 },
+}
+
 impl BrowserRuntime {
+    /// Serializes the final activity check with the authenticated RFB input gate.
+    pub async fn fence_managed_desktop(
+        &self,
+        fence: ManagedDesktopFence,
+        registration: CancellationToken,
+    ) -> TalosResult<()> {
+        let _input = self.input.clone().lock_owned().await;
+        let mut s = self.state.lock().map_err(|_| poisoned())?;
+        let active = match fence {
+            ManagedDesktopFence::Stop => matches!(
+                s.owner,
+                BrowserControlOwner::Human { .. } | BrowserControlOwner::HandingOver { .. }
+            ),
+            ManagedDesktopFence::Sleep { idle_before } => {
+                s.last_desktop_input_at.is_some_and(|at| at > idle_before)
+            }
+        };
+        if active {
+            return Err(conflict(
+                "The Talo desktop has active control or recent input.",
+            ));
+        }
+        s.managed_desktop_fence = Some(registration);
+        Ok(())
+    }
+
+    pub fn clear_managed_desktop_fence(&self) -> TalosResult<()> {
+        self.state
+            .lock()
+            .map_err(|_| poisoned())?
+            .managed_desktop_fence = None;
+        Ok(())
+    }
+
     pub(super) fn check_desktop_cleanup(&self) -> TalosResult<()> {
         match self
             .state
@@ -46,7 +86,13 @@ impl BrowserRuntime {
         for view in s.views.values() {
             view.stop.cancel();
         }
-        s.preferences.manual_hold = true;
+        // A fenced lifecycle stop closes this process's viewers without recording
+        // a new manual pause. A human control interruption keeps its existing hold.
+        s.preferences.manual_hold |= s.managed_desktop_fence.is_none()
+            || matches!(
+                s.owner,
+                BrowserControlOwner::Human { .. } | BrowserControlOwner::HandingOver { .. }
+            );
         revoke(&mut s);
         s.owner = BrowserControlOwner::Suspended {
             reason: BrowserSuspensionReason::ViewerDisconnected,
@@ -221,7 +267,11 @@ impl BrowserRuntime {
             return Err(denied());
         }
         if binding.input_mode == BrowserInputMode::Control
-            && (binding.input_epoch != Some(s.epoch)
+            && (s
+                .managed_desktop_fence
+                .as_ref()
+                .is_some_and(|token| !token.is_cancelled())
+                || binding.input_epoch != Some(s.epoch)
                 || s.controller_stream.as_ref() != Some(&binding.stream_id)
                 || !matches!(&s.owner, BrowserControlOwner::HandingOver {controller_id} | BrowserControlOwner::Human {controller_id}
                     if Some(controller_id) == binding.controller_id.as_ref()))
@@ -262,6 +312,12 @@ impl BrowserRuntime {
                                 .map_err(|error|TalosError::from_source(ErrorCode::Timeout,"Desktop input is not being consumed.",error))?
                                 .map_err(|error|TalosError::internal_with_source("The private desktop input connection failed.",error))?;
                             parser.sent(&message.data);
+                            if message.is_input {
+                                let seconds = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default().as_secs() as i64;
+                                self.state.lock().map_err(|_| poisoned())?.last_desktop_input_at = Some(seconds);
+                            }
                             if message.initializes {
                                 self.desktop_ready(&binding)?;
                                 initialized=true;

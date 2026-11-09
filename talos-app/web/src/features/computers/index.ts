@@ -17,3 +17,4 @@ export type { ComputerService, FlowLayer } from "./topology/observations";
 export { ComputerConnectHelp } from "./ComputerConnectHelp";
 
 export { ComputerDesktopButton, ComputerDesktop } from "./ComputerDesktop";
+export { TaloPanel, taloHasConversation, useManagedWorkerStatus } from "./TaloPanel";

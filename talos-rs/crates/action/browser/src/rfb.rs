@@ -22,6 +22,7 @@ pub(crate) struct RfbInput {
 pub(crate) struct RfbMessage {
     pub data: Vec<u8>,
     pub initializes: bool,
+    pub is_input: bool,
 }
 
 impl RfbInput {
@@ -136,6 +137,7 @@ impl RfbInput {
                 }
             }
             messages.push(RfbMessage {
+                is_input: matches!(message[0], 4 | 5 | 255),
                 data: message,
                 initializes,
             });

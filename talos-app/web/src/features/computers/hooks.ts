@@ -69,7 +69,7 @@ export function useComputers() {
     if (selectedId && !(selectedId === "embedded" && localId && localId !== "embedded")) return;
     if (localId) {
       select(scope, localId);
-    } else if (list.data?.pages[0]?.total === 1 && nodes.length === 1) {
+    } else if (list.data?.pages[0]?.total === 1 && nodes.length === 1 && nodes[0].managedWorkerPhase == null) {
       select(scope, nodes[0].nodeId);
     }
   }, [bridge, list.data, localId, nodes, scope, select, selectedId]);

@@ -86,10 +86,12 @@ class ChangeScopeTests(unittest.TestCase):
     def test_server_container_case_selects_packaged_products_and_web_inputs(self):
         result = plan(['talos-e2e/scenarios/23_browser_container/02_docker_server.sh'])
         tasks = result['categories']['server']['scenarios']['include']
-        self.assertEqual(len(tasks), 1)
-        task = tasks[0]
-        self.assertEqual(task['cases'], ['23_browser_container/02_docker_server.sh'])
+        self.assertEqual(len(tasks), 2)
+        by_case = {tuple(task['cases']): task for task in tasks}
+        task = by_case[('23_browser_container/02_docker_server.sh',)]
+        managed = by_case[('23_browser_container/03_managed_talo.sh',)]
         self.assertEqual(task['images'], ['server'])
+        self.assertEqual(managed['images'], ['server', 'worker'])
         self.assertEqual(set(task['binaries']), {'server', 'cli', 'worker', 'sandbox'})
         self.assertTrue(task['docker'] and task['node'])
         self.assertIn('talos-app/web', task_roots(task))

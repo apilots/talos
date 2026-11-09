@@ -1,0 +1,11 @@
+# Apply only to a trusted same-host Docker Engine deployment with Talo enabled.
+services:
+  talos-server:
+    group_add:
+      - ${TALOS_DOCKER_GID:?Set the numeric GID of the host Docker Unix socket}
+    volumes:
+      - type: bind
+        source: ${TALOS_DOCKER_SOCKET:-/var/run/docker.sock}
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false

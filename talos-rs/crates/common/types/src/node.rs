@@ -89,6 +89,9 @@ pub struct NodeInfo {
     pub available: bool,
     #[ts(type = "number | null")]
     pub credential_expires_at: Option<i64>,
+    /// Present only for a server-managed Computer.
+    #[ts(optional = nullable)]
+    pub managed_worker_phase: Option<crate::ManagedWorkerPhase>,
     pub system_info: Option<NodeSystemInfo>,
 }
 

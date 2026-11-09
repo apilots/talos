@@ -35,6 +35,8 @@ export function MessageList({
   const helpfulLabel = t("helpful");
   const notHelpfulLabel = t("notHelpful");
   const lastUserIndex = blocks.reduce((last, block, index) => block.kind === "user" ? index : last, -1);
+  const lastBlock = blocks.at(-1);
+  const showingWaitStatus = lastBlock?.kind === "status" && lastBlock.variant === "thinking";
 
   if (blocks.length === 0) {
     return (
@@ -66,6 +68,7 @@ export function MessageList({
               notHelpfulLabel={notHelpfulLabel}
               pendingUserAction={pendingUserAction}
               renderUserAction={renderUserAction}
+              showWaitingIndicator={!showingWaitStatus}
             />
           );
         }

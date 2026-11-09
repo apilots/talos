@@ -16,6 +16,21 @@ impl TalosService {
             .await?;
         self.access.worker_environment(actor, &node).await
     }
+    pub(super) async fn active_worker_environment(
+        &self,
+        actor: &Actor,
+        node_id: Option<&str>,
+    ) -> ServiceResult<(
+        Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        Arc<dyn WorkerEnvironment>,
+    )> {
+        let node = self
+            .connect_selected_computer(actor, node_id.unwrap_or("embedded"))
+            .await?;
+        let admission = self.nodes.acquire_managed_worker(actor, &node).await?;
+        let environment = self.access.worker_environment(actor, &node).await?;
+        Ok((admission, environment))
+    }
     pub async fn workspace_info(
         &self,
         actor: &Actor,
@@ -98,10 +113,19 @@ impl TalosService {
     pub async fn read_fs_directory(
         &self,
         actor: &Actor,
-        request: FsDirectoryReadRequest,
+        mut request: FsDirectoryReadRequest,
     ) -> ServiceResult<FsDirectorySnapshot> {
-        self.worker_environment(actor, request.node_id.as_deref())
-            .await?
+        let (_admission, environment) = if request.wake_if_sleeping.take() == Some(true) {
+            self.active_worker_environment(actor, request.node_id.as_deref())
+                .await?
+        } else {
+            (
+                None,
+                self.worker_environment(actor, request.node_id.as_deref())
+                    .await?,
+            )
+        };
+        environment
             .read_directory(actor.worker_environment_context(), request)
             .await
     }
@@ -110,8 +134,10 @@ impl TalosService {
         actor: &Actor,
         request: FsDirectoryCreateRequest,
     ) -> ServiceResult<FsDirectoryCreateResponse> {
-        self.worker_environment(actor, request.node_id.as_deref())
-            .await?
+        let (_admission, environment) = self
+            .active_worker_environment(actor, request.node_id.as_deref())
+            .await?;
+        environment
             .create_directory(actor.worker_environment_context(), request)
             .await
     }

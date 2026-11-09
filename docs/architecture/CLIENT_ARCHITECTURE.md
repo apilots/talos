@@ -297,6 +297,11 @@ new capability as complete until those paths and their tests are aligned.
 - Use existing TUI styling helpers and the default foreground unless the design system requires a specific color. Avoid hardcoded white and churn between equivalent span/line constructions.
 - Use shared text-wrapping options and line utilities for wrapping, indentation, and list prefixes instead of custom string manipulation.
 
+For a sleeping Talo, the chat submits menu-selected Goal and Loop as the
+existing reserved Skill selection by name, leaving the path empty. Turn and
+queue admission wake the Worker and resolve its protected System Skill. The
+chat waiting row reads the existing Computer phase until Turn events arrive.
+
 ### Running Turn reads and stream offsets
 
 `GET /v1/sessions/:session_id/active-turn` and `session/active_turn` return

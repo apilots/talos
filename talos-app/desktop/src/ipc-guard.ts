@@ -3,7 +3,10 @@ import type { AppProtocol } from "@talos/sdk-core";
 type ParamGuard = (params: unknown) => boolean;
 // Enrollment and credential delivery belong to the trusted host, never the renderer bridge.
 export type DesktopRendererMethod = Exclude<
-  AppProtocol.ClientMethod, "initialize" | "computer/create" | "computer/rotateCredential"
+  AppProtocol.ClientMethod,
+  | "initialize" | "computer/create" | "computer/rotateCredential"
+  | "computer/createManagedWorker" | "computer/startManagedWorker" | "computer/stopManagedWorker"
+  | "computer/resetManagedWorker" | "computer/deleteManagedWorker"
 >;
 
 const mcpDefinitionRef = (value: unknown) => isRecord(value) && value.type === "plugin" && typeof value.installId === "string";
@@ -17,7 +20,8 @@ const emptyParams = (params: unknown) => isRecord(params);
 const sessionParams = (params: unknown) => hasString(params, "sessionId");
 const projectParams = (params: unknown) => hasString(params, "project_id");
 const fsDirectoryReadParams = (params: unknown) =>
-  isRecord(params) && (params.path === undefined || params.path === null || typeof params.path === "string");
+  isRecord(params) && (params.path == null || typeof params.path === "string") &&
+  (params.wakeIfSleeping == null || typeof params.wakeIfSleeping === "boolean");
 const fsDirectoryCreateParams = (params: unknown) =>
   hasString(params, "parent") && hasString(params, "name");
 const fileUploadParams = (params: unknown) =>
@@ -143,6 +147,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     (params.limit == null || (typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0)),
   "computer/delete": (params) => hasString(params, "nodeId"),
   "computer/read": (params) => hasString(params, "nodeId"),
+  "computer/readManagedWorker": (params) => isRecord(params) && Object.keys(params).length === 0,
   "computer/rename": (params) => hasString(params, "nodeId") && hasString(params, "displayName"),
   "computer/setStatus": (params) => hasString(params, "nodeId") && isRecord(params) &&
     (params.status === "enabled" || params.status === "disabled"),

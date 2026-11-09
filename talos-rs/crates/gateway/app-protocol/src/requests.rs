@@ -31,6 +31,11 @@ use talos_types::{
 mod client_method;
 pub use client_method::ClientMethod;
 
+/// Empty params for account-scoped managed Worker reads and creation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedWorkerParams {}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ClientRequestParams {
@@ -83,6 +88,18 @@ pub enum ClientRequestParams {
     ComputerSetStatus(talos_types::SetComputerStatusRequest),
     #[serde(rename = "computer/rotateCredential")]
     ComputerRotateCredential(talos_types::RotateCredentialRequest),
+    #[serde(rename = "computer/readManagedWorker")]
+    ComputerReadManagedWorker(Option<ManagedWorkerParams>),
+    #[serde(rename = "computer/createManagedWorker")]
+    ComputerCreateManagedWorker(Option<ManagedWorkerParams>),
+    #[serde(rename = "computer/startManagedWorker")]
+    ComputerStartManagedWorker(talos_types::ManagedWorkerActionRequest),
+    #[serde(rename = "computer/stopManagedWorker")]
+    ComputerStopManagedWorker(talos_types::ManagedWorkerActionRequest),
+    #[serde(rename = "computer/resetManagedWorker")]
+    ComputerResetManagedWorker(talos_types::ManagedWorkerActionRequest),
+    #[serde(rename = "computer/deleteManagedWorker")]
+    ComputerDeleteManagedWorker(talos_types::DeleteManagedWorkerRequest),
     #[serde(rename = "profile/read")]
     ProfileRead(ProfileReadRequest),
     #[serde(rename = "trajectory/capabilities")]
@@ -352,6 +369,24 @@ impl ClientRequest {
             }
             ClientMethod::ComputerRotateCredential => {
                 ClientRequestParams::ComputerRotateCredential(decode(params_value)?)
+            }
+            ClientMethod::ComputerReadManagedWorker => {
+                ClientRequestParams::ComputerReadManagedWorker(decode(params_value)?)
+            }
+            ClientMethod::ComputerCreateManagedWorker => {
+                ClientRequestParams::ComputerCreateManagedWorker(decode(params_value)?)
+            }
+            ClientMethod::ComputerStartManagedWorker => {
+                ClientRequestParams::ComputerStartManagedWorker(decode(params_value)?)
+            }
+            ClientMethod::ComputerStopManagedWorker => {
+                ClientRequestParams::ComputerStopManagedWorker(decode(params_value)?)
+            }
+            ClientMethod::ComputerResetManagedWorker => {
+                ClientRequestParams::ComputerResetManagedWorker(decode(params_value)?)
+            }
+            ClientMethod::ComputerDeleteManagedWorker => {
+                ClientRequestParams::ComputerDeleteManagedWorker(decode(params_value)?)
             }
             ClientMethod::ProfileRead => ClientRequestParams::ProfileRead(decode(params_value)?),
             ClientMethod::TrajectoryCapabilities => {

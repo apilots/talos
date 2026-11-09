@@ -95,6 +95,7 @@ async fn fixture_with_options(options: SyncOptions, hub_id: &str) -> Fixture {
 
 fn node(name: &str) -> NodeInfo {
     NodeInfo {
+        managed_worker_phase: None,
         system_info: None,
         node_id: "embedded".into(),
         display_name: name.into(),

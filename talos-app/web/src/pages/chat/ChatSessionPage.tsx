@@ -1,3 +1,5 @@
+import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
+import { TaloPanel } from "@/features/computers";
 import { useTranslation } from "react-i18next";
 import { SessionTracingPanel, TraceTabs } from "@/features/tracing";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
@@ -29,7 +31,15 @@ import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useChatSessionComposer } from "./useChatSessionComposer";
 
 export function ChatSessionPage() {
+  return <ChatSessionContent sessionId={useParams().sessionId ?? ""} />;
+}
+
+export function ChatSessionContent({ sessionId, talo }: {
+  sessionId: string;
+  talo?: AppProtocol.ManagedWorkerInfo;
+}) {
   const { t: tracingText } = useTranslation("tracing");
+  const { t: computerText } = useTranslation("computers");
   const [view, setView] = useState<"conversation" | "tracing">("conversation");
   const [tracingOpened, setTracingOpened] = useState(false);
   const changeView = (next: "conversation" | "tracing") => {
@@ -38,8 +48,7 @@ export function ChatSessionPage() {
   };
   const navigate = useNavigate();
   const location = useLocation();
-  const sessionId = useParams().sessionId ?? "";
-  const locationState = location.state as SessionLocationState | null;
+  const locationState = talo ? null : location.state as SessionLocationState | null;
   const [pendingInitialSessionId, setPendingInitialSessionId] =
     useState<string>();
   const [restoredAutomationMode, setRestoredAutomationMode] = useState<{ scope: string; sessionId: string; mode: "goal" | "loop" }>();
@@ -53,11 +62,17 @@ export function ChatSessionPage() {
   const scope = useProductScope();
   const selectComputer = useAppStore((state) => state.selectComputer);
   const nodeId =
-    session?.nodeId ?? locationState?.initialNodeId ?? computers.selectedId;
+    talo?.nodeId ?? session?.nodeId ?? locationState?.initialNodeId ?? computers.selectedId;
   const target = useComputer(nodeId);
+  const workerPhase = talo?.phase ?? target.data?.managedWorkerPhase;
+  const sleepingTalo = workerPhase === "sleeping";
+  const ready = talo ? workerPhase === "ready" : target.data?.available;
+  const firstTaloTurn = talo && sessionQuery.error instanceof TalosApiError &&
+    sessionQuery.error.code === AppProtocol.ErrorCode.ResourceNotFound;
   useEffect(() => {
-    if (session?.nodeId) selectComputer(scope, session.nodeId);
-  }, [session?.nodeId, sessionId, scope, selectComputer]);
+    const computer = talo?.nodeId ?? session?.nodeId;
+    if (computer) selectComputer(scope, computer);
+  }, [talo?.nodeId, session?.nodeId, sessionId, scope, selectComputer]);
   const { data: modelCatalog } = useModelsQuery(nodeId);
   const models = modelCatalog?.models;
   const projectsView = useProjectsView(nodeId);
@@ -66,7 +81,7 @@ export function ChatSessionPage() {
     // Another client may have created this Project while the sidebar stayed mounted.
     if (session?.projectId) void refetchProjects();
   }, [session?.projectId, session?.nodeId, refetchProjects]);
-  const chat = useChatSession(sessionId, session?.messageCount);
+  const chat = useChatSession(sessionId, session?.messageCount, workerPhase);
   const {
     blocks,
     setDraft,
@@ -87,7 +102,7 @@ export function ChatSessionPage() {
   const projects = projectsView.projects;
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
-    blocks.length > 0 ||
+    Boolean(firstTaloTurn) || blocks.length > 0 ||
     (sessionHistoryQuery.isSuccess && !sessionHistoryError);
   const autoScroll = useChatSessionAutoScroll({
     blocks,
@@ -104,6 +119,8 @@ export function ChatSessionPage() {
     session,
     sessionId,
     nodeId,
+    sleepingTalo,
+    taloConversation: Boolean(talo),
     restoredAutomationMode: restoredAutomationMode?.scope === scope && restoredAutomationMode.sessionId === sessionId ? restoredAutomationMode.mode : undefined,
     onRestoredAutomationModeConsumed: () => setRestoredAutomationMode(undefined),
   });
@@ -127,7 +144,7 @@ export function ChatSessionPage() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      {sessionQuery.error && !locationState ? (
+      {sessionQuery.error && !locationState && !firstTaloTurn ? (
         <p role="alert" className="px-7 py-3 text-sm text-danger">
           {userVisibleErrorMessage(
             sessionQuery.error,
@@ -135,7 +152,15 @@ export function ChatSessionPage() {
           )}
         </p>
       ) : null}
-      <TraceTabs
+      {talo ? (
+        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-7 py-2">
+          <h1 className="text-sm font-semibold text-ink">{computerText("talo.title")}</h1>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {talo.diskQuota === "unsupported" ? <p className="text-xs text-muted">{computerText("talo.quotaUnsupported")}</p> : null}
+            <TaloPanel desktopButton />
+          </div>
+        </header>
+      ) : <TraceTabs
         className="session-view-tabs"
         label={tracingText("title")}
         value={view}
@@ -146,11 +171,11 @@ export function ChatSessionPage() {
           controls: `session-panel-${tab}`,
           label: tracingText(tab === "conversation" ? "conversation" : "tab"),
         }))}
-      />
+      />}
       <div
         id="session-panel-conversation"
-        role="tabpanel"
-        aria-labelledby="session-view-conversation"
+        role={talo ? undefined : "tabpanel"}
+        aria-labelledby={talo ? undefined : "session-view-conversation"}
         className={
           view === "conversation" ? "flex min-h-0 flex-1 flex-col" : "hidden"
         }
@@ -194,7 +219,7 @@ export function ChatSessionPage() {
           viewportRef={autoScroll.viewportRef}
         />
       </div>
-      <div
+      {!talo ? <div
         id="session-panel-tracing"
         role="tabpanel"
         aria-labelledby="session-view-tracing"
@@ -210,16 +235,16 @@ export function ChatSessionPage() {
             history={sessionHistoryQuery.data}
           />
         ) : null}
-      </div>
+      </div> : null}
       <div className={view === "conversation" ? "mt-4 shrink-0" : "hidden"}>
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
           <ChatComposer
             key={JSON.stringify([scope, sessionId])}
             {...sessionComposer.props}
             disabled={
-              !target.data?.available ||
+              (!ready && !sleepingTalo) ||
               (sessionQuery.isPending &&
-                !locationState &&
+                !talo && !locationState &&
                 pendingInitialSessionId !== sessionId)
             }
           />

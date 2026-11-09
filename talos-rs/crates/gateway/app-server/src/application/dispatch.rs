@@ -232,6 +232,42 @@ impl TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
+            ClientRequestParams::ComputerReadManagedWorker(_) => to_value(
+                self.gateway
+                    .read_managed_worker(actor)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerCreateManagedWorker(_) => to_value(
+                self.gateway
+                    .create_managed_worker(actor)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerStartManagedWorker(params) => to_value(
+                self.gateway
+                    .start_managed_worker(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerStopManagedWorker(params) => to_value(
+                self.gateway
+                    .stop_managed_worker(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerResetManagedWorker(params) => to_value(
+                self.gateway
+                    .reset_managed_worker(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::ComputerDeleteManagedWorker(params) => to_value(
+                self.gateway
+                    .delete_managed_worker(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::ProjectCreate(params) => to_value(
                 self.gateway
                     .create_project(actor, params)

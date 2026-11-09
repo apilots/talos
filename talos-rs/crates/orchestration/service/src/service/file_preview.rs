@@ -58,6 +58,9 @@ impl TalosService {
             }
             FilePreviewSource::SessionPath { session_id, path } => {
                 let session = self.access.load_session(actor, &session_id).await?;
+                let (_admission, environment) = self
+                    .active_worker_environment(actor, Some(&session.execution_node_id))
+                    .await?;
                 let saved = self.sessions.build_agent_session_context(&session).await?;
                 let context = WorkerEnvironmentContext {
                     user_id: saved.workspace.user_id,
@@ -65,9 +68,6 @@ impl TalosService {
                     workspace_id: Some(saved.workspace.workspace_id),
                 };
                 let root = session.current_directory.unwrap_or(saved.workspace.root);
-                let environment = self
-                    .worker_environment(actor, Some(&session.execution_node_id))
-                    .await?;
                 let resource = environment
                     .preview_resource(
                         context.clone(),

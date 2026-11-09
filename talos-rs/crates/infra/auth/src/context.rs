@@ -121,6 +121,20 @@ impl AuthContexts {
         Ok(identity)
     }
 
+    pub(crate) fn has_verified_admin(&self, user_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .expect("Auth contexts lock")
+            .values()
+            .any(|context| {
+                context.identity().is_ok_and(|identity| {
+                    !identity.auth_disabled
+                        && identity.user_id == user_id
+                        && identity.role == crate::UserRole::Admin
+                })
+            })
+    }
+
     pub(crate) fn retain(&self, token: &str) -> TalosResult<AccessTokenLease> {
         let sessions = self.sessions.lock().expect("Auth contexts lock");
         let context = sessions

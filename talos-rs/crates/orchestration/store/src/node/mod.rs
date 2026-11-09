@@ -1,4 +1,10 @@
 mod deletion;
+mod managed_worker;
+
+pub use managed_worker::{
+    ManagedWorkerAction, ManagedWorkerDeletion, ManagedWorkerDesired, ManagedWorkerRecord,
+    ManagedWorkerStep, ManagedWorkerWrite,
+};
 mod store;
 mod types;
 

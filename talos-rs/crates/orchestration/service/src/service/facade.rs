@@ -159,14 +159,19 @@ impl TalosService {
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
     ) -> Self {
+        let restrict_embedded = base_config.talos.worker.runtime.is_some();
         let sessions = SessionService::new(
             session_store.clone(),
             project_store.clone(),
             base_config.clone(),
             coordinator.clone(),
         );
-        let sessions = Arc::new(sessions);
-        let execution_gate = Arc::new(crate::turn::NodeAdmissionGates::default());
+        let sessions = Arc::new(if restrict_embedded {
+            sessions.with_embedded_admin_auth(auth_service.clone())
+        } else {
+            sessions
+        });
+        let execution_gate = nodes.admission_gates();
         let projects = Arc::new(ProjectService::new(project_store.clone()));
         let message_queue = SessionMessageQueueService::new(
             base_config.agent.message_queue.max_messages_per_session,
@@ -183,7 +188,8 @@ impl TalosService {
             message_queue.clone(),
             base_config.clone(),
             execution_gate.clone(),
-        );
+        )
+        .with_managed_workers(nodes.clone());
         let history = SessionHistoryService::new(event_service.clone());
         let subagents = SubagentService::new(
             sessions.clone(),
@@ -207,6 +213,7 @@ impl TalosService {
                 coordinator.clone(),
                 sessions.clone(),
                 projects,
+                restrict_embedded,
             ),
             sessions,
             account: AccountService::new(
@@ -334,32 +341,55 @@ impl TalosService {
         TurnService::validate_start_turn_request(&request)?;
         // Idempotency describes the public command, before host-local routing aliases.
         let command_request = request.clone();
-        if let Some(node) = request.node_id.take() {
+        let conversation_node = self
+            .nodes
+            .managed_conversation_node(actor, &request)
+            .await?;
+        let managed_conversation = conversation_node.is_some();
+        if let Some(node) = conversation_node.or(request.node_id.take()) {
             request.node_id = Some(self.connect_selected_computer(actor, &node).await?);
         }
         let session_id = request.session_id.clone();
         let existing_session = match self.access.load_session(actor, &session_id).await {
-            Ok(session) => Some(session),
+            Ok(session) => Some((Self::existing_turn_metadata(&session, &request)?, session)),
             Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => None,
             Err(error) => return Err(error),
         };
         let computer = existing_session
             .as_ref()
-            .map(|session| session.execution_node_id.as_str())
+            .map(|(_, session)| session.execution_node_id.as_str())
             .or(request.node_id.as_deref())
             .unwrap_or("embedded");
-        self.connect_selected_computer(actor, computer).await?;
+        let computer = self.connect_selected_computer(actor, computer).await?;
+        let wake_wait = if idempotency_key.is_some() {
+            self.nodes.managed_request_wait(&computer).await?
+        } else {
+            std::time::Duration::ZERO
+        };
         let prepared = match self
             .turns
-            .reserve_start_turn(&command_request, idempotency_key.as_deref())
+            .reserve_start_turn(&command_request, idempotency_key.as_deref(), wake_wait)
             .await?
         {
             StartTurnReservation::Ready(prepared) => prepared,
-            StartTurnReservation::Completed(response) => return Ok(response),
+            StartTurnReservation::Completed(response) => {
+                if existing_session.is_none() {
+                    self.access.load_session(actor, &session_id).await?;
+                }
+                return Ok(response);
+            }
         };
-        let created_session = existing_session.is_none();
+        let admission = match self.nodes.acquire_managed_worker(actor, &computer).await {
+            Ok(admission) => admission,
+            Err(error) => {
+                self.turns.release_start_turn(prepared).await;
+                return Err(error);
+            }
+        };
+        // A materialized Talo conversation is the shared destination for concurrent sends.
+        let creating_session = existing_session.is_none();
         let session_result = match existing_session {
-            Some(session) => self.apply_existing_turn_metadata(session, &request).await,
+            Some((patch, session)) => self.apply_start_turn_patch(session, patch).await,
             None => {
                 self.access
                     .create_session(
@@ -377,6 +407,21 @@ impl TalosService {
                     .await
             }
         };
+        let session_result = match session_result {
+            Err(error)
+                if managed_conversation
+                    && creating_session
+                    && error.is_code(talos_error::ErrorCode::AlreadyExists) =>
+            {
+                async {
+                    let session = self.access.load_session(actor, &session_id).await?;
+                    let patch = Self::existing_turn_metadata(&session, &request)?;
+                    self.apply_start_turn_patch(session, patch).await
+                }
+                .await
+            }
+            result => result,
+        };
         let session = match session_result {
             Ok(session) => session,
             Err(error) => {
@@ -384,7 +429,9 @@ impl TalosService {
                 return Err(error);
             }
         };
-        let rollback_session = created_session.then(|| session.clone());
+        let rollback_session = (creating_session && !managed_conversation).then(|| session.clone());
+        // The original Turn admission acquires its own shared execution guard.
+        drop(admission);
         let result = self
             .turns
             .submit_start_turn(session, request, prepared)
@@ -401,11 +448,21 @@ impl TalosService {
         result
     }
 
-    async fn apply_existing_turn_metadata(
+    async fn apply_start_turn_patch(
         &self,
         session: SessionRecord,
-        request: &StartTurnRequest,
+        patch: SessionPatch,
     ) -> ServiceResult<SessionRecord> {
+        if patch.conf.is_none() && patch.current_directory.is_none() {
+            return Ok(session);
+        }
+        self.access.patch_session(session, patch).await
+    }
+
+    fn existing_turn_metadata(
+        session: &SessionRecord,
+        request: &StartTurnRequest,
+    ) -> ServiceResult<SessionPatch> {
         if request
             .node_id
             .as_ref()
@@ -453,10 +510,7 @@ impl TalosService {
                 Some(_) => {}
             }
         }
-        if patch.conf.is_none() && patch.current_directory.is_none() {
-            return Ok(session);
-        }
-        self.access.patch_session(session, patch).await
+        Ok(patch)
     }
 
     pub async fn start_turn(

@@ -40,6 +40,7 @@ pub struct SessionAutomationService {
     execution: Arc<dyn AgentExecutionStore>,
     queue: SessionMessageQueueService,
     resolver: Arc<dyn AutomationSkillResolver>,
+    nodes: Option<crate::AgentNodeService>,
     changed: tokio::sync::broadcast::Sender<AutomationChangedNotification>,
     gates: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     declarations: Arc<Mutex<HashMap<(String, String), Declaration>>>,
@@ -70,11 +71,16 @@ impl SessionAutomationService {
             execution,
             queue,
             resolver,
+            nodes: None,
             changed: tokio::sync::broadcast::channel(128).0,
             gates: Default::default(),
             declarations: Default::default(),
             explicit_dispatch: Default::default(),
         }
+    }
+    pub(crate) fn with_managed_workers(mut self, nodes: Option<crate::AgentNodeService>) -> Self {
+        self.nodes = nodes;
+        self
     }
     pub fn subscribe_changed(
         &self,
@@ -266,6 +272,15 @@ impl SessionAutomationService {
     ) -> TalosResult<()> {
         if let Some(active) = self.execution.get_agent_active_turn(&session.id).await? {
             if matches!(self.store.origin(&active.identity).await?,Some(AutomationTurnOrigin::Loop{loop_id,..}) if loop_id==task.id)
+            {
+                return Ok(());
+            }
+        }
+        if let Some(nodes) = &self.nodes {
+            if nodes
+                .wake_for_managed_dispatch(&session.user_id, &session.execution_node_id)
+                .await?
+                != crate::agent_node::ManagedDispatch::Proceed
             {
                 return Ok(());
             }

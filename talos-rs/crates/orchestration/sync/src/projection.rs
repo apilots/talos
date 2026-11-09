@@ -67,6 +67,7 @@ fn snapshot(binding: &SyncBinding, snapshot: SyncResourceSnapshot) -> TalosResul
                 "lastHeartbeatAt",
                 "available",
                 "credentialExpiresAt",
+                "managedWorkerPhase",
             ] {
                 value
                     .as_object_mut()

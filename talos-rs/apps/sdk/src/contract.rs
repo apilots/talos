@@ -184,6 +184,30 @@ pub trait GatewayClient: Send {
         request: talos_types::RotateCredentialRequest,
     ) -> TalosResult<talos_types::NodeCredential>;
 
+    async fn read_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn create_managed_worker(&mut self) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn start_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn stop_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn reset_managed_worker(
+        &mut self,
+        request: talos_types::ManagedWorkerActionRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
+    async fn delete_managed_worker(
+        &mut self,
+        request: talos_types::DeleteManagedWorkerRequest,
+    ) -> TalosResult<talos_types::ManagedWorkerResponse>;
+
     async fn read_auth_session(
         &mut self,
         request: AuthSessionReadRequest,

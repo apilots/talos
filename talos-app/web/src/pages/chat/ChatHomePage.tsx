@@ -47,6 +47,8 @@ export function ChatHomePage() {
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
   const computers = useComputers();
+  const sleepingTalo = computers.selected?.managedWorkerPhase === "sleeping";
+  const canSend = computers.selected?.available || sleepingTalo;
   const scope = useProductScope();
   const draftKey = JSON.stringify([scope, computers.selectedId, "home"]);
   const ownerRef = useRef<string | undefined>(draftKey);
@@ -54,7 +56,7 @@ export function ChatHomePage() {
   useEffect(() => { ownerRef.current = draftKey; return () => { ownerRef.current = undefined; }; }, [draftKey]);
   const commands = useQuery({ queryKey: ["talos", scope, "automation-commands"],
     queryFn: () => getTalosClient().automation.commandCatalog({}),
-    enabled: Boolean(computers.selected?.available), staleTime: Infinity });
+    enabled: canSend, staleTime: Infinity });
   const savedDraft = useAppStore((state) => state.composerDrafts[draftKey] ?? "");
   const saveDraft = useAppStore((state) => state.saveComposerDraft);
   const draft = locationState?.initialDraft ?? savedDraft;
@@ -96,8 +98,8 @@ export function ChatHomePage() {
     attachments: FileInfo[] = [],
     mode?: AutomationMode,
   ) {
-    if (!computers.selected?.available) return;
-    const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId);
+    if (!canSend) return;
+    const prepared = await prepareAutomationMessage(initialPrompt ?? "", mode, computers.selectedId, sleepingTalo);
     if (ownerRef.current !== draftKey) return;
     if (prepared.kind === "management") throw automationRequestError("chatRequired");
     const trimmed = prepared.prompt.trim();
@@ -146,7 +148,7 @@ export function ChatHomePage() {
           key={draftKey}
           automationCommands={commands.data?.data}
           activeProjectId={activeProject?.id ?? activeProjectId}
-          disabled={!computers.selected?.available}
+          disabled={!canSend}
           draft={draft}
           isStreaming={false}
           models={modelPickerOptions(models)}

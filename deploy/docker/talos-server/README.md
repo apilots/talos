@@ -44,6 +44,47 @@ docker compose -f compose.production.yml up -d
 For the maintained installation at `/opt/talos-server`, install this production
 file as `/opt/talos-server/docker-compose.yml`, not the basic profile.
 
+## Talo on a single Docker host
+
+Talo is an opt-in managed AI assistant. Run Talos Server and its Talo Workers on
+one Linux host with the same Docker Engine. Enable authentication and the
+existing TLS Agent node control plane in the Server configuration. Use
+`talos.worker.runtime` from [the sample configuration](talos.yaml.example).
+Choose a published Worker image pinned by digest. Set
+`control_plane_endpoint` to the HTTPS Agent ingress reachable from the Worker
+network. The loopback-only ports published by this Compose file are available to
+the host ingress, so the Worker uses the ingress hostname. For a private CA,
+mount its certificate into Server and set `trusted_ca_file`.
+
+Add the managed Worker overlay to the production profile. On the Linux host,
+set `TALOS_DOCKER_GID` in `.env` to the result of
+`stat -Lc '%g' /var/run/docker.sock`. If using a different host socket, set
+`TALOS_DOCKER_SOCKET` and obtain the group ID from that socket instead. The
+container-side path is `/var/run/docker.sock`. The supplemental group allows
+the Server image's non-root user to access it.
+
+~~~bash
+docker compose -f compose.production.yml -f compose.managed-worker.yml config --quiet
+docker compose -f compose.production.yml -f compose.managed-worker.yml up -d --no-build
+~~~
+
+To open this Server's Talo in native Electron, launch Talos Desktop with
+`TALOS_DESKTOP_SERVER_URL=https://your-talos-server.example`. Sign in with the
+same account used in Web. This mode opens the Server-hosted product in an
+isolated Electron view. The existing desktop WebSocket uses the same Server
+origin and the Worker connects out to the Server. Standalone Desktop continues
+to use its local App Server.
+
+The Docker socket grants host administration privileges. Apply the overlay to
+a trusted Server deployment. Managed Workers use one Docker bridge with
+inter-container connectivity disabled and keep their own Docker volumes.
+Use a Linux Docker Engine that enforces bridge firewall rules.
+They publish no host ports and have no Docker socket. Docker restarts
+unexpectedly exited Workers with `unless-stopped`, while Server Stop and
+sleep leave their containers stopped. Each Talo Worker
+uses its own Provider configuration and API key. Docker supplies persistent
+Home storage without a disk quota.
+
 ## Embedded Browser and terminal management
 
 The image includes the embedded Worker's managed Chromium, Browser Use driver,

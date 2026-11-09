@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use talos_agent::{AgentInputParams, AgentRunParams, AgentRunSettlement};
 use talos_agent_api::{
@@ -34,6 +34,7 @@ mod automation_runtime;
 mod completion;
 mod input;
 mod interrupt;
+mod managed_wake;
 mod message_queue;
 
 #[path = "service_subagent.rs"]
@@ -52,6 +53,9 @@ pub(crate) struct TurnService {
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
     execution_gate: Arc<super::NodeAdmissionGates>,
+    nodes: Option<crate::AgentNodeService>,
+    wake_dispatches:
+        Arc<std::sync::Mutex<std::collections::HashSet<(String, managed_wake::WakeCandidate)>>>,
 }
 
 struct TurnSubmission {
@@ -77,7 +81,14 @@ impl TurnService {
             message_queue,
             base_config,
             execution_gate,
+            nodes: None,
+            wake_dispatches: Default::default(),
         }
+    }
+
+    pub(crate) fn with_managed_workers(mut self, nodes: crate::AgentNodeService) -> Self {
+        self.nodes = Some(nodes);
+        self
     }
 
     pub(crate) fn with_user_workspace_memory_reflection(
@@ -178,6 +189,20 @@ impl TurnService {
         &self,
         request: &StartTurnRequest,
         idempotency_key: Option<&str>,
+        wake_wait: Duration,
+    ) -> TalosResult<StartTurnReservation> {
+        let command = idempotency_key
+            .map(|key| start_turn_hash(request).map(|hash| (key, hash)))
+            .transpose()?;
+        self.reserve_turn_submission(&request.session_id, command, wake_wait)
+            .await
+    }
+
+    async fn reserve_turn_submission(
+        &self,
+        session_id: &str,
+        command: Option<(&str, String)>,
+        wake_wait: Duration,
     ) -> TalosResult<StartTurnReservation> {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let prepared = PreparedTurnSubmission {
@@ -186,7 +211,7 @@ impl TurnService {
             message_id: format!("msg_{}", Uuid::new_v4().simple()),
             command: None,
         };
-        let Some(key) = idempotency_key else {
+        let Some((key, request_hash)) = command else {
             return Ok(StartTurnReservation::Ready(prepared));
         };
         if key.trim().is_empty() {
@@ -199,16 +224,17 @@ impl TurnService {
             .execution
             .execution_store
             .reserve_command(CommandReservation {
-                session_id: request.session_id.clone(),
+                session_id: session_id.to_owned(),
                 command: IdempotentCommand::TurnSubmission,
                 idempotency_key: key.to_string(),
-                request_hash: start_turn_hash(request)?,
+                request_hash,
                 request_id: prepared.request_id,
                 turn_id: prepared.turn_id,
                 message_id: prepared.message_id,
                 lease_id: format!("lease_{}", Uuid::new_v4().simple()),
                 now: now_ms,
-                lease_expires_at: now_ms.saturating_add(TURN_SUBMISSION_LEASE_MS),
+                lease_expires_at: now_ms
+                    .saturating_add(TURN_SUBMISSION_LEASE_MS + wake_wait.as_millis() as i64),
                 record_expires_at: Some(now_ms.saturating_add(
                     (self.base_config.agent.command_idempotency_ttl_hours as i64) * 60 * 60 * 1000,
                 )),
@@ -346,7 +372,6 @@ impl TurnService {
             .await;
         validate_user_input(&submission.input)?;
         let session_id = session.id.clone();
-        let request_hash = turn_submission_hash(&session_id, &submission.input)?;
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut request_id = format!("req_{}", Uuid::new_v4().simple());
         let mut turn_id = format!("turn_{}", Uuid::new_v4().simple());
@@ -376,7 +401,7 @@ impl TurnService {
                     session_id: session_id.clone(),
                     command: IdempotentCommand::TurnSubmission,
                     idempotency_key: key.clone(),
-                    request_hash: request_hash.clone(),
+                    request_hash: turn_submission_hash(&session_id, &submission.input)?,
                     request_id: request_id.clone(),
                     turn_id: turn_id.clone(),
                     message_id: message_id.clone(),
@@ -497,6 +522,39 @@ impl TurnService {
         validate_retry_request(&request)?;
         validate_user_input(&request.input)?;
         let idempotency_key = retry_idempotency_key(&request);
+        let mut prepared = None;
+        if let Some(nodes) = &self.nodes {
+            let wake_wait = nodes
+                .managed_request_wait(&session.execution_node_id)
+                .await?;
+            if !wake_wait.is_zero() {
+                let hash = turn_submission_hash(&session.id, &request.input)?;
+                let reservation = self
+                    .reserve_turn_submission(&session.id, Some((&idempotency_key, hash)), wake_wait)
+                    .await?;
+                let submission = match reservation {
+                    StartTurnReservation::Ready(submission) => submission,
+                    StartTurnReservation::Completed(response) => return Ok(response),
+                };
+                let readiness = async {
+                    self.validate_retry_attempt(&session.id, &request.retry_of_message_id)
+                        .await?;
+                    nodes
+                        .acquire_managed_worker(
+                            &crate::Actor::regular(&session.user_id),
+                            &session.execution_node_id,
+                        )
+                        .await?;
+                    Ok(())
+                }
+                .await;
+                if let Err(error) = readiness {
+                    self.release_start_turn(submission).await;
+                    return Err(error);
+                }
+                prepared = Some(submission);
+            }
+        }
         self.submit_turn(
             session,
             TurnSubmission {
@@ -506,7 +564,7 @@ impl TurnService {
                 retry_of_message_id: Some(request.retry_of_message_id),
             },
             Some(idempotency_key),
-            None,
+            prepared,
             None,
         )
         .await

@@ -178,6 +178,18 @@ impl pb::agent_coordinator_rpc_server::AgentCoordinatorRpc for CoordinatorRpc {
                 "Computer belongs to another account",
             )));
         }
+        if self
+            .management
+            .nodes
+            .is_managed_worker_node(&first.computer_id)
+            .await
+            .map_err(status)?
+        {
+            return Err(status(TalosError::new(
+                ErrorCode::PermissionDenied,
+                "Talo execution is managed by its Server.",
+            )));
+        }
         if !node.available {
             return Err(status(TalosError::new(
                 ErrorCode::ServiceUnavailable,

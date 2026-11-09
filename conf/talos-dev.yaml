@@ -31,6 +31,14 @@ agent_node:
   worker_rpc:
     bind_address: 127.0.0.1:0
     tls: null
+# Managed Talo Workers are opt-in on the authenticated Server.
+talos:
+  worker:
+    runtime: null
+  server:
+    runtime:
+      idle_timeout_seconds: 900
+
 cloud:
   api_base_url: http://127.0.0.1:8787
   agent_base_url: https://127.0.0.1:9210

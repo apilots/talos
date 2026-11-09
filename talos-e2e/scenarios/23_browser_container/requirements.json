@@ -38,6 +38,23 @@
         "server_image"
       ],
       "binaries": []
+    },
+    "03_managed_talo.sh": {
+      "commands": [
+        "docker",
+        "openssl",
+        "python3"
+      ],
+      "python_modules": [
+        "yaml",
+        "websockets"
+      ],
+      "checks": [
+        "docker",
+        "server_image",
+        "worker_image"
+      ],
+      "binaries": []
     }
   }
 }

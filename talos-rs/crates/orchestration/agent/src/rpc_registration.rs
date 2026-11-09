@@ -20,7 +20,7 @@ impl AgentHarnessRpcAdapter {
         Ok(())
     }
 
-    pub(super) fn registration_admission(
+    pub(super) async fn registration_admission(
         &self,
         request: pb::SetRegistrationAdmissionRequest,
     ) -> TalosResult<()> {
@@ -42,6 +42,34 @@ impl AgentHarnessRpcAdapter {
         } else {
             None
         };
+        use agent_protocol::RegistrationAdmission;
+        use pb::set_registration_admission_request::ManagedDesktop;
+        let desktop = match (request.blocked, request.managed_desktop) {
+            (true, Some(ManagedDesktop::RejectController(true))) => {
+                Some(RegistrationAdmission::StopManaged)
+            }
+            (true, Some(ManagedDesktop::IdleBeforeUnixSeconds(idle_before))) => {
+                Some(RegistrationAdmission::SleepManaged { idle_before })
+            }
+            (false, None) => Some(RegistrationAdmission::Unblock),
+            (true, None) => None,
+            _ => return Err(invalid_request()),
+        };
+        match (desktop, &self.managed_desktop_admission) {
+            (Some(admission), Some(probe)) => probe(admission, lease.revoked.clone()).await?,
+            (
+                Some(
+                    RegistrationAdmission::StopManaged | RegistrationAdmission::SleepManaged { .. },
+                ),
+                None,
+            ) => {
+                return Err(TalosError::new(
+                    ErrorCode::Conflict,
+                    "Talo desktop admission is unavailable.",
+                ));
+            }
+            _ => {}
+        }
         *self
             .blocked_registration
             .lock()

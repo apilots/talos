@@ -844,11 +844,13 @@ async fn execution_details_upgrade_preserves_main_history_with_null_details() {
         .fetch_all(&pool)
         .await
         .unwrap();
-    // Later migrations add automation definitions without rewriting existing facts.
+    // Later migrations add independent tables without rewriting existing facts.
     tables_before.extend([
         "session_goals".to_owned(),
         "session_loops".to_owned(),
         "automation_native_job_controls".to_owned(),
+        "managed_workers".to_owned(),
+        "managed_worker_deletions".to_owned(),
     ]);
     tables_before.sort();
 

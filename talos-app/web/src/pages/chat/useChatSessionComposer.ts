@@ -21,6 +21,7 @@ import {
   type useChatSession,
   type useProjectsView,
 } from "@/features/chat";
+import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ReasoningLevel } from "@/shared/types/ui";
 import type { SessionLocationState } from "./chatSessionLocation";
 import { useSessionCommands } from "./useSessionCommands";
@@ -35,6 +36,8 @@ interface UseChatSessionComposerOptions {
   session?: SessionInfo;
   sessionId: string;
   nodeId?: string;
+  sleepingTalo: boolean;
+  taloConversation?: boolean;
   restoredAutomationMode?: AutomationMode;
   onRestoredAutomationModeConsumed?: () => void;
 }
@@ -48,6 +51,8 @@ export function useChatSessionComposer({
   session,
   sessionId,
   nodeId,
+  sleepingTalo,
+  taloConversation = false,
   restoredAutomationMode,
   onRestoredAutomationModeConsumed,
 }: UseChatSessionComposerOptions) {
@@ -89,7 +94,7 @@ export function useChatSessionComposer({
     sessionId,
   });
   const { boundProject, selectedProjectId } = useSelectedSessionProject({
-    activeProjectId: projectsView.activeProjectId,
+    activeProjectId: taloConversation ? UNBOUND_PROJECT_ID : projectsView.activeProjectId,
     draftProjectId,
     projects: projectsView.projects,
     sessionExists: Boolean(session),
@@ -197,7 +202,7 @@ export function useChatSessionComposer({
     },
     onSend: async (attachments, mode) => {
       const text = chat.draft;
-      const prepared = await prepareAutomationMessage(text, mode, session?.nodeId ?? nodeId);
+      const prepared = await prepareAutomationMessage(text, mode, session?.nodeId ?? nodeId, sleepingTalo);
       if (ownerRef.current !== owner) throw new DOMException("The message could not be sent.", "AbortError");
       if (prepared.kind === "management") {
         if (!session) throw automationRequestError("chatRequired");

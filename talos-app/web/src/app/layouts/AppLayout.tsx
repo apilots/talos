@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Bot } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
-import { ComputerRail, useComputers, useSelectedComputerId, useProductScope } from "@/features/computers";
+import { ComputerRail, useComputers, useSelectedComputerId, useProductScope, taloHasConversation, useManagedWorkerStatus } from "@/features/computers";
 import { SidebarContainer } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { AppNavigation, AppSessionContext, AppTopBar, WorkspaceControls } from "./AppTopBar";
@@ -10,7 +11,7 @@ import { AppSidebar } from "./AppSidebar";
 import { AppMainContent } from "./AppMainContent";
 import { AppBusinessRegion } from "./AppBusinessRegion";
 import { layoutWidths } from "./layout-sizing";
-import { SidebarComputerEntry } from "./SidebarComputerEntry";
+import { SidebarNavItem } from "@/widgets/sidebar/SidebarNavItem";
 import { workspaceBelongsToScope, workspaceContextForPath } from "@/shared/store/workspace-state";
 import { useDesktopBrowserWorkspace } from "@/features/web-preview";
 
@@ -40,7 +41,10 @@ export function AppLayout() {
     setWorkspaceContext({ scope, context: workspaceContextForPath(location.pathname) }, window.matchMedia("(min-width: 1024px)").matches);
   }, [scope, location.pathname, setWorkspaceContext]);
   const standalonePage = location.pathname === "/computers" || location.pathname.startsWith("/settings");
-  const choosingComputer = !computerId && !standalonePage && !location.pathname.startsWith("/sessions/");
+  const taloPage = location.pathname === "/talo";
+  const talo = useManagedWorkerStatus(taloPage && !computerId).status.data?.instance;
+  const choosingComputer = !computerId && !standalonePage && !location.pathname.startsWith("/sessions/") &&
+    !(taloPage && taloHasConversation(talo));
   const sidebarAvailable = !choosingComputer && !standalonePage;
   const showSidebar = sidebarAvailable && (wide ? sidebarOpen : sidebarDrawerOpen);
   const workspaceVisible = workspaceOpen && windows.length > 0;
@@ -69,11 +73,14 @@ export function AppLayout() {
   const sidebarExpanded = wide && sidebarVisible;
   const mainHeader = <AppTopBar className="h-full border-b-0 px-6 sm:px-6">{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
   const modalHeader = <AppTopBar>{navigation}{context}{!workspaceVisible ? <WorkspaceControls toggleRef={workspaceToggle} /> : null}</AppTopBar>;
-  const sidebarRegion = (wide && sidebarAvailable) || sidebarModal ? <AppSidebar modal={sidebarModal} visible={sidebarVisible} width={wide ? sizes.sidebar : Math.min(sidebarWidth, viewport.width - 56)} resizing={resizing} toggleRef={sidebarToggle} onClose={() => wide ? setSidebarOpen(false) : setSidebarDrawerOpen(false)} topBar={sidebarModal ? modalHeader : undefined}><SidebarContainer computer={computer} computerEntry={<SidebarComputerEntry />} /></AppSidebar> : null;
+  const taloEntry = <SidebarNavItem icon={<Bot size={16} aria-hidden="true" />} label="Talo" to="/talo" onClick={(event) => {
+    if (!wide && event.button === 0 && !event.metaKey && !event.altKey && !event.ctrlKey && !event.shiftKey) setSidebarDrawerOpen(false);
+  }} />;
+  const sidebarRegion = (wide && sidebarAvailable) || sidebarModal ? <AppSidebar modal={sidebarModal} visible={sidebarVisible} width={wide ? sizes.sidebar : Math.min(sidebarWidth, viewport.width - 56)} resizing={resizing} toggleRef={sidebarToggle} onClose={() => wide ? setSidebarOpen(false) : setSidebarDrawerOpen(false)} topBar={sidebarModal ? modalHeader : undefined}><SidebarContainer computer={computer} computerEntry={taloEntry} /></AppSidebar> : null;
   return <div className="flex h-screen overflow-hidden bg-surface text-ink">
     <div className="h-full w-14 shrink-0"><ComputerRail /></div>
     <AppBusinessRegion inactive={workspaceModal} headerVisible={!choosingComputer} sidebarExpanded={sidebarExpanded} sidebarWidth={sizes.sidebar} sidebarMax={sizes.sidebarMax} navigation={!sidebarModal ? navigation : undefined} mainHeader={!sidebarModal ? mainHeader : null} sidebar={wide ? sidebarRegion : null}>
-      <AppMainContent key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : computerId ?? "pending"}`}>
+      <AppMainContent key={`${scope}:${location.pathname.startsWith("/sessions/") ? "session" : taloPage ? "talo" : computerId ?? "pending"}`}>
         {choosingComputer ? <ComputerHomePage /> : <Outlet />}
       </AppMainContent>
     </AppBusinessRegion>

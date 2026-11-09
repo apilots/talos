@@ -20,6 +20,7 @@ function render(ui: ReactElement) {
 }
 
 let testProjects = createDefaultProjects();
+const computer = vi.hoisted(() => ({ sleeping: false }));
 const createProjectMutateAsync = vi.fn();
 const setActiveProjectIdMock = vi.fn((projectId: string) => {
   useAppStore.setState({ activeProjectId: projectId });
@@ -28,6 +29,7 @@ const setActiveProjectIdMock = vi.fn((projectId: string) => {
 vi.mock("@/features/chat", () => ({
   ChatComposer: ({
     activeProjectId,
+    automationCommands,
     onPermissionModeChange,
     onSend,
     permissionMode,
@@ -35,6 +37,7 @@ vi.mock("@/features/chat", () => ({
     selectedModel,
   }: {
     activeProjectId: string;
+    automationCommands?: Array<{ mode: string }>;
     onPermissionModeChange: (mode: "approveForMe") => void;
     onSend: (attachments: [], mode?: "goal" | "loop") => Promise<void> | void;
     permissionMode: string;
@@ -43,6 +46,7 @@ vi.mock("@/features/chat", () => ({
   }) => (
     <div>
       <span data-testid="composer-project">{activeProjectId}</span>
+      <span data-testid="composer-automation">{automationCommands?.map((command) => command.mode).join(", ")}</span>
       <span data-testid="composer-model">{selectedModel}</span>
       <span data-testid="composer-reasoning">{reasoningLevel}</span>
       <span data-testid="composer-permission">{permissionMode}</span>
@@ -117,6 +121,7 @@ describe("ChatHomePage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    computer.sleeping = false;
     setTalosClientFactory(() => ({ automation: { commandCatalog: vi.fn().mockResolvedValue({ data: [] }) } }) as unknown as TalosWebClient);
 
     const storage = new Map<string, string>();
@@ -193,6 +198,21 @@ describe("ChatHomePage", () => {
     });
   });
 
+  it("loads Add commands and submits from a cold Home with a sleeping Talo", async () => {
+    computer.sleeping = true;
+    const commandCatalog = vi.fn().mockResolvedValue({ data: [{ mode: "goal" }, { mode: "loop" }] });
+    setTalosClientFactory(() => ({ automation: { commandCatalog } }) as unknown as TalosWebClient);
+    render(<MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "5m Check CI" } }]}><Routes>
+      <Route path="/" element={<ChatHomePage />} />
+      <Route path="/sessions/:sessionId" element={<LocationStateProbe />} />
+    </Routes></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("composer-automation")).toHaveTextContent("goal, loop"));
+    fireEvent.click(screen.getByRole("button", { name: "Send Loop" }));
+    await waitFor(() => expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}")).toMatchObject({
+      initialNodeId: "talo", initialPrompt: "5m Check CI", initialSkillSelection: { name: "loop", path: "" },
+    }));
+  });
+
   it("does not navigate back when a protected-Skill lookup resolves after leaving Home", async () => {
     let resolve!: (value: { data: unknown[] }) => void;
     const list = vi.fn(() => new Promise<{ data: unknown[] }>((done) => { resolve = done; }));
@@ -228,4 +248,6 @@ describe("ChatHomePage", () => {
 
 });
 
-vi.mock("@/features/computers", () => ({ useComputers: () => ({ selectedId: "embedded", selected: { available: true } }), useProductScope: () => "test-scope", ComputerContext: () => null }));
+vi.mock("@/features/computers", () => ({ useComputers: () => computer.sleeping
+  ? { selectedId: "talo", selected: { available: false, managedWorkerPhase: "sleeping" } }
+  : { selectedId: "embedded", selected: { available: true } }, useProductScope: () => "test-scope", ComputerContext: () => null }));

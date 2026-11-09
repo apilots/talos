@@ -174,6 +174,10 @@ impl super::TalosService {
         if let Some(host) = host {
             let mut data = Vec::new();
             for info in page.data {
+                if info.managed_worker_phase.is_some() {
+                    data.push(info);
+                    continue;
+                }
                 match host.computer_info(actor, info).await {
                     Ok(info) => data.push(info),
                     Err(error) if error.is_code(talos_error::ErrorCode::ResourceExpired) => {
@@ -197,10 +201,12 @@ impl super::TalosService {
             .expect("sync management lock")
             .as_ref()
             .and_then(Weak::upgrade);
-        match host {
-            Some(host) => host.resolve_node(actor, computer_id).await,
-            None => Ok(computer_id.into()),
-        }
+        let node_id = match host {
+            Some(host) => host.resolve_node(actor, computer_id).await?,
+            None => computer_id.into(),
+        };
+        self.access.ensure_worker_access(actor, &node_id)?;
+        Ok(node_id)
     }
     /// Resolve only the host-local alias for retained metadata. Ownership is
     /// checked by the resource Store; offline/removed Workers need no connection.
@@ -244,6 +250,9 @@ impl super::TalosService {
             .nodes
             .read_computer(actor, talos_types::GetNodeRequest { node_id })
             .await?;
+        if info.managed_worker_phase.is_some() {
+            return Ok(info);
+        }
         let host = self
             .sync_management
             .read()
@@ -272,15 +281,31 @@ impl super::TalosService {
         actor: &Actor,
         computer_id: &str,
     ) -> TalosResult<String> {
+        if self.nodes.managed_worker_enabled()
+            && computer_id != "embedded"
+            && self.nodes.is_managed_worker_node(computer_id).await?
+        {
+            self.nodes
+                .read_computer(
+                    actor,
+                    talos_types::GetNodeRequest {
+                        node_id: computer_id.into(),
+                    },
+                )
+                .await?;
+            return Ok(computer_id.into());
+        }
         let host = self
             .sync_management
             .read()
             .expect("sync management lock")
             .as_ref()
             .and_then(Weak::upgrade);
-        if let Some(host) = host {
-            return host.connect_computer(actor, computer_id).await;
-        }
-        Ok(computer_id.into())
+        let node_id = match host {
+            Some(host) => host.connect_computer(actor, computer_id).await?,
+            None => computer_id.into(),
+        };
+        self.access.ensure_worker_access(actor, &node_id)?;
+        Ok(node_id)
     }
 }
