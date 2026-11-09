@@ -170,7 +170,7 @@ async fn desktop_admission_and_conversation_commands_progress_independently() {
 }
 
 #[tokio::test]
-async fn saturated_business_requests_leave_control_and_host_replies_available() {
+async fn saturated_general_requests_leave_control_and_host_replies_available() {
     let entered = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let app = Arc::new(MockApp {

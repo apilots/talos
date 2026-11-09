@@ -117,7 +117,7 @@ async fn local_requests_and_desktop_input_remain_authenticated_and_responsive_du
 }
 
 #[tokio::test]
-async fn desktop_viewer_admission_completes_while_computer_list_is_blocked() {
+async fn remote_read_saturation_does_not_block_viewer_admission_or_interrupt() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let app = Arc::new(MockApp {
@@ -146,16 +146,28 @@ async fn desktop_viewer_admission_completes_while_computer_list_is_blocked() {
     read_output_line(&mut output).await;
 
     let credentials = json!({"credential":{"type":"existing_session_token","token":"user-token"}});
-    let list = json!({"jsonrpc":"2.0","id":10,"method":"computer/list","params":{},"actor_credentials":credentials});
-    client_write
-        .write_all(format!("{list}\n").as_bytes())
-        .await
-        .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
-        .await
-        .expect("computer list entered its remote wait");
+    for id in 10..15 {
+        let list = json!({"jsonrpc":"2.0","id":id,"method":"computer/list","params":{},"actor_credentials":credentials});
+        client_write
+            .write_all(format!("{list}\n").as_bytes())
+            .await
+            .unwrap();
+        if id < 14 {
+            tokio::time::timeout(std::time::Duration::from_secs(1), entered.notified())
+                .await
+                .expect("remote read entered its wait");
+        }
+    }
+    let rejected = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        read_output_line(&mut output),
+    )
+    .await
+    .expect("remote reads have a four-request limit");
+    assert_eq!(rejected["id"], 14);
+    assert_eq!(result_error(&rejected)["code"], "conflict");
 
-    let open = json!({"jsonrpc":"2.0","id":11,"method":"desktop/streamOpen","params":{
+    let open = json!({"jsonrpc":"2.0","id":15,"method":"desktop/streamOpen","params":{
         "streamId":"71f38d28-9990-4674-a4ce-b8c42e3c65c7",
         "ticket":"119dcd45-351f-4a7c-a27b-9be30b46ced3"
     },"actor_credentials":credentials});
@@ -169,12 +181,33 @@ async fn desktop_viewer_admission_completes_while_computer_list_is_blocked() {
     )
     .await
     .expect("viewer admission must complete before the computer list is released");
-    assert_eq!(response["id"], 11);
+    assert_eq!(response["id"], 15);
     assert_eq!(result_data(&response), &json!({"ok":true}));
-    assert_eq!(app.dispatched_actors.lock().unwrap().as_slice(), ["user-1"]);
+    let interrupt = json!({"jsonrpc":"2.0","id":16,"method":"turn/interrupt","params":{"identity":{"sessionId":"s1","turnId":"turn-1"}},"actor_credentials":credentials});
+    client_write
+        .write_all(format!("{interrupt}\n").as_bytes())
+        .await
+        .unwrap();
+    let interrupted = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        read_output_line(&mut output),
+    )
+    .await
+    .expect("an interrupt must complete before releasing the remote reads");
+    assert_eq!(interrupted["id"], 16);
+    assert_eq!(result_data(&interrupted), &json!({"ok":true}));
+    assert_eq!(
+        app.dispatched_actors.lock().unwrap().as_slice(),
+        ["user-1", "user-1"]
+    );
 
-    release.notify_one();
-    assert_eq!(read_output_line(&mut output).await["id"], 10);
+    release.notify_waiters();
+    let mut replies = Vec::new();
+    for _ in 10..14 {
+        replies.push(read_output_line(&mut output).await["id"].as_u64().unwrap());
+    }
+    replies.sort_unstable();
+    assert_eq!(replies, [10, 11, 12, 13]);
     client_write.shutdown().await.unwrap();
     runtime.await.unwrap().unwrap();
 }
@@ -346,7 +379,7 @@ async fn local_live_subscription_and_unsubscription_progress_during_remote_wait(
 }
 
 #[tokio::test]
-async fn stdin_eof_cancels_stalled_local_requests_before_draining_the_application() {
+async fn stdin_eof_cancels_stalled_deletions_before_draining_the_application() {
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
     let app = Arc::new(MockApp {
@@ -377,7 +410,7 @@ async fn stdin_eof_cancels_stalled_local_requests_before_draining_the_applicatio
         // Release the fixture even on the regression path, without hiding the failure.
         release.notify_waiters();
         runtime.await.unwrap().unwrap();
-        panic!("EOF must cancel local requests without waiting for remote release");
+        panic!("EOF must cancel deletion without waiting for remote release");
     }
     result.unwrap().unwrap().unwrap();
     assert!(

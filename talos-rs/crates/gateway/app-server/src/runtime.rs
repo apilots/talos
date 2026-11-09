@@ -1,6 +1,6 @@
-mod business_requests;
 mod desktop_host;
-mod local_requests;
+mod request_scheduler;
+use request_scheduler::{Dispatch, RequestScheduler};
 mod subscriptions;
 use desktop_host::{complete_host_error, complete_host_response};
 
@@ -146,12 +146,6 @@ where
     let subscriptions = Arc::new(subscriptions::Subscriptions::new(
         config.subscription_capacity,
     ));
-    let local_requests = Arc::new(local_requests::LocalRequests::new(
-        app.clone(),
-        validator.clone(),
-        config.auth_enabled,
-        subscriptions.clone(),
-    ));
     let stop = tokio_util::sync::CancellationToken::new();
     let (line_tx, mut line_rx) = mpsc::channel(16 + desktop_host::CONTROL_QUEUE_CAPACITY);
     let read_loop = desktop_host::read_requests(
@@ -161,7 +155,6 @@ where
         outgoing_tx.clone(),
         line_tx,
         stop.clone(),
-        local_requests.clone(),
     );
     let host_loop =
         desktop_host::forward_requests(browser_requests, outgoing_tx.clone(), stop.clone());
@@ -170,7 +163,7 @@ where
             actor: None,
             session_source: None,
             initialized_notification_seen: false,
-            business: business_requests::BusinessRequests::new(),
+            requests: RequestScheduler::new(),
             subscriptions: subscriptions.clone(),
         };
         let mut line = Vec::new();
@@ -240,7 +233,6 @@ where
                             {
                                 break;
                             }
-                            if let Some(actor) = &state.actor { local_requests.initialized(actor); }
                         }
                         Ok(BoundedLineRead::Eof) => break,
                         Ok(BoundedLineRead::LimitExceeded) => {
@@ -273,7 +265,7 @@ where
                     line=Vec::new();
                     frame_permit=None;
                 }
-                () = state.business.reap(), if state.business.has_tasks() => {}
+                () = state.requests.reap(), if state.requests.has_tasks() => {}
                 writer_result = &mut writer_task => {
                     match writer_result {
                         Ok(Ok(())) => {}
@@ -293,7 +285,7 @@ where
         app.close_connection();
         // Accepted requests can still return after stdin closes. In particular,
         // dropping a Turn start would lose the identity of its detached admission.
-        state.business.drain(app.as_ref()).await;
+        state.requests.drain(app.as_ref()).await;
 
         const DRAIN_BACKGROUND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -369,7 +361,7 @@ struct RuntimeState {
     actor: Option<Actor>,
     session_source: Option<talos_types::talos::SessionSource>,
     initialized_notification_seen: bool,
-    business: business_requests::BusinessRequests,
+    requests: RequestScheduler,
     subscriptions: Arc<subscriptions::Subscriptions>,
 }
 
@@ -497,51 +489,16 @@ async fn handle_request(
             .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()));
             send_result(outgoing_tx, id, result).await
         }
-        ClientRequestParams::EventSubscribe(params) => {
-            if !state.initialized_notification_seen {
-                return send_error(outgoing_tx, Some(id), AppServerErrorBody::not_initialized())
-                    .await;
-            }
-            let actor = match resolve_request_actor(
-                state.actor.as_ref(),
-                validator.as_ref(),
-                config.auth_enabled,
-                decoded.method,
-                request_actor_credentials,
-            )
-            .await
-            {
-                Ok(actor) => actor,
-                Err(error) => return send_application_error(outgoing_tx, id, error).await,
-            };
-            state
-                .subscriptions
-                .subscribe(app.as_ref(), &actor, params, outgoing_tx, id)
-                .await
-        }
-        ClientRequestParams::EventUnsubscribe(params) => {
-            if !state.initialized_notification_seen {
-                return send_error(outgoing_tx, Some(id), AppServerErrorBody::not_initialized())
-                    .await;
-            }
-            if let Err(error) = resolve_request_actor(
-                state.actor.as_ref(),
-                validator.as_ref(),
-                config.auth_enabled,
-                decoded.method,
-                request_actor_credentials,
-            )
-            .await
-            {
-                return send_application_error(outgoing_tx, id, error).await;
-            }
-            state
-                .subscriptions
-                .unsubscribe(params, outgoing_tx, id)
-                .await
-        }
         params => {
-            let permit = match state.business.reserve(decoded.method) {
+            if matches!(
+                params,
+                ClientRequestParams::EventSubscribe(_) | ClientRequestParams::EventUnsubscribe(_)
+            ) && !state.initialized_notification_seen
+            {
+                return send_error(outgoing_tx, Some(id), AppServerErrorBody::not_initialized())
+                    .await;
+            }
+            let permit = match state.requests.reserve(decoded.method) {
                 Ok(permit) => permit,
                 Err(error) => return send_application_error(outgoing_tx, id, error).await,
             };
@@ -562,13 +519,24 @@ async fn handle_request(
                 )
                 .await
             };
-            let prepare = state
-                .business
-                .preparer(app, source, ClientRequest { method, params });
-            let request = if method == ClientMethod::UserCurrent {
+            let prepare = state.requests.prepare(
+                app,
+                source,
+                ClientRequest { method, params },
+                state.subscriptions.clone(),
+                id.clone(),
+                outgoing_tx.clone(),
+            );
+            let request: Dispatch = if method == ClientMethod::UserCurrent {
                 // This method can verify credentials over the network.
-                Box::pin(async move { prepare(authenticate.await?).await })
-                    as futures_util::future::BoxFuture<'static, _>
+                Box::pin(async move {
+                    match authenticate.await {
+                        Ok(actor) => prepare(actor).await,
+                        Err(error) => {
+                            let _ = send_application_error(outgoing_tx, id, error).await;
+                        }
+                    }
+                })
             } else {
                 // The other methods only validate local credentials. Prepare
                 // synchronous resource changes in arrival order before spawning.
@@ -577,9 +545,7 @@ async fn handle_request(
                     Err(error) => return send_application_error(outgoing_tx, id, error).await,
                 }
             };
-            state
-                .business
-                .spawn(request, id, outgoing_tx, permit, frame_permit);
+            state.requests.spawn(request, permit, frame_permit);
             Ok(())
         }
     }

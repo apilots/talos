@@ -1167,8 +1167,8 @@ async fn disconnected_output_retains_the_io_source_as_an_internal_failure() {
 #[path = "runtime/desktop_host_tests.rs"]
 mod desktop_host_tests;
 
-#[path = "runtime/local_requests_tests.rs"]
-mod local_requests_tests;
+#[path = "runtime/request_admission_tests.rs"]
+mod request_admission_tests;
 
-#[path = "runtime/business_requests_tests.rs"]
-mod business_requests_tests;
+#[path = "runtime/request_scheduler_tests.rs"]
+mod request_scheduler_tests;

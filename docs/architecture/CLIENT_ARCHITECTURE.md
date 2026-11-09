@@ -150,19 +150,21 @@ operations that use the directory. Removing a Project record does not require
 its directory to exist or its Worker to be online; ownership and retained-file
 constraints still apply.
 
-App Server dispatches business requests concurrently after initialization and
-correlates replies by request ID. Request and frame limits bound in-flight work,
-with reserved capacity for control requests. Local queries, Timeline subscriptions
-and metadata deletions retain independent capacity and per-request authentication.
+After initialization, one App Server scheduler authenticates and dispatches
+JSON-RPC requests concurrently and correlates replies by request ID. Frame limits
+and request class quotas bound in-flight work. Control requests, local reads and
+subscription requests, remote inventory reads, and metadata deletions have
+capacity independent of general requests.
 Session and Worker owners enforce admission for conflicting operations. Desktop
 media reserves a viewer before remote admission and preserves input order per
 stream. Closing, signing out or disconnecting withdraws pending viewers.
 
 Subscriptions retain one connection-owned task registry, remove completed streams
 automatically, and abort remaining tasks on unsubscribe, connection drop or
-shutdown. On stdin EOF the server cancels local requests, withdraws connection-owned
-media and cancels owned Turns. An in-flight admission that returns after EOF
-also cancels its Turn before application drain.
+shutdown. On stdin EOF the server cancels pending remote inventory reads and
+metadata deletions, withdraws connection-owned media, and cancels owned Turns.
+Accepted local queries can still return their replies. An in-flight admission
+that returns after EOF also cancels its Turn before application drain.
 Session deletion rejects locally observed active parent/child Turns, including
 synced activity, and bounds Worker
 connection setup, verification/cleanup and admission-lock acquisition to two seconds.
