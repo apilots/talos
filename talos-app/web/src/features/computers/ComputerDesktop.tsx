@@ -17,16 +17,20 @@ import { createUuid } from "@/shared/lib/uuid";
 import { useBrowser } from "./browser-query";
 import { TaloPanel } from "./TaloPanel";
 
-/** Capability-gated entry, reused by the existing session header and Computer inspector. */
-export function ComputerDesktopButton({ nodeId, online }: { nodeId?: string; online: boolean }) {
+/** The Session shortcut requires remote desktop capability. The inspector also supports browser targets. */
+export function ComputerDesktopButton({ nodeId, online, shortcut = false }: { nodeId?: string; online: boolean; shortcut?: boolean }) {
   const { t } = useTranslation("computers");
   const open = useAppStore((state) => state.openWorkspaceWindow);
   const browser = useBrowser(nodeId, online);
-  const snapshot=browser.data;
-  if (!nodeId || !snapshot?.enabled || (snapshot.display.kind !== "dockerDesktop" && !snapshot.targets.length)) return null;
-  const label = t(snapshot.display.kind === "dockerDesktop" ? "desktop.open" : "desktop.browser");
-  return <Button variant="ghost" className="shrink-0 gap-2 whitespace-nowrap px-2 py-2 text-xs sm:px-3.5" aria-label={label} title={label} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
-    <Monitor aria-hidden="true" size={16} /><span className="hidden sm:inline">{label}</span>
+  const snapshot = browser.data;
+  if (!nodeId || !snapshot?.enabled) return null;
+  const remoteDesktop = snapshot.display.kind === "dockerDesktop";
+  if (shortcut && (!browser.isSuccess || !remoteDesktop)) return null;
+  if (!remoteDesktop && !snapshot.targets.length) return null;
+  const label = t(remoteDesktop ? "desktop.open" : "desktop.browser");
+  return <Button type="button" variant="ghost" className={shortcut ? "size-7 shrink-0 p-0" : "shrink-0 gap-2 whitespace-nowrap px-2 py-2 text-xs sm:px-3.5"} aria-label={label} title={label} onClick={(event) => { event.currentTarget.focus(); open({ kind: "computer", nodeId }); }}>
+    <Monitor aria-hidden="true" size={16} strokeWidth={shortcut ? 1.5 : undefined} />
+    {shortcut ? null : <span className="hidden sm:inline">{label}</span>}
   </Button>;
 }
 

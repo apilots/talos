@@ -27,6 +27,7 @@ vi.mock("@/shared/store/app-store", async () => {
   return support.createAppStoreMock();
 });
 vi.mock("@/features/computers", () => ({
+  SessionDesktopShortcut: () => null,
   useComputers: () => ({ selectedId: "other-computer" }),
   useSelectedComputerId: () => "other-computer",
   useProductScope: () => "test-scope",

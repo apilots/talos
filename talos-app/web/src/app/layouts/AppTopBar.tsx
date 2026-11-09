@@ -7,6 +7,7 @@ import { Button } from "@/shared/ui/Button";
 import { cn } from "@/shared/lib/cn";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useProjectsQuery, useSessionQuery } from "@/features/chat";
+import { SessionDesktopShortcut } from "@/features/computers";
 import { normalizeProjects } from "@/shared/store/ui-slice";
 
 /** Middle-region navigation and Session context own no workspace geometry. */
@@ -47,6 +48,7 @@ export function AppSessionContext() {
       {project ? <><button type="button" className="hidden max-w-40 truncate text-muted hover:text-ink sm:block" onClick={() => { setActiveProject(project.id); navigate("/"); }}>{project.name}</button><span aria-hidden="true" className="hidden text-muted/40 sm:block">/</span></> : null}
       <span className="truncate font-medium text-ink" title={title}>{title}</span>
     </div>
+    {session ? <SessionDesktopShortcut nodeId={session.nodeId} /> : null}
   </div>;
 }
 
