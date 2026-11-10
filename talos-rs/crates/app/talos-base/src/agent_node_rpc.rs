@@ -383,9 +383,9 @@ impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
         request: Request<pb::RegisterRequest>,
     ) -> Result<Response<pb::RegisterResponse>, Status> {
         let result = async {
-            let _lifecycle = self.nodes.lock_lifecycle().await;
             let request = request.into_inner();
             let auth = node_pb::decode_auth(request.auth)?;
+            let _lifecycle = self.nodes.lock_lifecycle(&auth.node_id).await;
             let params = node_pb::decode_register(request.params)?;
             let deployments = params.deployments.clone();
             let principal = self.nodes.authenticate_registration(&auth).await?;
@@ -455,9 +455,9 @@ impl pb::agent_node_control_server::AgentNodeControl for NodeControlRpc {
         request: Request<pb::UnregisterRequest>,
     ) -> Result<Response<pb::UnregisterResponse>, Status> {
         let result = async {
-            let _lifecycle = self.nodes.lock_lifecycle().await;
             let request = request.into_inner();
             let auth = node_pb::decode_auth(request.auth)?;
+            let _lifecycle = self.nodes.lock_lifecycle(&auth.node_id).await;
             let node_id = auth.node_id.clone();
             node_pb::require_empty(request.params)?;
             let principal = self.nodes.authenticate_lease(&auth).await?;

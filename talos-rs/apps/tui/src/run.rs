@@ -35,7 +35,6 @@ use super::{GatewayClient, TuiApp};
 pub async fn run_tui_app_with_gateway_client(
     client: Arc<dyn GatewayClient>,
 ) -> Result<(), Box<dyn Error>> {
-    let shutdown_client = client.clone();
     let mut app = TuiApp::new_with_gateway_client(client);
     app.initialize_session().await;
 
@@ -57,11 +56,7 @@ pub async fn run_tui_app_with_gateway_client(
     }
 
     let run_result = run_event_loop(&mut terminal, &mut app).await;
-    let shutdown_result = if app.client_shutdown_completed || app.force_exit_without_shutdown {
-        Ok(())
-    } else {
-        shutdown_client.shutdown().await
-    };
+    let shutdown_result = app.shutdown_terminal_client().await;
 
     if app.uses_transient_fullscreen_surface() {
         app.session_picker = None;

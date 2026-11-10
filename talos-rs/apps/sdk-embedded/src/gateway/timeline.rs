@@ -17,6 +17,16 @@ impl EmbeddedServerClient {
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         let (message_queue_tx, message_queue_rx) = tokio::sync::mpsc::channel(256);
         let (automation_tx, automation_rx) = tokio::sync::mpsc::channel(256);
+        let mut subscriptions = self
+            .subscriptions
+            .lock()
+            .expect("embedded subscription lock poisoned");
+        let subscriptions = subscriptions.as_mut().ok_or_else(|| {
+            talos_error::TalosError::new(
+                talos_error::ErrorCode::ServiceUnavailable,
+                "The embedded client is shut down.",
+            )
+        })?;
         let task = tokio::spawn(async move {
             while let Some(message) = events.recv().await {
                 match message {
@@ -42,9 +52,8 @@ impl EmbeddedServerClient {
                 }
             }
         });
-        if let Some(previous) = self.subscriptions.insert(subscription_id, task) {
+        if let Some(previous) = subscriptions.insert(subscription_id, task) {
             previous.abort();
-            let _ = previous.await;
         }
         Ok(TimelineStreamSubscription {
             response,
@@ -58,7 +67,13 @@ impl EmbeddedServerClient {
         &mut self,
         request: EventUnsubscribeRequest,
     ) -> TalosResult<EventUnsubscribeResponse> {
-        let unsubscribed = if let Some(task) = self.subscriptions.remove(&request.subscription_id) {
+        let task = self
+            .subscriptions
+            .lock()
+            .expect("embedded subscription lock poisoned")
+            .as_mut()
+            .and_then(|subscriptions| subscriptions.remove(&request.subscription_id));
+        let unsubscribed = if let Some(task) = task {
             task.abort();
             let _ = task.await;
             true

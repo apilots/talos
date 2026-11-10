@@ -12,7 +12,6 @@ use talos_sdk::{
 };
 use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::run_tui_app_with_gateway_client;
-use tokio::sync::Mutex;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Runtime teardown can log while dropping background tasks. Flush the
@@ -61,7 +60,7 @@ async fn run_embedded_tui(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = create_embedded_client(log_guard).await?;
     ensure_authenticated(&mut client, CloudLoginClientKind::Tui, "Talos TUI").await?;
-    let gateway_client: Arc<dyn talos_tui::GatewayClient> = Arc::new(Mutex::new(client));
+    let gateway_client: Arc<dyn talos_tui::GatewayClient> = Arc::new(client);
     run_tui_app_with_gateway_client(gateway_client).await
 }
 

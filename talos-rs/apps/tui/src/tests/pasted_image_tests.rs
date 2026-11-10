@@ -153,6 +153,7 @@ async fn pasted_image_failure_keeps_draft_and_reuses_successful_uploads() {
         .unwrap();
 
     app.submit_input().await.unwrap();
+    wait_for_image_upload(&mut app).await;
 
     assert_eq!(state.lock().unwrap().upload_requests.len(), 2);
     assert!(state.lock().unwrap().sent_requests.is_empty());
@@ -206,6 +207,17 @@ async fn backspace_removes_a_pasted_image_marker_and_attachment() {
     assert!(app.pasted_image_attachments.is_empty());
 }
 
+async fn wait_for_image_upload(app: &mut TuiApp) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while app.pending_image_upload.is_some() {
+            app.poll_image_upload().await;
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("image upload settled");
+}
+
 async fn wait_for_request(
     app: &mut TuiApp,
     state: &Arc<std::sync::Mutex<crate::test_support::MockGatewayState>>,
@@ -217,4 +229,90 @@ async fn wait_for_request(
             break;
         }
     }
+}
+
+#[tokio::test]
+async fn held_upload_and_recovery_allow_input_and_timeline_progress() {
+    let client = Arc::new(MockGatewayClient::new());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let recovery_entered = Arc::new(tokio::sync::Notify::new());
+    let recovery_release = Arc::new(tokio::sync::Notify::new());
+    {
+        let mut state = client.state.lock().unwrap();
+        state.models[0]
+            .model
+            .input
+            .push(talos_sdk::ModelInputKind::Image);
+        state.upload_gate = Some((entered.clone(), release.clone()));
+        state.reconnect_gate = Some((recovery_entered.clone(), recovery_release));
+        state.active_turn_id = Some("turn-active".into());
+    }
+    let mut app = TuiApp::new_with_gateway_client(client.clone());
+    app.initialize_session().await;
+    app.session_id = Some("sess-test".into());
+    let (timeline, events) = tokio::sync::mpsc::channel(3);
+    app.pending_stream = Some(events);
+    app.in_flight = true;
+    app.active_message = Some("Working".into());
+    app.last_stream_event_at = Some(
+        std::time::Instant::now()
+            - crate::STREAM_STALL_TIMEOUT
+            - std::time::Duration::from_millis(1),
+    );
+    app.handle_pasted_image(Bytes::from_static(b"png")).unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        app.on_tick().await;
+        recovery_entered.notified().await;
+        assert_eq!(
+            client.get_session("sess-test").await.unwrap().id,
+            "sess-test"
+        );
+        app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .unwrap();
+        entered.notified().await;
+        app.handle_input(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        app.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await
+            .unwrap();
+        for event in [
+            crate::test_support::turn_started_event("sess-test", 1),
+            crate::test_support::assistant_block_started_event("message", "sess-test", 2),
+            crate::test_support::assistant_text_delta_event(
+                "message",
+                "sess-test",
+                3,
+                "live progress",
+            ),
+        ] {
+            timeline.send(event).await.unwrap();
+        }
+        while app.trace_event_count == 0
+            || client.state.lock().unwrap().cancelled_sessions.is_empty()
+        {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.input_buffer, "[Image #1]x");
+    assert_eq!(app.trace_event_count, 3);
+    assert!(crate::test_support::interactive_transcript_text(&app).contains("live progress"));
+    assert!(app.pending_reconnect.is_none());
+    assert!(client.state.lock().unwrap().sent_requests.is_empty());
+
+    release.notify_one();
+    wait_for_image_upload(&mut app).await;
+    assert!(app.pending_image_upload.is_none());
+    assert_eq!(app.input_buffer, "[Image #1]x");
+    assert!(matches!(
+        app.pasted_image_attachments[0].state,
+        crate::types::PastedImageState::Uploaded { .. }
+    ));
+    assert!(client.state.lock().unwrap().sent_requests.is_empty());
 }

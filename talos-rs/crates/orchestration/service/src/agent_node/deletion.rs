@@ -18,8 +18,8 @@ impl AgentNodeService {
         Ok(())
     }
 
-    /// Owner-only, retryable deletion. Holding the current registration lock prevents
-    /// renewal/reinstallation while Worker admission is revoked and the Store commits.
+    /// Owner-only, retryable deletion. The node lifecycle guard prevents renewal
+    /// and reinstallation while Worker admission is revoked and the Store commits.
     pub async fn delete_computer(
         &self,
         actor: &Actor,
@@ -48,8 +48,7 @@ impl AgentNodeService {
         request: DeleteComputerRequest,
     ) -> TalosResult<DeleteComputerResponse> {
         ensure_management_actor(actor)?;
-        let _lifecycle = self.lock_lifecycle().await;
-        let mut current = self.current.lock().await;
+        let _lifecycle = self.lock_lifecycle(&request.node_id).await;
         let deleted_owner = self.store.deletion_owner(&request.node_id).await?;
         if deleted_owner.as_deref() != Some(&actor.user_id) {
             let node = self
@@ -63,8 +62,12 @@ impl AgentNodeService {
                 return Err(not_found());
             }
             self.reject_managed_node_mutation(&request.node_id).await?;
-            let prepare = current
+            let prepare = self
+                .current
+                .lock()
+                .await
                 .get(&request.node_id)
+                .filter(|registration| node.lease_token_hash == Some(registration.token_hash))
                 .and_then(|registration| registration.prepare_deletion.clone());
             if let Some(prepare) = &prepare {
                 if let Err(error) = prepare(agent_protocol::RegistrationAdmission::Block).await {
@@ -101,7 +104,12 @@ impl AgentNodeService {
             }
             if let Err(error) = self
                 .store
-                .delete_owned(&request.node_id, &actor.user_id, now())
+                .delete_owned(
+                    &request.node_id,
+                    &actor.user_id,
+                    node.lease_token_hash,
+                    now(),
+                )
                 .await
             {
                 if let Some(prepare) = prepare {
@@ -114,8 +122,7 @@ impl AgentNodeService {
                 return Err(error);
             }
         }
-        let previous = current.remove(&request.node_id);
-        drop(current);
+        let previous = self.current.lock().await.remove(&request.node_id);
         revoke_registration(previous).await;
         Ok(DeleteComputerResponse {
             node_id: request.node_id,

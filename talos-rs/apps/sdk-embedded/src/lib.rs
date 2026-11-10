@@ -11,6 +11,7 @@
 //! install executable entrypoints on behalf of an embedding application.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -60,17 +61,20 @@ use talos_types::{
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
     WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
-use tokio::task::JoinHandle;
+use tokio::{sync::OnceCell, task::JoinHandle};
 
 mod request_context;
 use request_context::{
     authenticated_actor_from_access_token, prepare_embedded_start_turn, resolve_cached_actor,
 };
 
+type Subscriptions = HashMap<String, JoinHandle<()>>;
+
 pub struct EmbeddedServerClient {
-    runtime: TalosApplicationRuntime,
+    runtime: Arc<TalosApplicationRuntime>,
     actor: Actor,
-    subscriptions: HashMap<String, JoinHandle<()>>,
+    subscriptions: Arc<Mutex<Option<Subscriptions>>>,
+    shutdown_result: Arc<OnceCell<TalosResult<()>>>,
 }
 
 impl EmbeddedServerClient {
@@ -104,10 +108,23 @@ impl EmbeddedServerClient {
             runtime.service.sync_status(&actor).await?;
         }
         Ok(Self {
-            runtime,
+            runtime: Arc::new(runtime),
             actor,
-            subscriptions: HashMap::new(),
+            subscriptions: Arc::new(Mutex::new(Some(HashMap::new()))),
+            shutdown_result: Arc::new(OnceCell::new()),
         })
+    }
+
+    /// Take an independent request handle with the current authenticated identity.
+    /// Authenticate the owner before creating handles. Subscriptions and shutdown
+    /// are shared with the owner and all handles for this runtime.
+    pub fn request_handle(&self) -> Self {
+        Self {
+            runtime: self.runtime.clone(),
+            actor: self.actor.clone(),
+            subscriptions: self.subscriptions.clone(),
+            shutdown_result: self.shutdown_result.clone(),
+        }
     }
 }
 

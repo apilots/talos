@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use talos_error::{TalosError, TalosResult};
@@ -14,8 +16,9 @@ use talos_sdk::{
     StartTurnResponse, SubmitTurnInputRequest, SubmitTurnInputResponse, SubscribeTimelineRequest,
     TimelineActiveTurn, TimelineEvent, UserPermissionMode,
 };
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use talos_sdk_embedded::EmbeddedServerClient;
+use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Mutex, MutexGuard};
 
 /// Receives queue invalidations and product notices on the shared Session stream.
 ///
@@ -164,9 +167,11 @@ pub trait GatewayClient: Send + Sync {
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistoryResponse>;
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<TimelineActiveTurn>>;
+    /// Reports the accepted Turn ID before opening its Timeline stream.
     async fn start_turn_stream(
         &self,
         request: StartTurnRequest,
+        accepted_turn: Option<oneshot::Sender<String>>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>>;
     async fn reconnect_active_turn_stream(
         &self,
@@ -187,81 +192,115 @@ pub trait GatewayClient: Send + Sync {
     async fn shutdown(&self) -> TalosResult<()>;
 }
 
+// The terminal also supports callers that supply a mutable SDK transport.
+enum SdkRequest<'a, C> {
+    Locked(MutexGuard<'a, C>),
+    Independent(C),
+}
+
+impl<C> SdkRequest<'_, C> {
+    fn client(&mut self) -> &mut C {
+        match self {
+            Self::Locked(guard) => guard,
+            Self::Independent(client) => client,
+        }
+    }
+}
+
+trait SdkRequestSource: Send + Sync {
+    type Client: SdkGatewayClient + Send;
+
+    fn request(&self) -> impl Future<Output = SdkRequest<'_, Self::Client>> + Send;
+}
+
+impl<C: SdkGatewayClient + Send> SdkRequestSource for Mutex<C> {
+    type Client = C;
+
+    async fn request(&self) -> SdkRequest<'_, C> {
+        SdkRequest::Locked(self.lock().await)
+    }
+}
+
+impl SdkRequestSource for EmbeddedServerClient {
+    type Client = Self;
+
+    async fn request(&self) -> SdkRequest<'_, Self> {
+        SdkRequest::Independent(self.request_handle())
+    }
+}
+
 #[async_trait]
-impl<C> GatewayClient for Mutex<C>
-where
-    C: SdkGatewayClient + Send,
-{
+impl<C: SdkRequestSource> GatewayClient for C {
     async fn session_automation(
         &self,
         request: talos_sdk::SessionAutomationReadRequest,
     ) -> TalosResult<talos_sdk::SessionAutomationSnapshot> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::session_automation(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::session_automation(client.client(), request).await
     }
     async fn execute_automation(
         &self,
         request: talos_sdk::AutomationRequest,
     ) -> TalosResult<talos_sdk::AutomationControlResult> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::execute_automation(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::execute_automation(client.client(), request).await
     }
     async fn list_automation(
         &self,
         request: talos_sdk::AutomationListRequest,
     ) -> TalosResult<talos_sdk::AutomationListResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::list_automation(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::list_automation(client.client(), request).await
     }
     async fn automation_command_catalog(
         &self,
         request: talos_sdk::AutomationCommandCatalogRequest,
     ) -> TalosResult<talos_sdk::AutomationCommandCatalogResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::automation_command_catalog(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::automation_command_catalog(client.client(), request).await
     }
     async fn resolve_automation_command(
         &self,
         request: talos_sdk::AutomationCommandResolveRequest,
     ) -> TalosResult<talos_sdk::AutomationCommandResolveResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::resolve_automation_command(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::resolve_automation_command(client.client(), request).await
     }
     async fn list_builtin_jobs(
         &self,
         request: talos_sdk::BuiltinJobListRequest,
     ) -> TalosResult<talos_sdk::BuiltinJobListResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::list_builtin_jobs(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::list_builtin_jobs(client.client(), request).await
     }
     async fn control_builtin_job(
         &self,
         request: talos_sdk::BuiltinJobControlRequest,
     ) -> TalosResult<talos_sdk::BuiltinJobInfo> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::control_builtin_job(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::control_builtin_job(client.client(), request).await
     }
     async fn list_skills(
         &self,
         request: talos_sdk::SkillsListRequest,
     ) -> TalosResult<talos_sdk::SkillsListResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::list_skills(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::list_skills(client.client(), request).await
     }
     async fn list_models(&self) -> TalosResult<ModelListResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::list_models(&mut *client, ModelListRequest { node_id: None }).await
+        let mut client = self.request().await;
+        SdkGatewayClient::list_models(client.client(), ModelListRequest { node_id: None }).await
     }
 
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::read_auth_session(&mut *client, AuthSessionReadRequest {}).await
+        let mut client = self.request().await;
+        SdkGatewayClient::read_auth_session(client.client(), AuthSessionReadRequest {}).await
     }
 
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::suggest_skills(
-            &mut *client,
+            client.client(),
             SkillsSuggestRequest {
                 node_id: None,
                 query: query.to_string(),
@@ -277,13 +316,13 @@ where
         request: FileUploadRequest,
         data: Bytes,
     ) -> TalosResult<FileUploadResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::upload_file(&mut *client, request, data).await
+        let mut client = self.request().await;
+        SdkGatewayClient::upload_file(client.client(), request, data).await
     }
 
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::list_sessions(&mut *client, SessionListRequest::default())
+        let mut client = self.request().await;
+        SdkGatewayClient::list_sessions(client.client(), SessionListRequest::default())
             .await
             .map(|response| {
                 response
@@ -295,9 +334,9 @@ where
     }
 
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::get_session(
-            &mut *client,
+            client.client(),
             SessionGetRequest {
                 session_id: session_id.to_string(),
             },
@@ -307,9 +346,9 @@ where
     }
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::close_session(
-            &mut *client,
+            client.client(),
             SessionCloseRequest {
                 session_id: session_id.to_string(),
             },
@@ -319,9 +358,9 @@ where
     }
 
     async fn cancel_active_turn(&self, session_id: &str, turn_id: &str) -> TalosResult<()> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::interrupt_turn(
-            &mut *client,
+            client.client(),
             InterruptTurnRequest {
                 identity: AgentTurnRef::new(session_id, turn_id),
             },
@@ -334,62 +373,62 @@ where
         &self,
         request: MessageQueueAddRequest,
     ) -> TalosResult<MessageQueue> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::add_queued_message(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::add_queued_message(client.client(), request).await
     }
 
     async fn list_message_queue(
         &self,
         request: MessageQueueListRequest,
     ) -> TalosResult<MessageQueue> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::list_message_queue(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::list_message_queue(client.client(), request).await
     }
 
     async fn update_queued_message(
         &self,
         request: MessageQueueUpdateRequest,
     ) -> TalosResult<MessageQueue> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::update_queued_message(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::update_queued_message(client.client(), request).await
     }
 
     async fn delete_queued_message(
         &self,
         request: MessageQueueDeleteRequest,
     ) -> TalosResult<MessageQueue> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::delete_queued_message(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::delete_queued_message(client.client(), request).await
     }
 
     async fn reorder_message_queue(
         &self,
         request: MessageQueueReorderRequest,
     ) -> TalosResult<MessageQueue> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::reorder_message_queue(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::reorder_message_queue(client.client(), request).await
     }
 
     async fn start_queued_message(
         &self,
         request: MessageQueueStartRequest,
     ) -> TalosResult<StartTurnResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::start_queued_message(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::start_queued_message(client.client(), request).await
     }
 
     async fn submit_turn_input(
         &self,
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::submit_turn_input(&mut *client, request).await
+        let mut client = self.request().await;
+        SdkGatewayClient::submit_turn_input(client.client(), request).await
     }
 
     async fn subscribe_session_events(&self, session_id: &str) -> TalosResult<SessionSubscription> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         let subscription = SdkGatewayClient::open_timeline_stream(
-            &mut *client,
+            client.client(),
             SubscribeTimelineRequest {
                 session_id: session_id.to_string(),
                 turn_id: None,
@@ -438,9 +477,9 @@ where
         session_id: &str,
         model_selection: &ModelSelection,
     ) -> TalosResult<SessionInfo> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::patch_session(
-            &mut *client,
+            client.client(),
             SessionPatchRequest {
                 session_id: session_id.to_string(),
                 conf: Some(SessionConf {
@@ -459,9 +498,9 @@ where
         session_id: &str,
         mode: UserPermissionMode,
     ) -> TalosResult<SessionInfo> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::patch_session(
-            &mut *client,
+            client.client(),
             SessionPatchRequest {
                 session_id: session_id.to_string(),
                 conf: Some(SessionConf {
@@ -476,9 +515,9 @@ where
     }
 
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::compact_session(
-            &mut *client,
+            client.client(),
             SessionCompactRequest {
                 session_id: session_id.to_string(),
             },
@@ -488,9 +527,9 @@ where
     }
 
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::clear_session(
-            &mut *client,
+            client.client(),
             SessionClearRequest {
                 session_id: session_id.to_string(),
             },
@@ -500,9 +539,9 @@ where
     }
 
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistoryResponse> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::get_session_history(
-            &mut *client,
+            client.client(),
             SessionHistoryRequest {
                 session_id: session_id.to_string(),
                 cursor: None,
@@ -513,9 +552,9 @@ where
     }
 
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<TimelineActiveTurn>> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::get_active_turn(
-            &mut *client,
+            client.client(),
             SessionActiveTurnRequest {
                 session_id: session_id.to_string(),
             },
@@ -527,15 +566,19 @@ where
     async fn start_turn_stream(
         &self,
         mut request: StartTurnRequest,
+        accepted_turn: Option<oneshot::Sender<String>>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
         let session_id = request.session_id.clone();
         if request.client_request_id.is_none() {
             request.client_request_id = Some(format!("tui-{}", uuid::Uuid::new_v4().simple()));
         }
-        let mut client = self.lock().await;
-        let response = SdkGatewayClient::start_turn(&mut *client, request).await?;
+        let mut client = self.request().await;
+        let response = SdkGatewayClient::start_turn(client.client(), request).await?;
+        if let Some(accepted_turn) = accepted_turn {
+            let _ = accepted_turn.send(response.turn_id.clone());
+        }
         let subscription = SdkGatewayClient::open_timeline_stream(
-            &mut *client,
+            client.client(),
             SubscribeTimelineRequest {
                 session_id,
                 turn_id: Some(response.turn_id),
@@ -554,9 +597,9 @@ where
         session_id: &str,
         since_event_id: Option<String>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         let active_turn = SdkGatewayClient::get_active_turn(
-            &mut *client,
+            client.client(),
             SessionActiveTurnRequest {
                 session_id: session_id.to_string(),
             },
@@ -570,7 +613,7 @@ where
             ));
         };
         let subscription = SdkGatewayClient::open_timeline_stream(
-            &mut *client,
+            client.client(),
             SubscribeTimelineRequest {
                 session_id: session_id.to_string(),
                 turn_id: Some(active_turn.active_turn.identity.turn_id),
@@ -589,9 +632,9 @@ where
         session_id: &str,
         since_event_id: Option<String>,
     ) -> TalosResult<mpsc::Receiver<TimelineEvent>> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         let subscription = SdkGatewayClient::open_timeline_stream(
-            &mut *client,
+            client.client(),
             SubscribeTimelineRequest {
                 session_id: session_id.to_string(),
                 turn_id: None,
@@ -610,9 +653,9 @@ where
         session_id: &str,
         after_event_id: Option<String>,
     ) -> TalosResult<RecoverTimelineResponse> {
-        let mut client = self.lock().await;
+        let mut client = self.request().await;
         SdkGatewayClient::recover_timeline(
-            &mut *client,
+            client.client(),
             RecoverTimelineRequest {
                 session_id: session_id.to_string(),
                 after_event_id,
@@ -623,7 +666,7 @@ where
     }
 
     async fn shutdown(&self) -> TalosResult<()> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::shutdown(&mut *client).await
+        let mut client = self.request().await;
+        SdkGatewayClient::shutdown(client.client()).await
     }
 }

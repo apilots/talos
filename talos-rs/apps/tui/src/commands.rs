@@ -66,61 +66,59 @@ impl TuiApp {
                     return Ok(false);
                 }
             };
-            let file_ids = match self.upload_pending_image_attachments().await {
-                Ok(file_ids) => file_ids,
-                Err(error) => {
-                    self.push_system_notice(format!(
-                        "Failed to upload image attachment: {}",
-                        error.to_api_error().message
-                    ));
-                    self.push_right_event("image attachment upload failed".to_string());
-                    return Ok(false);
+            if self.pasted_image_attachments.is_empty() {
+                self.submit_composed_message(user_input, Vec::new()).await
+            } else {
+                if let Err(error) = self
+                    .start_image_upload(crate::attachments::ImageSubmission::Message(user_input))
+                {
+                    self.report_image_upload_failure(error);
                 }
-            };
-            let original_input = self.input_buffer.clone();
-            let original_pasted_blocks = self.pasted_blocks.clone();
-            let original_pasted_images = self.pasted_image_attachments.clone();
-            let original_pasted_image_sequence = self.pasted_image_sequence;
-            let original_selected_skills = self.selected_skills.clone();
-            self.reset_input();
-            match self
-                .send_user_message_with_skills(
-                    user_input.clone(),
-                    original_selected_skills.clone(),
-                    file_ids,
-                )
-                .await
-            {
-                Ok(true) => Ok(false),
-                Ok(false) => {
-                    self.input_buffer = original_input;
-                    self.cursor_index = self.input_buffer.chars().count();
-                    self.pasted_blocks = original_pasted_blocks;
-                    self.selected_pasted_block = if self.pasted_blocks.is_empty() {
-                        None
-                    } else {
-                        Some(self.pasted_blocks.len().saturating_sub(1))
-                    };
-                    self.pasted_image_attachments = original_pasted_images;
-                    self.pasted_image_sequence = original_pasted_image_sequence;
-                    self.selected_skills = original_selected_skills;
-                    Ok(false)
-                }
-                Err(err) => Err(err),
+                Ok(false)
             }
         };
 
         match result {
             Ok(should_quit) => Ok(should_quit),
-            Err(err) => {
-                self.push_system_notice(format!(
-                    "Failed to handle input: {}",
-                    err.to_api_error().message
-                ));
-                self.push_right_event("input handling failed".to_string());
+            Err(error) => {
+                self.report_input_failure(error);
                 Ok(false)
             }
         }
+    }
+
+    pub(crate) async fn submit_composed_message(
+        &mut self,
+        user_input: String,
+        file_ids: Vec<String>,
+    ) -> TalosResult<bool> {
+        let original_input = self.input_buffer.clone();
+        let original_pasted_blocks = self.pasted_blocks.clone();
+        let original_pasted_images = self.pasted_image_attachments.clone();
+        let original_pasted_image_sequence = self.pasted_image_sequence;
+        let original_selected_skills = self.selected_skills.clone();
+        self.reset_input();
+        if !self
+            .send_user_message_with_skills(user_input, original_selected_skills.clone(), file_ids)
+            .await?
+        {
+            self.input_buffer = original_input;
+            self.cursor_index = self.input_buffer.chars().count();
+            self.pasted_blocks = original_pasted_blocks;
+            self.selected_pasted_block = self.pasted_blocks.len().checked_sub(1);
+            self.pasted_image_attachments = original_pasted_images;
+            self.pasted_image_sequence = original_pasted_image_sequence;
+            self.selected_skills = original_selected_skills;
+        }
+        Ok(false)
+    }
+
+    pub(crate) fn report_input_failure(&mut self, error: TalosError) {
+        self.push_system_notice(format!(
+            "Failed to handle input: {}",
+            error.to_api_error().message
+        ));
+        self.push_right_event("input handling failed".to_string());
     }
 
     pub(crate) async fn execute_command(&mut self, command_line: &str) -> TalosResult<bool> {
@@ -580,6 +578,19 @@ impl TuiApp {
 
     pub(crate) fn load_session_history(&mut self, session: SessionInfo) {
         let session_id = session.id.clone();
+        self.pending_image_upload = None;
+        self.pending_interrupt = None;
+        if self.session_id.as_deref() != Some(session_id.as_str()) {
+            if self.in_flight
+                || self.pending_stream.is_some()
+                || self.pending_stream_connect.is_some()
+            {
+                self.finish_active_stream("session switched", false, false);
+            }
+            self.session_subscription = None;
+            self.session_subscription_session_id = None;
+            self.pending_user_action = None;
+        }
         self.session_id = Some(session_id.clone());
         self.set_current_model_selection(&session.model_selection);
         self.session_usage = session.usage.tokens.clone();
@@ -680,6 +691,9 @@ impl TuiApp {
         let (tx, rx) = mpsc::channel(1);
         self.pending_close_update = Some(rx);
         self.close_in_progress = true;
+        self.pending_image_upload = None;
+        self.pending_reconnect = None;
+        self.pending_interrupt = None;
         self.close_started_at = Some(Instant::now());
         self.close_slow_notice_reported = false;
         self.closing_session_id = Some(closing_session_id.clone());

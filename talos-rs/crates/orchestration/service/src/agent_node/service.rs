@@ -20,6 +20,7 @@ use talos_store::session::SessionRecord;
 use tokio::sync::Mutex;
 
 use super::types::NodePrincipal;
+use crate::keyed_gates::KeyedGates;
 use crate::Actor;
 
 const LEASE_SECONDS: i64 = 90;
@@ -50,10 +51,11 @@ pub struct AgentNodeService {
         Arc<std::sync::RwLock<Option<Arc<dyn super::ComputerManagement>>>>,
     account_sync: Arc<std::sync::RwLock<Option<std::sync::Weak<dyn crate::ManagementSync>>>>,
     current: Arc<Mutex<HashMap<String, CurrentRegistration>>>,
-    lifecycle: Arc<Mutex<()>>,
+    lifecycle: Arc<KeyedGates>,
     admission: Arc<crate::turn::NodeAdmissionGates>,
     managed: Arc<std::sync::OnceLock<managed_worker::ManagedWorkers>>,
-    managed_submission: Arc<Mutex<bool>>,
+    managed_runtime_update: Arc<Mutex<bool>>,
+    managed_intent: Arc<KeyedGates>,
 }
 
 struct CurrentRegistration {
@@ -70,17 +72,19 @@ impl AgentNodeService {
             remote_management: Default::default(),
             account_sync: Default::default(),
             current: Arc::new(Mutex::new(HashMap::new())),
-            lifecycle: Arc::new(Mutex::new(())),
+            lifecycle: Default::default(),
             admission: Default::default(),
             managed: Default::default(),
-            managed_submission: Default::default(),
+            managed_runtime_update: Default::default(),
+            managed_intent: Default::default(),
         }
     }
 
-    /// Serialize Register/Unregister together with transport publication.
-    /// Directory mutations take this same lock internally. Never hold it during execution.
-    pub async fn lock_lifecycle(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.lifecycle.lock().await
+    /// Serialize registration, renewal and publication with directory mutations
+    /// for one node. The transport holds this guard across its publication work.
+    /// Never hold it during Turn execution.
+    pub async fn lock_lifecycle(&self, node_id: &str) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+        self.lifecycle.for_node(node_id).write_owned().await
     }
 
     /// Persist the trusted in-process node after composition installs its
@@ -302,6 +306,7 @@ impl AgentNodeService {
         Ok(node)
     }
 
+    /// The transport must hold this node's lifecycle guard through publication.
     pub async fn register(
         &self,
         principal: &NodePrincipal,
@@ -315,7 +320,6 @@ impl AgentNodeService {
             return Err(unauthenticated());
         };
         validate_deployments(&params)?;
-        let mut current = self.current.lock().await;
         let now_at = now();
         let node = self.store.get(node_id).await?.ok_or_else(unauthenticated)?;
         let credential_expires_at = node.credential_expires_at.ok_or_else(unauthenticated)?;
@@ -333,7 +337,7 @@ impl AgentNodeService {
                 now_at,
             })
             .await?;
-        let previous = current.insert(
+        let previous = self.current.lock().await.insert(
             node_id.clone(),
             CurrentRegistration {
                 token_hash,
@@ -342,7 +346,6 @@ impl AgentNodeService {
                 prepare_deletion: None,
             },
         );
-        drop(current);
         revoke_registration(previous).await;
         Ok(Registration {
             lease_token: token,
@@ -364,7 +367,7 @@ impl AgentNodeService {
         else {
             return Err(unauthenticated());
         };
-        let current = self.current.lock().await;
+        let _lifecycle = self.lock_lifecycle(node_id).await;
         let now_at = now();
         let node = self.store.get(node_id).await?.ok_or_else(unauthenticated)?;
         let expires_at =
@@ -380,7 +383,6 @@ impl AgentNodeService {
                 expires_at,
             })
             .await?;
-        drop(current);
         Ok(LeaseValidity {
             expires_at: renewed
                 .lease_expires_at
@@ -401,7 +403,6 @@ impl AgentNodeService {
         else {
             return Err(unauthenticated());
         };
-        let current = self.current.lock().await;
         let now_at = now();
         self.store
             .heartbeat(HeartbeatNodeParams {
@@ -413,6 +414,7 @@ impl AgentNodeService {
                 health: params.health,
             })
             .await?;
+        let current = self.current.lock().await;
         Ok(HeartbeatResult {
             received_at: now_at,
             registration_required: current
@@ -421,6 +423,7 @@ impl AgentNodeService {
         })
     }
 
+    /// The transport must hold this node's lifecycle guard through withdrawal.
     pub async fn unregister(&self, principal: &NodePrincipal) -> TalosResult<()> {
         let NodePrincipal::Lease {
             node_id,
@@ -429,7 +432,6 @@ impl AgentNodeService {
         else {
             return Err(unauthenticated());
         };
-        let mut current = self.current.lock().await;
         self.store
             .unregister(LeaseCheck {
                 node_id: node_id.clone(),
@@ -437,6 +439,7 @@ impl AgentNodeService {
                 now_at: now(),
             })
             .await?;
+        let mut current = self.current.lock().await;
         let previous = if current
             .get(node_id)
             .is_some_and(|value| value.token_hash == *token_hash)

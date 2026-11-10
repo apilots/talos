@@ -37,7 +37,7 @@ impl NodeControlRpc {
         };
         let auth = node_pb::decode_auth(first.auth).map_err(control_status)?;
         node_pb::require_empty(first.params).map_err(control_status)?;
-        let lifecycle = self.nodes.lock_lifecycle().await;
+        let lifecycle = self.nodes.lock_lifecycle(&auth.node_id).await;
         let deployments = self
             .nodes
             .outbound_deployments(&auth)
@@ -137,7 +137,7 @@ impl NodeControlRpc {
                     }
                 }
             }
-            let _lifecycle = nodes.lock_lifecycle().await;
+            let _lifecycle = nodes.lock_lifecycle(&auth.node_id).await;
             nodes.withdraw_publication(&auth, &revoke).await;
         });
         Ok(Response::new(Box::pin(tokio_stream::StreamExt::map(
