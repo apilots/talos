@@ -1,9 +1,8 @@
 use crate::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
-    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningBlock,
-    ReasoningContinuation, ReasoningEncryptedBlock, ReasoningOutput, ReasoningSummaryBlock,
-    ReasoningTextBlock, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
+    ChatChunk, ChatMessage, ChatRequest, ChatStream, ModelBlockCompleted, ModelBlockDelta,
+    ModelBlockKind, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, ModelOutputPhase,
+    ModelToolCallStart, ReasoningContinuation, ReasoningOutput, Role, SseLineDecoder, ToolChoice,
+    ToolDefinition,
 };
 use futures_util::StreamExt;
 use serde::Deserialize;
@@ -13,16 +12,28 @@ use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 
 mod attachments;
+mod decode;
 mod reasoning;
+mod terminal;
 mod types;
 
+use decode::reasoning_from_item;
+pub use decode::{chat_response, official_chat_response, response_content, usage};
+use terminal::{stream_terminal, unterminated_stream};
 pub use types::*;
 
 #[derive(Debug, Clone)]
 enum ActiveResponsesBlock {
-    Reasoning { model_item_id: String },
-    AssistantText { model_item_id: String },
-    ToolCall { model_item_id: String },
+    Reasoning {
+        model_item_id: String,
+    },
+    AssistantText {
+        model_item_id: String,
+    },
+    ToolCall {
+        model_item_id: String,
+        arguments: String,
+    },
 }
 
 pub fn request(
@@ -30,9 +41,19 @@ pub fn request(
     stream: Option<bool>,
     options: ResponsesRequestOptions,
 ) -> TalosResult<ResponsesRequest> {
+    request_with_contract(request, stream, options, ResponsesContract::Compatible)
+}
+
+/// Encodes a request using the selected endpoint's reasoning replay contract.
+pub fn request_with_contract(
+    request: ChatRequest,
+    stream: Option<bool>,
+    options: ResponsesRequestOptions,
+    contract: ResponsesContract,
+) -> TalosResult<ResponsesRequest> {
     Ok(ResponsesRequest {
         model: request.model,
-        input: input(request.messages)?,
+        input: input_with_contract(request.messages, contract)?,
         temperature: request.temperature,
         max_output_tokens: request.max_tokens,
         top_p: request.top_p,
@@ -41,11 +62,19 @@ pub fn request(
         parallel_tool_calls: request.parallel_tool_calls,
         reasoning: options.reasoning,
         include: options.include,
+        store: None,
         stream,
     })
 }
 
 pub fn input(messages: Vec<ChatMessage>) -> TalosResult<Vec<Value>> {
+    input_with_contract(messages, ResponsesContract::Compatible)
+}
+
+fn input_with_contract(
+    messages: Vec<ChatMessage>,
+    contract: ResponsesContract,
+) -> TalosResult<Vec<Value>> {
     let mut items = Vec::new();
 
     for message in messages {
@@ -70,7 +99,7 @@ pub fn input(messages: Vec<ChatMessage>) -> TalosResult<Vec<Value>> {
                 }));
             }
             Role::Assistant => {
-                items.extend(reasoning::items(message.reasoning_continuation)?);
+                items.extend(reasoning::items(message.reasoning_continuation, contract)?);
                 if !message.content.is_empty() {
                     items.push(serde_json::json!({
                         "role": "assistant",
@@ -113,6 +142,7 @@ pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ResponsesTo
                 name: tool.name,
                 description: tool.description,
                 parameters: tool.parameters,
+                strict: None,
             })
             .collect()
     })
@@ -131,80 +161,19 @@ pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ResponsesToolChoice> {
     }
 }
 
-pub fn usage(usage: Option<ResponsesUsage>) -> Usage {
-    let Some(usage) = usage else {
-        return Usage::default();
-    };
-    Usage {
-        prompt_tokens: usage.input_tokens,
-        completion_tokens: usage.output_tokens,
-        total_tokens: usage.total_tokens,
-        cache_creation_input_tokens: None,
-        cache_read_input_tokens: usage
-            .input_tokens_details
-            .and_then(|details| details.cached_tokens),
-    }
-}
-
-pub fn chat_response(response: ResponsesResponse) -> ChatResponse {
-    let (content, reasoning, tool_calls) = response_content(&response);
-    ChatResponse {
-        content,
-        reasoning,
-        model: response.model.unwrap_or_default(),
-        usage: usage(response.usage),
-        finish_reason: finish_reason(response.status.as_deref()),
-        tool_calls,
-    }
-}
-
-pub fn response_content(
-    response: &ResponsesResponse,
-) -> (String, ReasoningOutput, Option<Vec<FunctionCall>>) {
-    let mut text = Vec::new();
-    let mut display_text = Vec::new();
-    let mut continuation = Vec::new();
-    let mut calls = Vec::new();
-
-    let has_output_text = response
-        .output_text
-        .as_ref()
-        .is_some_and(|text| !text.is_empty());
-    if let Some(output_text) = response.output_text.as_ref() {
-        if !output_text.is_empty() {
-            text.push(output_text.clone());
-        }
-    }
-
-    for item in &response.output {
-        match item_type(item) {
-            "message" if !has_output_text => text.extend(text_from_message_item(item)),
-            "reasoning" => {
-                let (display, blocks) = reasoning_from_item(item);
-                display_text.extend(display);
-                continuation.extend(blocks);
-            }
-            "function_call" => calls.push(function_call(item)),
-            _ => {}
-        }
-    }
-
-    let tool_calls = if calls.is_empty() { None } else { Some(calls) };
-    let continuation =
-        (!continuation.is_empty()).then_some(ReasoningContinuation::Blocks(continuation));
-    (
-        text.join(""),
-        ReasoningOutput {
-            display_text,
-            continuation,
-        },
-        tool_calls,
-    )
-}
-
 pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> ChatStream {
+    stream_with_contract(response, provider_name, ResponsesContract::Compatible)
+}
+
+/// Decodes text events using the selected endpoint's termination contract.
+pub fn stream_with_contract(
+    response: reqwest::Response,
+    provider_name: impl Into<String>,
+    contract: ResponsesContract,
+) -> ChatStream {
     let (tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(100);
     let provider_name = provider_name.into();
+    let official = contract == ResponsesContract::Official;
 
     tokio::spawn(async move {
         let request_context = crate::error::response_context(&response);
@@ -232,12 +201,15 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             continue;
                         }
                         if data == "[DONE]" {
-                            let _ = tx
-                                .send(Ok(ChatChunk {
+                            let result = if official {
+                                Err(unterminated_stream(&request_context))
+                            } else {
+                                Ok(ChatChunk {
                                     delta: String::new(),
                                     finish_reason: Some("stop".to_string()),
-                                }))
-                                .await;
+                                })
+                            };
+                            let _ = tx.send(result).await;
                             return;
                         }
 
@@ -253,38 +225,29 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             }
                         };
 
-                        if let Some(error) = stream_error(&event) {
-                            let _ = tx.send(Err(error.context(provider_name))).await;
+                        if let Some(terminal) = stream_terminal(&event, false, contract) {
+                            let result = terminal.map(|finish_reason| ChatChunk {
+                                delta: String::new(),
+                                finish_reason: Some(finish_reason),
+                            });
+                            let _ = tx
+                                .send(result.map_err(|error| error.context(&request_context)))
+                                .await;
                             return;
                         }
 
-                        match event_type(&event) {
-                            "response.output_text.delta" => {
-                                if let Some(delta) = event.get("delta").and_then(Value::as_str) {
-                                    let _ = tx
-                                        .send(Ok(ChatChunk {
-                                            delta: delta.to_string(),
-                                            finish_reason: None,
-                                        }))
-                                        .await;
-                                }
-                            }
-                            "response.completed" => {
-                                let reason = event
-                                    .get("response")
-                                    .and_then(|r| r.get("status"))
-                                    .and_then(Value::as_str)
-                                    .and_then(|status| finish_reason(Some(status)))
-                                    .or_else(|| Some("stop".to_string()));
+                        let kind = event_type(&event);
+                        if kind == "response.output_text.delta"
+                            || (official && kind == "response.refusal.delta")
+                        {
+                            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                                 let _ = tx
                                     .send(Ok(ChatChunk {
-                                        delta: String::new(),
-                                        finish_reason: reason,
+                                        delta: delta.to_string(),
+                                        finish_reason: None,
                                     }))
                                     .await;
-                                return;
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -296,6 +259,9 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
             }
         }
+        if official {
+            let _ = tx.send(Err(unterminated_stream(&request_context))).await;
+        }
     });
 
     ChatStream::new(rx)
@@ -305,6 +271,16 @@ pub fn model_blocks(
     response: reqwest::Response,
     options: ResponsesModelBlocks,
 ) -> ModelBlockStream {
+    model_blocks_with_contract(response, options, ResponsesContract::Compatible)
+}
+
+/// Decodes model blocks using the selected endpoint's termination and tool contract.
+pub fn model_blocks_with_contract(
+    response: reqwest::Response,
+    options: ResponsesModelBlocks,
+    contract: ResponsesContract,
+) -> ModelBlockStream {
+    let official = contract == ResponsesContract::Official;
     let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
 
     tokio::spawn(async move {
@@ -314,8 +290,6 @@ pub fn model_blocks(
         let mut active_blocks: HashMap<String, ActiveResponsesBlock> = HashMap::new();
         let mut next_tool_index = 0;
         let mut reasoning_output = ReasoningOutput::default();
-        let mut final_usage: Option<Usage> = None;
-        let mut final_finish_reason: Option<String> = None;
 
         while let Some(chunk_result) =
             tokio::select! { _ = tx.closed() => return, next = stream.next() => next }
@@ -338,6 +312,10 @@ pub fn model_blocks(
                             continue;
                         }
                         if data == "[DONE]" {
+                            if official {
+                                let _ = tx.send(Err(unterminated_stream(&request_context))).await;
+                                return;
+                            }
                             if !complete_open_blocks(&tx, &mut active_blocks).await {
                                 return;
                             }
@@ -346,10 +324,8 @@ pub fn model_blocks(
                             }
                             let _ = tx
                                 .send(Ok(ModelBlockStreamEvent::Done {
-                                    finish_reason: final_finish_reason
-                                        .clone()
-                                        .or_else(|| Some("stop".to_string())),
-                                    usage: final_usage.clone(),
+                                    finish_reason: Some("stop".to_string()),
+                                    usage: None,
                                 }))
                                 .await;
                             return;
@@ -368,13 +344,46 @@ pub fn model_blocks(
                             }
                         };
 
-                        if let Some(error) = stream_error(&event) {
-                            let _ = tx
-                                .send(Err({ let diagnostic = format!(
-                                    "{} responses stream error: {error}",
-                                    options.provider_name
-                                ); TalosError::internal_with_source("Model responses stream error; technical details were withheld.", error).context(diagnostic) }))
-                                .await;
+                        if let Some(terminal) =
+                            stream_terminal(&event, next_tool_index != 0, contract)
+                        {
+                            let finish_reason = match terminal {
+                                Ok(reason) => reason,
+                                Err(error) => {
+                                    let error = if official {
+                                        error.context(&request_context)
+                                    } else {
+                                        let diagnostic = format!(
+                                            "{} responses stream error: {error}",
+                                            options.provider_name
+                                        );
+                                        TalosError::internal_with_source(
+                                            "Model responses stream error; technical details were withheld.",
+                                            error,
+                                        )
+                                        .context(diagnostic)
+                                    };
+                                    let _ = tx.send(Err(error)).await;
+                                    return;
+                                }
+                            };
+                            let final_usage = event
+                                .get("response")
+                                .and_then(|r| r.get("usage"))
+                                .and_then(|value| {
+                                    serde_json::from_value::<ResponsesUsage>(value.clone()).ok()
+                                })
+                                .map(|value| usage(Some(value)));
+                            if complete_open_blocks(&tx, &mut active_blocks).await
+                                && send_reasoning_output(&tx, &mut reasoning_output).await
+                            {
+                                let _ = tx
+                                    .send(Ok(ModelBlockStreamEvent::Done {
+                                        finish_reason: Some(finish_reason),
+                                        usage: final_usage,
+                                    }))
+                                    .await;
+                            }
                             return;
                         }
 
@@ -392,7 +401,9 @@ pub fn model_blocks(
                                     return;
                                 }
                             }
-                            "response.output_text.delta" => {
+                            kind if kind == "response.output_text.delta"
+                                || (official && kind == "response.refusal.delta") =>
+                            {
                                 if !send_text_delta(
                                     &tx,
                                     &mut active_blocks,
@@ -430,40 +441,25 @@ pub fn model_blocks(
                                     return;
                                 }
                             }
-                            "response.output_item.done" => {
-                                append_reasoning_output(&mut reasoning_output, &event);
-                                if !complete_output_item(&tx, &mut active_blocks, &event).await {
+                            "response.function_call_arguments.done" if official => {
+                                let key = block_key("tool", output_index(&event));
+                                if !reconcile_tool_arguments(
+                                    &tx,
+                                    active_blocks.get_mut(&key),
+                                    event["arguments"].as_str(),
+                                )
+                                .await
+                                {
                                     return;
                                 }
                             }
-                            "response.completed" => {
-                                final_usage = event
-                                    .get("response")
-                                    .and_then(|r| r.get("usage"))
-                                    .and_then(|value| {
-                                        serde_json::from_value::<ResponsesUsage>(value.clone()).ok()
-                                    })
-                                    .map(|usage_value| usage(Some(usage_value)));
-                                final_finish_reason = event
-                                    .get("response")
-                                    .and_then(|r| r.get("status"))
-                                    .and_then(Value::as_str)
-                                    .and_then(|status| finish_reason(Some(status)));
-                                if !complete_open_blocks(&tx, &mut active_blocks).await {
+                            "response.output_item.done" => {
+                                append_reasoning_output(&mut reasoning_output, &event);
+                                if !complete_output_item(&tx, &mut active_blocks, &event, contract)
+                                    .await
+                                {
                                     return;
                                 }
-                                if !send_reasoning_output(&tx, &mut reasoning_output).await {
-                                    return;
-                                }
-                                let _ = tx
-                                    .send(Ok(ModelBlockStreamEvent::Done {
-                                        finish_reason: final_finish_reason
-                                            .clone()
-                                            .or_else(|| Some("stop".to_string())),
-                                        usage: final_usage.clone(),
-                                    }))
-                                    .await;
-                                return;
                             }
                             _ => {}
                         }
@@ -476,6 +472,9 @@ pub fn model_blocks(
                     return;
                 }
             }
+        }
+        if official {
+            let _ = tx.send(Err(unterminated_stream(&request_context))).await;
         }
     });
 
@@ -496,117 +495,6 @@ fn output_index(event: &Value) -> usize {
         .or_else(|| event.get("index"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize
-}
-
-fn text_from_message_item(item: &Value) -> Vec<String> {
-    let Some(content) = item.get("content").and_then(|v| v.as_array()) else {
-        return Vec::new();
-    };
-    content
-        .iter()
-        .filter_map(|block| {
-            let block_type = item_type(block);
-            if block_type == "output_text" || block_type == "text" {
-                block
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
-    let provider_item_id = item.get("id").and_then(Value::as_str).map(str::to_string);
-    let mut display_text = Vec::new();
-    let mut blocks = Vec::new();
-
-    if let Some(items) = item.get("summary").and_then(|v| v.as_array()) {
-        for block in items {
-            if let Some(text) = block.get("text").and_then(Value::as_str) {
-                display_text.push(text.to_string());
-                blocks.push(ReasoningBlock::Summary(ReasoningSummaryBlock {
-                    provider_item_id: provider_item_id.clone(),
-                    provider_index: None,
-                    text: text.to_string(),
-                    format: Some("openai-responses-v1".to_string()),
-                }));
-            }
-        }
-    }
-    if let Some(items) = item.get("content").and_then(|v| v.as_array()) {
-        for block in items {
-            if let Some(text) = block.get("text").and_then(Value::as_str) {
-                display_text.push(text.to_string());
-                blocks.push(ReasoningBlock::Text(ReasoningTextBlock {
-                    provider_item_id: provider_item_id.clone(),
-                    provider_index: None,
-                    text: text.to_string(),
-                    signature: None,
-                    format: Some("openai-responses-v1".to_string()),
-                }));
-            }
-        }
-    }
-    if let Some(data) = item.get("encrypted_content").and_then(Value::as_str) {
-        blocks.push(ReasoningBlock::Encrypted(ReasoningEncryptedBlock {
-            provider_item_id,
-            provider_index: None,
-            data: data.to_string(),
-            format: Some("openai-responses-v1".to_string()),
-        }));
-    }
-
-    (display_text, blocks)
-}
-
-fn function_call(item: &Value) -> FunctionCall {
-    FunctionCall::from_response(
-        item.get("call_id")
-            .or_else(|| item.get("id"))
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-        item.get("name").and_then(Value::as_str).unwrap_or_default(),
-        item.get("arguments").cloned().unwrap_or(Value::Null),
-    )
-}
-
-fn finish_reason(status: Option<&str>) -> Option<String> {
-    match status {
-        Some("completed") => Some("stop".to_string()),
-        Some(status) if !status.is_empty() => Some(status.to_string()),
-        _ => None,
-    }
-}
-
-fn stream_error(event: &Value) -> Option<TalosError> {
-    match event_type(event) {
-        "error" | "response.failed" | "response.incomplete" => {
-            Some(crate::error::stream_response_error(
-                event
-                    .get("error")
-                    .and_then(|e| e.get("code"))
-                    .and_then(Value::as_str)
-                    .or_else(|| {
-                        event
-                            .get("response")
-                            .and_then(|r| r.get("error"))
-                            .and_then(|e| e.get("code"))
-                            .and_then(Value::as_str)
-                    })
-                    .or_else(|| {
-                        event
-                            .get("response")
-                            .and_then(|r| r.get("incomplete_details"))
-                            .and_then(|d| d.get("reason"))
-                            .and_then(Value::as_str)
-                    }),
-            ))
-        }
-        _ => None,
-    }
 }
 
 fn block_key(kind: &str, index: usize) -> String {
@@ -631,19 +519,14 @@ async fn start_output_item(
     event: &Value,
     item_prefix: &str,
 ) -> bool {
-    let index = output_index(event);
     let item = event.get("item").unwrap_or(&Value::Null);
-    let item_type = item_type(item);
-    match item_type {
+    match item_type(item) {
         "reasoning" => ensure_reasoning_block(tx, active_blocks, event, item_prefix).await,
         "message" => ensure_text_block(tx, active_blocks, event, item_prefix).await,
         "function_call" => {
             ensure_tool_block(tx, active_blocks, next_tool_index, event, item_prefix).await
         }
-        _ => {
-            let _ = index;
-            true
-        }
+        _ => true,
     }
 }
 
@@ -718,12 +601,17 @@ async fn send_tool_delta(
     }
     let index = output_index(event);
     let key = block_key("tool", index);
-    let Some(ActiveResponsesBlock::ToolCall { model_item_id }) = active_blocks.get(&key) else {
+    let Some(ActiveResponsesBlock::ToolCall {
+        model_item_id,
+        arguments,
+    }) = active_blocks.get_mut(&key)
+    else {
         return true;
     };
     let Some(delta) = event.get("delta").and_then(Value::as_str) else {
         return true;
     };
+    arguments.push_str(delta);
     send_model_block_event(
         tx,
         ModelBlockStreamEvent::BlockDelta {
@@ -824,6 +712,7 @@ async fn ensure_tool_block(
         key,
         ActiveResponsesBlock::ToolCall {
             model_item_id: model_item_id.clone(),
+            arguments: String::new(),
         },
     );
     send_model_block_event(
@@ -851,16 +740,76 @@ async fn complete_output_item(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
     active_blocks: &mut HashMap<String, ActiveResponsesBlock>,
     event: &Value,
+    contract: ResponsesContract,
 ) -> bool {
     let index = output_index(event);
     let item = event.get("item").unwrap_or(&Value::Null);
     let key = match item_type(item) {
         "reasoning" => block_key("reasoning", index),
         "message" => block_key("text", index),
+        "function_call" if contract == ResponsesContract::Official => {
+            if item["status"] == "incomplete" {
+                let _ = tx
+                    .send(Err(TalosError::internal(
+                        "The model response contained an incomplete tool call.",
+                    )))
+                    .await;
+                return false;
+            }
+            let key = block_key("tool", index);
+            if !reconcile_tool_arguments(
+                tx,
+                active_blocks.get_mut(&key),
+                item["arguments"].as_str(),
+            )
+            .await
+            {
+                return false;
+            }
+            key
+        }
         "function_call" => block_key("tool", index),
         _ => return true,
     };
     complete_block(tx, active_blocks, &key).await
+}
+
+async fn reconcile_tool_arguments(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    active_block: Option<&mut ActiveResponsesBlock>,
+    final_arguments: Option<&str>,
+) -> bool {
+    let (
+        Some(ActiveResponsesBlock::ToolCall {
+            model_item_id,
+            arguments,
+        }),
+        Some(final_arguments),
+    ) = (active_block, final_arguments)
+    else {
+        return true;
+    };
+    let Some(suffix) = final_arguments.strip_prefix(arguments.as_str()) else {
+        let _ = tx
+            .send(Err(TalosError::internal(
+                "The completed model tool arguments differ from the streamed arguments.",
+            )))
+            .await;
+        return false;
+    };
+    if suffix.is_empty() {
+        return true;
+    }
+    let delta = suffix.to_string();
+    arguments.push_str(&delta);
+    send_model_block_event(
+        tx,
+        ModelBlockStreamEvent::BlockDelta {
+            model_item_id: model_item_id.clone(),
+            delta: ModelBlockDelta::ToolArguments { delta },
+        },
+    )
+    .await
 }
 
 async fn complete_open_blocks(
@@ -887,7 +836,7 @@ async fn complete_block(
     let model_item_id = match active_block {
         ActiveResponsesBlock::Reasoning { model_item_id }
         | ActiveResponsesBlock::AssistantText { model_item_id }
-        | ActiveResponsesBlock::ToolCall { model_item_id } => model_item_id,
+        | ActiveResponsesBlock::ToolCall { model_item_id, .. } => model_item_id,
     };
     send_model_block_event(
         tx,

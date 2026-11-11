@@ -159,7 +159,8 @@ def chat_chunks(call, mode, done):
         "choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
         {"id": "fixture", "object": "chat.completion.chunk", "created": 1, "model": MODEL,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop" if done else "tool_calls"}],
-        "usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}}]
+        "usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110,
+            "prompt_tokens_details": {"cached_tokens": 80 if done else 0, "cache_write_tokens": 0 if done else 40}}}]
 
 
 def response_events(call, mode, done):
@@ -183,7 +184,8 @@ def response_events(call, mode, done):
     events.extend([{"type": "response.output_item.added", "output_index": index, "item": start}, delta,
         {"type": "response.output_item.done", "output_index": index, "item": item},
         {"type": "response.completed", "response": {"id": "resp_fixture", "status": "completed", "output": [item],
-            "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}}}])
+            "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110,
+                "input_tokens_details": {"cached_tokens": 80 if done else 0, "cache_write_tokens": 0 if done else 40}}}}])
     return events
 
 
@@ -310,6 +312,10 @@ def verify(base, directory):
             assert any(item.get("type") == "output_text" and f"PROTOCOL_OK:call_{provider}_{mode}" in item.get("text", "") for item in result["output"]), result
             assert sum(item.get("type") == "tool_call" and item.get("name") == "Bash" for item in result["output"]) == 1, result
             assert sum(item.get("type") == "tool_result" and not item.get("is_error") for item in result["output"]) == 1, result
+            if protocol in ("chat", "responses"):
+                usage = result["metrics"]["usage"]
+                assert usage["cache_read_input_tokens"] == 80, usage
+                assert usage["cache_creation_input_tokens"] == 40, usage
             if mode != "off":
                 assert result["reasoning"], "omit policy must preserve canonical reasoning display/history"
             print(f"CASE protocol_agent_tool_loop PASS protocol={protocol} replay={replay} thinking={mode} upstream_requests=2")

@@ -106,6 +106,44 @@ fixture/资源、配置及 CI 定义；全仓格式/错误/仓库检查使用更
 证据，无需覆盖旧缓存。构建归档仍按输入 key 仅保留一份并校验摘要；源码指纹跟踪文件类型
 和 Git 的可执行位，不把 runner 默认读写权限差异当作代码变化。
 
+## OpenAI 官方连接
+
+随附配置模板为 OpenAI 官方连接预设 Responses，升级保留已保存的协议和模型目录。
+模板列出 GPT-6 Astra、GPT-6.1 Sol、GPT-6.1 Terra 和 GPT-6 Luna，费用使用标准
+短上下文与 30 分钟缓存写入费率。
+
+GPT-6 Astra、GPT-6.1 Sol 和 GPT-6.1 Terra 的工具调用需要 Responses。
+GPT-6 Luna 和 GPT-5.4 mini 在 Chat Completions 中使用函数工具时需要关闭推理。
+
+关闭推理时，OpenAI 官方连接为 `gpt-6-luna`、`gpt-6.1-terra` 和旧版
+`gpt-6-sol` 显式发送 `none`。模板中的 `gpt-6.1-sol` 和 `gpt-6-astra`
+要求推理。关闭这两个模型的推理设置时，Talos 省略推理强度，由 OpenAI 使用模型默认值。
+GPT-6.1 Sol 的默认推理强度为 `medium`。参见
+[OpenAI 模型限制](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-limitations)和
+[GPT-6.1 Sol 文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。
+
+内置 OpenAI Provider 连接 `https://api.openai.com` 时，Chat 使用
+`max_completion_tokens` 设置输出上限。Responses 默认发送 `store: false`，
+并请求加密推理数据供本地历史回放。Responses 函数工具使用 `strict: false`，
+保留已声明的可选参数。Responses JSON 和 SSE 保留拒绝文本，纯文本达到
+输出上限时报告 `length`，上游失败以错误返回。
+Chat 和 Responses 将上游报告的缓存读取与写入映射到逐调用和回合用量字段。
+输出 token 包含 OpenAI 的推理 token，Talos 暂无单独的推理 token 计数。
+
+官方 Responses 要求流式响应包含终止事件，并校验工具参数的最终值。
+兼容端点沿用各自的推理回放和流式处理行为。
+
+## 百炼连接
+
+百炼 Chat Provider 解析[百炼上下文缓存](https://help.aliyun.com/zh/model-studio/context-cache)
+文档中的显式缓存字段。使用业务空间专属域名时，在 `llm.bailian.base_url`
+填写与 API Key 匹配的业务空间和地域地址。可查阅[百炼 Base URL 总览](https://help.aliyun.com/zh/model-studio/base-url)。
+
+支持分档思考的 Qwen 3.8 和 Qwen 4 模型默认发送 `reasoning_effort`。
+显式设置 `thinking_budget` 时使用预算模式，同时配置两者会报错。
+受支持的新款 Qwen Max 和 Flash 使用 `max_completion_tokens` 表示运行时输出上限，
+模型参数可显式指定 `max_tokens`。[百炼 Chat API](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)
+
 ## 端到端测试
 
 ```bash

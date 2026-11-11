@@ -106,7 +106,25 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
         let paths = TalosPaths::from_home(dir.path().join("home"));
         let template_path = repo_root.join("conf").join(profile);
         let mut saved = read_yaml_file(&template_path).unwrap();
+        assert_eq!(
+            get_path_for_test(&saved, &["llm", "openai", "protocol"]).and_then(YamlValue::as_str),
+            Some("responses"),
+            "{profile}"
+        );
+        // A saved OpenAI catalog and selection can predate the shipped GPT-6 entries.
+        saved["llm"]["openai"]["models"]
+            .as_sequence_mut()
+            .unwrap()
+            .retain(|model| !model["id"].as_str().unwrap().starts_with("gpt-6"));
+        // Managed upgrades preserve the operator's previously saved Bailian catalog.
+        saved["llm"]["bailian"]["models"]
+            .as_sequence_mut()
+            .unwrap()
+            .retain(|model| !model["id"].as_str().unwrap().starts_with("qwen3.8-"));
         for (path, value) in [
+            (vec!["llm", "provider"], "openai"),
+            (vec!["llm", "model"], "gpt-5.4-mini"),
+            (vec!["llm", "openai", "protocol"], "chat"),
             (vec!["sync", "enabled"], "false"),
             (vec!["agent", "identity"], "PERSONA.md"),
             (
