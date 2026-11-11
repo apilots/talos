@@ -29,13 +29,11 @@
       "commands": [
         "cargo",
         "protoc",
-        "curl",
         "git",
         "node"
       ],
       "checks": [],
       "binaries": [
-        "server",
         "cli"
       ]
     },

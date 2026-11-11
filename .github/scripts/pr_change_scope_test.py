@@ -185,7 +185,18 @@ class ChangeScopeTests(unittest.TestCase):
         result = plan(['talos-rs/apps/tui/src/cli/plugin.rs'])
         tasks = result['categories']['tui']['scenarios']['include']
         task = next(task for task in tasks if '05_cli/plugin_lifecycle.sh' in task['cases'])
-        self.assertTrue({'server', 'cli'} <= set(task['binaries']))
+        self.assertIn('cli', task['binaries'])
+        self.assertNotIn('server', task['binaries'])
+
+    def test_plugin_backend_and_catalog_fixture_select_both_lifecycles(self):
+        for path in ('talos-rs/crates/action/plugin/src/manager.rs',
+                     'talos-e2e/scripts/plugin_fixture.py'):
+            result = plan([path])
+            cli = result['categories']['tui']['scenarios']['include']
+            self.assertTrue(any('05_cli/plugin_lifecycle.sh' in task['cases'] for task in cli))
+            api = result['categories']['server']['scenarios']['include']
+            task = next(task for task in api if '09_app_server/plugin_api_lifecycle.sh' in task['cases'])
+            self.assertTrue({'app_server', 'test_client'} <= set(task['binaries']))
 
     def test_exec_changes_select_the_secretless_cli_case(self):
         for path in ('talos-rs/apps/tui/src/cli/mod.rs',
@@ -200,12 +211,14 @@ class ChangeScopeTests(unittest.TestCase):
 
     def test_shared_plugin_cli_fixture_selects_both_worker_consumers(self):
         result = plan(['talos-e2e/scripts/plugin_cli.py'])
-        for category, case in [('tui', '05_cli/plugin_lifecycle.sh'),
-                               ('desktop', '23_browser_container/01_docker_worker.sh')]:
+        for category, case, binaries in [
+            ('tui', '05_cli/plugin_lifecycle.sh', {'cli'}),
+            ('desktop', '23_browser_container/01_docker_worker.sh', {'server', 'cli'}),
+        ]:
             tasks = result['categories'][category]['scenarios']['include']
             task = next(task for task in tasks if case in task['cases'])
-            self.assertTrue({'server', 'cli'} <= set(task['binaries']))
-        self.assertTrue(task['docker'])
+            self.assertTrue(binaries <= set(task['binaries']))
+            self.assertEqual(task['docker'], category == 'desktop')
 
     def test_tui_leaf_selects_only_tui(self):
         result = impact(['talos-rs/apps/tui/src/render/chat_lines.rs'])

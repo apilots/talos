@@ -103,7 +103,7 @@ Python3.9+ is required for discovery. `--help` requires only Bash.
 | `01_models` | Secretless server health, model catalog, custom Provider persistence and protocol tool loops |
 | Root `02`-`03` cases | Session lifecycle, HTTP, and SSE |
 | `05`-`08` | CLI, tools, memory, and embedded TUI |
-| `09` | App Server protocol, Skills, MCP, and Memory integration |
+| `09` | App Server protocol, Plugins, Skills, MCP, and Memory integration |
 | `11`-`13` | Cloud auth, files, and durable user interaction |
 | `14` | Unified sandbox and permission enforcement |
 | `15` | Release bundle installation and installed TUI startup |
@@ -141,6 +141,13 @@ maintainers. Run it with `just e2e-case 08_tui/controlled_chat`.
 exit codes, Session permission persistence, and token usage on stderr. Run it
 with `just e2e-case 05_cli/exec_unattended`. The native ARM64 Harbor smoke trial
 is documented in [Talos Agent benchmarks](../talos-bench/README.md).
+
+Plugin lifecycle has two secretless entry-point cases. Run
+`just e2e-case 09_app_server/plugin_api_lifecycle` for the Desktop UI's App Server
+API. It covers catalog search, document reads, and Skill and MCP management.
+Run `just e2e-case 05_cli/plugin_lifecycle` for the CLI's Marketplace
+commands, installations by name, and offline package replacement. Plugin
+backend and shared catalog fixture changes select both cases.
 
 `15_tui_install` runs in release and manual `release-preflight.yml` only. Native
 Linux AMD64/ARM64 and macOS ARM64 acceptance installs the product already built

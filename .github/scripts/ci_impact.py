@@ -51,6 +51,8 @@ BROWSER_CASES = (WORKSPACE_CASES['webui'] | WORKSPACE_CASES['desktop']
 RUNNING_TURN_TARGET = 'case:09_app_server/running_turn'
 TUI_TARGET = 'case:08_tui/controlled_chat'
 EXEC_TARGET = 'case:05_cli/exec_unattended'
+PLUGIN_CLI_TARGET = 'case:05_cli/plugin_lifecycle'
+PLUGIN_API_TARGET = 'case:09_app_server/plugin_api_lifecycle'
 MEDIA_OWNERS = ('desktop-media', 'desktop-ipc', 'desktop-server-requests', 'ipc-guard',
                 'ipc.', 'preload.', 'app-server-controller')
 
@@ -136,12 +138,13 @@ class Impact:
         if frontend_checks:
             self.frontend.update(frontend.roots)
         self.targets['server'].update(SERVER_TARGETS.values())
+        self.targets['server'].add(PLUGIN_API_TARGET)
         self.targets['server'].update(CONTAINER_CASES['server'])
         self.targets['desktop'].update(BROWSER_CASES - WORKSPACE_CASES['webui'])
         self.targets['webui'].update(WORKSPACE_CASES['webui'] | {RUNNING_TURN_TARGET})
         for category, cases in PREVIEW_CASES.items():
             self.targets[category].update(cases)
-        self.targets['tui'].update({TUI_TARGET, AUTOMATION_TUI_TARGET, EXEC_TARGET})
+        self.targets['tui'].update({TUI_TARGET, AUTOMATION_TUI_TARGET, EXEC_TARGET, PLUGIN_CLI_TARGET})
         self.targets['webui'].add(AUTOMATION_WEB_TARGET)
         self.installer = self.mcp = self.harness = True
 
@@ -158,7 +161,15 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             if owner:
                 direct_rust.add(owner)
                 if path.startswith('talos-rs/apps/tui/src/cli/'):
-                    result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                    result.targets['tui'].add(PLUGIN_CLI_TARGET)
+                if owner == 'talos-plugin':
+                    result.targets['tui'].add(PLUGIN_CLI_TARGET)
+                    result.targets['server'].add(PLUGIN_API_TARGET)
+                if path in ('talos-rs/crates/gateway/app-server/src/application/dispatch.rs',
+                            'talos-rs/apps/app-server-test-client/src/plugin_lifecycle.rs',
+                            'talos-rs/apps/app-server-test-client/src/main.rs',
+                            'talos-rs/apps/app-server-test-client/src/scenario.rs'):
+                    result.targets['server'].add(PLUGIN_API_TARGET)
                 if path in ('talos-rs/apps/tui/src/cli/mod.rs', 'talos-rs/apps/tui/src/cli/types.rs',
                             'talos-rs/apps/tui/src/cli/trajectory.rs', 'talos-rs/apps/tui/src/main.rs', 'talos-rs/apps/tui/src/model_selection.rs'):
                     result.targets['tui'].add(EXEC_TARGET)
@@ -236,11 +247,16 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             elif path in ('talos-e2e/scripts/plugin_cli.py',
                         'talos-e2e/scenarios/05_cli/plugin_lifecycle.sh',
                         'talos-e2e/scenarios/05_cli/requirements.json'):
-                result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                result.targets['tui'].add(PLUGIN_CLI_TARGET)
                 if path == 'talos-e2e/scenarios/05_cli/requirements.json':
                     result.targets['tui'].add(EXEC_TARGET)
                 if path == 'talos-e2e/scripts/plugin_cli.py':
                     result.targets['desktop'].update(CONTAINER_CASES['desktop'])
+            elif path in ('talos-e2e/scripts/plugin_fixture.py',
+                          'talos-e2e/scenarios/09_app_server/plugin_api_lifecycle.sh'):
+                result.targets['server'].add(PLUGIN_API_TARGET)
+                if path == 'talos-e2e/scripts/plugin_fixture.py':
+                    result.targets['tui'].add(PLUGIN_CLI_TARGET)
             elif path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
                                 'talos-e2e/tests/tui_install_target_test.sh', 'talos-e2e/docker/tui-install-')):
                 result.installer = True

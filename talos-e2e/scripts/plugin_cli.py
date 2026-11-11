@@ -2,62 +2,40 @@
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
-import urllib.request
 from zipfile import ZipFile
 
-ROOT = Path(__file__).resolve().parents[2]
+from plugin_fixture import ROOT, prepare_catalog
 
 def git(repo, *args):
     return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
 
 
-def prepare(url):
+def run():
     WORKER_HOME = Path(os.environ['TALOS_HOME'])
     REPORT = Path(os.environ['TALOS_SCENARIO_REPORT_DIR'])
-    REPO = WORKER_HOME / 'plugin-cli-fixture'
-    STATE = REPORT / 'plugin-cli-catalog.json'
-    skill = REPO / 'skills/cli-skill'
-    mcp = REPO / 'mcp/cli-mcp'
-    skill.mkdir(parents=True)
-    mcp.mkdir(parents=True)
-    (skill / 'SKILL.md').write_text('---\nname: cli-skill\ndescription: CLI lifecycle fixture.\n---\nVERSION_ONE\n')
-    shutil.copy2(ROOT / 'talos-rs/crates/action/mcp/tests/fixtures/server.py', mcp / 'server.py')
-    (mcp / 'talos-mcp.json').write_text(json.dumps({
-        'name': 'cli-mcp', 'transport': {'type': 'stdio', 'command': sys.executable,
-        'args': ['server.py', str(WORKER_HOME / 'cli-peer'), 'normal'], 'env': {}, 'cwd': None}}))
-    (mcp / 'README.md').write_text('VERSION_ONE\n')
+    REPO = prepare_catalog(WORKER_HOME)
     git(REPO, 'init', '-b', 'main')
     git(REPO, 'config', 'user.name', 'Talos E2E')
     git(REPO, 'config', 'user.email', 'e2e@example.test')
     git(REPO, 'add', '.')
     git(REPO, 'commit', '-m', 'fixture: first version')
-    request = urllib.request.Request(url + '/v1/plugin/sources', data=json.dumps({
-        'source': {'kind': 'git', 'url': REPO.as_uri(), 'reference': 'main', 'sparse_paths': []},
-        'refresh': True}).encode(), headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        catalog = json.load(response)['data']
-    assert {plugin['kind'] for plugin in catalog['plugins']} == {'skill', 'mcp_server'}
-    STATE.write_text(json.dumps({'plugins': catalog['plugins'], 'commit': git(REPO, 'rev-parse', 'HEAD')}))
-
-
-def run():
-    WORKER_HOME = Path(os.environ['TALOS_HOME'])
-    REPORT = Path(os.environ['TALOS_SCENARIO_REPORT_DIR'])
-    REPO = WORKER_HOME / 'plugin-cli-fixture'
-    STATE = REPORT / 'plugin-cli-catalog.json'
-    catalog = json.loads(STATE.read_text())
     evidence = []
     def cli(*args, failure=None):
         return invoke_cli(args, evidence, failure=failure)
+
+    initial_commit = git(REPO, 'rev-parse', 'HEAD')
+    catalog = cli('marketplace', 'add', REPO.as_uri(), '--reference', 'main')
+    source_id = catalog['source']['id']
+    assert catalog['source']['last_checked_commit'] == initial_commit
+    assert {plugin['kind'] for plugin in catalog['plugins']} == {'skill', 'mcp_server'}
     installed = []
     for plugin in catalog['plugins']:
-        result = cli('install', plugin['id'], '--commit', catalog['commit'], '--disabled', '--node', 'embedded')
+        result = cli('install', plugin['id'], '--commit', initial_commit, '--disabled', '--node', 'embedded')
         install = result['install']
         assert not install['enabled'] and Path(install['installed_path']).is_relative_to(WORKER_HOME)
-        assert install['source']['commit'] == catalog['commit']
+        assert install['source']['commit'] == initial_commit
         installed.append(install)
         assert cli('enable', install['id'])['plugin']['status']['enabled']
         assert not cli('disable', install['id'], '--node', 'embedded')['plugin']['status']['enabled']
@@ -68,6 +46,7 @@ def run():
     git(REPO, 'add', '.')
     git(REPO, 'commit', '-m', 'fixture: second version')
     commit = git(REPO, 'rev-parse', 'HEAD')
+    assert cli('marketplace', 'refresh', source_id)['source']['last_checked_commit'] == commit
     for install in installed:
         updated = cli('update', install['id'], '--commit', commit, '--node', 'embedded')['install']
         assert updated['id'] == install['id'] and updated['source']['commit'] == commit and not updated['enabled']
@@ -78,9 +57,11 @@ def run():
     remaining = {row['id'] for row in cli('list')['plugins']}
     assert not any(install['plugin_id'] in remaining for install in installed)
     exercise_named_packages(cli, REPO, REPORT)
+    assert cli('marketplace', 'remove', source_id)['removed']
+    assert all(row['id'] != source_id for row in cli('marketplace', 'list')['sources'])
     (REPORT / 'plugin-cli-acceptance.json').write_text(json.dumps({
         'status': 'passed', 'kinds': ['skill', 'mcp_server'], 'commit': commit,
-        'checks': ['install', 'list', 'enable', 'disable', 'update', 'uninstall', 'explicit embedded target', 'disabled update preserved', 'named lifecycle', 'local package replacement'],
+        'checks': ['marketplace add/refresh/remove', 'install', 'list', 'enable', 'disable', 'update', 'uninstall', 'explicit embedded target', 'disabled update preserved', 'named lifecycle', 'local package replacement'],
         'commands': evidence}, indent=2))
 
 
@@ -268,7 +249,4 @@ def remote_cli(url, node, container, environment, http, data, report):
 
 
 if __name__ == '__main__':
-    if sys.argv[1] == 'prepare':
-        prepare(sys.argv[2])
-    else:
-        run()
+    run()
