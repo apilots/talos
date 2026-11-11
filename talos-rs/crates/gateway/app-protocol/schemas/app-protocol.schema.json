@@ -6362,7 +6362,8 @@
     "ConfigPath": {
       "enum": [
         "llm",
-        "webSearch"
+        "webSearch",
+        "sessionMessageSendPolicy"
       ],
       "type": "string"
     },
@@ -6424,6 +6425,24 @@
             },
             "value": {
               "$ref": "#/definitions/WebSearchToolConfig"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "sessionMessageSendPolicy"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/SessionMessageSendPolicy"
             }
           },
           "required": [
@@ -13133,6 +13152,14 @@
         "updatedAt"
       ],
       "type": "object"
+    },
+    "SessionMessageSendPolicy": {
+      "description": "Default handling of new composer input while a Session Turn is running.",
+      "enum": [
+        "queue",
+        "steer"
+      ],
+      "type": "string"
     },
     "SessionPatchRequest": {
       "additionalProperties": false,

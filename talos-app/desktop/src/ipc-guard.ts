@@ -28,12 +28,13 @@ const fileUploadParams = (params: unknown) =>
   isRecord(params) && isRecord(params.request) && typeof params.dataBase64 === "string";
 const fileIdParams = (params: unknown) => hasString(params, "fileId");
 const configGetParams = (params: unknown) =>
-  isRecord(params) && (params.path === "llm" || params.path === "webSearch");
+  isRecord(params) && (params.path === "llm" || params.path === "webSearch" || params.path === "sessionMessageSendPolicy");
 const configWriteParams = (params: unknown) =>
   isRecord(params) &&
   isRecord(params.value) &&
-  (params.value.type === "llm" || params.value.type === "webSearch") &&
-  isRecord(params.value.value);
+  (params.value.type === "sessionMessageSendPolicy"
+    ? params.value.value === "queue" || params.value.value === "steer"
+    : (params.value.type === "llm" || params.value.type === "webSearch") && isRecord(params.value.value));
 const authLoginStartParams = (params: unknown) =>
   isRecord(params) &&
   hasString(params, "client_name") &&

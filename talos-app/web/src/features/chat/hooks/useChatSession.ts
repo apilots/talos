@@ -14,7 +14,7 @@ import {
   isLiveRecoverableActiveTurn,
   useChatSessionTimelineLifecycle,
 } from "./useChatSessionTimelineLifecycle";
-import { createInitialTurnRequest } from "../api";
+import { createInitialTurnRequest, submitTurnInput } from "../api";
 import {
   clearInactiveTurnSnapshot,
 } from "../stream-events";
@@ -25,6 +25,7 @@ import { useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { buildSessionInputHistory, sessionInputHistoryHasMessage } from "../session-input-history";
 import { automationTurnTiming } from "../automation-runtime";
+import { getSessionMessageSendPolicy } from "@/shared/api/session-message-send-policy";
 
 const ACTIVE_TURN_NOT_FOUND_CODES = [
   AppProtocol.ErrorCode.ResourceNotFound,
@@ -35,6 +36,7 @@ export function useChatSession(
   sessionId: string,
   serverMessageCount?: number,
   managedWorkerPhase?: AppProtocol.NodeInfo["managedWorkerPhase"],
+  nodeId?: string,
 ) {
   useTranslation("errors");
   const scope = useProductScope();
@@ -182,19 +184,32 @@ export function useChatSession(
     draft,
     setDraft,
     sendText,
-    sendTurn: (options?: SendTextOptions, promptOverride?: string) => {
+    sendTurn: async (options?: SendTextOptions, promptOverride?: string) => {
       const text = (promptOverride ?? draft).trim();
       const fileIds = options?.fileIds ?? [];
       if (!text && fileIds.length === 0) {
-        return Promise.resolve();
+        return;
       }
       if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
-        return Promise.reject(new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null }));
+        throw new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null });
       }
       if (activeTurnId || isStreaming) {
-        return messageQueue.add(buildQueuedInput(text, options)).then(() => {
-          if (useAppStore.getState().composerDrafts[draftKey] === draft) setDraft("");
-        });
+        const input = buildQueuedInput(text, options);
+        if (
+          activeTurnId && !isCancelling && !streamState?.pendingUserAction &&
+          (streamState?.isStreaming || activeTurn?.state === "running") &&
+          !options?.skillSelection && await getSessionMessageSendPolicy(nodeId) === "steer"
+        ) {
+          await submitTurnInput({
+            identity: { sessionId, turnId: activeTurnId },
+            input: { type: "message", input },
+            clientRequestId: null,
+          });
+        } else {
+          await messageQueue.add(input);
+        }
+        if (useAppStore.getState().composerDrafts[draftKey] === draft) setDraft("");
+        return;
       }
       const request = options
         ? createInitialTurnRequest(

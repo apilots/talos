@@ -401,6 +401,15 @@ use the control-plane relay to the original bounded Worker attempt; only transie
 state-hash routing lives on the control plane. SDK and the generated PB projection
 reuse the canonical business types.
 
+Settings > General > Composer updates the selected Computer's typed
+`sessionMessageSendPolicy` config through `config/get` and `config/update`.
+The Worker persists it at `agent.message_queue.default_send_policy` in its
+`talos.yaml` with the same access and idle-Worker admission as model settings.
+The default is `queue` when the field is absent. For text and file follow-ups
+submitted while a Turn is running, the composer reads the Session's bound
+Computer policy. `steer` targets that Turn through `turn/input` with a direct
+message. The existing queue and manual Steer retain their independent actions.
+
 `ComputerDetails` presents the canonical `NodeInfo.systemInfo` report together
 with existing owner, identity, heartbeat and registration metadata. The Worker
 collects it once through `talos-system-info::collect()`, and the original Node

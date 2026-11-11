@@ -34,6 +34,10 @@ impl ConfigService {
         match request.path {
             ConfigPath::Llm => self.config_store.load_llm_read().map(Into::into),
             ConfigPath::WebSearch => self.config_store.load_web_search_read().map(Into::into),
+            ConfigPath::SessionMessageSendPolicy => self
+                .config_store
+                .load_session_message_send_policy()
+                .map(|policy| ConfigResponse::SessionMessageSendPolicy { policy }),
         }
     }
 
@@ -62,6 +66,14 @@ impl ConfigService {
                 self.config_store.save_web_search(&web_search)?;
                 prepared.publish();
                 self.config_store.load_web_search_read().map(Into::into)
+            }
+            ConfigValue::SessionMessageSendPolicy(policy) => {
+                let prepared = self.prepare_reload(ConfigReloadTrigger::Updated(
+                    ConfigValue::SessionMessageSendPolicy(policy),
+                ))?;
+                self.config_store.save_session_message_send_policy(policy)?;
+                prepared.publish();
+                Ok(ConfigResponse::SessionMessageSendPolicy { policy })
             }
         }
     }

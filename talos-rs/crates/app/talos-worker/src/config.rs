@@ -41,6 +41,9 @@ pub(crate) fn service(
                 );
                 candidate.agent.kernel.tools.web_search = value;
             }
+            ConfigReloadTrigger::Updated(ConfigValue::SessionMessageSendPolicy(value)) => {
+                candidate.agent.message_queue.default_send_policy = value;
+            }
             ConfigReloadTrigger::Explicit => {}
         }
         candidate.validate_runtime()?;

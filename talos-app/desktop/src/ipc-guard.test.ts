@@ -144,7 +144,7 @@ describe("desktop IPC guard", () => {
     }
   });
 
-  it("allows llm config methods", () => {
+  it("allows supported Worker config methods", () => {
     expect(isDesktopRendererMethod("config/get")).toBe(true);
     expect(isDesktopRendererMethod("config/reload")).toBe(true);
     expect(() => assertDesktopRendererInvoke("config/get", {
@@ -155,6 +155,12 @@ describe("desktop IPC guard", () => {
     })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("config/update", {
       value: { type: "webSearch", value: {} },
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("config/get", {
+      path: "sessionMessageSendPolicy", nodeId: "computer-1",
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("config/update", {
+      value: { type: "sessionMessageSendPolicy", value: "steer" }, nodeId: "computer-1",
     })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("config/delete", {
       path: "llm",

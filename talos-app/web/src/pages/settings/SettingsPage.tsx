@@ -86,6 +86,7 @@ export function SettingsPage() {
 
             {activeSection === "general" ? (
               <SettingsGeneralSection
+                canManageConfig={canManageConfig}
                 locale={locale}
                 setLocale={setLocale}
                 uiTheme={uiTheme}
