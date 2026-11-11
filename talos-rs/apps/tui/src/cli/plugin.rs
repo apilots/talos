@@ -175,14 +175,16 @@ async fn typed(
                     refresh: true,
                 })
                 .await?;
-            unique(
-                added
-                    .plugins
-                    .into_iter()
-                    .filter(|plugin| plugin.kind == kind),
-                "The package has no plugin of the selected type.",
-                "The package has more than one plugin of the selected type.",
-            )?
+            added
+                .plugins
+                .into_iter()
+                .find(|plugin| plugin.kind == kind)
+                .ok_or_else(|| {
+                    TalosError::new(
+                        ErrorCode::ResourceNotFound,
+                        "The package has no plugin of the selected type.",
+                    )
+                })?
         } else {
             let selector = name.expect("CLI requires a name or file");
             let (name, source_id) = match selector.rsplit_once('@') {

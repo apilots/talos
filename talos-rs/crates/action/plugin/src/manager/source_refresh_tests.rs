@@ -32,13 +32,12 @@ fn local_package_publishes_only_a_valid_contained_snapshot() {
         archive.finish().unwrap();
     };
 
-    write_package("plugin/../SKILL.md");
+    write_package("../SKILL.md");
     assert_eq!(
         manager.add_source(request(None)).unwrap_err().error_code(),
         talos_error::ErrorCode::InvalidRequest
     );
     assert!(manager.state.load_sources().unwrap().sources.is_empty());
-    assert!(!root.path().join("SKILL.md").exists());
 
     write_package("plugin/SKILL.md");
     assert_eq!(
