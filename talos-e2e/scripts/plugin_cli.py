@@ -1,4 +1,4 @@
-"""Exercise the CLI against a catalog prepared by the original Plugin API."""
+"""Exercise catalog and local-package Plugin lifecycle through the CLI."""
 import json
 import os
 from pathlib import Path
@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -76,10 +77,71 @@ def run():
         assert not Path(install['installed_path']).exists()
     remaining = {row['id'] for row in cli('list')['plugins']}
     assert not any(install['plugin_id'] in remaining for install in installed)
+    exercise_named_packages(cli, REPO, REPORT)
     (REPORT / 'plugin-cli-acceptance.json').write_text(json.dumps({
         'status': 'passed', 'kinds': ['skill', 'mcp_server'], 'commit': commit,
-        'checks': ['install', 'list', 'enable', 'disable', 'update', 'uninstall', 'explicit embedded target', 'disabled update preserved'],
+        'checks': ['install', 'list', 'enable', 'disable', 'update', 'uninstall', 'explicit embedded target', 'disabled update preserved', 'named lifecycle', 'local package replacement'],
         'commands': evidence}, indent=2))
+
+
+def exercise_named_packages(cli, repo, report):
+    sources = cli('marketplace', 'list')['sources']
+    source = next(item for item in sources if item['location'].get('url') == repo.as_uri())
+    catalog = cli('skill', 'add', f"cli-skill@{source['display_name']}")['install']
+    assert catalog['source']['source_id'] == source['id']
+    skill_file = repo / 'skills/cli-skill/SKILL.md'
+    skill_file.write_text(skill_file.read_text().replace('VERSION_TWO', 'VERSION_THREE'))
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-m', 'fixture: named update')
+    updated = cli('skill', 'update', 'cli-skill')['install']
+    assert updated['id'] == catalog['id'] and updated['source']['commit'] == git(repo, 'rev-parse', 'HEAD')
+    assert cli('skill', 'remove', 'cli-skill')['uninstalled']
+
+    def archive(path, files):
+        with ZipFile(path, 'w') as package:
+            for name, content in files.items():
+                package.writestr(f'package/{name}', content)
+        return str(path)
+
+    skill = '---\nname: offline-demo\ndescription: Local plugin fixture.\n---\n'
+    original = archive(report / 'offline-skill.zip', {'SKILL.md': skill + 'Version one.'})
+    replacement = archive(report / 'offline-skill-v2.zip', {'SKILL.md': skill + 'Version two.'})
+    mcp = {'name': 'offline-demo', 'transport': {
+        'type': 'stdio', 'command': sys.executable, 'args': ['server.py', str(report / 'offline-peer'), 'normal']}}
+    mcp_zip = archive(report / 'offline-mcp.zip', {
+        'mcp.json': json.dumps(mcp),
+        'server.py': (ROOT / 'talos-rs/crates/action/mcp/tests/fixtures/server.py').read_text(),
+    })
+    skill_install = cli('skill', 'add', '--file', original)['install']
+    mcp_install = cli('mcp', 'add', '--file', mcp_zip)['install']
+    assert skill_install['name'] == mcp_install['name'] == 'offline-demo'
+    assert Path(mcp_install['installed_path'], 'server.py').is_file()
+    package_sources = {row['id'] for row in cli('marketplace', 'list')['sources']
+                       if row['kind'] == 'local_package'}
+    assert {skill_install['source']['source_id'], mcp_install['source']['source_id']} <= package_sources
+    assert cli('skill', 'disable', 'offline-demo')['plugin']['status']['enabled'] is False
+    assert cli('skill', 'enable', 'offline-demo')['plugin']['status']['enabled'] is True
+
+    changed = cli('skill', 'add', '--file', replacement, '--replace')['install']
+    assert changed['source']['source_id'] != skill_install['source']['source_id']
+    assert 'Version two.' in Path(changed['installed_path'], 'SKILL.md').read_text()
+    Path(replacement).unlink()
+    assert cli('skill', 'remove', 'offline-demo')['uninstalled']
+    reinstalled = cli('skill', 'add', '--file', original)['install']
+    assert reinstalled['source']['source_id'] == skill_install['source']['source_id']
+    assert cli('skill', 'remove', 'offline-demo')['uninstalled']
+    mcp = next(plugin for plugin in cli('mcp', 'list')['plugins']
+               if plugin['metadata']['name'] == 'offline-demo')
+    assert mcp['status']['status'] == 'installed'
+    assert mcp['definition']['plugin']['server']['transport']['cwd'] == mcp_install['installed_path']
+    assert cli('mcp', 'remove', 'offline-demo')['uninstalled']
+
+    standalone = report / 'offline-mcp.json'
+    standalone.write_text(json.dumps({
+        'name': 'offline-config', 'transport': {'type': 'streamable_http', 'url': 'http://127.0.0.1:1'}}))
+    direct = cli('mcp', 'add', '--file', str(standalone))['install']
+    assert Path(direct['installed_path'], 'mcp.json').is_file()
+    assert cli('mcp', 'remove', 'offline-config')['uninstalled']
 
 
 def invoke_cli(args, evidence, environment=None):

@@ -191,9 +191,11 @@ fn plugin_install_keeps_target_commit_and_explicit_install_policy() {
         panic!("expected Plugin command");
     };
     assert_eq!(node.as_deref(), Some("computer-1"));
-    assert!(matches!(command, types::PluginCommands::Install {
-        plugin_id, commit: Some(commit), disabled: true, replace: true,
-    } if plugin_id == "plugin-browser" && commit == "fixed-revision"));
+    assert!(matches!(command, types::PluginCommands::Installation(
+        types::PluginInstallationCommand::Install {
+            plugin_id, commit: Some(commit), disabled: true, replace: true,
+        }
+    ) if plugin_id == "plugin-browser" && commit == "fixed-revision"));
 }
 
 #[test]
@@ -212,11 +214,14 @@ fn plugin_lifecycle_uses_install_ids_and_preserves_the_selected_computer() {
             panic!("expected Plugin command");
         };
         assert_eq!(node.as_deref(), Some("computer-2"));
+        use types::PluginInstallationCommand::{Disable, Enable, Uninstall, Update};
         let install_id = match command {
-            types::PluginCommands::Enable { install_id }
-            | types::PluginCommands::Disable { install_id }
-            | types::PluginCommands::Update { install_id, .. }
-            | types::PluginCommands::Uninstall { install_id } => install_id,
+            types::PluginCommands::Installation(
+                Enable { install_id }
+                | Disable { install_id }
+                | Update { install_id, .. }
+                | Uninstall { install_id },
+            ) => install_id,
             _ => panic!("expected existing installation command"),
         };
         assert_eq!(install_id, "install-existing");

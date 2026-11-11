@@ -26,14 +26,14 @@ use talos_config::{
 };
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
-    Plugin, PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
-    PluginInstall, PluginInstallRequest, PluginInstallResponse, PluginInstallTarget,
-    PluginListRequest, PluginListResponse, PluginSearchRefreshPolicy, PluginSearchRequest,
-    PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
-    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
-    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, PluginWarning,
-    PluginWarningCode,
+    MarketplaceSource, MarketplaceSourceKind, Plugin, PluginDisableRequest, PluginDisableResponse,
+    PluginEnableRequest, PluginEnableResponse, PluginInstall, PluginInstallRequest,
+    PluginInstallResponse, PluginInstallTarget, PluginListRequest, PluginListResponse,
+    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest,
+    PluginSourceAddResponse, PluginSourceListRequest, PluginSourceListResponse,
+    PluginSourceRefreshRequest, PluginSourceRefreshResponse, PluginSourceRemoveRequest,
+    PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest, PluginUninstallResponse,
+    PluginUpdateRequest, PluginUpdateResponse, PluginWarning, PluginWarningCode,
 };
 
 #[derive(Clone)]
@@ -87,32 +87,32 @@ impl PluginManager {
         &self,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        let refresh = request.refresh;
-        let mut request = request;
-        request.refresh = false;
-        let added = self
-            .state
-            .with_exclusive_lock("plugin.source.add", || self.add_source_locked(request))?;
-        if refresh {
-            let refreshed = self.refresh_source(PluginSourceRefreshRequest {
-                node_id: None,
-                source_id: added.source.id,
-            })?;
-            Ok(PluginSourceAddResponse {
-                source: refreshed.source,
-                plugins: refreshed.plugins,
-                warnings: refreshed.warnings,
-            })
+        let source = source_from_input(request.source)?;
+        let scanned = if source.kind == MarketplaceSourceKind::LocalPackage {
+            self.scan_and_publish_source(source, None)?
         } else {
-            Ok(added)
-        }
+            self.state
+                .with_exclusive_lock("plugin.source.add", || self.register_source(&source))?;
+            if !request.refresh {
+                return Ok(PluginSourceAddResponse {
+                    source,
+                    plugins: Vec::new(),
+                    warnings: Vec::new(),
+                });
+            }
+            self.refresh_source(PluginSourceRefreshRequest {
+                node_id: None,
+                source_id: source.id,
+            })?
+        };
+        Ok(PluginSourceAddResponse {
+            source: scanned.source,
+            plugins: scanned.plugins,
+            warnings: scanned.warnings,
+        })
     }
 
-    fn add_source_locked(
-        &self,
-        request: PluginSourceAddRequest,
-    ) -> TalosResult<PluginSourceAddResponse> {
-        let source = source_from_input(request.source)?;
+    fn register_source(&self, source: &MarketplaceSource) -> TalosResult<()> {
         let existing = self.list_sources(PluginSourceListRequest { node_id: None })?;
         if existing.sources.iter().any(|item| item.id == source.id) {
             return Err(TalosError::new(
@@ -123,13 +123,7 @@ impl PluginManager {
 
         let mut file = self.state.load_sources()?;
         file.sources.push(source.clone());
-        self.state.save_sources(&file)?;
-
-        Ok(PluginSourceAddResponse {
-            source,
-            plugins: Vec::new(),
-            warnings: Vec::new(),
-        })
+        self.state.save_sources(&file)
     }
 
     pub fn refresh_source(
@@ -154,11 +148,12 @@ impl PluginManager {
                 continue;
             }
             let cached = self.state.load_source_scan_cache(&source.id)?;
-            let should_refresh = match request.refresh {
-                PluginSearchRefreshPolicy::CacheOnly => false,
-                PluginSearchRefreshPolicy::RefreshStale => cached.plugins.is_empty(),
-                PluginSearchRefreshPolicy::ForceRefresh => true,
-            };
+            let should_refresh = source.kind != MarketplaceSourceKind::LocalPackage
+                && match request.refresh {
+                    PluginSearchRefreshPolicy::CacheOnly => false,
+                    PluginSearchRefreshPolicy::RefreshStale => cached.plugins.is_empty(),
+                    PluginSearchRefreshPolicy::ForceRefresh => true,
+                };
             let source_plugins = if should_refresh {
                 match self.refresh_source(PluginSourceRefreshRequest {
                     node_id: None,
@@ -558,6 +553,7 @@ impl PluginManager {
         if !install.installed_path.exists() {
             let mut plugin = missing_plugin_from_install(install, enabled);
             plugin.status = PluginStatus::Conflict {
+                install_id: Some(install.id.clone()),
                 reason: talos_types::PluginConflictReason::TargetPathMissing,
             };
             return plugin;
@@ -574,6 +570,7 @@ impl PluginManager {
             }
             let mut plugin = missing_plugin_from_install(install, enabled);
             plugin.status = PluginStatus::Conflict {
+                install_id: Some(install.id.clone()),
                 reason: talos_types::PluginConflictReason::InvalidManifest,
             };
             return plugin;
@@ -588,6 +585,7 @@ impl PluginManager {
                 Ok(server) => definition.server = server,
                 Err(_) => {
                     plugin.status = PluginStatus::Conflict {
+                        install_id: Some(install.id.clone()),
                         reason: talos_types::PluginConflictReason::InvalidManifest,
                     };
                     return plugin;
@@ -670,6 +668,7 @@ impl PluginManager {
             let enabled = install.enabled;
             if !install.installed_path.exists() {
                 plugin.status = PluginStatus::Conflict {
+                    install_id: Some(install.id.clone()),
                     reason: talos_types::PluginConflictReason::TargetPathMissing,
                 };
                 continue;
@@ -681,6 +680,7 @@ impl PluginManager {
                     Ok(server) => definition.server = server,
                     Err(_) => {
                         plugin.status = PluginStatus::Conflict {
+                            install_id: Some(install.id.clone()),
                             reason: talos_types::PluginConflictReason::InvalidManifest,
                         };
                         continue;

@@ -8848,6 +8848,24 @@
             "sparse_paths"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "local_package"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
         }
       ]
     },

@@ -68,6 +68,13 @@ pub(super) fn encode_marketplace_source_input(
                     .map(Ok)
                     .collect::<TalosResult<_>>()?,
             }),
+            d::MarketplaceSourceInput::LocalPackage { path } => {
+                pb::marketplace_source_input::Value::LocalPackage(
+                    pb::MarketplaceSourceInputLocalPackage {
+                        path: path.to_str().ok_or_else(invalid)?.to_owned(),
+                    },
+                )
+            }
             d::MarketplaceSourceInput::LocalFolder { path, sparse_paths } => {
                 pb::marketplace_source_input::Value::LocalFolder(
                     pb::MarketplaceSourceInputLocalFolder {
@@ -95,6 +102,11 @@ pub(super) fn decode_marketplace_source_input(
                 .map(Ok)
                 .collect::<TalosResult<_>>()?,
         },
+        pb::marketplace_source_input::Value::LocalPackage(value) => {
+            d::MarketplaceSourceInput::LocalPackage {
+                path: value.path.into(),
+            }
+        }
         pb::marketplace_source_input::Value::LocalFolder(value) => {
             d::MarketplaceSourceInput::LocalFolder {
                 path: value.path.into(),
@@ -111,12 +123,14 @@ pub(super) fn encode_marketplace_source_kind(value: d::MarketplaceSourceKind) ->
     Ok(match value {
         d::MarketplaceSourceKind::Git => 1,
         d::MarketplaceSourceKind::LocalFolder => 2,
+        d::MarketplaceSourceKind::LocalPackage => 3,
     })
 }
 pub(super) fn decode_marketplace_source_kind(value: i32) -> TalosResult<d::MarketplaceSourceKind> {
     match value {
         1 => Ok(d::MarketplaceSourceKind::Git),
         2 => Ok(d::MarketplaceSourceKind::LocalFolder),
+        3 => Ok(d::MarketplaceSourceKind::LocalPackage),
         _ => Err(invalid()),
     }
 }
@@ -130,6 +144,14 @@ pub(super) fn encode_marketplace_source_location(
                     url,
                     reference,
                 })
+            }
+            d::MarketplaceSourceLocation::LocalPackage { path, sha256 } => {
+                pb::marketplace_source_location::Value::LocalPackage(
+                    pb::MarketplaceSourceLocationLocalPackage {
+                        path: path.to_str().ok_or_else(invalid)?.to_owned(),
+                        sha256,
+                    },
+                )
             }
             d::MarketplaceSourceLocation::LocalFolder { path } => {
                 pb::marketplace_source_location::Value::LocalFolder(
@@ -149,6 +171,12 @@ pub(super) fn decode_marketplace_source_location(
             url: value.url,
             reference: value.reference,
         },
+        pb::marketplace_source_location::Value::LocalPackage(value) => {
+            d::MarketplaceSourceLocation::LocalPackage {
+                path: value.path.into(),
+                sha256: value.sha256,
+            }
+        }
         pb::marketplace_source_location::Value::LocalFolder(value) => {
             d::MarketplaceSourceLocation::LocalFolder {
                 path: value.path.into(),

@@ -117,10 +117,31 @@ pub(crate) struct PluginCmd {
 
 #[derive(Subcommand)]
 pub(crate) enum PluginCommands {
+    /// Manage Skill plugins by name.
+    Skill {
+        #[command(subcommand)]
+        command: TypedPluginCommand,
+    },
+    /// Manage MCP plugins by name.
+    Mcp {
+        #[command(subcommand)]
+        command: TypedPluginCommand,
+    },
+    /// Manage plugin sources.
+    Marketplace {
+        #[command(subcommand)]
+        command: MarketplaceCommand,
+    },
     /// List installed plugins, including disabled installations.
     List,
     /// Import and enable one MCP server from an MCP JSON file.
     ImportMcp { file: std::path::PathBuf },
+    #[command(flatten)]
+    Installation(PluginInstallationCommand),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum PluginInstallationCommand {
     /// Install a discovered plugin by its Plugin ID.
     Install {
         plugin_id: String,
@@ -150,6 +171,48 @@ pub(crate) enum PluginCommands {
     Disable { install_id: String },
     /// Uninstall through the existing Plugin lifecycle.
     Uninstall { install_id: String },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TypedPluginCommand {
+    /// Install a catalog entry or a local package.
+    Add {
+        /// Plugin name, optionally qualified as name@marketplace.
+        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        name: Option<String>,
+        /// ZIP or MCP JSON file on the selected Worker.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+        /// Replace an existing installation with the same name.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// List installations of this type.
+    List,
+    /// Remove an installation by name.
+    Remove { name: String },
+    /// Enable an installation by name.
+    Enable { name: String },
+    /// Disable an installation by name.
+    Disable { name: String },
+    /// Update an installation from its marketplace by name.
+    Update { name: String },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum MarketplaceCommand {
+    /// Add a Git repository or a directory on the selected Worker.
+    Add {
+        location: String,
+        #[arg(long)]
+        reference: Option<String>,
+    },
+    /// List configured marketplace sources.
+    List,
+    /// Refresh a marketplace by name or source ID.
+    Refresh { marketplace: String },
+    /// Remove a marketplace by name or source ID.
+    Remove { marketplace: String },
 }
 
 #[derive(Args)]

@@ -58,6 +58,32 @@ pub(crate) fn source_from_input(input: MarketplaceSourceInput) -> TalosResult<Ma
                 updated_at_ms: now_ms,
             })
         }
+        MarketplaceSourceInput::LocalPackage { path } => {
+            let path = fs::canonicalize(path).map_err(|error| {
+                TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "The local plugin package could not be found.",
+                )
+                .with_source(error)
+            })?;
+            let sha256 = crate::scanner::package::package_sha256(&path)?;
+            Ok(MarketplaceSource {
+                id: source_id_for(&sha256, "local-package", &[]),
+                source_type: MarketplaceSourceType::User,
+                kind: MarketplaceSourceKind::LocalPackage,
+                display_name: path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                location: MarketplaceSourceLocation::LocalPackage { path, sha256 },
+                sparse_paths: Vec::new(),
+                last_checked_commit: None,
+                last_checked_at_ms: None,
+                created_at_ms: now_ms,
+                updated_at_ms: now_ms,
+            })
+        }
         MarketplaceSourceInput::LocalFolder { path, sparse_paths } => {
             validate_sparse_paths(&sparse_paths)?;
             let path = fs::canonicalize(&path).map_err(|err| {

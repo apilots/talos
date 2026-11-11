@@ -36,8 +36,9 @@ message MarketplaceSourceInputLocalFolder {
   string path = 1;
   repeated string sparse_paths = 2;
 }
-message MarketplaceSourceInput { oneof value { MarketplaceSourceInputGit git = 1; MarketplaceSourceInputLocalFolder local_folder = 2; } }
-enum MarketplaceSourceKind { MARKETPLACE_SOURCE_KIND_UNSPECIFIED = 0; MARKETPLACE_SOURCE_KIND_GIT = 1; MARKETPLACE_SOURCE_KIND_LOCAL_FOLDER = 2; }
+message MarketplaceSourceInputLocalPackage { string path = 1; }
+message MarketplaceSourceInput { oneof value { MarketplaceSourceInputGit git = 1; MarketplaceSourceInputLocalFolder local_folder = 2; MarketplaceSourceInputLocalPackage local_package = 3; } }
+enum MarketplaceSourceKind { MARKETPLACE_SOURCE_KIND_UNSPECIFIED = 0; MARKETPLACE_SOURCE_KIND_GIT = 1; MARKETPLACE_SOURCE_KIND_LOCAL_FOLDER = 2; MARKETPLACE_SOURCE_KIND_LOCAL_PACKAGE = 3; }
 message MarketplaceSourceLocationGit {
   string url = 1;
   string reference = 2;
@@ -45,7 +46,8 @@ message MarketplaceSourceLocationGit {
 message MarketplaceSourceLocationLocalFolder {
   string path = 1;
 }
-message MarketplaceSourceLocation { oneof value { MarketplaceSourceLocationGit git = 1; MarketplaceSourceLocationLocalFolder local_folder = 2; } }
+message MarketplaceSourceLocationLocalPackage { string path = 1; string sha256 = 2; }
+message MarketplaceSourceLocation { oneof value { MarketplaceSourceLocationGit git = 1; MarketplaceSourceLocationLocalFolder local_folder = 2; MarketplaceSourceLocationLocalPackage local_package = 3; } }
 enum MarketplaceSourceType { MARKETPLACE_SOURCE_TYPE_UNSPECIFIED = 0; MARKETPLACE_SOURCE_TYPE_OFFICIAL = 1; MARKETPLACE_SOURCE_TYPE_USER = 2; }
 message McpAuthenticationOAuth {
   McpOAuthConfig config = 1;
@@ -349,6 +351,7 @@ message PluginStatusSourceMissing {
 }
 message PluginStatusConflict {
   PluginConflictReason reason = 1;
+  optional string install_id = 2;
 }
 message PluginStatus { oneof value { Empty not_installed = 1; PluginStatusInstalled installed = 2; PluginStatusUpdateAvailable update_available = 3; PluginStatusSourceMissing source_missing = 4; PluginStatusConflict conflict = 5; } }
 message PluginUninstallParams {

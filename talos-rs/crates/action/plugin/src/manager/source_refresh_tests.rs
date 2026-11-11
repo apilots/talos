@@ -6,6 +6,54 @@ use crate::{
 };
 use talos_types::*;
 
+#[test]
+fn local_package_publishes_only_a_valid_contained_snapshot() {
+    use std::io::Write;
+
+    let root = tempfile::tempdir().unwrap();
+    let manager = manager_with_state(PluginStateStore::new(root.path().join("state")));
+    let package = root.path().join("plugin.zip");
+    let request = || PluginSourceAddRequest {
+        node_id: None,
+        source: MarketplaceSourceInput::LocalPackage {
+            path: package.clone(),
+        },
+        refresh: false,
+    };
+    let write_package = |entry: &str| {
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&package).unwrap());
+        archive
+            .start_file(entry, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        archive
+            .write_all(b"---\nname: writer\ndescription: Offline writer.\n---\n")
+            .unwrap();
+        archive.finish().unwrap();
+    };
+
+    write_package("plugin/../SKILL.md");
+    assert_eq!(
+        manager.add_source(request()).unwrap_err().error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
+    assert!(manager.state.load_sources().unwrap().sources.is_empty());
+    assert!(!root.path().join("SKILL.md").exists());
+
+    write_package("plugin/SKILL.md");
+    let added = manager.add_source(request()).unwrap();
+    assert_eq!(added.plugins[0].metadata.name, "writer");
+    assert_eq!(
+        manager
+            .refresh_source(PluginSourceRefreshRequest {
+                node_id: None,
+                source_id: added.source.id,
+            })
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
+}
+
 fn fixture(root: &std::path::Path) -> (PluginManager, std::path::PathBuf, MarketplaceSource) {
     let repo = root.join("git");
     std::fs::create_dir_all(&repo).unwrap();
@@ -75,11 +123,11 @@ fn competing_git_publications_keep_one_complete_commit() {
     let (second, same, other) = prepare(&manager, &source);
     let commit = scan.source_commit.clone();
     manager
-        .publish_source_scan(source.clone(), old, &first, scan)
+        .publish_source_scan(source.clone(), Some(old), &first, scan)
         .unwrap();
     assert_eq!(
         manager
-            .publish_source_scan(source.clone(), same, &second, other)
+            .publish_source_scan(source.clone(), Some(same), &second, other)
             .unwrap_err()
             .error_code(),
         talos_error::ErrorCode::Conflict
@@ -104,7 +152,7 @@ fn failed_git_cache_index_write_never_replaces_the_published_tree() {
         let expected = old.source_commit.clone();
         manager.state.fail_scan_cache_save(failure);
         assert!(manager
-            .publish_source_scan(source.clone(), old, &dir, scan)
+            .publish_source_scan(source.clone(), Some(old), &dir, scan)
             .is_err());
         assert_eq!(
             manager

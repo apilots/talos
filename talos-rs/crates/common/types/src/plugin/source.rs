@@ -35,6 +35,7 @@ pub enum MarketplaceSourceType {
 pub enum MarketplaceSourceKind {
     Git,
     LocalFolder,
+    LocalPackage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -42,6 +43,7 @@ pub enum MarketplaceSourceKind {
 pub enum MarketplaceSourceLocation {
     Git { url: String, reference: String },
     LocalFolder { path: PathBuf },
+    LocalPackage { path: PathBuf, sha256: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -55,6 +57,9 @@ pub enum MarketplaceSourceInput {
     LocalFolder {
         path: PathBuf,
         sparse_paths: Vec<String>,
+    },
+    LocalPackage {
+        path: PathBuf,
     },
 }
 

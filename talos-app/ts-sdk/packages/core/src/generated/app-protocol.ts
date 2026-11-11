@@ -1064,13 +1064,13 @@ export type MarketplaceSource = { id: MarketplaceSourceId, source_type: Marketpl
 
 export type MarketplaceSourceId = string;
 
-export type MarketplaceSourceInput = { "kind": "git", url: string, reference: string, sparse_paths: Array<string>, } | { "kind": "local_folder", path: string, sparse_paths: Array<string>, };
+export type MarketplaceSourceInput = { "kind": "git", url: string, reference: string, sparse_paths: Array<string>, } | { "kind": "local_folder", path: string, sparse_paths: Array<string>, } | { "kind": "local_package", path: string, };
 
 export type MarketplaceSourceType = "official" | "user";
 
-export type MarketplaceSourceKind = "git" | "local_folder";
+export type MarketplaceSourceKind = "git" | "local_folder" | "local_package";
 
-export type MarketplaceSourceLocation = { "kind": "git", url: string, reference: string, } | { "kind": "local_folder", path: string, };
+export type MarketplaceSourceLocation = { "kind": "git", url: string, reference: string, } | { "kind": "local_folder", path: string, } | { "kind": "local_package", path: string, sha256: string, };
 
 export type Plugin = { id: PluginId, kind: PluginKind, metadata: PluginMetadata, documents: Array<PluginDocumentRef>, source_id: MarketplaceSourceId | null, path_in_source: string | null, source_commit: string | null, status: PluginStatus, definition: PluginDefinition, warnings: Array<PluginWarning>, };
 
@@ -1080,7 +1080,7 @@ export type PluginId = string;
 
 export type PluginKind = "skill" | "mcp_server" | "package" | "feature";
 
-export type PluginStatus = { "status": "not_installed" } | { "status": "installed", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "update_available", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, latest_commit: string, enabled: boolean, } | { "status": "source_missing", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "conflict", reason: PluginConflictReason, };
+export type PluginStatus = { "status": "not_installed" } | { "status": "installed", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "update_available", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, latest_commit: string, enabled: boolean, } | { "status": "source_missing", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "conflict", reason: PluginConflictReason, install_id?: PluginInstallId, };
 
 export type PluginInstall = { id: PluginInstallId, plugin_id: PluginId, kind: PluginKind, name: string, installed_path: string, enabled: boolean, source: PluginInstallSource, content_digest: ContentDigest, installed_at_ms: number, updated_at_ms: number, };
 
