@@ -73,6 +73,13 @@ class Desktop:
         require((self.home / 'auth/cloud-session.json').stat().st_mode & 0o777 == 0o600, 'Login cache permissions')
         return result
 
+    def enrolled_identity(self):
+        def identity():
+            current = self.call('desktop/workerIdentity')
+            return current if current['nodeId'] != 'embedded' else None
+
+        return wait_for(identity, f'{self.name} Worker enrollment')
+
     def close(self):
         if self.process.poll() is None:
             self.process.stdin.close()
@@ -126,7 +133,8 @@ def start_ingress(cluster):
     cluster.start_process('ingress', [os.environ['TALOS_E2E_CADDY_BIN'], 'run', '--config', str(config)],
                           dict(os.environ, XDG_CONFIG_HOME=str(cluster.root / 'caddy-config'),
                                XDG_DATA_HOME=str(cluster.root / 'caddy-data')))
-    wait_for(lambda: public(cluster, '/v1/computers').get('status') == 'success', 'TLS product ingress')
+    wait_for(lambda: public(cluster, '/v1/user').get('status') == 'success', 'TLS product ingress and account verification')
+    data(public(cluster, '/v1/computers'))
 
 
 def configure_desktop(cluster, name):
@@ -168,7 +176,7 @@ def run(cluster):
         require(first.call('desktop/workerIdentity') == {'nodeId': 'embedded', 'controlPlaneEndpoint': cluster.ingress},
                 'Fresh Desktop must expose its unregistered identity and configured Server')
         first.login('alice')
-        identity = first.call('desktop/workerIdentity')
+        identity = first.enrolled_identity()
         node_id = identity['nodeId']
         require(str(uuid.UUID(node_id)) == node_id, 'Control plane did not create UUID')
         node = registered(cluster, node_id)
@@ -185,6 +193,7 @@ def run(cluster):
         require(all(secret not in json.dumps(identity) for secret in secrets), 'Safe identity response leaked a credential')
         proof('desktop_real_device_login_saved_registration', node)
 
+        data(public(cluster, '/v1/user', user='bob'))
         other_nodes = data(public(cluster, '/v1/computers', user='bob'))['data']
         require(node_id not in [item['nodeId'] for item in other_nodes], 'Another account sees private node')
         require(public(cluster, f'/v1/computers/{node_id}', user='bob')['status'] == 'error', 'Another account reads private node')
@@ -219,6 +228,7 @@ def run(cluster):
         old_lease = cluster.query('SELECT lease_token_hash FROM agent_nodes WHERE node_id = ?', (node_id,))[0][0]
         Cluster.stop(cluster.server)
         cluster.start_server()
+        data(public(cluster, '/v1/user'))
         recovered = wait_for(lambda: next((n for n in [info(cluster, node_id)] if n['leaseExpiresAt'] is not None
                              and n['leaseExpiresAt'] > time.time() and n['health'] == 'healthy'), None),
                              'Control-plane restart re-registration', seconds=45)
@@ -246,7 +256,7 @@ def run(cluster):
         second = Desktop(cluster, home_b, 'desktop-b')
         second.login('alice')
         secrets.extend(second.login_tokens)
-        second_id = second.call('desktop/workerIdentity')['nodeId']
+        second_id = second.enrolled_identity()['nodeId']
         require(second_id != node_id, 'Distinct computer reused another computer UUID')
         registered(cluster, second_id)
         second_runner = yaml.safe_load((home_b / 'conf/talos.yaml').read_text())['agent_node']['runner']
