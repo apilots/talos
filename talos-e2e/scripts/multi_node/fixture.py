@@ -143,7 +143,8 @@ class Cluster:
     def config(self, home, node_config):
         conf = home / 'conf'
         conf.mkdir(parents=True, exist_ok=True)
-        document = yaml.safe_load((ROOT / 'conf/talos-dev.yaml').read_text())
+        config_template = Path(os.environ.get('TALOS_TEST_CONFIG_TEMPLATE', ROOT / 'conf/talos-dev.yaml'))
+        document = yaml.safe_load(config_template.read_text())
         document['gateway'].update(port=self.http_port, host='127.0.0.1', auth=True)
         document['cloud'].update(api_base_url=self.cloud_url, web_base_url=self.cloud_url,
                                  agent_base_url=f'https://127.0.0.1:{self.rpc_port}', agent_trusted_ca_file=str(self.cert))
@@ -157,8 +158,9 @@ class Cluster:
                 'cron': '0/15 * * * * *', 'batch_size': 10, 'max_batches': 1}
         path = conf / 'talos.yaml'
         path.write_text(yaml.safe_dump(document, sort_keys=False))
-        if (ROOT / '.env').is_file():
-            shutil.copyfile(ROOT / '.env', home / '.env')
+        env_template = Path(os.environ.get('TALOS_TEST_ENV_TEMPLATE', ROOT / '.env'))
+        if env_template.is_file():
+            shutil.copyfile(env_template, home / '.env')
             (home / '.env').chmod(0o600)
         return dict(os.environ, TALOS_HOME=str(home), TALOS_CONFIG=str(path), TALOS_RESOURCE_DIR=str(ROOT))
 
@@ -245,11 +247,15 @@ class Cluster:
             return connection.execute(sql, args).fetchall()
 
     def enroll_management_host(self, user):
-        # Product sign-in reads Sync status to enroll this host; Cloud login
-        # alone does not grant Computer ownership, even to an administrator.
-        host = data(http(self.url + '/v1/sync/status', token=self.users[user]['access_token']))
-        host_id = host['localComputerId']
-        require(host_id and str(uuid.UUID(host_id)) == host_id, 'Management host was not enrolled')
+        token = self.users[user]['access_token']
+        data(http(self.url + '/v1/user', token=token))
+
+        def owned_host_id():
+            host_id = data(http(self.url + '/v1/sync/status', token=token))['localComputerId']
+            return host_id if host_id and host_id != 'embedded' else None
+
+        host_id = wait_for(owned_host_id, 'Management host enrollment')
+        require(str(uuid.UUID(host_id)) == host_id, 'Management host was not enrolled')
         owned = self.manage(user, 'GetNode', {'node_id': host_id})['node']
         require(owned['owner_user_id'] == self.users[user]['user']['user_id'], 'Management host has the wrong owner')
         return host_id

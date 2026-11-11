@@ -245,6 +245,7 @@ impl AppServerClient {
             .await?;
         if let Some(session) = response.session {
             self.actor_credentials = Some(existing_session_credentials(session.access_token));
+            self.current_user(UserCurrentRequest {}).await?;
             let _: talos_types::SyncStatusResponse = self
                 .request_typed("sync/status", Option::<()>::None)
                 .await?;

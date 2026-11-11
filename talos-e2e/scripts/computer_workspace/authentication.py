@@ -34,9 +34,15 @@ def run(cluster):
     host = Desktop(cluster, home, 'auth-cache-host')
     try:
         host.login('alice')
-        node_id = host.call('desktop/workerIdentity')['nodeId']
-        wait_for(lambda: cluster.manage('alice', 'GetNode', {'node_id': node_id}).get('node', {}).get('available'),
-                 'Owned host registration')
+
+        def registered_host():
+            node_id = host.call('desktop/workerIdentity')['nodeId']
+            if node_id == 'embedded':
+                return None
+            node = cluster.manage('alice', 'GetNode', {'node_id': node_id}).get('node', {})
+            return node_id if node.get('available') else None
+
+        node_id = wait_for(registered_host, 'Owned host registration')
     finally:
         host.close()
     config_file = home / 'conf/talos.yaml'
