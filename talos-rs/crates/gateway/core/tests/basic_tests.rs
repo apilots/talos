@@ -50,6 +50,9 @@ fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
                 ConfigValue::WebSearch(web_search) => {
                     next.agent.kernel.tools.web_search = *web_search;
                 }
+                ConfigValue::SessionMessageSendPolicy(policy) => {
+                    next.agent.message_queue.default_send_policy = policy;
+                }
             }
         }
         let active = active.clone();

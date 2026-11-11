@@ -37,6 +37,9 @@ pub(crate) fn test_config_reload_hook(
                 talos_types::ConfigValue::WebSearch(web_search) => {
                     next.agent.kernel.tools.web_search = *web_search;
                 }
+                talos_types::ConfigValue::SessionMessageSendPolicy(policy) => {
+                    next.agent.message_queue.default_send_policy = policy;
+                }
             }
         }
         let active = active.clone();
