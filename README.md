@@ -160,7 +160,7 @@ Prefer package-scoped checks during development. See
 - [Rust workspace](talos-rs/README.md)
 - [Web, Desktop, and TypeScript SDKs](talos-app/README.md)
 - [End-to-end tests](talos-e2e/README.md)
-- [Local Agent benchmarks](talos-bench/README.md)
+- [Local Agent benchmarks](docs/reference/BENCHMARKS.md)
 - [Deployment](deploy/README.md)
 
 Change-specific designs live under [`spec/`](spec/). The

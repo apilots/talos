@@ -18,6 +18,7 @@
 ## 参考
 
 - [Plugin 命令行指南（英文）](reference/PLUGIN_CLI.md)涵盖 Skill 与 MCP 安装、离线包和 Marketplace 来源。
+- [本地 Agent 评测指南（英文）](reference/BENCHMARKS.md)涵盖评测运行、模型选择和结果解读。
 - [工程结构](reference/PROJECT_STRUCTURE_zh.md)：当前仓库目录
 - [Rust workspace 模块](reference/RUST_MODULES_zh.md)：当前 Rust workspace 清单
 

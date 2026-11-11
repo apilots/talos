@@ -132,7 +132,7 @@ just e2e-group 01_models
 - [Rust workspace](talos-rs/README_zh.md)
 - [Web、Desktop 和 TypeScript SDK](talos-app/README_zh.md)
 - [端到端测试](talos-e2e/README_zh.md)
-- [本地 Agent 评测](talos-bench/README.md)
+- [本地 Agent 评测](docs/reference/BENCHMARKS.md)
 - [部署](deploy/README_zh.md)
 
 具体变更设计位于 [`spec/`](spec/)，其中

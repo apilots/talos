@@ -14,9 +14,3 @@ The case asks for the first word in the upstream `Barber Shop.csv` example. Harb
 Harbor passes `answer.txt` to a separate verifier. The pinned upstream claim scorer calls a loopback judge that checks the expected word. The run directory contains the Talos trajectory and answer, judge verdict, scored CSV, and Harbor reward. The oracle command verifies the same grading path with a fixed submission. The first build downloads the pinned sandbox, dependencies and scorer. Trials use local fixture endpoints and synthetic tokens. [Upstream scorer](https://github.com/scaleapi/mcp-atlas/blob/e3dfef3ce93287c3d7b9e765c3a021f252eefbff/services/scoring/score_claims.py)
 
 This case measures the integration path. Real-model and dataset-wide evaluation require sandbox tool coverage, official dataset claims, and a configured judge.
-
-The sandbox-only diagnostic runs with `--network none`. It saves the sandbox log and REST tool responses under `output/talos-bench/mcp-atlas-smoke.*`.
-
-```bash
-./talos-bench/suites/mcp-atlas/smoke.sh
-```
