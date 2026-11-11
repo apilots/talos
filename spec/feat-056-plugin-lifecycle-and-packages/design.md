@@ -11,7 +11,7 @@ The CLI currently exposes generic installation IDs and a standalone MCP JSON imp
 - `talos plugin marketplace add|list|refresh|remove` operates on Marketplace sources.
 - `talos plugin skill add <name[@marketplace]>` and `talos plugin mcp add <name[@marketplace]>` select a catalog entry by exact type, name, and optional source. Ambiguous matches report a conflict. The source name shown by the CLI or its existing source ID identifies a Marketplace source.
 - `talos plugin skill|mcp list` shows installations of that type. `remove`, `enable`, `disable`, and `update` take the installed name on the selected Worker. Internal installation IDs remain the mutation keys.
-- `talos plugin skill|mcp add --file <path>` imports a local package. A file path is resolved by the target Worker. For an embedded Worker the CLI resolves a relative path against its working directory. An explicit `--node` uses the named Worker's filesystem. Local replacement takes a new package and `--replace`.
+- `talos plugin skill|mcp add --file <path>` imports a local package. A file path is resolved by the target Worker. For an embedded Worker the CLI resolves a relative path against its working directory. An explicit `--node` uses the named Worker's filesystem. Local replacement takes a new package and `--replace` and preserves the current enabled state.
 
 The existing CLI commands retain their behavior for existing scripts. All commands use the existing Gateway and Plugin services.
 
@@ -36,11 +36,11 @@ A standalone MCP manifest can define a remote server with this shape.
 
 For a stdio server with bundled resources, put `mcp.json` and those resources together in the ZIP's plugin directory. The installed directory is the default working directory for stdio.
 
-The Worker imports a contained snapshot into the existing Marketplace cache and installs the selected candidate through the existing transaction. It records the source identity in the managed installation. Importing identical bytes reuses the registered snapshot. Source refresh and update cannot fetch changes for a local package. The user supplies a replacement explicitly. Built-in Browser identity and privileges remain governed by the existing official-source checks.
+The Worker validates the requested package type before publishing a contained snapshot into the existing Marketplace cache. It installs the selected candidate through the existing transaction and records the source identity in the managed installation. Importing identical bytes reuses the registered snapshot. Source refresh and update cannot fetch changes for a local package. The user supplies a replacement explicitly. Built-in Browser identity and privileges remain governed by the existing official-source checks.
 
 ## Verification
 
-Exercise Marketplace discovery, Skill and MCP ZIP installation, direct canonical MCP JSON, replacement, filtering, enablement, removal, and old manifest reads. Verify archive containment and that a failed import does not change installed state. Run scoped Rust checks, generated-protocol validation, and a local CLI smoke. Actual results belong under `output/`.
+Exercise Marketplace discovery, Skill and MCP ZIP installation, direct canonical MCP JSON, replacement, filtering, enablement, removal, and old manifest reads. Verify archive containment and that a failed import does not change installed state. Run scoped Rust checks and generated-protocol validation. Exercise Worker-local paths, kind rejection, and replacement through the outbound Worker CLI scenario. Actual results belong under `output/`.
 
 ## Boundaries
 

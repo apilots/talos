@@ -1034,7 +1034,11 @@ export type PluginDocumentRole = "primary" | "readme" | "manifest";
 
 export type PluginDocumentMediaType = "markdown" | "json" | "text";
 
-export type PluginInstallRequest = { nodeId?: string, target: PluginInstallTarget, enable: boolean | null, conflict_policy: PluginInstallConflictPolicy, };
+export type PluginInstallRequest = { nodeId?: string, target: PluginInstallTarget,
+/**
+ * Defaults to enabled for a new install and retains the current state for a local package replacement.
+ */
+enable: boolean | null, conflict_policy: PluginInstallConflictPolicy, };
 
 export type PluginInstallResponse = { plugin: Plugin, install: PluginInstall, };
 
@@ -1064,7 +1068,11 @@ export type MarketplaceSource = { id: MarketplaceSourceId, source_type: Marketpl
 
 export type MarketplaceSourceId = string;
 
-export type MarketplaceSourceInput = { "kind": "git", url: string, reference: string, sparse_paths: Array<string>, } | { "kind": "local_folder", path: string, sparse_paths: Array<string>, } | { "kind": "local_package", path: string, };
+export type MarketplaceSourceInput = { "kind": "git", url: string, reference: string, sparse_paths: Array<string>, } | { "kind": "local_folder", path: string, sparse_paths: Array<string>, } | { "kind": "local_package", path: string,
+/**
+ * If supplied, validate the package kind before publishing the source.
+ */
+expected_kind?: PluginKind, };
 
 export type MarketplaceSourceType = "official" | "user";
 

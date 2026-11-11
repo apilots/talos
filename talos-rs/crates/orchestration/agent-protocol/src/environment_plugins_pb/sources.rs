@@ -68,13 +68,15 @@ pub(super) fn encode_marketplace_source_input(
                     .map(Ok)
                     .collect::<TalosResult<_>>()?,
             }),
-            d::MarketplaceSourceInput::LocalPackage { path } => {
-                pb::marketplace_source_input::Value::LocalPackage(
-                    pb::MarketplaceSourceInputLocalPackage {
-                        path: path.to_str().ok_or_else(invalid)?.to_owned(),
-                    },
-                )
-            }
+            d::MarketplaceSourceInput::LocalPackage {
+                path,
+                expected_kind,
+            } => pb::marketplace_source_input::Value::LocalPackage(
+                pb::MarketplaceSourceInputLocalPackage {
+                    path: path.to_str().ok_or_else(invalid)?.to_owned(),
+                    expected_kind: expected_kind.map(encode_plugin_kind).transpose()?,
+                },
+            ),
             d::MarketplaceSourceInput::LocalFolder { path, sparse_paths } => {
                 pb::marketplace_source_input::Value::LocalFolder(
                     pb::MarketplaceSourceInputLocalFolder {
@@ -105,6 +107,7 @@ pub(super) fn decode_marketplace_source_input(
         pb::marketplace_source_input::Value::LocalPackage(value) => {
             d::MarketplaceSourceInput::LocalPackage {
                 path: value.path.into(),
+                expected_kind: value.expected_kind.map(decode_plugin_kind).transpose()?,
             }
         }
         pb::marketplace_source_input::Value::LocalFolder(value) => {

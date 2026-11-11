@@ -1,4 +1,4 @@
-use super::MarketplaceSourceId;
+use super::{MarketplaceSourceId, PluginKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -60,6 +60,9 @@ pub enum MarketplaceSourceInput {
     },
     LocalPackage {
         path: PathBuf,
+        /// If supplied, validate the package kind before publishing the source.
+        #[ts(optional)]
+        expected_kind: Option<PluginKind>,
     },
 }
 

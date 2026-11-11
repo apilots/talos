@@ -2,7 +2,7 @@ use crate::installer::{
     cleanup_install_activation, cleanup_uninstall_activation, cleanup_update_activation,
     install_plugin, installed_plugin, installed_skill_root, missing_plugin_from_install,
     rollback_install_activation, rollback_uninstall_activation, rollback_update_activation,
-    stage_uninstall_plugin, update_plugin, InstallCandidate,
+    stage_uninstall_plugin, update_plugin, InstallCandidate, InstallSource,
 };
 use crate::scanner::scanned_at_ms;
 use crate::source::{config_source, source_from_input};
@@ -26,14 +26,15 @@ use talos_config::{
 };
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
-    MarketplaceSource, MarketplaceSourceKind, Plugin, PluginDisableRequest, PluginDisableResponse,
-    PluginEnableRequest, PluginEnableResponse, PluginInstall, PluginInstallRequest,
-    PluginInstallResponse, PluginInstallTarget, PluginListRequest, PluginListResponse,
-    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest,
-    PluginSourceAddResponse, PluginSourceListRequest, PluginSourceListResponse,
-    PluginSourceRefreshRequest, PluginSourceRefreshResponse, PluginSourceRemoveRequest,
-    PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest, PluginUninstallResponse,
-    PluginUpdateRequest, PluginUpdateResponse, PluginWarning, PluginWarningCode,
+    MarketplaceSource, MarketplaceSourceInput, MarketplaceSourceKind, Plugin, PluginDisableRequest,
+    PluginDisableResponse, PluginEnableRequest, PluginEnableResponse, PluginInstall,
+    PluginInstallRequest, PluginInstallResponse, PluginInstallTarget, PluginListRequest,
+    PluginListResponse, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, PluginWarning,
+    PluginWarningCode,
 };
 
 #[derive(Clone)]
@@ -87,9 +88,13 @@ impl PluginManager {
         &self,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
+        let expected_kind = match &request.source {
+            MarketplaceSourceInput::LocalPackage { expected_kind, .. } => *expected_kind,
+            _ => None,
+        };
         let source = source_from_input(request.source)?;
         let scanned = if source.kind == MarketplaceSourceKind::LocalPackage {
-            self.scan_and_publish_source(source, None)?
+            self.scan_and_publish_source(source, None, expected_kind)?
         } else {
             self.state
                 .with_exclusive_lock("plugin.source.add", || self.register_source(&source))?;
@@ -269,8 +274,22 @@ impl PluginManager {
         conflict_policy: talos_types::PluginInstallConflictPolicy,
     ) -> TalosResult<PluginInstallResponse> {
         official::validate_candidate(&candidate)?;
-        let enabled = enable != Some(false);
         let previous_installs = self.state.load_installs()?;
+        let enabled = enable.unwrap_or_else(|| match &candidate.source {
+            InstallSource::Marketplace(source)
+                if source.kind == MarketplaceSourceKind::LocalPackage =>
+            {
+                previous_installs
+                    .installs
+                    .iter()
+                    .find(|install| {
+                        install.kind == candidate.plugin.kind
+                            && install.name == candidate.plugin.metadata.name
+                    })
+                    .is_none_or(|install| install.enabled)
+            }
+            _ => true,
+        });
         let activation = install_plugin(&self.state, candidate, conflict_policy, enabled)?;
         self.finish_install(previous_installs, activation)
     }

@@ -108,7 +108,7 @@ pub(crate) struct ModelsCmd {
 
 #[derive(Args)]
 pub(crate) struct PluginCmd {
-    /// Target Computer ID. Omit to use this embedded Worker.
+    /// Target Computer ID. Defaults to the embedded Worker.
     #[arg(long, global = true)]
     pub(crate) node: Option<String>,
     #[command(subcommand)]
@@ -176,14 +176,16 @@ pub(crate) enum PluginInstallationCommand {
 #[derive(Subcommand)]
 pub(crate) enum TypedPluginCommand {
     /// Install a catalog entry or a local package.
+    ///
+    /// Supply either a catalog name or --file.
     Add {
         /// Plugin name, optionally qualified as name@marketplace.
         #[arg(required_unless_present = "file", conflicts_with = "file")]
         name: Option<String>,
-        /// ZIP or MCP JSON file on the selected Worker.
+        /// Package on the selected Worker. Skills use ZIP. MCP uses ZIP or standalone mcp.json.
         #[arg(long)]
         file: Option<std::path::PathBuf>,
-        /// Replace an existing installation with the same name.
+        /// Replace an installation with the same name. Local packages retain its enabled state.
         #[arg(long)]
         replace: bool,
     },
@@ -196,6 +198,8 @@ pub(crate) enum TypedPluginCommand {
     /// Disable an installation by name.
     Disable { name: String },
     /// Update an installation from its marketplace by name.
+    ///
+    /// For local packages, use add --file <path> --replace.
     Update { name: String },
 }
 
@@ -203,7 +207,9 @@ pub(crate) enum TypedPluginCommand {
 pub(crate) enum MarketplaceCommand {
     /// Add a Git repository or a directory on the selected Worker.
     Add {
+        /// An https://, git@, or file:// Git URL, or a directory on the selected Worker.
         location: String,
+        /// Git branch, tag, or commit. Defaults to main.
         #[arg(long)]
         reference: Option<String>,
     },

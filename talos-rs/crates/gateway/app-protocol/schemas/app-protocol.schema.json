@@ -8851,6 +8851,17 @@
         },
         {
           "properties": {
+            "expected_kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/PluginKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "If supplied, validate the package kind before publishing the source."
+            },
             "kind": {
               "enum": [
                 "local_package"
@@ -10650,6 +10661,7 @@
           "$ref": "#/definitions/PluginInstallConflictPolicy"
         },
         "enable": {
+          "description": "Defaults to enabled for a new install and retains the current state for a local package replacement.",
           "type": [
             "boolean",
             "null"

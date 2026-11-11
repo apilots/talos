@@ -58,7 +58,7 @@ pub(crate) fn source_from_input(input: MarketplaceSourceInput) -> TalosResult<Ma
                 updated_at_ms: now_ms,
             })
         }
-        MarketplaceSourceInput::LocalPackage { path } => {
+        MarketplaceSourceInput::LocalPackage { path, .. } => {
             let path = fs::canonicalize(path).map_err(|error| {
                 TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,

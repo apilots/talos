@@ -1,6 +1,7 @@
 use super::preparation::StagingDirectory;
 use super::*;
 use crate::state::SourceScanCacheFile;
+use talos_types::PluginKind;
 
 impl PluginManager {
     /// Materialization uses an isolated cache with no installation file lock held.
@@ -22,17 +23,26 @@ impl PluginManager {
                 let previous = self.state.load_source_scan_cache(&source.id)?;
                 Ok((source, previous))
             })?;
-        self.scan_and_publish_source(source, Some(previous))
+        self.scan_and_publish_source(source, Some(previous), None)
     }
 
     pub(super) fn scan_and_publish_source(
         &self,
         source: MarketplaceSource,
         previous: Option<SourceScanCacheFile>,
+        expected_kind: Option<PluginKind>,
     ) -> TalosResult<PluginSourceRefreshResponse> {
         let directory = StagingDirectory::new(&self.state)?;
         let staging = self.state.staging_store(directory.path().join("source"));
         let scan = crate::scanner::scan_source(&staging, &source)?;
+        if expected_kind
+            .is_some_and(|kind| scan.plugins.first().map(|plugin| plugin.kind) != Some(kind))
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "The package has no plugin of the selected type.",
+            ));
+        }
         self.publish_source_scan(source, previous, &directory, scan)
     }
 

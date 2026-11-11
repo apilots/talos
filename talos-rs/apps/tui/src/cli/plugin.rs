@@ -69,23 +69,17 @@ async fn installation(
             commit,
             disabled,
             replace,
-        } => serde_json::to_value(
-            client
-                .install_plugin(PluginInstallRequest {
-                    node_id,
-                    target: PluginInstallTarget::Plugin {
-                        plugin_id: PluginId(plugin_id),
-                        expected_source_commit: commit,
-                    },
-                    enable: Some(!disabled),
-                    conflict_policy: if replace {
-                        PluginInstallConflictPolicy::Replace
-                    } else {
-                        PluginInstallConflictPolicy::Reject
-                    },
-                })
-                .await?,
-        )?,
+        } => {
+            install_catalog_entry(
+                client,
+                node_id,
+                PluginId(plugin_id),
+                commit,
+                Some(!disabled),
+                replace,
+            )
+            .await?
+        }
         PluginInstallationCommand::Update {
             install_id,
             commit,
@@ -131,6 +125,32 @@ async fn installation(
     })
 }
 
+async fn install_catalog_entry(
+    client: &mut impl GatewayClient,
+    node_id: Option<String>,
+    plugin_id: PluginId,
+    expected_source_commit: Option<String>,
+    enable: Option<bool>,
+    replace: bool,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let response = client
+        .install_plugin(PluginInstallRequest {
+            node_id,
+            target: PluginInstallTarget::Plugin {
+                plugin_id,
+                expected_source_commit,
+            },
+            enable,
+            conflict_policy: if replace {
+                PluginInstallConflictPolicy::Replace
+            } else {
+                PluginInstallConflictPolicy::Reject
+            },
+        })
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
 async fn typed(
     client: &mut impl GatewayClient,
     node_id: Option<String>,
@@ -148,7 +168,10 @@ async fn typed(
             let added = client
                 .add_plugin_source(PluginSourceAddRequest {
                     node_id: node_id.clone(),
-                    source: MarketplaceSourceInput::LocalPackage { path },
+                    source: MarketplaceSourceInput::LocalPackage {
+                        path,
+                        expected_kind: Some(kind),
+                    },
                     refresh: true,
                 })
                 .await?;
@@ -189,15 +212,13 @@ async fn typed(
                 "More than one plugin has this name. Select a unique name and marketplace.",
             )?
         };
-        return installation(
+        return install_catalog_entry(
             client,
             node_id,
-            PluginInstallationCommand::Install {
-                plugin_id: plugin.id.0,
-                commit: plugin.source_commit,
-                disabled: false,
-                replace,
-            },
+            plugin.id,
+            plugin.source_commit,
+            None,
+            replace,
         )
         .await;
     }

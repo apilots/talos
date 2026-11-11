@@ -13,10 +13,11 @@ fn local_package_publishes_only_a_valid_contained_snapshot() {
     let root = tempfile::tempdir().unwrap();
     let manager = manager_with_state(PluginStateStore::new(root.path().join("state")));
     let package = root.path().join("plugin.zip");
-    let request = || PluginSourceAddRequest {
+    let request = |expected_kind| PluginSourceAddRequest {
         node_id: None,
         source: MarketplaceSourceInput::LocalPackage {
             path: package.clone(),
+            expected_kind,
         },
         refresh: false,
     };
@@ -33,14 +34,24 @@ fn local_package_publishes_only_a_valid_contained_snapshot() {
 
     write_package("plugin/../SKILL.md");
     assert_eq!(
-        manager.add_source(request()).unwrap_err().error_code(),
+        manager.add_source(request(None)).unwrap_err().error_code(),
         talos_error::ErrorCode::InvalidRequest
     );
     assert!(manager.state.load_sources().unwrap().sources.is_empty());
     assert!(!root.path().join("SKILL.md").exists());
 
     write_package("plugin/SKILL.md");
-    let added = manager.add_source(request()).unwrap();
+    assert_eq!(
+        manager
+            .add_source(request(Some(PluginKind::McpServer)))
+            .unwrap_err()
+            .error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
+    assert!(manager.state.load_sources().unwrap().sources.is_empty());
+    let added = manager
+        .add_source(request(Some(PluginKind::Skill)))
+        .unwrap();
     assert_eq!(added.plugins[0].metadata.name, "writer");
     assert_eq!(
         manager

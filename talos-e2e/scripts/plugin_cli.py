@@ -50,8 +50,8 @@ def run():
     STATE = REPORT / 'plugin-cli-catalog.json'
     catalog = json.loads(STATE.read_text())
     evidence = []
-    def cli(*args):
-        return invoke_cli(args, evidence)
+    def cli(*args, failure=None):
+        return invoke_cli(args, evidence, failure=failure)
     installed = []
     for plugin in catalog['plugins']:
         result = cli('install', plugin['id'], '--commit', catalog['commit'], '--disabled', '--node', 'embedded')
@@ -112,6 +112,9 @@ def exercise_named_packages(cli, repo, report):
         'mcp.json': json.dumps(mcp),
         'server.py': (ROOT / 'talos-rs/crates/action/mcp/tests/fixtures/server.py').read_text(),
     })
+    before = {row['id'] for row in cli('marketplace', 'list')['sources']}
+    cli('mcp', 'add', '--file', original, failure='The package has no plugin of the selected type.')
+    assert {row['id'] for row in cli('marketplace', 'list')['sources']} == before
     skill_install = cli('skill', 'add', '--file', original)['install']
     mcp_install = cli('mcp', 'add', '--file', mcp_zip)['install']
     assert skill_install['name'] == mcp_install['name'] == 'offline-demo'
@@ -120,11 +123,12 @@ def exercise_named_packages(cli, repo, report):
                        if row['kind'] == 'local_package'}
     assert {skill_install['source']['source_id'], mcp_install['source']['source_id']} <= package_sources
     assert cli('skill', 'disable', 'offline-demo')['plugin']['status']['enabled'] is False
-    assert cli('skill', 'enable', 'offline-demo')['plugin']['status']['enabled'] is True
 
     changed = cli('skill', 'add', '--file', replacement, '--replace')['install']
     assert changed['source']['source_id'] != skill_install['source']['source_id']
+    assert changed['enabled'] is False
     assert 'Version two.' in Path(changed['installed_path'], 'SKILL.md').read_text()
+    assert cli('skill', 'enable', 'offline-demo')['plugin']['status']['enabled'] is True
     Path(replacement).unlink()
     assert cli('skill', 'remove', 'offline-demo')['uninstalled']
     reinstalled = cli('skill', 'add', '--file', original)['install']
@@ -144,14 +148,76 @@ def exercise_named_packages(cli, repo, report):
     assert cli('mcp', 'remove', 'offline-config')['uninstalled']
 
 
-def invoke_cli(args, evidence, environment=None):
+def invoke_cli(args, evidence, environment=None, *, failure=None):
     environment = os.environ if environment is None else environment
     result = subprocess.run([environment['TALOS_E2E_CLI_BIN'], 'plugin', *args],
         env=environment, text=True, capture_output=True, timeout=90)
+    if failure is not None:
+        assert result.returncode != 0 and failure in result.stderr, result.stderr
+        evidence.append({'args': list(args), 'error': failure})
+        return None
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     evidence.append({'args': list(args), 'result': payload})
     return payload
+
+
+def remote_packages(node, container, environment, report):
+    root = '/home/talos/.talos/package-fixtures'
+    setup = """import json, sys
+from pathlib import Path
+from zipfile import ZipFile
+
+root = Path(sys.argv[1])
+root.mkdir()
+with ZipFile(root / 'skill.zip', 'w') as package:
+    package.writestr('skill/SKILL.md', '---\\nname: remote-offline-demo\\ndescription: Worker package fixture.\\n---\\n')
+manifest = {'name': 'remote-offline-demo', 'transport': {
+    'type': 'streamable_http', 'url': 'http://127.0.0.1:1'}}
+(root / 'mcp.json').write_text(json.dumps(manifest))
+(root / 'mcp-v2.json').write_text(json.dumps(dict(manifest, description='Version two.')))
+"""
+    docker = ['docker', 'exec', container]
+    subprocess.run([*docker, 'python3', '-c', setup, root], check=True, capture_output=True)
+    evidence = []
+
+    def cli(*args, failure=None):
+        return invoke_cli([*args, '--node', node], evidence, environment, failure=failure)
+
+    def sources():
+        return {item['id'] for item in cli('marketplace', 'list')['sources']}
+
+    skill_file = f'{root}/skill.zip'
+    assert not Path(skill_file).exists()
+    before = sources()
+    cli('mcp', 'add', '--file', skill_file, failure='The package has no plugin of the selected type.')
+    assert sources() == before
+
+    skill = cli('skill', 'add', '--file', skill_file)['install']
+    mcp = cli('mcp', 'add', '--file', f'{root}/mcp.json')['install']
+    name = 'remote-offline-demo'
+    assert skill['name'] == mcp['name'] == name
+    assert skill['enabled'] and mcp['enabled']
+    assert cli('skill', 'add', '--file', skill_file, '--replace')['install']['enabled'] is True
+    assert cli('mcp', 'disable', name)['plugin']['status']['enabled'] is False
+    replacement = cli('mcp', 'add', '--file', f'{root}/mcp-v2.json', '--replace')['install']
+    assert replacement['enabled'] is False
+    assert replacement['source']['source_id'] != mcp['source']['source_id']
+    manifest = subprocess.check_output([*docker, 'cat', f"{replacement['installed_path']}/mcp.json"], text=True)
+    assert json.loads(manifest)['description'] == 'Version two.'
+
+    local_state = Path(environment['TALOS_HOME']) / 'plugins/plugin-installs.json'
+    if local_state.is_file():
+        assert all(row['name'] != name for row in json.loads(local_state.read_text())['installs'])
+    assert cli('mcp', 'remove', name)['uninstalled']
+    assert cli('skill', 'remove', name)['uninstalled']
+    (report / 'remote-package-acceptance.json').write_text(json.dumps({
+        'status': 'passed', 'nodeId': node, 'commands': evidence,
+        'architecture': subprocess.check_output([*docker, 'uname', '-m'], text=True).strip(),
+        'wrongKindLeavesNoSource': True, 'replacementRemainsDisabled': True,
+        'clientHasNoRemoteInstall': True,
+    }, indent=2))
+    print('PASS remote Worker package kind validation and disabled replacement', flush=True)
 
 
 def remote_cli(url, node, container, environment, http, data, report):
@@ -198,6 +264,7 @@ def remote_cli(url, node, container, environment, http, data, report):
         'status': 'passed', 'nodeId': node, 'kinds': ['skill', 'mcp_server'],
         'clientHasNoRemoteInstall': True, 'commands': evidence}, indent=2))
     print('PASS real CLI -> Service -> outbound Docker Worker Plugin lifecycle; no remote installation on client', flush=True)
+    remote_packages(node, container, environment, report)
 
 
 if __name__ == '__main__':

@@ -36,7 +36,7 @@ message MarketplaceSourceInputLocalFolder {
   string path = 1;
   repeated string sparse_paths = 2;
 }
-message MarketplaceSourceInputLocalPackage { string path = 1; }
+message MarketplaceSourceInputLocalPackage { string path = 1; optional PluginKind expected_kind = 2; }
 message MarketplaceSourceInput { oneof value { MarketplaceSourceInputGit git = 1; MarketplaceSourceInputLocalFolder local_folder = 2; MarketplaceSourceInputLocalPackage local_package = 3; } }
 enum MarketplaceSourceKind { MARKETPLACE_SOURCE_KIND_UNSPECIFIED = 0; MARKETPLACE_SOURCE_KIND_GIT = 1; MARKETPLACE_SOURCE_KIND_LOCAL_FOLDER = 2; MARKETPLACE_SOURCE_KIND_LOCAL_PACKAGE = 3; }
 message MarketplaceSourceLocationGit {
