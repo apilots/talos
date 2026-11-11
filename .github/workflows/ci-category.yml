@@ -45,8 +45,7 @@ jobs:
       - name: Prepare Rust test prerequisites
         if: steps.cache.outputs.hit != 'true' && matrix.ecosystem == 'rust'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends protobuf-compiler bubblewrap ripgrep
+          bash .github/scripts/ci_install_apt.sh protobuf-compiler bubblewrap ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           cargo fetch --locked --manifest-path talos-rs/Cargo.toml
       - uses: pnpm/action-setup@v6
@@ -119,8 +118,7 @@ jobs:
           if [[ "$SCENARIO_OFFICE" == true ]]; then
             packages+=(libreoffice-writer libreoffice-calc libreoffice-impress fonts-noto-cjk)
           fi
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "${packages[@]}"
+          bash .github/scripts/ci_install_apt.sh "${packages[@]}"
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           bwrap --unshare-user --uid 0 --gid 0 --ro-bind / / true
       - uses: dtolnay/rust-toolchain@master
