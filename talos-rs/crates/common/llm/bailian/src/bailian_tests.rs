@@ -13,19 +13,58 @@ async fn spawn_sse_server(body: String) -> String {
 }
 
 async fn spawn_sse_server_chunks(chunks: Vec<String>) -> String {
+    spawn_http_response("text/event-stream", chunks).await
+}
+
+async fn spawn_http_response(content_type: &'static str, chunks: Vec<String>) -> String {
+    spawn_http_exchange(content_type, chunks).await.0
+}
+
+async fn spawn_http_exchange(
+    content_type: &'static str,
+    chunks: Vec<String>,
+) -> (String, tokio::task::JoinHandle<(String, serde_json::Value)>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("test server should bind");
     let addr = listener
         .local_addr()
         .expect("test server addr should exist");
-    tokio::spawn(async move {
+    let request = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.expect("request should arrive");
-        let mut buf = vec![0; 4096];
-        let _ = socket.read(&mut buf).await.expect("request should read");
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 4096];
+        let body_offset = loop {
+            let count = socket.read(&mut buffer).await.expect("request should read");
+            assert_ne!(count, 0, "request ended before its headers");
+            bytes.extend_from_slice(&buffer[..count]);
+            if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let mut headers = std::str::from_utf8(&bytes[..body_offset]).unwrap().lines();
+        let request_line = headers.next().unwrap().to_owned();
+        let body_length: usize = headers
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then_some(value)
+            })
+            .expect("request should have content length")
+            .trim()
+            .parse()
+            .unwrap();
+        while bytes.len() < body_offset + body_length {
+            let count = socket
+                .read(&mut buffer)
+                .await
+                .expect("request body should read");
+            assert_ne!(count, 0, "request ended before its body");
+            bytes.extend_from_slice(&buffer[..count]);
+        }
+        let body = serde_json::from_slice(&bytes[body_offset..body_offset + body_length]).unwrap();
         let content_length: usize = chunks.iter().map(|chunk| chunk.len()).sum();
         let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            "HTTP/1.1 200 OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
             content_length
         );
         socket
@@ -38,8 +77,9 @@ async fn spawn_sse_server_chunks(chunks: Vec<String>) -> String {
                 .await
                 .expect("chunk should write");
         }
+        (request_line, body)
     });
-    format!("http://{addr}")
+    (format!("http://{addr}"), request)
 }
 
 async fn collect_model_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEvent> {
@@ -457,6 +497,120 @@ fn test_build_request_maps_reasoning_to_bailian_fields() {
         serde_json::to_value(BailianProvider::build_request(request, false).unwrap()).unwrap();
     assert!(json.get("enable_thinking").is_none());
     assert!(json.get("thinking_budget").is_none());
+
+    let mut request = ChatRequest::new_user("hello", "qwen3.7-plus");
+    request.max_tokens = Some(120);
+    let encoded = BailianProvider::build_request(request, false).unwrap();
+    assert_eq!(encoded.enable_thinking, Some(false));
+    assert_eq!(encoded.thinking_budget, None);
+    assert_eq!(encoded.max_tokens, Some(120));
+    assert_eq!(encoded.max_completion_tokens, None);
+}
+
+#[test]
+fn bailian_builds_documented_qwen_effort_and_output_limit() {
+    for (model, effort, expected) in [
+        (
+            "qwen4-max-preview",
+            Some(ReasoningEffort::High),
+            Some("xhigh"),
+        ),
+        ("qwen3.8-max", Some(ReasoningEffort::Medium), Some("medium")),
+        ("qwen3.8-flash", Some(ReasoningEffort::Light), Some("low")),
+        ("qwen3.8-max-0902", None, Some("none")),
+    ] {
+        let mut request = ChatRequest::new_user("hello", model);
+        request.reasoning_effort = effort;
+        request.max_tokens = Some(120);
+        let encoded = BailianProvider::build_request(request, true).unwrap();
+        assert_eq!(encoded.reasoning_effort.as_deref(), expected, "{model}");
+        assert_eq!(encoded.enable_thinking, None, "{model}");
+        assert_eq!(encoded.thinking_budget, None, "{model}");
+        assert_eq!(encoded.max_tokens, None, "{model}");
+        assert_eq!(encoded.max_completion_tokens, Some(120), "{model}");
+    }
+
+    let request = ChatRequest::new_user("hello", "qwen3.8-2.4t-a95b");
+    let encoded = BailianProvider::build_request(request, false).unwrap();
+    assert_eq!(encoded.reasoning_effort, None);
+    assert_eq!(encoded.enable_thinking, None);
+}
+
+#[tokio::test]
+async fn bailian_sends_current_request_fields_in_both_response_modes() {
+    for (stream, content_type, response) in [
+        (
+            false,
+            "application/json",
+            r#"{"model":"qwen3.8-max","choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}"#,
+        ),
+        (true, "text/event-stream", "data: [DONE]\n\n"),
+    ] {
+        let (base_url, exchange) =
+            spawn_http_exchange(content_type, vec![response.to_owned()]).await;
+        let config =
+            BailianConfig::new("").with_base_url(format!("{base_url}/compatible-mode/v1/"));
+        let provider = BailianProvider::new(config);
+        let mut request = ChatRequest::new_user("hello", "qwen3.8-max");
+        request.max_tokens = Some(120);
+
+        if stream {
+            let events =
+                collect_model_events(provider.stream_model_blocks(request).await.unwrap()).await;
+            assert!(matches!(
+                events.as_slice(),
+                [ModelBlockStreamEvent::Done { .. }]
+            ));
+        } else {
+            assert_eq!(provider.chat(request).await.unwrap().content, "OK");
+        }
+
+        let (request_line, body) = exchange.await.unwrap();
+        assert_eq!(
+            request_line,
+            "POST /compatible-mode/v1/chat/completions HTTP/1.1"
+        );
+        assert_eq!(body["stream"], stream);
+        assert_eq!(body["reasoning_effort"], "none");
+        assert_eq!(body["max_completion_tokens"], 120);
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("thinking_budget").is_none());
+    }
+}
+
+#[test]
+fn bailian_respects_explicit_budget_and_rejects_conflicting_effort() {
+    let mut request = ChatRequest::new_user("hello", "qwen3.8-max");
+    request.reasoning_effort = Some(ReasoningEffort::Medium);
+    request.max_tokens = Some(120);
+    request
+        .request_parameters
+        .insert("thinking_budget".into(), serde_json::json!(512));
+    request
+        .request_parameters
+        .insert("max_tokens".into(), serde_json::json!(90));
+
+    let encoded = BailianProvider::build_request(request.clone(), false).unwrap();
+    let body = talos_llm_provider::serialize_with_parameters(encoded, &request.request_parameters)
+        .unwrap();
+    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(body["enable_thinking"], true);
+    assert_eq!(body["thinking_budget"], 512);
+    assert_eq!(body["max_tokens"], 90);
+    assert!(body.get("max_completion_tokens").is_none());
+
+    request
+        .request_parameters
+        .insert("reasoning_effort".into(), serde_json::json!("low"));
+    let error = BailianProvider::build_request(request.clone(), false).unwrap_err();
+    assert!(error.is_code(ErrorCode::InvalidRequest));
+
+    request.request_parameters.remove("thinking_budget");
+    let encoded = BailianProvider::build_request(request.clone(), false).unwrap();
+    let body = talos_llm_provider::serialize_with_parameters(encoded, &request.request_parameters)
+        .unwrap();
+    assert_eq!(body["reasoning_effort"], "low");
+    assert!(body.get("thinking_budget").is_none());
 }
 
 #[test]
@@ -522,67 +676,88 @@ fn test_bailian_request_serializes_cache_control_as_content_block() {
     );
 }
 
-#[test]
-fn test_usage_from_bailian_maps_cache_fields() {
-    let usage = chat_protocol::usage(chat_protocol::ChatCompletionUsage {
-        prompt_tokens: 128,
-        completion_tokens: 32,
-        total_tokens: 160,
-        prompt_tokens_details: Some(chat_protocol::ChatCompletionPromptTokensDetails {
-            cached_tokens: Some(96),
-        }),
-        cache_creation: Some(chat_protocol::ChatCompletionCacheCreation {
-            cache_creation_input_tokens: Some(48),
-            ephemeral_5m_input_tokens: Some(48),
-        }),
-    })
-    .expect("usage mapping should succeed");
+#[tokio::test]
+async fn bailian_decodes_its_cache_fields_in_json_and_sse() {
+    use serde_json::json;
+    use talos_error::ErrorCode;
 
-    assert_eq!(usage.prompt_tokens, 128);
-    assert_eq!(usage.completion_tokens, 32);
-    assert_eq!(usage.total_tokens, 160);
-    assert_eq!(usage.cache_read_input_tokens, Some(96));
-    assert_eq!(usage.cache_creation_input_tokens, Some(48));
-}
+    let cases = [
+        (
+            json!({"prompt_tokens_details":{"cache_creation_input_tokens":40}}),
+            Ok(Some(40)),
+        ),
+        (
+            json!({"cache_creation":{"cache_creation_input_tokens":48,"ephemeral_5m_input_tokens":48}}),
+            Ok(Some(48)),
+        ),
+        (
+            json!({"cache_creation":{"ephemeral_5m_input_tokens":72}}),
+            Ok(Some(72)),
+        ),
+        (
+            json!({"prompt_tokens_details":{"cache_write_tokens":0,"cache_creation_input_tokens":40},
+                "cache_creation":{"ephemeral_5m_input_tokens":72}}),
+            Ok(Some(0)),
+        ),
+        (
+            json!({"prompt_tokens_details":{},"cache_creation":null}),
+            Ok(None),
+        ),
+        (
+            json!({"cache_creation":{"cache_creation_input_tokens":72,"ephemeral_5m_input_tokens":96}}),
+            Err(ErrorCode::InvalidRequest),
+        ),
+    ];
+    for (mut wire_usage, expected) in cases {
+        wire_usage["prompt_tokens"] = json!(128);
+        wire_usage["completion_tokens"] = json!(32);
+        wire_usage["total_tokens"] = json!(160);
+        wire_usage["prompt_tokens_details"]["cached_tokens"] = json!(32);
 
-#[test]
-fn test_usage_from_bailian_maps_ephemeral_cache_creation_fallback() {
-    let usage = chat_protocol::usage(chat_protocol::ChatCompletionUsage {
-        prompt_tokens: 256,
-        completion_tokens: 64,
-        total_tokens: 320,
-        prompt_tokens_details: Some(chat_protocol::ChatCompletionPromptTokensDetails {
-            cached_tokens: Some(128),
-        }),
-        cache_creation: Some(chat_protocol::ChatCompletionCacheCreation {
-            cache_creation_input_tokens: None,
-            ephemeral_5m_input_tokens: Some(72),
-        }),
-    })
-    .expect("usage mapping should succeed");
+        let non_streaming_body = json!({
+            "model":"qwen-test",
+            "choices":[{"message":{"content":"OK"},"finish_reason":"stop"}],
+            "usage":wire_usage,
+        });
+        let base_url =
+            spawn_http_response("application/json", vec![non_streaming_body.to_string()]).await;
+        let provider = BailianProvider::new(BailianConfig::new("").with_base_url(base_url));
+        let request = ChatRequest::new_user("test", "qwen-test");
+        let response_usage = provider
+            .chat(request.clone())
+            .await
+            .map(|response| response.usage);
 
-    assert_eq!(usage.prompt_tokens, 256);
-    assert_eq!(usage.completion_tokens, 64);
-    assert_eq!(usage.total_tokens, 320);
-    assert_eq!(usage.cache_read_input_tokens, Some(128));
-    assert_eq!(usage.cache_creation_input_tokens, Some(72));
-}
+        let usage_chunk = json!({"choices":[],"usage":wire_usage});
+        let sse = format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"content\":\"OK\"}},\"finish_reason\":\"stop\"}}]}}\n\ndata: {usage_chunk}\n\ndata: [DONE]\n\n"
+        );
+        let base_url = spawn_sse_server(sse).await;
+        let provider = BailianProvider::new(BailianConfig::new("").with_base_url(base_url));
+        let mut stream = provider.stream_model_blocks(request).await.unwrap();
+        let stream_usage = loop {
+            match stream
+                .next()
+                .await
+                .expect("stream must emit a terminal event")
+            {
+                Ok(ModelBlockStreamEvent::Done { usage, .. }) => break Ok(usage.unwrap()),
+                Ok(_) => {}
+                Err(error) => break Err(error),
+            }
+        };
 
-#[test]
-fn test_usage_from_bailian_rejects_conflicting_cache_creation_fields() {
-    let err = chat_protocol::usage(chat_protocol::ChatCompletionUsage {
-        prompt_tokens: 256,
-        completion_tokens: 64,
-        total_tokens: 320,
-        prompt_tokens_details: Some(chat_protocol::ChatCompletionPromptTokensDetails {
-            cached_tokens: Some(128),
-        }),
-        cache_creation: Some(chat_protocol::ChatCompletionCacheCreation {
-            cache_creation_input_tokens: Some(72),
-            ephemeral_5m_input_tokens: Some(96),
-        }),
-    })
-    .expect_err("usage mapping should reject conflicting cache creation fields");
-
-    assert!(err.is_code(talos_error::ErrorCode::InvalidRequest));
+        for result in [response_usage, stream_usage] {
+            let mapped = result
+                .map(|usage| {
+                    assert_eq!(usage.prompt_tokens, 128);
+                    assert_eq!(usage.completion_tokens, 32);
+                    assert_eq!(usage.total_tokens, 160);
+                    assert_eq!(usage.cache_read_input_tokens, Some(32));
+                    usage.cache_creation_input_tokens
+                })
+                .map_err(|error| error.error_code());
+            assert_eq!(mapped, expected, "{wire_usage}");
+        }
+    }
 }

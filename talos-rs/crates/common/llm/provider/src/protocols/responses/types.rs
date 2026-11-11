@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Selects the official API's wire requirements or the existing compatible behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponsesContract {
+    Compatible,
+    Official,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ResponsesRequest {
     pub model: String,
@@ -22,6 +29,8 @@ pub struct ResponsesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 }
 
@@ -33,6 +42,8 @@ pub struct ResponsesTool {
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +81,25 @@ pub struct ResponsesResponse {
     pub usage: Option<ResponsesUsage>,
 }
 
+/// Adds terminal metadata validated by the official API decoder.
+#[derive(Debug, Clone, Deserialize)]
+pub struct OfficialResponsesResponse {
+    #[serde(flatten)]
+    pub(super) response: ResponsesResponse,
+    pub(super) error: Option<ResponsesError>,
+    pub(super) incomplete_details: Option<ResponsesIncompleteDetails>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct ResponsesError {
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct ResponsesIncompleteDetails {
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResponsesUsage {
     #[serde(default)]
@@ -86,6 +116,8 @@ pub struct ResponsesUsage {
 pub struct ResponsesInputTokensDetails {
     #[serde(default)]
     pub cached_tokens: Option<u32>,
+    #[serde(default)]
+    pub cache_write_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone)]

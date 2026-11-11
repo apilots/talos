@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Attachment, AttachmentKind};
+use crate::{Attachment, AttachmentKind, FunctionCall};
 use bytes::Bytes;
 
 #[test]
@@ -145,10 +145,10 @@ fn responses_chat_response_reads_output_items() {
             }
         ],
         "usage": {
-            "input_tokens": 1,
+            "input_tokens": 10,
             "output_tokens": 2,
-            "total_tokens": 3,
-            "input_tokens_details": {"cached_tokens": 1}
+            "total_tokens": 12,
+            "input_tokens_details": {"cached_tokens": 1, "cache_write_tokens": 6}
         }
     }))
     .expect("response should parse");
@@ -161,7 +161,8 @@ fn responses_chat_response_reads_output_items() {
         mapped.reasoning.continuation,
         Some(ReasoningContinuation::Blocks(blocks)) if blocks.len() == 1
     ));
-    assert_eq!(mapped.usage.total_tokens, 3);
+    assert_eq!(mapped.usage.total_tokens, 12);
+    assert_eq!(mapped.usage.cache_creation_input_tokens, Some(6));
     assert_eq!(mapped.usage.cache_read_input_tokens, Some(1));
     let calls = mapped.tool_calls.expect("tool calls should exist");
     assert_eq!(calls[0].name, "read");
@@ -248,4 +249,231 @@ async fn reasoning_and_text_output_indices_do_not_create_gaps_in_tool_ordinals()
             ]
         );
     }
+}
+
+#[test]
+fn encrypted_reasoning_round_trips_with_an_empty_summary() {
+    let item = serde_json::json!({
+        "type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "opaque"
+    });
+    let response: ResponsesResponse = serde_json::from_value(serde_json::json!({
+        "status": "completed", "output": [item]
+    }))
+    .unwrap();
+    let mapped = chat_response(response);
+    assert!(mapped.reasoning.display_text.is_empty());
+    let messages = vec![ChatMessage::assistant("")
+        .with_reasoning_continuation(mapped.reasoning.continuation.unwrap())];
+    assert_eq!(
+        input_with_contract(messages.clone(), ResponsesContract::Official).unwrap(),
+        vec![item]
+    );
+    assert_eq!(
+        input(messages).unwrap(),
+        vec![serde_json::json!({"type":"reasoning","id":"rs_1","encrypted_content":"opaque"})]
+    );
+}
+
+#[test]
+fn responses_json_reports_terminal_outcomes_and_preserves_refusal_text() {
+    let failed = serde_json::from_value(serde_json::json!({
+        "status": "failed", "error": {"code": "rate_limit_exceeded", "message": "private"}
+    }))
+    .unwrap();
+    let error = official_chat_response(failed).unwrap_err().to_api_error();
+    assert_eq!(error.code, talos_error::ErrorCode::UsageLimitExceeded);
+    assert!(!error.message.contains("private"));
+
+    let refused = serde_json::from_value(serde_json::json!({
+        "status": "completed",
+        "output": [{"type": "message", "content": [{"type": "refusal", "refusal": "Cannot help."}]}]
+    }))
+    .unwrap();
+    assert_eq!(
+        official_chat_response(refused).unwrap().content,
+        "Cannot help."
+    );
+
+    let limited = serde_json::from_value(serde_json::json!({
+        "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+        "output_text": "Partial text"
+    }))
+    .unwrap();
+    let result = official_chat_response(limited).unwrap();
+    assert_eq!(result.content, "Partial text");
+    assert_eq!(result.finish_reason.as_deref(), Some("length"));
+}
+
+#[tokio::test]
+async fn responses_streams_deliver_refusals_and_output_limit() {
+    let sse = concat!(
+        "data: {\"type\":\"response.refusal.delta\",\"output_index\":0,\"delta\":\"Cannot help.\"}\n\n",
+        "data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":2,\"output_tokens\":3,\"total_tokens\":5}}}\n\n",
+    );
+    let mut text_stream = stream_with_contract(
+        reqwest::Response::from(http::Response::new(sse)),
+        "OpenAI",
+        ResponsesContract::Official,
+    );
+    assert_eq!(
+        text_stream.next().await.unwrap().unwrap().delta,
+        "Cannot help."
+    );
+    assert_eq!(
+        text_stream
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .finish_reason
+            .as_deref(),
+        Some("length")
+    );
+    assert!(text_stream.next().await.is_none());
+
+    let mut blocks = model_blocks_with_contract(
+        reqwest::Response::from(http::Response::new(sse)),
+        ResponsesModelBlocks::openai(),
+        ResponsesContract::Official,
+    );
+    assert!(matches!(
+        blocks.next().await.unwrap().unwrap(),
+        ModelBlockStreamEvent::BlockStarted(_)
+    ));
+    assert!(matches!(
+        blocks.next().await.unwrap().unwrap(),
+        ModelBlockStreamEvent::BlockDelta { delta: ModelBlockDelta::AssistantText { delta }, .. }
+            if delta == "Cannot help."
+    ));
+    assert!(matches!(
+        blocks.next().await.unwrap().unwrap(),
+        ModelBlockStreamEvent::BlockCompleted(_)
+    ));
+    assert!(matches!(
+        blocks.next().await.unwrap().unwrap(),
+        ModelBlockStreamEvent::Done { finish_reason, usage }
+            if finish_reason.as_deref() == Some("length") && usage.as_ref().is_some_and(|usage| usage.total_tokens == 5)
+    ));
+    assert!(blocks.next().await.is_none());
+}
+
+#[tokio::test]
+async fn responses_streams_preserve_typed_errors_and_reject_early_eof() {
+    for (sse, code) in [
+        ("data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"private\"}\n\n",
+            talos_error::ErrorCode::UsageLimitExceeded),
+        ("data: {\"type\":\"response.in_progress\"}\n\n", talos_error::ErrorCode::InternalError),
+        ("data: [DONE]\n\n", talos_error::ErrorCode::InternalError),
+    ] {
+        let mut text = stream_with_contract(reqwest::Response::from(http::Response::new(sse)), "OpenAI", ResponsesContract::Official);
+        let mut blocks = model_blocks_with_contract(
+            reqwest::Response::from(http::Response::new(sse)), ResponsesModelBlocks::openai(), ResponsesContract::Official,
+        );
+        for error in [text.next().await.unwrap().unwrap_err(), blocks.next().await.unwrap().unwrap_err()] {
+            let error = error.to_api_error();
+            assert_eq!(error.code, code);
+            assert!(!error.message.contains("private"));
+        }
+        assert!(text.next().await.is_none());
+        assert!(blocks.next().await.is_none());
+    }
+}
+
+#[tokio::test]
+async fn responses_tool_completion_reconciles_arguments_before_dispatch() {
+    for (final_arguments, status, expected) in [
+        (r#"{"n":42}"#, "completed", Some(r#"{"n":42}"#)),
+        (r#"{"m":42}"#, "completed", None),
+        (r#"{"n":"#, "incomplete", None),
+    ] {
+        let events = [
+            serde_json::json!({"type":"response.output_item.added","output_index":0,
+                "item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"echo","arguments":""}}),
+            serde_json::json!({"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"n\":"}),
+            serde_json::json!({"type":"response.output_item.done","output_index":0,
+                "item":{"type":"function_call","arguments":final_arguments,"status":status}}),
+            serde_json::json!({"type":"response.completed"}),
+        ];
+        let sse = events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect::<String>();
+        let mut blocks = model_blocks_with_contract(
+            reqwest::Response::from(http::Response::new(sse)),
+            ResponsesModelBlocks::openai(),
+            ResponsesContract::Official,
+        );
+        let mut arguments = String::new();
+        let mut completed = false;
+        let mut error = None;
+        while let Some(event) = blocks.next().await {
+            match event {
+                Ok(ModelBlockStreamEvent::BlockDelta {
+                    delta: ModelBlockDelta::ToolArguments { delta },
+                    ..
+                }) => {
+                    arguments.push_str(&delta);
+                }
+                Ok(ModelBlockStreamEvent::BlockCompleted(_)) => completed = true,
+                Err(failure) => error = Some(failure),
+                _ => {}
+            }
+        }
+        assert_eq!(completed.then_some(arguments.as_str()), expected);
+        assert_eq!(error.is_some(), expected.is_none());
+    }
+}
+
+#[test]
+fn compatible_responses_keep_existing_json_status_and_ignore_unknown_terminal_metadata() {
+    let response = serde_json::from_value(serde_json::json!({
+        "status":"incomplete",
+        "output_text":"Partial text",
+        "error":"provider-specific metadata",
+        "incomplete_details":{"reason":"max_output_tokens"},
+    }))
+    .unwrap();
+    let mapped = chat_response(response);
+    assert_eq!(mapped.content, "Partial text");
+    assert_eq!(mapped.finish_reason.as_deref(), Some("incomplete"));
+}
+
+#[tokio::test]
+async fn compatible_responses_keep_streamed_tool_arguments_and_done_sentinel() {
+    let sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"echo\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"n\\\":42}\"}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.done\",\"output_index\":0,\"arguments\":\"{ \\\"n\\\": 42 }\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"arguments\":\"{ \\\"n\\\": 42 }\"}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut blocks = model_blocks(
+        reqwest::Response::from(http::Response::new(sse)),
+        ResponsesModelBlocks::openrouter(),
+    );
+    let mut arguments = String::new();
+    let mut finished = false;
+    while let Some(event) = blocks.next().await {
+        match event.unwrap() {
+            ModelBlockStreamEvent::BlockDelta {
+                delta: ModelBlockDelta::ToolArguments { delta },
+                ..
+            } => arguments.push_str(&delta),
+            ModelBlockStreamEvent::Done { finish_reason, .. } => {
+                finished = finish_reason.as_deref() == Some("stop")
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(arguments, r#"{"n":42}"#);
+    assert!(finished);
+
+    let mut text = stream(
+        reqwest::Response::from(http::Response::new(
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Partial\"}\n\n",
+        )),
+        "compatible",
+    );
+    assert_eq!(text.next().await.unwrap().unwrap().delta, "Partial");
+    assert!(text.next().await.is_none());
 }

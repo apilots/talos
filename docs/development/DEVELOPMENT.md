@@ -217,6 +217,42 @@ Select reasoning replay per model using its configured wire contract. A private
 Chat endpoint requiring `reasoning_content` must opt in; do not change replay
 fields globally for unrelated providers.
 
+The shipped profiles select Responses for new official OpenAI connections.
+Configuration upgrades preserve saved protocols and model catalogs. The
+profiles list GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, and GPT-6 Luna with
+standard short-context rates and 30-minute cache-write rates.
+
+GPT-6 Astra, GPT-6.1 Sol, and GPT-6.1 Terra require Responses for tools.
+GPT-6 Luna and GPT-5.4 mini can use Chat Completions function tools with reasoning
+disabled. The official GPT-6 Luna connection sends `none` explicitly when
+reasoning is disabled because the provider defaults to medium.
+
+The built-in OpenAI connection uses `max_completion_tokens` for a Chat output
+limit on `https://api.openai.com`. Its Responses requests default to
+`store: false` and request encrypted reasoning for manual history replay.
+Responses function tools set `strict: false` so optional tool arguments keep
+their declared semantics. Responses JSON and SSE retain refusal text, report
+text-only output limits as `length`, and propagate failed responses as errors.
+Official Responses requires a terminal event and checks finalized tool arguments.
+Compatible endpoints retain their existing reasoning replay and stream handling.
+OpenAI Chat and Responses map reported cache reads and writes to the existing
+usage counters in per-call and turn metrics. Output tokens include reasoning
+tokens reported by OpenAI. Talos does not expose a separate reasoning token
+counter.
+
+The native Bailian Chat adapter maps the explicit-cache fields documented in
+[Bailian Context Cache](https://help.aliyun.com/zh/model-studio/context-cache).
+Configure `llm.bailian.base_url` with the workspace and region-specific Base URL
+for its API key when using a dedicated host. See the
+[Bailian Base URL reference](https://help.aliyun.com/zh/model-studio/base-url).
+
+For the Qwen 3.8 and Qwen 4 models with named effort in the
+[Bailian Chat reference](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions),
+the adapter sends `reasoning_effort` by default. An explicit `thinking_budget`
+selects the budget path. The adapter rejects a request that configures both.
+Supported current Qwen Max and Flash models use `max_completion_tokens` for
+the runtime output cap unless model parameters select `max_tokens`.
+
 ## Plans and durable evidence
 
 For complex or staged work, maintain a task-owned `IMPLEMENTATION_PLAN.md`

@@ -209,6 +209,8 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
@@ -273,7 +275,7 @@ pub enum ChatReasoningContinuationFormat {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChatCompletionResponse {
+pub struct ChatCompletionResponse<U = ChatCompletionUsage> {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -282,8 +284,7 @@ pub struct ChatCompletionResponse {
     pub created: Option<u64>,
     pub model: String,
     pub choices: Vec<ChatCompletionChoice>,
-    #[serde(default)]
-    pub usage: Option<ChatCompletionUsage>,
+    pub usage: Option<U>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -317,22 +318,14 @@ pub struct ChatCompletionUsage {
     pub total_tokens: u32,
     #[serde(default)]
     pub prompt_tokens_details: Option<ChatCompletionPromptTokensDetails>,
-    #[serde(default)]
-    pub cache_creation: Option<ChatCompletionCacheCreation>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatCompletionPromptTokensDetails {
     #[serde(default)]
     pub cached_tokens: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ChatCompletionCacheCreation {
     #[serde(default)]
-    pub cache_creation_input_tokens: Option<u32>,
-    #[serde(default)]
-    pub ephemeral_5m_input_tokens: Option<u32>,
+    pub cache_write_tokens: Option<u32>,
 }
 
 /// Accepted incoming reasoning representation at this existing protocol boundary.
@@ -363,18 +356,6 @@ impl ChatCompletionModelBlocks {
             segment_after_boundary: false,
             ignore_empty_text: false,
             ignore_reasoning_after_assistant: false,
-            reasoning_format: ChatReasoningStreamFormat::TextAliases,
-        }
-    }
-
-    pub fn bailian() -> Self {
-        Self {
-            provider_name: "Bailian".to_string(),
-            item_prefix: "bailian".to_string(),
-            reasoning_keys: &["reasoning_content", "thinking", "reasoning"],
-            segment_after_boundary: true,
-            ignore_empty_text: true,
-            ignore_reasoning_after_assistant: true,
             reasoning_format: ChatReasoningStreamFormat::TextAliases,
         }
     }

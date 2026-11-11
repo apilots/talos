@@ -355,3 +355,27 @@ async fn native_stream_modes_preserve_their_existing_reasoning_representations()
         }
     }
 }
+
+#[test]
+fn chat_usage_preserves_reported_cache_write_and_missing_values() {
+    for cache_write in [Some(40), Some(0), None] {
+        let mut details = serde_json::json!({"cached_tokens": 32});
+        if let Some(tokens) = cache_write {
+            details["cache_write_tokens"] = serde_json::json!(tokens);
+        }
+        let mapped = usage(
+            serde_json::from_value(serde_json::json!({
+                "prompt_tokens": 100,
+                "completion_tokens": 10,
+                "total_tokens": 110,
+                "prompt_tokens_details": details,
+            "cache_creation": {"cache_creation_input_tokens": 72, "ephemeral_5m_input_tokens": 96}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mapped.cache_read_input_tokens, Some(32));
+        assert_eq!(mapped.cache_creation_input_tokens, cache_write);
+        assert_eq!(mapped.total_tokens, 110);
+    }
+}

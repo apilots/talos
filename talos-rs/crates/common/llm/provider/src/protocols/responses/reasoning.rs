@@ -1,3 +1,4 @@
+use super::ResponsesContract;
 use crate::{ReasoningBlock, ReasoningContinuation};
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
@@ -20,7 +21,7 @@ impl ResponsesReasoningItem {
         }
     }
 
-    fn into_value(self) -> Value {
+    fn into_value(self, contract: ResponsesContract) -> Value {
         let mut value = serde_json::json!({
             "type": "reasoning",
             "id": self.id,
@@ -28,8 +29,8 @@ impl ResponsesReasoningItem {
         let object = value
             .as_object_mut()
             .expect("reasoning item should serialize as object");
-        if !self.summary.is_empty() {
-            object.insert("summary".to_string(), Value::Array(self.summary));
+        if contract == ResponsesContract::Official || !self.summary.is_empty() {
+            object.insert("summary".to_owned(), Value::Array(self.summary));
         }
         if !self.content.is_empty() {
             object.insert("content".to_string(), Value::Array(self.content));
@@ -44,7 +45,10 @@ impl ResponsesReasoningItem {
     }
 }
 
-pub(super) fn items(continuation: Option<ReasoningContinuation>) -> TalosResult<Vec<Value>> {
+pub(super) fn items(
+    continuation: Option<ReasoningContinuation>,
+    contract: ResponsesContract,
+) -> TalosResult<Vec<Value>> {
     let Some(continuation) = continuation else {
         return Ok(Vec::new());
     };
@@ -101,6 +105,6 @@ pub(super) fn items(continuation: Option<ReasoningContinuation>) -> TalosResult<
 
     Ok(items
         .into_iter()
-        .map(ResponsesReasoningItem::into_value)
+        .map(|item| item.into_value(contract))
         .collect())
 }

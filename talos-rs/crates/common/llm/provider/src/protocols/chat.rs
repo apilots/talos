@@ -5,6 +5,7 @@ use crate::{
     Role, SseLineDecoder, ToolChoice, Usage,
 };
 use futures_util::StreamExt;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -84,6 +85,7 @@ pub fn request(
         )?,
         temperature: chat_request.temperature,
         max_tokens: chat_request.max_tokens,
+        max_completion_tokens: None,
         top_p: chat_request.top_p,
         stop: chat_request.stop,
         tools: tools(chat_request.tools),
@@ -186,18 +188,13 @@ pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ChatCompletionToolChoic
 }
 
 pub fn usage(usage: ChatCompletionUsage) -> TalosResult<Usage> {
+    let prompt_details = usage.prompt_tokens_details.as_ref();
     Ok(Usage {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,
         total_tokens: usage.total_tokens,
-        cache_creation_input_tokens: match usage.cache_creation.as_ref() {
-            Some(creation) => cache_creation_tokens(creation)?,
-            None => None,
-        },
-        cache_read_input_tokens: usage
-            .prompt_tokens_details
-            .as_ref()
-            .and_then(|details| details.cached_tokens),
+        cache_creation_input_tokens: prompt_details.and_then(|details| details.cache_write_tokens),
+        cache_read_input_tokens: prompt_details.and_then(|details| details.cached_tokens),
     })
 }
 
@@ -205,25 +202,30 @@ pub fn chat_response(
     response: ChatCompletionResponse,
     provider_name: &str,
 ) -> TalosResult<ChatResponse> {
+    chat_response_with_usage(response, provider_name, usage)
+}
+
+/// Maps a Chat response whose usage object is defined by the calling provider.
+pub fn chat_response_with_usage<U>(
+    response: ChatCompletionResponse<U>,
+    provider_name: &str,
+    map_usage: fn(U) -> TalosResult<Usage>,
+) -> TalosResult<ChatResponse> {
     let choice = response.choices.into_iter().next().ok_or_else(|| {
         TalosError::internal("No choices in response.")
             .context(format!("No choices in {provider_name} response"))
     })?;
-
-    let usage_value = response.usage.unwrap_or(ChatCompletionUsage {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-        prompt_tokens_details: None,
-        cache_creation: None,
-    });
 
     let reasoning = response_reasoning(&choice.message);
     Ok(ChatResponse {
         content: content_text(choice.message.content, provider_name)?,
         reasoning,
         model: response.model,
-        usage: usage(usage_value)?,
+        usage: response
+            .usage
+            .map(map_usage)
+            .transpose()?
+            .unwrap_or_default(),
         finish_reason: choice.finish_reason,
         tool_calls: tool_calls(choice.message.tool_calls),
     })
@@ -493,6 +495,15 @@ pub fn model_blocks(
     response: reqwest::Response,
     options: ChatCompletionModelBlocks,
 ) -> ModelBlockStream {
+    model_blocks_with_usage(response, options, usage)
+}
+
+/// Decodes model blocks using the calling provider's wire usage type and mapper.
+pub fn model_blocks_with_usage<U: DeserializeOwned + 'static>(
+    response: reqwest::Response,
+    options: ChatCompletionModelBlocks,
+    map_usage: fn(U) -> TalosResult<Usage>,
+) -> ModelBlockStream {
     let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
 
     tokio::spawn(async move {
@@ -565,10 +576,12 @@ pub fn model_blocks(
                                 .await;
                             return;
                         }
-                        if let Some(parsed_usage) = event.get("usage").and_then(|value| {
-                            serde_json::from_value::<ChatCompletionUsage>(value.clone()).ok()
-                        }) {
-                            match usage(parsed_usage) {
+                        let mapped_usage = event
+                            .get("usage")
+                            .and_then(|value| serde_json::from_value::<U>(value.clone()).ok())
+                            .map(map_usage);
+                        if let Some(result) = mapped_usage {
+                            match result {
                                 Ok(mapped_usage) => final_usage = Some(mapped_usage),
                                 Err(err) => {
                                     let _ = tx.send(Err(err)).await;
@@ -862,25 +875,6 @@ fn finish_reason(choice: Option<&Value>) -> Option<&str> {
     choice
         .and_then(|c| c.get("finish_reason"))
         .and_then(|r| r.as_str())
-}
-
-fn cache_creation_tokens(creation: &ChatCompletionCacheCreation) -> TalosResult<Option<u32>> {
-    match (
-        creation.cache_creation_input_tokens,
-        creation.ephemeral_5m_input_tokens,
-    ) {
-        (Some(cache_creation_input_tokens), Some(ephemeral_5m_input_tokens))
-            if cache_creation_input_tokens != ephemeral_5m_input_tokens =>
-        {
-            Err(TalosError::new(ErrorCode::InvalidRequest, format!(
-                "Bailian cache creation token fields disagree: cache_creation_input_tokens={} ephemeral_5m_input_tokens={}",
-                cache_creation_input_tokens, ephemeral_5m_input_tokens
-            )))
-        }
-        (Some(cache_creation_input_tokens), _) => Ok(Some(cache_creation_input_tokens)),
-        (None, Some(ephemeral_5m_input_tokens)) => Ok(Some(ephemeral_5m_input_tokens)),
-        (None, None) => Ok(None),
-    }
 }
 
 fn reasoning_model_item_id(
