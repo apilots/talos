@@ -34,34 +34,44 @@ impl ConfigService {
         match request.path {
             ConfigPath::Llm => self.config_store.load_llm_read().map(Into::into),
             ConfigPath::WebSearch => self.config_store.load_web_search_read().map(Into::into),
+            ConfigPath::SessionMessageSendPolicy => self
+                .config_store
+                .load_session_message_send_policy()
+                .map(|policy| ConfigResponse::SessionMessageSendPolicy { policy }),
         }
     }
 
     pub async fn update_config(&self, request: ConfigUpdateRequest) -> TalosResult<ConfigResponse> {
-        let _execution_guard = self.execution_gate.clone().try_write_owned().map_err(|_| {
-            TalosError::new(
-                talos_error::ErrorCode::Conflict,
-                "Worker configuration cannot change while execution is active",
-            )
-        })?;
+        let _execution_guard = if request.value.requires_runtime_reload() {
+            Some(self.execution_gate.clone().try_write_owned().map_err(|_| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Worker configuration cannot change while execution is active",
+                )
+            })?)
+        } else {
+            None
+        };
         match request.value {
             ConfigValue::Llm(llm) => {
                 let llm = *llm;
-                let prepared = self.prepare_reload(ConfigReloadTrigger::Updated(
-                    ConfigValue::Llm(Box::new(llm.clone())),
-                ))?;
+                let prepared =
+                    self.prepare_reload(ConfigReloadTrigger::Llm(Box::new(llm.clone())))?;
                 self.config_store.save_llm(&llm)?;
                 prepared.publish();
                 self.config_store.load_llm_read().map(Into::into)
             }
             ConfigValue::WebSearch(web_search) => {
                 validate_web_search_config(&web_search)?;
-                let prepared = self.prepare_reload(ConfigReloadTrigger::Updated(
-                    ConfigValue::WebSearch(web_search.clone()),
-                ))?;
+                let prepared =
+                    self.prepare_reload(ConfigReloadTrigger::WebSearch(web_search.clone()))?;
                 self.config_store.save_web_search(&web_search)?;
                 prepared.publish();
                 self.config_store.load_web_search_read().map(Into::into)
+            }
+            ConfigValue::SessionMessageSendPolicy(policy) => {
+                self.config_store.save_session_message_send_policy(policy)?;
+                Ok(ConfigResponse::SessionMessageSendPolicy { policy })
             }
         }
     }

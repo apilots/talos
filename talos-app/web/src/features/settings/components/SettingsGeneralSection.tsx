@@ -4,12 +4,14 @@ import { useTranslation } from "react-i18next";
 import type { SettingsPageState } from "../hooks/useSettingsPage";
 import { Panel } from "@/shared/ui/Panel";
 import { FieldBlock, OverviewCard, SectionHeader } from "./SectionPrimitives";
+import { SettingsComposerSection } from "./SettingsComposerSection";
 
 export function SettingsGeneralSection({
   locale,
   setLocale,
   uiTheme,
-}: Pick<SettingsPageState, "locale" | "setLocale" | "uiTheme">) {
+  canManageConfig,
+}: Pick<SettingsPageState, "locale" | "setLocale" | "uiTheme"> & { canManageConfig: boolean }) {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
@@ -47,6 +49,7 @@ export function SettingsGeneralSection({
           </FieldBlock>
         </div>
       </Panel>
+      <SettingsComposerSection canManageConfig={canManageConfig} />
     </div>
   );
 }

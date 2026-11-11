@@ -14,6 +14,39 @@ fn write_yaml(content: &str) -> NamedTempFile {
     f
 }
 
+#[test]
+fn session_message_send_policy_defaults_to_queue_and_preserves_queue_capacity() {
+    let file = write_yaml(
+        "agent:\n  message_queue:\n    max_messages_per_session: 4\ngateway:\n  port: 8080\n",
+    );
+    let store = YamlConfigStore::new(file.path().to_path_buf());
+    assert_eq!(
+        store.load_session_message_send_policy().unwrap(),
+        SessionMessageSendPolicy::Queue
+    );
+
+    store
+        .save_session_message_send_policy(SessionMessageSendPolicy::Steer)
+        .unwrap();
+    let saved = std::fs::read_to_string(file.path()).unwrap();
+    let root = parse_yaml_root(&saved).unwrap();
+    assert_eq!(
+        root["agent"]["message_queue"]["max_messages_per_session"].as_u64(),
+        Some(4)
+    );
+    assert_eq!(
+        root["agent"]["message_queue"]["default_send_policy"].as_str(),
+        Some("steer")
+    );
+    assert_eq!(root["gateway"]["port"].as_u64(), Some(8080));
+    assert_eq!(
+        YamlConfigStore::new(file.path().to_path_buf())
+            .load_session_message_send_policy()
+            .unwrap(),
+        SessionMessageSendPolicy::Steer
+    );
+}
+
 fn minimal_yaml_with_llm(api_key: &str) -> String {
     format!(
         r#"gateway:

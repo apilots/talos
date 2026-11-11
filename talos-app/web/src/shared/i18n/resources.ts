@@ -243,6 +243,13 @@ export const resources = {
     webPreview: webPreviewResources.en,
     settings: {
       pageLabel: "Settings",
+      composer: {
+        title: "Composer",
+        followUp: "Follow-up behavior",
+        followUpDetail: "Queue follow-ups or steer the current run.",
+        queue: "Queue",
+        steer: "Steer",
+      },
       backToApp: "Back to app",
       title: "Configure the Web console",
       detail:
@@ -714,6 +721,13 @@ export const resources = {
     webPreview: webPreviewResources.zh,
     settings: {
       pageLabel: "设置",
+      composer: {
+        title: "输入框",
+        followUp: "后续消息",
+        followUpDetail: "运行时排队，或引导当前轮。",
+        queue: "Queue",
+        steer: "Steer",
+      },
       backToApp: "返回应用",
       title: "配置 Web 控制台",
       detail: "让连接默认值、模型偏好和界面行为与 TUI 当前复用的共享 API 路径保持一致。",

@@ -179,6 +179,7 @@ agent:
   identity: null
   message_queue:
     max_messages_per_session: 10
+    default_send_policy: queue
   timeline_replay_batch_size: 1024
 channels:
   whatsapp:

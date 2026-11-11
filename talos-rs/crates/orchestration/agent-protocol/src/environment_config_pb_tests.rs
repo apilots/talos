@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn session_message_send_policy_roundtrips_through_worker_config() {
+    let request = ConfigGetRequest {
+        node_id: None,
+        path: ConfigPath::SessionMessageSendPolicy,
+    };
+    assert_eq!(
+        decode_get_config_params(Some(encode_get_config_params(request.clone()).unwrap())).unwrap(),
+        request
+    );
+    for policy in [
+        SessionMessageSendPolicy::Queue,
+        SessionMessageSendPolicy::Steer,
+    ] {
+        let update = ConfigUpdateRequest {
+            node_id: None,
+            value: ConfigValue::SessionMessageSendPolicy(policy),
+        };
+        assert_eq!(
+            decode_update_config_params(Some(encode_update_config_params(update.clone()).unwrap()))
+                .unwrap(),
+            update
+        );
+        let result = ConfigResponse::SessionMessageSendPolicy { policy };
+        assert_eq!(
+            decode_config_result(encode_config_result(result.clone()).unwrap()).unwrap(),
+            result
+        );
+    }
+}
+
+#[test]
 fn custom_connections_and_nested_parameters_roundtrip_without_losing_identity() {
     let llm: LlmConfig = serde_json::from_value(serde_json::json!({
         "provider":"llm-gateway", "model":"model",

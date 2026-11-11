@@ -7,7 +7,6 @@ use talos_service::{
     ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, ConfigService, McpCredentialStore,
     PluginManagerService,
 };
-use talos_types::ConfigValue;
 
 pub(crate) fn service(
     active: Arc<RwLock<Config>>,
@@ -28,12 +27,12 @@ pub(crate) fn service(
         let current = active.read().expect("Worker config lock poisoned").clone();
         let mut candidate = current.reload()?;
         match trigger {
-            ConfigReloadTrigger::Updated(ConfigValue::Llm(value)) => {
+            ConfigReloadTrigger::Llm(value) => {
                 let mut value = *value;
                 talos_config::resolve_llm_update_for_runtime(&current.llm, &mut value);
                 candidate.llm = value;
             }
-            ConfigReloadTrigger::Updated(ConfigValue::WebSearch(value)) => {
+            ConfigReloadTrigger::WebSearch(value) => {
                 let mut value = *value;
                 talos_config::resolve_web_search_update_for_runtime(
                     &current.agent.kernel.tools.web_search,

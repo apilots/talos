@@ -23,18 +23,42 @@ fn default_command_idempotency_ttl_hours() -> u32 {
     24
 }
 
-/// Bounded in-memory message queue settings for each session.
+/// Default handling of new composer input while a Session Turn is running.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    schemars::JsonSchema,
+    ts_rs::TS,
+)]
+#[serde(rename_all = "lowercase")]
+#[ts(rename_all = "lowercase")]
+pub enum SessionMessageSendPolicy {
+    #[default]
+    Queue,
+    Steer,
+}
+
+/// Session message queue settings and default send policy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct MessageQueueConfig {
     #[serde(default = "default_max_messages_per_session")]
     pub max_messages_per_session: u32,
+    #[serde(default)]
+    pub default_send_policy: SessionMessageSendPolicy,
 }
 
 impl Default for MessageQueueConfig {
     fn default() -> Self {
         Self {
             max_messages_per_session: default_max_messages_per_session(),
+            default_send_policy: SessionMessageSendPolicy::Queue,
         }
     }
 }

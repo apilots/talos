@@ -25,9 +25,16 @@ impl TalosService {
             .take()
             .unwrap_or_else(|| "embedded".to_owned());
         let node = self.resolve_computer_node(actor, &node).await?;
-        let _guard = self.execution_gate.for_node(&node).write_owned().await;
+        let runtime_update = request.value.requires_runtime_reload();
+        let _guard = if runtime_update {
+            Some(self.execution_gate.for_node(&node).write_owned().await)
+        } else {
+            None
+        };
         let environment = self.worker_environment(actor, Some(&node)).await?;
-        self.sessions.reject_nonterminal_turns(&node).await?;
+        if runtime_update {
+            self.sessions.reject_nonterminal_turns(&node).await?;
+        }
         environment
             .update_config(actor.worker_environment_context(), request)
             .await

@@ -227,8 +227,9 @@ runner discovers its three cases from the filesystem and their declared prerequi
 - `01_session_automation`: shared lifecycle, cadence, mutual exclusion, Queue/Steer,
   restart and CLI/SDK/Worker contracts described below.
 - `02_web_entry`: actual Add and slash selections, original typed input, first-work
-  countdown/cancel, automatic Timeline output and terminal row removal using a real
-  isolated Server, production Web assets and installed Chrome.
+  countdown/cancel, automatic Timeline output and terminal row removal. It also
+  verifies the Composer policy's Worker YAML persistence, reload and same-Turn
+  model context using an isolated Server, production Web assets and Chrome.
 - `03_tui_entry`: actual `/goal <prompt>` and `/loop <prompt>` through the original
   terminal/SkillSelection path, automatic stream display and terminal task cleanup.
 
