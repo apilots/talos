@@ -35,6 +35,7 @@ mod utils;
 
 pub use automation::foreground::wait_for_session_automation;
 pub use client::{GatewayClient, SessionSubscription};
+pub use model_selection::selection_for_key;
 pub use run::run_tui_app_with_gateway_client;
 pub use turn_request::TerminalTurnRequest;
 use types::*;

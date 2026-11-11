@@ -4,7 +4,8 @@ pub(crate) fn model_key(model: &ModelInfo) -> String {
     format!("{}:{}", model.provider, model.model.id)
 }
 
-pub(crate) fn selection_for_key(
+/// Resolve a provider-qualified catalog key with the model's supported reasoning settings.
+pub fn selection_for_key(
     models: &[ModelInfo],
     key: &str,
     reasoning_effort: Option<ReasoningEffort>,

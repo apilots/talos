@@ -137,6 +137,11 @@ completion and persisted tool/answer events; resizes the window and exits throug
 `/quit`. Existing model-backed TUI/interaction groups remain available to
 maintainers. Run it with `just e2e-case 08_tui/controlled_chat`.
 
+`05_cli/exec_unattended` uses a loopback model to check waiting and failure
+exit codes, Session permission persistence, and token usage on stderr. Run it
+with `just e2e-case 05_cli/exec_unattended`. The native ARM64 Harbor smoke trial
+is documented in [Talos Agent benchmarks](../talos-bench/README.md).
+
 `15_tui_install` runs in release and manual `release-preflight.yml` only. Native
 Linux AMD64/ARM64 and macOS ARM64 acceptance installs the product already built
 on that runner. Linux Docker acceptance requires `TUI_INSTALL_PRODUCT_DIR` pointing

@@ -1,0 +1,12 @@
+**
+!talos-rs/
+!talos-rs/**
+talos-rs/target/
+!deploy/
+!deploy/docker/
+!deploy/docker/talos-worker/
+!deploy/docker/talos-worker/chromium-seccomp.json
+!conf/
+!conf/talos-prod.yaml
+!conf/migrations/
+!conf/migrations/**

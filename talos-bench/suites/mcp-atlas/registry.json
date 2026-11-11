@@ -1,0 +1,14 @@
+[
+  {
+    "name": "mcp-atlas",
+    "version": "2.0.0",
+    "description": "Controlled MCP-Atlas 2.0 case with sandbox 1.2.7 and pinned claim scorer",
+    "tasks": [
+      {
+        "name": "barber-shop-first-word",
+        "path": "cases/barber-shop-first-word",
+        "submission_paths": ["/logs/artifacts/answer.txt"]
+      }
+    ]
+  }
+]

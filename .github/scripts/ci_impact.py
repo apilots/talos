@@ -50,6 +50,7 @@ BROWSER_CASES = (WORKSPACE_CASES['webui'] | WORKSPACE_CASES['desktop']
                  | NATIVE_BROWSER_CASES | CONTAINER_CASES['desktop'])
 RUNNING_TURN_TARGET = 'case:09_app_server/running_turn'
 TUI_TARGET = 'case:08_tui/controlled_chat'
+EXEC_TARGET = 'case:05_cli/exec_unattended'
 MEDIA_OWNERS = ('desktop-media', 'desktop-ipc', 'desktop-server-requests', 'ipc-guard',
                 'ipc.', 'preload.', 'app-server-controller')
 
@@ -140,7 +141,7 @@ class Impact:
         self.targets['webui'].update(WORKSPACE_CASES['webui'] | {RUNNING_TURN_TARGET})
         for category, cases in PREVIEW_CASES.items():
             self.targets[category].update(cases)
-        self.targets['tui'].update({TUI_TARGET, AUTOMATION_TUI_TARGET})
+        self.targets['tui'].update({TUI_TARGET, AUTOMATION_TUI_TARGET, EXEC_TARGET})
         self.targets['webui'].add(AUTOMATION_WEB_TARGET)
         self.installer = self.mcp = self.harness = True
 
@@ -158,6 +159,9 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 direct_rust.add(owner)
                 if path.startswith('talos-rs/apps/tui/src/cli/'):
                     result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                if path in ('talos-rs/apps/tui/src/cli/mod.rs', 'talos-rs/apps/tui/src/cli/types.rs',
+                            'talos-rs/apps/tui/src/cli/trajectory.rs', 'talos-rs/apps/tui/src/main.rs', 'talos-rs/apps/tui/src/model_selection.rs'):
+                    result.targets['tui'].add(EXEC_TARGET)
                 if path == 'talos-rs/apps/tui/src/input.rs':
                     result.targets['server'].update(CONTAINER_CASES['server'])
 
@@ -226,10 +230,15 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
             elif path.startswith('talos-e2e/scenarios/23_browser_container/'):
                 for category, cases in CONTAINER_CASES.items():
                     result.targets[category].update(cases)
+            elif path in ('talos-e2e/scripts/exec_unattended.py',
+                          'talos-e2e/scenarios/05_cli/exec_unattended.sh'):
+                result.targets['tui'].add(EXEC_TARGET)
             elif path in ('talos-e2e/scripts/plugin_cli.py',
                         'talos-e2e/scenarios/05_cli/plugin_lifecycle.sh',
                         'talos-e2e/scenarios/05_cli/requirements.json'):
                 result.targets['tui'].add('case:05_cli/plugin_lifecycle')
+                if path == 'talos-e2e/scenarios/05_cli/requirements.json':
+                    result.targets['tui'].add(EXEC_TARGET)
                 if path == 'talos-e2e/scripts/plugin_cli.py':
                     result.targets['desktop'].update(CONTAINER_CASES['desktop'])
             elif path.startswith(('talos-e2e/scenarios/15_tui_install/', 'talos-e2e/scripts/tui_install.sh',
@@ -271,6 +280,9 @@ def impact(paths: list[str], root: Path = ROOT) -> Impact:
                 # Shared runner/fixtures and provider-backed scenario edits retain the
                 # public representative suites instead of silently skipping behavior.
                 result.full(rust, frontend, frontend_checks=False)
+        elif path.startswith('talos-bench/'):
+            # Native benchmark trials are local acceptance; exec has a hosted E2E case.
+            continue
         elif path.startswith(('conf/', 'talos-rs/.cargo/')) or path in ('justfile', '.github/release-toolchain.env', '.github/ci-toolchain.env', '.github/sandbox-base.env'):
             result.full(rust, frontend, frontend_checks=path == '.github/release-toolchain.env')
         elif path.startswith(('.github/scripts/ci_', '.github/scripts/pr_change_scope',

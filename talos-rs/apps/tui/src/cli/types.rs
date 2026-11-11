@@ -42,6 +42,9 @@ pub(crate) enum Commands {
 }
 
 #[derive(Args)]
+#[command(
+    after_help = "Exit codes: 0 completed, 1 execution failed, 2 invalid arguments, 3 waiting for input."
+)]
 pub(crate) struct ExecCmd {
     /// Session ID to reuse. A new session is created when omitted.
     #[arg(long)]
@@ -54,6 +57,18 @@ pub(crate) struct ExecCmd {
     /// User ID for the request context.
     #[arg(long)]
     pub(crate) user: Option<String>,
+
+    /// Save Full Access for the session. Use only in disposable environments.
+    #[arg(long)]
+    pub(crate) dangerously_skip_permissions: bool,
+
+    /// Write execution measurements and terminal trajectory metadata to a new JSON file.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) trajectory: Option<std::path::PathBuf>,
+
+    /// Include user and assistant content, tool arguments, and results in the trajectory.
+    #[arg(long, requires = "trajectory")]
+    pub(crate) trajectory_include_content: bool,
 
     /// Message to execute.
     #[arg(required = true, trailing_var_arg = true)]
@@ -104,6 +119,8 @@ pub(crate) struct PluginCmd {
 pub(crate) enum PluginCommands {
     /// List installed plugins, including disabled installations.
     List,
+    /// Import and enable one MCP server from an MCP JSON file.
+    ImportMcp { file: std::path::PathBuf },
     /// Install a discovered plugin by its Plugin ID.
     Install {
         plugin_id: String,

@@ -98,6 +98,7 @@ talos/
 |-- talos-rs/       Rust runtime, gateways, SDKs, TUI, and server binaries
 |-- talos-app/      Web, Desktop, and TypeScript SDK workspace
 |-- talos-e2e/      Cross-component integration and release scenarios
+|-- talos-bench/    Local Agent benchmarks with Harbor and Pier
 |-- deploy/         Server deployment and TUI installation assets
 |-- conf/           Repository-managed configuration and migrations
 |-- docs/           Current architecture, reference, and development docs
@@ -159,6 +160,7 @@ Prefer package-scoped checks during development. See
 - [Rust workspace](talos-rs/README.md)
 - [Web, Desktop, and TypeScript SDKs](talos-app/README.md)
 - [End-to-end tests](talos-e2e/README.md)
+- [Local Agent benchmarks](talos-bench/README.md)
 - [Deployment](deploy/README.md)
 
 Change-specific designs live under [`spec/`](spec/). The

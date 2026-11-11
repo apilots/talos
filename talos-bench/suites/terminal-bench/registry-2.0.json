@@ -1,0 +1,46 @@
+[
+  {
+    "name": "terminal-bench",
+    "version": "2.0",
+    "description": "Pinned Terminal-Bench 2.0 cases for native ARM64 Talos evaluation",
+    "tasks": [
+      {
+        "name": "regex-log",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "regex-log",
+        "submission_paths": [
+          "/app/regex.txt"
+        ]
+      },
+      {
+        "name": "log-summary-date-ranges",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "log-summary-date-ranges",
+        "submission_paths": [
+          "/app/summary.csv"
+        ]
+      },
+      {
+        "name": "polyglot-c-py",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "polyglot-c-py",
+        "submission_paths": [
+          "/app/polyglot"
+        ]
+      },
+      {
+        "name": "multi-source-data-merger",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "multi-source-data-merger",
+        "submission_paths": [
+          "/app/merged_users.parquet",
+          "/app/conflicts.json"
+        ]
+      }
+    ]
+  }
+]

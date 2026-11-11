@@ -38,6 +38,16 @@
         "server",
         "cli"
       ]
+    },
+    "exec_unattended.sh": {
+      "commands": [
+        "cargo",
+        "protoc"
+      ],
+      "binaries": [
+        "cli"
+      ],
+      "checks": []
     }
   }
 }

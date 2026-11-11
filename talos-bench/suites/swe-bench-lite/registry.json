@@ -1,0 +1,16 @@
+[
+  {
+    "name": "swe-bench-lite",
+    "version": "1.0",
+    "description": "Pinned SWE-bench Lite tasks for native ARM64 Talos evaluation",
+    "tasks": [
+      {
+        "name": "sympy__sympy-20590",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20590",
+        "submission_paths": ["/logs/artifacts/submission.patch"]
+      }
+    ]
+  }
+]

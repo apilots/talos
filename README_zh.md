@@ -73,6 +73,7 @@ talos/
 |-- talos-rs/       Rust runtime, gateways, SDKs, TUI, and server binaries
 |-- talos-app/      Web, Desktop, and TypeScript SDK workspace
 |-- talos-e2e/      Cross-component integration and release scenarios
+|-- talos-bench/    Local Agent benchmarks with Harbor and Pier
 |-- deploy/         Server deployment and TUI installation assets
 |-- conf/           Repository-managed configuration and migrations
 |-- docs/           Current architecture, reference, and development docs
@@ -131,6 +132,7 @@ just e2e-group 01_models
 - [Rust workspace](talos-rs/README_zh.md)
 - [Web、Desktop 和 TypeScript SDK](talos-app/README_zh.md)
 - [端到端测试](talos-e2e/README_zh.md)
+- [本地 Agent 评测](talos-bench/README.md)
 - [部署](deploy/README_zh.md)
 
 具体变更设计位于 [`spec/`](spec/)，其中

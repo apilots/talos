@@ -1,0 +1,25 @@
+services:
+  main:
+    platform: linux/arm64
+    depends_on:
+      atlas:
+        condition: service_healthy
+  atlas:
+    image: ghcr.io/scaleapi/mcp-atlas@sha256:07f876f28aebf2a126e318bcd335bcd4b7fa1ad89702e872bb865d19a28e27c1
+    platform: linux/arm64
+    cpus: 0.5
+    mem_limit: 768m
+    environment:
+      ENABLED_SERVERS: filesystem,calculator
+      SANDBOX_AUTH_TOKEN: local-atlas-fixture
+    volumes:
+      - ./offline-start.sh:/tmp/talos-atlas-offline.sh:ro
+    command: ["sh", "/tmp/talos-atlas-offline.sh", "0.0.0.0"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: Bearer $$SANDBOX_AUTH_TOKEN\" http://127.0.0.1:1984/enabled-servers | grep -q '\"filesystem\",\"OK\"'"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+networks:
+  default:
+    internal: true

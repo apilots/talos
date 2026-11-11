@@ -1,9 +1,9 @@
 //! CLI request mapping only; discovery, authorization, state and installation belong to Plugin.
 use super::types::{PluginCmd, PluginCommands};
 use talos_sdk::{
-    GatewayClient, PluginDisableRequest, PluginEnableRequest, PluginInstallConflictPolicy,
-    PluginInstallId, PluginInstallRequest, PluginInstallTarget, PluginListRequest,
-    PluginUninstallRequest, PluginUpdateConflictPolicy, PluginUpdateRequest,
+    GatewayClient, McpServerImportRequest, PluginDisableRequest, PluginEnableRequest,
+    PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallTarget,
+    PluginListRequest, PluginUninstallRequest, PluginUpdateConflictPolicy, PluginUpdateRequest,
 };
 use talos_types::PluginId;
 
@@ -21,6 +21,17 @@ pub(super) async fn execute(
                     status: None,
                     source_id: None,
                     include_disabled: true,
+                })
+                .await?,
+        )?,
+        PluginCommands::ImportMcp { file } => serde_json::to_value(
+            client
+                .import_mcp_server(McpServerImportRequest {
+                    node_id,
+                    json: std::fs::read_to_string(file)?,
+                    name: None,
+                    enable: Some(true),
+                    conflict_policy: PluginInstallConflictPolicy::Reject,
                 })
                 .await?,
         )?,

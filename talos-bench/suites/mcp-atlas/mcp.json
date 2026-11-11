@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "atlas": {
+      "command": "/usr/local/bin/python3",
+      "args": ["/opt/talos-atlas/bridge.py"],
+      "env": {
+        "ATLAS_URL": "http://atlas:1984",
+        "SANDBOX_AUTH_TOKEN": "local-atlas-fixture"
+      }
+    }
+  }
+}

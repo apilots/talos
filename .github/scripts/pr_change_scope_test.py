@@ -187,6 +187,17 @@ class ChangeScopeTests(unittest.TestCase):
         task = next(task for task in tasks if '05_cli/plugin_lifecycle.sh' in task['cases'])
         self.assertTrue({'server', 'cli'} <= set(task['binaries']))
 
+    def test_exec_changes_select_the_secretless_cli_case(self):
+        for path in ('talos-rs/apps/tui/src/cli/mod.rs',
+                     'talos-rs/apps/tui/src/cli/trajectory.rs',
+                     'talos-rs/apps/tui/src/main.rs',
+                     'talos-rs/apps/tui/src/model_selection.rs',
+                     'talos-e2e/scripts/exec_unattended.py',
+                     'talos-e2e/scenarios/05_cli/requirements.json'):
+            tasks = plan([path])['categories']['tui']['scenarios']['include']
+            task = next(task for task in tasks if '05_cli/exec_unattended.sh' in task['cases'])
+            self.assertIn('cli', task['binaries'])
+
     def test_shared_plugin_cli_fixture_selects_both_worker_consumers(self):
         result = plan(['talos-e2e/scripts/plugin_cli.py'])
         for category, case in [('tui', '05_cli/plugin_lifecycle.sh'),
