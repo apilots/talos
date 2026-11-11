@@ -25,7 +25,6 @@ import { useProductScope } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
 import { buildSessionInputHistory, sessionInputHistoryHasMessage } from "../session-input-history";
 import { automationTurnTiming } from "../automation-runtime";
-import { getSessionMessageSendPolicy } from "@/shared/api/session-message-send-policy";
 
 const ACTIVE_TURN_NOT_FOUND_CODES = [
   AppProtocol.ErrorCode.ResourceNotFound,
@@ -36,7 +35,7 @@ export function useChatSession(
   sessionId: string,
   serverMessageCount?: number,
   managedWorkerPhase?: AppProtocol.NodeInfo["managedWorkerPhase"],
-  nodeId?: string,
+  sendPolicy: AppProtocol.SessionMessageSendPolicy = "queue",
 ) {
   useTranslation("errors");
   const scope = useProductScope();
@@ -198,7 +197,7 @@ export function useChatSession(
         if (
           activeTurnId && !isCancelling && !streamState?.pendingUserAction &&
           (streamState?.isStreaming || activeTurn?.state === "running") &&
-          !options?.skillSelection && await getSessionMessageSendPolicy(nodeId) === "steer"
+          !options?.skillSelection && sendPolicy === "steer"
         ) {
           await submitTurnInput({
             identity: { sessionId, turnId: activeTurnId },

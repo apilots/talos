@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
+use talos_config::{LlmConfig, WebSearchToolConfig};
 use talos_error::TalosResult;
-use talos_types::ConfigValue;
 
 /// Identifies whether configuration reload follows an update or an explicit reload request.
 #[derive(Debug, Clone)]
 pub enum ConfigReloadTrigger {
-    /// Reloads application components for the supplied update.
-    Updated(ConfigValue),
+    /// Reloads application components for the supplied model configuration.
+    Llm(Box<LlmConfig>),
+    /// Reloads application components for the supplied web search configuration.
+    WebSearch(Box<WebSearchToolConfig>),
     /// Reloads application components from the configured source.
     Explicit,
 }

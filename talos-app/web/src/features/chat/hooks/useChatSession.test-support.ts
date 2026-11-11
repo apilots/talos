@@ -34,7 +34,6 @@ const mocks = vi.hoisted(() => ({
   messageQueueAdd: vi.fn().mockResolvedValue(undefined),
   messageQueueStart: vi.fn(),
   messageQueueHook: vi.fn(),
-  getSendPolicy: vi.fn(),
   submitTurnInput: vi.fn(),
   timeline: vi.fn(),
 }));
@@ -66,10 +65,6 @@ vi.mock("./useChatQueries", () => ({
     isFetchedAfterMount: enabled && mocks.historyLoaded,
     refetch: mocks.sessionHistoryRefetch,
   }),
-}));
-
-vi.mock("@/shared/api/session-message-send-policy", () => ({
-  getSessionMessageSendPolicy: mocks.getSendPolicy,
 }));
 
 vi.mock("./useSessionBlocks", () => ({
@@ -132,7 +127,6 @@ export function resetChatSessionMocks() {
   mocks.sessionHistoryRefetch.mockClear();
   mocks.messageQueueStart.mockReset().mockResolvedValue(undefined);
   mocks.messageQueueAdd.mockReset().mockResolvedValue(undefined);
-  mocks.getSendPolicy.mockReset().mockResolvedValue("queue");
   mocks.submitTurnInput.mockReset().mockResolvedValue(undefined);
   mocks.messageQueueHook.mockClear();
   mocks.timeline.mockClear();

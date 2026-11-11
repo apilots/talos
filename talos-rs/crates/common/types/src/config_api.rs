@@ -71,6 +71,16 @@ pub enum ConfigValue {
     SessionMessageSendPolicy(SessionMessageSendPolicy),
 }
 
+impl ConfigValue {
+    /// Whether applying this update replaces live Worker components.
+    pub fn requires_runtime_reload(&self) -> bool {
+        match self {
+            Self::Llm(_) | Self::WebSearch(_) => true,
+            Self::SessionMessageSendPolicy(_) => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]

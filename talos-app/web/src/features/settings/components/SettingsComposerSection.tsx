@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { AppProtocol } from "@talos/sdk-browser";
 
-import { useEnvironmentKey, useSelectedComputerId } from "@/features/computers";
-import { getSessionMessageSendPolicy, updateSessionMessageSendPolicy } from "@/shared/api/session-message-send-policy";
+import { useProductScope, useSelectedComputerId } from "@/features/computers";
+import { sessionMessageSendPolicyOptions, updateSessionMessageSendPolicy } from "@/shared/api/session-message-send-policy";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Panel } from "@/shared/ui/Panel";
 import { selectionClasses } from "@/shared/ui/controlStyles";
@@ -13,14 +13,10 @@ const policies = ["queue", "steer"] as const;
 export function SettingsComposerSection({ canManageConfig }: { canManageConfig: boolean }) {
   const { t } = useTranslation(["settings", "common"]);
   const nodeId = useSelectedComputerId();
-  const environmentKey = useEnvironmentKey();
+  const scope = useProductScope();
   const queryClient = useQueryClient();
-  const queryKey = ["talos", environmentKey, "session-message-send-policy"] as const;
-  const policy = useQuery({
-    queryKey,
-    queryFn: () => getSessionMessageSendPolicy(nodeId),
-    enabled: Boolean(nodeId),
-  });
+  const options = sessionMessageSendPolicyOptions(scope, nodeId);
+  const policy = useQuery(options);
   const update = useMutation({
     mutationFn: ({ nodeId, value }: { nodeId: string; value: AppProtocol.SessionMessageSendPolicy }) =>
       updateSessionMessageSendPolicy(nodeId, value),
@@ -46,7 +42,7 @@ export function SettingsComposerSection({ canManageConfig }: { canManageConfig: 
                 onClick={() => {
                   if (!nodeId || value === policy.data) return;
                   update.mutate({ nodeId, value }, {
-                    onSuccess: (saved) => { queryClient.setQueryData(queryKey, saved); },
+                    onSuccess: (saved) => { queryClient.setQueryData(options.queryKey, saved); },
                   });
                 }}
                 type="button"

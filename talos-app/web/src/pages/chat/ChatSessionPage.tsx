@@ -1,4 +1,5 @@
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
+import { useQuery } from "@tanstack/react-query";
 import { TaloPanel } from "@/features/computers";
 import { useTranslation } from "react-i18next";
 import { SessionTracingPanel, TraceTabs } from "@/features/tracing";
@@ -21,6 +22,7 @@ import {
   useProductScope,
 } from "@/features/computers";
 import { useAppStore } from "@/shared/store/app-store";
+import { sessionMessageSendPolicyOptions } from "@/shared/api/session-message-send-policy";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
 import {
@@ -81,7 +83,11 @@ export function ChatSessionContent({ sessionId, talo }: {
     // Another client may have created this Project while the sidebar stayed mounted.
     if (session?.projectId) void refetchProjects();
   }, [session?.projectId, session?.nodeId, refetchProjects]);
-  const chat = useChatSession(sessionId, session?.messageCount, workerPhase, nodeId);
+  const { data: sendPolicy } = useQuery({
+    ...sessionMessageSendPolicyOptions(scope, nodeId),
+    enabled: Boolean(nodeId && ready),
+  });
+  const chat = useChatSession(sessionId, session?.messageCount, workerPhase, sendPolicy);
   const {
     blocks,
     setDraft,

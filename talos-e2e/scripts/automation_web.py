@@ -130,7 +130,11 @@ def composer_send_policy(page, origin, config_path, fixture):
     page.screenshot(path=str(REPORT / 'composer-steer.png'), full_page=True)
 
     marker = 'pending_' + uuid.uuid4().hex
-    started = begin(page, 'goal', 'prompt', f'AUTO_CASE={marker} Start a controlled ordinary Turn')
+    with page.expect_response(lambda response: urlsplit(response.url).path == '/v1/config/sessionMessageSendPolicy'
+                              and response.request.method == 'GET') as observed:
+        started = begin(page, 'goal', 'prompt', f'AUTO_CASE={marker} Start a controlled ordinary Turn')
+    assert observed.value.ok, observed.value.text()
+    assert observed.value.json()['data']['policy'] == 'steer'
     session = started['sessionId']
     wait_for(lambda: (fixture / f'{marker}.busy').exists(), 'running ordinary Turn')
     with urllib.request.urlopen(f'{origin}/v1/sessions/{session}/active-turn') as response:
@@ -138,8 +142,17 @@ def composer_send_policy(page, origin, config_path, fixture):
     follow_up = 'Use this follow-up in the current run.'
     composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
     composer.fill(follow_up)
+    policy_reads = []
+
+    def record_policy_read(request):
+        if urlsplit(request.url).path == '/v1/config/sessionMessageSendPolicy':
+            policy_reads.append(request.url)
+
+    page.on('request', record_policy_read)
     with page.expect_response(lambda response: response.url.endswith('/v1/turns/input')) as steered:
         composer.press('Enter')
+    page.remove_listener('request', record_policy_read)
+    assert not policy_reads, policy_reads
     assert steered.value.ok, steered.value.text()
     assert steered.value.request.post_data_json['identity'] == {'sessionId': session, 'turnId': turn}
     assert steered.value.request.post_data_json['input'] == {
@@ -147,6 +160,11 @@ def composer_send_policy(page, origin, config_path, fixture):
     }
     expect(page.get_by_test_id('user-input-message').filter(has_text=follow_up)).to_be_visible()
     page.screenshot(path=str(REPORT / 'composer-steer-running.png'), full_page=True)
+    saved_while_running = page.request.put(origin + '/v1/config', data={
+        'type': 'sessionMessageSendPolicy', 'value': 'queue',
+    })
+    assert saved_while_running.ok, saved_while_running.text()
+    assert yaml.safe_load(config_path.read_text())['agent']['message_queue']['default_send_policy'] == 'queue'
     (fixture / f'{marker}.release-busy').touch()
     def included_in_model_context():
         for line in (fixture / 'requests.jsonl').read_text().splitlines():
@@ -158,7 +176,7 @@ def composer_send_policy(page, origin, config_path, fixture):
                 return True
         return False
     wait_for(included_in_model_context, 'follow-up in the next model request')
-    print('CASE composer_send_policy PASS yaml=persisted default=queue steer=same-turn context=observed')
+    print('CASE composer_send_policy PASS yaml=persisted default=queue steer=cached same-turn context=observed save=during-turn')
 
 
 def complete(page, database, fixture, mode, entry):

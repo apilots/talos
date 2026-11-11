@@ -44,16 +44,12 @@ fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        if let ConfigReloadTrigger::Updated(value) = trigger {
-            match value {
-                ConfigValue::Llm(llm) => next.llm = *llm,
-                ConfigValue::WebSearch(web_search) => {
-                    next.agent.kernel.tools.web_search = *web_search;
-                }
-                ConfigValue::SessionMessageSendPolicy(policy) => {
-                    next.agent.message_queue.default_send_policy = policy;
-                }
+        match trigger {
+            ConfigReloadTrigger::Llm(llm) => next.llm = *llm,
+            ConfigReloadTrigger::WebSearch(web_search) => {
+                next.agent.kernel.tools.web_search = *web_search;
             }
+            ConfigReloadTrigger::Explicit => {}
         }
         let active = active.clone();
         Ok(ConfigReloadPlan::new(move || {

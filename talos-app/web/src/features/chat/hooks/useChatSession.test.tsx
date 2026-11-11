@@ -192,19 +192,22 @@ describe("useChatSession", () => {
     expect(result.current.messageQueue.canStart).toBe(false);
   });
 
-  it("routes running input using the session Computer's policy", async () => {
+  it("queues when the policy is unavailable and steers when it becomes available", async () => {
     mocks.activeTurn = { state: "running", identity: { sessionId: "session-1", turnId: "turn-1" } };
-    const { result } = renderHook(() => useChatSession("session-1", 1, undefined, "computer-1"));
+    const { result, rerender } = renderHook(
+      ({ policy }: { policy?: AppProtocol.SessionMessageSendPolicy }) =>
+        useChatSession("session-1", 1, undefined, policy),
+      { initialProps: {} },
+    );
     act(() => result.current.setDraft("Wait for the next turn"));
     await act(() => result.current.sendTurn());
     expect(mocks.messageQueueAdd).toHaveBeenCalledWith({
       content: [{ type: "text", text: "Wait for the next turn" }],
     });
 
-    mocks.getSendPolicy.mockResolvedValue("steer");
+    rerender({ policy: "steer" });
     act(() => result.current.setDraft("Use this now"));
     await act(() => result.current.sendTurn({ fileIds: ["file-1"] }));
-    expect(mocks.getSendPolicy).toHaveBeenLastCalledWith("computer-1");
     expect(mocks.submitTurnInput).toHaveBeenCalledWith({
       identity: { sessionId: "session-1", turnId: "turn-1" },
       input: { type: "message", input: { content: [{ type: "text", text: "Use this now" }, { type: "file", fileId: "file-1" }] } },
@@ -216,10 +219,9 @@ describe("useChatSession", () => {
 
   it("keeps the draft when the targeted Turn finishes before Steer is accepted", async () => {
     mocks.activeTurn = { state: "running", identity: { sessionId: "session-1", turnId: "turn-1" } };
-    mocks.getSendPolicy.mockResolvedValue("steer");
     const failure = { code: AppProtocol.ErrorCode.ResourceNotFound };
     mocks.submitTurnInput.mockRejectedValue(failure);
-    const { result } = renderHook(() => useChatSession("session-1", 1));
+    const { result } = renderHook(() => useChatSession("session-1", 1, undefined, "steer"));
     act(() => result.current.setDraft("Keep this follow-up"));
     await expect(result.current.sendTurn()).rejects.toBe(failure);
     expect(result.current.draft).toBe("Keep this follow-up");
