@@ -204,10 +204,22 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
             "tracedTrials": sum(bool(trial["modelCallsObserved"]) for trial in attempts),
             "meanScore": sum(rewards) / len(rewards) if rewards else None,
         })
-    complete = (runner_exit == 0 and result.get("finished_at") is not None
-                and result.get("n_total_trials") == len(trials) == len(scored) == expected
-                and all(case["scoredTrials"] == repeats for case in cases))
+    all_scored = (runner_exit == 0 and result.get("finished_at") is not None
+                  and result.get("n_total_trials") == len(trials) == len(scored) == expected
+                  and all(case["scoredTrials"] == repeats for case in cases))
     traced = sum(case["tracedTrials"] for case in cases)
+    expected_reward = 1.0 if mode == "oracle" else fixture_reward
+    failure = None
+    if not all_scored:
+        failure = "Talos benchmark job did not score every trial"
+    elif require_trace and traced != expected:
+        failure = "Talos benchmark job is missing trajectory metadata"
+    elif require_atif and any("atif" not in trial["artifacts"] for trial in scored):
+        failure = "Talos benchmark job is missing ATIF trajectories"
+    elif any(not item["path"] for trial in scored for item in trial["submissions"]):
+        failure = "Talos benchmark job is missing a required submission"
+    elif mode in ("fixture", "oracle") and any(trial["score"] != expected_reward for trial in scored):
+        failure = f"Talos {mode} validation failed"
     summary = run / "summary.json"
     write_json(summary, {
         "schemaVersion": 1,
@@ -224,24 +236,13 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
         "requestedTrials": expected,
         "scoredTrials": len(scored),
         "meanScore": sum(trial["score"] for trial in scored) / len(scored) if scored else None,
-        "complete": complete,
+        "complete": failure is None,
         "tracedTrials": traced,
         "cases": cases,
         "trials": trials,
     })
-    if not complete:
-        raise SystemExit(f"Talos benchmark job did not score every trial. See {summary}")
-    if require_trace and traced != expected:
-        raise SystemExit(f"Talos benchmark job is missing trajectory metadata. See {summary}")
-    if require_atif and any("atif" not in trial["artifacts"] for trial in scored):
-        raise SystemExit(f"Talos benchmark job is missing ATIF trajectories. See {summary}")
-    if any((mode == "fixture" or trial["score"] > 0)
-           and any(not item["path"] for item in trial["submissions"])
-           for trial in scored):
-        raise SystemExit(f"Talos benchmark job is missing a required submission. See {summary}")
-    expected_reward = 1.0 if mode == "oracle" else fixture_reward
-    if mode in ("fixture", "oracle") and any(trial["score"] != expected_reward for trial in scored):
-        raise SystemExit(f"Talos {mode} validation failed. See {summary}")
+    if failure is not None:
+        raise SystemExit(f"{failure}. See {summary}")
     print(f"Talos benchmark scored {len(scored)}/{expected} trials. See {summary}")
 
 
