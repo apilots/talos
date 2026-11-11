@@ -42,6 +42,16 @@ def wait_for(probe, description, seconds=40):
     raise AssertionError(f'{description} timed out; last transport error={last_error}')
 
 
+def wait_for_enrolled_computer(read_local_id, description):
+    def enrolled_id():
+        node_id = read_local_id()
+        return node_id if node_id and node_id != 'embedded' else None
+
+    node_id = wait_for(enrolled_id, description)
+    require(str(uuid.UUID(node_id)) == node_id, f'{description} returned a non-canonical UUID')
+    return node_id
+
+
 def free_port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
@@ -250,12 +260,10 @@ class Cluster:
         token = self.users[user]['access_token']
         data(http(self.url + '/v1/user', token=token))
 
-        def owned_host_id():
-            host_id = data(http(self.url + '/v1/sync/status', token=token))['localComputerId']
-            return host_id if host_id and host_id != 'embedded' else None
-
-        host_id = wait_for(owned_host_id, 'Management host enrollment')
-        require(str(uuid.UUID(host_id)) == host_id, 'Management host was not enrolled')
+        host_id = wait_for_enrolled_computer(
+            lambda: data(http(self.url + '/v1/sync/status', token=token))['localComputerId'],
+            'Management host enrollment',
+        )
         owned = self.manage(user, 'GetNode', {'node_id': host_id})['node']
         require(owned['owner_user_id'] == self.users[user]['user']['user_id'], 'Management host has the wrong owner')
         return host_id

@@ -10,7 +10,7 @@ import uuid
 import yaml
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / 'multi_node'))
-from fixture import Cluster, REPORT, ROOT, data, free_port, http, require, wait_for
+from fixture import Cluster, REPORT, ROOT, data, free_port, http, require, wait_for, wait_for_enrolled_computer
 sys.path.append(str(Path(__file__).resolve().parents[1] / 'computer_workspace'))
 from registration import Desktop
 from lifecycle import container_args
@@ -79,9 +79,10 @@ class SyncCluster(Cluster):
             host = Desktop(self, home, name)
             login = host.login('alice')
             token = login['access_token']
-            node = wait_for(lambda: self.call(host, token, 'sync/status')['localComputerId'],
-                            f'{name} enrolled its embedded Worker')
-            require(str(uuid.UUID(node)) == node, 'Desktop did not enroll its embedded Worker')
+            node = wait_for_enrolled_computer(
+                lambda: self.call(host, token, 'sync/status')['localComputerId'],
+                f'{name} Worker enrollment',
+            )
             self.manage('alice', 'RenameComputer', {'node_id': node, 'display_name': name})
             self.desktops[name] = {'host': host, 'token': token, 'home': home, 'node': node}
         self.add_worker('Mac-Worker', 'alice', container=False)
