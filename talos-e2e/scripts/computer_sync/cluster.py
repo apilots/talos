@@ -79,9 +79,9 @@ class SyncCluster(Cluster):
             host = Desktop(self, home, name)
             login = host.login('alice')
             token = login['access_token']
-            status = self.call(host, token, 'sync/status', None)
-            node = status['localComputerId']
-            require(node and str(uuid.UUID(node)) == node, 'Desktop did not enroll its embedded Worker')
+            node = wait_for(lambda: self.call(host, token, 'sync/status')['localComputerId'],
+                            f'{name} enrolled its embedded Worker')
+            require(str(uuid.UUID(node)) == node, 'Desktop did not enroll its embedded Worker')
             self.manage('alice', 'RenameComputer', {'node_id': node, 'display_name': name})
             self.desktops[name] = {'host': host, 'token': token, 'home': home, 'node': node}
         self.add_worker('Mac-Worker', 'alice', container=False)
