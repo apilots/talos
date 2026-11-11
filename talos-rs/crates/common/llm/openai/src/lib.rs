@@ -211,7 +211,7 @@ impl OpenAIProvider {
             .reasoning_effort
             .map(Self::convert_reasoning_effort)
             .or_else(|| {
-                // These GPT-6 tiers default to medium on the official API and support an explicit Off.
+                // GPT-6 Sol supports "none"; GPT-6.1 Sol is a distinct model that requires reasoning.
                 (official
                     && matches!(
                         request.model.as_str(),

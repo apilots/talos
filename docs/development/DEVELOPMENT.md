@@ -224,8 +224,14 @@ standard short-context rates and 30-minute cache-write rates.
 
 GPT-6 Astra, GPT-6.1 Sol, and GPT-6.1 Terra require Responses for tools.
 GPT-6 Luna and GPT-5.4 mini can use Chat Completions function tools with reasoning
-disabled. The official GPT-6 Luna connection sends `none` explicitly when
-reasoning is disabled because the provider defaults to medium.
+disabled.
+
+When reasoning is off, the official OpenAI connection sends `none` for
+`gpt-6-luna`, `gpt-6.1-terra`, and the older `gpt-6-sol`. The shipped
+`gpt-6.1-sol` and `gpt-6-astra` require reasoning. Talos omits the effort for
+these models when reasoning is set to off, so OpenAI uses the model's default.
+GPT-6.1 Sol defaults to `medium`. See [OpenAI model limitations](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-limitations)
+and the [GPT-6.1 Sol reference](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
 
 The built-in OpenAI connection uses `max_completion_tokens` for a Chat output
 limit on `https://api.openai.com`. Its Responses requests default to

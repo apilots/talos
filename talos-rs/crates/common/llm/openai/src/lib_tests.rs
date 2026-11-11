@@ -735,17 +735,18 @@ fn official_responses_requests_stateless_reasoning_and_preserves_optional_tool_f
 }
 
 #[test]
-fn official_gpt6_reasoning_off_is_explicit_only_on_supported_models() {
+fn official_reasoning_off_distinguishes_gpt6_sol_from_gpt61_sol() {
     let official = OpenAIProvider::new(OpenAIConfig::new(""));
     let compatible =
         OpenAIProvider::new(OpenAIConfig::new("").with_base_url("https://compatible.example/v1"));
     for (provider, model, expected) in [
+        (&official, "gpt-6-sol", Some("none")),
+        (&official, "gpt-6.1-sol", None),
         (&official, "gpt-6-luna", Some("none")),
         (&official, "gpt-6.1-terra", Some("none")),
-        (&official, "gpt-6-sol", Some("none")),
         (&official, "gpt-6-astra", None),
-        (&official, "gpt-6.1-sol", None),
         (&official, "gpt-4o", None),
+        (&compatible, "gpt-6-sol", None),
         (&compatible, "gpt-6-luna", None),
     ] {
         let request = ChatRequest::new_user("hello", model);

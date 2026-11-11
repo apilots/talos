@@ -45,7 +45,7 @@ target = Path(os.environ["CONFIG_TEMPLATE"])
 lines = source.read_text(encoding="utf-8").splitlines(keepends=True)
 in_llm = False
 in_openai = False
-updated = {"provider": False, "model": False, "base_url": False}
+updated = {"provider": False, "model": False, "base_url": False, "protocol": False}
 
 for index, line in enumerate(lines):
     stripped = line.strip()
@@ -63,9 +63,13 @@ for index, line in enumerate(lines):
             lines[index] = "  model: gpt-5.4-mini\n"
             updated["model"] = True
         continue
-    if in_openai and indent == 4 and stripped.startswith("base_url:"):
-        lines[index] = f"    base_url: {json.dumps(os.environ['MOCK_BASE_URL'])}\n"
-        updated["base_url"] = True
+    if in_openai and indent == 4:
+        if stripped.startswith("base_url:"):
+            lines[index] = f"    base_url: {json.dumps(os.environ['MOCK_BASE_URL'])}\n"
+            updated["base_url"] = True
+        elif stripped.startswith("protocol:"):
+            lines[index] = "    protocol: chat\n"
+            updated["protocol"] = True
 
 if not all(updated.values()):
     raise SystemExit(f"failed to configure mock OpenAI provider: {updated}")
@@ -89,6 +93,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
 
     def do_POST(self):
+        if self.path != "/v1/chat/completions":
+            self.send_error(404, "Expected Chat Completions")
+            return
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length))
         with open(request_log, "a", encoding="utf-8") as handle:

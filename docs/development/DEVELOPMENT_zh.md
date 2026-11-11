@@ -114,7 +114,13 @@ fixture/资源、配置及 CI 定义；全仓格式/错误/仓库检查使用更
 
 GPT-6 Astra、GPT-6.1 Sol 和 GPT-6.1 Terra 的工具调用需要 Responses。
 GPT-6 Luna 和 GPT-5.4 mini 在 Chat Completions 中使用函数工具时需要关闭推理。
-GPT-6 Luna 在关闭推理时显式发送 `none`，因为官方默认推理强度为 medium。
+
+关闭推理时，OpenAI 官方连接为 `gpt-6-luna`、`gpt-6.1-terra` 和旧版
+`gpt-6-sol` 显式发送 `none`。模板中的 `gpt-6.1-sol` 和 `gpt-6-astra`
+要求推理。关闭这两个模型的推理设置时，Talos 省略推理强度，由 OpenAI 使用模型默认值。
+GPT-6.1 Sol 的默认推理强度为 `medium`。参见
+[OpenAI 模型限制](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-limitations)和
+[GPT-6.1 Sol 文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。
 
 内置 OpenAI Provider 连接 `https://api.openai.com` 时，Chat 使用
 `max_completion_tokens` 设置输出上限。Responses 默认发送 `store: false`，

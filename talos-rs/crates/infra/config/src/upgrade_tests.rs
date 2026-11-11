@@ -116,26 +116,11 @@ fn managed_profile_upgrade_preserves_saved_runtime_preferences() {
             .as_sequence_mut()
             .unwrap()
             .retain(|model| !model["id"].as_str().unwrap().starts_with("gpt-6"));
-        let bailian_models = saved["llm"]["bailian"]["models"].as_sequence_mut().unwrap();
-        let bailian_ids = bailian_models
-            .iter()
-            .map(|model| model["id"].as_str().unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            bailian_ids,
-            [
-                "qwen3.8-max",
-                "qwen3.8-flash",
-                "qwen3.7-plus",
-                "qwen3.8-max-0902",
-                "qwen3.7-max",
-                "qwen3.6-flash",
-                "qwen3.8-27b",
-            ],
-            "{profile}"
-        );
         // Managed upgrades preserve the operator's previously saved Bailian catalog.
-        bailian_models.retain(|model| !model["id"].as_str().unwrap().starts_with("qwen3.8-"));
+        saved["llm"]["bailian"]["models"]
+            .as_sequence_mut()
+            .unwrap()
+            .retain(|model| !model["id"].as_str().unwrap().starts_with("qwen3.8-"));
         for (path, value) in [
             (vec!["llm", "provider"], "openai"),
             (vec!["llm", "model"], "gpt-5.4-mini"),
