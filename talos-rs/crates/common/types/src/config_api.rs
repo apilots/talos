@@ -6,7 +6,8 @@ use ts_rs::TS;
 
 pub use talos_config::{
     LlmConfig, ModelReadiness, ProviderKeyStatus, ProviderProtocolCapabilities,
-    WebSearchProviderConfig, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
+    SessionMessageSendPolicy, WebSearchProviderConfig, WebSearchProviderRuntimeConfig,
+    WebSearchToolConfig,
 };
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -16,6 +17,7 @@ pub enum ConfigPath {
     #[default]
     Llm,
     WebSearch,
+    SessionMessageSendPolicy,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -66,6 +68,17 @@ pub struct ConfigReloadResponse {
 pub enum ConfigValue {
     Llm(Box<LlmConfig>),
     WebSearch(Box<WebSearchToolConfig>),
+    SessionMessageSendPolicy(SessionMessageSendPolicy),
+}
+
+impl ConfigValue {
+    /// Whether applying this update replaces live Worker components.
+    pub fn requires_runtime_reload(&self) -> bool {
+        match self {
+            Self::Llm(_) | Self::WebSearch(_) => true,
+            Self::SessionMessageSendPolicy(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -80,6 +93,9 @@ pub enum ConfigResponse {
     },
     WebSearch {
         config: Box<WebSearchToolConfig>,
+    },
+    SessionMessageSendPolicy {
+        policy: SessionMessageSendPolicy,
     },
 }
 

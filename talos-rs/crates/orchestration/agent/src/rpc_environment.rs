@@ -24,7 +24,7 @@ impl AgentHarnessRpcAdapter {
     }
 }
 macro_rules! environment_rpc {
-    ($method:ident, $request:ident, $response:ident, $result:ident, $variant:ident, $decode:ident, $encode:ident) => {
+    ($method:ident, $request:ident, $response:ident, $result:ident, $variant:ident, $decode:ident, $encode:ident $(, $requires_reload:expr)?) => {
         fn $method<'life0, 'async_trait>(&'life0 self, request: Request<pb::$request>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response<pb::$response>, Status>> + Send + 'async_trait>>
         where 'life0: 'async_trait, Self: 'async_trait {
             Box::pin(async move {
@@ -32,12 +32,16 @@ macro_rules! environment_rpc {
             let result = async {
                 let (lease, context, environment) = self.environment_context(request.auth, request.context)?;
                 let params = wire::$decode(request.params)?;
-                let _configuration = match stringify!($method) {
-                    "update_config" | "delete_config" | "reload_config"
+                let reserve_configuration = matches!(stringify!($method),
+                    "delete_config" | "reload_config"
                     | "add_plugin_source" | "refresh_plugin_source" | "remove_plugin_source"
                     | "install_plugin" | "update_plugin" | "uninstall_plugin" | "enable_plugin" | "disable_plugin"
-                    | "update_mcp_credentials" | "import_mcp_server" => Some(self.session_gate.reserve_configuration()?),
-                    _ => None,
+                    | "update_mcp_credentials" | "import_mcp_server"
+                ) $(|| ($requires_reload)(&params))?;
+                let _configuration = if reserve_configuration {
+                    Some(self.session_gate.reserve_configuration()?)
+                } else {
+                    None
                 };
                 let operation = environment.$method(context, params);
                 let value = tokio::select! { biased; _ = lease.ended() => return Err(unauthenticated()), value = operation => value? };
@@ -301,7 +305,8 @@ impl pb::worker_environment_rpc_server::WorkerEnvironmentRpc for AgentHarnessRpc
         update_config_response,
         Config,
         decode_update_config_params,
-        encode_config_result
+        encode_config_result,
+        |params: &talos_types::ConfigUpdateRequest| params.value.requires_runtime_reload()
     );
     environment_rpc!(
         delete_config,

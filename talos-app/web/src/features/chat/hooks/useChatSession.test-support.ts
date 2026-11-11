@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   messageQueueAdd: vi.fn().mockResolvedValue(undefined),
   messageQueueStart: vi.fn(),
   messageQueueHook: vi.fn(),
+  submitTurnInput: vi.fn(),
   timeline: vi.fn(),
 }));
 
@@ -42,6 +43,7 @@ vi.mock("../api", async (importOriginal) => {
   return {
     ...actual,
     createInitialTurnRequest: mocks.createInitialTurnRequest,
+    submitTurnInput: mocks.submitTurnInput,
   };
 });
 
@@ -124,6 +126,8 @@ export function resetChatSessionMocks() {
   mocks.activeTurnQuery.mockClear();
   mocks.sessionHistoryRefetch.mockClear();
   mocks.messageQueueStart.mockReset().mockResolvedValue(undefined);
+  mocks.messageQueueAdd.mockReset().mockResolvedValue(undefined);
+  mocks.submitTurnInput.mockReset().mockResolvedValue(undefined);
   mocks.messageQueueHook.mockClear();
   mocks.timeline.mockClear();
   mocks.isStreaming = false;

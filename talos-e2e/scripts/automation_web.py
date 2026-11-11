@@ -112,6 +112,73 @@ def queue_and_steer(page, session, turn):
     expect(user.get_by_test_id('automation-input-source')).to_have_count(0)
 
 
+def composer_send_policy(page, origin, config_path, fixture):
+    page.goto(origin + '/settings/general')
+    composer_settings = page.get_by_role('region', name='Composer', exact=True)
+    queue = composer_settings.get_by_role('button', name='Queue', exact=True)
+    steer = composer_settings.get_by_role('button', name='Steer', exact=True)
+    expect(queue).to_have_attribute('aria-pressed', 'true')
+    expect(steer).to_be_enabled()
+    page.screenshot(path=str(REPORT / 'composer-queue.png'), full_page=True)
+    with page.expect_response(lambda response: urlsplit(response.url).path == '/v1/config'
+                              and response.request.method == 'PUT') as saved:
+        steer.click()
+    assert saved.value.ok, saved.value.text()
+    assert yaml.safe_load(config_path.read_text())['agent']['message_queue']['default_send_policy'] == 'steer'
+    page.reload()
+    expect(steer).to_have_attribute('aria-pressed', 'true')
+    page.screenshot(path=str(REPORT / 'composer-steer.png'), full_page=True)
+
+    marker = 'pending_' + uuid.uuid4().hex
+    with page.expect_response(lambda response: urlsplit(response.url).path == '/v1/config/sessionMessageSendPolicy'
+                              and response.request.method == 'GET') as observed:
+        started = begin(page, 'goal', 'prompt', f'AUTO_CASE={marker} Start a controlled ordinary Turn')
+    assert observed.value.ok, observed.value.text()
+    assert observed.value.json()['data']['policy'] == 'steer'
+    session = started['sessionId']
+    wait_for(lambda: (fixture / f'{marker}.busy').exists(), 'running ordinary Turn')
+    with urllib.request.urlopen(f'{origin}/v1/sessions/{session}/active-turn') as response:
+        turn = json.load(response)['data']['activeTurn']['identity']['turnId']
+    follow_up = 'Use this follow-up in the current run.'
+    composer = page.get_by_role('textbox', name='Ask anything. Press / for commands and skills.')
+    composer.fill(follow_up)
+    policy_reads = []
+
+    def record_policy_read(request):
+        if urlsplit(request.url).path == '/v1/config/sessionMessageSendPolicy':
+            policy_reads.append(request.url)
+
+    page.on('request', record_policy_read)
+    with page.expect_response(lambda response: response.url.endswith('/v1/turns/input')) as steered:
+        composer.press('Enter')
+    page.remove_listener('request', record_policy_read)
+    assert not policy_reads, policy_reads
+    assert steered.value.ok, steered.value.text()
+    assert steered.value.request.post_data_json['identity'] == {'sessionId': session, 'turnId': turn}
+    assert steered.value.request.post_data_json['input'] == {
+        'type': 'message', 'input': {'content': [{'type': 'text', 'text': follow_up}]},
+    }
+    expect(page.get_by_test_id('user-input-message').filter(has_text=follow_up)).to_be_visible()
+    page.screenshot(path=str(REPORT / 'composer-steer-running.png'), full_page=True)
+    saved_while_running = page.request.put(origin + '/v1/config', data={
+        'type': 'sessionMessageSendPolicy', 'value': 'queue',
+    })
+    assert saved_while_running.ok, saved_while_running.text()
+    assert yaml.safe_load(config_path.read_text())['agent']['message_queue']['default_send_policy'] == 'queue'
+    (fixture / f'{marker}.release-busy').touch()
+    def included_in_model_context():
+        for line in (fixture / 'requests.jsonl').read_text().splitlines():
+            request = json.loads(line)
+            if request['marker'] == marker and any(
+                message['role'] == 'user' and follow_up in json.dumps(message.get('content'))
+                for message in request['body']['messages']
+            ):
+                return True
+        return False
+    wait_for(included_in_model_context, 'follow-up in the next model request')
+    print('CASE composer_send_policy PASS yaml=persisted default=queue steer=cached same-turn context=observed save=during-turn')
+
+
 def complete(page, database, fixture, mode, entry):
     kind = 'goal' if mode == 'goal' else 'dynamicstop'
     marker = kind + '_' + uuid.uuid4().hex
@@ -220,6 +287,7 @@ def run(home):
                            complete(page, home / 'data/talos.db', fixture, 'loop', 'slash'),
                            cancel(page, home / 'data/talos.db', fixture),
                            complete(page, home / 'data/talos.db', fixture, 'goal', 'prompt')]
+                composer_send_policy(page, origin, config_path, fixture)
                 assert not (fixture / 'errors.jsonl').exists(), 'Controlled upstream contract failed'
                 (REPORT / 'result.json').write_text(json.dumps({'result': 'PASS', 'tasks': results}, indent=2))
                 print('CASE automation_web_entry PASS server=real tool=real entries=Add,slash,prompt selection=typed-or-none countdown=real terminalRows=removed cancel=beforeWork')

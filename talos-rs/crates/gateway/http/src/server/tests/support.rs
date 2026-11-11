@@ -31,13 +31,12 @@ pub(crate) fn test_config_reload_hook(
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        if let talos_service::ConfigReloadTrigger::Updated(value) = trigger {
-            match value {
-                talos_types::ConfigValue::Llm(llm) => next.llm = *llm,
-                talos_types::ConfigValue::WebSearch(web_search) => {
-                    next.agent.kernel.tools.web_search = *web_search;
-                }
+        match trigger {
+            talos_service::ConfigReloadTrigger::Llm(llm) => next.llm = *llm,
+            talos_service::ConfigReloadTrigger::WebSearch(web_search) => {
+                next.agent.kernel.tools.web_search = *web_search;
             }
+            talos_service::ConfigReloadTrigger::Explicit => {}
         }
         let active = active.clone();
         Ok(talos_service::ConfigReloadPlan::new(move || {

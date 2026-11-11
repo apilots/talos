@@ -758,13 +758,15 @@ export type WebSearchProviderConfig = "firecrawl" | "brave" | "tavily";
 
 export type WebSearchProviderRuntimeConfig = { api_key?: string, base_url?: string, timeout_ms: number, };
 
-export type ConfigPath = "llm" | "webSearch";
+export type ConfigPath = "llm" | "webSearch" | "sessionMessageSendPolicy";
+
+export type SessionMessageSendPolicy = "queue" | "steer";
 
 export type ConfigGetRequest = { nodeId: string | null, path: ConfigPath, };
 
 export type ConfigUpdateRequest = { nodeId: string | null, value: ConfigValue, };
 
-export type ConfigResponse = { "type": "llm", config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, } | { "type": "webSearch", config: WebSearchToolConfig, };
+export type ConfigResponse = { "type": "llm", config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, } | { "type": "webSearch", config: WebSearchToolConfig, } | { "type": "sessionMessageSendPolicy", policy: SessionMessageSendPolicy, };
 
 export type ConfigDeleteRequest = { nodeId: string | null, path: string, };
 
@@ -774,7 +776,7 @@ export type ConfigReloadRequest = { nodeId: string | null, };
 
 export type ConfigReloadResponse = { success: boolean, };
 
-export type ConfigValue = { "type": "llm", "value": LlmConfig } | { "type": "webSearch", "value": WebSearchToolConfig };
+export type ConfigValue = { "type": "llm", "value": LlmConfig } | { "type": "webSearch", "value": WebSearchToolConfig } | { "type": "sessionMessageSendPolicy", "value": SessionMessageSendPolicy };
 
 export type ModelReadiness = { ready: boolean, provider: string, model: string, issues: Array<string>, };
 

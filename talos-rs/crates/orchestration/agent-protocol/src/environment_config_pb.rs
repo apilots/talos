@@ -160,11 +160,25 @@ fn decode_search(value: pb::WebSearchConfig) -> TalosResult<WebSearchToolConfig>
         tavily: decode_search_provider(value.tavily)?,
     })
 }
+fn encode_send_policy(value: SessionMessageSendPolicy) -> i32 {
+    match value {
+        SessionMessageSendPolicy::Queue => pb::SessionMessageSendPolicy::Queue as i32,
+        SessionMessageSendPolicy::Steer => pb::SessionMessageSendPolicy::Steer as i32,
+    }
+}
+fn decode_send_policy(value: i32) -> TalosResult<SessionMessageSendPolicy> {
+    match pb::SessionMessageSendPolicy::try_from(value) {
+        Ok(pb::SessionMessageSendPolicy::Queue) => Ok(SessionMessageSendPolicy::Queue),
+        Ok(pb::SessionMessageSendPolicy::Steer) => Ok(SessionMessageSendPolicy::Steer),
+        _ => Err(invalid()),
+    }
+}
 pub fn encode_get_config_params(value: ConfigGetRequest) -> TalosResult<pb::ConfigGetParams> {
     Ok(pb::ConfigGetParams {
         path: match value.path {
             ConfigPath::Llm => 1,
             ConfigPath::WebSearch => 2,
+            ConfigPath::SessionMessageSendPolicy => 3,
         },
     })
 }
@@ -177,6 +191,7 @@ pub fn decode_get_config_params(
         path: match value.path {
             1 => ConfigPath::Llm,
             2 => ConfigPath::WebSearch,
+            3 => ConfigPath::SessionMessageSendPolicy,
             _ => return Err(invalid()),
         },
     })
@@ -189,6 +204,11 @@ pub fn encode_update_config_params(
             ConfigValue::Llm(value) => pb::config_update_params::Value::Llm(encode_llm(*value)),
             ConfigValue::WebSearch(value) => {
                 pb::config_update_params::Value::WebSearch(encode_search(*value))
+            }
+            ConfigValue::SessionMessageSendPolicy(policy) => {
+                pb::config_update_params::Value::SessionMessageSendPolicy(encode_send_policy(
+                    policy,
+                ))
             }
         }),
     })
@@ -204,6 +224,9 @@ pub fn decode_update_config_params(
             }
             pb::config_update_params::Value::WebSearch(value) => {
                 ConfigValue::WebSearch(Box::new(decode_search(value)?))
+            }
+            pb::config_update_params::Value::SessionMessageSendPolicy(policy) => {
+                ConfigValue::SessionMessageSendPolicy(decode_send_policy(policy)?)
             }
         },
     })
@@ -271,6 +294,9 @@ pub fn encode_config_result(value: ConfigResponse) -> TalosResult<pb::ConfigRead
             ConfigResponse::WebSearch { config } => {
                 pb::config_read::Value::WebSearch(encode_search(*config))
             }
+            ConfigResponse::SessionMessageSendPolicy { policy } => {
+                pb::config_read::Value::SessionMessageSendPolicy(encode_send_policy(policy))
+            }
         }),
     })
 }
@@ -320,6 +346,11 @@ pub fn decode_config_result(value: pb::ConfigRead) -> TalosResult<ConfigResponse
         pb::config_read::Value::WebSearch(value) => ConfigResponse::WebSearch {
             config: Box::new(decode_search(value)?),
         },
+        pb::config_read::Value::SessionMessageSendPolicy(policy) => {
+            ConfigResponse::SessionMessageSendPolicy {
+                policy: decode_send_policy(policy)?,
+            }
+        }
     })
 }
 pub fn encode_delete_config_result(value: ConfigDeleteResponse) -> TalosResult<pb::ConfigDeleted> {

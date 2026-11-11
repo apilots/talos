@@ -7,7 +7,8 @@ use talos_fs::FileSystem;
 
 use crate::{
     model_readiness_for_llm, EnvSecretStore, LlmConfig, LlmConfigRead, ProviderConfig,
-    ProviderKeyStatus, RuntimeEnv, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
+    ProviderKeyStatus, RuntimeEnv, SessionMessageSendPolicy, WebSearchProviderRuntimeConfig,
+    WebSearchToolConfig,
 };
 
 mod custom_provider;
@@ -41,6 +42,11 @@ pub trait ConfigStore: Send + Sync {
 
     /// Read the UI-facing web search config with API keys redacted.
     fn load_web_search_read(&self) -> TalosResult<WebSearchToolConfig>;
+
+    fn load_session_message_send_policy(&self) -> TalosResult<SessionMessageSendPolicy>;
+
+    fn save_session_message_send_policy(&self, policy: SessionMessageSendPolicy)
+        -> TalosResult<()>;
 
     /// Replace only agent.kernel.tools.web_search and persist provider API keys to env.
     fn save_web_search(&self, web_search: &WebSearchToolConfig)
@@ -191,6 +197,41 @@ impl ConfigStore for YamlConfigStore {
         let raw = self.load_web_search_raw_unsanitized()?;
         let runtime_env = RuntimeEnv::load(&self.env_path)?;
         Ok(build_web_search_config_read(raw, &runtime_env))
+    }
+
+    fn load_session_message_send_policy(&self) -> TalosResult<SessionMessageSendPolicy> {
+        let root = parse_yaml_root(&self.read_config_text()?)?;
+        let value = root["agent"]["message_queue"].get("default_send_policy");
+        match value {
+            None => Ok(SessionMessageSendPolicy::default()),
+            Some(value) => serde_yaml::from_value(value.clone()).map_err(|error| {
+                TalosError::internal_with_source("Invalid session message send policy.", error)
+            }),
+        }
+    }
+
+    fn save_session_message_send_policy(
+        &self,
+        policy: SessionMessageSendPolicy,
+    ) -> TalosResult<()> {
+        let _lock = talos_fs::std_fs().with_file_lock(&self.lock_path())?;
+        let mut root = parse_yaml_root(&self.read_config_text()?)?;
+        let root_map = root
+            .as_mapping_mut()
+            .ok_or_else(|| TalosError::internal("config file root is not a yaml mapping"))?;
+        let agent = nested_mapping(root_map, "agent")?;
+        let queue = nested_mapping(agent, "message_queue")?;
+        let value = serde_yaml::to_value(policy).map_err(|error| {
+            TalosError::internal_with_source(
+                "Failed to serialize session message send policy.",
+                error,
+            )
+        })?;
+        queue.insert("default_send_policy".into(), value);
+        let output = serde_yaml::to_string(&root).map_err(|error| {
+            TalosError::internal_with_source("Failed to serialize YAML configuration.", error)
+        })?;
+        talos_fs::std_fs().write_file(&self.config_path, &output)
     }
 
     fn save_web_search(
@@ -767,6 +808,7 @@ fn rollback_status(result: TalosResult<()>) -> &'static str {
 pub struct InMemoryLlmConfigStore {
     llm: std::sync::RwLock<LlmConfig>,
     web_search: std::sync::RwLock<WebSearchToolConfig>,
+    session_message_send_policy: std::sync::RwLock<SessionMessageSendPolicy>,
 }
 
 impl InMemoryLlmConfigStore {
@@ -774,6 +816,7 @@ impl InMemoryLlmConfigStore {
         Self {
             llm: std::sync::RwLock::new(llm),
             web_search: std::sync::RwLock::new(WebSearchToolConfig::default()),
+            session_message_send_policy: std::sync::RwLock::default(),
         }
     }
 }
@@ -814,6 +857,24 @@ impl ConfigStore for InMemoryLlmConfigStore {
             .write()
             .expect("web search config write lock") = web_search.clone();
         Ok(web_search.clone())
+    }
+
+    fn load_session_message_send_policy(&self) -> TalosResult<SessionMessageSendPolicy> {
+        Ok(*self
+            .session_message_send_policy
+            .read()
+            .expect("send policy read lock"))
+    }
+
+    fn save_session_message_send_policy(
+        &self,
+        policy: SessionMessageSendPolicy,
+    ) -> TalosResult<()> {
+        *self
+            .session_message_send_policy
+            .write()
+            .expect("send policy write lock") = policy;
+        Ok(())
     }
 }
 
