@@ -311,25 +311,13 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
         assert_eq!(snapshot, first);
     }
     assert_eq!(host.background.lock().unwrap().tasks.len(), 1);
-    let verified = actor.clone().with_username(Some("fixture".into()));
-    runtime.service.resume_account_sync(&verified);
-    assert_eq!(
-        host.background.lock().unwrap().tasks[&actor.user_id]
-            .state
-            .borrow()
-            .revision,
-        0,
-        "display metadata must not invalidate a cached session's pending ownership decision"
-    );
     let refreshed = Actor::regular(&actor.user_id).with_access_token("refreshed-fixture-token");
     runtime.service.resume_account_sync(&refreshed);
     {
         let background = host.background.lock().unwrap();
         let refresh = &background.tasks[&actor.user_id];
         assert_eq!(refresh.task.id(), supervisor_id);
-        let state = refresh.state.borrow();
-        assert_eq!(state.actor.access_token, refreshed.access_token);
-        assert_eq!(state.revision, 1);
+        assert_eq!(refresh.actor.borrow().access_token, refreshed.access_token);
     }
     assert_eq!(std::fs::read(config.source_path()).unwrap(), before);
     assert!(runtime.sync.saved_bindings().await.unwrap().is_empty());
@@ -370,7 +358,7 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
         actor.user_id.clone(),
         RefreshTask {
             task,
-            state: watch::channel(RefreshState::new(actor.clone())).0,
+            actor: tokio::sync::watch::channel(actor.clone()).0,
         },
     );
     let desktop = crate::desktop_application::DesktopApplication::new(

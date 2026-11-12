@@ -1,6 +1,5 @@
 //! Login and configuration policy over the existing synchronization and auth owners.
 use super::application_sync::ApplicationSyncHost;
-use super::application_sync_background::LocalComputerReconciliation;
 use agent_protocol::AgentFuture;
 use std::sync::Arc;
 use talos_auth::RequestIdentity;
@@ -221,7 +220,6 @@ impl ApplicationSyncHost {
     async fn attach_signed_in(
         &self,
         actor: &RequestIdentity,
-        reconciliation: Option<&LocalComputerReconciliation<'_>>,
     ) -> TalosResult<(talos_sync_sdk::CredentialCallback, Option<TalosError>)> {
         let mut enrollment_error = None;
         let store = YamlConfigStore::new(self.config.source_path());
@@ -288,20 +286,15 @@ impl ApplicationSyncHost {
                 }
             }
         }
-        let desktop = self.config.agent_node.control_plane.is_none();
-        let owned = (desktop || reconciliation.is_some())
+        let credentials = self.credentials(actor)?;
+        let owns_local = self.config.agent_node.control_plane.is_none()
             && self
                 .owns_local_computer(&Actor::regular(&actor.user_id))
                 .await?;
-        if let Some(reconciliation) = reconciliation {
-            // Loopback execution only needs the local ownership decision.
-            reconciliation.complete(enrollment_error.as_ref().map_or(Ok(owned), Err));
-        }
-        let credentials = self.credentials(actor)?;
         if let Some(runner) = store
             .load_agent_node()?
             .runner
-            .filter(|_| desktop && owned && enrollment_error.is_none())
+            .filter(|_| owns_local && enrollment_error.is_none())
         {
             match self.connect_computer(actor, &runner.node_id).await {
                 Err(error) => {
@@ -321,12 +314,8 @@ impl ApplicationSyncHost {
         Ok((credentials, enrollment_error))
     }
 
-    async fn bind_signed_in(
-        &self,
-        actor: &RequestIdentity,
-        reconciliation: Option<&LocalComputerReconciliation<'_>>,
-    ) -> TalosResult<Option<TalosError>> {
-        let (credentials, enrollment_error) = self.attach_signed_in(actor, reconciliation).await?;
+    async fn bind_signed_in(&self, actor: &RequestIdentity) -> TalosResult<Option<TalosError>> {
+        let (credentials, enrollment_error) = self.attach_signed_in(actor).await?;
         // H initialization must still proceed when G enrollment fails. The owner
         // retries the incomplete lifecycle without duplicating H reconnect.
         match (
@@ -486,7 +475,6 @@ impl ApplicationSyncHost {
         &self,
         actor: &Actor,
         phase: &mut RefreshPhase,
-        reconciliation: &LocalComputerReconciliation<'_>,
     ) -> TalosResult<()> {
         *phase = RefreshPhase::VerifyAccount;
         let verified = self.verified_actor(actor).await?;
@@ -510,9 +498,7 @@ impl ApplicationSyncHost {
             }
             self.sync_stores.shutdown_handles().await?;
             *phase = RefreshPhase::ReconcileWorkerAndBinding;
-            let (_, enrollment_error) = self
-                .attach_signed_in(&verified, Some(reconciliation))
-                .await?;
+            let (_, enrollment_error) = self.attach_signed_in(&verified).await?;
             return enrollment_error.map_or(Ok(()), Err);
         }
         // Restore document transport from its durable binding before any Worker
@@ -533,9 +519,7 @@ impl ApplicationSyncHost {
             }
         }
         *phase = RefreshPhase::ReconcileWorkerAndBinding;
-        self.bind_signed_in(&verified, Some(reconciliation))
-            .await?
-            .map_or(Ok(()), Err)
+        self.bind_signed_in(&verified).await?.map_or(Ok(()), Err)
     }
 
     async fn read_status(&self, actor: &Actor) -> TalosResult<SyncStatusResponse> {
@@ -671,10 +655,7 @@ impl ManagementSync for ApplicationSyncHost {
                     self.service.claim_local_history(&verified.user_id).await?;
                 }
                 self.sync.set_enabled(&verified.user_id, true).await?;
-                if let Some(error) = self
-                    .bind_signed_in(&verified, /* reconciliation */ None)
-                    .await?
-                {
+                if let Some(error) = self.bind_signed_in(&verified).await? {
                     // H enable succeeded. G's independently retained failure is
                     // handled here and retried by the resumed account owner.
                     talos_logging::report_error(&error);

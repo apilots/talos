@@ -2,9 +2,8 @@
 use super::application_sync::ApplicationSyncHost;
 use super::application_sync_management::RefreshPhase;
 use std::collections::HashMap;
-use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
-use tokio::{sync::watch, task::JoinHandle};
+use tokio::task::JoinHandle;
 
 #[derive(Default)]
 pub(crate) struct RefreshTasks {
@@ -39,74 +38,7 @@ impl Drop for RefreshPause<'_> {
 
 struct RefreshTask {
     task: JoinHandle<()>,
-    state: watch::Sender<RefreshState>,
-}
-
-struct RefreshState {
-    actor: Actor,
-    revision: u64,
-    computer: Option<LocalComputerDecision>,
-}
-
-impl RefreshState {
-    fn new(actor: Actor) -> Self {
-        Self {
-            actor,
-            revision: 0,
-            computer: None,
-        }
-    }
-
-    fn request_reconciliation(&mut self) {
-        self.revision += 1;
-        self.computer = None;
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum LocalComputerDecision {
-    Owned,
-    Denied,
-    Failed(ErrorCode),
-}
-
-pub(crate) struct LocalComputerReconciliation<'a> {
-    state: &'a watch::Sender<RefreshState>,
-    revision: u64,
-}
-
-impl LocalComputerReconciliation<'_> {
-    /// Publish only the current revision's first definitive ownership result.
-    pub(crate) fn complete(&self, result: Result<bool, &TalosError>) {
-        let decision = match result {
-            Ok(true) => LocalComputerDecision::Owned,
-            Ok(false) => LocalComputerDecision::Denied,
-            Err(error) if retryable(error) => return,
-            Err(error)
-                if matches!(
-                    error.error_code(),
-                    ErrorCode::ResourceNotFound | ErrorCode::PermissionDenied
-                ) =>
-            {
-                LocalComputerDecision::Denied
-            }
-            Err(error) => LocalComputerDecision::Failed(error.error_code()),
-        };
-        self.state.send_if_modified(|current| {
-            if current.revision != self.revision || current.computer.is_some() {
-                return false;
-            }
-            current.computer = Some(decision);
-            true
-        });
-    }
-}
-
-fn retryable(error: &TalosError) -> bool {
-    matches!(
-        error.error_code(),
-        ErrorCode::ServiceUnavailable | ErrorCode::Timeout | ErrorCode::UsageLimitExceeded
-    )
+    actor: tokio::sync::watch::Sender<Actor>,
 }
 
 impl Drop for RefreshTasks {
@@ -154,15 +86,11 @@ impl ApplicationSyncHost {
         }
         if let Some(refresh) = background.tasks.get(&actor.user_id) {
             if !refresh.task.is_finished() {
-                refresh.state.send_if_modified(|current| {
-                    // Cached and verified Actors can differ only in their display name.
-                    if current.actor.access_token == actor.access_token
-                        && current.actor.role == actor.role
-                    {
+                refresh.actor.send_if_modified(|current| {
+                    if current == actor {
                         return false;
                     }
-                    current.actor = actor.clone();
-                    current.request_reconciliation();
+                    *current = actor.clone();
                     true
                 });
                 return;
@@ -170,59 +98,14 @@ impl ApplicationSyncHost {
         }
         let host = self.self_weak.clone();
         let account_id = actor.user_id.clone();
-        let (state, updates) = watch::channel(RefreshState::new(actor.clone()));
+        let (actor, updates) = tokio::sync::watch::channel(actor.clone());
         let failures = self.worker_failures.subscribe();
         tracing::info!(%account_id, "Sync account maintenance started");
         let lifetime = RefreshLifetime(account_id.clone());
-        let task = tokio::spawn(maintain_account(
-            host,
-            state.clone(),
-            updates,
-            failures,
-            lifetime,
-        ));
+        let task = tokio::spawn(maintain_account(host, updates, failures, lifetime));
         background
             .tasks
-            .insert(account_id, RefreshTask { task, state });
-    }
-
-    /// Wait for the existing account supervisor's ownership decision.
-    /// An absent supervisor leaves routing to the existing authorization path.
-    /// A cancelled supervisor denies the waiting request.
-    pub(crate) async fn await_local_computer_reconciliation(
-        &self,
-        actor: &Actor,
-    ) -> TalosResult<Option<LocalComputerDecision>> {
-        let Some(mut updates) = self
-            .background
-            .lock()
-            .expect("Sync refresh tasks lock")
-            .tasks
-            .get(&actor.user_id)
-            .filter(|refresh| !refresh.task.is_finished())
-            .map(|refresh| refresh.state.subscribe())
-        else {
-            return Ok(None);
-        };
-        self.verified_actor(actor).await?;
-        // This deadline bounds the request while upstream recovery is pending.
-        // Only a published ownership decision can mark the Computer as owned.
-        let decision = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            updates.wait_for(|current| current.computer.is_some()),
-        )
-        .await
-        .map_err(|_| {
-            TalosError::new(
-                ErrorCode::Timeout,
-                "Timed out restoring access to the local Computer.",
-            )
-        })?;
-        Ok(
-            decision.map_or(Some(LocalComputerDecision::Denied), |current| {
-                current.computer
-            }),
-        )
+            .insert(account_id, RefreshTask { task, actor });
     }
 
     /// Durable Computer imports wake registration reconciliation, never a read API.
@@ -234,9 +117,7 @@ impl ApplicationSyncHost {
             .tasks
             .get(account_id)
         {
-            refresh
-                .state
-                .send_modify(RefreshState::request_reconciliation);
+            refresh.actor.send_modify(|_| {});
         }
     }
 
@@ -289,7 +170,7 @@ impl ApplicationSyncHost {
                 background
                     .tasks
                     .get(&actor.user_id)
-                    .and_then(|refresh| refresh.state.borrow().actor.access_token.clone())
+                    .and_then(|refresh| refresh.actor.borrow().access_token.clone())
             });
             background.suspended.insert(actor.user_id.clone(), token);
         }
@@ -310,34 +191,21 @@ impl ApplicationSyncHost {
 
 async fn maintain_account(
     host: std::sync::Weak<ApplicationSyncHost>,
-    state: watch::Sender<RefreshState>,
-    mut updates: watch::Receiver<RefreshState>,
-    mut failures: watch::Receiver<Option<talos_error::ApiError>>,
+    mut updates: tokio::sync::watch::Receiver<Actor>,
+    mut failures: tokio::sync::watch::Receiver<Option<talos_error::ApiError>>,
     _lifetime: RefreshLifetime,
 ) {
     let mut wake_reason = RefreshWake::Started;
     loop {
         let Some(owner) = host.upgrade() else { break };
-        let (actor, revision) = {
-            let current = updates.borrow();
-            (current.actor.clone(), current.revision)
-        };
-        let reconciliation = LocalComputerReconciliation {
-            state: &state,
-            revision,
-        };
-        state.send_if_modified(|current| {
-            current.revision == revision && current.computer.take().is_some()
-        });
+        let actor = updates.borrow_and_update().clone();
         failures.borrow_and_update();
         let started = std::time::Instant::now();
         let mut phase = RefreshPhase::AwaitLifecycle;
         let result = {
             let _guard = owner.lifecycle.lock().await;
             async {
-                owner
-                    .refresh_account(&actor, &mut phase, &reconciliation)
-                    .await?;
+                owner.refresh_account(&actor, &mut phase).await?;
                 phase = RefreshPhase::ObserveWorker;
                 let local = talos_config::YamlConfigStore::new(owner.config.source_path())
                     .load_agent_node()?
@@ -357,14 +225,20 @@ async fn maintain_account(
             .await
         };
         let failed = result.is_err();
-        let should_retry = result.as_ref().is_err_and(retryable);
-        let retry_after_seconds = should_retry.then_some(5_u64);
+        let retryable = result.as_ref().is_err_and(|error| {
+            matches!(
+                error.error_code(),
+                talos_error::ErrorCode::ServiceUnavailable
+                    | talos_error::ErrorCode::Timeout
+                    | talos_error::ErrorCode::UsageLimitExceeded
+            )
+        });
+        let retry_after_seconds = retryable.then_some(5_u64);
         let connection = match result {
             Err(error) => {
                 let span = tracing::warn_span!("sync_account_initialization_failed", account_id = %actor.user_id, ?phase, ?wake_reason, elapsed_ms = started.elapsed().as_millis() as u64, retry_after_seconds);
                 let _entered = span.enter();
                 talos_logging::report_error(&error);
-                reconciliation.complete(Err(&error));
                 owner
                     .failures
                     .write()
@@ -387,8 +261,8 @@ async fn maintain_account(
         drop(owner);
         if failed {
             wake_reason = tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if should_retry => RefreshWake::TemporaryFailureRetry,
-                changed = updates.wait_for(|current| current.revision != revision) => {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)), if retryable => RefreshWake::TemporaryFailureRetry,
+                changed = updates.changed() => {
                     if changed.is_err() { break }
                     RefreshWake::AccountOrComputerChanged
                 },
@@ -409,7 +283,7 @@ async fn maintain_account(
             continue;
         }
         wake_reason = tokio::select! {
-            changed = updates.wait_for(|current| current.revision != revision) => {
+            changed = updates.changed() => {
                 if changed.is_err() { break }
                 RefreshWake::AccountOrComputerChanged
             },

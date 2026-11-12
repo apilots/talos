@@ -2,10 +2,10 @@
 use crate::desktop_application::DesktopApplication;
 use agent_client::{AgentNodeClient, AgentTlsTrust};
 use agent_protocol::{CreateNodeRequest, NodeMode, RotateCredentialRequest};
-use talos_auth::CloudSessionCache;
-use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport};
+use talos_auth::{CloudSessionCache, RequestIdentity};
+use talos_config::{AgentNodeRunnerConfig, AgentNodeTransport, Config};
 use talos_error::{ErrorCode, TalosError, TalosResult};
-use talos_types::DesktopWorkerIdentityResponse;
+use talos_types::{DesktopWorkerIdentityResponse, NodeInfo};
 
 // Registration credentials have an explicit lifetime; expired credentials require owner recovery.
 const CREDENTIAL_LIFETIME_SECONDS: i64 = 365 * 24 * 60 * 60;
@@ -274,30 +274,7 @@ impl WorkerEnrollment<'_> {
         let central = config.agent_node.control_plane.is_some();
         let direct_endpoint = central.then(|| endpoint.clone());
         let mut transport_changed = false;
-        if existing
-            .as_ref()
-            .is_some_and(|runner| runner.control_plane_endpoint != endpoint)
-        {
-            return Err(TalosError::new(
-                ErrorCode::Conflict,
-                "Saved Worker belongs to another control plane",
-            ));
-        }
-        let ca_file = existing
-            .as_ref()
-            .and_then(|runner| runner.trusted_ca_file.as_ref())
-            .or(config.cloud.agent_trusted_ca_file.as_ref());
-        let trust = ca_file
-            .map(std::fs::read)
-            .transpose()
-            .map_err(|error| {
-                TalosError::internal_with_source(
-                    "Read Worker control-plane CA; technical details were withheld.",
-                    error,
-                )
-            })?
-            .map_or(AgentTlsTrust::SystemRoots, AgentTlsTrust::Certificate);
-        let client = AgentNodeClient::connect(&endpoint, trust).await?;
+        let client = enrollment_gateway(&config, existing.as_ref()).await?;
         let expires_at = CloudSessionCache::now_ms() / 1000 + CREDENTIAL_LIFETIME_SECONDS;
         let node_id = recover_node_id
             .as_ref()
@@ -314,25 +291,7 @@ impl WorkerEnrollment<'_> {
                 }
                 Err(error) => return Err(error),
             };
-            if node.status == agent_protocol::NodeStatus::Disabled {
-                return Err(TalosError::new(
-                    ErrorCode::PermissionDenied,
-                    "Enable this computer before registering its Worker",
-                ));
-            }
-            if node.mode != NodeMode::Remote
-                || node.owner_user_id.as_deref() != Some(&actor.user_id)
-                || (!central
-                    && node.endpoint.is_some()
-                        != existing
-                            .as_ref()
-                            .is_some_and(|runner| runner.transport() == AgentNodeTransport::Direct))
-            {
-                return Err(TalosError::new(
-                    ErrorCode::PermissionDenied,
-                    "Saved computer ownership or transport does not match this Worker",
-                ));
-            }
+            validate_saved_node(&config, &actor, existing.as_ref(), &node)?;
             if existing
                 .as_ref()
                 .is_some_and(|saved| saved.node_id != *node_id)
@@ -380,15 +339,7 @@ impl WorkerEnrollment<'_> {
                         .await?,
                 )
             } else {
-                if node
-                    .credential_expires_at
-                    .is_none_or(|expiry| expiry <= CloudSessionCache::now_ms() / 1000)
-                {
-                    return Err(TalosError::new(
-                        ErrorCode::ResourceExpired,
-                        "Worker registration credential expired. Recover this computer credential.",
-                    ));
-                }
+                validate_registration_expiry(&node)?;
                 None
             };
             (node, credential)
@@ -467,6 +418,72 @@ impl WorkerEnrollment<'_> {
         config.agent_node.runner = Some(runner);
         Ok(config)
     }
+}
+
+pub(crate) async fn enrollment_gateway(
+    config: &Config,
+    runner: Option<&AgentNodeRunnerConfig>,
+) -> TalosResult<AgentNodeClient> {
+    let endpoint = &config.cloud.agent_base_url;
+    if runner.is_some_and(|runner| &runner.control_plane_endpoint != endpoint) {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Saved Worker belongs to another control plane",
+        ));
+    }
+    let ca_file = runner
+        .and_then(|runner| runner.trusted_ca_file.as_ref())
+        .or(config.cloud.agent_trusted_ca_file.as_ref());
+    let trust = ca_file
+        .map(std::fs::read)
+        .transpose()
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "Read Worker control-plane CA; technical details were withheld.",
+                error,
+            )
+        })?
+        .map_or(AgentTlsTrust::SystemRoots, AgentTlsTrust::Certificate);
+    AgentNodeClient::connect(endpoint, trust).await
+}
+
+pub(crate) fn validate_saved_node(
+    config: &Config,
+    actor: &RequestIdentity,
+    runner: Option<&AgentNodeRunnerConfig>,
+    node: &NodeInfo,
+) -> TalosResult<()> {
+    if node.status == agent_protocol::NodeStatus::Disabled {
+        return Err(TalosError::new(
+            ErrorCode::PermissionDenied,
+            "Enable this computer before registering its Worker",
+        ));
+    }
+    if node.mode != NodeMode::Remote
+        || node.owner_user_id.as_deref() != Some(&actor.user_id)
+        || (config.agent_node.control_plane.is_none()
+            && node.endpoint.is_some()
+                != runner.is_some_and(|runner| runner.transport() == AgentNodeTransport::Direct))
+    {
+        return Err(TalosError::new(
+            ErrorCode::PermissionDenied,
+            "Saved computer ownership or transport does not match this Worker",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_registration_expiry(node: &NodeInfo) -> TalosResult<()> {
+    if node
+        .credential_expires_at
+        .is_none_or(|expiry| expiry <= CloudSessionCache::now_ms() / 1000)
+    {
+        return Err(TalosError::new(
+            ErrorCode::ResourceExpired,
+            "Worker registration credential expired. Recover this computer credential.",
+        ));
+    }
+    Ok(())
 }
 
 fn enrollment_account_mismatch() -> TalosError {

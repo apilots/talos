@@ -1,8 +1,11 @@
 //! Current-host aliases and live Gateway reachability, using original Computer DTOs.
 use super::application_sync::ApplicationSyncHost;
-use super::application_sync_background::LocalComputerDecision;
+use super::desktop_worker::{
+    enrollment_gateway, validate_registration_expiry, validate_saved_node,
+};
 use agent_client::{AgentNodeClient, AgentTlsTrust};
 use talos_auth::{RequestIdentity, UserRole};
+use talos_config::{AgentNodeRunnerConfig, Config};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::NodeInfo;
@@ -152,29 +155,9 @@ impl ApplicationSyncHost {
                 return Ok("embedded".into());
             }
             if local != "embedded" {
-                match self.await_local_computer_reconciliation(actor).await? {
-                    Some(LocalComputerDecision::Owned) => {
-                        // The registration and current access policy may have changed
-                        // while this request was waiting for the supervisor.
-                        if self.account_connections_allowed(&actor.user_id)
-                            && self.local_computer_id().await? == local
-                            && self.owns_local_computer(actor).await?
-                        {
-                            return Ok("embedded".into());
-                        }
-                        return Err(local_computer_denied(actor, computer_id));
-                    }
-                    Some(LocalComputerDecision::Denied) => {
-                        return Err(local_computer_denied(actor, computer_id))
-                    }
-                    Some(LocalComputerDecision::Failed(code)) => {
-                        return Err(TalosError::new(
-                            code,
-                            "Could not restore access to the local Computer.",
-                        ));
-                    }
-                    None => {}
-                }
+                return self
+                    .authorize_saved_computer(actor, computer_id, &local)
+                    .await;
             }
             if computer_id == "embedded" {
                 return Err(local_computer_denied(actor, computer_id));
@@ -182,13 +165,47 @@ impl ApplicationSyncHost {
         }
         let verified = self.verified_actor(actor).await?;
         self.connect_computer(&verified, computer_id).await?;
-        if computer_id == local {
-            *self.local_owner.write().expect("local computer owner lock") =
-                Some(actor.user_id.clone());
-            Ok("embedded".into())
-        } else {
-            Ok(computer_id.into())
+        Ok(computer_id.into())
+    }
+
+    async fn authorize_saved_computer(
+        &self,
+        actor: &Actor,
+        selector: &str,
+        node_id: &str,
+    ) -> TalosResult<String> {
+        let verified = self.verified_actor(actor).await?;
+        if !self.account_connections_allowed(&actor.user_id) {
+            return Err(local_computer_denied(actor, selector));
         }
+        let config = self.config.reload()?;
+        let Some(runner) = config
+            .agent_node
+            .runner
+            .as_ref()
+            .filter(|runner| runner.node_id == node_id)
+        else {
+            return Err(local_computer_denied(actor, selector));
+        };
+        // The request owns this read-only check and its original typed error.
+        // The background task can maintain the same registration independently.
+        match verify_saved_computer(&config, &verified, runner).await {
+            Err(error) if selector == "embedded" && error.is_code(ErrorCode::ResourceNotFound) => {
+                return Err(local_computer_denied(actor, selector));
+            }
+            result => result?,
+        }
+        if !self.account_connections_allowed(&actor.user_id)
+            || self.local_computer_id().await? != node_id
+            || talos_config::YamlConfigStore::new(self.config.source_path())
+                .load_agent_node()?
+                .runner
+                .as_ref()
+                != Some(runner)
+        {
+            return Err(local_computer_denied(actor, selector));
+        }
+        Ok("embedded".into())
     }
     pub(crate) async fn computer_view(
         &self,
@@ -253,6 +270,29 @@ impl ApplicationSyncHost {
         }
         Ok(info)
     }
+}
+
+/// Check the saved Computer for one local request without starting or waiting
+/// for its background Worker and document synchronization lifecycles.
+async fn verify_saved_computer(
+    config: &Config,
+    actor: &RequestIdentity,
+    runner: &AgentNodeRunnerConfig,
+) -> TalosResult<()> {
+    let token = actor.access_token.as_deref().expect("verified token");
+    let client = enrollment_gateway(config, Some(runner)).await?;
+    // Scope access before reading the host's protected credential file.
+    let node = client.get_node(token, &runner.node_id).await?;
+    validate_saved_node(config, actor, Some(runner), &node)?;
+    validate_registration_expiry(&node)?;
+    let node =
+        talos_worker::RegisteredWorker::verify_saved_credential(config, runner, token).await?;
+    if node.node_id != runner.node_id {
+        return Err(TalosError::internal(
+            "Control plane returned a different Worker identity.",
+        ));
+    }
+    validate_saved_node(config, actor, Some(runner), &node)
 }
 
 fn local_computer_denied(actor: &Actor, computer_id: &str) -> TalosError {

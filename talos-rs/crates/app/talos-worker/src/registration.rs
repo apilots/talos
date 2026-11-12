@@ -46,6 +46,26 @@ impl RegisteredWorker {
         ))
     }
 
+    /// Verify the protected local credential at its control plane without
+    /// exposing it to the caller or starting a registration.
+    pub async fn verify_saved_credential(
+        config: &Config,
+        runner: &AgentNodeRunnerConfig,
+        access_token: &str,
+    ) -> TalosResult<agent_protocol::NodeInfo> {
+        let token = read_credential(&runner.credential_file, &config.talos_paths().conf_dir)?;
+        registration_client(config, runner)
+            .await?
+            .verify_saved_registration(
+                access_token,
+                NodeAuth {
+                    node_id: runner.node_id.clone(),
+                    token,
+                },
+            )
+            .await
+    }
+
     /// Register the host's existing Worker and listener. Detaching never stops
     /// its local RPC credential, local executions, MCP runtime or listener.
     pub async fn attach(
