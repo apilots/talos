@@ -80,7 +80,7 @@ pub struct AgentNodeControlConfig {
 ///
 /// The registration credential is read from a protected file, not from the
 /// Workspace or the serialized configuration value.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentNodeRunnerConfig {
     /// Omitted uses outbound Connect; listener settings never select registration transport.

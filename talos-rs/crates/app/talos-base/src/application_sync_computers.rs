@@ -193,13 +193,8 @@ impl ApplicationSyncHost {
             }
             result => result?,
         }
-        if !self.account_connections_allowed(&actor.user_id)
-            || self.local_computer_id().await? != node_id
-            || talos_config::YamlConfigStore::new(self.config.source_path())
-                .load_agent_node()?
-                .runner
-                .as_ref()
-                != Some(runner)
+        if self.local_computer_id().await? != node_id
+            || !self.account_connections_allowed(&actor.user_id)
         {
             return Err(local_computer_denied(actor, selector));
         }
@@ -291,11 +286,6 @@ async fn verify_saved_computer(
         &actor.user_id,
     )
     .await?;
-    if node.node_id != runner.node_id {
-        return Err(TalosError::internal(
-            "Control plane returned a different Worker identity.",
-        ));
-    }
     validate_saved_node(config, actor, Some(runner), &node)
 }
 

@@ -13,10 +13,13 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
         time::Duration,
     };
 
+    use tokio::sync::Barrier;
+
     #[derive(Default)]
     struct GatewayAuth {
         calls: AtomicUsize,
         failure: Mutex<Option<TalosError>>,
+        verification_pause: Mutex<Option<Arc<Barrier>>>,
     }
 
     #[tonic::async_trait]
@@ -30,6 +33,11 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
             let failure = self.failure.lock().unwrap().take();
             if let Some(error) = failure {
                 return Err(error);
+            }
+            let pause = self.verification_pause.lock().unwrap().take();
+            if let Some(pause) = pause {
+                pause.wait().await;
+                pause.wait().await;
             }
             TestAuth.verify_access_token(token).await
         }
@@ -175,6 +183,25 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
         "each local request needs only one Gateway verification"
     );
     assert!(restarted.worker_registration.lock().await.is_none());
+
+    let verification_pause = Arc::new(Barrier::new(2));
+    *gateway_auth.verification_pause.lock().unwrap() = Some(verification_pause.clone());
+    let (result, pause) = tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::join!(request(&owner, implicit.clone()), async {
+            verification_pause.wait().await;
+            let pause = restarted.sync_host.suspend_refresh(&owner).await;
+            verification_pause.wait().await;
+            pause
+        })
+    })
+    .await
+    .expect("the Gateway verification must overlap account suspension");
+    assert_eq!(
+        result.unwrap().unwrap_err().error_code(),
+        ErrorCode::PermissionDenied
+    );
+    drop(pause);
+    restarted.sync_host.resume_login(&owner);
 
     // A control-plane rotation leaves the saved bytes intact but revokes their proof.
     let replacement = fixture
