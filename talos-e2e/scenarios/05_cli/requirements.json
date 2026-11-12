@@ -29,15 +29,23 @@
       "commands": [
         "cargo",
         "protoc",
-        "curl",
         "git",
         "node"
       ],
       "checks": [],
       "binaries": [
-        "server",
         "cli"
       ]
+    },
+    "exec_unattended.sh": {
+      "commands": [
+        "cargo",
+        "protoc"
+      ],
+      "binaries": [
+        "cli"
+      ],
+      "checks": []
     }
   }
 }

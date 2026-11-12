@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,14 +14,19 @@ use talos_sdk::{
 use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::run_tui_app_with_gateway_client;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
     // Runtime teardown can log while dropping background tasks. Flush the
     // logging worker only after that runtime has been dropped.
     let mut log_guard = None;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(run(&mut log_guard))
+    match runtime.block_on(run(&mut log_guard)) {
+        Err(error) if error.is::<cli::ExecWaitingForInput>() => {
+            Ok(ExitCode::from(cli::ExecWaitingForInput::EXIT_CODE))
+        }
+        result => result.map(|()| ExitCode::SUCCESS),
+    }
 }
 
 async fn run(

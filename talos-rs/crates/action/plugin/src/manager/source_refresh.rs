@@ -1,6 +1,7 @@
 use super::preparation::StagingDirectory;
 use super::*;
-use talos_types::MarketplaceSource;
+use crate::state::SourceScanCacheFile;
+use talos_types::PluginKind;
 
 impl PluginManager {
     /// Materialization uses an isolated cache with no installation file lock held.
@@ -13,19 +14,42 @@ impl PluginManager {
             .state
             .with_exclusive_lock("plugin.source.inspect", || {
                 let source = self.source_by_id(&request.source_id)?;
+                if source.kind == MarketplaceSourceKind::LocalPackage {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "Local plugin packages cannot be refreshed. Add a new package with replacement instead.",
+                    ));
+                }
                 let previous = self.state.load_source_scan_cache(&source.id)?;
                 Ok((source, previous))
             })?;
+        self.scan_and_publish_source(source, Some(previous), None)
+    }
+
+    pub(super) fn scan_and_publish_source(
+        &self,
+        source: MarketplaceSource,
+        previous: Option<SourceScanCacheFile>,
+        expected_kind: Option<PluginKind>,
+    ) -> TalosResult<PluginSourceRefreshResponse> {
         let directory = StagingDirectory::new(&self.state)?;
         let staging = self.state.staging_store(directory.path().join("source"));
         let scan = crate::scanner::scan_source(&staging, &source)?;
+        if expected_kind
+            .is_some_and(|kind| scan.plugins.first().map(|plugin| plugin.kind) != Some(kind))
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "The package has no plugin of the selected type.",
+            ));
+        }
         self.publish_source_scan(source, previous, &directory, scan)
     }
 
     pub(super) fn publish_source_scan(
         &self,
         mut source: MarketplaceSource,
-        previous: crate::state::SourceScanCacheFile,
+        previous: Option<SourceScanCacheFile>,
         directory: &StagingDirectory,
         scan: crate::scanner::SourceScanResult,
     ) -> TalosResult<PluginSourceRefreshResponse> {
@@ -39,7 +63,7 @@ impl PluginManager {
         // lose a disposable cache, but can never label new bytes with an old commit.
         staging.save_source_scan_cache(
             &source.id,
-            &crate::state::SourceScanCacheFile {
+            &SourceScanCacheFile {
                 version: 1,
                 source_id: source.id.clone(),
                 scanned_at_ms: source.updated_at_ms,
@@ -49,18 +73,33 @@ impl PluginManager {
             },
         )?;
         self.state.with_exclusive_lock("plugin.source.publish", || {
-            let current_source = self.source_by_id(&source.id)?;
             let current = self.state.load_source_scan_cache(&source.id)?;
-            if current_source.location != source.location
-                || current_source.sparse_paths != source.sparse_paths
-                || current.scanned_at_ms != previous.scanned_at_ms
-                || current.source_commit != previous.source_commit
-                || current.plugins != previous.plugins
-            {
-                return Err(TalosError::new(
-                    talos_error::ErrorCode::Conflict,
-                    "The plugin source changed while it was being refreshed.",
-                ));
+            let mut file = self.state.load_sources()?;
+            let record = file
+                .sources
+                .iter_mut()
+                .find(|record| record.id == source.id);
+            if let Some(previous) = &previous {
+                let current_source = self.source_by_id(&source.id)?;
+                if current_source.location != source.location
+                    || current_source.sparse_paths != source.sparse_paths
+                    || current.scanned_at_ms != previous.scanned_at_ms
+                    || current.source_commit != previous.source_commit
+                    || current.plugins != previous.plugins
+                {
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
+                        "The plugin source changed while it was being refreshed.",
+                    ));
+                }
+            } else if let Some(record) = record.as_ref() {
+                if !current.plugins.is_empty() {
+                    return Ok(PluginSourceRefreshResponse {
+                        source: (**record).clone(),
+                        plugins: current.plugins,
+                        warnings: current.warnings,
+                    });
+                }
             }
             let target = self.state.marketplace_cache_dir(&source.id);
             let backup = directory.path().join("previous");
@@ -79,14 +118,18 @@ impl PluginManager {
                 }
                 return Err(error);
             }
-            let mut file = self.state.load_sources()?;
-            if let Some(record) = file
-                .sources
-                .iter_mut()
-                .find(|record| record.id == source.id)
-            {
+            if let Some(record) = record {
                 *record = source.clone();
                 self.state.save_sources(&file)?;
+            } else if previous.is_none() {
+                file.sources.push(source.clone());
+                if let Err(error) = self.state.save_sources(&file) {
+                    rename(&target, &staging.marketplace_cache_dir(&source.id))?;
+                    if backup.exists() {
+                        rename(&backup, &target)?;
+                    }
+                    return Err(error);
+                }
             }
             Ok(PluginSourceRefreshResponse {
                 source,

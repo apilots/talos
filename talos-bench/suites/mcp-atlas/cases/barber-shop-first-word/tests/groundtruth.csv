@@ -1,0 +1,2 @@
+TASK,PROMPT,GTFA_CLAIMS
+barber-shop-first-word,What is the first word of the file at /data/Barber Shop.csv?,The first word is Customer.

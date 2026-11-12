@@ -23,6 +23,8 @@ talos-fs = { workspace = true }
 talos-skills = { workspace = true }
 talos-types = { workspace = true }
 
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+
 [dev-dependencies]
 tempfile = "3"
 

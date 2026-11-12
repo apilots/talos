@@ -2,13 +2,82 @@ use super::*;
 use std::collections::{HashMap, HashSet};
 use talos_sdk::{
     AgentAssistantText, AgentAssistantTextPhase, AgentEvent, AgentEventPayload, AgentMessageBlock,
-    AgentMessageBlockCompleted, AgentMessageBlockContent, AgentMessageBlockStatus, AgentStopReason,
-    AgentTurnCompleted, AgentTurnFailed, AgentTurnRef, ErrorCode, TimelineEvent,
+    AgentMessageBlockCompleted, AgentMessageBlockContent, AgentMessageBlockStatus, AgentRunMetrics,
+    AgentStopReason, AgentTurnCompleted, AgentTurnFailed, AgentTurnRef, ErrorCode, TimelineEvent,
+    TokenUsage,
 };
 
 #[test]
 fn parses_exec_command() {
-    assert!(Cli::try_parse_from(["talos", "exec", "hello"]).is_ok());
+    for (args, expected) in [
+        (vec!["talos", "exec", "hello"], false),
+        (
+            vec!["talos", "exec", "--dangerously-skip-permissions", "hello"],
+            true,
+        ),
+    ] {
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(
+            matches!(cli.command, Some(Commands::Exec(cmd)) if cmd.dangerously_skip_permissions == expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn waiting_finishes_with_the_latest_usage_while_the_stream_is_still_open() {
+    let (sender, receiver) = mpsc::channel(3);
+    let first = TokenUsage {
+        input_tokens: 10,
+        total_tokens: 10,
+        ..Default::default()
+    };
+    let last = TokenUsage {
+        input_tokens: 20,
+        output_tokens: 5,
+        total_tokens: 25,
+        cache_read_input_tokens: Some(3),
+        ..Default::default()
+    };
+    for usage in [first, last.clone()] {
+        sender
+            .send(timeline_event(AgentEventPayload::MetricsUpdated(
+                AgentRunMetrics {
+                    usage,
+                    ..Default::default()
+                },
+            )))
+            .await
+            .unwrap();
+    }
+    sender
+        .send(timeline_event(AgentEventPayload::WaitingForInput(
+            AgentPendingInput::Message {
+                action_id: "action-1".into(),
+                prompt: "Waiting".into(),
+            },
+        )))
+        .await
+        .unwrap();
+    let mut observation = ExecObservation::default();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        render_timeline_events(receiver, &mut observation),
+    )
+    .await
+    .expect("waiting should stop before the sender is dropped");
+    assert!(result.unwrap_err().is::<ExecWaitingForInput>());
+    assert_eq!(observation.metrics.unwrap().usage, last);
+}
+
+#[tokio::test]
+async fn exec_reports_a_stream_that_closes_without_a_terminal_event() {
+    let (sender, receiver) = mpsc::channel(1);
+    drop(sender);
+    let mut observation = ExecObservation::default();
+    assert!(render_timeline_events(receiver, &mut observation)
+        .await
+        .is_err());
+    assert_eq!(observation.metrics, None);
 }
 
 #[test]
@@ -122,9 +191,11 @@ fn plugin_install_keeps_target_commit_and_explicit_install_policy() {
         panic!("expected Plugin command");
     };
     assert_eq!(node.as_deref(), Some("computer-1"));
-    assert!(matches!(command, types::PluginCommands::Install {
-        plugin_id, commit: Some(commit), disabled: true, replace: true,
-    } if plugin_id == "plugin-browser" && commit == "fixed-revision"));
+    assert!(matches!(command, types::PluginCommands::Installation(
+        types::PluginInstallationCommand::Install {
+            plugin_id, commit: Some(commit), disabled: true, replace: true,
+        }
+    ) if plugin_id == "plugin-browser" && commit == "fixed-revision"));
 }
 
 #[test]
@@ -143,11 +214,14 @@ fn plugin_lifecycle_uses_install_ids_and_preserves_the_selected_computer() {
             panic!("expected Plugin command");
         };
         assert_eq!(node.as_deref(), Some("computer-2"));
+        use types::PluginInstallationCommand::{Disable, Enable, Uninstall, Update};
         let install_id = match command {
-            types::PluginCommands::Enable { install_id }
-            | types::PluginCommands::Disable { install_id }
-            | types::PluginCommands::Update { install_id, .. }
-            | types::PluginCommands::Uninstall { install_id } => install_id,
+            types::PluginCommands::Installation(
+                Enable { install_id }
+                | Disable { install_id }
+                | Update { install_id, .. }
+                | Uninstall { install_id },
+            ) => install_id,
             _ => panic!("expected existing installation command"),
         };
         assert_eq!(install_id, "install-existing");

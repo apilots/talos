@@ -103,6 +103,9 @@ pub enum PluginStatus {
     },
     Conflict {
         reason: PluginConflictReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        install_id: Option<PluginInstallId>,
     },
 }
 

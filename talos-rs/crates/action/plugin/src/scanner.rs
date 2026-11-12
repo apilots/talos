@@ -1,16 +1,17 @@
 mod discovery;
 mod materialize;
 pub(crate) mod mcp_manifest;
+pub(crate) mod package;
 mod skill_manifest;
 
 use crate::documents::relative_path;
 use crate::PluginStateStore;
 use chrono::Utc;
 use std::path::Path;
-use talos_error::TalosResult;
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
-    MarketplaceSource, Plugin, PluginKind, PluginWarning, PluginWarningCode, SkillLoadError,
-    SkillLoadErrorKind,
+    MarketplaceSource, MarketplaceSourceKind, Plugin, PluginKind, PluginWarning, PluginWarningCode,
+    SkillLoadError, SkillLoadErrorKind,
 };
 
 use discovery::{ensure_contained_dir, mcp_manifest_paths, scan_roots, skill_dirs};
@@ -30,6 +31,15 @@ pub(crate) fn scan_source(
 ) -> TalosResult<SourceScanResult> {
     let materialized = materialize_source(state, source)?;
     let (plugins, warnings) = scan_materialized_plugins(source, &materialized.root)?;
+    if source.kind == MarketplaceSourceKind::LocalPackage
+        && !matches!(&plugins[..], [plugin] if plugin.path_in_source.as_deref()
+            .is_some_and(|path| Path::new(path).components().count() <= 1))
+    {
+        return Err(TalosError::new(
+            ErrorCode::InvalidRequest,
+            "A local package must contain one valid plugin at its root.",
+        ));
+    }
     Ok(SourceScanResult {
         source_commit: materialized.commit,
         plugins,

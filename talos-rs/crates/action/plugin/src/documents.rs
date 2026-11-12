@@ -21,8 +21,8 @@ pub(crate) fn skill_document_ref(path: String) -> PluginDocumentRef {
 pub(crate) fn mcp_manifest_document_ref(path: String) -> PluginDocumentRef {
     PluginDocumentRef {
         role: PluginDocumentRole::Manifest,
+        title: document_file_name(Path::new(&path)),
         path,
-        title: "talos-mcp.json".to_string(),
         media_type: PluginDocumentMediaType::Json,
     }
 }
@@ -51,7 +51,7 @@ pub(crate) fn document_priority(kind: PluginKind, path: &Path) -> usize {
     let name = document_file_name(path).to_ascii_lowercase();
     match kind {
         PluginKind::McpServer if name.starts_with("readme") => 0,
-        PluginKind::McpServer if name == "talos-mcp.json" => 1,
+        PluginKind::McpServer if matches!(name.as_str(), "mcp.json" | "talos-mcp.json") => 1,
         PluginKind::Skill if name == "skill.md" => 0,
         PluginKind::Skill if name.starts_with("readme") => 1,
         _ => 2,
@@ -71,7 +71,9 @@ pub(crate) fn document_role(kind: PluginKind, path: &Path) -> PluginDocumentRole
     let name = document_file_name(path).to_ascii_lowercase();
     match kind {
         PluginKind::McpServer if name.starts_with("readme") => PluginDocumentRole::Readme,
-        PluginKind::McpServer if name == "talos-mcp.json" => PluginDocumentRole::Manifest,
+        PluginKind::McpServer if matches!(name.as_str(), "mcp.json" | "talos-mcp.json") => {
+            PluginDocumentRole::Manifest
+        }
         PluginKind::Skill if name.starts_with("readme") => PluginDocumentRole::Readme,
         PluginKind::Skill if name == "skill.md" => PluginDocumentRole::Primary,
         _ => PluginDocumentRole::Primary,

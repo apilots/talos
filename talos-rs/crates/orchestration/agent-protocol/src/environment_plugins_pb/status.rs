@@ -65,9 +65,10 @@ pub(super) fn encode_plugin_status(value: d::PluginStatus) -> TalosResult<pb::Pl
                     .transpose()?,
                 enabled,
             }),
-            d::PluginStatus::Conflict { reason } => {
+            d::PluginStatus::Conflict { reason, install_id } => {
                 pb::plugin_status::Value::Conflict(pb::PluginStatusConflict {
                     reason: encode_plugin_conflict_reason(reason)?,
+                    install_id: install_id.map(|id| id.0),
                 })
             }
         }),
@@ -106,6 +107,7 @@ pub(super) fn decode_plugin_status(value: pb::PluginStatus) -> TalosResult<d::Pl
         },
         pb::plugin_status::Value::Conflict(value) => d::PluginStatus::Conflict {
             reason: decode_plugin_conflict_reason(value.reason)?,
+            install_id: value.install_id.map(d::PluginInstallId),
         },
     })
 }

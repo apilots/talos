@@ -22,6 +22,7 @@ mod automation_restart_e2e;
 mod mcp_e2e;
 mod memory_e2e;
 mod message_queue_e2e;
+mod plugin_lifecycle;
 mod request;
 mod resource_matrix;
 use resource_matrix::resource_matrix;
@@ -84,6 +85,7 @@ async fn main() -> Result<()> {
         Scenario::CloudSessionCache => cloud_session_cache(&mut client).await?,
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
         Scenario::McpE2e => mcp_e2e(&mut client).await?,
+        Scenario::PluginLifecycle => plugin_lifecycle::run(&mut client).await?,
         Scenario::MessageQueueE2e => message_queue_e2e(&mut client).await?,
         Scenario::AutomationE2e => automation_e2e::run(&mut client).await?,
         Scenario::AutomationEmbeddedE2e => unreachable!("embedded scenario owns its runtime"),

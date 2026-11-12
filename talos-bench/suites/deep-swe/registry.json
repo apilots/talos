@@ -1,0 +1,27 @@
+[
+  {
+    "name": "deep-swe",
+    "version": "1.1",
+    "description": "Pinned DeepSWE cases with a native ARM64 build",
+    "tasks": [
+      {
+        "name": "python-statemachine-state-data-scoping",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/python-statemachine-state-data-scoping",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      },
+      {
+        "name": "anko-typed-variable-bindings",
+        "git_url": "https://github.com/datacurve-ai/deep-swe.git",
+        "git_commit_id": "435ee89ec2f2e2289f33b0da4f992f0b7b7266b9",
+        "path": "tasks/anko-typed-variable-bindings",
+        "submission_paths": [
+          "/logs/artifacts/model.patch"
+        ]
+      }
+    ]
+  }
+]

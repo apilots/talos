@@ -1,0 +1,20 @@
+[
+  {
+    "name": "terminal-bench",
+    "version": "4.1.0",
+    "description": "Pinned Terminal-Bench 4.1 cases for native ARM64 Talos evaluation",
+    "tasks": [
+      {
+        "name": "production-planning",
+        "git_url": "https://github.com/harbor-framework/terminal-bench.git",
+        "git_commit_id": "4070d6cef56a7d20cb5dc98d5e10ada88a6b9440",
+        "path": "tasks/production-planning",
+        "submission_paths": [
+          "/app/output/erp_writeback.sql",
+          "/app/output/mes_writeback.sql",
+          "/app/output/wms_writeback.sql"
+        ]
+      }
+    ]
+  }
+]

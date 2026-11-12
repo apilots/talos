@@ -174,7 +174,7 @@ impl PluginManager {
         let (plugins, warnings) = scanner::scan_materialized_plugins(&official, &incoming)?;
         self.publish_source_scan(
             official,
-            previous,
+            Some(previous),
             &directory,
             scanner::SourceScanResult {
                 source_commit: Some(metadata.commit),

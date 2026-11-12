@@ -41,6 +41,14 @@ container removes its packaged environment metadata before Worker startup and
 disables external package DNS while retaining the control-plane hosts entry. It
 must reuse the same home environment and complete another real Browser task.
 
+For focused outbound Worker package acceptance, run
+`TALOS_E2E_PLUGIN_PACKAGES_ONLY=1 just e2e-case 23_browser_container/01_docker_worker`
+with a current-source Worker image. This runs the real CLI, Server and Docker
+Worker path without starting Electron or calling a model. It checks Worker-local
+ZIP and MCP JSON paths, wrong-kind rejection before Marketplace publication,
+disabled state across replacement, and installation isolation from the client.
+The full case also runs these package checks.
+
 Build the **current source** Worker image using the standard build context (the
 parent directory must contain this checkout as `talos/`):
 

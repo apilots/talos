@@ -6,6 +6,7 @@ pub(crate) use runtime::{
     installed_mcp_servers, installed_plugin, installed_skill_root, missing_plugin_from_install,
 };
 
+use crate::scanner::mcp_manifest::manifest_path;
 use crate::PluginStateStore;
 use chrono::Utc;
 use sha2::{Digest, Sha256};
@@ -368,15 +369,15 @@ pub(crate) fn plugin_source_dir(
     })?;
     let root = match &source.location {
         MarketplaceSourceLocation::LocalFolder { path } => path.clone(),
-        MarketplaceSourceLocation::Git { .. } => {
+        MarketplaceSourceLocation::Git { .. } | MarketplaceSourceLocation::LocalPackage { .. } => {
             state.marketplace_cache_dir(&source.id).join("repo")
         }
     };
     let path = root.join(path_in_source);
     ensure_contained_dir(&root, &path)?;
     let required_file = match plugin.kind {
-        PluginKind::Skill => "SKILL.md",
-        PluginKind::McpServer => "talos-mcp.json",
+        PluginKind::Skill => path.join("SKILL.md"),
+        PluginKind::McpServer => manifest_path(&path),
         PluginKind::Package | PluginKind::Feature => {
             return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
@@ -384,16 +385,14 @@ pub(crate) fn plugin_source_dir(
             ));
         }
     };
-    if is_regular_file(&path.join(required_file)) {
+    if is_regular_file(&required_file) {
         return Ok(path);
     }
     Err(TalosError::new(
         talos_error::ErrorCode::ResourceNotFound,
-        format!(
-            "plugin source path `{}` is not materialized",
-            path.display()
-        ),
-    ))
+        "The plugin source is missing its manifest.",
+    )
+    .context(required_file.display().to_string()))
 }
 
 fn ensure_contained_dir(root: &Path, path: &Path) -> TalosResult<()> {
@@ -506,7 +505,7 @@ fn materialize_install_dir(
                     "Only MCP credentials can update an installed manifest.",
                 ));
             };
-            let path = install_dir.join("talos-mcp.json");
+            let path = manifest_path(install_dir);
             let text = fs::read_to_string(&path).map_err(|error| {
                 TalosError::internal_with_source(
                     "Failed to read the installed MCP manifest.",
@@ -553,17 +552,18 @@ fn materialize_install_dir(
         }
     }
     let required_file = match candidate.plugin.kind {
-        PluginKind::Skill => "SKILL.md",
-        PluginKind::McpServer => "talos-mcp.json",
+        PluginKind::Skill => install_dir.join("SKILL.md"),
+        PluginKind::McpServer => manifest_path(install_dir),
         PluginKind::Package | PluginKind::Feature => unreachable!("kind checked above"),
     };
-    if !install_dir.join(required_file).is_file() {
+    if !required_file.is_file() {
         return Err(TalosError::internal(
             "Plugin install did not materialize; technical details were withheld.",
         )
         .context(format!(
-            "plugin install `{}` did not materialize {required_file}",
-            install_id.0
+            "plugin install `{}` did not materialize {}",
+            install_id.0,
+            required_file.display()
         )));
     }
     content_digest_for_dir(install_dir)
@@ -603,7 +603,7 @@ fn write_marketplace_mcp_credentials(
     install_dir: &Path,
     credentials: Option<&talos_types::McpCredentialBinding>,
 ) -> TalosResult<()> {
-    let path = install_dir.join("talos-mcp.json");
+    let path = manifest_path(install_dir);
     let mut document: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&path).map_err(|error| {
             TalosError::internal_with_source("Failed to read the MCP manifest update.", error)
@@ -638,7 +638,8 @@ fn install_source(source: &InstallSource, plugin: &Plugin) -> PluginInstallSourc
             commit: plugin.source_commit.clone().unwrap_or_default(),
             path_in_source: plugin.path_in_source.clone().unwrap_or_default(),
         },
-        MarketplaceSourceLocation::LocalFolder { path } => PluginInstallSource::LocalPath {
+        MarketplaceSourceLocation::LocalFolder { path }
+        | MarketplaceSourceLocation::LocalPackage { path, .. } => PluginInstallSource::LocalPath {
             source_id: source.id.clone(),
             path: path.clone(),
             path_in_source: plugin.path_in_source.clone().unwrap_or_default(),

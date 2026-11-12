@@ -10,6 +10,12 @@ export TALOS_E2E_WORKER_IMAGE="${TALOS_E2E_WORKER_IMAGE:-talos-worker:browser-e2
 docker image inspect "${TALOS_E2E_WORKER_IMAGE}" >/dev/null || {
   echo "Build the current standard Worker image first; see this group's README" >&2; exit 1;
 }
+if [[ "${TALOS_E2E_PLUGIN_PACKAGES_ONLY:-0}" == 1 ]]; then
+  prepare_binary TALOS_E2E_SERVER_BIN talos-server talos-server
+  build_cli_binary
+  python3 "${TALOS_E2E_DIR}/scripts/browser-worker/fixture.py" --plugin-packages-only
+  exit
+fi
 python3 - "${TALOS_E2E_WORKER_IMAGE}" "${REPO_ROOT}" "${SCENARIO_REPORT_DIR}" <<'PY'
 import hashlib, json, subprocess, sys, uuid
 from pathlib import Path

@@ -49,12 +49,21 @@ impl BrowserPluginConfig {
     }
 }
 
+pub(crate) fn manifest_path(directory: &Path) -> PathBuf {
+    let canonical = directory.join("mcp.json");
+    if crate::documents::is_regular_file(&canonical) {
+        canonical
+    } else {
+        directory.join("talos-mcp.json")
+    }
+}
+
 pub(crate) fn browser_configuration(plugin_dir: &Path) -> TalosResult<Option<BrowserPluginConfig>> {
-    Ok(read_mcp_manifest(&plugin_dir.join("talos-mcp.json"))?.browser)
+    Ok(read_mcp_manifest(&manifest_path(plugin_dir))?.browser)
 }
 
 pub(crate) fn requests_default_install(plugin_dir: &Path) -> TalosResult<bool> {
-    Ok(read_mcp_manifest(&plugin_dir.join("talos-mcp.json"))?.default_install)
+    Ok(read_mcp_manifest(&manifest_path(plugin_dir))?.default_install)
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,7 +151,7 @@ pub(crate) fn plugin_from_mcp_manifest(
 pub(crate) fn server_from_installed_mcp_manifest(
     plugin_dir: &Path,
 ) -> TalosResult<McpServerDefinition> {
-    let manifest_path = plugin_dir.join("talos-mcp.json");
+    let manifest_path = manifest_path(plugin_dir);
     let manifest = read_mcp_manifest(&manifest_path)?;
     talos_types::validate_mcp_server_name(&manifest.name)?;
     let transport = transport_from_manifest(manifest.transport, Some(plugin_dir))?;
