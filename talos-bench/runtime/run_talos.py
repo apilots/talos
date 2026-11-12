@@ -75,7 +75,7 @@ def run(options, llm, secret):
         command = [str(binary), "exec", "--dangerously-skip-permissions",
                    "--model", f"{provider}:{model}", "--trajectory", str(logs / "talos-trajectory.json")]
         if options.include_content:
-            command.append("--trajectory-include-content")
+            command.extend(("--transcript", str(logs / "talos-transcript.json")))
         started = time.monotonic()
         with (logs / "talos.stdout.txt").open("w") as stdout, (logs / "talos.stderr.txt").open("w") as stderr:
             result = subprocess.run(

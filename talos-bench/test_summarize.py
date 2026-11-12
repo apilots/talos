@@ -27,18 +27,40 @@ class CompletionTest(unittest.TestCase):
                 {"source": "/app/answer.txt", "destination": "artifacts/answer.txt", "status": "ok"},
             ])
             atif = agent / "trajectory.json"
+            trace = agent / "talos-trajectory.json"
             answer = artifacts / "answer.txt"
             atif.write_text("{}")
+            write_json(trace, {
+                "identity": {"sessionId": "session", "turnId": "turn"},
+                "clockSegments": [],
+                "data": [{"type": "modelRequest", "request": {
+                    "callRecords": [{"metrics": {"executionDurationMs": 1500}}],
+                }}],
+                "nextCursor": None,
+            })
+            (agent / "talos.stderr.txt").write_text(
+                'TOOL_CALL_COMPLETED call_id=call tool=Bash internal=Bash is_error=false '
+                'metrics={"executionDurationMs":250,"queueDurationMs":50}\n'
+                'TALOS_EXEC_METRICS {"modelRounds":1,"usage":{"total_tokens":23}}\n'
+            )
             answer.write_text("Wrong answer with complete evidence.")
 
             def summarize_run():
-                summarize(run, "fixture", 1, 0, False, True, 0,
+                summarize(run, "fixture", 1, 0, True, True, 0,
                           "test-task", job.name, registry, "harbor", job.name)
 
             summarize_run()
             summary = run / "summary.json"
-            self.assertTrue(read_json(summary)["complete"])
-            for artifact, message in [(atif, "missing ATIF"), (answer, "missing a required submission")]:
+            result = read_json(summary)
+            self.assertTrue(result["complete"])
+            trial_summary, = result["trials"]
+            self.assertEqual(trial_summary["usage"]["total_tokens"], 23)
+            self.assertEqual(trial_summary["observedModelSeconds"], 1.5)
+            self.assertEqual(trial_summary["observedToolSeconds"], 0.25)
+            self.assertEqual(trial_summary["observedToolQueueSeconds"], 0.05)
+            for artifact, message in [(trace, "missing trajectory metadata"),
+                                      (atif, "missing ATIF"),
+                                      (answer, "missing a required submission")]:
                 with self.subTest(artifact=artifact.name):
                     content = artifact.read_text()
                     artifact.unlink()

@@ -8,17 +8,20 @@ from harbor.models.trajectories import (
 )
 from harbor.utils.trajectory_validator import TrajectoryValidator
 
+from payload import cli_log_lines, run_metrics
+
 
 def export_atif(logs):
     run = json.loads((logs / "talos-run.json").read_text())
     if run["exit_code"]:
         return
     trace = json.loads((logs / "talos-trajectory.json").read_text())
+    transcript = json.loads((logs / "talos-transcript.json").read_text())
     steps = []
     calls = {}
     current = None
 
-    for block in trace["content"]:
+    for block in transcript:
         kind = block["content"]["type"]
         data = block["content"]["data"]
         if kind == "toolResult":
@@ -62,10 +65,10 @@ def export_atif(logs):
 
     if not steps or steps[0].source != "user" or not any(step.source == "agent" for step in steps):
         raise ValueError("The Talos transcript must contain user and agent content")
-    usage = (trace["metrics"] or {}).get("usage", {})
+    usage = (run_metrics(cli_log_lines(logs)) or {}).get("usage", {})
     trajectory = Trajectory(
         schema_version="ATIF-v1.8",
-        session_id=trace["execution"]["identity"]["sessionId"],
+        session_id=trace["identity"]["sessionId"],
         agent=Agent(name="talos", version=run["version"], model_name=run["model"].replace(":", "/", 1)),
         steps=steps,
         final_metrics=FinalMetrics(

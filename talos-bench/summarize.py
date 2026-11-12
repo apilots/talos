@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import subprocess
 
+from runtime.payload import cli_log_lines, run_metrics
+
 
 def read_json(path):
     return json.loads(path.read_text()) if path.is_file() and path.stat().st_size else {}
@@ -96,19 +98,24 @@ def trial_summary(run, directory, entries):
     agent = directory / "agent"
     cli = read_json(agent / "talos-run.json")
     try:
-        trace = read_json(agent / "talos-trajectory.json")
+        trace = read_json(agent / "talos-trajectory.json") or {}
         trace_error = None
     except json.JSONDecodeError:
         # Keep the failed trial's other facts even if the CLI was interrupted mid-write.
         trace = {}
         trace_error = "invalidJson"
-    execution = trace.get("execution", {})
-    metadata = execution.get("trajectory") or {}
-    calls = [record for entry in metadata.get("data") or [] if entry["type"] == "modelRequest"
+    calls = [record for entry in trace.get("data") or [] if entry["type"] == "modelRequest"
              for record in entry["request"]["callRecords"]]
-    metrics = trace.get("metrics") or {}
+    lines = cli_log_lines(agent)
+    metrics = run_metrics(lines) or {}
     model_timings = [call.get("metrics") for call in calls]
-    tool_timings = [tool.get("metrics") for tool in execution.get("tools", [])]
+    tool_timings = []
+    compactions = 0
+    for line in lines:
+        if line.startswith("TOOL_CALL_COMPLETED ") and " metrics=" in line:
+            tool_timings.append(json.loads(line.rsplit(" metrics=", 1)[1]))
+        elif line.startswith("CONTEXT_COMPACTION_COMPLETED "):
+            compactions += 1
     usage = metrics.get("usage")
     if usage is None:
         harbor_usage = result.get("agent_result") or {}
@@ -147,6 +154,7 @@ def trial_summary(run, directory, entries):
         "trialLog": directory / "trial.log",
         "architecture": agent / "architecture.txt",
         "trajectory": agent / "talos-trajectory.json",
+        "transcript": agent / "talos-transcript.json",
         "atif": agent / "trajectory.json",
         "stdout": agent / "talos.stdout.txt",
         "stderr": agent / "talos.stderr.txt",
@@ -168,14 +176,13 @@ def trial_summary(run, directory, entries):
         "exception": exception,
         "usage": usage,
         "modelRounds": metrics.get("modelRounds"),
-        "modelCallsObserved": len(calls) if metadata.get("data") is not None else None,
+        "modelCallsObserved": len(calls) if trace.get("data") is not None else None,
         "observedModelSeconds": observed_seconds(model_timings, "executionDurationMs"),
         "toolCalls": metrics.get("toolCalls"),
         "toolErrors": metrics.get("toolErrors"),
         "observedToolSeconds": observed_seconds(tool_timings, "executionDurationMs"),
         "observedToolQueueSeconds": observed_seconds(tool_timings, "queueDurationMs"),
-        "compactions": len(execution["compactions"]) if "compactions" in execution else None,
-        "settlement": execution.get("settlement"),
+        "compactions": compactions if metrics or compactions else None,
         "trajectoryError": trace_error,
         "submissions": submissions,
         "artifacts": {name: str(path.relative_to(run)) for name, path in paths.items() if path.exists()},

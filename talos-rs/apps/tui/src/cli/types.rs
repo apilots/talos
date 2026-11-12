@@ -62,13 +62,13 @@ pub(crate) struct ExecCmd {
     #[arg(long)]
     pub(crate) dangerously_skip_permissions: bool,
 
-    /// Write execution measurements and terminal trajectory metadata to a new JSON file.
+    /// Write the canonical Turn trajectory response to a new JSON file.
     #[arg(long, value_name = "FILE")]
     pub(crate) trajectory: Option<std::path::PathBuf>,
 
-    /// Include user and assistant content, tool arguments, and results in the trajectory.
-    #[arg(long, requires = "trajectory")]
-    pub(crate) trajectory_include_content: bool,
+    /// Write canonical message blocks, including tool arguments and results, to a new JSON file.
+    #[arg(long, value_name = "FILE", requires = "trajectory")]
+    pub(crate) transcript: Option<std::path::PathBuf>,
 
     /// Message to execute.
     #[arg(required = true, trailing_var_arg = true)]

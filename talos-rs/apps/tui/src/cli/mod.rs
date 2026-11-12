@@ -106,14 +106,16 @@ async fn execute_exec_command(
     cmd: ExecCmd,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let trace_file = cmd.trajectory.as_ref().map(File::create_new).transpose()?;
-    let mut observation =
-        ExecObservation::new(trace_file.is_some(), cmd.trajectory_include_content);
+    let transcript_file = cmd.transcript.as_ref().map(File::create_new).transpose()?;
+    let mut observation = ExecObservation::new(transcript_file.is_some());
     let result = execute_turn(client.clone(), cmd, &mut observation).await;
-    let usage = observation.metrics.as_ref().map(|metrics| &metrics.usage);
-    eprintln!("TALOS_EXEC_USAGE {}", serde_json::to_string(&usage)?);
+    eprintln!(
+        "TALOS_EXEC_METRICS {}",
+        serde_json::to_string(&observation.metrics)?
+    );
     if let Some(file) = trace_file {
         let export = observation
-            .write_trace(&mut *client.lock().await, file)
+            .write_exports(&mut *client.lock().await, file, transcript_file)
             .await;
         if let Err(error) = export {
             eprintln!("Unable to export execution trajectory: {error}");
@@ -413,11 +415,20 @@ fn render_event(
         AgentEventPayload::MessageBlockCompleted(payload) => {
             if let AgentMessageBlockContent::ToolResult(result) = &payload.block.content {
                 eprintln!(
-                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
+                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={} metrics={}",
                     result.call_id,
                     display_tool_name(&result.tool_name),
                     result.tool_name,
-                    result.is_error
+                    result.is_error,
+                    serde_json::to_string(&result.metrics)?
+                );
+            }
+            if let AgentMessageBlockContent::ContextCompaction(compaction) = &payload.block.content
+            {
+                eprintln!(
+                    "CONTEXT_COMPACTION_COMPLETED block={} metrics={}",
+                    payload.block.block_id,
+                    serde_json::to_string(&compaction.metrics)?
                 );
             }
             if let AgentMessageBlockContent::AssistantText(assistant) = &payload.block.content {

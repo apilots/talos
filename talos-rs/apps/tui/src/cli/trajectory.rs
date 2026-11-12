@@ -8,15 +8,13 @@ use serde::Serialize;
 use talos_sdk::trajectory::{TrajectoryReadTurnRequest, TrajectoryReadTurnResponse};
 use talos_sdk::{
     AgentEvent, AgentEventPayload, AgentMessageBlock, AgentMessageBlockContent, AgentRunMetrics,
-    AgentStopReason, AgentTurnRef, ContextCompactionMetrics, ContextCompactionOutcome, ErrorCode,
-    GatewayClient,
+    AgentTurnRef, GatewayClient,
 };
-use talos_types::talos::ToolExecutionMetrics;
 
 #[derive(Default)]
 pub(super) struct ExecObservation {
     pub(super) metrics: Option<AgentRunMetrics>,
-    trace: Option<ExecTrace>,
+    terminal: Option<AgentTurnRef>,
     content: Option<Transcript>,
 }
 
@@ -26,127 +24,52 @@ struct Transcript {
     completed: BTreeMap<u64, AgentMessageBlock>,
 }
 
-#[derive(Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExecTrace {
-    identity: Option<AgentTurnRef>,
-    settlement: Option<Settlement>,
-    trajectory: Option<TrajectoryReadTurnResponse>,
-    tools: Vec<ToolTiming>,
-    compactions: Vec<Compaction>,
-}
-
-#[derive(Serialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum Settlement {
-    Completed { stop_reason: AgentStopReason },
-    Failed { code: ErrorCode },
-    WaitingForInput,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToolTiming {
-    call_id: String,
-    tool_name: String,
-    is_error: bool,
-    metrics: Option<ToolExecutionMetrics>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Compaction {
-    outcome: Option<ContextCompactionOutcome>,
-    metrics: Option<ContextCompactionMetrics>,
-}
-
 impl ExecObservation {
-    pub(super) fn new(trace: bool, include_content: bool) -> Self {
+    pub(super) fn new(include_content: bool) -> Self {
         Self {
-            trace: trace.then(ExecTrace::default),
             content: include_content.then(Transcript::default),
             ..Default::default()
         }
     }
 
     pub(super) fn record(&mut self, event: &AgentEvent) {
-        if let AgentEventPayload::MetricsUpdated(metrics) = &event.payload {
-            self.metrics = Some(metrics.clone());
+        match &event.payload {
+            AgentEventPayload::MetricsUpdated(metrics) => self.metrics = Some(metrics.clone()),
+            AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_) => {
+                self.terminal = Some(event.identity.clone());
+            }
+            _ => {}
         }
-        let Some(trace) = self.trace.as_mut() else {
-            return;
-        };
         if let Some(transcript) = self.content.as_mut() {
             transcript.record(event);
         }
-        trace.identity.get_or_insert_with(|| event.identity.clone());
-        match &event.payload {
-            AgentEventPayload::TurnCompleted(done) => {
-                trace.settlement = Some(Settlement::Completed {
-                    stop_reason: done.stop_reason,
-                });
-            }
-            AgentEventPayload::TurnFailed(failed) => {
-                trace.settlement = Some(Settlement::Failed {
-                    code: failed.error.code,
-                });
-            }
-            AgentEventPayload::WaitingForInput(_) => {
-                trace.settlement = Some(Settlement::WaitingForInput);
-            }
-            AgentEventPayload::MessageBlockCompleted(block) => match &block.block.content {
-                AgentMessageBlockContent::ToolResult(result) => trace.tools.push(ToolTiming {
-                    call_id: result.call_id.clone(),
-                    tool_name: result.tool_name.clone(),
-                    is_error: result.is_error,
-                    metrics: result.metrics.clone(),
-                }),
-                AgentMessageBlockContent::ContextCompaction(compaction) => {
-                    trace.compactions.push(Compaction {
-                        outcome: compaction.outcome,
-                        metrics: compaction.metrics.clone(),
-                    });
-                }
-                _ => {}
-            },
-            _ => {}
-        }
     }
 
-    pub(super) async fn write_trace(
-        &mut self,
+    pub(super) async fn write_exports(
+        &self,
         client: &mut impl GatewayClient,
-        mut file: File,
+        trajectory_file: File,
+        transcript_file: Option<File>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(trace) = self.trace.as_mut() else {
-            return Ok(());
+        if let (Some(file), Some(transcript)) = (transcript_file, &self.content) {
+            write_json(file, &transcript.completed.values().collect::<Vec<_>>())?;
+        }
+        let trajectory = match &self.terminal {
+            Some(identity) => Some(
+                read_trajectory(client, identity)
+                    .await
+                    .map_err(|error| error.to_api_error().message)?,
+            ),
+            None => None,
         };
-        let mut read_result = Ok(());
-        if matches!(
-            trace.settlement,
-            Some(Settlement::Completed { .. } | Settlement::Failed { .. })
-        ) {
-            if let Some(identity) = trace.identity.as_ref() {
-                match read_trajectory(client, identity).await {
-                    Ok(trajectory) => trace.trajectory = Some(trajectory),
-                    Err(error) => read_result = Err(error),
-                }
-            }
-        }
-        let mut document =
-            serde_json::json!({"schemaVersion": 1, "metrics": self.metrics, "execution": trace});
-        if let Some(transcript) = self.content.as_ref() {
-            document["content"] =
-                serde_json::to_value(transcript.completed.values().collect::<Vec<_>>())?;
-        }
-        serde_json::to_writer_pretty(&mut file, &document)?;
-        writeln!(file)?;
-        read_result.map_err(|error| error.to_api_error().message.into())
+        write_json(trajectory_file, &trajectory)
     }
+}
+
+fn write_json(mut file: File, value: &impl Serialize) -> Result<(), Box<dyn std::error::Error>> {
+    serde_json::to_writer_pretty(&mut file, value)?;
+    writeln!(file)?;
+    Ok(())
 }
 
 impl Transcript {

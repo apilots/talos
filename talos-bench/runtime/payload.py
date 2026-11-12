@@ -7,7 +7,7 @@ import shlex
 from tempfile import TemporaryDirectory
 
 REMOTE = "/installed-agent/talos"
-USAGE_PREFIX = "TALOS_EXEC_USAGE "
+METRICS_PREFIX = "TALOS_EXEC_METRICS "
 
 
 async def upload_payload(environment, product, *, connection=None, fixture=None, mcp_config=None):
@@ -73,14 +73,22 @@ def model_configuration(selected_model, config, dotenv):
 
 
 
-def populate_usage(logs_dir, context):
+def cli_log_lines(logs_dir):
     stderr = logs_dir / "talos.stderr.txt"
-    if not stderr.is_file():
-        return
-    for line in stderr.read_text().splitlines():
-        if line.startswith(USAGE_PREFIX):
-            usage = json.loads(line[len(USAGE_PREFIX):])
-            if usage is not None:
-                context.n_input_tokens = usage["input_tokens"]
-                context.n_output_tokens = usage["output_tokens"]
-                context.n_cache_tokens = usage["cache_read_input_tokens"]
+    return stderr.read_text().splitlines() if stderr.is_file() else []
+
+
+def run_metrics(lines):
+    for line in reversed(lines):
+        if line.startswith(METRICS_PREFIX):
+            return json.loads(line[len(METRICS_PREFIX):])
+    return None
+
+
+def populate_usage(logs_dir, context):
+    metrics = run_metrics(cli_log_lines(logs_dir))
+    if metrics is not None:
+        usage = metrics["usage"]
+        context.n_input_tokens = usage["input_tokens"]
+        context.n_output_tokens = usage["output_tokens"]
+        context.n_cache_tokens = usage["cache_read_input_tokens"]

@@ -44,16 +44,17 @@ The runner builds Talos once in agent modes. Each task runs the requested number
 | `summary.json` | Suite version, per-task score and attempt count, per-attempt elapsed time, token usage, observed model and tool timings, and links to raw evidence |
 | `<job>/result.json` and runner metadata | Original job result and resolved inputs |
 | `provenance/<task>.json` | DeepSWE source revision, local ARM64 image IDs and verifier file hashes |
-| `<job>/<trial>/agent/talos-trajectory.json` | Existing Talos Turn trajectory metadata, including each model request and attempt, TTFT, usage, outcome, tool queue and execution timings, and compaction metrics |
+| `<job>/<trial>/agent/talos-trajectory.json` | Existing `trajectory/readTurn` response with all pages collected, including model requests, attempts, TTFT, usage, and outcomes |
+| `<job>/<trial>/agent/talos-transcript.json` | Canonical message blocks collected for Terminal-Bench 4.1's ATIF export |
 | `<job>/<trial>/agent/trajectory.json` | Terminal-Bench 4.1 ATIF with user and assistant messages, recorded reasoning, tool arguments and observations, and total token usage |
-| `<job>/<trial>/agent/` and `<job>/<trial>/verifier/` | CLI stdout, stderr, duration, native architecture, verifier logs and reward |
+| `<job>/<trial>/agent/` and `<job>/<trial>/verifier/` | CLI stdout, stderr with cumulative usage and tool and compaction metrics, duration, native architecture, verifier logs and reward |
 | `<job>/<trial>/artifacts/` and `artifacts/manifest.json` | Host copies of the submissions and the runner's collection status |
 
 Compare the same task digest, model settings, and platform across builds. CLI wall time includes startup, trajectory export, and shutdown. Observed model and tool times sum individual measured durations. Talos limits detailed request measurements to the first 128 model requests. Use Turn totals for overall token usage and model rounds.
 
-A verifier score of zero is valid. The summary sets `complete: true` only when scoring and all required trace and submission checks pass. Inspect the runner and verifier logs when the command exits nonzero. If a Turn pauses or is interrupted, the diagnostic export retains the measurements received so far.
+A verifier score of zero is valid. The summary sets `complete: true` only when scoring and all required trace and submission checks pass. Inspect the runner and verifier logs when the command exits nonzero. If a Turn pauses or is interrupted, inspect stderr for the measurements received so far.
 
-To summarize a historical `regex-log` job, run `python3 talos-bench/summarize.py summary <run-dir> real <attempts>`. For other selections, pass the task list and job name. For a Pier job, also pass `--suite deep-swe --runner pier`.
+To regenerate the summary for a saved `regex-log` job, run `python3 talos-bench/summarize.py summary <run-dir> real <attempts>`. For other selections, pass the task list and job name. For a Pier job, also pass `--suite deep-swe --runner pier`.
 
 ## Recheck a saved submission
 

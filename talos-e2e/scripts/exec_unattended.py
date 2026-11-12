@@ -14,7 +14,7 @@ import yaml
 
 from model_protocol_fixture import MODEL, chat_chunks, prepare
 
-USAGE_PREFIX = "TALOS_EXEC_USAGE "
+METRICS_PREFIX = "TALOS_EXEC_METRICS "
 PROVIDER = "chat-protocol-default"
 
 
@@ -70,6 +70,9 @@ def exercise(root, work, report):
         try:
             def run(case, expected, session, *flags):
                 trace_file = report / f"{case}.trajectory.json"
+                transcript_file = report / f"{case}.transcript.json"
+                if case == "new":
+                    flags = (*flags, "--transcript", str(transcript_file))
                 result = subprocess.run(
                     [environment["TALOS_E2E_CLI_BIN"], "exec", "--session", session,
                      "--model", f"{PROVIDER}:{MODEL}", "--trajectory", str(trace_file), *flags, case],
@@ -77,31 +80,38 @@ def exercise(root, work, report):
                 (report / f"{case}.stdout.txt").write_text(result.stdout)
                 (report / f"{case}.stderr.txt").write_text(result.stderr)
                 assert result.returncode == expected, (case, result.returncode, result.stderr)
-                records = [line[len(USAGE_PREFIX):] for line in result.stderr.splitlines()
-                           if line.startswith(USAGE_PREFIX)]
-                assert len(records) == 1 and USAGE_PREFIX not in result.stdout, result
+                lines = result.stderr.splitlines()
+                records = [line[len(METRICS_PREFIX):] for line in lines
+                           if line.startswith(METRICS_PREFIX)]
+                assert len(records) == 1 and METRICS_PREFIX not in result.stdout, result
                 if case != "fail":
                     rounds = 2 if case in {"new", "enable", "saved"} else 1
-                    usage = json.loads(records[0])
+                    usage = json.loads(records[0])["usage"]
                     assert usage["input_tokens"] == 100 * rounds, usage
                     assert usage["output_tokens"] == 10 * rounds, usage
                     assert usage["total_tokens"] == 110 * rounds, usage
                 trace = json.loads(trace_file.read_text())
-                execution = trace["execution"]
-                assert execution["identity"]["sessionId"] == session, trace
-                assert execution["settlement"]["type"] == {0: "completed", 1: "failed", 3: "waitingForInput"}[expected], trace
+                if expected == 3:
+                    assert trace is None, trace
+                else:
+                    assert set(trace) == {"identity", "clockSegments", "data", "nextCursor"}, trace
+                    assert trace["identity"]["sessionId"] == session and trace["nextCursor"] is None, trace
                 if expected == 0:
                     assert result.stdout == f"PROTOCOL_OK:call_{case}\n", result
-                    requests = [entry["request"] for entry in execution["trajectory"]["data"]
+                    requests = [entry["request"] for entry in trace["data"]
                                 if entry["type"] == "modelRequest"]
                     assert len(requests) == rounds, trace
                     assert all(req["callRecords"][0]["metrics"]["ttftMs"] is not None for req in requests), trace
                     if rounds == 2:
-                        tool, = execution["tools"]
-                        assert tool["toolName"] == "Bash" and tool["isError"] is False
-                        assert tool["metrics"]["executionDurationMs"] is not None
-                if expected == 3:
-                    assert execution["trajectory"] is None, trace
+                        tool, = [line for line in lines if line.startswith("TOOL_CALL_COMPLETED ")]
+                        assert "internal=Bash is_error=false" in tool
+                        assert json.loads(tool.rsplit(" metrics=", 1)[1])["executionDurationMs"] is not None
+                if case == "new":
+                    transcript = transcript_file.read_text()
+                    contents = [block["content"] for block in json.loads(transcript)]
+                    assert contents[0]["type"] == "userContent", contents
+                    assert {"assistantText", "toolCall", "toolResult"} <= {item["type"] for item in contents}
+                    assert "controlled-loopback-key" not in transcript
                 assert "controlled-loopback-key" not in trace_file.read_text()
                 return result
 
