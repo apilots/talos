@@ -16,12 +16,23 @@ echo "CASE real_llm_precheck PASS key_detected=true"
 start_server
 trap stop_server EXIT
 
-create_payload='{
-  "modelSelection": {
-    "modelRef": {"provider": "deepseek", "id": "deepseek-v4-pro"},
-    "reasoningEffort": null
-  }
-}'
+models_json="$(curl -fsS "${GATEWAY_URL}/v1/models")"
+primary_model="$(TALOS_E2E_PREFERRED_MODELS="${TALOS_E2E_PREFERRED_MODELS:-deepseek-v4-pro}" select_e2e_model_from_json "${models_json}")"
+primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
+if [[ -z "${primary_model}" || -z "${primary_provider}" ]]; then
+  echo "CASE messages_select_model FAIL"
+  exit 1
+fi
+create_payload="$(python3 - "${primary_provider}" "${primary_model}" <<'PY'
+import json
+import sys
+
+provider, model = sys.argv[1:]
+print(json.dumps({
+    "modelSelection": {"modelRef": {"provider": provider, "id": model}, "reasoningEffort": None},
+}))
+PY
+)"
 create_id="$(new_session_id)"
 remember_session_start_defaults "${create_id}" "${create_payload}"
 create_json="{\"id\":\"${create_id}\"}"
@@ -98,7 +109,7 @@ PY
   sleep 1
 done
 IFS=$'\t' read -r turn_user turn_provider turn_model turn_input turn_output turn_total <<< "${model_usage_evidence}"
-if [[ -z "${turn_total}" || "${turn_user}" != "anonymous" || "${turn_provider}" != "deepseek" || "${turn_model}" != "deepseek-v4-pro" || "${turn_total}" -le 0 ]]; then
+if [[ -z "${turn_total}" || "${turn_user}" != "anonymous" || "${turn_provider}" != "${primary_provider}" || "${turn_model}" != "${primary_model}" || "${turn_total}" -le 0 ]]; then
   echo "CASE session_model_turn_usage_db FAIL evidence=${model_usage_evidence}"
   exit 1
 fi
@@ -132,17 +143,23 @@ if [[ -z "${generated_title}" || "${generated_title}" == "Untitled Session" ]]; 
   echo "CASE session_inner_model_title FAIL title=${generated_title}"
   exit 1
 fi
-python3 - "${TALOS_HOME}/data/talos.db" "${session_id}" <<'PY'
+python3 - "${TALOS_HOME}/data/talos.db" "${session_id}" "${TALOS_HOME}/conf/talos.yaml" <<'PY'
+from pathlib import Path
 import sqlite3
 import sys
 
-with sqlite3.connect(sys.argv[1]) as connection:
+import yaml
+
+database_path, session_id, config_path = sys.argv[1:]
+inner_model = yaml.safe_load(Path(config_path).read_text())["agent"]["inner_model"]
+provider, model = inner_model["provider"], inner_model["id"]
+with sqlite3.connect(database_path) as connection:
     rows = connection.execute(
         "SELECT model_provider, model_id FROM profile_turn_usage WHERE session_id = ? AND usage_kind = 'title'",
-        (sys.argv[2],),
+        (session_id,),
     ).fetchall()
-assert rows == [("deepseek", "deepseek-v4-flash")], f"Title must use configured Inner Model: {rows}"
-print("CASE session_inner_model_title PASS generated=true model=deepseek:deepseek-v4-flash")
+assert rows == [(provider, model)], f"Title must use configured Inner Model {provider}:{model}: {rows}"
+print(f"CASE session_inner_model_title PASS generated=true model={provider}:{model}")
 PY
 
 sse_log="$(scenario_report_path sse_events.log)"

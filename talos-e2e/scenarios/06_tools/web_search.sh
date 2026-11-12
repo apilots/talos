@@ -26,6 +26,7 @@ done
 
 build_binaries
 trap stop_server EXIT
+base_config="${TALOS_TEST_CONFIG_TEMPLATE:-${REPO_ROOT}/conf/talos-dev.yaml}"
 
 build_session_start_defaults() {
   python3 - <<'PY'
@@ -77,7 +78,7 @@ create_provider_config() {
   local provider="$1"
   local config_path
   config_path="$(scenario_report_path "talos-${provider}.yaml")"
-  PROVIDER="${provider}" CONFIG_SOURCE="${REPO_ROOT}/conf/talos-dev.yaml" CONFIG_PATH="${config_path}" python3 - <<'PY'
+  PROVIDER="${provider}" CONFIG_SOURCE="${base_config}" CONFIG_PATH="${config_path}" python3 - <<'PY'
 import os
 from pathlib import Path
 
@@ -122,13 +123,13 @@ run_provider() {
   models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
   primary_model="$(select_e2e_model_from_json "${models_json}")"
   primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
-  if [[ "${primary_model}" != "deepseek-v4-flash" || "${primary_provider}" != "deepseek" ]]; then
-    echo "CASE web_search_select_model FAIL expected=deepseek/deepseek-v4-flash actual=${primary_provider}/${primary_model}"
+  if [[ -z "${primary_model}" || -z "${primary_provider}" ]]; then
+    echo "CASE web_search_select_model FAIL provider=${provider}"
     exit 1
   fi
   export PRIMARY_MODEL="${primary_model}"
   export PRIMARY_PROVIDER="${primary_provider}"
-  echo "CASE web_search_select_model PASS provider=${provider} model=${primary_model}"
+  echo "CASE web_search_select_model PASS provider=${provider} model=${primary_provider}:${primary_model}"
 
   local session_payload
   local session_id

@@ -6,6 +6,7 @@ ARG RUST_VERSION=1.99.0
 ARG JUST_SHA256=7fedeb22c7e14d9ef1551e8b793700866d80f409f9884b0e80ebb65c11d4874d
 ARG NEXTEST_SHA256=32d1d8c0567b7a80bee2bad8bb09125c846da96bc009b2de11ec08557290c770
 ARG CARGO_SHA256=d7674918d28093097614cd9728b6ca60db9ea3038f640f0bd1e9a4188c7568ce
+ARG TARGETARCH
 LABEL org.opencontainers.image.source="https://github.com/apilots/talos"
 LABEL org.opencontainers.image.description="Pinned Talos Linux sandbox test environment"
 
@@ -14,15 +15,24 @@ RUN apt-get update \
         bubblewrap ca-certificates curl libssl3t64 python3 ripgrep xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" -o /tmp/just.tar.gz \
+RUN case "${TARGETARCH}" in \
+      amd64) rust_arch=x86_64 ;; \
+      arm64) rust_arch=aarch64; \
+        JUST_SHA256=f29d8e72380bc144465f632c7d59da311205eef2923d57511708b05b82f2e64f; \
+        NEXTEST_SHA256=6f82e375187cf3a1f3e336879a51940c315a5d0ce7253f7e517ad28295b74189; \
+        CARGO_SHA256=113229fcc16cc1ba004923a4cc275fbf3281dafaaf8b97269f9c00189d497fd4 ;; \
+      *) echo "Unsupported sandbox test image architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && cargo_target="${rust_arch}-unknown-linux-gnu" \
+    && curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${rust_arch}-unknown-linux-musl.tar.gz" -o /tmp/just.tar.gz \
     && echo "${JUST_SHA256}  /tmp/just.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/just.tar.gz -C /usr/local/bin just \
-    && curl -fsSL "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/nextest.tar.gz \
+    && curl -fsSL "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/cargo-nextest-${NEXTEST_VERSION}-${cargo_target}.tar.gz" -o /tmp/nextest.tar.gz \
     && echo "${NEXTEST_SHA256}  /tmp/nextest.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/nextest.tar.gz -C /usr/local/bin cargo-nextest \
-    && curl -fsSL "https://static.rust-lang.org/dist/cargo-${RUST_VERSION}-x86_64-unknown-linux-gnu.tar.xz" -o /tmp/cargo.tar.xz \
+    && curl -fsSL "https://static.rust-lang.org/dist/cargo-${RUST_VERSION}-${cargo_target}.tar.xz" -o /tmp/cargo.tar.xz \
     && echo "${CARGO_SHA256}  /tmp/cargo.tar.xz" | sha256sum -c - \
-    && tar -xJf /tmp/cargo.tar.xz -C /usr/local/bin --strip-components=3 "cargo-${RUST_VERSION}-x86_64-unknown-linux-gnu/cargo/bin/cargo" \
+    && tar -xJf /tmp/cargo.tar.xz -C /usr/local/bin --strip-components=3 "cargo-${RUST_VERSION}-${cargo_target}/cargo/bin/cargo" \
     && rm /tmp/just.tar.gz /tmp/nextest.tar.gz /tmp/cargo.tar.xz
 
 ENV PATH="/root/.cargo/bin:${PATH}"
