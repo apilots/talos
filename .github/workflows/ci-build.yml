@@ -40,8 +40,7 @@ jobs:
       - name: Prepare build prerequisites after restoring Rust dependencies
         if: steps.cache.outputs.hit != 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends protobuf-compiler libssl-dev pkg-config
+          bash .github/scripts/ci_install_apt.sh protobuf-compiler libssl-dev pkg-config
           cargo fetch --locked --manifest-path talos-rs/Cargo.toml
       - name: Compile selected binaries and shared tests through just
         if: steps.cache.outputs.hit != 'true'

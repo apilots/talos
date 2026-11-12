@@ -158,6 +158,7 @@ pub struct PluginInstallRequest {
     #[ts(optional)]
     pub node_id: Option<String>,
     pub target: PluginInstallTarget,
+    /// Defaults to enabled for a new install and retains the current state for a local package replacement.
     pub enable: Option<bool>,
     pub conflict_policy: PluginInstallConflictPolicy,
 }

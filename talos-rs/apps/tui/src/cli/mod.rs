@@ -5,22 +5,28 @@
 
 use clap::Parser;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 
 use talos_sdk::{
     AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlock, AgentMessageBlockContent,
-    AgentMessageBlockDeltaContent, AgentToolCallArguments, ModelRef, ModelSelection, TimelineEvent,
+    AgentMessageBlockDeltaContent, AgentPendingInput, AgentToolCallArguments, ErrorCode,
+    ModelSelection, TimelineEvent, UserActionParams, UserPermissionMode,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
-use talos_tui::{display_tool_name, GatewayClient as TerminalGatewayClient, TerminalTurnRequest};
+use talos_tui::{
+    display_tool_name, selection_for_key, GatewayClient as TerminalGatewayClient,
+    TerminalTurnRequest,
+};
 use tokio::sync::{mpsc, Mutex};
-use tracing::error;
 
 mod automation;
 mod plugin;
+mod trajectory;
 mod types;
 
+use trajectory::ExecObservation;
 use types::{Cli, Commands, ExecCmd, ModelsCmd, SessionCommands};
 
 pub(crate) enum TerminalMode {
@@ -48,7 +54,7 @@ pub(crate) async fn run_cli_with_client(
         println!("{}", serde_json::to_string_pretty(&response)?);
         return Ok(());
     }
-    let client: Arc<dyn TerminalGatewayClient> = Arc::new(Mutex::new(client));
+    let client = Arc::new(Mutex::new(client));
     let result = match command {
         Commands::Exec(cmd) => execute_exec_command(client.clone(), cmd).await,
         Commands::Models(cmd) => execute_models_command(client.clone(), cmd).await,
@@ -96,8 +102,34 @@ fn print_automation_result(
 }
 
 async fn execute_exec_command(
+    client: Arc<Mutex<EmbeddedServerClient>>,
+    cmd: ExecCmd,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let trace_file = cmd.trajectory.as_ref().map(File::create_new).transpose()?;
+    let transcript_file = cmd.transcript.as_ref().map(File::create_new).transpose()?;
+    let mut observation = ExecObservation::new(transcript_file.is_some());
+    let result = execute_turn(client.clone(), cmd, &mut observation).await;
+    eprintln!(
+        "TALOS_EXEC_METRICS {}",
+        serde_json::to_string(&observation.metrics)?
+    );
+    if let Some(file) = trace_file {
+        let export = observation
+            .write_exports(&mut *client.lock().await, file, transcript_file)
+            .await;
+        if let Err(error) = export {
+            eprintln!("Unable to export execution trajectory: {error}");
+            result?;
+            return Err(error);
+        }
+    }
+    result
+}
+
+async fn execute_turn(
     client: Arc<dyn TerminalGatewayClient>,
     cmd: ExecCmd,
+    observation: &mut ExecObservation,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let message = cmd.message.join(" ");
     let session_id = cmd
@@ -108,7 +140,7 @@ async fn execute_exec_command(
     } else {
         None
     };
-    let request = TerminalTurnRequest {
+    let mut request = TerminalTurnRequest {
         session_id,
         message,
         skills: Vec::new(),
@@ -119,11 +151,29 @@ async fn execute_exec_command(
         client_request_id: Some(format!("cli-{}", uuid::Uuid::new_v4().simple())),
     }
     .build();
+    if cmd.dangerously_skip_permissions {
+        eprintln!(
+            "WARNING: Saving Full Access for this session. Use only in disposable environments."
+        );
+        match client.get_session(&request.session_id).await {
+            Ok(_) => {
+                client
+                    .update_session_permission_mode(
+                        &request.session_id,
+                        UserPermissionMode::FullAccess,
+                    )
+                    .await?;
+            }
+            Err(error) if error.is_code(ErrorCode::ResourceNotFound) => {
+                request.user_permission_mode = Some(UserPermissionMode::FullAccess);
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
     let events = client
         .start_turn_stream(request, /*accepted_turn*/ None)
         .await?;
-    render_timeline_events(events).await?;
-    Ok(())
+    render_timeline_events(events, observation).await
 }
 
 async fn resolve_cli_model_selection(
@@ -131,19 +181,9 @@ async fn resolve_cli_model_selection(
     model_key: &str,
 ) -> Result<ModelSelection, Box<dyn std::error::Error>> {
     let models = client.list_models().await?.models;
-    let model = models
-        .iter()
-        .find(|model| format!("{}:{}", model.provider, model.model.id) == model_key)
-        .ok_or_else(|| {
-            format!("model '{model_key}' is not available in the current model catalog")
-        })?;
-    Ok(ModelSelection::from_model(
-        ModelRef {
-            provider: model.provider.clone(),
-            id: model.model.id.clone(),
-        },
-        &model.model,
-    ))
+    selection_for_key(&models, model_key, /*reasoning_effort*/ None).ok_or_else(|| {
+        format!("model '{model_key}' is not available in the current model catalog").into()
+    })
 }
 
 async fn execute_models_command(
@@ -220,31 +260,78 @@ async fn execute_status_command(
 
 async fn render_timeline_events(
     mut events: mpsc::Receiver<TimelineEvent>,
-) -> Result<String, Box<dyn std::error::Error>> {
+    observation: &mut ExecObservation,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
     let mut item_phases = HashMap::new();
     let mut item_texts = HashMap::new();
     let mut written_final_items = HashSet::new();
 
-    while let Some(envelope) = events.recv().await {
-        if render_event(
+    let result = loop {
+        let Some(envelope) = events.recv().await else {
+            break Err("Turn event stream closed before a terminal event.".into());
+        };
+        if let talos_sdk::TimelineEventPayload::Agent(event) = &envelope.event {
+            observation.record(event);
+        }
+        match render_event(
             &envelope,
             &mut item_phases,
             &mut item_texts,
             &mut written_final_items,
             &mut output_text,
             &mut output_stream,
-        )? {
-            break;
+        ) {
+            Ok(false) => {}
+            Ok(true) => break Ok(()),
+            Err(error) => break Err(error),
         }
-    }
+    };
 
     if !output_text.is_empty() && !output_text.ends_with('\n') {
         println!();
     }
 
-    Ok(output_text)
+    result
+}
+
+#[derive(Debug)]
+pub(crate) struct ExecWaitingForInput;
+
+impl ExecWaitingForInput {
+    pub(crate) const EXIT_CODE: u8 = 3;
+}
+
+impl std::fmt::Display for ExecWaitingForInput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Turn is waiting for input.")
+    }
+}
+
+impl std::error::Error for ExecWaitingForInput {}
+
+fn report_waiting_input(pending: &AgentPendingInput) {
+    match pending {
+        AgentPendingInput::Message { action_id, .. } => {
+            eprintln!("WAITING_FOR_INPUT kind=message action_id={action_id}");
+        }
+        AgentPendingInput::UserAction { action } => {
+            let (kind, tool_name) = match &action.params {
+                UserActionParams::SandboxApproval(params) => {
+                    ("approval", params.tool_name.as_str())
+                }
+                UserActionParams::Question(_) => ("question", "AskUserQuestion"),
+                UserActionParams::DynamicToolResult(params) => {
+                    ("user_action", params.tool_name.as_str())
+                }
+            };
+            eprintln!(
+                "WAITING_FOR_INPUT kind={kind} tool={tool_name} call_id={} action_id={}",
+                action.call_id, action.action_id,
+            );
+        }
+    }
 }
 
 fn render_event(
@@ -328,11 +415,20 @@ fn render_event(
         AgentEventPayload::MessageBlockCompleted(payload) => {
             if let AgentMessageBlockContent::ToolResult(result) = &payload.block.content {
                 eprintln!(
-                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
+                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={} metrics={}",
                     result.call_id,
                     display_tool_name(&result.tool_name),
                     result.tool_name,
-                    result.is_error
+                    result.is_error,
+                    serde_json::to_string(&result.metrics)?
+                );
+            }
+            if let AgentMessageBlockContent::ContextCompaction(compaction) = &payload.block.content
+            {
+                eprintln!(
+                    "CONTEXT_COMPACTION_COMPLETED block={} metrics={}",
+                    payload.block.block_id,
+                    serde_json::to_string(&compaction.metrics)?
                 );
             }
             if let AgentMessageBlockContent::AssistantText(assistant) = &payload.block.content {
@@ -348,16 +444,18 @@ fn render_event(
             }
         }
         AgentEventPayload::TurnFailed(payload) => {
-            error!("TURN_ERROR {}", payload.error.message);
             return Err(payload.error.message.clone().into());
         }
         AgentEventPayload::TurnCompleted(_) => {
             return Ok(true);
         }
+        AgentEventPayload::WaitingForInput(pending) => {
+            report_waiting_input(pending);
+            return Err(ExecWaitingForInput.into());
+        }
         AgentEventPayload::TurnStarted(_)
         | AgentEventPayload::MessageStarted(_)
         | AgentEventPayload::MessageCompleted(_)
-        | AgentEventPayload::WaitingForInput(_)
         | AgentEventPayload::MetricsUpdated(_) => {}
     }
     Ok(false)

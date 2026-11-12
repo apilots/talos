@@ -1,0 +1,6 @@
+services:
+  main:
+    platform: linux/arm64
+    build:
+      platforms:
+        - linux/arm64

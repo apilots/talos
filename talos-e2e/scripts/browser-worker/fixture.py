@@ -9,6 +9,7 @@ import signal
 import socket
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -334,7 +335,7 @@ def browser_task(url,node,attachment,label,verify_cookie=False):
     require('data:image' not in json.dumps(events) and 'base64' not in json.dumps(events), 'Timeline persisted inline image bytes')
     return session,events,results
 
-def native_media(document,node,server_home,container):
+def remote_cli_environment(document, node, server_home, container):
     home=RUN/('desktop-media-'+uuid.uuid4().hex[:8]);home.mkdir()
     (home/'data').mkdir()
     # Seed the owned directory snapshot; G/H routing and media authorization remain real.
@@ -346,6 +347,10 @@ def native_media(document,node,server_home,container):
     env={key:os.environ[key] for key in ('PATH','TMPDIR','DISPLAY','XAUTHORITY','XDG_RUNTIME_DIR') if key in os.environ}
     env.update(HOME=str(home),TALOS_HOME=str(home),TALOS_CONFIG=str(conf),TALOS_RESOURCE_DIR=str(ROOT),TALOS_APP_SERVER_BIN=os.environ.get('TALOS_E2E_APP_SERVER_BIN',str(ROOT/'talos-rs/target/debug/app-server')),TALOS_E2E_REMOTE_NODE=node,TALOS_SCENARIO_REPORT_DIR=str(REPORT),TALOS_E2E_CLI_BIN=os.environ['TALOS_E2E_CLI_BIN'])
     env['TALOS_E2E_WORKER_CONTAINER']=container
+    return env
+
+def native_media(document,node,server_home,container):
+    env = remote_cli_environment(document, node, server_home, container)
     electron=ROOT/'talos-app/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
     if not electron.exists():electron=ROOT/'talos-app/desktop/node_modules/electron/dist/electron'
     with (REPORT/'native-docker-media.log').open('wb') as log:
@@ -374,7 +379,7 @@ print(json.dumps({'commit':source['commit'],'lockSha256':metadata['lockSha256'],
     require(result['commit']==expected['commit'],'Worker did not use the pinned official source')
     return result
 
-def run():
+def run(plugin_packages_only=False):
     import yaml
     mock = ThreadingHTTPServer(('0.0.0.0', 0), Fixture)
     print('FIXTURE_PORT', mock.server_port, flush=True)
@@ -439,6 +444,10 @@ HTTPServer(('127.0.0.1',18080),H).serve_forever()
             'python3 /home/talos/.talos/conf/website.py & exec /opt/talos/bin/talos-worker']
         subprocess.run(worker_command,check=True,capture_output=True)
         wait(lambda: data(http(url + '/v1/computers/' + node)).get('available'), 'Outbound Worker registration')
+        if plugin_packages_only:
+            from plugin_cli import remote_packages
+            remote_packages(node, name, remote_cli_environment(document, node, home, name), REPORT)
+            return
         snapshot = data(http(url + '/v1/browser', {'nodeId': node, 'operation': {'kind': 'read'}}))
         require(snapshot['host'] == 'docker' and snapshot['enabled'], 'Wrong canonical browser capability')
         delivery=official_delivery(name)
@@ -572,4 +581,4 @@ print(json.dumps({'lockSha256':metadata['lockSha256'],'browserUseVersion':versio
         log.close(); mock.shutdown(); mock.server_close()
 
 if __name__ == '__main__':
-    run()
+    run(plugin_packages_only=sys.argv[1:] == ['--plugin-packages-only'])

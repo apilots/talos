@@ -90,7 +90,7 @@ fn collect_mcp_manifest_paths(
     manifests: &mut Vec<PathBuf>,
     warnings: &mut Vec<PluginWarning>,
 ) -> TalosResult<()> {
-    let manifest_path = current.join("talos-mcp.json");
+    let manifest_path = super::mcp_manifest::manifest_path(current);
     let has_manifest = is_regular_file(&manifest_path);
     if has_manifest {
         if let Some(ancestor) = ancestor_mcp_dir {

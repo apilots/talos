@@ -41,6 +41,14 @@
         "model"
       ]
     },
+    "plugin_api_lifecycle.sh": {
+      "commands": [
+        "cargo",
+        "protoc",
+        "timeout",
+        "python3"
+      ]
+    },
     "desktop_recovery.sh": {
       "commands": [
         "cargo",

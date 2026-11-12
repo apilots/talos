@@ -2,6 +2,7 @@ use super::PluginManager;
 use crate::documents::{
     document_media_type, document_priority, document_role, document_title, readme_document_names,
 };
+use crate::scanner::mcp_manifest::manifest_path;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -68,7 +69,7 @@ impl PluginManager {
     ) -> TalosResult<(PathBuf, PathBuf)> {
         if let Some(installed_path) = installed_path(plugin) {
             let root = installed_content_root(plugin, installed_path)?;
-            let path = root.join(installed_document_name(plugin)?);
+            let path = installed_document_path(plugin, &root)?;
             let path = ensure_contained_regular_file(&root, &path)?;
             let root = fs::canonicalize(&root).map_err(|err| {
                 let diagnostic = format!(
@@ -103,7 +104,8 @@ impl PluginManager {
             })?;
         let root = match &source.location {
             talos_types::MarketplaceSourceLocation::LocalFolder { path } => path.clone(),
-            talos_types::MarketplaceSourceLocation::Git { .. } => {
+            talos_types::MarketplaceSourceLocation::Git { .. }
+            | talos_types::MarketplaceSourceLocation::LocalPackage { .. } => {
                 self.state.marketplace_cache_dir(&source.id).join("repo")
             }
         };
@@ -129,7 +131,7 @@ fn document_paths(plugin: &Plugin, root: &Path, primary_path: &Path) -> TalosRes
         }
     }
     if plugin.kind == talos_types::PluginKind::McpServer {
-        let manifest_path = root.join("talos-mcp.json");
+        let manifest_path = manifest_path(root);
         let path = ensure_contained_regular_file(root, &manifest_path)?;
         paths.push(path);
     }
@@ -163,10 +165,10 @@ fn installed_content_root(plugin: &Plugin, installed_path: &Path) -> TalosResult
     }
 }
 
-fn installed_document_name(plugin: &Plugin) -> TalosResult<&'static str> {
+fn installed_document_path(plugin: &Plugin, root: &Path) -> TalosResult<PathBuf> {
     match plugin.kind {
-        talos_types::PluginKind::Skill => Ok("SKILL.md"),
-        talos_types::PluginKind::McpServer => Ok("talos-mcp.json"),
+        talos_types::PluginKind::Skill => Ok(root.join("SKILL.md")),
+        talos_types::PluginKind::McpServer => Ok(manifest_path(root)),
         other => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("plugin kind `{other:?}` has no readable document"),

@@ -146,7 +146,7 @@ def check_request(body, headers, provider, mode):
     return call, result is not None
 
 
-def chat_chunks(call, mode, done):
+def chat_chunks(call, mode, done, *, command=None):
     delta = {"role": "assistant"}
     if done:
         delta["content"] = f"PROTOCOL_OK:{call}"
@@ -154,7 +154,7 @@ def chat_chunks(call, mode, done):
         if mode == "on":
             delta["reasoning_content"] = f"private:{call}"
         delta["tool_calls"] = [{"index": 0, "id": call, "type": "function", "function": {
-            "name": "Bash", "arguments": json.dumps({"command": f"printf 'TOOL_{call[5:]}'"})}}]
+            "name": "Bash", "arguments": json.dumps({"command": command or f"printf 'TOOL_{call[5:]}'"})}}]
     return [{"id": "fixture", "object": "chat.completion.chunk", "created": 1, "model": MODEL,
         "choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
         {"id": "fixture", "object": "chat.completion.chunk", "created": 1, "model": MODEL,

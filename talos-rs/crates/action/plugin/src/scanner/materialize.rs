@@ -23,6 +23,11 @@ pub(crate) fn materialize_source(
             root: path.clone(),
             commit: None,
         }),
+        MarketplaceSourceLocation::LocalPackage { path, sha256 } => {
+            let root = state.marketplace_cache_dir(&source.id).join("repo");
+            super::package::materialize(path, sha256, &root)?;
+            Ok(MaterializedSource { root, commit: None })
+        }
         MarketplaceSourceLocation::Git { url, reference } => {
             let repo_dir = state.marketplace_cache_dir(&source.id).join("repo");
             if repo_dir.exists() {

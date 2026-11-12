@@ -1,0 +1,4 @@
+services:
+  main:
+    platform: linux/arm64
+    network_mode: none
