@@ -257,6 +257,7 @@ impl WorkerEnrollment<'_> {
                     "Only the previous owner may reconnect this Computer.",
                 ));
             }
+            let _retirement = self.sync_host.registration_retirement.lock().await;
             self.sync_host
                 .retire_removed_local_registration(&actor)
                 .await?;
@@ -420,7 +421,7 @@ impl WorkerEnrollment<'_> {
     }
 }
 
-pub(crate) async fn enrollment_gateway(
+async fn enrollment_gateway(
     config: &Config,
     runner: Option<&AgentNodeRunnerConfig>,
 ) -> TalosResult<AgentNodeClient> {
@@ -473,7 +474,7 @@ pub(crate) fn validate_saved_node(
     Ok(())
 }
 
-pub(crate) fn validate_registration_expiry(node: &NodeInfo) -> TalosResult<()> {
+fn validate_registration_expiry(node: &NodeInfo) -> TalosResult<()> {
     if node
         .credential_expires_at
         .is_none_or(|expiry| expiry <= CloudSessionCache::now_ms() / 1000)

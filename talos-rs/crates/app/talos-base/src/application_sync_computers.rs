@@ -1,8 +1,6 @@
 //! Current-host aliases and live Gateway reachability, using original Computer DTOs.
 use super::application_sync::ApplicationSyncHost;
-use super::desktop_worker::{
-    enrollment_gateway, validate_registration_expiry, validate_saved_node,
-};
+use super::desktop_worker::validate_saved_node;
 use agent_client::{AgentNodeClient, AgentTlsTrust};
 use talos_auth::{RequestIdentity, UserRole};
 use talos_config::{AgentNodeRunnerConfig, Config};
@@ -280,13 +278,19 @@ async fn verify_saved_computer(
     runner: &AgentNodeRunnerConfig,
 ) -> TalosResult<()> {
     let token = actor.access_token.as_deref().expect("verified token");
-    let client = enrollment_gateway(config, Some(runner)).await?;
-    // Scope access before reading the host's protected credential file.
-    let node = client.get_node(token, &runner.node_id).await?;
-    validate_saved_node(config, actor, Some(runner), &node)?;
-    validate_registration_expiry(&node)?;
-    let node =
-        talos_worker::RegisteredWorker::verify_saved_credential(config, runner, token).await?;
+    if runner.control_plane_endpoint != config.cloud.agent_base_url {
+        return Err(TalosError::new(
+            ErrorCode::Conflict,
+            "Saved Worker belongs to another control plane",
+        ));
+    }
+    let node = talos_worker::RegisteredWorker::verify_saved_credential(
+        config,
+        runner,
+        token,
+        &actor.user_id,
+    )
+    .await?;
     if node.node_id != runner.node_id {
         return Err(TalosError::internal(
             "Control plane returned a different Worker identity.",

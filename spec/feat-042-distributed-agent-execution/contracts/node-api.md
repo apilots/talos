@@ -165,7 +165,8 @@ NodeInfo 不包含秘密，available 由 Service 推导。list 默认 50、最�
 management host resolving its saved local Computer. The caller must present
 the verified owner's Cloud bearer token and the provisioned Worker credential
 over the Agent TLS connection. Directory ownership is checked before the
-credential. A rejected or expired Worker credential returns `ResourceExpired`
+credential. A cold request with a readable credential uses this single Gateway
+call. A rejected or expired Worker credential returns `ResourceExpired`
 with recovery guidance. The RPC returns public `NodeInfo` and issues no lease.
 For mixed versions, upgrade the control plane before relying on cold local
 access that requires this proof. A control plane without the RPC returns

@@ -52,10 +52,21 @@ impl RegisteredWorker {
         config: &Config,
         runner: &AgentNodeRunnerConfig,
         access_token: &str,
+        account_id: &str,
     ) -> TalosResult<agent_protocol::NodeInfo> {
-        let token = read_credential(&runner.credential_file, &config.talos_paths().conf_dir)?;
-        registration_client(config, runner)
-            .await?
+        let client = registration_client(config, runner).await?;
+        let token = match read_credential(&runner.credential_file, &config.talos_paths().conf_dir) {
+            Ok(token) => token,
+            Err(error) => {
+                // File errors are visible only after the directory establishes ownership.
+                let node = client.get_node(access_token, &runner.node_id).await?;
+                if node.owner_user_id.as_deref() != Some(account_id) {
+                    return Err(TalosError::authorization_denied());
+                }
+                return Err(error);
+            }
+        };
+        client
             .verify_saved_registration(
                 access_token,
                 NodeAuth {

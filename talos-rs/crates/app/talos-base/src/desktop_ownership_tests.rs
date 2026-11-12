@@ -5,10 +5,17 @@ use super::*;
 async fn cached_local_requests_check_ownership_independently_of_document_sync() {
     use axum::{routing::post, Json, Router};
     use serde_json::{json, Value};
-    use std::{sync::Mutex, time::Duration};
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        },
+        time::Duration,
+    };
 
     #[derive(Default)]
     struct GatewayAuth {
+        calls: AtomicUsize,
         failure: Mutex<Option<TalosError>>,
     }
 
@@ -19,6 +26,7 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
         }
 
         async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
             let failure = self.failure.lock().unwrap().take();
             if let Some(error) = failure {
                 return Err(error);
@@ -156,46 +164,31 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
         assert_eq!(error.error_code(), code);
     }
 
+    let before = gateway_auth.calls.load(Ordering::Relaxed);
     let implicit_models = request(&owner, implicit.clone()).await.unwrap().unwrap();
     let explicit_models = request(&owner, explicit.clone()).await.unwrap().unwrap();
     assert!(!implicit_models.models.is_empty());
     assert_eq!(implicit_models, explicit_models);
-    assert!(restarted.worker_registration.lock().await.is_none());
-    drop(lifecycle);
-
-    tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let status = restarted.service.sync_status(&owner).await.unwrap();
-            if let Some(error) = status.last_error {
-                assert_eq!(error.code, ErrorCode::InternalError);
-                assert!(error.message.starts_with("Read sync trust certificate"));
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("document initialization must reach the bad certificate");
     assert_eq!(
-        request(&owner, implicit.clone()).await.unwrap().unwrap(),
-        implicit_models,
-        "a failed document association must not stop local execution"
+        gateway_auth.calls.load(Ordering::Relaxed) - before,
+        2,
+        "each local request needs only one Gateway verification"
     );
     assert!(restarted.worker_registration.lock().await.is_none());
 
     // A control-plane rotation leaves the saved bytes intact but revokes their proof.
-    fixture
+    let replacement = fixture
         .nodes
         .rotate_credential(
             &owner,
             talos_types::RotateCredentialRequest {
-                node_id: registered,
+                node_id: registered.clone(),
                 expires_at: CloudSessionCache::now_ms() / 1000 + 600,
             },
         )
         .await
         .unwrap();
-    for selector in [implicit, explicit] {
+    for selector in [implicit.clone(), explicit] {
         let error = request(&owner, selector).await.unwrap().unwrap_err();
         assert_eq!(error.error_code(), ErrorCode::ResourceExpired);
         assert!(error
@@ -204,6 +197,48 @@ async fn cached_local_requests_check_ownership_independently_of_document_sync() 
             .contains("Recover this computer credential"));
     }
     assert_eq!(std::fs::read(&credential_path).unwrap(), credential);
+    let runner = restarted.config.agent_node.runner.as_ref().unwrap();
+    YamlConfigStore::new(restarted.config.source_path())
+        .save_node_identity(runner, &replacement.token)
+        .unwrap();
+
+    // Hold publication of the saved document handle. Worker registration must
+    // complete before document initialization can even reach its bad CA.
+    let documents = restarted.sync_host.sync_stores.handles.lock().await;
+    drop(lifecycle);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if restarted.sync_host.local_owner.read().unwrap().as_deref() == Some("user-1") {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("saved Worker ownership must settle while document publication is blocked");
+    assert!(documents.is_empty());
+    drop(documents);
+
+    tokio::time::timeout(Duration::from_secs(12), async {
+        loop {
+            let status = restarted.service.sync_status(&owner).await.unwrap();
+            if status.last_error.is_some_and(|error| {
+                error.code == ErrorCode::InternalError
+                    && error.message.starts_with("Read sync trust certificate")
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("document initialization must report its original error after publication is released");
+    assert_eq!(
+        request(&owner, implicit).await.unwrap().unwrap(),
+        implicit_models,
+        "a failed document association must not stop local execution"
+    );
+    assert!(restarted.worker_registration.lock().await.is_some());
 
     restarted.shutdown_sync().await.unwrap();
     if let Some(worker) = restarted.worker_registration.lock().await.take() {

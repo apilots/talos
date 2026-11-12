@@ -437,6 +437,95 @@ async fn status_snapshots_bypass_busy_lifecycles_and_maintenance_is_owned_and_co
     restarted.worker.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn saved_document_transport_starts_while_worker_gateway_is_stalled() {
+    use axum::{routing::post, Json, Router};
+    use serde_json::json;
+    use talos_sync::{SyncBindParams, SyncScope};
+
+    let home = tempfile::tempdir().unwrap();
+    let auth = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let gateway = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let documents = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = snapshot_config(home.path());
+    config.cloud.api_base_url = format!("http://{}", auth.local_addr().unwrap());
+    config.cloud.agent_base_url = format!("https://{}", gateway.local_addr().unwrap());
+    config.sync.enabled = Some(true);
+    config.sync.hub_endpoint = format!("wss://{}/v1/sync", documents.local_addr().unwrap());
+    let mut persisted = serde_json::to_value(&config).unwrap();
+    persisted["logging"].as_object_mut().unwrap().remove("file");
+    persisted["storage"]
+        .as_object_mut()
+        .unwrap()
+        .remove("connection_string");
+    std::fs::write(
+        config.source_path(),
+        serde_json::to_vec(&persisted).unwrap(),
+    )
+    .unwrap();
+
+    let auth = tokio::spawn(async move {
+        axum::serve(auth, Router::new().route("/v1/auth/introspect", post(|| async {
+            Json(json!({
+                "active": true,
+                "user": {"user_id": "account", "email": "test@example.invalid", "username": "test", "role": "user", "type": "free", "status": "active"},
+                "capabilities": {"is_admin": false, "role": "user", "scopes": []},
+                "entitlement": {"can_use": true, "plan": "free", "reason": null},
+                "expires_at_ms": null
+            }))
+        }))).await.unwrap();
+    });
+    let runtime = crate::build_application_runtime_with_migration_dir(
+        config,
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
+    )
+    .await
+    .unwrap();
+    let actor = Actor::regular("account").with_access_token("fixture-token");
+    let verified = runtime.sync_host.verified_actor(&actor).await.unwrap();
+    runtime
+        .sync
+        .bind_account(
+            &verified,
+            SyncBindParams {
+                scope: SyncScope {
+                    hub_id: "saved-hub".into(),
+                    account_id: actor.user_id.clone(),
+                },
+                source_user_id: actor.user_id.clone(),
+                computers: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    runtime.service.resume_account_sync(&actor);
+
+    let (_worker_connection, _) = tokio::time::timeout(Duration::from_secs(3), gateway.accept())
+        .await
+        .expect("the Worker branch must start")
+        .unwrap();
+    let (_document_connection, _) =
+        tokio::time::timeout(Duration::from_secs(3), documents.accept())
+            .await
+            .expect("saved document transport must dial while Worker TLS is stalled")
+            .unwrap();
+    assert!(runtime
+        .sync_host
+        .sync_stores
+        .handles
+        .lock()
+        .await
+        .contains_key(&actor.user_id));
+    assert!(runtime.sync_host.lifecycle.try_lock().is_err());
+
+    runtime.shutdown_sync().await.unwrap();
+    runtime.worker_rpc.shutdown().await.unwrap();
+    runtime.resource_rpc.shutdown().await.unwrap();
+    runtime.automation.shutdown().await.unwrap();
+    runtime.worker.shutdown().await.unwrap();
+    auth.abort();
+}
+
 fn snapshot_config(home: &Path) -> Config {
     let paths = TalosPaths::from_home(home.into());
     paths.ensure_base_dirs().unwrap();
