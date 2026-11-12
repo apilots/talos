@@ -158,6 +158,76 @@ async fn rejected_cached_credentials_preserve_the_original_request_error() {
 }
 
 #[tokio::test]
+async fn cold_cached_session_verifies_token_before_sync_status() {
+    let mut child = Command::new("cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut client = test_app_server_client(true);
+    client.stdin = child.stdin.take();
+    let pending = client.pending_responses.clone();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let token = "cached-token";
+    let cache = AuthSessionReadResponse {
+        session: Some(talos_types::AuthSessionSnapshot {
+            schema_version: 1,
+            cloud_api_base_url: "https://cloud.example".into(),
+            access_token: token.into(),
+            token_type: "Bearer".into(),
+            expires_at_ms: None,
+            last_used_at_ms: "0".into(),
+            user: talos_types::AuthSessionUserSnapshot {
+                user_id: "user-1".into(),
+                username: "ada".into(),
+                email: None,
+                role: talos_auth::UserRole::User,
+                r#type: talos_auth::UserType::Pro,
+            },
+        }),
+    };
+    let rejected = TalosError::new(
+        talos_error::ErrorCode::Unauthenticated,
+        "The login session has expired.",
+    );
+    let respond = async {
+        for (method, credentials, response) in [
+            (
+                "auth/session/read",
+                None,
+                Ok(serde_json::to_value(cache).unwrap()),
+            ),
+            (
+                "user/current",
+                Some(existing_session_credentials(token.into())),
+                Err(rejected.clone()),
+            ),
+        ] {
+            let request: JsonRpcRequest =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(request.method, method);
+            assert_eq!(request.actor_credentials, credentials);
+            let RequestId::Number(id) = request.id else {
+                panic!("numeric SDK request ID");
+            };
+            pending
+                .lock()
+                .await
+                .remove(&id)
+                .unwrap()
+                .send(response)
+                .unwrap();
+        }
+    };
+    let (result, ()) = tokio::join!(client.restore_cloud_session_candidate(), respond);
+    assert_eq!(result.unwrap_err().to_api_error(), rejected.to_api_error());
+    assert!(client.actor_credentials.is_none());
+    drop(client.stdin.take());
+    child.wait().await.unwrap();
+}
+
+#[tokio::test]
 async fn slow_plugin_requests_accept_delayed_responses_without_extending_other_requests() {
     for method in ["plugin/install", "plugin/update", "session/list"] {
         let mut child = Command::new("cat")

@@ -115,7 +115,18 @@ async fn smoke(client: &mut AppServerClient) -> Result<()> {
 
 async fn cloud_session_cache(client: &mut AppServerClient) -> Result<()> {
     eprintln!("cloud-session-cache model.list");
-    list_models(client).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        loop {
+            match list_models(client).await {
+                Err(error) if error.is_code(talos_sdk::ErrorCode::PermissionDenied) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+                result => return result,
+            }
+        }
+    })
+    .await
+    .context("Cached account did not regain its owned Computer")??;
     eprintln!("cloud-session-cache session id");
     new_session_id(client).await?;
     Ok(())
