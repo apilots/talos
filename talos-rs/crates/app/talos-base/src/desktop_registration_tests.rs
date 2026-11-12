@@ -20,6 +20,10 @@ struct DesktopFixture {
 
 impl DesktopFixture {
     async fn new() -> Self {
+        Self::with_auth(Arc::new(TestAuth), None).await
+    }
+
+    async fn with_auth(gateway_auth: Arc<dyn AuthService>, cloud_api: Option<String>) -> Self {
         // The actual Worker directory picker is confined to the process HOME.
         // Keep all product state in an owned temporary child of that boundary.
         let home = tempfile::Builder::new()
@@ -63,7 +67,7 @@ impl DesktopFixture {
                 trusted_node_ca_file: None,
             },
             nodes.clone(),
-            Arc::new(TestAuth),
+            gateway_auth,
             coordinator.clone(),
             NodeResourceServices {
                 session_data: NodeSessionDataRpc::new(
@@ -90,6 +94,11 @@ impl DesktopFixture {
         .unwrap();
         let mut config = Config::default().with_runtime_paths(paths);
         config.apply_derived_paths();
+        if let Some(cloud_api) = cloud_api {
+            config.cloud.api_base_url = cloud_api;
+            config.gateway.auth = true;
+            config.sync.enabled = Some(false);
+        }
         config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
             reasoning_replay: Default::default(),
             reasoning_efforts: None,
@@ -205,6 +214,175 @@ impl DesktopFixture {
         .await
         .unwrap()
     }
+}
+
+#[tokio::test]
+async fn first_cached_model_requests_wait_for_owned_worker_through_a_gateway_retry() {
+    use axum::{routing::post, Json, Router};
+    use serde_json::{json, Value};
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
+    };
+
+    #[derive(Default)]
+    struct GatewayAuth {
+        fail_next: AtomicBool,
+        failed: tokio::sync::Notify,
+    }
+
+    #[tonic::async_trait]
+    impl AuthService for GatewayAuth {
+        async fn logout(&self, identity: &RequestIdentity) -> TalosResult<()> {
+            TestAuth.logout(identity).await
+        }
+
+        async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+            if self.fail_next.swap(false, Ordering::SeqCst) {
+                self.failed.notify_one();
+                return Err(TalosError::new(
+                    ErrorCode::ServiceUnavailable,
+                    "Gateway temporarily unavailable",
+                ));
+            }
+            TestAuth.verify_access_token(token).await
+        }
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/v1/auth/introspect",
+        post(|Json(request): Json<Value>| async move {
+            let token = request["token"].as_str().unwrap();
+            Json(json!({
+                "active": matches!(token, "user-1" | "user-2"),
+                "user": {"user_id": token, "email": "test@example.invalid", "username": token, "role": "user", "type": "free", "status": "active"},
+                "capabilities": {"is_admin": false, "role": "user", "scopes": []},
+                "entitlement": {"can_use": true, "plan": "free", "reason": null},
+                "expires_at_ms": null,
+            }))
+        }),
+    );
+    let cloud = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let gateway_auth = Arc::new(GatewayAuth::default());
+    let fixture = DesktopFixture::with_auth(gateway_auth.clone(), Some(api)).await;
+    let host = fixture.host("Saved Computer");
+    fixture.login("user-1");
+    let registered = host
+        .enroll_worker(None, None)
+        .await
+        .unwrap()
+        .node_id
+        .unwrap();
+    host.stop_registration().await.unwrap();
+    gateway_auth.fail_next.store(true, Ordering::SeqCst);
+
+    let restarted = crate::build_application_runtime_with_migration_dir(
+        fixture.config.reload().unwrap(),
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
+    )
+    .await
+    .unwrap();
+    let lifecycle = restarted.sync_host.lifecycle.try_lock().unwrap();
+    let owner = Actor::regular("user-1")
+        .with_access_token("user-1")
+        .with_username(Some("user-1".into()));
+    restarted
+        .auth_service
+        .verify_access_token("user-1")
+        .await
+        .unwrap();
+    restarted.service.resume_account_sync(&owner);
+    let status = tokio::time::timeout(
+        Duration::from_secs(1),
+        restarted.service.sync_status(&owner),
+    )
+    .await
+    .expect("status is a snapshot while ownership is being restored")
+    .unwrap();
+    assert_eq!(status.local_computer_id, None);
+    assert_eq!(
+        restarted.sync_host.local_computer_id().await.unwrap(),
+        registered
+    );
+
+    let invalid = Actor::regular("user-1").with_access_token("expired");
+    let foreign = Actor::regular("user-2").with_access_token("user-2");
+    for (actor, code) in [
+        (invalid, ErrorCode::Unauthenticated),
+        (foreign.clone(), ErrorCode::PermissionDenied),
+    ] {
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            restarted.service.list_models(&actor, Default::default()),
+        )
+        .await
+        .expect("unverified and foreign requests cannot join the owner's startup")
+        .unwrap_err();
+        assert_eq!(error.error_code(), code);
+    }
+
+    let implicit = restarted.service.list_models(&owner, Default::default());
+    let explicit = restarted.service.list_models(
+        &owner,
+        talos_types::ModelListRequest {
+            node_id: Some(registered.clone()),
+        },
+    );
+    let first = async { tokio::try_join!(implicit, explicit) };
+    tokio::pin!(first);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), &mut first)
+            .await
+            .is_err(),
+        "both local selectors must await the existing supervisor while its lifecycle is blocked"
+    );
+    drop(lifecycle);
+    tokio::select! {
+        result = &mut first => panic!("requests completed before the first Gateway failure: {result:?}"),
+        result = tokio::time::timeout(Duration::from_secs(3), gateway_auth.failed.notified()) => {
+            result.expect("the supervisor must encounter a retryable failure");
+        }
+    }
+    let (implicit_models, explicit_models) =
+        tokio::time::timeout(Duration::from_secs(9), &mut first)
+            .await
+            .expect("the original requests must resume after the Gateway retry")
+            .unwrap();
+    assert!(!implicit_models.models.is_empty());
+    assert_eq!(implicit_models, explicit_models);
+
+    restarted.service.resume_account_sync(&foreign);
+    for (node_id, code) in [
+        (None, ErrorCode::PermissionDenied),
+        (Some(registered), ErrorCode::ResourceNotFound),
+    ] {
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            restarted
+                .service
+                .list_models(&foreign, talos_types::ModelListRequest { node_id }),
+        )
+        .await
+        .expect("a verified foreign account must get the ordinary denial")
+        .unwrap_err();
+        assert_eq!(error.error_code(), code);
+    }
+
+    restarted.shutdown_sync().await.unwrap();
+    if let Some(worker) = restarted.worker_registration.lock().await.take() {
+        worker.shutdown().await.unwrap();
+    }
+    restarted.worker_rpc.shutdown().await.unwrap();
+    restarted.resource_rpc.shutdown().await.unwrap();
+    restarted.automation.shutdown().await.unwrap();
+    restarted.worker.shutdown().await.unwrap();
+    fixture.stop.cancel();
+    fixture.server.await.unwrap().unwrap();
+    cloud.abort();
 }
 
 #[tokio::test]

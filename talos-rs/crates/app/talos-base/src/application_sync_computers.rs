@@ -1,7 +1,8 @@
 //! Current-host aliases and live Gateway reachability, using original Computer DTOs.
 use super::application_sync::ApplicationSyncHost;
+use super::application_sync_background::LocalComputerDecision;
 use agent_client::{AgentNodeClient, AgentTlsTrust};
-use talos_auth::RequestIdentity;
+use talos_auth::{RequestIdentity, UserRole};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_service::Actor;
 use talos_types::NodeInfo;
@@ -127,10 +128,7 @@ impl ApplicationSyncHost {
     pub(crate) async fn local_node(&self, actor: &Actor, computer_id: &str) -> TalosResult<String> {
         if computer_id == "embedded" {
             if self.local_computer_for_client(actor).await?.is_none() {
-                return Err(TalosError::new(
-                    ErrorCode::PermissionDenied,
-                    "This account does not own the management host's Computer.",
-                ));
+                return Err(local_computer_denied(actor, computer_id));
             }
             return Ok(computer_id.into());
         }
@@ -145,12 +143,42 @@ impl ApplicationSyncHost {
         actor: &Actor,
         computer_id: &str,
     ) -> TalosResult<String> {
-        if computer_id == "embedded" || actor.auth_disabled {
+        if actor.auth_disabled {
             return self.local_node(actor, computer_id).await;
         }
         let local = self.local_computer_id().await?;
-        if computer_id == local && self.owns_local_computer(actor).await? {
-            return Ok("embedded".into());
+        if computer_id == "embedded" || computer_id == local {
+            if self.owns_local_computer(actor).await? {
+                return Ok("embedded".into());
+            }
+            if local != "embedded" {
+                match self.await_local_computer_reconciliation(actor).await? {
+                    Some(LocalComputerDecision::Owned) => {
+                        // The registration and current access policy may have changed
+                        // while this request was waiting for the supervisor.
+                        if self.account_connections_allowed(&actor.user_id)
+                            && self.local_computer_id().await? == local
+                            && self.owns_local_computer(actor).await?
+                        {
+                            return Ok("embedded".into());
+                        }
+                        return Err(local_computer_denied(actor, computer_id));
+                    }
+                    Some(LocalComputerDecision::Denied) => {
+                        return Err(local_computer_denied(actor, computer_id))
+                    }
+                    Some(LocalComputerDecision::Failed(code)) => {
+                        return Err(TalosError::new(
+                            code,
+                            "Could not restore access to the local Computer.",
+                        ));
+                    }
+                    None => {}
+                }
+            }
+            if computer_id == "embedded" {
+                return Err(local_computer_denied(actor, computer_id));
+            }
         }
         let verified = self.verified_actor(actor).await?;
         self.connect_computer(&verified, computer_id).await?;
@@ -225,6 +253,17 @@ impl ApplicationSyncHost {
         }
         Ok(info)
     }
+}
+
+fn local_computer_denied(actor: &Actor, computer_id: &str) -> TalosError {
+    // Match the owner-scoped Gateway response for explicit IDs.
+    if computer_id != "embedded" && actor.role != UserRole::Admin {
+        return TalosError::new(ErrorCode::ResourceNotFound, "Agent node not found");
+    }
+    TalosError::new(
+        ErrorCode::PermissionDenied,
+        "This account does not own the management host's Computer.",
+    )
 }
 
 pub(crate) async fn gateway_client(config: &talos_config::Config) -> TalosResult<AgentNodeClient> {
