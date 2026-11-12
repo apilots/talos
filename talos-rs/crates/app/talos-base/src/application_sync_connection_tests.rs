@@ -49,6 +49,12 @@ impl pb::agent_node_management_server::AgentNodeManagement for Gateway {
     ) -> Result<Response<pb::GetNodeResponse>, Status> {
         Err(Status::unimplemented("unused fixture RPC"))
     }
+    async fn verify_saved_registration(
+        &self,
+        _: Request<pb::VerifySavedRegistrationRequest>,
+    ) -> Result<Response<pb::GetNodeResponse>, Status> {
+        Err(Status::unimplemented("legacy Gateway"))
+    }
     async fn list_nodes(
         &self,
         _: Request<pb::ListNodesRequest>,
@@ -254,6 +260,29 @@ impl Fixture {
         self.gateway.abort();
         self.auth.abort();
     }
+}
+
+#[tokio::test]
+async fn legacy_gateway_cannot_confirm_a_saved_registration() {
+    let fixture = Fixture::start().await;
+    let error = fixture
+        .runtime
+        .sync_host
+        .gateway_client()
+        .await
+        .unwrap()
+        .verify_saved_registration(
+            "credential",
+            agent_protocol::NodeAuth {
+                node_id: "fast".into(),
+                token: "saved-worker-credential".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is_code(talos_error::ErrorCode::ServiceUnavailable));
+    assert!(std::error::Error::source(&error).is_some());
+    fixture.finish().await;
 }
 
 #[tokio::test]

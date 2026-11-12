@@ -16,6 +16,8 @@ service AgentNodeManagement {
   rpc DeleteComputer(GetNodeRequest) returns (DeleteComputerResponse);
   rpc CreateNode(CreateNodeRequest) returns (CreateNodeResponse);
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  // Read-only proof of both account ownership and the saved Worker credential.
+  rpc VerifySavedRegistration(VerifySavedRegistrationRequest) returns (GetNodeResponse);
   rpc GetDeployments(GetNodeRequest) returns (GetDeploymentsResponse);
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc UpdateNode(UpdateNodeRequest) returns (GetNodeResponse);
@@ -65,6 +67,7 @@ message CreateNodeRequest {
 message CreatedNode { NodeInfo node = 1; NodeCredential credential = 2; }
 message CreateNodeResponse { oneof result { CreatedNode created = 1; Failure failure = 2; } }
 message GetNodeRequest { string node_id = 1; }
+message VerifySavedRegistrationRequest { NodeAuth auth = 1; }
 message GetNodeResponse { oneof result { NodeInfo node = 1; Failure failure = 2; } }
 message NodeDeployments { repeated Deployment deployments = 1; }
 message GetDeploymentsResponse { oneof result { NodeDeployments deployments = 1; Failure failure = 2; } }

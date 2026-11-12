@@ -1,5 +1,6 @@
 //! Login and configuration policy over the existing synchronization and auth owners.
 use super::application_sync::ApplicationSyncHost;
+use super::application_sync_background::refresh_retryable;
 use agent_protocol::AgentFuture;
 use std::sync::Arc;
 use talos_auth::RequestIdentity;
@@ -15,6 +16,7 @@ pub(crate) enum RefreshPhase {
     VerifyAccount,
     LocalSettings,
     RestoreSync,
+    RestoreSyncAndWorker,
     ReconcileWorkerAndBinding,
     ObserveWorker,
 }
@@ -316,21 +318,24 @@ impl ApplicationSyncHost {
 
     async fn bind_signed_in(&self, actor: &RequestIdentity) -> TalosResult<Option<TalosError>> {
         let (credentials, enrollment_error) = self.attach_signed_in(actor).await?;
-        // H initialization must still proceed when G enrollment fails. The owner
-        // retries the incomplete lifecycle without duplicating H reconnect.
-        match (
-            self.bind_document_sync(actor, credentials).await,
-            enrollment_error,
-        ) {
-            (Err(error), Some(enrollment_error)) => {
-                // Preserve an otherwise-lost independent G failure; the caller
-                // reports the primary document initialization failure once.
+        if let Err(error) = self.bind_document_sync(actor, credentials).await {
+            if let Some(enrollment_error) = enrollment_error {
                 talos_logging::report_error(&enrollment_error);
-                Err(error)
             }
-            (Err(error), None) => Err(error),
-            (Ok(()), enrollment_error) => Ok(enrollment_error),
+            return Err(error);
         }
+        Ok(enrollment_error)
+    }
+
+    async fn restore_saved_document_sync(
+        &self,
+        actor: &RequestIdentity,
+    ) -> TalosResult<Option<Arc<talos_sync::SyncHandle>>> {
+        if !self.sync.enabled(&actor.user_id).await? {
+            return Ok(None);
+        }
+        self.publish_document_binding(actor, self.credentials(actor)?, None)
+            .await
     }
 
     async fn bind_document_sync(
@@ -341,97 +346,118 @@ impl ApplicationSyncHost {
         if !self.sync.enabled(&actor.user_id).await? {
             return Ok(());
         }
-        // Late enrollment refreshes presence without rewriting capture aliases
-        // or replacing the account's running document synchronization handle.
-        let installed = self
+        let handle = match self
+            .publish_document_binding(actor, credentials.clone(), None)
+            .await?
+        {
+            Some(handle) => handle,
+            None => {
+                let scope = self
+                    .discover_document_scope(actor, credentials.clone())
+                    .await?;
+                self.publish_document_binding(actor, credentials, Some(scope))
+                    .await?
+                    .expect("a discovered scope can create a document binding")
+            }
+        };
+        self.refresh_presence_computers(actor, &handle).await
+    }
+
+    async fn discover_document_scope(
+        &self,
+        actor: &RequestIdentity,
+        credentials: talos_sync_sdk::CredentialCallback,
+    ) -> TalosResult<talos_sync::SyncScope> {
+        let mut options = talos_sync_sdk::SyncOptions::new(
+            self.config.sync.hub_endpoint.clone(),
+            actor.user_id.clone(),
+            self.sync.peer_id().into(),
+        );
+        options.trusted_ca_pem = self
+            .config
+            .sync
+            .trusted_ca_file
+            .as_ref()
+            .map(std::fs::read)
+            .transpose()
+            .map_err(|error| {
+                TalosError::internal_with_source(
+                    "Read synchronization CA; technical details were withheld.",
+                    error,
+                )
+            })?;
+        let client = talos_sync_sdk::SyncClient::connect(options, credentials)
+            .await
+            .map_err(|error| {
+                TalosError::from_source(
+                    ErrorCode::ServiceUnavailable,
+                    "Synchronization service is unavailable.",
+                    error,
+                )
+            })?;
+        let scope = client.scope().await;
+        client.shutdown().await.map_err(|error| {
+            TalosError::from_source(
+                ErrorCode::ServiceUnavailable,
+                "Close synchronization discovery connection.",
+                error,
+            )
+        })?;
+        Ok(scope)
+    }
+
+    async fn publish_document_binding(
+        &self,
+        actor: &RequestIdentity,
+        credentials: talos_sync_sdk::CredentialCallback,
+        discovered_scope: Option<talos_sync::SyncScope>,
+    ) -> TalosResult<Option<Arc<talos_sync::SyncHandle>>> {
+        // Retirement can rewrite the saved aliases. Re-read the binding under
+        // its publication guard after any discovery handshake.
+        let _retirement = self.registration_retirement.lock().await;
+        if let Some(handle) = self
             .sync_stores
             .handles
             .lock()
             .await
             .get(&actor.user_id)
-            .cloned();
-        if let Some(handle) = installed {
-            self.refresh_presence_computers(actor, &handle).await?;
-            return Ok(());
+            .cloned()
+        {
+            return Ok(Some(handle));
         }
-        let mut binding = self.sync.account_binding(actor).await?;
-        if binding.is_none() {
-            let mut options = talos_sync_sdk::SyncOptions::new(
-                self.config.sync.hub_endpoint.clone(),
-                actor.user_id.clone(),
-                self.sync.peer_id().into(),
-            );
-            options.trusted_ca_pem = self
-                .config
-                .sync
-                .trusted_ca_file
-                .as_ref()
-                .map(std::fs::read)
-                .transpose()
-                .map_err(|error| {
-                    TalosError::internal_with_source(
-                        "Read synchronization CA; technical details were withheld.",
-                        error,
+        let params = match self.sync.account_binding(actor).await? {
+            Some(binding) => SyncBindParams {
+                scope: binding.scope,
+                source_user_id: binding.source_user_id,
+                computers: binding.computers,
+            },
+            None => {
+                let Some(scope) = discovered_scope else {
+                    return Ok(None);
+                };
+                let computers = self
+                    .local_computer(
+                        &Actor::regular(&actor.user_id)
+                            .with_access_token(actor.access_token.clone().expect("verified token")),
                     )
-                })?;
-            let client = talos_sync_sdk::SyncClient::connect(options, credentials.clone())
-                .await
-                .map_err(|error| {
-                    TalosError::from_source(
-                        ErrorCode::ServiceUnavailable,
-                        "Synchronization service is unavailable.",
-                        error,
-                    )
-                })?;
-            let scope = client.scope().await;
-            client.shutdown().await.map_err(|error| {
-                TalosError::from_source(
-                    ErrorCode::ServiceUnavailable,
-                    "Close synchronization discovery connection.",
-                    error,
-                )
-            })?;
-            let computers = self
-                .local_computer(
-                    &Actor::regular(&actor.user_id)
-                        .with_access_token(actor.access_token.clone().expect("verified token")),
-                )
-                .await?
-                .filter(|local| local != "embedded")
-                .map_or_else(Vec::new, |local| {
-                    vec![ComputerAlias {
-                        source_node_id: "embedded".into(),
-                        computer_id: local,
-                    }]
-                });
-            self.verify_computer_aliases(actor, &computers).await?;
-            binding = Some(
-                self.sync
-                    .bind_account(
-                        actor,
-                        SyncBindParams {
-                            scope,
-                            source_user_id: actor.user_id.clone(),
-                            computers,
-                        },
-                    )
-                    .await?,
-            );
-        }
-        let binding = binding.expect("account binding");
-        let handle = self
-            .start_account_sync(
-                actor,
+                    .await?
+                    .filter(|local| local != "embedded")
+                    .map_or_else(Vec::new, |local| {
+                        vec![ComputerAlias {
+                            source_node_id: "embedded".into(),
+                            computer_id: local,
+                        }]
+                    });
                 SyncBindParams {
-                    scope: binding.scope,
-                    source_user_id: binding.source_user_id,
-                    computers: binding.computers,
-                },
-                credentials,
-            )
-            .await?;
-        self.refresh_presence_computers(actor, &handle).await?;
-        Ok(())
+                    scope,
+                    source_user_id: actor.user_id.clone(),
+                    computers,
+                }
+            }
+        };
+        self.start_account_sync(actor, params, credentials)
+            .await
+            .map(Some)
     }
 
     async fn stop_account_sync(&self, account_id: &str) -> TalosResult<()> {
@@ -501,25 +527,34 @@ impl ApplicationSyncHost {
             let (_, enrollment_error) = self.attach_signed_in(&verified).await?;
             return enrollment_error.map_or(Ok(()), Err);
         }
-        // Restore document transport from its durable binding before any Worker
-        // registration RPC. An unavailable G must not delay an existing H handle.
-        *phase = RefreshPhase::RestoreSync;
-        if self.sync.enabled(&verified.user_id).await? {
-            if let Some(binding) = self.sync.account_binding(&verified).await? {
-                self.start_account_sync(
-                    &verified,
-                    SyncBindParams {
-                        scope: binding.scope,
-                        source_user_id: binding.source_user_id,
-                        computers: binding.computers,
-                    },
-                    self.credentials(&verified)?,
-                )
-                .await?;
+        // Both operations can start from a verified account. Join their
+        // outcomes so a failure on either side cannot cancel the other.
+        let (documents, worker) = tokio::join!(
+            self.restore_saved_document_sync(&verified),
+            self.attach_signed_in(&verified),
+        );
+        let restore_failed = documents.is_err();
+        let (documents, worker_error) = match (documents, worker) {
+            (Ok(handle), Ok((credentials, enrollment_error))) => {
+                // New bindings and presence can now reference the confirmed Worker.
+                let documents = match handle {
+                    Some(handle) => self.refresh_presence_computers(&verified, &handle).await,
+                    None => self.bind_document_sync(&verified, credentials).await,
+                };
+                (documents, enrollment_error)
             }
+            (Err(error), Ok((_, enrollment_error))) => (Err(error), enrollment_error),
+            (documents, Err(error)) => (documents.map(drop), Some(error)),
+        };
+        *phase = match (restore_failed, worker_error.is_some()) {
+            (true, true) => RefreshPhase::RestoreSyncAndWorker,
+            (true, false) => RefreshPhase::RestoreSync,
+            (false, _) => RefreshPhase::ReconcileWorkerAndBinding,
+        };
+        match documents {
+            Ok(()) => worker_error.map_or(Ok(()), Err),
+            Err(error) => Err(combine_refresh_errors(error, worker_error)),
         }
-        *phase = RefreshPhase::ReconcileWorkerAndBinding;
-        self.bind_signed_in(&verified).await?.map_or(Ok(()), Err)
     }
 
     async fn read_status(&self, actor: &Actor) -> TalosResult<SyncStatusResponse> {
@@ -606,6 +641,18 @@ impl ApplicationSyncHost {
             can_claim_local_history: self.trusted_local_host,
         })
     }
+}
+
+fn combine_refresh_errors(mut primary: TalosError, secondary: Option<TalosError>) -> TalosError {
+    if let Some(mut secondary) = secondary {
+        // Retry a transient failure even if the independent operation needs
+        // operator intervention. Both original failures keep their diagnostics.
+        if !refresh_retryable(&primary) && refresh_retryable(&secondary) {
+            std::mem::swap(&mut primary, &mut secondary);
+        }
+        talos_logging::report_error(&secondary);
+    }
+    primary
 }
 
 impl ManagementSync for ApplicationSyncHost {
