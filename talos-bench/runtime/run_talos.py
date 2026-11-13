@@ -55,7 +55,7 @@ def run(options, llm, secret):
                 "name": "talos",
                 "inner_model": {"provider": provider, "id": model},
                 "kernel": {"tools": {"sandbox_policy": {
-                    "user_permission_mode": "ask_for_approval",
+                    "user_permission_mode": "full_access",
                     "platform": {"linux_helper_executable": str(PRODUCT / "bin/talos-linux-sandbox-launcher")},
                 }}, "plugins": {"sources": []}},
             },
