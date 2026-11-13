@@ -52,17 +52,11 @@ pub async fn persist_general_turn_state(
                     tool_calls: pending.tool_calls.clone(),
                     tool_messages: pending.tool_messages.clone(),
                     deferred_tool_calls: pending.deferred_tool_calls.clone(),
+                    deferred_inputs: pending.deferred_inputs.clone(),
                 },
             },
         );
-        if let Err(err) = transcript_service.append_event(&mut session, event).await {
-            warn!(
-                session_id = %prepared.session_id,
-                call_id = %pending.call_id,
-                error = %err,
-                "failed to append pending user action transcript"
-            );
-        }
+        transcript_service.append_event(&mut session, event).await?;
     }
     Ok(())
 }

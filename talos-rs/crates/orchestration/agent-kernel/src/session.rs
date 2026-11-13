@@ -70,6 +70,8 @@ pub struct KernelTranscriptUserActionRequestPayload {
     pub tool_calls: Vec<FunctionCall>,
     pub tool_messages: Vec<ChatMessage>,
     pub deferred_tool_calls: Vec<FunctionCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deferred_inputs: Vec<crate::UserInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

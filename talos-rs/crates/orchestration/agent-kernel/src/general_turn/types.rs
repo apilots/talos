@@ -237,6 +237,7 @@ pub struct AgentKernelUserActionContinuation {
     pub tool_calls: Vec<FunctionCall>,
     pub tool_messages: Vec<ChatMessage>,
     pub deferred_tool_calls: Vec<FunctionCall>,
+    pub deferred_inputs: Vec<crate::ActiveTurnInput>,
     pub replay_dynamic_tool_results:
         std::collections::HashMap<String, crate::execution::ReplayDynamicToolResult>,
     pub execution_metrics: TurnExecutionMetrics,
@@ -502,6 +503,7 @@ pub struct PendingUserActionRequest {
     pub tool_calls: Vec<FunctionCall>,
     pub tool_messages: Vec<ChatMessage>,
     pub deferred_tool_calls: Vec<FunctionCall>,
+    pub deferred_inputs: Vec<crate::UserInput>,
 }
 
 #[derive(Debug, Clone)]
