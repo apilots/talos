@@ -63,18 +63,34 @@ impl KernelAgentEventMapper {
         call_id: &str,
     ) -> AgentResult<Self> {
         let message = sink.resume_message(message_id)?;
-        let block = sink.resume_block(message_id, block_id)?;
-        let tool = ToolBlock {
-            handle: block,
-            call_id: call_id.to_string(),
-        };
+        let tools = sink.resume_open_tool_calls(&message)?;
+        let tool_count = tools.len();
+        let tools_by_call: HashMap<_, _> = tools
+            .into_iter()
+            .map(|(call_id, handle)| (call_id.clone(), ToolBlock { handle, call_id }))
+            .collect();
+        if tools_by_call.len() != tool_count {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Kernel continuation has duplicate open Tool calls",
+            ));
+        }
+        if tools_by_call
+            .get(call_id)
+            .is_none_or(|tool| tool.handle.block_id() != block_id)
+        {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Kernel continuation does not match the waiting Tool block",
+            ));
+        }
         Ok(Self {
             sink,
             agent_message: Some(message),
             reasoning: None,
             assistant: HashMap::new(),
             tools_by_stream: HashMap::new(),
-            tools_by_call: HashMap::from([(call_id.to_string(), tool)]),
+            tools_by_call,
             pending_tool_arguments: HashMap::new(),
             compaction: None,
         })

@@ -415,7 +415,7 @@ async fn resumed_screenshots_share_request_limits_with_user_attachments() {
                 .collect(),
             tool_messages: resumed,
             deferred_tool_calls: vec![],
-            deferred_inputs: Vec::new(),
+            deferred_inputs: None,
             replay_dynamic_tool_results: Default::default(),
             execution_metrics: Default::default(),
         });

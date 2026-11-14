@@ -452,16 +452,14 @@ async fn apply_general_turn_resume(
     }
     emit_pending_user_action_stream_events(prepared, &replay_batch).await;
     apply_general_turn_tool_batch(state, &replay_batch, kernel_config.as_ref());
-    if let Some(pending) = &mut state.pending_user_action {
-        pending.deferred_inputs = resume
-            .deferred_inputs
-            .into_iter()
-            .map(|message| message.input)
-            .collect();
-    } else {
-        for message in resume.deferred_inputs {
-            emit_live_input_boundary(prepared, &message.input).await;
-            append_running_message(state, message);
+    if let Some(deferred) = resume.deferred_inputs {
+        if let Some(pending) = &mut state.pending_user_action {
+            pending.deferred_inputs = deferred.inputs;
+        } else {
+            for message in (deferred.prepare)(deferred.inputs).await? {
+                emit_live_input_boundary(prepared, &message.input).await;
+                append_running_message(state, message);
+            }
         }
     }
     Ok(())

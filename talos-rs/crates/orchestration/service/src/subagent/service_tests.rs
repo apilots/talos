@@ -32,7 +32,8 @@ use talos_types::talos::{SessionSource, SessionSourceProvider, SessionSourceType
 use talos_types::{
     AgentCaller, AgentTarget, AgentTurnRef, FollowUpSubagentRequest, InterruptSubagentRequest,
     ListSubagentsRequest, ModelRef, ModelSelection, SendSubagentMessageRequest, SessionConf,
-    SpawnSubagentRequest, SubagentOutcome, SubagentRef, TalosConfig, WaitSubagentRequest,
+    SpawnSubagentRequest, SubagentOutcome, SubagentRef, TalosConfig, UserPermissionMode,
+    WaitSubagentRequest,
 };
 use tokio::sync::mpsc;
 
@@ -424,6 +425,14 @@ fn test_config() -> TalosConfig {
         input: Vec::new(),
         cost: Default::default(),
     }];
+    let mut alternate = config.llm.anthropic.models[0].clone();
+    alternate.id = "alternate-model".into();
+    alternate.reasoning = true;
+    alternate.reasoning_efforts = Some(vec![
+        talos_types::ReasoningEffort::Medium,
+        talos_types::ReasoningEffort::High,
+    ]);
+    config.llm.anthropic.models.push(alternate);
     config
 }
 
@@ -445,6 +454,23 @@ async fn create_parent_with_agent(
     turn_id: &str,
     agent_id: &str,
 ) -> AgentCaller {
+    create_parent_with_conf(
+        services,
+        session_id,
+        turn_id,
+        agent_id,
+        SessionConf::default(),
+    )
+    .await
+}
+
+async fn create_parent_with_conf(
+    services: &TestServices,
+    session_id: &str,
+    turn_id: &str,
+    agent_id: &str,
+    conf: SessionConf,
+) -> AgentCaller {
     let parent = services
         .sessions
         .create_session(CreateSessionParams {
@@ -463,7 +489,7 @@ async fn create_parent_with_agent(
                 provider: "anthropic".to_string(),
                 id: "test-model".to_string(),
             })),
-            conf: Some(SessionConf::default()),
+            conf: Some(conf),
             workspace_id: "default".to_string(),
             project_id: None,
             current_directory: None,
@@ -875,7 +901,25 @@ async fn spawn_rejects_an_initial_prompt_over_the_hard_byte_cap() {
 async fn spawn_supports_recursive_child_parent() {
     let services = test_services().await;
     *services.executor.hold_running_turn.lock().unwrap() = true;
-    let parent = create_parent(&services).await;
+    let permission_mode = UserPermissionMode::AskForApproval;
+    let inherited_model = ModelSelection::new(
+        ModelRef {
+            provider: "anthropic".into(),
+            id: "alternate-model".into(),
+        },
+        Some(talos_types::ReasoningEffort::High),
+    );
+    let parent = create_parent_with_conf(
+        &services,
+        "parent-1",
+        "turn-parent",
+        "default",
+        SessionConf {
+            model_selection: Some(inherited_model.clone()),
+            user_permission_mode: Some(permission_mode),
+        },
+    )
+    .await;
     let child_result = services
         .subagents
         .spawn(SpawnSubagentRequest {
@@ -904,7 +948,12 @@ async fn spawn_supports_recursive_child_parent() {
 
     assert_eq!(nested.path.as_str(), "/root/research/nested");
     assert_eq!(nested.parent.session_id, child.session_id);
-    assert_eq!(services.executor.requests.lock().unwrap().len(), 2);
+    let requests = services.executor.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        assert_eq!(request.context.permission_mode, permission_mode);
+        assert_eq!(request.context.model_selection, inherited_model);
+    }
 }
 
 #[tokio::test]

@@ -901,7 +901,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         )],
         tool_messages: Vec::new(),
         deferred_tool_calls: Vec::new(),
-        deferred_inputs: Vec::new(),
+        deferred_inputs: None,
         replay_dynamic_tool_results: HashMap::new(),
         execution_metrics: TurnExecutionMetrics {
             model_rounds: 1,
@@ -982,7 +982,7 @@ async fn live_input_waits_for_the_original_tool_batch_across_user_actions() {
         }),
         tool_registry.clone(),
         tool_registry.clone(),
-        memory_store,
+        memory_store.clone(),
         missing_user_workspace_memory(),
         &config,
         None,
@@ -1001,6 +1001,29 @@ async fn live_input_waits_for_the_original_tool_batch_across_user_actions() {
         .await
         .expect("the waiting turn retained the admitted input");
     assert_eq!(pending.deferred_inputs, vec![steer.clone()]);
+    let session = memory_store
+        .load_session(
+            &ctx.session_id,
+            Some(&ctx.invocation_id),
+            Some(ExecutionBranch::ReactiveLoop),
+        )
+        .await
+        .unwrap();
+    let persisted = session
+        .events
+        .iter()
+        .find_map(|event| match &event.payload {
+            KernelTranscriptPayload::UserActionRequest { payload }
+                if payload.action_id == pending.action_id =>
+            {
+                Some(&payload.deferred_inputs)
+            }
+            _ => None,
+        });
+    assert_eq!(
+        persisted.map(Vec::as_slice),
+        Some(std::slice::from_ref(&steer))
+    );
     assert!(matches!(
         pending.params,
         talos_types::UserActionParams::Question(ref params)
@@ -1175,7 +1198,9 @@ fn question_resume(
         tool_calls,
         tool_messages,
         deferred_tool_calls,
-        deferred_inputs: deferred_inputs.into_iter().map(test_active_input).collect(),
+        deferred_inputs: crate::DeferredTurnInputs::new(deferred_inputs, |inputs| async {
+            Ok(inputs.into_iter().map(test_active_input).collect())
+        }),
         replay_dynamic_tool_results: HashMap::new(),
         execution_metrics,
     })

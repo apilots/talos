@@ -49,7 +49,7 @@ pub(crate) async fn execute(
         .transpose()?;
     let continuation = prepare_continuation(
         provider,
-        &turn,
+        &turn.context,
         &projection,
         &kernel_config.workspace_dir,
         continuation_reference.as_ref(),
@@ -118,7 +118,7 @@ async fn execute_mapped(
                     input_open = false;
                     continue;
                 };
-                match project_live_input(provider, turn, delivery.input()).await {
+                match project_live_input(provider, &turn.context, delivery.input()).await {
                     Ok(input) => {
                         let (accepted_tx, accepted_rx) = oneshot::channel();
                         if kernel_input_tx
@@ -204,7 +204,7 @@ async fn build_request(
 
 async fn prepare_continuation(
     provider: &KernelAgentProvider,
-    invocation: &SessionTurnParams,
+    context: &AgentContext,
     projection: &KernelInputProjection,
     workspace_root: &str,
     reference: Option<&KernelProviderContinuation>,
@@ -226,7 +226,7 @@ async fn prepare_continuation(
     })?;
     build_kernel_continuation(
         provider,
-        invocation,
+        context,
         std::path::Path::new(workspace_root),
         reference,
         &action_id,
@@ -238,7 +238,7 @@ async fn prepare_continuation(
 
 async fn project_live_input(
     provider: &KernelAgentProvider,
-    invocation: &SessionTurnParams,
+    context: &AgentContext,
     message: &talos_agent_api::AgentMessage,
 ) -> AgentResult<talos_agent_kernel::ActiveTurnInput> {
     let projection = project_input(message)?;
@@ -248,15 +248,14 @@ async fn project_live_input(
             "live Kernel input supports only text and files",
         ));
     }
-    prepare_live_input(provider, invocation, projection.input).await
+    prepare_live_input(provider, context, projection.input).await
 }
 
 pub(crate) async fn prepare_live_input(
     provider: &KernelAgentProvider,
-    invocation: &SessionTurnParams,
+    context: &AgentContext,
     input: talos_agent_kernel::UserInput,
 ) -> AgentResult<talos_agent_kernel::ActiveTurnInput> {
-    let context = &invocation.context;
     let resolved = resolve_attachments(provider, context, &input.file_ids).await?;
     let llm_provider = provider
         .llm_provider_router
