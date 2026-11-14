@@ -26,7 +26,6 @@ Several processes can open one `TALOS_HOME`. Nothing records which process owns 
 | Process | Policy | Maintenance scan |
 | --- | --- | --- |
 | TUI | `Attached`: one open session until switch or exit | on |
-| Interactive CLI that is not a foreground owner | `Attached` | off |
 | `talos exec` | `Process`: hold until process exit | off |
 | `goal start`, `loop start` | `Process` | on |
 | Other short-lived CLI subcommands | `Turn` | off |
