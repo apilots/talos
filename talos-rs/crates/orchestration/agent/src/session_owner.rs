@@ -504,6 +504,16 @@ mod tests {
     }
 
     #[test]
+    fn a_process_hold_does_not_claim_a_session_it_does_not_own() {
+        let root = tempfile::tempdir().unwrap();
+        let exec = owner(root.path(), SessionHold::Process);
+        assert!(exec.try_for_scan("other-session").unwrap().is_none());
+        assert!(!exec.holds("other-session"));
+        exec.acquire("owned").unwrap();
+        assert!(exec.try_for_scan("owned").unwrap().is_some());
+    }
+
+    #[test]
     fn scan_skips_a_session_this_attached_owner_does_not_hold() {
         let root = tempfile::tempdir().unwrap();
         let holder = owner(root.path(), SessionHold::Process);
