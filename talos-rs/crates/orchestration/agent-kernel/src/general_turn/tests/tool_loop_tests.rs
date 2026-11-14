@@ -24,6 +24,10 @@ enum QuestionProviderMode {
 struct QuestionProvider {
     mode: QuestionProviderMode,
     round: AtomicUsize,
+    pending_steer: Option<(
+        mpsc::Sender<crate::ActiveTurnInputDelivery>,
+        Mutex<Option<crate::ActiveTurnInputDelivery>>,
+    )>,
 }
 
 #[derive(Default)]
@@ -165,6 +169,10 @@ impl LlmProvider for QuestionProvider {
 
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         assert_eq!(self.round.fetch_add(1, Ordering::SeqCst), 0);
+        if let Some((sender, delivery)) = &self.pending_steer {
+            let delivery = delivery.lock().unwrap().take().unwrap();
+            sender.send(delivery).await.unwrap();
+        }
         match self.mode {
             QuestionProviderMode::Initial => Ok(ChatResponse {
                 content: String::new(),
@@ -212,6 +220,15 @@ impl LlmProvider for QuestionProvider {
                         && message.content.contains("plan")
                         && message.content.contains("How should the agent proceed?")
                 }));
+                let last_tool = request
+                    .messages
+                    .iter()
+                    .rposition(|message| message.tool_call_id.as_deref() == Some("call-question-3"))
+                    .expect("third tool result must be replayed");
+                assert_eq!(
+                    request.messages[last_tool + 1].content,
+                    "Keep this instruction after the answers."
+                );
                 let assistant_message = request
                     .messages
                     .iter()
@@ -884,6 +901,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         )],
         tool_messages: Vec::new(),
         deferred_tool_calls: Vec::new(),
+        deferred_inputs: None,
         replay_dynamic_tool_results: HashMap::new(),
         execution_metrics: TurnExecutionMetrics {
             model_rounds: 1,
@@ -922,7 +940,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
 }
 
 #[tokio::test]
-async fn question_pending_and_resume_continue_the_original_tool_call() {
+async fn live_input_waits_for_the_original_tool_batch_across_user_actions() {
     let tool_registry = Arc::new(ToolRegistry::new());
     talos_tools::register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
@@ -933,8 +951,20 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream_for_session("question-pending", None);
+    memory_store.set_session_id(ctx.session_id.clone());
+    ctx.session_prompt_context_source = memory_store.clone();
+    ctx.session_artifact_store = memory_store.clone();
+    ctx.memory_progress_store = memory_store.clone();
+    ctx.transcript_service = memory_store.clone();
 
-    let initial = run_general_turn(
+    let (sender, receiver) = mpsc::channel(1);
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    let steer = crate::UserInput {
+        text: "Keep this instruction after the answers.".to_string(),
+        file_ids: Vec::new(),
+    };
+
+    let initial = super::super::run_general_turn_with_resume(
         &mut ctx,
         "talos",
         "assistant",
@@ -942,12 +972,23 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         Arc::new(QuestionProvider {
             mode: QuestionProviderMode::Initial,
             round: AtomicUsize::new(0),
+            pending_steer: Some((
+                sender,
+                Mutex::new(Some(crate::ActiveTurnInputDelivery::new(
+                    test_active_input(steer.clone()),
+                    ack_tx,
+                ))),
+            )),
         }),
         tool_registry.clone(),
         tool_registry.clone(),
-        memory_store,
+        memory_store.clone(),
+        missing_user_workspace_memory(),
         &config,
-        skill_options_from_config(&workspace_dir, &config),
+        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
+        Some(receiver),
+        crate::test_run_tasks(),
     )
     .await
     .expect("question should suspend the turn");
@@ -956,6 +997,33 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         panic!("question should produce one pending user action");
     };
     let mut pending = *pending_action;
+    ack_rx
+        .await
+        .expect("the waiting turn retained the admitted input");
+    assert_eq!(pending.deferred_inputs, vec![steer.clone()]);
+    let session = memory_store
+        .load_session(
+            &ctx.session_id,
+            Some(&ctx.invocation_id),
+            Some(ExecutionBranch::ReactiveLoop),
+        )
+        .await
+        .unwrap();
+    let persisted = session
+        .events
+        .iter()
+        .find_map(|event| match &event.payload {
+            KernelTranscriptPayload::UserActionRequest { payload }
+                if payload.action_id == pending.action_id =>
+            {
+                Some(&payload.deferred_inputs)
+            }
+            _ => None,
+        });
+    assert_eq!(
+        persisted.map(Vec::as_slice),
+        Some(std::slice::from_ref(&steer))
+    );
     assert!(matches!(
         pending.params,
         talos_types::UserActionParams::Question(ref params)
@@ -1034,6 +1102,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         .pending_user_action
         .expect("second question should remain pending");
     assert_eq!(pending.call_id, second_call.id);
+    assert_eq!(pending.deferred_inputs, vec![steer.clone()]);
     assert_eq!(pending.deferred_tool_calls, vec![third_call.clone()]);
     assert_eq!(
         pending.reasoning_continuation,
@@ -1061,6 +1130,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         .pending_user_action
         .expect("third question should remain pending");
     assert_eq!(pending.call_id, third_call.id);
+    assert_eq!(pending.deferred_inputs, vec![steer]);
     assert!(pending.deferred_tool_calls.is_empty());
     assert_eq!(
         pending.reasoning_continuation,
@@ -1077,6 +1147,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         Arc::new(QuestionProvider {
             mode: QuestionProviderMode::Resume,
             round: AtomicUsize::new(0),
+            pending_steer: None,
         }),
         registry,
         &config,
@@ -1105,6 +1176,7 @@ fn question_resume(
         tool_calls,
         tool_messages,
         deferred_tool_calls,
+        deferred_inputs,
         ..
     } = pending;
     AgentKernelContinuation::UserAction(AgentKernelUserActionContinuation {
@@ -1126,9 +1198,21 @@ fn question_resume(
         tool_calls,
         tool_messages,
         deferred_tool_calls,
+        deferred_inputs: crate::DeferredTurnInputs::new(deferred_inputs, |inputs| async {
+            Ok(inputs.into_iter().map(test_active_input).collect())
+        }),
         replay_dynamic_tool_results: HashMap::new(),
         execution_metrics,
     })
+}
+
+fn test_active_input(input: crate::UserInput) -> crate::ActiveTurnInput {
+    crate::ActiveTurnInput {
+        message: ChatMessage::user(input.text.clone()),
+        input,
+        attachment_tokens: 0,
+        browser_uploads: Vec::new(),
+    }
 }
 
 #[derive(Debug, Default)]

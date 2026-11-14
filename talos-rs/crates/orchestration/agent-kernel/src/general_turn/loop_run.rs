@@ -260,6 +260,18 @@ pub async fn execute_general_turn_loop_with_policy(
             };
             emit_turn_metrics_stream_event(&prepared, &state, tool_batch_stop_reason).await;
             pending_messages.extend(take_running_messages(&prepared)?);
+
+            if let Some(pending) = &mut state.pending_user_action {
+                // Keep the tool exchange open. Replay admitted input after its results.
+                pending.deferred_inputs.extend(
+                    pending_messages
+                        .into_iter()
+                        .map(|delivery| delivery.acknowledge().input),
+                );
+                break policy_stop.map_or((String::new(), StopReason::WaitingUserAction), |stop| {
+                    (stop.output_text, stop.stop_reason)
+                });
+            }
             let received_messages = !pending_messages.is_empty();
             apply_running_messages(&prepared, &mut state, pending_messages).await;
 
@@ -267,9 +279,6 @@ pub async fn execute_general_turn_loop_with_policy(
                 break (policy_stop.output_text, policy_stop.stop_reason);
             }
 
-            if tool_batch.pending_user_action.is_some() {
-                break (String::new(), StopReason::WaitingUserAction);
-            }
             if received_messages {
                 continue;
             }
@@ -314,22 +323,29 @@ async fn apply_running_messages(
     messages: Vec<crate::ActiveTurnInputDelivery>,
 ) {
     for delivery in messages {
-        emit_stream_event(
-            prepared.stream_tx.as_ref(),
-            AgentKernelEventPayload::UserInput(delivery.input().input.clone()),
-        )
-        .await;
-        let message = delivery.acknowledge();
-        state.browser_uploads.extend(message.browser_uploads);
-        state.active_turn_attachment_tokens = state
-            .active_turn_attachment_tokens
-            .saturating_add(message.attachment_tokens);
-        state.messages.push(message.message);
-        state.output_items.push(KernelRunItem::UserInput {
-            text: message.input.text,
-            file_ids: message.input.file_ids,
-        });
+        emit_live_input_boundary(prepared, &delivery.input().input).await;
+        append_running_message(state, delivery.acknowledge());
     }
+}
+
+async fn emit_live_input_boundary(prepared: &PreparedGeneralTurn, input: &crate::UserInput) {
+    emit_stream_event(
+        prepared.stream_tx.as_ref(),
+        AgentKernelEventPayload::UserInput(input.clone()),
+    )
+    .await;
+}
+
+fn append_running_message(state: &mut GeneralTurnLoopState, message: crate::ActiveTurnInput) {
+    state.browser_uploads.extend(message.browser_uploads);
+    state.active_turn_attachment_tokens = state
+        .active_turn_attachment_tokens
+        .saturating_add(message.attachment_tokens);
+    state.messages.push(message.message);
+    state.output_items.push(KernelRunItem::UserInput {
+        text: message.input.text,
+        file_ids: message.input.file_ids,
+    });
 }
 
 async fn emit_turn_metrics_stream_event(
@@ -436,6 +452,16 @@ async fn apply_general_turn_resume(
     }
     emit_pending_user_action_stream_events(prepared, &replay_batch).await;
     apply_general_turn_tool_batch(state, &replay_batch, kernel_config.as_ref());
+    if let Some(deferred) = resume.deferred_inputs {
+        if let Some(pending) = &mut state.pending_user_action {
+            pending.deferred_inputs = deferred.inputs;
+        } else {
+            for message in (deferred.prepare)(deferred.inputs).await? {
+                emit_live_input_boundary(prepared, &message.input).await;
+                append_running_message(state, message);
+            }
+        }
+    }
     Ok(())
 }
 

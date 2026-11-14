@@ -6,8 +6,8 @@ use crate::TimelineEventService;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::SessionSource;
 use talos_types::{
-    AgentTurnRef, AgentUserContent, AgentUserInput, SpawnSubagentRequest, StartTurnRequest,
-    SubagentRef, SubagentSpawnResult,
+    AgentTurnRef, AgentUserContent, AgentUserInput, SessionConf, SpawnSubagentRequest,
+    StartTurnRequest, SubagentRef, SubagentSpawnResult,
 };
 
 const MAX_SUBAGENT_PROMPT_BYTES: usize = 32 * 1024;
@@ -57,6 +57,7 @@ impl SubagentService {
         self.turns
             .validate_subagent_agent(&agent_id, &parent.user_id, &parent.execution_node_id)
             .await?;
+        let parent_info = self.sessions.session_info(&parent).await?;
         let mut child_source = SessionSource::system();
         child_source.environment = parent.environment.clone();
         let child = self
@@ -68,8 +69,11 @@ impl SubagentService {
                     user_id: parent.user_id.clone(),
                     target_agent: agent_id.clone(),
                     execution_node_id: parent.execution_node_id.clone(),
-                    model_selection: parent.conf.model_selection.clone(),
-                    conf: None,
+                    model_selection: Some(parent_info.model_selection),
+                    conf: Some(SessionConf {
+                        user_permission_mode: Some(parent_info.effective_mode),
+                        ..SessionConf::default()
+                    }),
                     workspace_id: parent.workspace_id.clone(),
                     project_id: parent.project_id.clone(),
                     current_directory: parent.current_directory.clone(),

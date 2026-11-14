@@ -287,6 +287,46 @@ impl AgentEventSink {
         })
     }
 
+    /// Restore open Tool call handles from one Provider-owned checkpoint message.
+    /// Completed calls are excluded so the Provider can resume only unfinished work.
+    pub fn resume_open_tool_calls(
+        &self,
+        message: &AgentMessageHandle,
+    ) -> AgentResult<Vec<(String, AgentMessageBlockHandle)>> {
+        self.validate_message_handle(message)?;
+        let checkpoint_message = self
+            .inner
+            .resume_checkpoint
+            .messages
+            .iter()
+            .find(|candidate| candidate.message_id == message.message_id)
+            .ok_or_else(|| {
+                TalosError::new(ErrorCode::Conflict, "resumed Agent message does not exist")
+            })?;
+        Ok(checkpoint_message
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.content {
+                AgentMessageBlockContent::ToolCall(call)
+                    if matches!(
+                        block.status,
+                        AgentMessageBlockStatus::Running | AgentMessageBlockStatus::WaitingForInput
+                    ) =>
+                {
+                    Some((
+                        call.call_id.clone(),
+                        AgentMessageBlockHandle {
+                            sink_id: message.sink_id.clone(),
+                            message_id: message.message_id.clone(),
+                            block_id: block.block_id.clone(),
+                        },
+                    ))
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
     /// Start one typed block inside an open Provider-owned message.
     pub async fn start_block(
         &self,

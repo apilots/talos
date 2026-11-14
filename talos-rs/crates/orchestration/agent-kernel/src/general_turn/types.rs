@@ -222,12 +222,10 @@ pub enum GeneralTurnOutcome {
     },
 }
 
-#[derive(Debug, Clone)]
 pub enum AgentKernelContinuation {
     UserAction(AgentKernelUserActionContinuation),
 }
 
-#[derive(Debug, Clone)]
 pub struct AgentKernelUserActionContinuation {
     pub call_id: String,
     pub tool_name: String,
@@ -237,6 +235,7 @@ pub struct AgentKernelUserActionContinuation {
     pub tool_calls: Vec<FunctionCall>,
     pub tool_messages: Vec<ChatMessage>,
     pub deferred_tool_calls: Vec<FunctionCall>,
+    pub deferred_inputs: Option<crate::DeferredTurnInputs>,
     pub replay_dynamic_tool_results:
         std::collections::HashMap<String, crate::execution::ReplayDynamicToolResult>,
     pub execution_metrics: TurnExecutionMetrics,
@@ -502,6 +501,7 @@ pub struct PendingUserActionRequest {
     pub tool_calls: Vec<FunctionCall>,
     pub tool_messages: Vec<ChatMessage>,
     pub deferred_tool_calls: Vec<FunctionCall>,
+    pub deferred_inputs: Vec<crate::UserInput>,
 }
 
 #[derive(Debug, Clone)]
