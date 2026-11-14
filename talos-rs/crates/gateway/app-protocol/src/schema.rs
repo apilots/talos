@@ -683,6 +683,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_error::BrowserCapabilityOperation>());
     output.push_str(&export::<talos_error::BrowserCapabilityReason>());
     output.push_str(&export::<talos_error::AutomationRequestReason>());
+    output.push_str(&export::<talos_error::SessionOwnerKind>());
     output.push_str(&export::<talos_error::ErrorLocalization>());
     output.push_str(&export::<
         talos_types::ApiResponse<talos_types::UserCurrentResponse>,

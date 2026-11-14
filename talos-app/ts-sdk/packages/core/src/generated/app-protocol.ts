@@ -1433,6 +1433,8 @@ export type BrowserCapabilityReason = "nativeHost" | "notBundled" | "hostPolicy"
 
 export type AutomationRequestReason = "selectedModeManagementConflict" | "selectedModeConflict" | "computerRequired" | "chatRequired" | "taskNotFound" | "goalNotFound" | "systemSkillUnavailable";
 
+export type SessionOwnerKind = "tui" | "exec" | "cli" | "server" | "desktop" | "unknown";
+
 export type ErrorLocalization = { "type": "automationRequest", reason: AutomationRequestReason, } | { "type": "browserCapabilityUnavailable", operation: BrowserCapabilityOperation, reason: BrowserCapabilityReason, } | { "type": "computerDeletionActive" } | { "type": "computerRegistrationRemoved" } | { "type": "computerDeletionUnverified" } | { "type": "modelNotConfigured", provider: string, model: string, } | { "type": "attachmentCountExceeded", limit: number, actual: number, } | { "type": "sessionHeld", sessionId: string, ownerKind: SessionOwnerKind, pid: number, host: string, since: string, };
 
 export type ApiResponse<T> = { "status": "success", data: T, } | { "status": "error", error: ApiError, };
