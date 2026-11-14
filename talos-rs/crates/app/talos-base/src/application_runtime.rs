@@ -347,7 +347,6 @@ pub(crate) async fn build_application_runtime_with_policy(
         talos_config::parse_timezone(&config.timezone)?,
         initial_paused,
         Arc::downgrade(&service),
-        session_ownership.run_session_loops,
     )
     .await?;
 

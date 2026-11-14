@@ -140,6 +140,18 @@ impl DatabaseAutomationStore {
     pub async fn active_loop_sessions(&self) -> TalosResult<Vec<String>> {
         Ok(self.storage.query("SELECT DISTINCT session_id FROM session_loops WHERE status='active' AND cleared_at IS NULL", &[]).await?.iter().filter_map(|r| r.get_string("session_id")).collect())
     }
+    pub async fn active_goal_sessions(&self) -> TalosResult<Vec<String>> {
+        Ok(self
+            .storage
+            .query(
+                "SELECT DISTINCT session_id FROM session_goals WHERE status='active'",
+                &[],
+            )
+            .await?
+            .iter()
+            .filter_map(|row| row.get_string("session_id"))
+            .collect())
+    }
     /// Only durable, never-admitted Goals need an initial clock wake. Ongoing
     /// Goals still progress solely through original settlement/reconciliation.
     pub async fn initial_goal_sessions(&self, now: i64) -> TalosResult<Vec<String>> {

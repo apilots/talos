@@ -8,13 +8,12 @@ use talos_sdk::{
 };
 
 #[test]
-fn exec_does_not_scan_loops_and_prints_a_waiting_contract() {
+fn exec_drives_only_the_session_it_holds_and_prints_a_waiting_contract() {
     let cli = Cli::try_parse_from(["talos", "exec", "hello"]).unwrap();
     let Some(Commands::Exec(cmd)) = cli.command else {
         panic!("exec command");
     };
     let policy = session_ownership(&TerminalMode::Command(Commands::Exec(cmd)));
-    assert!(!policy.run_session_loops);
     assert_eq!(policy.hold, talos_base::SessionHold::Process);
     assert_eq!(policy.kind, talos_error::SessionOwnerKind::Exec);
 
@@ -42,6 +41,23 @@ fn exec_does_not_scan_loops_and_prints_a_waiting_contract() {
             "status": "waiting",
         })
     );
+}
+
+#[test]
+fn goal_resume_keeps_the_session_until_the_process_exits() {
+    let resume = Cli::try_parse_from(["talos", "goal", "--session", "s1", "resume"]).unwrap();
+    let Some(Commands::Goal(cmd)) = resume.command else {
+        panic!("goal resume");
+    };
+    let policy = session_ownership(&TerminalMode::Command(Commands::Goal(cmd)));
+    assert_eq!(policy.hold, talos_base::SessionHold::Process);
+
+    let show = Cli::try_parse_from(["talos", "goal", "--session", "s1", "show"]).unwrap();
+    let Some(Commands::Goal(cmd)) = show.command else {
+        panic!("goal show");
+    };
+    let policy = session_ownership(&TerminalMode::Command(Commands::Goal(cmd)));
+    assert_eq!(policy.hold, talos_base::SessionHold::Turn);
 }
 
 #[test]

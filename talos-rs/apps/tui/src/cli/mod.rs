@@ -35,24 +35,24 @@ pub(crate) enum TerminalMode {
 }
 
 pub(crate) fn session_ownership(mode: &TerminalMode) -> talos_base::SessionOwnershipPolicy {
-    let (kind, hold, run_session_loops) = match mode {
+    let (kind, hold) = match mode {
         TerminalMode::Tui => (
             talos_error::SessionOwnerKind::Tui,
             talos_base::SessionHold::Attached,
-            true,
         ),
         TerminalMode::Command(Commands::Exec(_)) => (
             talos_error::SessionOwnerKind::Exec,
             talos_base::SessionHold::Process,
-            false,
         ),
         TerminalMode::Command(Commands::Goal(command))
-            if matches!(command.command, Some(types::GoalCommands::Start { .. })) =>
+            if matches!(
+                command.command,
+                Some(types::GoalCommands::Start { .. } | types::GoalCommands::Resume)
+            ) =>
         {
             (
                 talos_error::SessionOwnerKind::Cli,
                 talos_base::SessionHold::Process,
-                true,
             )
         }
         TerminalMode::Command(Commands::Loop(command))
@@ -61,20 +61,14 @@ pub(crate) fn session_ownership(mode: &TerminalMode) -> talos_base::SessionOwner
             (
                 talos_error::SessionOwnerKind::Cli,
                 talos_base::SessionHold::Process,
-                true,
             )
         }
         TerminalMode::Command(_) => (
             talos_error::SessionOwnerKind::Cli,
             talos_base::SessionHold::Turn,
-            false,
         ),
     };
-    talos_base::SessionOwnershipPolicy {
-        kind,
-        hold,
-        run_session_loops,
-    }
+    talos_base::SessionOwnershipPolicy { kind, hold }
 }
 
 pub(crate) fn parse_terminal_mode() -> TerminalMode {

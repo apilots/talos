@@ -76,10 +76,9 @@ pub(super) async fn start_maintenance(
     timezone: TalosTimezone,
     initial_paused: Vec<talos_types::BuiltinJobId>,
     service: std::sync::Weak<talos_service::TalosService>,
-    run_session_loops: bool,
 ) -> TalosResult<Automation> {
     let retention = ProfileUsageRetention::new(profiles, profile_config.clone());
-    let mut jobs = vec![
+    let jobs = vec![
         AutomationJob::cron_on_start(
             "profile-usage-retention",
             profile_config.cron,
@@ -106,25 +105,18 @@ pub(super) async fn start_maintenance(
             paused: initial_paused.contains(&talos_types::BuiltinJobId::DreamMemoryMaintenance),
             run_once: true,
         }),
-    ];
-    if run_session_loops {
-        jobs.push(AutomationJob::cron(
-            "session-loop-scan",
-            "*/1 * * * * *",
-            timezone,
-            move || {
-                let service = service.clone();
-                async move {
-                    if let Some(service) = service.upgrade() {
-                        service
-                            .scan_session_loops(chrono::Utc::now().timestamp())
-                            .await?;
-                    }
-                    Ok(())
+        AutomationJob::cron("session-loop-scan", "*/1 * * * * *", timezone, move || {
+            let service = service.clone();
+            async move {
+                if let Some(service) = service.upgrade() {
+                    service
+                        .scan_session_loops(chrono::Utc::now().timestamp())
+                        .await?;
                 }
-            },
-        ));
-    }
+                Ok(())
+            }
+        }),
+    ];
     Automation::start(jobs).await
 }
 

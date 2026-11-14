@@ -23,13 +23,12 @@ Several processes can open one `TALOS_HOME`. Nothing records which process owns 
 4. **One in-process table.** The embedded runtime builds one `SessionOwner` and shares it with the worker RPC adapter and the service. A second `flock` in the same process is not a second owner: `holds` succeeds without opening the file again. Another process gets `SessionHeld` and does not take over or signal the holder.
 5. **Hold scope is a runtime policy**, set when the process starts:
 
-| Process | Policy | Maintenance scan |
-| --- | --- | --- |
-| TUI | `Attached`: one open session until switch or exit | on |
-| `talos exec` | `Process`: hold until process exit | off |
-| `goal start`, `loop start` | `Process` | on |
-| Other short-lived CLI subcommands | `Turn` | off |
-| `talos-server`, Desktop, SDK embed | `Turn`: admission through settlement | on |
+| Process | Policy |
+| --- | --- |
+| TUI | `Attached`: one open session until switch or exit |
+| `talos exec`, `goal start`, `goal resume`, `loop start` | `Process`: hold until process exit |
+| Other CLI subcommands | `Turn` |
+| `talos-server`, Desktop, SDK embed | `Turn`: admission through settlement |
 
 `Turn` is the default for server, Desktop, and the SDK host so one process can serve many sessions. Web clients in that process do not each take a lock.
 
@@ -37,7 +36,7 @@ Several processes can open one `TALOS_HOME`. Nothing records which process owns 
 7. **Switching under a live turn.** `Attached` does not drop a session lock while this process still has a live turn there. The new session is not taken. After that turn settles, a later open can move the lock.
 8. **Dead owner.** If this process acquires the lock and the canonical turn is not live here, the previous owner is dead. Interrupt treats cleanup as confirmed. A waiting continuation that already has a durable resume point still resumes. Every other nonterminal turn settles `Failed` with the public reason `owner process exited`. A live holder yields `SessionHeld` instead, and the turn keeps running.
 9. **Start consults recovery before `ActiveTurnRunning`.** When the active turn is not live in this process, start recovers it. `SessionHeld` stops the start. A settled dead turn allows the new turn to continue. The same hold then lasts until that turn settles (`Turn`) or until process exit (`Process`).
-10. **Loop scan.** Short-lived CLI, including exec, omits only the `session-loop-scan` job. Profile retention and dream maintenance still start. Where the scan runs, it asks `SessionOwner::try_for_scan` before the compare-and-set that clears `next_due_at`. The scan continues only when this process already holds the session, or when the policy is `Turn` and the lock is free. Otherwise it skips that session and writes nothing. A `Turn` hold taken only to scan is released if dispatch does not leave a live turn; a dispatched turn releases it at settlement.
+10. **Loop and Goal scan.** Every process starts `session-loop-scan`. Triggering is not chosen by entry point. A session with an active Loop or Goal is driven by the one process that holds its lock. The scan calls `SessionOwner::try_for_scan` before the compare-and-set that clears `next_due_at`. If another process holds the lock, the scan skips that session and writes nothing. A lock taken only for this scan is released when no turn remains. A session this process already held stays for its hold policy. The same scan continues an active Goal that is idle.
 11. **Missed Loop occurrence.** An occurrence already removed from `next_due_at` is not replayed. On a scan that holds the lock, an `active` Loop with `next_due_at = NULL`, no running turn, and no queued occurrence is rescheduled: fixed interval uses its minutes; model-decided uses the one-minute minimum. That is the next occurrence, not the lost one.
 12. **`talos exec` contract.** `--request-id` is `client_request_id`. The server's existing idempotency record still returns the original turn; exec does not create a second turn and prints that turn's terminal result when the stream replays it. Exit 3 prints `WAITING_FOR_INPUT` with `session`, `turn`, and the JSON `AgentPendingInput`. A final stdout line is `{"sessionId","turnId","status"}` with `status` of `completed`, `failed`, or `waiting`. `--trajectory` stays JSON `null` while waiting, because waiting is not terminal. Exit codes: `0` completed, `1` execution failed, `2` invalid arguments, `3` waiting, `4` session held. Exec prints the public `ApiError` message, not the debug error.
 

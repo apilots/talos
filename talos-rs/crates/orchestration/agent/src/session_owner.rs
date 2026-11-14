@@ -72,6 +72,7 @@ pub struct SessionScanPermit {
     owner: SessionOwner,
     session_id: String,
     release_on_drop: bool,
+    created: bool,
 }
 
 /// Releases a hold created by this start if admission does not succeed.
@@ -150,12 +151,12 @@ impl SessionOwner {
 
     /// Lock the session when this process does not already hold it.
     pub fn acquire(&self, session_id: &str) -> TalosResult<()> {
-        self.ensure_held(session_id, false).map(|_| ())
+        self.ensure_held(session_id, false, true).map(|_| ())
     }
 
     /// Admission pin. The matching drop does not release a follow-up turn.
     pub fn pin(&self, session_id: &str) -> TalosResult<SessionAdmissionPin> {
-        self.ensure_held(session_id, true)?;
+        self.ensure_held(session_id, true, true)?;
         Ok(SessionAdmissionPin {
             owner: self.clone(),
             session_id: session_id.to_owned(),
@@ -165,7 +166,7 @@ impl SessionOwner {
     /// Start guard. It releases only a hold this call created, and only when
     /// admission does not keep the turn.
     pub fn guard_start(&self, session_id: &str) -> TalosResult<SessionStartGuard> {
-        let created = self.ensure_held(session_id, false)?;
+        let created = self.ensure_held(session_id, false, true)?;
         Ok(SessionStartGuard {
             owner: self.clone(),
             session_id: session_id.to_owned(),
@@ -173,9 +174,8 @@ impl SessionOwner {
         })
     }
 
-    /// `Ok(None)` means another owner holds the session, or this policy does
-    /// not take locks for sessions it does not already own. The scan must not
-    /// clear `next_due_at` in that case.
+    /// `Ok(None)` means another process holds the session. The scan must not
+    /// clear `next_due_at` in that case. Every hold policy may take a free lock.
     pub fn try_for_scan(&self, session_id: &str) -> TalosResult<Option<SessionScanPermit>> {
         if self.holds(session_id) {
             self.adjust_pins(session_id, 1)?;
@@ -183,16 +183,15 @@ impl SessionOwner {
                 owner: self.clone(),
                 session_id: session_id.to_owned(),
                 release_on_drop: false,
+                created: false,
             }));
         }
-        if self.inner.hold != SessionHold::Turn {
-            return Ok(None);
-        }
-        match self.ensure_held(session_id, true).map(|_| ()) {
-            Ok(()) => Ok(Some(SessionScanPermit {
+        match self.ensure_held(session_id, true, false) {
+            Ok(_) => Ok(Some(SessionScanPermit {
                 owner: self.clone(),
                 session_id: session_id.to_owned(),
                 release_on_drop: false,
+                created: true,
             })),
             Err(error) if error.is_code(ErrorCode::SessionHeld) => Ok(None),
             Err(error) => Err(error),
@@ -240,7 +239,7 @@ impl SessionOwner {
                 ));
             }
         }
-        self.ensure_held(session_id, false)?;
+        self.ensure_held(session_id, false, true)?;
         let mut state = self.inner.state.lock().expect("session owner lock");
         state.open_session = Some(session_id.to_owned());
         if !retain_others {
@@ -251,7 +250,7 @@ impl SessionOwner {
         Ok(())
     }
 
-    fn ensure_held(&self, session_id: &str, pin: bool) -> TalosResult<bool> {
+    fn ensure_held(&self, session_id: &str, pin: bool, become_open: bool) -> TalosResult<bool> {
         if session_id.is_empty() {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
@@ -263,7 +262,7 @@ impl SessionOwner {
             if pin {
                 held.pins = held.pins.saturating_add(1);
             }
-            if self.inner.hold != SessionHold::Turn && state.open_session.is_none() {
+            if become_open && self.inner.hold != SessionHold::Turn && state.open_session.is_none() {
                 state.open_session = Some(session_id.to_owned());
             }
             return Ok(false);
@@ -289,7 +288,7 @@ impl SessionOwner {
                 release_when_unpinned: false,
             },
         );
-        if self.inner.hold != SessionHold::Turn && state.open_session.is_none() {
+        if become_open && self.inner.hold != SessionHold::Turn && state.open_session.is_none() {
             state.open_session = Some(session_id.to_owned());
         }
         Ok(true)
@@ -312,6 +311,17 @@ impl SessionOwner {
             state.held.remove(session_id);
         }
         Ok(())
+    }
+
+    fn drop_created_scan_hold(&self, session_id: &str) {
+        let mut state = self.inner.state.lock().expect("session owner lock");
+        let Some(held) = state.held.get_mut(session_id) else {
+            return;
+        };
+        held.pins = held.pins.saturating_sub(1);
+        if held.pins == 0 {
+            state.held.remove(session_id);
+        }
     }
 
     fn keeps_after_terminal(&self, session_id: &str) -> bool {
@@ -340,9 +350,12 @@ impl Drop for SessionAdmissionPin {
 }
 
 impl SessionScanPermit {
-    /// Release this scan hold on drop when dispatch did not leave a turn.
+    /// Release a lock this scan created when dispatch did not leave a turn.
+    /// A session this process already held stays with its hold policy.
     pub fn release_if_idle(&mut self) {
-        self.release_on_drop = true;
+        if self.created {
+            self.release_on_drop = true;
+        }
     }
 }
 
@@ -352,9 +365,11 @@ impl Drop for SessionScanPermit {
             return;
         }
         if self.release_on_drop {
-            self.owner.on_terminal(&self.session_id);
+            self.owner.drop_created_scan_hold(&self.session_id);
+        } else {
+            let _ = self.owner.adjust_pins(&self.session_id, -1);
         }
-        let _ = self.owner.adjust_pins(&self.session_id, -1);
+        self.session_id.clear();
     }
 }
 
@@ -504,24 +519,25 @@ mod tests {
     }
 
     #[test]
-    fn a_process_hold_does_not_claim_a_session_it_does_not_own() {
-        let root = tempfile::tempdir().unwrap();
-        let exec = owner(root.path(), SessionHold::Process);
-        assert!(exec.try_for_scan("other-session").unwrap().is_none());
-        assert!(!exec.holds("other-session"));
-        exec.acquire("owned").unwrap();
-        assert!(exec.try_for_scan("owned").unwrap().is_some());
-    }
-
-    #[test]
-    fn scan_skips_a_session_this_attached_owner_does_not_hold() {
+    fn any_hold_scans_a_free_session_and_skips_one_another_process_holds() {
         let root = tempfile::tempdir().unwrap();
         let holder = owner(root.path(), SessionHold::Process);
         holder.acquire("session-a").unwrap();
-        let scanner = owner(root.path(), SessionHold::Attached);
-        assert!(scanner.try_for_scan("session-a").unwrap().is_none());
-        assert!(scanner.try_for_scan("session-b").unwrap().is_none());
-        assert!(!scanner.holds("session-b"));
+        let exec = owner(root.path(), SessionHold::Process);
+        assert!(exec.try_for_scan("session-a").unwrap().is_none());
+        let mut permit = exec.try_for_scan("other-session").unwrap().unwrap();
+        assert!(exec.holds("other-session"));
+        permit.release_if_idle();
+        drop(permit);
+        assert!(!exec.holds("other-session"));
+        assert!(holder.holds("session-a"));
+
+        let attached = owner(root.path(), SessionHold::Attached);
+        assert!(attached.try_for_scan("session-a").unwrap().is_none());
+        let mut permit = attached.try_for_scan("session-b").unwrap().unwrap();
+        permit.release_if_idle();
+        drop(permit);
+        assert!(!attached.holds("session-b"));
     }
 
     #[test]

@@ -71,9 +71,6 @@ pub use talos_agent::SessionHold;
 pub struct SessionOwnershipPolicy {
     pub kind: talos_error::SessionOwnerKind,
     pub hold: talos_agent::SessionHold,
-    /// Short-lived commands omit the session Loop scan. Profile and dream
-    /// maintenance still start.
-    pub run_session_loops: bool,
 }
 
 impl Default for SessionOwnershipPolicy {
@@ -81,7 +78,6 @@ impl Default for SessionOwnershipPolicy {
         Self {
             kind: talos_error::SessionOwnerKind::Server,
             hold: talos_agent::SessionHold::Turn,
-            run_session_loops: true,
         }
     }
 }
@@ -817,7 +813,6 @@ fn desktop_session_options() -> Option<TalosServerOptions> {
         session_ownership: Some(SessionOwnershipPolicy {
             kind: talos_error::SessionOwnerKind::Desktop,
             hold: talos_agent::SessionHold::Turn,
-            run_session_loops: true,
         }),
         ..TalosServerOptions::default()
     })
