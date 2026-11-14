@@ -168,14 +168,8 @@ impl AgentExecutionDriver {
         &self,
         params: AgentRunParams,
         command: Option<CommandLease>,
-    ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
-        self.start_automation(params, command, None).await
-    }
-    pub(crate) async fn start_automation(
-        &self,
-        params: AgentRunParams,
-        command: Option<CommandLease>,
         automation_origin: Option<talos_types::AutomationTurnOrigin>,
+        subagent_limit: Option<std::num::NonZeroU32>,
     ) -> TalosResult<oneshot::Receiver<TalosResult<AgentRunSettlement>>> {
         if params.checkpoint.is_some() || params.continuation.is_some() {
             return Err(TalosError::internal(
@@ -198,6 +192,7 @@ impl AgentExecutionDriver {
                 events: execution.admission.events.clone(),
                 command,
                 automation_origin,
+                subagent_limit,
             })
             .await
         {

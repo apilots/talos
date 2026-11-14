@@ -50,6 +50,12 @@ struct RecordingAgentExecution {
     inputs: Mutex<Vec<AgentInputParams>>,
     input_error: Mutex<Option<TalosError>>,
     fail_next: Mutex<bool>,
+    start_gate: Mutex<
+        Option<(
+            tokio::sync::oneshot::Sender<()>,
+            tokio::sync::oneshot::Receiver<()>,
+        )>,
+    >,
     hold_running_turn: Mutex<bool>,
     active_progress: Mutex<Vec<mpsc::Sender<CanonicalAgentEvent>>>,
     input_sequences: Mutex<HashMap<(String, String), u64>>,
@@ -103,6 +109,11 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
             .lock()
             .unwrap()
             .push(request.clone());
+        let start_gate = self.execution.start_gate.lock().unwrap().take();
+        if let Some((entered, release)) = start_gate {
+            entered.send(()).unwrap();
+            release.await.unwrap();
+        }
         if std::mem::take(&mut *self.execution.fail_next.lock().unwrap()) {
             return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
@@ -357,6 +368,10 @@ async fn test_services() -> TestServices {
 }
 
 async fn test_services_uninitialized() -> TestServices {
+    test_services_with_config(test_config()).await
+}
+
+async fn test_services_with_config(config: TalosConfig) -> TestServices {
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
@@ -365,7 +380,7 @@ async fn test_services_uninitialized() -> TestServices {
     run_test_migrations(storage.pool()).await;
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let workspace = tempfile::tempdir().unwrap();
-    let config = test_config().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+    let config = config.with_workspace_definition(talos_config::WorkspaceDefinition::new(
         talos_config::DEFAULT_WORKSPACE_ID,
         workspace.path().to_path_buf(),
     ));
@@ -542,7 +557,7 @@ async fn create_live_running_child(
     let started = services
         .subagents
         .turns
-        .submit_subagent_turn(
+        .submit_subagent_turn_owned(
             child.clone(),
             talos_types::StartTurnRequest {
                 node_id: None,
@@ -908,6 +923,94 @@ async fn spawn_supports_recursive_child_parent() {
 }
 
 #[tokio::test]
+async fn child_admission_is_atomic_per_tree_and_releases_at_settlement() {
+    let mut config = test_config();
+    config.agent.subagent_admission.max_depth = std::num::NonZeroUsize::MIN;
+    config.agent.subagent_admission.max_active_turns = std::num::NonZeroU32::MIN;
+    let services = test_services_with_config(config).await;
+    *services.executor.hold_running_turn.lock().unwrap() = true;
+    let parent = create_parent(&services).await;
+    let spawn = |caller: AgentCaller, name: &str| {
+        services.subagents.spawn(SpawnSubagentRequest {
+            caller,
+            task_name: name.to_string(),
+            prompt: "Check one independent work item".to_string(),
+        })
+    };
+    let (first, second) = tokio::join!(
+        spawn(parent.clone(), "first"),
+        spawn(parent.clone(), "second")
+    );
+    let (admitted, rejected) = match (first, second) {
+        (Ok(admitted), Err(rejected)) | (Err(rejected), Ok(admitted)) => (admitted, rejected),
+        _ => panic!("exactly one child must be admitted"),
+    };
+    assert!(
+        rejected.is_code(talos_error::ErrorCode::SessionBudgetExceeded),
+        "{rejected}"
+    );
+    let nested = spawn(
+        AgentCaller {
+            session_id: admitted.subagent.session_id.clone(),
+            turn_id: admitted.turn.turn_id.clone(),
+            agent_id: admitted.agent_id.clone(),
+        },
+        "nested",
+    )
+    .await
+    .unwrap_err();
+    assert!(nested.is_code(talos_error::ErrorCode::SessionBudgetExceeded));
+    assert_eq!(
+        services
+            .sessions
+            .list_subagent_tree_records(parent.session_id.clone(), None)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let other_parent = create_parent_named(&services, "other-parent", "other-turn").await;
+    spawn(other_parent, "independent").await.unwrap();
+    let idle = create_child_session(&services, &parent, "idle-child").await;
+    let idle = SubagentRef {
+        path: "/root/idle_child".parse().unwrap(),
+        session_id: idle.id,
+        parent: parent.turn_ref(),
+    };
+    let error = services
+        .subagents
+        .follow_up(FollowUpSubagentRequest {
+            caller: parent.clone(),
+            target: target(&idle),
+            prompt: "Continue independent work".to_string(),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        error.is_code(talos_error::ErrorCode::SessionBudgetExceeded),
+        "{error}"
+    );
+    settle_canonical_turn(
+        &services.store,
+        &services.timeline,
+        &admitted.subagent.session_id,
+        &admitted.turn.turn_id,
+        CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    )
+    .await;
+    let next = spawn(parent.clone(), "next").await.unwrap();
+    assert!(services
+        .store
+        .get_agent_active_turn(&next.subagent.session_id)
+        .await
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
 async fn spawn_removes_child_when_turn_start_fails() {
     let services = test_services().await;
     let parent = create_parent(&services).await;
@@ -933,4 +1036,48 @@ async fn spawn_removes_child_when_turn_start_fails() {
         .unwrap();
     assert!(error.is_code(talos_error::ErrorCode::Conflict));
     assert!(rows.is_empty());
+}
+
+#[tokio::test]
+async fn dropped_spawn_removes_child_when_admission_is_rejected() {
+    let mut config = test_config();
+    config.agent.subagent_admission.max_active_turns = std::num::NonZeroU32::MIN;
+    let services = test_services_with_config(config).await;
+    let parent = create_parent(&services).await;
+    let (_running, _) = create_running_child(&services, parent.clone()).await;
+    let (entered, started) = tokio::sync::oneshot::channel();
+    let (release, paused) = tokio::sync::oneshot::channel();
+    *services.executor.start_gate.lock().unwrap() = Some((entered, paused));
+    let subagents = services.subagents.clone();
+    let caller = parent.clone();
+    let task = tokio::spawn(async move {
+        subagents
+            .spawn(SpawnSubagentRequest {
+                caller,
+                task_name: "waiting".into(),
+                prompt: "Check this item".into(),
+            })
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), started)
+        .await
+        .unwrap()
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let path = "/root/waiting".parse().unwrap();
+        while services
+            .store
+            .get_subagent_record(&parent.session_id, &path)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("rejected child must be removed even after the request is dropped");
 }

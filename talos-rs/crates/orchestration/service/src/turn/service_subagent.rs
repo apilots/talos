@@ -1,6 +1,17 @@
 use super::*;
 
 impl TurnService {
+    pub(crate) fn validate_subagent_depth(&self, path: &talos_types::AgentPath) -> TalosResult<()> {
+        let limit = self.base_config.agent.subagent_admission.max_depth.get();
+        if path.depth() > limit {
+            return Err(TalosError::new(
+                talos_error::ErrorCode::SessionBudgetExceeded,
+                format!("Delegation is limited to {limit} child levels. Complete the assigned task directly."),
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn validate_subagent_agent(
         &self,
         agent_id: &str,
@@ -15,7 +26,7 @@ impl TurnService {
             .map(|_| ())
     }
 
-    pub(crate) async fn submit_subagent_turn(
+    pub(crate) async fn submit_subagent_turn_owned(
         &self,
         session: talos_store::session::SessionRecord,
         request: StartTurnRequest,
@@ -30,7 +41,7 @@ impl TurnService {
                 )),
             );
         }
-        self.submit_turn(
+        self.submit_turn_owned(
             session,
             TurnSubmission {
                 origin: None,

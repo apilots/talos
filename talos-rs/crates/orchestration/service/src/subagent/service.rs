@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::session::{CreateSessionParams, SessionService};
-use crate::turn::TurnService;
+use crate::turn::{await_admission, TurnService};
 use crate::TimelineEventService;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::SessionSource;
@@ -41,9 +41,15 @@ impl SubagentService {
         request: SpawnSubagentRequest,
     ) -> TalosResult<SubagentSpawnResult> {
         Self::validate_request(&request)?;
+        let service = self.clone();
+        await_admission(async move { service.spawn_owned(request).await }).await
+    }
+
+    async fn spawn_owned(&self, request: SpawnSubagentRequest) -> TalosResult<SubagentSpawnResult> {
         let caller = self.authorize_caller(&request.caller).await?;
         let agent_id = caller.agent_id.clone();
         let child_path = caller.path.join(&request.task_name)?;
+        self.turns.validate_subagent_depth(&child_path)?;
         let parent = self
             .sessions
             .load_record(&request.caller.session_id)
@@ -84,7 +90,7 @@ impl SubagentService {
         let cleanup_session = child.clone();
         let start_result = self
             .turns
-            .submit_subagent_turn(
+            .submit_subagent_turn_owned(
                 child,
                 StartTurnRequest {
                     node_id: None,

@@ -118,6 +118,7 @@ pub(crate) async fn commit_test_running_turn(
 ) -> AgentEventCommit {
     store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: None,
             events: canonical_user_admission(identity, message, 1, true),
             command: None,
