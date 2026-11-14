@@ -125,6 +125,7 @@ pub struct AgentHarnessRpcAdapter {
     local_auth: Arc<Mutex<Option<Lease>>>,
     active: Arc<Mutex<HashMap<TurnKey, AuthorizationOwner>>>,
     cleanup_failure: Arc<Mutex<Option<TalosError>>>,
+    session_owner: crate::SessionOwner,
 }
 
 impl AgentHarnessRpcAdapter {
@@ -133,14 +134,19 @@ impl AgentHarnessRpcAdapter {
         config: Arc<std::sync::RwLock<Config>>,
         harnesses: Vec<(String, Arc<dyn AgentHarness>)>,
     ) -> Self {
-        let root = config
+        let data_dir = config
             .read()
             .expect("Worker config lock")
             .talos_paths()
             .data_dir
-            .join("worker/session-heads");
+            .clone();
         Self {
-            session_gate: session_gate::SessionGate::new(root),
+            session_gate: session_gate::SessionGate::new(data_dir.join("worker/session-heads")),
+            session_owner: crate::SessionOwner::new(
+                data_dir.join("worker/session-locks"),
+                talos_error::SessionOwnerKind::Server,
+                crate::SessionHold::Turn,
+            ),
             node_id,
             environment: None,
             resource_binder: None,
@@ -154,6 +160,23 @@ impl AgentHarnessRpcAdapter {
             active: Arc::new(Mutex::new(HashMap::new())),
             cleanup_failure: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Selects who is named in a refusal and how long a successful claim is held.
+    /// Call this before the adapter admits any session.
+    #[must_use]
+    pub fn with_session_policy(
+        mut self,
+        kind: talos_error::SessionOwnerKind,
+        hold: crate::SessionHold,
+    ) -> Self {
+        let root = self.session_owner.root().to_path_buf();
+        self.session_owner = crate::SessionOwner::new(root, kind, hold);
+        self
+    }
+
+    pub fn session_owner(&self) -> crate::SessionOwner {
+        self.session_owner.clone()
     }
 
     /// Bind the Worker-owned ports after Harness reservation and before permit

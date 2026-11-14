@@ -38,10 +38,12 @@ async fn run(
         }
         return Ok(());
     }
-    match cli::parse_terminal_mode() {
-        cli::TerminalMode::Tui => run_embedded_tui(log_guard).await,
+    let mode = cli::parse_terminal_mode();
+    let ownership = cli::session_ownership(&mode);
+    match mode {
+        cli::TerminalMode::Tui => run_embedded_tui(log_guard, ownership).await,
         cli::TerminalMode::Command(command) => {
-            let mut client = create_embedded_client(log_guard).await?;
+            let mut client = create_embedded_client(log_guard, ownership).await?;
             ensure_authenticated(&mut client, CloudLoginClientKind::Cli, "Talos CLI").await?;
             cli::run_cli_with_client(command, client).await
         }
@@ -50,9 +52,11 @@ async fn run(
 
 async fn create_embedded_client(
     log_guard: &mut Option<talos_logging::LogGuard>,
+    session_ownership: talos_base::SessionOwnershipPolicy,
 ) -> Result<EmbeddedServerClient, Box<dyn std::error::Error>> {
     let logging_options = talos_base::TalosServerOptions {
         logging_stdout: Some(false),
+        session_ownership: Some(session_ownership),
         ..Default::default()
     };
     let app_server = talos_base::run_embedded_app_server(Some(&logging_options)).await?;
@@ -63,8 +67,9 @@ async fn create_embedded_client(
 
 async fn run_embedded_tui(
     log_guard: &mut Option<talos_logging::LogGuard>,
+    session_ownership: talos_base::SessionOwnershipPolicy,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut client = create_embedded_client(log_guard).await?;
+    let mut client = create_embedded_client(log_guard, session_ownership).await?;
     ensure_authenticated(&mut client, CloudLoginClientKind::Tui, "Talos TUI").await?;
     let gateway_client: Arc<dyn talos_tui::GatewayClient> = Arc::new(client);
     run_tui_app_with_gateway_client(gateway_client).await

@@ -64,7 +64,8 @@ fn status_for_error_code(code: ErrorCode) -> StatusCode {
         | ErrorCode::RetrySourceMismatch
         | ErrorCode::IdempotencyConflict
         | ErrorCode::AlreadyExists
-        | ErrorCode::Cancelled => StatusCode::CONFLICT,
+        | ErrorCode::Cancelled
+        | ErrorCode::SessionHeld => StatusCode::CONFLICT,
         ErrorCode::UploadTooLarge | ErrorCode::AttachmentLimitExceeded => {
             StatusCode::PAYLOAD_TOO_LARGE
         }

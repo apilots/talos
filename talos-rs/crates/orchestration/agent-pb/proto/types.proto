@@ -46,6 +46,7 @@ enum ErrorCode {
   ERROR_CODE_RUN_FORCED_ABORT = 39;
   ERROR_CODE_RUN_CLEANUP_UNCONFIRMED = 40;
   ERROR_CODE_INTERNAL_ERROR = 41;
+  ERROR_CODE_SESSION_HELD = 42;
 }
 enum MessageRole {
   MESSAGE_ROLE_UNSPECIFIED = 0;
@@ -216,7 +217,24 @@ message ApiError {
     Empty computer_deletion_unverified = 7;
     ModelNotConfigured model_not_configured = 3;
     AttachmentCountExceeded attachment_count_exceeded = 4;
+    SessionHeld session_held = 10;
   }
+}
+enum SessionOwnerKind {
+  SESSION_OWNER_KIND_UNSPECIFIED = 0;
+  SESSION_OWNER_KIND_TUI = 1;
+  SESSION_OWNER_KIND_EXEC = 2;
+  SESSION_OWNER_KIND_CLI = 3;
+  SESSION_OWNER_KIND_SERVER = 4;
+  SESSION_OWNER_KIND_DESKTOP = 5;
+  SESSION_OWNER_KIND_UNKNOWN = 6;
+}
+message SessionHeld {
+  string session_id = 1;
+  SessionOwnerKind owner_kind = 2;
+  uint64 pid = 3;
+  string host = 4;
+  string since = 5;
 }
 message ModelNotConfigured { string provider = 1; string model = 2; }
 message AttachmentCountExceeded { uint64 limit = 1; uint64 actual = 2; }

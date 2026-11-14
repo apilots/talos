@@ -3,7 +3,7 @@ pub use rooted::{RootedDirectory, RootedFileRead};
 
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use fs4::{FileExt, TryLockError};
@@ -493,6 +493,35 @@ pub struct FileLock {
 }
 
 impl FileLock {
+    /// Replace this lock file's bytes without renaming it.
+    ///
+    /// The advisory lock is tied to this open file description. A replace that
+    /// writes a new inode would drop the lock, so callers that store holder
+    /// metadata must overwrite the locked descriptor in place.
+    pub fn overwrite(&self, bytes: &[u8]) -> TalosResult<()> {
+        let Some(file) = &self.file else {
+            return Ok(());
+        };
+        let mut writer = file.try_clone().map_err(|err| {
+            let diagnostic = format!("clone lock file `{}`: {err}", self.path.display());
+            storage_error("clone lock file", err).context(diagnostic)
+        })?;
+        writer.seek(SeekFrom::Start(0)).map_err(|err| {
+            let diagnostic = format!("rewind lock file `{}`: {err}", self.path.display());
+            storage_error("rewind lock file", err).context(diagnostic)
+        })?;
+        writer.set_len(0).map_err(|err| {
+            let diagnostic = format!("truncate lock file `{}`: {err}", self.path.display());
+            storage_error("truncate lock file", err).context(diagnostic)
+        })?;
+        writer.write_all(bytes).map_err(|err| {
+            let diagnostic = format!("write lock file `{}`: {err}", self.path.display());
+            storage_error("write lock file", err).context(diagnostic)
+        })?;
+        let _ = writer.sync_all();
+        Ok(())
+    }
+
     /// Release the lock before the guard is dropped.
     pub fn unlock(mut self) -> TalosResult<()> {
         let Some(file) = self.file.take() else {

@@ -34,6 +34,40 @@ pub(crate) enum TerminalMode {
     Command(Commands),
 }
 
+pub(crate) fn session_ownership(mode: &TerminalMode) -> talos_base::SessionOwnershipPolicy {
+    let (kind, hold) = match mode {
+        TerminalMode::Tui => (
+            talos_error::SessionOwnerKind::Tui,
+            talos_base::SessionHold::Attached,
+        ),
+        TerminalMode::Command(Commands::Exec(_)) => (
+            talos_error::SessionOwnerKind::Exec,
+            talos_base::SessionHold::Process,
+        ),
+        TerminalMode::Command(Commands::Goal(command))
+            if matches!(command.command, Some(types::GoalCommands::Start { .. })) =>
+        {
+            (
+                talos_error::SessionOwnerKind::Cli,
+                talos_base::SessionHold::Process,
+            )
+        }
+        TerminalMode::Command(Commands::Loop(command))
+            if matches!(command.command, Some(types::LoopCommands::Start { .. })) =>
+        {
+            (
+                talos_error::SessionOwnerKind::Cli,
+                talos_base::SessionHold::Process,
+            )
+        }
+        TerminalMode::Command(_) => (
+            talos_error::SessionOwnerKind::Cli,
+            talos_base::SessionHold::Turn,
+        ),
+    };
+    talos_base::SessionOwnershipPolicy { kind, hold }
+}
+
 pub(crate) fn parse_terminal_mode() -> TerminalMode {
     let cli = Cli::parse();
     match cli.command {

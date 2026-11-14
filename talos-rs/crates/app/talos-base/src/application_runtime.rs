@@ -27,9 +27,23 @@ use super::{
     application_automation, application_storage, ApplicationAgentControl, TalosApplicationRuntime,
 };
 
+#[cfg(test)]
 pub(crate) async fn build_application_runtime_with_migration_dir(
     config: Config,
     migration_dir: &Path,
+) -> TalosResult<TalosApplicationRuntime> {
+    build_application_runtime_with_policy(
+        config,
+        migration_dir,
+        crate::SessionOwnershipPolicy::default(),
+    )
+    .await
+}
+
+pub(crate) async fn build_application_runtime_with_policy(
+    config: Config,
+    migration_dir: &Path,
+    session_ownership: crate::SessionOwnershipPolicy,
 ) -> TalosResult<TalosApplicationRuntime> {
     let storage_connection = application_storage::connect_application_storage(&config).await?;
     let upgrade_report = talos_upgrade::run_startup_upgrades(talos_upgrade::StartupUpgradeParams {
@@ -75,7 +89,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         Arc::new(SessionMemoryProgress::new(session_store_impl.clone()));
     let tool_image_store: Arc<dyn ToolImageStore> =
         Arc::new(super::tool_images::ToolImages(file_service.clone()));
-    let worker = TalosWorker::build_with_browser_host(
+    let mut worker = TalosWorker::build_with_browser_host(
         config.clone(),
         TalosWorkerResources {
             session_history_reader: session_history_reader.clone(),
@@ -92,6 +106,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         },
     )
     .await?;
+    worker.set_session_policy(session_ownership.kind, session_ownership.hold);
     let default_model_selection = resolve_default_model_selection(&config.llm)?;
     let default_agent_id = worker
         .deployments()
@@ -233,6 +248,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             config.talos_paths().talos_home,
         ))?;
     service.set_coordinator_id(sync.peer_id().into());
+    service.set_session_owner(worker_rpc.session_owner());
     service.install_session_automation(
         session_store_impl.automation_store(),
         Arc::new(

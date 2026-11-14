@@ -116,6 +116,12 @@ impl TalosService {
         self.sessions.set_coordinator_id(peer_id);
     }
 
+    /// Shares the worker adapter's session-lock table. A second table in this
+    /// process would contend with itself.
+    pub fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
+        self.turns.set_session_owner(owner);
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         coordinator: Arc<dyn AgentCoordinator>,
@@ -720,6 +726,7 @@ impl TalosService {
         request: SubscribeTimelineRequest,
     ) -> ServiceResult<TimelineSubscription> {
         let session = self.access.load_session(actor, &request.session_id).await?;
+        self.turns.claim_session_open(&request.session_id).await?;
         if let Some(active) = self
             .turns
             .canonical_active_turn(&request.session_id)
@@ -765,6 +772,7 @@ impl TalosService {
         request: RecoverTimelineRequest,
     ) -> ServiceResult<talos_agent_api::RecoverTimelineResponse> {
         let session = self.access.load_session(actor, &request.session_id).await?;
+        self.turns.claim_session_open(&request.session_id).await?;
         if let Some(active) = self
             .turns
             .canonical_active_turn(&request.session_id)

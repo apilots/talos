@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use talos_error::TalosError;
+use talos_error::{ErrorCode, TalosError};
 use tokio::sync::{mpsc, mpsc::error::TryRecvError};
 use tracing::error;
 
@@ -328,10 +328,18 @@ impl TuiApp {
                                 ));
                             }
                             Err(err) => {
-                                self.push_system_notice(format!(
-                                    "Failed to recover active turn: {}",
-                                    err
-                                ));
+                                if err.is_code(ErrorCode::SessionHeld) {
+                                    self.session_read_only = true;
+                                    self.push_system_notice(format!(
+                                        "Read-only. {}",
+                                        err.to_api_error().message
+                                    ));
+                                } else {
+                                    self.push_system_notice(format!(
+                                        "Failed to recover active turn: {}",
+                                        err.to_api_error().message
+                                    ));
+                                }
                                 self.push_right_event("live recovery failed".to_string());
                             }
                         }

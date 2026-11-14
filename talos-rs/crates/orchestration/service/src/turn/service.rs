@@ -56,6 +56,7 @@ pub(crate) struct TurnService {
     nodes: Option<crate::AgentNodeService>,
     wake_dispatches:
         Arc<std::sync::Mutex<std::collections::HashSet<(String, managed_wake::WakeCandidate)>>>,
+    session_owner: Arc<std::sync::RwLock<Option<talos_agent::SessionOwner>>>,
 }
 
 struct TurnSubmission {
@@ -83,7 +84,50 @@ impl TurnService {
             execution_gate,
             nodes: None,
             wake_dispatches: Default::default(),
+            session_owner: Default::default(),
         }
+    }
+
+    pub(crate) fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
+        *self.session_owner.write().expect("session owner lock") = Some(owner);
+    }
+
+    pub(crate) fn session_owner(&self) -> Option<talos_agent::SessionOwner> {
+        self.session_owner
+            .read()
+            .expect("session owner lock")
+            .clone()
+    }
+
+    /// Claim the open-session hold before recovery or subscription.
+    /// A live turn in this process keeps its lock; the requested session is refused.
+    pub(crate) async fn claim_session_open(&self, session_id: &str) -> TalosResult<()> {
+        let Some(owner) = self.session_owner() else {
+            return Ok(());
+        };
+        let retain_others = self.retain_other_session_holds(&owner, session_id).await?;
+        owner.claim_open(session_id, retain_others)
+    }
+
+    async fn retain_other_session_holds(
+        &self,
+        owner: &talos_agent::SessionOwner,
+        session_id: &str,
+    ) -> TalosResult<bool> {
+        if owner.hold() != talos_agent::SessionHold::Attached {
+            return Ok(true);
+        }
+        for other in owner.held_sessions() {
+            if other == session_id {
+                continue;
+            }
+            if let Some(active) = self.canonical_active_turn(&other).await? {
+                if self.is_turn_execution_active(&active.identity) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn with_managed_workers(mut self, nodes: crate::AgentNodeService) -> Self {

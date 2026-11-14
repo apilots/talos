@@ -203,6 +203,10 @@ export function useSessionTimelineEvents(
               subscriptionError = recoveryError;
             }
           }
+          if (subscriptionError instanceof TalosApiError && subscriptionError.code === AppProtocol.ErrorCode.SessionHeld) {
+            useAppStore.getState().setStreamError(sessionId, userVisibleError(subscriptionError, "Session is held by another owner."));
+            return;
+          }
           const exhausted = attempt >= 3;
           const state = useAppStore.getState();
           state.setStreamError(
