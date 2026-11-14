@@ -119,7 +119,10 @@ impl TalosService {
     /// Shares the worker adapter's session-lock table. A second table in this
     /// process would contend with itself.
     pub fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
-        self.turns.set_session_owner(owner);
+        self.turns.set_session_owner(owner.clone());
+        if let Some(automation) = self.turns.installed_automation() {
+            automation.set_session_owner(owner);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

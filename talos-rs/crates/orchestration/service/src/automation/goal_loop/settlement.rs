@@ -264,6 +264,12 @@ impl SessionAutomationService {
 
     pub(crate) async fn scan(&self, session: &SessionRecord, now: i64) -> TalosResult<()> {
         let _gate = self.lock(&session.id).await;
+        if self
+            .session_owner()
+            .is_some_and(|owner| owner.holds(&session.id))
+        {
+            self.heal_stuck_loops(session, now).await?;
+        }
         for task in self
             .store
             .loops(&session.id)
@@ -276,6 +282,50 @@ impl SessionAutomationService {
             }
         }
         Ok(())
+    }
+
+    /// A claimed occurrence that never started is not replayed. The next
+    /// interval is written only while this process holds the session lock.
+    async fn heal_stuck_loops(&self, session: &SessionRecord, now: i64) -> TalosResult<()> {
+        if self
+            .execution
+            .get_agent_active_turn(&session.id)
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+        for task in self.store.loops(&session.id).await? {
+            if task.status != LoopStatus::Active || task.next_due_at.is_some() {
+                continue;
+            }
+            if self.loop_is_queued(&session.id, &task.id) {
+                continue;
+            }
+            let minutes = match &task.schedule {
+                LoopSchedule::FixedInterval { minutes } => (*minutes).max(1),
+                LoopSchedule::ModelDecided {} => 1,
+            };
+            let mut next = task.clone();
+            next.next_due_at = Some(next_due(now, minutes)?);
+            match self.store.replace_loop(&task, &next).await {
+                Ok(()) => self.emit(&session.id),
+                Err(error) if error.is_code(ErrorCode::Conflict) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn loop_is_queued(&self, session_id: &str, loop_id: &str) -> bool {
+        self.queue.list(session_id).ok().is_some_and(|queue| {
+            queue.messages.iter().any(|message| {
+                matches!(
+                    &message.source,
+                    QueuedMessageSource::Loop { loop_id: id, .. } if id == loop_id
+                )
+            })
+        })
     }
 }
 

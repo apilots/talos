@@ -151,10 +151,20 @@ impl TalosService {
             .collect::<std::collections::BTreeSet<_>>();
         for id in sessions {
             let result: ServiceResult<()> = async {
-                if let Some(session) = self.sessions.load_record(&id).await? {
-                    automation.scan(&session, now).await?;
-                    self.turns.try_dispatch_next(&id).await?;
-                    self.turns.continue_goal(session, false).await?;
+                let Some(session) = self.sessions.load_record(&id).await? else {
+                    return Ok(());
+                };
+                let mut permit = match automation.admit_scan(&session.id)? {
+                    crate::automation::goal_loop::ScanAdmission::Skip => return Ok(()),
+                    crate::automation::goal_loop::ScanAdmission::Run(permit) => permit,
+                };
+                automation.scan(&session, now).await?;
+                self.turns.try_dispatch_next(&id).await?;
+                self.turns.continue_goal(session, false).await?;
+                if self.turns.canonical_active_turn(&id).await?.is_none() {
+                    if let Some(permit) = permit.as_mut() {
+                        permit.release_if_idle();
+                    }
                 }
                 Ok(())
             }
