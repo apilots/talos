@@ -7,7 +7,9 @@ agent_args=(--agent harbor_talos:TalosAgent --agent-kwarg "capture=patch")
 prepare_suite() {
   if [[ "$mode" == fixture ]]; then
     agent_args+=(--agent-kwarg "fixture_file=$suite_dir/cases/$selection/fixture_model.py")
+  elif [[ "$mode" == real ]]; then
+    agent_args+=(--agent-kwarg include_content=true)
   fi
   uv run --python 3.12 --script "$suite_dir/prepare.py" "$run_dir" "$selection" "$mode"
-  suite_args=(--path "$run_dir/task/$selection")
+  suite_args=(--path "$run_dir/task")
 }

@@ -19,8 +19,8 @@ REPO = Path("/app")
 
 def main():
     architecture = platform.machine()
-    if architecture != "aarch64":
-        raise RuntimeError("The SWE-bench verifier requires native ARM64.")
+    if architecture not in {"aarch64", "x86_64"}:
+        raise RuntimeError(f"Unsupported SWE-bench Lite verifier architecture: {architecture}")
     (LOGS / "architecture.txt").write_text(f"verifier={architecture}\n")
     (LOGS / "swe-bench-version.txt").write_text(version("swebench") + "\n")
     case = json.loads((TESTS / "case.json").read_text())

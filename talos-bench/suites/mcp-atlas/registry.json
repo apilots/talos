@@ -2,12 +2,55 @@
   {
     "name": "mcp-atlas",
     "version": "2.0.0",
-    "description": "Controlled MCP-Atlas 2.0 case with sandbox 1.2.7 and pinned claim scorer",
+    "description": "MCP-Atlas 2.0 documentation smoke and pinned public cases",
+    "pass_threshold": 0.75,
     "tasks": [
       {
         "name": "barber-shop-first-word",
         "path": "cases/barber-shop-first-word",
-        "submission_paths": ["/logs/artifacts/answer.txt"]
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ]
+      },
+      {
+        "name": "686d2c79e1db37ea23ddda26",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Find the initial commit in a local Snake game repository"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fe3",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Combine a historical event date with local Git history"
+      },
+      {
+        "name": "6863f438a500a4b36aab0f24",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Research two historical suspension-bridge records"
+      },
+      {
+        "name": "68a398aa2f58036e8d45ee0c",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Compare public transportation in two Santiago communes"
+      },
+      {
+        "name": "68993ef3cf3e953b8ab83fdf",
+        "revision": "8c563b55d7c967755f474299848049834d624617",
+        "submission_paths": [
+          "/logs/artifacts/answer.txt"
+        ],
+        "description": "Find a walking route to a charging station near Tomorrowland"
       }
     ]
   }
