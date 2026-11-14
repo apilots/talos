@@ -240,6 +240,11 @@ impl TurnService {
                 self.continue_goal(session, false).await?;
             }
         }
+        if let Ok(None) = self.canonical_active_turn(&event.identity.session_id).await {
+            if let Some(owner) = self.session_owner() {
+                owner.on_terminal(&event.identity.session_id);
+            }
+        }
         profile_result
     }
 }

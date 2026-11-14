@@ -154,6 +154,10 @@ export function useChatSession(
     if (!content && fileIds.length === 0) {
       return Promise.resolve();
     }
+    const held = useAppStore.getState().streams[sessionId]?.error;
+    if (held?.code === AppProtocol.ErrorCode.SessionHeld) {
+      return Promise.reject(new TalosApiError(held));
+    }
     if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
       return Promise.reject(new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null }));
     }
@@ -188,6 +192,10 @@ export function useChatSession(
       const fileIds = options?.fileIds ?? [];
       if (!text && fileIds.length === 0) {
         return;
+      }
+      const held = useAppStore.getState().streams[sessionId]?.error;
+      if (held?.code === AppProtocol.ErrorCode.SessionHeld) {
+        throw new TalosApiError(held);
       }
       if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
         throw new TalosApiError({ code: AppProtocol.ErrorCode.Conflict, message: "Context is compacting. Wait for it to finish before sending.", localization: null });

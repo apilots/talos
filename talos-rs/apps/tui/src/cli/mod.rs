@@ -34,6 +34,43 @@ pub(crate) enum TerminalMode {
     Command(Commands),
 }
 
+pub(crate) fn session_ownership(mode: &TerminalMode) -> talos_base::SessionOwnershipPolicy {
+    let (kind, hold) = match mode {
+        TerminalMode::Tui => (
+            talos_error::SessionOwnerKind::Tui,
+            talos_base::SessionHold::Attached,
+        ),
+        TerminalMode::Command(Commands::Exec(_)) => (
+            talos_error::SessionOwnerKind::Exec,
+            talos_base::SessionHold::Process,
+        ),
+        TerminalMode::Command(Commands::Goal(command))
+            if matches!(
+                command.command,
+                Some(types::GoalCommands::Start { .. } | types::GoalCommands::Resume)
+            ) =>
+        {
+            (
+                talos_error::SessionOwnerKind::Cli,
+                talos_base::SessionHold::Process,
+            )
+        }
+        TerminalMode::Command(Commands::Loop(command))
+            if matches!(command.command, Some(types::LoopCommands::Start { .. })) =>
+        {
+            (
+                talos_error::SessionOwnerKind::Cli,
+                talos_base::SessionHold::Process,
+            )
+        }
+        TerminalMode::Command(_) => (
+            talos_error::SessionOwnerKind::Cli,
+            talos_base::SessionHold::Turn,
+        ),
+    };
+    talos_base::SessionOwnershipPolicy { kind, hold }
+}
+
 pub(crate) fn parse_terminal_mode() -> TerminalMode {
     let cli = Cli::parse();
     match cli.command {
@@ -148,7 +185,17 @@ async fn execute_turn(
         model_selection,
         current_directory: current_terminal_directory(),
         project_id: None,
-        client_request_id: Some(format!("cli-{}", uuid::Uuid::new_v4().simple())),
+        client_request_id: Some(match cmd.request_id.as_deref() {
+            Some(request_id) if !request_id.trim().is_empty() => request_id.to_owned(),
+            Some(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "request id must not be empty",
+                )
+                .into());
+            }
+            None => format!("cli-{}", uuid::Uuid::new_v4().simple()),
+        }),
     }
     .build();
     if cmd.dangerously_skip_permissions {
@@ -167,12 +214,16 @@ async fn execute_turn(
             Err(error) if error.is_code(ErrorCode::ResourceNotFound) => {
                 request.user_permission_mode = Some(UserPermissionMode::FullAccess);
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(exec_failure(error)),
         }
     }
-    let events = client
+    let events = match client
         .start_turn_stream(request, /*accepted_turn*/ None)
-        .await?;
+        .await
+    {
+        Ok(events) => events,
+        Err(error) => return Err(exec_failure(error)),
+    };
     render_timeline_events(events, observation).await
 }
 
@@ -267,12 +318,19 @@ async fn render_timeline_events(
     let mut item_phases = HashMap::new();
     let mut item_texts = HashMap::new();
     let mut written_final_items = HashSet::new();
+    let mut turn_identity = None;
+    let terminal_status;
 
     let result = loop {
         let Some(envelope) = events.recv().await else {
+            terminal_status = Some("failed");
             break Err("Turn event stream closed before a terminal event.".into());
         };
         if let talos_sdk::TimelineEventPayload::Agent(event) = &envelope.event {
+            turn_identity = Some((
+                event.identity.session_id.clone(),
+                event.identity.turn_id.clone(),
+            ));
             observation.record(event);
         }
         match render_event(
@@ -284,13 +342,26 @@ async fn render_timeline_events(
             &mut output_stream,
         ) {
             Ok(false) => {}
-            Ok(true) => break Ok(()),
-            Err(error) => break Err(error),
+            Ok(true) => {
+                terminal_status = Some("completed");
+                break Ok(());
+            }
+            Err(error) if error.is::<ExecWaitingForInput>() => {
+                terminal_status = Some("waiting");
+                break Err(error);
+            }
+            Err(error) => {
+                terminal_status = Some("failed");
+                break Err(error);
+            }
         }
     };
 
     if !output_text.is_empty() && !output_text.ends_with('\n') {
         println!();
+    }
+    if let (Some(status), Some((session_id, turn_id))) = (terminal_status, turn_identity.as_ref()) {
+        print_exec_result(session_id, turn_id, status);
     }
 
     result
@@ -311,11 +382,55 @@ impl std::fmt::Display for ExecWaitingForInput {
 
 impl std::error::Error for ExecWaitingForInput {}
 
-fn report_waiting_input(pending: &AgentPendingInput) {
+#[derive(Debug)]
+pub(crate) struct ExecSessionHeld {
+    message: String,
+}
+
+impl ExecSessionHeld {
+    pub(crate) const EXIT_CODE: u8 = 4;
+}
+
+impl std::fmt::Display for ExecSessionHeld {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ExecSessionHeld {}
+
+pub(crate) fn public_error_message(error: &(dyn std::error::Error + 'static)) -> String {
+    if let Some(error) = error.downcast_ref::<talos_error::TalosError>() {
+        return error.to_api_error().message;
+    }
+    if let Some(held) = error.downcast_ref::<ExecSessionHeld>() {
+        return held.message.clone();
+    }
+    error.to_string()
+}
+
+pub(crate) fn is_session_held(error: &(dyn std::error::Error + 'static)) -> bool {
+    error.is::<ExecSessionHeld>()
+        || error
+            .downcast_ref::<talos_error::TalosError>()
+            .is_some_and(|error| error.is_code(ErrorCode::SessionHeld))
+}
+
+fn exec_failure(error: talos_error::TalosError) -> Box<dyn std::error::Error> {
+    let message = error.to_api_error().message;
+    if error.is_code(ErrorCode::SessionHeld) {
+        ExecSessionHeld { message }.into()
+    } else {
+        message.into()
+    }
+}
+
+fn waiting_input_line(session_id: &str, turn_id: &str, pending: &AgentPendingInput) -> String {
+    let request = serde_json::to_string(pending).unwrap_or_else(|_| "{}".to_owned());
     match pending {
-        AgentPendingInput::Message { action_id, .. } => {
-            eprintln!("WAITING_FOR_INPUT kind=message action_id={action_id}");
-        }
+        AgentPendingInput::Message { action_id, .. } => format!(
+            "WAITING_FOR_INPUT session={session_id} turn={turn_id} kind=message action_id={action_id} request={request}"
+        ),
         AgentPendingInput::UserAction { action } => {
             let (kind, tool_name) = match &action.params {
                 UserActionParams::SandboxApproval(params) => {
@@ -326,12 +441,29 @@ fn report_waiting_input(pending: &AgentPendingInput) {
                     ("user_action", params.tool_name.as_str())
                 }
             };
-            eprintln!(
-                "WAITING_FOR_INPUT kind={kind} tool={tool_name} call_id={} action_id={}",
+            format!(
+                "WAITING_FOR_INPUT session={session_id} turn={turn_id} kind={kind} tool={tool_name} call_id={} action_id={} request={request}",
                 action.call_id, action.action_id,
-            );
+            )
         }
     }
+}
+
+fn report_waiting_input(session_id: &str, turn_id: &str, pending: &AgentPendingInput) {
+    eprintln!("{}", waiting_input_line(session_id, turn_id, pending));
+}
+
+fn exec_result_line(session_id: &str, turn_id: &str, status: &str) -> String {
+    serde_json::json!({
+        "sessionId": session_id,
+        "turnId": turn_id,
+        "status": status,
+    })
+    .to_string()
+}
+
+fn print_exec_result(session_id: &str, turn_id: &str, status: &str) {
+    println!("{}", exec_result_line(session_id, turn_id, status));
 }
 
 fn render_event(
@@ -450,7 +582,7 @@ fn render_event(
             return Ok(true);
         }
         AgentEventPayload::WaitingForInput(pending) => {
-            report_waiting_input(pending);
+            report_waiting_input(&event.identity.session_id, &event.identity.turn_id, pending);
             return Err(ExecWaitingForInput.into());
         }
         AgentEventPayload::TurnStarted(_)

@@ -78,7 +78,7 @@ pub(super) async fn start_maintenance(
     service: std::sync::Weak<talos_service::TalosService>,
 ) -> TalosResult<Automation> {
     let retention = ProfileUsageRetention::new(profiles, profile_config.clone());
-    Automation::start(vec![
+    let jobs = vec![
         AutomationJob::cron_on_start(
             "profile-usage-retention",
             profile_config.cron,
@@ -116,8 +116,8 @@ pub(super) async fn start_maintenance(
                 Ok(())
             }
         }),
-    ])
-    .await
+    ];
+    Automation::start(jobs).await
 }
 
 pub(super) async fn finish(

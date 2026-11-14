@@ -68,6 +68,30 @@ pub enum BrowserCapabilityReason {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub enum SessionOwnerKind {
+    Tui,
+    Exec,
+    Cli,
+    Server,
+    Desktop,
+    Unknown,
+}
+
+impl SessionOwnerKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tui => "tui",
+            Self::Exec => "exec",
+            Self::Cli => "cli",
+            Self::Server => "server",
+            Self::Desktop => "desktop",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub enum AutomationRequestReason {
     SelectedModeManagementConflict,
     SelectedModeConflict,
@@ -105,6 +129,18 @@ pub enum ErrorLocalization {
         #[ts(type = "number")]
         actual: u64,
     },
+    SessionHeld {
+        #[serde(rename = "sessionId")]
+        #[ts(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "ownerKind")]
+        #[ts(rename = "ownerKind")]
+        owner_kind: SessionOwnerKind,
+        #[ts(type = "number")]
+        pid: u64,
+        host: String,
+        since: String,
+    },
 }
 
 impl ErrorLocalization {
@@ -125,6 +161,7 @@ impl ErrorLocalization {
             Self::ComputerDeletionUnverified => ErrorCode::ServiceUnavailable,
             Self::ModelNotConfigured { .. } => ErrorCode::ProviderUnavailable,
             Self::AttachmentCountExceeded { .. } => ErrorCode::AttachmentLimitExceeded,
+            Self::SessionHeld { .. } => ErrorCode::SessionHeld,
         }
     }
 
@@ -153,6 +190,16 @@ impl ErrorLocalization {
             Self::AttachmentCountExceeded { limit, actual } => {
                 format!("This request contains {actual} attachments; the limit is {limit}.")
             }
+            Self::SessionHeld {
+                session_id,
+                owner_kind,
+                pid,
+                host,
+                since,
+            } => format!(
+                "Session {session_id} is held by {} pid {pid} on {host} since {since}.",
+                owner_kind.as_str()
+            ),
         }
     }
 
@@ -168,6 +215,19 @@ impl ErrorLocalization {
             }),
             Self::AttachmentCountExceeded { limit, actual } => {
                 *limit <= MAX_SAFE_INTEGER && *actual <= MAX_SAFE_INTEGER && actual > limit
+            }
+            Self::SessionHeld {
+                session_id,
+                pid,
+                host,
+                since,
+                ..
+            } => {
+                !session_id.trim().is_empty()
+                    && [session_id, host, since]
+                        .iter()
+                        .all(|value| value.chars().count() <= MAX_PARAMETER_CHARS)
+                    && *pid <= MAX_SAFE_INTEGER
             }
         }
     }

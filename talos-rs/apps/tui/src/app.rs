@@ -49,6 +49,7 @@ impl TuiApp {
             available_model_info: vec![],
             available_models: vec![],
             session_id: None,
+            session_read_only: false,
             connection_status: "disconnected".to_string(),
             right_panel_events: vec![],
             rendered_chat_lines: vec![],

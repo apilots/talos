@@ -97,7 +97,10 @@ def exercise(root, work, report):
                     assert set(trace) == {"identity", "clockSegments", "data", "nextCursor"}, trace
                     assert trace["identity"]["sessionId"] == session and trace["nextCursor"] is None, trace
                 if expected == 0:
-                    assert result.stdout == f"PROTOCOL_OK:call_{case}\n", result
+                    stdout_lines = result.stdout.splitlines()
+                    assert stdout_lines[0] == f"PROTOCOL_OK:call_{case}", result.stdout
+                    status = json.loads(stdout_lines[-1])
+                    assert status["sessionId"] == session and status["status"] == "completed", status
                     requests = [entry["request"] for entry in trace["data"]
                                 if entry["type"] == "modelRequest"]
                     assert len(requests) == rounds, trace
@@ -116,7 +119,9 @@ def exercise(root, work, report):
                 return result
 
             blocked = run("blocked", 3, str(uuid4()))
-            assert "WAITING_FOR_INPUT kind=approval" in blocked.stderr and "call_id=call_blocked" in blocked.stderr
+            assert "WAITING_FOR_INPUT " in blocked.stderr and "kind=approval" in blocked.stderr and "call_id=call_blocked" in blocked.stderr
+            waiting = json.loads(blocked.stdout.splitlines()[-1])
+            assert waiting["status"] == "waiting" and waiting["sessionId"], waiting
             assert not (workspace / "blocked").exists()
             run("fail", 1, str(uuid4()))
             new = run("new", 0, str(uuid4()), "--dangerously-skip-permissions")

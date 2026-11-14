@@ -20,22 +20,22 @@ impl TurnService {
         store: DatabaseAutomationStore,
         resolver: Arc<dyn AutomationSkillResolver>,
     ) -> TalosResult<()> {
-        self.automation
-            .set(Arc::new(
-                SessionAutomationService::new(
-                    store,
-                    self.execution.execution_store.clone(),
-                    self.message_queue.clone(),
-                    resolver,
-                )
-                .with_managed_workers(self.nodes.clone()),
-            ))
-            .map_err(|_| {
-                TalosError::new(
-                    talos_error::ErrorCode::Conflict,
-                    "Session automation is already installed.",
-                )
-            })
+        let automation = SessionAutomationService::new(
+            store,
+            self.execution.execution_store.clone(),
+            self.message_queue.clone(),
+            resolver,
+        )
+        .with_managed_workers(self.nodes.clone());
+        if let Some(owner) = self.session_owner() {
+            automation.set_session_owner(owner);
+        }
+        self.automation.set(Arc::new(automation)).map_err(|_| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Session automation is already installed.",
+            )
+        })
     }
     pub(crate) async fn continue_goal(
         &self,

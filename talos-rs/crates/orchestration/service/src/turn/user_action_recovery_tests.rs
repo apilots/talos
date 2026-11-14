@@ -157,3 +157,41 @@ async fn running_turn_without_a_claimed_continuation_fails_after_restart() {
             if failed.error.code == talos_error::ErrorCode::ServiceUnavailable
     ));
 }
+
+#[tokio::test]
+async fn reopening_after_the_owner_lock_is_released_fails_the_running_turn() {
+    let agent_execution = Arc::new(RecordingAgentExecution::default());
+    let (service, _event_service, store, _message_queue) =
+        test_service(agent_execution.clone()).await;
+    create_test_session_record(store.clone()).await;
+    let identity = talos_agent_api::AgentTurnRef::new("s1", "turn-orphaned");
+    let input = completed_agent_user_input(
+        &identity.turn_id,
+        "message-orphaned",
+        test_user_input("run"),
+        1,
+    )
+    .unwrap();
+    let admission = commit_test_running_turn(store.as_ref(), identity.clone(), input).await;
+    let locks = tempfile::tempdir().unwrap();
+    let owner = talos_agent::SessionOwner::new(
+        locks.path(),
+        talos_error::SessionOwnerKind::Tui,
+        talos_agent::SessionHold::Attached,
+    );
+    owner.acquire("s1").unwrap();
+    service.set_session_owner(owner);
+
+    service
+        .recover_active_turn(test_session(), admission.active_turn)
+        .await
+        .expect("a free lock means the previous owner has exited");
+
+    let events = store.list_agent_turn_events(&identity, 32).await.unwrap();
+    assert!(matches!(
+        events.last().map(|event| &event.payload),
+        Some(CanonicalAgentEventPayload::TurnFailed(failed))
+            if failed.error.message == "owner process exited"
+    ));
+    assert!(store.get_agent_active_turn("s1").await.unwrap().is_none());
+}

@@ -45,6 +45,19 @@ pub fn encode_api_error(api: ApiError) -> pb::ApiError {
                 actual,
             })
         }
+        ErrorLocalization::SessionHeld {
+            session_id,
+            owner_kind,
+            pid,
+            host,
+            since,
+        } => pb::api_error::Localization::SessionHeld(pb::SessionHeld {
+            session_id,
+            owner_kind: session_owner_kind_to_wire(owner_kind),
+            pid,
+            host,
+            since,
+        }),
     });
     pb::ApiError {
         code: encode_code(api.code) as i32,
@@ -95,6 +108,13 @@ pub fn decode_api_error(error: pb::ApiError) -> TalosResult<ApiError> {
                         actual: value.actual,
                     }
                 }
+                pb::api_error::Localization::SessionHeld(value) => ErrorLocalization::SessionHeld {
+                    session_id: value.session_id,
+                    owner_kind: session_owner_kind_from_wire(value.owner_kind)?,
+                    pid: value.pid,
+                    host: value.host,
+                    since: value.since,
+                },
             })
         })
         .transpose()?;
@@ -199,6 +219,7 @@ fn encode_code(code: ErrorCode) -> pb::ErrorCode {
         ErrorCode::ServiceUnavailable => pb::ErrorCode::ServiceUnavailable,
         ErrorCode::RunForcedAbort => pb::ErrorCode::RunForcedAbort,
         ErrorCode::RunCleanupUnconfirmed => pb::ErrorCode::RunCleanupUnconfirmed,
+        ErrorCode::SessionHeld => pb::ErrorCode::SessionHeld,
         ErrorCode::InternalError => pb::ErrorCode::InternalError,
     }
 }
@@ -246,6 +267,7 @@ fn decode_code(value: i32) -> TalosResult<ErrorCode> {
         pb::ErrorCode::ServiceUnavailable => ErrorCode::ServiceUnavailable,
         pb::ErrorCode::RunForcedAbort => ErrorCode::RunForcedAbort,
         pb::ErrorCode::RunCleanupUnconfirmed => ErrorCode::RunCleanupUnconfirmed,
+        pb::ErrorCode::SessionHeld => ErrorCode::SessionHeld,
         pb::ErrorCode::InternalError => ErrorCode::InternalError,
     };
     Ok(code)
@@ -366,6 +388,17 @@ localization_enum!(
     HostPolicy,
     UnsupportedVersion,
     ClientMismatch
+);
+localization_enum!(
+    session_owner_kind_to_wire,
+    session_owner_kind_from_wire,
+    SessionOwnerKind,
+    Tui,
+    Exec,
+    Cli,
+    Server,
+    Desktop,
+    Unknown
 );
 localization_enum!(
     automation_reason_to_wire,

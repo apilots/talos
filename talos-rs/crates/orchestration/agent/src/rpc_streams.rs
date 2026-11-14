@@ -217,6 +217,10 @@ impl AgentHarnessRpcAdapter {
         )
         .map_err(status_from_error)?;
         let identity = params.context.identity();
+        let start_guard = self
+            .session_owner
+            .guard_start(&identity.session_id)
+            .map_err(status_from_error)?;
         let agent_id = params.context.session.agent_id.clone();
         let harness = self.harness(&agent_id).map_err(status_from_error)?;
         let session_context = params.context.session.clone();
@@ -240,6 +244,9 @@ impl AgentHarnessRpcAdapter {
         self.authorize_admission(&lease)
             .map_err(status_from_error)?;
         let execution = harness.start(params).await;
+        if execution.is_ok() {
+            start_guard.keep();
+        }
         let resource_guard = if execution.is_ok() {
             self.bind_resources(&auth, &session_context, first.caller.as_ref())
                 .map_err(status_from_error)?

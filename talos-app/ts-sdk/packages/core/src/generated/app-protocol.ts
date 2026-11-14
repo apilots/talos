@@ -1378,7 +1378,7 @@ export type ContextCompactionOutcome = "applied" | "no_changes" | "rejected_miss
 
 export type ContextCompactionMetrics = { covers_from_seq: number | null, covers_until_seq: number | null, pre_compaction_total_tokens: number, post_compaction_total_tokens: number, compaction_input_tokens: number, compaction_output_tokens: number, trimmed_context_unit_count: number, raw_tail_preferred_count: number | null, raw_tail_backfilled_count: number | null, working_context_input_messages: number | null, working_context_compacted_messages: number | null, working_context_preserved_recent_exchanges: number | null, };
 
-export type ErrorCode = "invalidRequest" | "invalidRetryRequest" | "unauthenticated" | "permissionDenied" | "resourceNotFound" | "sessionNotFound" | "resourceExpired" | "conflict" | "activeTurnRunning" | "messageQueueFull" | "messageQueueBusy" | "retrySourceCompleted" | "retrySourceMismatch" | "idempotencyConflict" | "invalidCursor" | "eventCursorExpired" | "fsDisabled" | "invalidPath" | "pathOutsideRoot" | "symlinkNotSupported" | "pathNotFound" | "notDirectory" | "invalidName" | "alreadyExists" | "uploadTooLarge" | "unsupportedMediaType" | "attachmentLimitExceeded" | "unsupportedAttachment" | "fileInputRejected" | "contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "contextCompactionFailed" | "providerUnavailable" | "toolExecutionFailed" | "timeout" | "cancelled" | "serviceUnavailable" | "runForcedAbort" | "runCleanupUnconfirmed" | "internalError";
+export type ErrorCode = "invalidRequest" | "invalidRetryRequest" | "unauthenticated" | "permissionDenied" | "resourceNotFound" | "sessionNotFound" | "resourceExpired" | "conflict" | "activeTurnRunning" | "messageQueueFull" | "messageQueueBusy" | "retrySourceCompleted" | "retrySourceMismatch" | "idempotencyConflict" | "invalidCursor" | "eventCursorExpired" | "fsDisabled" | "invalidPath" | "pathOutsideRoot" | "symlinkNotSupported" | "pathNotFound" | "notDirectory" | "invalidName" | "alreadyExists" | "uploadTooLarge" | "unsupportedMediaType" | "attachmentLimitExceeded" | "unsupportedAttachment" | "fileInputRejected" | "contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "contextCompactionFailed" | "providerUnavailable" | "toolExecutionFailed" | "timeout" | "cancelled" | "serviceUnavailable" | "runForcedAbort" | "runCleanupUnconfirmed" | "sessionHeld" | "internalError";
 
 export const ErrorCode = {
   InvalidRequest: "invalidRequest",
@@ -1421,6 +1421,7 @@ export const ErrorCode = {
   ServiceUnavailable: "serviceUnavailable",
   RunForcedAbort: "runForcedAbort",
   RunCleanupUnconfirmed: "runCleanupUnconfirmed",
+  SessionHeld: "sessionHeld",
   InternalError: "internalError",
 } as const satisfies Record<string, ErrorCode>;
 
@@ -1432,7 +1433,9 @@ export type BrowserCapabilityReason = "nativeHost" | "notBundled" | "hostPolicy"
 
 export type AutomationRequestReason = "selectedModeManagementConflict" | "selectedModeConflict" | "computerRequired" | "chatRequired" | "taskNotFound" | "goalNotFound" | "systemSkillUnavailable";
 
-export type ErrorLocalization = { "type": "automationRequest", reason: AutomationRequestReason, } | { "type": "browserCapabilityUnavailable", operation: BrowserCapabilityOperation, reason: BrowserCapabilityReason, } | { "type": "computerDeletionActive" } | { "type": "computerRegistrationRemoved" } | { "type": "computerDeletionUnverified" } | { "type": "modelNotConfigured", provider: string, model: string, } | { "type": "attachmentCountExceeded", limit: number, actual: number, };
+export type SessionOwnerKind = "tui" | "exec" | "cli" | "server" | "desktop" | "unknown";
+
+export type ErrorLocalization = { "type": "automationRequest", reason: AutomationRequestReason, } | { "type": "browserCapabilityUnavailable", operation: BrowserCapabilityOperation, reason: BrowserCapabilityReason, } | { "type": "computerDeletionActive" } | { "type": "computerRegistrationRemoved" } | { "type": "computerDeletionUnverified" } | { "type": "modelNotConfigured", provider: string, model: string, } | { "type": "attachmentCountExceeded", limit: number, actual: number, } | { "type": "sessionHeld", sessionId: string, ownerKind: SessionOwnerKind, pid: number, host: string, since: string, };
 
 export type ApiResponse<T> = { "status": "success", data: T, } | { "status": "error", error: ApiError, };
 

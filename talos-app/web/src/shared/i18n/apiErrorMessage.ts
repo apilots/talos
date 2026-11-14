@@ -16,6 +16,7 @@ export function apiErrorMessage(error: AppProtocol.ApiError | TalosApiError): st
     case "computerDeletionUnverified":
     case "modelNotConfigured":
     case "attachmentCountExceeded":
+    case "sessionHeld":
       return i18n.t(`errors:detail.${descriptor.type}`, {
         ...descriptor,
         defaultValue: apiError.message,

@@ -45,6 +45,7 @@ pub struct SessionAutomationService {
     gates: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
     declarations: Arc<Mutex<HashMap<(String, String), Declaration>>>,
     explicit_dispatch: Arc<Mutex<HashMap<String, Vec<explicit_dispatch::ExplicitDispatch>>>>,
+    session_owner: Arc<std::sync::RwLock<Option<talos_agent::SessionOwner>>>,
 }
 #[derive(Clone)]
 enum Declaration {
@@ -76,6 +77,27 @@ impl SessionAutomationService {
             gates: Default::default(),
             declarations: Default::default(),
             explicit_dispatch: Default::default(),
+            session_owner: Default::default(),
+        }
+    }
+    pub(crate) fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
+        *self.session_owner.write().expect("session owner lock") = Some(owner);
+    }
+    pub(crate) fn session_owner(&self) -> Option<talos_agent::SessionOwner> {
+        self.session_owner
+            .read()
+            .expect("session owner lock")
+            .clone()
+    }
+    /// `Skip` leaves `next_due_at` untouched. `Run(None)` is a test owner that
+    /// has no session lock installed.
+    pub(crate) fn admit_scan(&self, session_id: &str) -> TalosResult<ScanAdmission> {
+        match self.session_owner() {
+            Some(owner) => match owner.try_for_scan(session_id)? {
+                Some(permit) => Ok(ScanAdmission::Run(Some(permit))),
+                None => Ok(ScanAdmission::Skip),
+            },
+            None => Ok(ScanAdmission::Run(None)),
         }
     }
     pub(crate) fn with_managed_workers(mut self, nodes: Option<crate::AgentNodeService>) -> Self {
@@ -356,6 +378,11 @@ impl SessionAutomationService {
         )))
     }
 }
+pub(crate) enum ScanAdmission {
+    Run(Option<talos_agent::SessionScanPermit>),
+    Skip,
+}
+
 fn conflict() -> TalosError {
     TalosError::new(
         ErrorCode::Conflict,
@@ -400,7 +427,10 @@ impl SessionAutomationService {
             self.queue.remove_loop(&task.session_id, &task.id)?;
             return Ok(());
         }
-        if !error.is_code(ErrorCode::Conflict) && !error.is_code(ErrorCode::ActiveTurnRunning) {
+        if !error.is_code(ErrorCode::Conflict)
+            && !error.is_code(ErrorCode::ActiveTurnRunning)
+            && !error.is_code(ErrorCode::SessionHeld)
+        {
             self.stop(
                 &task,
                 LoopStopReason::ExecutionFailed,

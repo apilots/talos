@@ -139,22 +139,32 @@ impl TalosService {
         automation.store.list(&actor.user_id, &request).await
     }
 
-    /// Original wake pump: Loop deadlines and never-admitted Goal deadlines.
-    /// Ongoing Goals still use committed completion or known-idle reconciliation.
+    /// Wake every session that has an active Loop or Goal and whose lock this
+    /// process can hold. The command that started the process does not matter.
     pub async fn scan_session_loops(&self, now: i64) -> ServiceResult<()> {
         let automation = self.turns.automation_service()?;
         let loop_sessions = automation.store.active_loop_sessions().await?;
-        let initial_goals = automation.store.initial_goal_sessions(now).await?;
+        let goal_sessions = automation.store.active_goal_sessions().await?;
         let sessions = loop_sessions
             .into_iter()
-            .chain(initial_goals)
+            .chain(goal_sessions)
             .collect::<std::collections::BTreeSet<_>>();
         for id in sessions {
             let result: ServiceResult<()> = async {
-                if let Some(session) = self.sessions.load_record(&id).await? {
-                    automation.scan(&session, now).await?;
-                    self.turns.try_dispatch_next(&id).await?;
-                    self.turns.continue_goal(session, false).await?;
+                let Some(session) = self.sessions.load_record(&id).await? else {
+                    return Ok(());
+                };
+                let mut permit = match automation.admit_scan(&session.id)? {
+                    crate::automation::goal_loop::ScanAdmission::Skip => return Ok(()),
+                    crate::automation::goal_loop::ScanAdmission::Run(permit) => permit,
+                };
+                automation.scan(&session, now).await?;
+                self.turns.try_dispatch_next(&id).await?;
+                self.turns.continue_goal(session, false).await?;
+                if self.turns.canonical_active_turn(&id).await?.is_none() {
+                    if let Some(permit) = permit.as_mut() {
+                        permit.release_if_idle();
+                    }
                 }
                 Ok(())
             }

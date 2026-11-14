@@ -32,7 +32,7 @@ Loop 既支持用户指定固定间隔，也支持模型根据本轮结果决定
 - `goal`、`loop` 是两个独立内置轻量 Skill，用户通过命令、自然语言主动要求或 UI 显式调用；两者共用一个 `automation` 工具执行确定性业务操作，不形成两套产品入口。
 - Web / Desktop：输入框 slash 与“添加 +”为两个等价入口，选择模式后发送；任务状态与原待发消息共用轻量展开列表。Automation 聚合 Goal / Loop 及当前电脑 owner 可管理的内置 Job。
 - TUI 与 CLI：TUI 的 `/loop`、`/goal` 与 Web / Desktop 共享命令目录、参数及状态动作合同；非交互 CLI 通过 SDK 提供等价命名子命令。
-- Loop / Goal 定义持久化；页面刷新、客户端重连或关闭不停止工作。消息队列仍全部在内存中，Server 重启不统一暂停 Goal / 停止 Loop；后续正常触发基于已有数据库记录继续，丢失的纯内存执行状态本期不恢复。
+- Loop / Goal 定义持久化；页面刷新、客户端重连或关闭不停止工作。消息队列仍全部在内存中，Server 重启不统一暂停 Goal / 停止 Loop。后续正常触发基于已有数据库记录继续。已 claim 但尚未执行的 occurrence 不补跑；持有该 Session 锁的扫描发现 active Loop 的 `next_due_at` 为空、没有运行中的 Turn、也没有排队 occurrence 时，把下一次安排到下一个间隔。丢失的纯内存执行状态不恢复。
 - 现有 `profile-usage-retention`、`dream-memory-maintenance` 保留原生回调与配置所有权，增加所属电脑 owner 的查询、持久暂停 / 恢复，以及按 Job 能力开放的“执行一次”；不新增管理员 / 普通用户分层。
 
 一期不包含：用户 Loop 的日历 cron / cron 编辑器、Webhook / 平台事件、跨 Session 新建运行、独立 Goal evaluator、通用 Stop Hook、LoopRun 控制台、工作流编排、模板市场、每 Loop 独立凭据 / 权限体系、成本美元硬上限。内置维护 Job 既有 cron 继续使用并可只读查看。
@@ -114,7 +114,7 @@ Web / Desktop 导航增加 Automation 入口：显示自己的 Session Goal / Lo
 ### 4.1 Loop：创建、等待、执行、结束
 
 1. 用户在 Session 显式调用 Loop Skill；UI 选择 Loop 后直接发送 prompt。启用消息按原人工消息准入，Skill 调用工具创建 `active` Loop，有 active / paused Goal 或待启用 Goal 时拒绝。Loop 没有统一有效期或自动过期：固定间隔持续安排下一次，直到用户停止或原异常 / 人工边界终止；模型决定模式可根据本轮结果提交 Stop。
-2. 显式选中 Loop 的 Turn 仅开放登记与原 AskUserQuestion；普通提示词驱动的 Turn 保留正常工具，模型 Create 成功后按 Skill 回执，不直接承担新 Loop 的业务首轮。保存 `next_due_at = created_at + 10 秒`；原 1 秒扫描到点后先用 Store 的原比较更新将该时间 claim 为已消费，再放入原内存队列，使同一数据库上的并发扫描只有一个胜者；真正执行仍等待当前 Turn、人工队列和原准入门槛。claim 后崩溃造成的内存项丢失不恢复、不承诺逐次 exactly-once。自动 Loop 永不调用 Steer，不向正在执行的 Turn 注入提示。
+2. 显式选中 Loop 的 Turn 仅开放登记与原 AskUserQuestion；普通提示词驱动的 Turn 保留正常工具，模型 Create 成功后按 Skill 回执，不直接承担新 Loop 的业务首轮。保存 `next_due_at = created_at + 10 秒`；原 1 秒扫描到点后先用 Store 的原比较更新将该时间 claim 为已消费，再放入原内存队列，使同一数据库上的并发扫描只有一个胜者；真正执行仍等待当前 Turn、人工队列和原准入门槛。claim 后崩溃造成的内存项丢失不补跑、不承诺逐次 exactly-once。持有该 Session 锁且没有运行中 Turn 或排队 occurrence 时，扫描把仍为 active、`next_due_at` 为空的 Loop 安排到下一个间隔，而不是重放错过的那一次。自动 Loop 永不调用 Steer，不向正在执行的 Turn 注入提示。
 3. 固定模式按用户间隔唤醒；动态模式由同一执行模型提交本轮下一次决定，后续触发仍进入相同队列。每个 Loop 最多一个待执行 occurrence，本 Loop 正在运行时不再堆积；重复到点合并，不累计补跑。
 4. 每次执行仍是普通 Turn，带可见的 Loop 来源，结果回到同一 Timeline。有变化或需决策时说明，无变化保持简短。
 5. 用户停止，或模型决定模式的 Agent 根据原指令提交 Stop，均禁止下一次触发。执行失败 / 需要人工处理时停止该 Loop 并显示原因，不增加外层自动重试。
@@ -313,7 +313,7 @@ Public contract: Goal and Loop are two independent built-in Skills sharing one t
 2. 两种 Loop 模式均由同一 Session 队列触发，空闲派发、忙碌等待且绝不自动 Steer；显式模式注册 Turn 仅登记 / 回执并限制业务工具，普通提示词 Turn 不套用该工具限制、Create 后按 Skill 回执；真正首轮自定义 created_at 起 10 秒后经原扫描 / 队列准入，倒计时可通过该 Loop Clear 取消，未准入清除不得执行。每 Loop 至多一个待执行 occurrence，运行时不堆积，满队列以 `queueFull` 停止。动态决定至少 1 分钟、正常结算后才安排下一次，原存活正常结算能确认未提供有效决定时以 `missingDecision` 停止；固定间隔持续安排下一次而无统一截止时间，模型决定可正常提交 Stop；停止移除未执行项，不伪报当前 Turn 已结束。
 3. Goal 创建与真实首轮分离；显式模式注册只登记，普通提示词 Turn 保留正常工具；创建所在 Turn 不能 Complete 或结算为 Goal 首轮进展；latest_turn_id 为空时首次 10 秒门槛不可被编辑 / 暂停 / 恢复绕过，倒计时可通过该 Goal Clear 取消。Goal 未完成可续跑、完成保留依据；暂停 / 清除后不续跑；token 预算或默认 24 小时到达、Goal 本次绑定工作等待审批 / 失败与无进展时暂停；独立 User 的失败 / 等待不暂停 Goal，恢复不重置创建时间或预算。
 4. 同 Session 的 Loop / Goal 在各路径始终互斥，暂停 Goal 仍占用模式，切换等待旧 Turn / 人工动作。分别覆盖 Goal 与 Loop 运行场景：原输入框可用，普通输入默认进入原 Queue；未点 Steer 不影响当前 Turn，点击该消息行 Steer 后仅干预同一个 Turn，不另起执行。编辑、删除、调序与空闲手动启动沿用现状，既不取消重启 Turn，也不隐式清除或改写任务定义；同队列 User 先于 Loop，人工消息可组内调序，Goal 仅队列空后续跑。
-5. 页面刷新 / 重连 / 关闭不停止工作；Server 重启不统一暂停 Goal / 停止 Loop，后续正常触发基于已保存状态走原准入。有旧 Turn 记录时先协调，不绕过人工动作；纯内存队列、短期 per-object permit 和未记录执行丢失时不补恢复，也不伪造终态或下一次决定；旧 Cancelled 仍有效，显式新建许可不冒充持久事实。没有可用下次依据时，动态显示“模型决定”，固定显示“暂无下次时间”；首轮门槛依据已有持久字段经原扫描检查，Goal 后续仍按已提交终态 / 已确认空闲事实检查，不引入周期续跑或启动全量补跑。不新增队列 / 逐次触发持久化。
+5. 页面刷新 / 重连 / 关闭不停止工作；Server 重启不统一暂停 Goal / 停止 Loop，后续正常触发基于已保存状态走原准入。有旧 Turn 记录时先协调，不绕过人工动作；纯内存队列、短期 per-object permit 和未记录执行丢失时不补跑错过的 occurrence，也不伪造终态或模型决定。持锁扫描把 active 且 `next_due_at` 为空、没有运行中 Turn 和排队 occurrence 的 Loop 安排到下一个间隔。旧 Cancelled 仍有效，显式新建许可不冒充持久事实。没有可用下次依据时，动态显示“模型决定”，固定显示“暂无下次时间”；首轮门槛依据已有持久字段经原扫描检查，Goal 后续仍按已提交终态 / 已确认空闲事实检查，不引入启动全量补跑。不新增队列 / 逐次触发持久化。
 6. History / Timeline 使用正常用户消息与执行展示，在确切自动 Input 或本条显式选择 Skill 的 Input 底栏，按真实 origin 优先、否则本条 activationMode 默认常显小 icon / 简短来源，整条 Input 悬停 / 聚焦时展开时间、复制；普通 User 无 badge，不单独创建 Goal / Loop 大标题或卡片，不解析 prompt 猜来源。保留原错误、取消与用量，同一目标不因重连或重复结算重复累计。
 7. Web / Desktop 的待发模式位于 Full access 右侧，以淡竖线分隔并无框嵌入图标与文字，悬停 / 聚焦可清除；任务行与 WaitingMessages 共用一个展开容器，左侧仅 icon + Goal / Loop，随后摘要，不重复状态文字、抽屉或同 Loop 定义 / 排队行，不替换 Timeline。Goal 编辑仅 prompt 且保留预算；Loop 可编辑 prompt 与固定 / 动态间隔，固定至少 1 分钟，旧配置决定不覆盖新配置，不重启当前 Turn、重复对象或自动恢复。人工队列编辑 / Steer 保持原限制；历史 Goal 操作只影响目标 ID。覆盖窄屏 / 空态 / 错误态及 TUI / CLI。
 8. Skill 通过共用工具、管理 / 编辑和 CLI 通过 SDK，均进入同一 Service；普通请求由模型依照 Skill 目录描述与工具 schema 判断，不注入未选择的完整正文、不伪造 selection 或用关键词限制创建，显式模式与自动绑定仍由后端确定。Home / Add / slash / 新旧 Session 均传真实 System SkillSelection 与原 prompt，原 ACK 消费一次、失败保留；Goal 注册不冒认人工 Turn 为真实首轮，不越过人工队列；后续自动 Turn 加载对应 Skill 规则。
@@ -334,7 +334,7 @@ TUI 入口须单独完成本端验收：分别直接提交 `/goal <提示词>`�
 - History 沿正常用户消息与执行展示，真实自动来源或本条显式 SkillSelection 在独立窄 metadata 底栏立即常显来源 icon / 简短文案，Input 悬停 / 聚焦时展开时间 / 复制；普通 User 无来源 badge，不新增独立历史卡片。
 - Goal / Loop 运行中均保留原输入框；普通用户输入默认 Queue，显式点击该人工消息行的 Steer 才干预当前同一个 Turn，完全复用原产品操作。自动 Loop 触发进入唯一 Session 队列，不自动 Steer。
 - goal / loop 是两个独立内置轻量 Skill，共用一个 automation 工具；命令、明确自然语言及 UI 模式消息主动启用，提及 / 讨论 / 引用和工具被发现本身不启用。
-- 队列全部保持内存；重启后按已有数据库状态正常触发，有执行记录则沿原机制协调，只有内存状态的工作本期不恢复。不因重启统一暂停 Goal / 停止 Loop，也不为此新增逐次触发持久化。
+- 队列全部保持内存；重启后按已有数据库状态正常触发，有执行记录则沿原机制协调。已消费但未执行的 Loop occurrence 不补跑，改由持锁扫描安排下一个间隔。不因重启统一暂停 Goal / 停止 Loop，也不为此新增逐次触发持久化。
 
 - Goal / Loop 均先登记回执；显式模式注册 Turn 限制业务工具，普通自然语言 Turn 保持正常工具并按 Skill 在 Create 后回执，真正首轮自定义创建后 10 秒才可准入；倒计时可取消，编辑 / 暂停 / 恢复不重置起点，清除只阻止未准入工作。
 - Automation 主行以摘要为主，Complete / Stopped 等一次状态与耗时 / 周期置于第二行 metadata，右侧仅操作。

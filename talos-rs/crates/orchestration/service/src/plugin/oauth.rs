@@ -282,7 +282,7 @@ impl super::PluginManagerService {
                     }
                     delivery = callbacks.recv() => match delivery { Some(delivery) => delivery, None => return },
                 };
-                let guard = match self.commit_guard() {
+                let guard = match self.commit_guard().await {
                     Ok(guard) => guard,
                     Err(error) => {
                         let _ = delivery.completion.send(Err(error));
@@ -309,7 +309,7 @@ impl super::PluginManagerService {
                 _ = attempt.cancel.cancelled() => return,
                 result = tokio::time::timeout(Duration::from_secs(attempt.expires_at.saturating_sub(now())), authorization.finish()) => result.map_err(|_| TalosError::new(ErrorCode::ResourceExpired, "MCP authorization expired.")).and_then(|result|result),
             };
-            let guard = self.commit_guard();
+            let guard = self.commit_guard().await;
             match guard {
                 Ok(guard) => (result, None, Some(guard)),
                 Err(error) => (Err(error), None, None),

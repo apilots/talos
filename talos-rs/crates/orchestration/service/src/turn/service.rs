@@ -56,6 +56,7 @@ pub(crate) struct TurnService {
     nodes: Option<crate::AgentNodeService>,
     wake_dispatches:
         Arc<std::sync::Mutex<std::collections::HashSet<(String, managed_wake::WakeCandidate)>>>,
+    session_owner: Arc<std::sync::RwLock<Option<talos_agent::SessionOwner>>>,
 }
 
 struct TurnSubmission {
@@ -83,7 +84,50 @@ impl TurnService {
             execution_gate,
             nodes: None,
             wake_dispatches: Default::default(),
+            session_owner: Default::default(),
         }
+    }
+
+    pub(crate) fn set_session_owner(&self, owner: talos_agent::SessionOwner) {
+        *self.session_owner.write().expect("session owner lock") = Some(owner);
+    }
+
+    pub(crate) fn session_owner(&self) -> Option<talos_agent::SessionOwner> {
+        self.session_owner
+            .read()
+            .expect("session owner lock")
+            .clone()
+    }
+
+    /// Claim the open-session hold before recovery or subscription.
+    /// A live turn in this process keeps its lock; the requested session is refused.
+    pub(crate) async fn claim_session_open(&self, session_id: &str) -> TalosResult<()> {
+        let Some(owner) = self.session_owner() else {
+            return Ok(());
+        };
+        let retain_others = self.retain_other_session_holds(&owner, session_id).await?;
+        owner.claim_open(session_id, retain_others)
+    }
+
+    async fn retain_other_session_holds(
+        &self,
+        owner: &talos_agent::SessionOwner,
+        session_id: &str,
+    ) -> TalosResult<bool> {
+        if owner.hold() != talos_agent::SessionHold::Attached {
+            return Ok(true);
+        }
+        for other in owner.held_sessions() {
+            if other == session_id {
+                continue;
+            }
+            if let Some(active) = self.canonical_active_turn(&other).await? {
+                if self.is_turn_execution_active(&active.identity) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     pub(crate) fn with_managed_workers(mut self, nodes: crate::AgentNodeService) -> Self {
@@ -429,6 +473,17 @@ impl TurnService {
                 }
             }
         }
+        let mut follow_up_lock = if submission.retry_of_message_id.is_none() {
+            match self.admit_after_dead_owner(&session_id).await {
+                Ok(lock) => lock,
+                Err(error) => {
+                    self.release_command(command_lease.take()).await;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         let validation = match submission.retry_of_message_id.as_deref() {
             Some(retry_of_message_id) => {
                 self.validate_retry_attempt(&session_id, retry_of_message_id)
@@ -492,6 +547,9 @@ impl TurnService {
                 return Err(error);
             }
         };
+        if let Some(lock) = follow_up_lock.as_mut() {
+            lock.hold();
+        }
         if let Some(automation) = self.automation.get() {
             if let Some(object) = automation_object {
                 automation.forget_explicit_dispatch(&session_id, &object);
@@ -613,6 +671,58 @@ impl TurnService {
         }
     }
 
+    async fn admit_after_dead_owner(&self, session_id: &str) -> TalosResult<Option<FollowUpLock>> {
+        let Some(owner) = self.session_owner() else {
+            return Ok(None);
+        };
+        let Some(active) = self.canonical_active_turn(session_id).await? else {
+            return Ok(None);
+        };
+        if self.is_turn_execution_active(&active.identity) {
+            return Ok(None);
+        }
+        let pin = owner.pin(session_id)?;
+        let record = match self.execution.sessions.load_record(session_id).await {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                drop(pin);
+                owner.on_terminal(session_id);
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::SessionNotFound,
+                    "Session is no longer available",
+                ));
+            }
+            Err(error) => {
+                drop(pin);
+                owner.on_terminal(session_id);
+                return Err(error);
+            }
+        };
+        if let Err(error) = user_action_resume::recover_erased(self.clone(), record, active).await {
+            let still_active = self
+                .canonical_active_turn(session_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some();
+            drop(FollowUpLock {
+                owner,
+                session_id: session_id.to_owned(),
+                pin: Some(pin),
+                release_on_drop: !still_active,
+            });
+            return Err(error);
+        }
+        let still_active = self.canonical_active_turn(session_id).await?.is_some();
+        owner.keep_for_follow_up(session_id);
+        Ok(Some(FollowUpLock {
+            owner,
+            session_id: session_id.to_owned(),
+            pin: Some(pin),
+            release_on_drop: !still_active,
+        }))
+    }
+
     async fn reject_active_turn(&self, session_id: &str) -> TalosResult<()> {
         if self.canonical_active_turn(session_id).await?.is_none() {
             return Ok(());
@@ -672,6 +782,29 @@ impl TurnService {
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let profile_context = self.profile_turn_context(&session, request_id);
         self.spawn_turn_completion(identity, profile_context, None, completion);
+    }
+}
+
+struct FollowUpLock {
+    owner: talos_agent::SessionOwner,
+    session_id: String,
+    /// Kept until this guard drops so a nested settlement cannot release the hold.
+    #[allow(dead_code)]
+    pin: Option<talos_agent::SessionAdmissionPin>,
+    release_on_drop: bool,
+}
+
+impl FollowUpLock {
+    fn hold(&mut self) {
+        self.release_on_drop = false;
+    }
+}
+
+impl Drop for FollowUpLock {
+    fn drop(&mut self) {
+        if self.release_on_drop {
+            self.owner.on_terminal(&self.session_id);
+        }
     }
 }
 
