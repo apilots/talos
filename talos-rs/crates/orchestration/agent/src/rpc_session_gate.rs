@@ -183,6 +183,15 @@ impl SessionGate {
         Ok(marker.cleanup_confirmed && !state.reserved.contains(&identity.session_id))
     }
 
+    /// This process still owns the reservation, so cleanup has not finished here.
+    pub(super) fn locally_reserved(&self, session_id: &str) -> bool {
+        self.state
+            .lock()
+            .expect("Worker Session gate lock")
+            .reserved
+            .contains(session_id)
+    }
+
     pub(super) fn new(root: PathBuf) -> Self {
         Self {
             root,

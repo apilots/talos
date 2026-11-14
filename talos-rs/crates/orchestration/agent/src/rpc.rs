@@ -468,11 +468,7 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
             .as_ref()
             .map(|caller| caller.coordinator_id.as_str())
             .ok_or_else(|| status_from_error(invalid_request()))?;
-        let cleanup_confirmed = self
-            .session_gate
-            .authorize_active(&params.agent_id, &params.identity, peer)
-            .map_err(status_from_error)?;
-        let result = if self
+        let local = self
             .active
             .lock()
             .expect("Agent active lock poisoned")
@@ -480,32 +476,47 @@ impl pb::agent_harness_rpc_server::AgentHarnessRpc for AgentHarnessRpcAdapter {
                 params.agent_id.clone(),
                 params.identity.session_id.clone(),
                 params.identity.turn_id.clone(),
-            )) {
+            ));
+        let result = if local {
+            let cleanup_confirmed = self
+                .session_gate
+                .authorize_active(&params.agent_id, &params.identity, peer)
+                .map_err(status_from_error)?;
             self.harness(&params.agent_id)
                 .map_err(status_from_error)?
                 .interrupt(params)
                 .await
-        } else if cleanup_confirmed {
-            // Waiting releases the Harness live slot, while the original Gate
-            // retains the exact coordinator/Turn and confirmed cleanup.
-            Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
-        } else {
+                .map_err(|error| {
+                    if !cleanup_confirmed && error.is_code(ErrorCode::ResourceNotFound) {
+                        TalosError::from_source(
+                            ErrorCode::RunCleanupUnconfirmed,
+                            "Agent Turn cleanup is not confirmed by this node instance",
+                            error,
+                        )
+                    } else {
+                        error
+                    }
+                })
+        } else if self
+            .session_gate
+            .locally_reserved(&params.identity.session_id)
+        {
+            // The reservation is still in this process. Cleanup has not finished.
             Err(TalosError::new(
                 ErrorCode::RunCleanupUnconfirmed,
-                "Agent Turn is not known to this node instance",
+                "Agent Turn cleanup is not confirmed by this node instance",
             ))
-        };
-        let result = result.map_err(|error| {
-            if !cleanup_confirmed && error.is_code(ErrorCode::ResourceNotFound) {
-                TalosError::from_source(
-                    ErrorCode::RunCleanupUnconfirmed,
-                    "Agent Turn cleanup is not confirmed by this node instance",
-                    error,
-                )
-            } else {
-                error
+        } else {
+            // The turn is not live here. The session lock is the proof of life:
+            // acquiring it means the previous owner has exited.
+            match self.session_owner.guard_start(&params.identity.session_id) {
+                Ok(guard) => {
+                    guard.keep();
+                    Ok(talos_agent_api::AgentInterruptOutcome::Cancelled)
+                }
+                Err(error) => Err(error),
             }
-        });
+        };
         Ok(Response::new(pb::InterruptResponse {
             result: Some(match result {
                 Ok(value) => pb::interrupt_response::Result::Interrupted(
