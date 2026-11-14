@@ -1,0 +1,29 @@
+[
+  {
+    "name": "frontier-harness",
+    "version": "1.1.0",
+    "source": "frontier-harness-eval/frontier-harness-eval",
+    "digest": "sha256:9236400fc1a6619eb72a663445c580417be9bbbab32f816c7dff76d0a96ab24a",
+    "tasks": [
+      {
+        "name": "terminal-bench/log-summary-date-ranges",
+        "submission_paths": ["/app/summary.csv"]
+      },
+      {
+        "name": "terminal-bench/music-harmony",
+        "digest": "sha256:f32afbf135cbd3c622ee687ba032abe61cab85a33b5243ee5cbbde82557f3ed1",
+        "submission_paths": ["/app/harmony.mxl"]
+      },
+      {
+        "name": "terminal-bench/filter-js-from-html",
+        "digest": "sha256:2d1496b6fc62adeccdba7a56f4bc24e5ef265840434d2011234ed20b6c240759",
+        "submission_paths": ["/app/filter.py"]
+      },
+      {
+        "name": "terminal-bench/video-processing",
+        "digest": "sha256:d3f02e177b49e5768b6ce6709fc4ae3ef2ce0cdecb63b09fc9b07f9d3ddb7203",
+        "submission_paths": ["/app/jump_analyzer.py", "/app/output.toml"]
+      }
+    ]
+  }
+]

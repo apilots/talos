@@ -13,7 +13,7 @@ from payload import cli_log_lines, run_metrics
 
 def export_atif(logs):
     run = json.loads((logs / "talos-run.json").read_text())
-    if run["exit_code"]:
+    if run["exit_code"] != 0:
         return
     trace = json.loads((logs / "talos-trajectory.json").read_text())
     transcript = json.loads((logs / "talos-transcript.json").read_text())
@@ -35,7 +35,7 @@ def export_atif(logs):
             ))
             continue
 
-        timestamp = datetime.fromtimestamp(block["startedAt"] / 1000, timezone.utc).isoformat()
+        timestamp = datetime.fromtimestamp(block["startedAt"], timezone.utc).isoformat()
         if kind == "userContent":
             steps.append(Step(step_id=len(steps) + 1, source="user", timestamp=timestamp,
                               message=data["text"]))
@@ -67,7 +67,6 @@ def export_atif(logs):
         raise ValueError("The Talos transcript must contain user and agent content")
     usage = (run_metrics(cli_log_lines(logs)) or {}).get("usage", {})
     trajectory = Trajectory(
-        schema_version="ATIF-v1.8",
         session_id=trace["identity"]["sessionId"],
         agent=Agent(name="talos", version=run["version"], model_name=run["model"].replace(":", "/", 1)),
         steps=steps,

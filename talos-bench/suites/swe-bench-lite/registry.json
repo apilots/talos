@@ -2,13 +2,51 @@
   {
     "name": "swe-bench-lite",
     "version": "1.0",
-    "description": "Pinned SWE-bench Lite tasks for native ARM64 Talos evaluation",
+    "description": "Five pinned SymPy 1.7 cases from the SWE-bench Lite test split",
     "tasks": [
       {
         "name": "sympy__sympy-20590",
         "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
         "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
         "path": "tasks/sympy__sympy-20590",
+        "base_commit": "cffd4e0f86fefd4802349a9f9b19ed70934ea354",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20590@sha256:bcdff110a35d19a6838fde5f678d1b5103610234bd034e5703df46878aad3b63",
+        "submission_paths": ["/logs/artifacts/submission.patch"]
+      },
+      {
+        "name": "sympy__sympy-19254",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-19254",
+        "base_commit": "e0ef1da13e2ab2a77866c05246f73c871ca9388c",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-19254@sha256:b0fa5c116818a60cfb71ccfb48d1620b50cdf161f6bc9e6b4db2825fb0db5224",
+        "submission_paths": ["/logs/artifacts/submission.patch"]
+      },
+      {
+        "name": "sympy__sympy-19487",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-19487",
+        "base_commit": "25fbcce5b1a4c7e3956e6062930f4a44ce95a632",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-19487@sha256:3289b9f407aee8220ef6156268ea4c909eb9f50b0c69238688cf28ce74fa585c",
+        "submission_paths": ["/logs/artifacts/submission.patch"]
+      },
+      {
+        "name": "sympy__sympy-20049",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20049",
+        "base_commit": "d57aaf064041fe52c0fa357639b069100f8b28e1",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20049@sha256:c1fea871185f0ae6437a238804b9274a7150eca843567ed88eddfa020c567ea3",
+        "submission_paths": ["/logs/artifacts/submission.patch"]
+      },
+      {
+        "name": "sympy__sympy-20154",
+        "git_url": "https://github.com/SWE-bench/swe-bench-tasks.git",
+        "git_commit_id": "3d07b464b7b311a0cbfb5ed5b2d8a3b96f84a33d",
+        "path": "tasks/sympy__sympy-20154",
+        "base_commit": "bdb49c4abfb35554a3c8ce761696ffff3bb837fe",
+        "amd64_image": "swebench/sweb.eval.x86_64.sympy_1776_sympy-20154@sha256:4cd606cd10023eb7df7faa8b7affcef72750cd25fb4f8bf29d491c46bcd52f4b",
         "submission_paths": ["/logs/artifacts/submission.patch"]
       }
     ]

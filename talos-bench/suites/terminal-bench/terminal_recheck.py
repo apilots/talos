@@ -87,14 +87,16 @@ def recheck(trial):
     if lock.get("digest") != f"sha256:{digest}":
         raise SystemExit("The pinned task contents differ from the source trial lock")
 
-    environment = dict(os.environ, DOCKER_DEFAULT_PLATFORM="linux/arm64",
-                       HARBOR_TELEMETRY="0", PYTHONPATH=os.pathsep.join(map(str, (SUITE, BENCH))))
+    environment = dict(os.environ, HARBOR_TELEMETRY="0", PYTHONPATH=os.pathsep.join(map(str, (SUITE, BENCH))))
     platform = subprocess.check_output(
         ["docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"],
         env=environment, text=True,
     ).strip()
-    if platform != "linux/arm64":
-        raise SystemExit("A native linux/arm64 Docker daemon is required")
+    if platform not in {"linux/arm64", "linux/amd64"}:
+        raise SystemExit(f"Unsupported Docker platform: {platform}")
+    if environment.get("TALOS_BENCH_PLATFORM", platform) != platform:
+        raise SystemExit(f"TALOS_BENCH_PLATFORM must match the native Docker platform ({platform})")
+    environment.update(TALOS_BENCH_PLATFORM=platform, DOCKER_DEFAULT_PLATFORM=platform)
 
     output = REPOSITORY / "output/talos-bench"
     output.mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,7 @@ def recheck(trial):
                                     "taskDigest": lock["digest"]})
     subprocess.run([
         "harbor", "run", "--path", str(task_dir), "--env", "docker", "--force-build",
-        "--extra-docker-compose", str(SUITE / "arm64.compose.yaml"),
+        "--extra-docker-compose", str(BENCH / "runtime/native.compose.yaml"),
         "--agent", "terminal_recheck:SubmissionAgent", "--agent-kwarg", f"source_trial={trial}",
         "--job-name", "recheck",
         "--jobs-dir", str(run), "--yes",

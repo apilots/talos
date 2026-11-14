@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 057 |
+| `feat` | 059 |
 | `fix` | 013 |
 | `refactor` | 045 |
 | `docs` | 001 |
@@ -15,6 +15,8 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-058 | [Phase two benchmark execution](feat-058-benchmark-execution/design.md) | active |
+| feat-057 | [Portable benchmark runs and official artifacts](feat-057-portable-benchmark-runs/design.md) | active |
 | feat-056 | [Plugin lifecycle and local packages](feat-056-plugin-lifecycle-and-packages/design.md) | verified |
 | feat-055 | [Local Talos Agent benchmarks](feat-055-local-agent-benchmarks/design.md) | verified |
 | feat-054 | [Talo managed AI assistant](feat-054-managed-talo/design.md) | implemented |

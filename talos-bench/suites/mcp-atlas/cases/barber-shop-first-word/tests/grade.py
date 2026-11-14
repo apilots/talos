@@ -1,8 +1,9 @@
-"""Run the upstream scorer with a loopback judge for this one controlled claim."""
+"""Run the pinned upstream MCP-Atlas claim scorer in the separate verifier."""
 
 import csv
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -42,9 +43,18 @@ class Judge(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(payload).encode())
 
 
-def grade(answer_file, logs):
-    if platform.machine() != "aarch64":
-        raise RuntimeError("MCP-Atlas verification requires native ARM64")
+def run_scorer(groundtruth, candidate, logs, judge_model, *options, timeout):
+    subprocess.run([
+        sys.executable, "/opt/atlas/score_claims.py",
+        "--groundtruth-file", str(groundtruth),
+        "--model-file", str(candidate), "--model-name", "talos",
+        "--evaluator-model", judge_model,
+        "--output-dir", str(logs), "--concurrency", "2",
+        *options,
+    ], check=True, timeout=timeout)
+
+
+def controlled_judge(groundtruth, candidate, logs):
     # Linux can expose inactive tunnel devices even with Docker network_mode none.
     active = {
         flags.parent.name for flags in Path("/sys/class/net").glob("*/flags")
@@ -52,43 +62,64 @@ def grade(answer_file, logs):
     }
     if active != {"lo"}:
         raise RuntimeError("The controlled verifier requires loopback-only networking")
-    logs.mkdir(parents=True, exist_ok=True)
-    (logs / "architecture.txt").write_text("aarch64\n")
     (logs / "network.txt").write_text("lo\n")
-    response = answer_file.read_text().strip()
-    model_file = logs / "candidate.csv"
-    with model_file.open("w", newline="") as stream:
-        csv.writer(stream).writerows([("task_id", "response"), (TASK, response)])
-
     with ThreadingHTTPServer(("127.0.0.1", 0), Judge) as server:
         server.verdicts = []
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            subprocess.run([
-                sys.executable, "/opt/atlas/score_claims.py",
-                "--groundtruth-file", str(Path(__file__).with_name("groundtruth.csv")),
-                "--model-file", str(model_file), "--model-name", "talos",
-                "--evaluator-model", JUDGE, "--api-key", "local-judge",
+            run_scorer(
+                groundtruth, candidate, logs, JUDGE,
+                "--api-key", "local-judge",
                 "--base-url", f"http://127.0.0.1:{server.server_port}",
-                "--output-dir", str(logs), "--concurrency", "1",
-            ], check=True, timeout=30)
+                timeout=30,
+            )
         finally:
             server.shutdown()
             thread.join()
-        verdicts = server.verdicts
+        return server.verdicts
 
-    (logs / "judge-verdicts.json").write_text(json.dumps(verdicts, indent=2) + "\n")
+
+def grade(answer_file, logs):
+    architecture = platform.machine()
+    if architecture not in {"aarch64", "x86_64"}:
+        raise RuntimeError(f"Unsupported MCP-Atlas verifier architecture: {architecture}")
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "architecture.txt").write_text(f"{architecture}\n")
+    groundtruth = Path(__file__).with_name("groundtruth.csv")
+    with groundtruth.open(newline="") as stream:
+        case, = csv.DictReader(stream)
+    task_id = case["TASK"]
+    response = answer_file.read_text().strip()
+    candidate = logs / "candidate.csv"
+    with candidate.open("w", newline="") as stream:
+        csv.writer(stream).writerows([("task_id", "response"), (task_id, response)])
+
+    if task_id == TASK:
+        verdicts = controlled_judge(groundtruth, candidate, logs)
+        # The upstream scorer skips judge calls for blank and ERROR responses.
+        if len(verdicts) != (0 if not response or response.startswith("ERROR:") else 1):
+            raise ValueError("Unexpected number of local judge calls")
+    else:
+        run_scorer(groundtruth, candidate, logs, os.environ["EVAL_LLM_MODEL"], timeout=390)
+
     with (logs / "scored_talos.csv").open(newline="") as stream:
         row, = csv.DictReader(stream)
-    if row["TASK"] != TASK or row["total_claims"] != "1":
-        raise ValueError("The upstream scorer did not score exactly the controlled claim")
-    # The upstream scorer skips judge calls for blank and ERROR responses.
-    if len(verdicts) != (0 if not response or response.startswith("ERROR:") else 1):
-        raise ValueError("Unexpected number of local judge calls")
+    if row["TASK"] != task_id:
+        raise ValueError("The upstream scorer returned a different task")
+    if task_id == TASK:
+        if row["total_claims"] != "1":
+            raise ValueError("The upstream scorer did not score exactly the controlled claim")
+    else:
+        details = json.loads(row["coverage_details_json"])
+        verdicts = details.get("per_claim", [])
+        # Atlas writes an apparent 0 for judge requests that exhausted their retries.
+        if not verdicts or any(verdict["reason"].startswith("Evaluation failed:") for verdict in verdicts):
+            raise RuntimeError("The upstream judge did not evaluate every claim")
+    (logs / "judge-verdicts.json").write_text(json.dumps(verdicts, indent=2) + "\n")
     score = float(row["coverage_score"])
-    if score not in {0.0, 1.0}:
-        raise ValueError("Unexpected coverage score for the controlled claim")
+    if not 0.0 <= score <= 1.0 or (task_id == TASK and score not in {0.0, 1.0}):
+        raise ValueError("Unexpected Atlas coverage score")
     (logs / "reward.txt").write_text(f"{score}\n")
 
 

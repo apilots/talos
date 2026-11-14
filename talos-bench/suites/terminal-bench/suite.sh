@@ -18,13 +18,16 @@ case "$suite_version" in
 esac
 
 prepare_suite() {
+  if [[ "$mode" == real && "$suite_version" == 2.0 ]]; then
+    agent_args+=(--agent-kwarg include_content=true)
+  fi
   if [[ "$suite_version" != 2.0 ]]; then
     job_name="$suite-$suite_version"
   elif [[ "$selection" == regex-log ]]; then
     job_name=regex-log
   fi
   suite_args=(--registry-path "$registry" --dataset "terminal-bench@$suite_version"
-    --force-build --extra-docker-compose "$suite_dir/arm64.compose.yaml")
+    --force-build --extra-docker-compose "$bench_dir/runtime/native.compose.yaml")
   while IFS= read -r task; do
     suite_args+=(--include-task-name "$task")
   done <<< "$selection"
