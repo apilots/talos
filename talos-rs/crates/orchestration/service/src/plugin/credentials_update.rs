@@ -7,7 +7,7 @@ impl super::PluginManagerService {
         &self,
         request: McpCredentialsUpdateRequest,
     ) -> TalosResult<McpAuthenticationResponse> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.commit_guard().await?;
         self.mcp_context()?.oauth.cancel(&request.server);
         let result = self.commit_mcp_credentials(&request.server, request.change);
         self.recover_credentials();

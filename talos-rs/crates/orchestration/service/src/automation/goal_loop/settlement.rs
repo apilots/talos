@@ -302,6 +302,12 @@ impl SessionAutomationService {
             if self.loop_is_queued(&session.id, &task.id) {
                 continue;
             }
+            // A finished occurrence clears `next_due_at` before its terminal
+            // callback runs. Rescheduling in that gap makes settlement treat
+            // the Stop decision as a duplicate and leave the Loop active.
+            if self.settlement_still_owns(&session.id, &task).await? {
+                continue;
+            }
             let minutes = match &task.schedule {
                 LoopSchedule::FixedInterval { minutes } => (*minutes).max(1),
                 LoopSchedule::ModelDecided {} => 1,
@@ -315,6 +321,24 @@ impl SessionAutomationService {
             }
         }
         Ok(())
+    }
+
+    async fn settlement_still_owns(
+        &self,
+        session_id: &str,
+        task: &SessionLoop,
+    ) -> TalosResult<bool> {
+        let Some(turn_id) = task.latest_turn_id.as_deref() else {
+            return Ok(false);
+        };
+        let Some(terminal) = self
+            .execution
+            .get_latest_agent_terminal_event(session_id)
+            .await?
+        else {
+            return Ok(false);
+        };
+        Ok(terminal.identity.turn_id == turn_id && task.updated_at < terminal.occurred_at)
     }
 
     fn loop_is_queued(&self, session_id: &str, loop_id: &str) -> bool {
