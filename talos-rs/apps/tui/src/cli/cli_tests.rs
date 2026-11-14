@@ -8,6 +8,52 @@ use talos_sdk::{
 };
 
 #[test]
+fn exec_does_not_scan_loops_and_prints_a_waiting_contract() {
+    let cli = Cli::try_parse_from(["talos", "exec", "hello"]).unwrap();
+    let Some(Commands::Exec(cmd)) = cli.command else {
+        panic!("exec command");
+    };
+    let policy = session_ownership(&TerminalMode::Command(Commands::Exec(cmd)));
+    assert!(!policy.run_session_loops);
+    assert_eq!(policy.hold, talos_base::SessionHold::Process);
+    assert_eq!(policy.kind, talos_error::SessionOwnerKind::Exec);
+
+    let pending = AgentPendingInput::Message {
+        action_id: "action-1".into(),
+        prompt: "Need a choice".into(),
+    };
+    let line = waiting_input_line("session-1", "turn-1", &pending);
+    assert!(line.starts_with(
+        "WAITING_FOR_INPUT session=session-1 turn=turn-1 kind=message action_id=action-1 request="
+    ));
+    let request = line.split_once("request=").unwrap().1;
+    let parsed: serde_json::Value = serde_json::from_str(request).unwrap();
+    assert_eq!(parsed["type"], "message");
+    assert_eq!(parsed["actionId"], "action-1");
+    assert_eq!(parsed["prompt"], "Need a choice");
+
+    let status: serde_json::Value =
+        serde_json::from_str(&exec_result_line("session-1", "turn-1", "waiting")).unwrap();
+    assert_eq!(
+        status,
+        serde_json::json!({
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "status": "waiting",
+        })
+    );
+}
+
+#[test]
+fn parses_exec_request_id() {
+    let cli = Cli::try_parse_from(["talos", "exec", "--request-id", "key-1", "hello"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Exec(cmd)) if cmd.request_id.as_deref() == Some("key-1")
+    ));
+}
+
+#[test]
 fn parses_exec_command() {
     for (args, expected) in [
         (vec!["talos", "exec", "hello"], false),

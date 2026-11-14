@@ -22,10 +22,18 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
     match runtime.block_on(run(&mut log_guard)) {
+        Ok(()) => Ok(ExitCode::SUCCESS),
         Err(error) if error.is::<cli::ExecWaitingForInput>() => {
             Ok(ExitCode::from(cli::ExecWaitingForInput::EXIT_CODE))
         }
-        result => result.map(|()| ExitCode::SUCCESS),
+        Err(error) if cli::is_session_held(error.as_ref()) => {
+            eprintln!("{}", cli::public_error_message(error.as_ref()));
+            Ok(ExitCode::from(cli::ExecSessionHeld::EXIT_CODE))
+        }
+        Err(error) => {
+            eprintln!("{}", cli::public_error_message(error.as_ref()));
+            Ok(ExitCode::from(1))
+        }
     }
 }
 
