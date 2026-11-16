@@ -14,6 +14,7 @@ use tokio::sync::broadcast;
 use tokio::time::Instant;
 
 use super::{service::SubagentService, MAX_AGENT_TREE_NODES};
+use crate::turn::await_admission;
 
 const MAX_WAIT_DURATION: Duration = Duration::from_secs(60);
 const MAX_FOLLOW_UP_PROMPT_BYTES: usize = 32 * 1024;
@@ -133,15 +134,10 @@ impl SubagentService {
         else {
             return self.snapshot(subagent).await;
         };
-        match active.state {
-            ActiveTurnState::Cancelling => self.snapshot(subagent).await,
-            ActiveTurnState::Running | ActiveTurnState::WaitingForInput => {
-                self.turns
-                    .interrupt_subagent_turn(child, active.identity.turn_id.clone(), agent_id)
-                    .await?;
-                self.snapshot(subagent).await
-            }
-        }
+        self.turns
+            .interrupt_subagent_turn(child, active.identity.turn_id, agent_id)
+            .await?;
+        self.snapshot(subagent).await
     }
 
     pub(crate) async fn follow_up(
@@ -170,27 +166,31 @@ impl SubagentService {
                 ),
             ));
         }
-        let result = self
-            .turns
-            .submit_subagent_turn(
-                child,
-                StartTurnRequest {
-                    node_id: None,
-                    session_id: subagent.session_id.clone(),
-                    input: AgentUserInput {
-                        content: vec![AgentUserContent::Text {
-                            text: request.prompt,
-                        }],
+        let turns = self.turns.clone();
+        let session_id = subagent.session_id.clone();
+        let result = await_admission(async move {
+            turns
+                .submit_subagent_turn_owned(
+                    child,
+                    StartTurnRequest {
+                        node_id: None,
+                        session_id,
+                        input: AgentUserInput {
+                            content: vec![AgentUserContent::Text {
+                                text: request.prompt,
+                            }],
+                        },
+                        model_selection: None,
+                        user_permission_mode: None,
+                        project_id: None,
+                        current_directory: None,
+                        client_request_id: None,
                     },
-                    model_selection: None,
-                    user_permission_mode: None,
-                    project_id: None,
-                    current_directory: None,
-                    client_request_id: None,
-                },
-                agent_id,
-            )
-            .await?;
+                    agent_id,
+                )
+                .await
+        })
+        .await?;
         self.snapshot_exact(subagent, &result.turn_id).await
     }
 

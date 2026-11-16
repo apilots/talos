@@ -95,6 +95,7 @@ async fn admit(f: &Fixture, origin: Option<AutomationTurnOrigin>) -> TalosResult
     let identity = AgentTurnRef::new("s", "t");
     f.session
         .commit_initial_admission(CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: origin,
             command: None,
             events: vec![

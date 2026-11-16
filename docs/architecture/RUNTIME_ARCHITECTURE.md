@@ -254,6 +254,25 @@ This applies at every level of the Session tree. Subsequent parent Session
 configuration changes apply to children spawned after the change. Cross-Agent
 delegation, if introduced, must be a separate explicit product capability.
 
+Child Turn admission shares the primary Session's collaboration limits.
+`agent.subagent_admission.max_depth` defaults to three child levels and is
+checked before creating a child Session within the canonical path limit. Set it
+to one to allow direct children only. `max_active_turns` defaults to twenty
+active child Turns per tree. The Turn Store checks capacity for a child's first
+Turn in the same transaction that inserts the active Turn. A child with a
+settled Turn can start a follow-up at capacity. Running, waiting, and cancelling
+child Turns all count against new children until settlement.
+
+Rejected admission returns `sessionBudgetExceeded` without starting execution.
+The spawn admission task owns cleanup of a rejected child even if the request
+is dropped. Repeating an interrupt can confirm cleanup of a cancelling child
+and release the slot. Parent Turns and existing message delivery, waiting, and
+interruption need no child slot. Separate primary Session trees admit
+independently.
+
+See [Subagent Turn admission](../../spec/fix-013-subagent-admission/design.md)
+for the policy and verification contract.
+
 ## Tool capability flow
 
 ```text

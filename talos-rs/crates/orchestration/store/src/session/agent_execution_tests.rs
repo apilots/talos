@@ -67,6 +67,7 @@ fn admission() -> Vec<AgentEvent> {
 
 fn initial_admission(events: Vec<AgentEvent>) -> CommitInitialAdmissionParams {
     CommitInitialAdmissionParams {
+        subagent_limit: None,
         automation_origin: None,
         events,
         command: None,
@@ -705,6 +706,7 @@ async fn session_clear_atomically_removes_canonical_history_and_resets_summary()
     };
     let admission = store
         .commit_initial_admission(CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: None,
             events: admission(),
             command: Some(lease),

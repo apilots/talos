@@ -61,6 +61,7 @@ async fn cancellation_is_display_only_and_command_replay_retains_original_respon
     let initial = a
         .sessions
         .commit_initial_admission(CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: None,
             events: vec![
                 event(
@@ -237,6 +238,7 @@ async fn enabling_capture_preserves_a_large_existing_history_at_the_pre_mutation
         .unwrap();
     let admitted = local
         .commit_initial_admission(CommitInitialAdmissionParams {
+            subagent_limit: None,
             automation_origin: None,
             events: vec![
                 event(

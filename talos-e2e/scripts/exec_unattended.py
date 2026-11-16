@@ -18,6 +18,32 @@ METRICS_PREFIX = "TALOS_EXEC_METRICS "
 PROVIDER = "chat-protocol-default"
 
 
+DEPTH_CASES = ("admission-root", "admission-child", "admission-grandchild", "admission-great-grandchild")
+
+
+def admission_chunks(case, history):
+    level = DEPTH_CASES.index(case)
+    at_limit = level == len(DEPTH_CASES) - 1
+    target = ("child", "grandchild", "great_grandchild", "too_deep")[level]
+    next_prompt = (*DEPTH_CASES[1:], "unexpected-beyond-admission")[level]
+    results = [message for message in history if message["role"] == "tool"]
+    if at_limit and results:
+        response = json.loads(results[-1]["content"])
+        assert response["ok"] is False and "3 child levels" in response["error"]["message"], response
+    if not at_limit and len(results) == 2:
+        outcome = json.loads(results[-1]["content"])["result"]["result"]["outcome"]
+        assert outcome["status"] == "completed" and outcome["output"] == f"PROTOCOL_OK:call_{next_prompt}", outcome
+    done = len(results) == (1 if at_limit else 2)
+    chunks = chat_chunks("call_" + case, "off", done)
+    if not done:
+        name, args = ("spawn_agent", {"taskName": target, "prompt": next_prompt}) if not results else (
+            "wait_agent", {"target": {"type": "directChild", "name": target}, "timeoutMs": 10000},
+        )
+        tool = chunks[0]["choices"][0]["delta"]["tool_calls"][0]
+        tool.update(id=f"call_{case}_{len(results)}", function={"name": name, "arguments": json.dumps(args)})
+    return chunks
+
+
 class Fixture(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -32,12 +58,14 @@ class Fixture(BaseHTTPRequestHandler):
         if case == "fail":
             self.reply({"error": {"message": "Controlled provider failure", "type": "invalid_request_error"}}, 400)
             return
-        done = case == "seed" or any(message.get("tool_call_id") == call for message in history[user_index:])
-        marker = shlex.quote(str(self.server.workspace / case))
-        command = f"test ! -s {marker} && printf tool-ran > {marker}"
-        if case == "delegate":
+        if case in DEPTH_CASES:
+            chunks = admission_chunks(case, history[user_index:])
+        elif case == "delegate":
             chunks = self.delegate_chunks(call, history[user_index:])
         else:
+            done = case == "seed" or any(message.get("tool_call_id") == call for message in history[user_index:])
+            marker = shlex.quote(str(self.server.workspace / case))
+            command = f"test ! -s {marker} && printf tool-ran > {marker}"
             chunks = chat_chunks(call, "off", done, command=command)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -108,7 +136,7 @@ def exercise(root, work, report):
                            if line.startswith(METRICS_PREFIX)]
                 assert len(records) == 1 and METRICS_PREFIX not in result.stdout, result
                 if case != "fail":
-                    rounds = {"new": 2, "enable": 2, "saved": 2, "delegate": 3}.get(case, 1)
+                    rounds = {"new": 2, "enable": 2, "saved": 2, "delegate": 3, DEPTH_CASES[0]: 3}.get(case, 1)
                     usage = json.loads(records[0])["usage"]
                     assert usage["input_tokens"] == 100 * rounds, usage
                     assert usage["output_tokens"] == 10 * rounds, usage
@@ -152,6 +180,8 @@ def exercise(root, work, report):
             assert (workspace / "enable").read_text() == (workspace / "saved").read_text() == "tool-ran"
             run("delegate", 0, str(uuid4()), "--dangerously-skip-permissions")
             assert (workspace / "child").read_text() == "tool-ran"
+            run(DEPTH_CASES[0], 0, str(uuid4()))
+            print("CASE subagent_admission PASS default depth=3 nested result delivered")
             assert config.read_bytes() == original
             print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child")
         finally:

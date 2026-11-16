@@ -478,13 +478,20 @@ impl TurnService {
             .origin
             .as_ref()
             .map(crate::automation::goal_loop::automation_object);
-        let execution_result = if let Some(origin) = submission.origin {
-            self.execution
-                .start_automation(params, command_lease.clone(), Some(origin))
-                .await
-        } else {
-            self.execution.start(params, command_lease.clone()).await
-        };
+        let subagent_limit = matches!(
+            session.tree_identity,
+            talos_store::session::SessionTreeIdentity::Subagent { .. }
+        )
+        .then_some(self.base_config.agent.subagent_admission.max_active_turns);
+        let execution_result = self
+            .execution
+            .start(
+                params,
+                command_lease.clone(),
+                submission.origin,
+                subagent_limit,
+            )
+            .await;
         let completion = match execution_result {
             Ok(completion) => completion,
             Err(error) => {
@@ -677,7 +684,7 @@ impl TurnService {
 
 /// Keep Service admission and its completion handoff alive if the request is dropped.
 /// This task owns only product submission; Harness continues to own execution cleanup.
-async fn await_admission<T: Send + 'static>(
+pub(crate) async fn await_admission<T: Send + 'static>(
     admission: impl std::future::Future<Output = TalosResult<T>> + Send + 'static,
 ) -> TalosResult<T> {
     tokio::spawn(async move {
