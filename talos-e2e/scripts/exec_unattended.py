@@ -234,6 +234,19 @@ def exercise(root, work, report):
                     capture_output=True, text=True, timeout=15)
                 (report / "competing.stderr.txt").write_text(competing.stderr)
                 assert competing.returncode == 4, competing.stderr
+                plugin = work / "running-turn-mcp.json"
+                plugin.write_text(json.dumps({
+                    "name": "while-running", "transport": {
+                        "type": "streamable_http", "url": "http://127.0.0.1:1",
+                    },
+                }))
+                install = subprocess.run(
+                    [environment["TALOS_E2E_CLI_BIN"], "plugin", "mcp", "add", "--file", str(plugin)],
+                    env=environment, cwd=workspace, capture_output=True, text=True, timeout=15)
+                (report / "running-turn-plugin.stdout.txt").write_text(install.stdout)
+                (report / "running-turn-plugin.stderr.txt").write_text(install.stderr)
+                assert install.returncode == 0, install.stderr
+                assert json.loads(install.stdout)["install"]["enabled"]
                 time.sleep(2)
                 assert holder.poll() is None, "owner exited before two scan ticks"
                 with sqlite3.connect(database) as db:
@@ -260,7 +273,7 @@ def exercise(root, work, report):
                     (crash_session, marker["active"]["turnId"])).fetchall()
             assert len(failures) == 1
             assert json.loads(failures[0][0])["data"]["error"]["message"] == "owner process exited"
-            print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child held=4 request_id=replayed sigkill=recovered unrelated_loop=untouched")
+            print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child held=4 request_id=replayed sigkill=recovered unrelated_loop=untouched plugin=installed_while_running")
         finally:
             server.shutdown()
             server_thread.join()

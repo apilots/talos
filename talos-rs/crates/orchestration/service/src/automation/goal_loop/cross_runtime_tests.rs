@@ -88,34 +88,6 @@ fn due_loop(id: &str, session: &str, next_due_at: Option<i64>, now: i64) -> Sess
 }
 
 #[tokio::test]
-async fn process_scan_does_not_claim_another_sessions_due_loop() {
-    let (service, store) = fixture().await;
-    let now = chrono::Utc::now().timestamp();
-    let due = now - 1;
-    store
-        .automation_store()
-        .create_loop(&due_loop("foreign", "alice", Some(due), now))
-        .await
-        .unwrap();
-    let locks = tempfile::tempdir().unwrap();
-    service.set_session_owner(talos_agent::SessionOwner::new(
-        locks.path(),
-        talos_error::SessionOwnerKind::Exec,
-        talos_agent::SessionHold::Process,
-    ));
-    service.scan_session_loops(now).await.unwrap();
-    assert_eq!(
-        store
-            .automation_store()
-            .loop_task("foreign")
-            .await
-            .unwrap()
-            .next_due_at,
-        Some(due)
-    );
-}
-
-#[tokio::test]
 async fn a_process_that_holds_the_session_claims_its_due_loop() {
     let (service, store) = fixture().await;
     let now = chrono::Utc::now().timestamp();

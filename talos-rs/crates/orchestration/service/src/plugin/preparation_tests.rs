@@ -93,15 +93,15 @@ async fn cancellation_is_actor_bound_and_releases_the_candidate_without_commit()
 }
 
 #[tokio::test]
-async fn preparation_does_not_hold_execution_gate_and_commit_still_requires_it() {
+async fn prepared_plugin_can_be_published_during_execution() {
     let (_directory, service, request) = fixture();
     let gate = service.execution_gate();
-    let executing = gate.read().await;
+    let _executing = gate.read().await;
     let prepared = service
         .prepare_plugin_change(actor("alice"), WorkerPluginChange::Install(request.clone()))
         .await
         .unwrap();
-    let error = service
+    let installed = service
         .commit_plugin_install(
             actor("alice"),
             WorkerPluginInstall {
@@ -110,21 +110,8 @@ async fn preparation_does_not_hold_execution_gate_and_commit_still_requires_it()
             },
         )
         .await
-        .unwrap_err();
-    assert_eq!(error.error_code(), ErrorCode::Conflict);
-    drop(executing);
-    assert!(service
-        .manager
-        .list_plugins(PluginListRequest {
-            node_id: None,
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true
-        })
-        .unwrap()
-        .plugins
-        .is_empty());
+        .unwrap();
+    assert!(installed.install.enabled);
 }
 
 #[tokio::test]

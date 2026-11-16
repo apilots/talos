@@ -6,7 +6,7 @@ use agent_protocol::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -43,8 +43,7 @@ impl From<&AgentSessionContext> for Binding {
 }
 #[derive(Debug, Default)]
 struct State {
-    markers: HashMap<String, Marker>,
-    reserved: HashSet<String>,
+    reservations: HashMap<String, Marker>,
     configuration_reserved: bool,
 }
 #[derive(Debug, Clone)]
@@ -80,27 +79,19 @@ impl Drop for Reservation {
             state.configuration_reserved = false;
             return;
         };
-        state.reserved.remove(session_id);
+        state.reservations.remove(session_id);
         if !self.consumed {
-            if let Some(marker) = self.previous_marker.take() {
-                match self.gate.save(session_id, &marker) {
-                    Ok(()) => {
-                        state.markers.insert(session_id.clone(), marker);
-                    }
-                    Err(error) => talos_logging::report_error(&error),
-                }
+            let restored = if let Some(marker) = self.previous_marker.take() {
+                self.gate.save(session_id, &marker)
             } else {
-                let removed = talos_fs::remove_file(&self.gate.path(session_id)).and_then(|()| {
+                talos_fs::remove_file(&self.gate.path(session_id)).and_then(|()| {
                     std::fs::File::open(&self.gate.root)
                         .and_then(|directory| directory.sync_all())
                         .map_err(io_error)
-                });
-                match removed {
-                    Ok(()) => {
-                        state.markers.remove(session_id);
-                    }
-                    Err(error) => talos_logging::report_error(&error),
-                }
+                })
+            };
+            if let Err(error) = restored {
+                talos_logging::report_error(&error);
             }
         }
     }
@@ -117,7 +108,7 @@ impl SessionGate {
     /// continuations and recovery markers loaded after a Worker restart.
     pub(super) fn reserve_configuration(&self) -> TalosResult<Reservation> {
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        if state.configuration_reserved || !state.reserved.is_empty() {
+        if state.configuration_reserved || !state.reservations.is_empty() {
             return Err(busy());
         }
         match std::fs::read_dir(&self.root) {
@@ -159,22 +150,20 @@ impl SessionGate {
         identity: &AgentTurnRef,
         peer: &str,
     ) -> TalosResult<bool> {
-        let mut state = self.state.lock().expect("Worker Session gate lock");
-        let marker = self
-            .load(&mut state, &identity.session_id)?
-            .ok_or_else(|| {
-                TalosError::new(
-                    ErrorCode::RunCleanupUnconfirmed,
-                    "Agent Turn is not known to this node instance",
-                )
-            })?;
+        let state = self.state.lock().expect("Worker Session gate lock");
+        let marker = self.load(&state, &identity.session_id)?.ok_or_else(|| {
+            TalosError::new(
+                ErrorCode::RunCleanupUnconfirmed,
+                "Agent Turn is not known to this node instance",
+            )
+        })?;
         if marker.binding.agent_id != agent_id
             || marker.active.as_ref() != Some(identity)
             || marker.coordinator_id != peer
         {
             return Err(conflict());
         }
-        Ok(marker.cleanup_confirmed && !state.reserved.contains(&identity.session_id))
+        Ok(marker.cleanup_confirmed && !state.reservations.contains_key(&identity.session_id))
     }
 
     /// The caller holds the Worker session lease. Reconcile only the marker
@@ -186,13 +175,12 @@ impl SessionGate {
         peer: &str,
         can_confirm: impl FnOnce() -> bool,
     ) -> TalosResult<()> {
-        let mut state = self.state.lock().expect("Worker Session gate lock");
-        if state.reserved.contains(&identity.session_id) {
+        let state = self.state.lock().expect("Worker Session gate lock");
+        if state.reservations.contains_key(&identity.session_id) {
             return Err(cleanup_unconfirmed());
         }
         let mut marker = self
-            .load(&mut state, &identity.session_id)?
-            .cloned()
+            .load(&state, &identity.session_id)?
             .ok_or_else(cleanup_unconfirmed)?;
         if marker.binding.agent_id != agent_id
             || marker.active.as_ref() != Some(identity)
@@ -206,7 +194,6 @@ impl SessionGate {
             }
             marker.cleanup_confirmed = true;
             self.save(&identity.session_id, &marker)?;
-            state.markers.insert(identity.session_id.clone(), marker);
         }
         Ok(())
     }
@@ -217,33 +204,27 @@ impl SessionGate {
             state: Arc::new(Mutex::new(State::default())),
         }
     }
-    fn load<'a>(&self, state: &'a mut State, session_id: &str) -> TalosResult<Option<&'a Marker>> {
+    fn load(&self, state: &State, session_id: &str) -> TalosResult<Option<Marker>> {
         if session_id.is_empty() {
             return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 "Session identity is invalid",
             ));
         }
-        // Outside a local reservation another process may have owned the lock
-        // and advanced this marker since our last access.
-        if !state.reserved.contains(session_id) {
-            match std::fs::read(self.path(session_id)) {
-                Ok(bytes) => {
-                    let marker: Marker = serde_json::from_slice(&bytes).map_err(|error| {
-                        TalosError::internal_with_source(
-                            "Worker execution marker is invalid; recovery is required.",
-                            error,
-                        )
-                    })?;
-                    state.markers.insert(session_id.into(), marker);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    state.markers.remove(session_id);
-                }
-                Err(error) => return Err(io_error(error)),
-            }
+        if let Some(marker) = state.reservations.get(session_id) {
+            return Ok(Some(marker.clone()));
         }
-        Ok(state.markers.get(session_id))
+        // Without a local reservation, another owner may have advanced the marker.
+        match std::fs::read(self.path(session_id)) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+                TalosError::internal_with_source(
+                    "Worker execution marker is invalid; recovery is required.",
+                    error,
+                )
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(error)),
+        }
     }
     fn path(&self, id: &str) -> PathBuf {
         self.root
@@ -261,18 +242,19 @@ impl SessionGate {
     }
 
     pub(super) fn read(&self, context: &AgentSessionContext) -> TalosResult<SessionExecutionState> {
-        let mut state = self.state.lock().expect("Worker Session gate lock");
-        match self.load(&mut state, &context.session_id)? {
+        let state = self.state.lock().expect("Worker Session gate lock");
+        match self.load(&state, &context.session_id)? {
             Some(marker) => {
-                binding(marker, context)?;
+                binding(&marker, context)?;
+                let handoff_ready = marker.active.is_none()
+                    && marker.cleanup_confirmed
+                    && marker.visibility == SessionStateVisibility::Shared
+                    && !state.reservations.contains_key(&context.session_id);
                 Ok(SessionExecutionState {
-                    history_cursor: marker.history_cursor.clone(),
-                    active_turn: marker.active.clone(),
-                    coordinator_id: Some(marker.coordinator_id.clone()),
-                    handoff_ready: marker.active.is_none()
-                        && marker.cleanup_confirmed
-                        && marker.visibility == SessionStateVisibility::Shared
-                        && !state.reserved.contains(&context.session_id),
+                    history_cursor: marker.history_cursor,
+                    active_turn: marker.active,
+                    coordinator_id: Some(marker.coordinator_id),
+                    handoff_ready,
                 })
             }
             None => Ok(SessionExecutionState {
@@ -298,10 +280,10 @@ impl SessionGate {
             ));
         }
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        if state.configuration_reserved || state.reserved.contains(&context.session_id) {
+        if state.configuration_reserved || state.reservations.contains_key(&context.session_id) {
             return Err(busy());
         }
-        let previous_marker = self.load(&mut state, &context.session_id)?.cloned();
+        let previous_marker = self.load(&state, &context.session_id)?;
         match &previous_marker {
             Some(marker) => {
                 binding(marker, context)?;
@@ -342,8 +324,9 @@ impl SessionGate {
         marker.visibility = SessionStateVisibility::Local;
         marker.active = Some(identity.clone());
         self.save(&context.session_id, &marker)?;
-        state.markers.insert(context.session_id.clone(), marker);
-        state.reserved.insert(context.session_id.clone());
+        state
+            .reservations
+            .insert(context.session_id.clone(), marker);
         Ok(Reservation {
             gate: self.clone(),
             session_id: Some(context.session_id.clone()),
@@ -353,31 +336,30 @@ impl SessionGate {
     }
     pub(super) fn consuming(&self, identity: &AgentTurnRef) -> TalosResult<()> {
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        let mut marker = self
-            .load(&mut state, &identity.session_id)?
-            .cloned()
+        let cached = state
+            .reservations
+            .get_mut(&identity.session_id)
             .ok_or_else(conflict)?;
-        if !state.reserved.contains(&identity.session_id) {
-            return Err(conflict());
-        }
+        let mut marker = cached.clone();
         marker.active = Some(identity.clone());
         marker.cleanup_confirmed = false;
         self.save(&identity.session_id, &marker)?;
-        state.markers.insert(identity.session_id.clone(), marker);
+        *cached = marker;
         Ok(())
     }
     pub(super) fn cleaned(&self, identity: &AgentTurnRef) -> TalosResult<()> {
         let mut state = self.state.lock().expect("Worker Session gate lock");
         let mut marker = self
-            .load(&mut state, &identity.session_id)?
-            .cloned()
+            .load(&state, &identity.session_id)?
             .ok_or_else(conflict)?;
         if marker.active.as_ref() != Some(identity) {
             return Err(conflict());
         }
         marker.cleanup_confirmed = true;
         self.save(&identity.session_id, &marker)?;
-        state.markers.insert(identity.session_id.clone(), marker);
+        if let Some(cached) = state.reservations.get_mut(&identity.session_id) {
+            *cached = marker;
+        }
         Ok(())
     }
     pub(super) fn commit(
@@ -390,7 +372,7 @@ impl SessionGate {
         bootstrap: HistoryBootstrap,
     ) -> TalosResult<()> {
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        let existing = self.load(&mut state, &context.session_id)?.cloned();
+        let existing = self.load(&state, &context.session_id)?;
         let mut marker = match existing {
             Some(marker) => marker,
             None if matches!(bootstrap, HistoryBootstrap::TrustedLocal)
@@ -410,7 +392,6 @@ impl SessionGate {
                     cleanup_confirmed: true,
                 };
                 self.save(&context.session_id, &marker)?;
-                state.markers.insert(context.session_id.clone(), marker);
                 return Ok(());
             }
             None => return Err(conflict()),
@@ -447,7 +428,9 @@ impl SessionGate {
         marker.history_cursor = history_cursor;
         marker.visibility = visibility;
         self.save(&context.session_id, &marker)?;
-        state.markers.insert(context.session_id.clone(), marker);
+        if let Some(cached) = state.reservations.get_mut(&context.session_id) {
+            *cached = marker;
+        }
         Ok(())
     }
     pub(super) fn maintenance(
@@ -479,12 +462,11 @@ impl SessionGate {
             return Err(conflict());
         }
         let mut state = self.state.lock().expect("Worker Session gate lock");
-        if state.configuration_reserved || state.reserved.contains(&context.session_id) {
+        if state.configuration_reserved || state.reservations.contains_key(&context.session_id) {
             return Err(busy());
         }
         let mut marker = self
-            .load(&mut state, &context.session_id)?
-            .cloned()
+            .load(&state, &context.session_id)?
             .unwrap_or_else(|| Marker {
                 binding: Binding::from(context),
                 history_cursor: Default::default(),
@@ -511,8 +493,9 @@ impl SessionGate {
         marker.coordinator_id = peer.into();
         marker.visibility = SessionStateVisibility::Local;
         self.save(&context.session_id, &marker)?;
-        state.markers.insert(context.session_id.clone(), marker);
-        state.reserved.insert(context.session_id.clone());
+        state
+            .reservations
+            .insert(context.session_id.clone(), marker);
         Ok(Reservation {
             gate: self.clone(),
             session_id: Some(context.session_id.clone()),
