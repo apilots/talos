@@ -91,6 +91,43 @@ impl AgentNodeService {
         Ok(self.node_info(record).await)
     }
 
+    /// Verify an owner's provisioned credential without issuing a lease or
+    /// changing Worker publication. Directory ownership conceals foreign IDs.
+    pub async fn verify_saved_registration(
+        &self,
+        actor: &Actor,
+        auth: &NodeAuth,
+    ) -> TalosResult<NodeInfo> {
+        let node = self
+            .get_node(
+                actor,
+                GetNodeRequest {
+                    node_id: auth.node_id.clone(),
+                },
+            )
+            .await?;
+        if node.owner_user_id.as_deref() != Some(&actor.user_id) {
+            return Err(TalosError::authorization_denied());
+        }
+        self.authenticate_registration(auth)
+            .await
+            .map_err(|error| {
+                // A rejected Worker secret is a registration error, not a Cloud login failure.
+                if matches!(
+                    error.error_code(),
+                    ErrorCode::Unauthenticated | ErrorCode::ResourceExpired
+                ) {
+                    return TalosError::from_source(
+                    ErrorCode::ResourceExpired,
+                    "Saved Worker credential is no longer valid. Recover this computer credential.",
+                    error,
+                );
+                }
+                error
+            })?;
+        Ok(node)
+    }
+
     pub async fn list_nodes(
         &self,
         actor: &Actor,

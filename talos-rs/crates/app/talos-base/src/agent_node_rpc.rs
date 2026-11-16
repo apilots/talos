@@ -610,6 +610,24 @@ impl pb::agent_node_management_server::AgentNodeManagement for NodeManagementRpc
         }))
     }
 
+    async fn verify_saved_registration(
+        &self,
+        request: Request<pb::VerifySavedRegistrationRequest>,
+    ) -> Result<Response<pb::GetNodeResponse>, Status> {
+        let result = async {
+            let actor = self.actor(&request).await?;
+            let auth = node_pb::decode_auth(request.into_inner().auth)?;
+            self.nodes.verify_saved_registration(&actor, &auth).await
+        }
+        .await;
+        Ok(Response::new(pb::GetNodeResponse {
+            result: Some(match result {
+                Ok(node) => pb::get_node_response::Result::Node(node_pb::encode_info(node)),
+                Err(error) => pb::get_node_response::Result::Failure(failure(error)),
+            }),
+        }))
+    }
+
     async fn list_nodes(
         &self,
         request: Request<pb::ListNodesRequest>,

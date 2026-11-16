@@ -2,6 +2,7 @@
 use super::application_sync::ApplicationSyncHost;
 use super::application_sync_management::RefreshPhase;
 use std::collections::HashMap;
+use talos_error::{ErrorCode, TalosError};
 use talos_service::Actor;
 use tokio::task::JoinHandle;
 
@@ -225,14 +226,7 @@ async fn maintain_account(
             .await
         };
         let failed = result.is_err();
-        let retryable = result.as_ref().is_err_and(|error| {
-            matches!(
-                error.error_code(),
-                talos_error::ErrorCode::ServiceUnavailable
-                    | talos_error::ErrorCode::Timeout
-                    | talos_error::ErrorCode::UsageLimitExceeded
-            )
-        });
+        let retryable = result.as_ref().is_err_and(refresh_retryable);
         let retry_after_seconds = retryable.then_some(5_u64);
         let connection = match result {
             Err(error) => {
@@ -301,6 +295,13 @@ async fn maintain_account(
             } => RefreshWake::WorkerConnectionEnded,
         };
     }
+}
+
+pub(crate) fn refresh_retryable(error: &TalosError) -> bool {
+    matches!(
+        error.error_code(),
+        ErrorCode::ServiceUnavailable | ErrorCode::Timeout | ErrorCode::UsageLimitExceeded
+    )
 }
 
 async fn stop(task: JoinHandle<()>) {

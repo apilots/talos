@@ -20,6 +20,10 @@ struct DesktopFixture {
 
 impl DesktopFixture {
     async fn new() -> Self {
+        Self::with_auth(Arc::new(TestAuth), None).await
+    }
+
+    async fn with_auth(gateway_auth: Arc<dyn AuthService>, cloud_api: Option<String>) -> Self {
         // The actual Worker directory picker is confined to the process HOME.
         // Keep all product state in an owned temporary child of that boundary.
         let home = tempfile::Builder::new()
@@ -63,7 +67,7 @@ impl DesktopFixture {
                 trusted_node_ca_file: None,
             },
             nodes.clone(),
-            Arc::new(TestAuth),
+            gateway_auth,
             coordinator.clone(),
             NodeResourceServices {
                 session_data: NodeSessionDataRpc::new(
@@ -90,6 +94,11 @@ impl DesktopFixture {
         .unwrap();
         let mut config = Config::default().with_runtime_paths(paths);
         config.apply_derived_paths();
+        if let Some(cloud_api) = cloud_api {
+            config.cloud.api_base_url = cloud_api;
+            config.gateway.auth = true;
+            config.sync.enabled = Some(false);
+        }
         config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
             reasoning_replay: Default::default(),
             reasoning_efforts: None,
@@ -105,17 +114,7 @@ impl DesktopFixture {
         }];
         config.cloud.agent_base_url = format!("https://{address}");
         config.cloud.agent_trusted_ca_file = Some(cert);
-        let mut persisted = serde_json::to_value(&config).unwrap();
-        persisted["logging"].as_object_mut().unwrap().remove("file");
-        persisted["storage"]
-            .as_object_mut()
-            .unwrap()
-            .remove("connection_string");
-        std::fs::write(
-            config.source_path(),
-            serde_json::to_string_pretty(&persisted).unwrap(),
-        )
-        .unwrap();
+        persist_desktop_config(&config);
         let mut runtime = crate::build_application_runtime_with_migration_dir(
             config.clone(),
             &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite"),
@@ -206,6 +205,23 @@ impl DesktopFixture {
         .unwrap()
     }
 }
+
+fn persist_desktop_config(config: &Config) {
+    let mut persisted = serde_json::to_value(config).unwrap();
+    persisted["logging"].as_object_mut().unwrap().remove("file");
+    persisted["storage"]
+        .as_object_mut()
+        .unwrap()
+        .remove("connection_string");
+    std::fs::write(
+        config.source_path(),
+        serde_json::to_string_pretty(&persisted).unwrap(),
+    )
+    .unwrap();
+}
+
+#[path = "desktop_ownership_tests.rs"]
+mod ownership;
 
 #[tokio::test]
 async fn desktop_enrollment_registers_reuses_renamed_uuid_and_recovers_credentials() {

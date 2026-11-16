@@ -145,7 +145,7 @@ Worker 只读取已有配置，重启不生成新 ID，也不自动注册创建�
 Create 省略 owner_user_id 时使用 Actor.user_id，指定其他用户须管理员身份；普通用户的
 List 强制过滤 owner_user_id。Get/Update/Rotate 先检查归属，不信任客户端自报 role。
 网络管理入口必须启用用户认证；本地 embedded 初始化使用上述可信 composition 入口。
-节点所有者或管理员通过生成的 AgentNodeManagementClient 调用五个管理 RPC，不另建管理框架或 UI。
+节点所有者或管理员通过生成的 AgentNodeManagementClient 调用管理 RPC。
 AgentNodeService 管理方法为 `async fn method(&self, actor: &Actor,
 r: Request) -> TalosResult<Result>`：
 
@@ -153,12 +153,25 @@ r: Request) -> TalosResult<Result>`：
 | --- | --- | --- |
 | create_node | CreateNodeRequest | CreatedNode { node: NodeInfo, credential: NodeCredential } |
 | get_node | GetNodeRequest | NodeInfo |
+| verify_saved_registration | NodeAuth | NodeInfo |
 | list_nodes | ListNodesRequest | NodePage |
 | update_node | UpdateNodeRequest | NodeInfo |
 | rotate_credential | RotateCredentialRequest | NodeCredential |
 
 请求与查询对象的字段逐项以 node.proto 为准；对应领域结构使用同名字段和闭合 enum。
 NodeInfo 不包含秘密，available 由 Service 推导。list 默认 50、最大 200，node_id 游标分页。
+
+`AgentNodeManagement.VerifySavedRegistration` is a read-only proof for a
+management host resolving its saved local Computer. The caller must present
+the verified owner's Cloud bearer token and the provisioned Worker credential
+over the Agent TLS connection. Directory ownership is checked before the
+credential. A cold request with a readable credential uses this single Gateway
+call. A rejected or expired Worker credential returns `ResourceExpired`
+with recovery guidance. The RPC returns public `NodeInfo` and issues no lease.
+For mixed versions, upgrade the control plane before relying on cold local
+access that requires this proof. A control plane without the RPC returns
+`ServiceUnavailable` to the management host for that check.
+
 Create 创建 remote 节点；embedded 由 composition 配置。owner_user_id 创建后保持不变，
 Register 不接受自报用户覆盖归属，Update 只修改显示名/地址/启停。Create/Rotate 凭据只返回
 一次，丢失响应则轮换，不保存可回读明文。

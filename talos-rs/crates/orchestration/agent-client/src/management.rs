@@ -1,7 +1,7 @@
 use crate::AgentNodeClient;
 use agent_pb as pb;
 use agent_protocol::{
-    error_pb, node_pb, CreateNodeRequest, CreatedNode, NodeCredential, NodeInfo,
+    error_pb, node_pb, CreateNodeRequest, CreatedNode, NodeAuth, NodeCredential, NodeInfo,
     RotateCredentialRequest,
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
@@ -109,6 +109,35 @@ impl AgentNodeClient {
             pb::get_node_response::Result::Node(value) => node_pb::decode_info(value),
             pb::get_node_response::Result::Failure(value) => Err(error_pb::decode_failure(value)?),
         }
+    }
+
+    /// Prove a saved registration without acquiring or changing a lease.
+    pub async fn verify_saved_registration(
+        &self,
+        access_token: &str,
+        auth: NodeAuth,
+    ) -> TalosResult<NodeInfo> {
+        let response =
+            pb::agent_node_management_client::AgentNodeManagementClient::new(self.channel.clone())
+                .verify_saved_registration(actor_request(
+                    access_token,
+                    pb::VerifySavedRegistrationRequest {
+                        auth: Some(node_pb::encode_auth(auth)),
+                    },
+                )?)
+                .await
+                .map_err(|error| {
+                    if error.code() == tonic::Code::Unimplemented {
+                        return TalosError::from_source(
+                            ErrorCode::ServiceUnavailable,
+                            "This control plane cannot verify saved Worker registrations.",
+                            error,
+                        );
+                    }
+                    crate::decode_rpc_status(error)
+                })?
+                .into_inner();
+        decode_node(response)
     }
 
     pub async fn update_node(
