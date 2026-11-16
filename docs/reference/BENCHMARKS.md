@@ -109,6 +109,10 @@ TALOS_BENCH_HARBOR_VERSION=0.22.0 ./talos-bench/run.sh terminal-bench@4.1.0
 TALOS_BENCH_ORACLE=1 ./talos-bench/run.sh frontier-harness@1.1.0
 ```
 
+## Benchmark Browser MCP
+
+Use `miniwob@1.1` with a native packaged Talos browser image. Harbor collects the upstream episode outcome and the ATIF trace of Talos's built-in Browser MCP actions. The [MiniWoB++ suite guide](../../talos-bench/suites/miniwob/README.md) covers the five pinned cases, image selection, repeatable seeds and per-model reports.
+
 ## Repeat and compare runs
 
 ```bash

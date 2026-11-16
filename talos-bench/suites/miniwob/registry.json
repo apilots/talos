@@ -1,0 +1,18 @@
+[
+  {
+    "name": "miniwob",
+    "version": "1.1",
+    "upstream": {
+      "repository": "https://github.com/Farama-Foundation/MiniWoB-plusplus.git",
+      "tag": "v1.1",
+      "revision": "a7658beb68e1d3572329e06734c5822bd284ddc8"
+    },
+    "tasks": [
+      {"name": "click-test-2", "description": "Select the requested button", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
+      {"name": "click-button-sequence", "description": "Click buttons in order", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
+      {"name": "enter-text", "description": "Enter and submit the requested text", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
+      {"name": "choose-list", "description": "Select the requested list value", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]},
+      {"name": "email-inbox-reply", "description": "Find an email, compose a reply and send it", "seed": 42, "submission_paths": ["/logs/artifacts/episode.json"]}
+    ]
+  }
+]

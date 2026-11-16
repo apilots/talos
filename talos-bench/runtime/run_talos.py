@@ -43,7 +43,7 @@ def capture_answer(destination, logs):
     destination.write_bytes(stdout)
 
 
-def run(options, llm, secret):
+def run(options, llm, secret, *, resources=PRODUCT, observe=None):
     logs = options.logs
     binary = PRODUCT / "bin/talos"
     with binary.open("rb") as executable:
@@ -92,7 +92,7 @@ def run(options, llm, secret):
             "llm": llm,
         }))
         environment = dict(os.environ, TALOS_HOME=home, TALOS_CONFIG=str(config),
-                           TALOS_RESOURCE_DIR=str(PRODUCT), TALOS_TUI_NO_BROWSER="1")
+                           TALOS_RESOURCE_DIR=str(resources), TALOS_TUI_NO_BROWSER="1")
         if (PRODUCT / "bin/rg").is_file():
             environment["PATH"] = f"{PRODUCT / 'bin'}{os.pathsep}{environment.get('PATH', os.defpath)}"
             probe = subprocess.run(["rg", "--version"], env=environment, capture_output=True,
@@ -132,25 +132,27 @@ def run(options, llm, secret):
         run_path = logs / "talos-run.json"
         run_path.write_text(json.dumps(metadata, indent=2) + "\n")
         started = time.monotonic()
-        with (logs / "talos.stdout.txt").open("w") as stdout, (logs / "talos.stderr.txt").open("w") as stderr:
-            command.extend(("--", options.instruction))
-            if watch:
-                from delegation_watch import wait, worktree_signature
+        observation = observe(Path(home)) if observe else nullcontext()
+        with observation:
+            with (logs / "talos.stdout.txt").open("w") as stdout, (logs / "talos.stderr.txt").open("w") as stderr:
+                command.extend(("--", options.instruction))
+                if watch:
+                    from delegation_watch import wait, worktree_signature
 
-                paths = list(filter(None, os.environ.get("TALOS_BENCH_WATCH_PATHS", "").split(":")))
-                signature = worktree_signature(WORKSPACE, paths)
-                with subprocess.Popen(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr) as process:
-                    try:
-                        exit_code = wait(process, home, logs, WORKSPACE, paths, signature)
-                    finally:
-                        if process.poll() is None:
-                            process.kill()
-            else:
-                exit_code = subprocess.run(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr).returncode
-        metadata.update(elapsed_seconds=time.monotonic() - started, exit_code=exit_code)
-        final_metadata = run_path.with_suffix(".tmp")
-        final_metadata.write_text(json.dumps(metadata, indent=2) + "\n")
-        final_metadata.replace(run_path)
+                    paths = list(filter(None, os.environ.get("TALOS_BENCH_WATCH_PATHS", "").split(":")))
+                    signature = worktree_signature(WORKSPACE, paths)
+                    with subprocess.Popen(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr) as process:
+                        try:
+                            exit_code = wait(process, home, logs, WORKSPACE, paths, signature)
+                        finally:
+                            if process.poll() is None:
+                                process.kill()
+                else:
+                    exit_code = subprocess.run(command, env=environment, cwd=WORKSPACE, stdout=stdout, stderr=stderr).returncode
+            metadata.update(elapsed_seconds=time.monotonic() - started, exit_code=exit_code)
+            final_metadata = run_path.with_suffix(".tmp")
+            final_metadata.write_text(json.dumps(metadata, indent=2) + "\n")
+            final_metadata.replace(run_path)
         if exit_code == 0 and options.capture:
             SUBMISSIONS.mkdir(parents=True, exist_ok=True)
             if baseline is not None:
@@ -160,7 +162,7 @@ def run(options, llm, secret):
         return exit_code
 
 
-if __name__ == "__main__":
+def main(*, resources=PRODUCT, observe=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("logs", type=Path)
     parser.add_argument("mode", choices=("fixture", "real"))
@@ -177,5 +179,8 @@ if __name__ == "__main__":
         configuration = nullcontext(json.loads((PRODUCT / "model.json").read_text()))
         secret = PRODUCT / "model.env"
     with configuration as llm:
-        exit_code = run(options, llm, secret)
-    raise SystemExit(exit_code)
+        return run(options, llm, secret, resources=resources, observe=observe)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

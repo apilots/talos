@@ -63,6 +63,7 @@ def attempt_reason(trial, run):
 def load_attempts(dataset, runs, registered, model, reasoning_effort=None):
     attempts = defaultdict(list)
     expected_dataset = f"{dataset['source']}@{dataset['digest']}" if "source" in dataset else None
+    upstream_revision = (dataset.get("upstream") or {}).get("revision")
     for path in sorted(runs.glob("*/summary.json"), key=lambda path: path.stat().st_mtime):
         summary = read_json(path)
         if (summary.get("suite"), summary.get("suiteVersion"), summary.get("mode")) != (
@@ -76,7 +77,7 @@ def load_attempts(dataset, runs, registered, model, reasoning_effort=None):
             if reasoning_effort is not None and trial.get("reasoningEffort") != reasoning_effort:
                 continue
             entry = registered[name]
-            expected_revision = entry.get("git_commit_id") or entry.get("revision")
+            expected_revision = entry.get("git_commit_id") or entry.get("revision") or upstream_revision
             provenance = read_json(path.parent / "provenance" / f"{name}.json")
             revision = trial.get("taskRevision") or provenance.get("datasetRevision")
             task_ref = provenance.get("upstreamTaskRef") or provenance.get("taskRef", "")
@@ -175,14 +176,23 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
     if judge := read_json(provenance).get("judgeModel"):
         label += f" · Judge {judge}"
     if raw is not None:
-        label += f" · 原始分 {raw:g}"
+        label += f" · Runner 原始分 {raw:g}"
+    episode_path = next((item["path"] for item in trial.get("submissions", [])
+                         if item["source"] == "/logs/artifacts/episode.json" and item.get("path")), None)
+    if episode_path and (episode := read_json(run / episode_path)):
+        if episode.get("done"):
+            label += f" · MiniWoB 原环境奖励 {episode['env_reward']:g} · 无时间权重 {episode['raw_reward']:g}"
+        else:
+            label += " · MiniWoB 回合未结束"
+        if episode.get("reason"):
+            reason = " · ".join(filter(None, (reason, str(episode["reason"]))))
     return f"<li>{escape(label)}<br>{escape(metrics)}<br>{escape(reason)} {' '.join(filter(None, links))}</li>"
 
 
 def render(output, registry, runs, model, notes, cohort, *, reasoning_effort=None):
     dataset = read_dataset(registry)
     titles = (dataset["name"], dataset["version"])
-    require_atif = titles == ("terminal-bench", "4.1.0")
+    require_atif = titles in (("terminal-bench", "4.1.0"), ("miniwob", "1.1"))
     pass_threshold = dataset.get("pass_threshold", 1.0)
     registered = {row["name"].rsplit("/", 1)[-1]: row for row in dataset["tasks"]}
     names = {name.rsplit("/", 1)[-1] for name in cohort} if cohort else registered.keys()
