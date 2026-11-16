@@ -1,0 +1,83 @@
+name: Bench · runner compatibility
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'talos-bench/**'
+      - '.github/workflows/bench-runners.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: talos-bench-runners-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product:
+    name: Build native Bench product
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install the product from this revision
+        run: |
+          ./talos-bench/install.sh "$GITHUB_SHA" "$RUNNER_TEMP/bench"
+          tar -C "$RUNNER_TEMP/bench" -czf "$RUNNER_TEMP/bench-product.tar.gz" product
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-product
+          path: ${{ runner.temp }}/bench-product.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  smoke:
+    name: ${{ matrix.runner }}
+    needs: product
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: Harbor 0.22
+            suite: terminal-bench@4.1.0
+            harbor: '0.22.0'
+          - runner: Harbor 0.25
+            suite: terminal-bench@4.1.0
+            harbor: '0.25.0'
+          - runner: Pier 0.3.1
+            suite: deep-swe@1.1
+            harbor: ''
+          - runner: SWE-bench Lite
+            suite: swe-bench-lite@1.0
+            harbor: ''
+          - runner: MCP-Atlas
+            suite: mcp-atlas@2.0.0
+            harbor: ''
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: python -m pip install 'uv==0.9.7'
+      - uses: actions/download-artifact@v7
+        with:
+          name: bench-product
+          path: ${{ runner.temp }}/bench
+      - name: Execute the controlled case against the upstream verifier
+        env:
+          BENCH_SUITE: ${{ matrix.suite }}
+          TALOS_BENCH_HARBOR_VERSION: ${{ matrix.harbor }}
+        run: |
+          tar -C "$RUNNER_TEMP/bench" -xzf "$RUNNER_TEMP/bench/bench-product.tar.gz"
+          TALOS_BENCH_PRODUCT="$RUNNER_TEMP/bench/product" ./talos-bench/run.sh "$BENCH_SUITE"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench-evidence-${{ strategy.job-index }}
+          path: output/talos-bench/run.*
+          if-no-files-found: ignore
+          retention-days: 3
