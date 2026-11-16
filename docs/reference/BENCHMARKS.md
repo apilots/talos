@@ -42,11 +42,12 @@ Use the summary for score and job time, `agent/talos-run.json` for the launch pr
 
 ## Review a representative selection
 
-Generate one HTML report per versioned suite from its registry and saved runs. The report includes every selected task and each archived attempt with the chosen model. It links the original score, verifier logs, trace, token usage, and submissions. A scored zero and an incomplete attempt have separate statuses. Use repeated `--task` arguments when the registry also contains tasks outside the selection.
+Generate one HTML report per versioned suite from its registry and saved runs. The report includes every selected task and each archived attempt with the chosen model. It links the original score, verifier logs, trace, token usage, and submissions. A scored zero and an incomplete attempt have separate statuses. Use `--reasoning-effort` to restrict the report to the exact recorded effort. Use repeated `--task` arguments when the registry also contains tasks outside the selection.
 
 ```bash
 python3 talos-bench/report.py output/terminal-bench-2.0/index.html \
-  talos-bench/suites/terminal-bench/registry-2.0.json --model openai:gpt-6.1-terra
+  talos-bench/suites/terminal-bench/registry-2.0.json \
+  --model openai:gpt-6.1-terra --reasoning-effort light
 ```
 
 Save launcher output for a task in `<task>.log` beside the report to retain evidence when a run fails before writing a summary. Pass `--notes` with a JSON object keyed by `<run-directory-name>/<task>` for an attempt diagnosis or by `<task>` for a case note. Regenerate the report after retries.

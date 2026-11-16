@@ -60,7 +60,7 @@ def attempt_reason(trial, run):
     return "未通过 " + "、".join(failed[:8]) if failed else "评分低于满分，原因待复盘"
 
 
-def load_attempts(dataset, runs, registered, model):
+def load_attempts(dataset, runs, registered, model, reasoning_effort=None):
     attempts = defaultdict(list)
     expected_dataset = f"{dataset['source']}@{dataset['digest']}" if "source" in dataset else None
     for path in sorted(runs.glob("*/summary.json"), key=lambda path: path.stat().st_mtime):
@@ -72,6 +72,8 @@ def load_attempts(dataset, runs, registered, model):
         for trial in summary["trials"]:
             name = (trial.get("task") or "").rsplit("/", 1)[-1]
             if name not in registered or trial.get("model") not in (model, None):
+                continue
+            if reasoning_effort is not None and trial.get("reasoningEffort") != reasoning_effort:
                 continue
             entry = registered[name]
             expected_revision = entry.get("git_commit_id") or entry.get("revision")
@@ -144,7 +146,9 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
         else:
             metrics += " · 根 Turn 缓存读占比不可用"
     collaboration = "单 Agent 诊断" if trial.get("collaborationTools") is False else None
-    label = " · ".join(str(x) for x in (run.name, trial.get("model"), trial.get("taskDigest"), collaboration) if x)
+    label = " · ".join(str(x) for x in (
+        run.name, trial.get("model"), trial.get("reasoningEffort"), trial.get("taskDigest"), collaboration,
+    ) if x)
     raw = trial.get("verifierReward", trial.get("score"))
     if judge := read_json(provenance).get("judgeModel"):
         label += f" · Judge {judge}"
@@ -153,7 +157,7 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
     return f"<li>{escape(label)}<br>{escape(metrics)}<br>{escape(reason)} {' '.join(filter(None, links))}</li>"
 
 
-def render(output, registry, runs, model, notes, cohort):
+def render(output, registry, runs, model, notes, cohort, *, reasoning_effort=None):
     dataset = read_dataset(registry)
     titles = (dataset["name"], dataset["version"])
     require_atif = titles == ("terminal-bench", "4.1.0")
@@ -162,7 +166,7 @@ def render(output, registry, runs, model, notes, cohort):
     names = {name.rsplit("/", 1)[-1] for name in cohort} if cohort else registered.keys()
     if unknown := names - registered.keys():
         raise ValueError(f"Unregistered report tasks: {', '.join(sorted(unknown))}")
-    attempts = load_attempts(dataset, runs, registered, model)
+    attempts = load_attempts(dataset, runs, registered, model, reasoning_effort)
     output_root = runs.parent.resolve()
     selected = sorted(names)
     rows, scores = [], []
@@ -177,7 +181,7 @@ def render(output, registry, runs, model, notes, cohort):
         runner_logs += [link(path, path.name, output.parent, output_root)
                         for path in sorted(output.parent.glob(f"{name}.*.log"))]
         case_note = escape(notes.get(name, ""))
-        attempted = bool(entries or any(runner_logs))
+        attempted = bool(entries or (reasoning_effort is None and any(runner_logs)))
         started += attempted
         if score is not None:
             scores.append(score)
@@ -197,6 +201,7 @@ def render(output, registry, runs, model, notes, cohort):
                     f"<td>{score if score is not None else '—'}</td>"
                     f"<td>{case_note} {details} {' '.join(filter(None, runner_logs))}</td></tr>")
     title = escape(" ".join(titles))
+    profile = escape(f"{model} · 推理档位 {reasoning_effort or '不限'}")
     passed = sum(score >= pass_threshold for score in scores)
     average = f"{sum(scores) / len(scores):.4f}" if scores else "—"
     counters = [("代表题", len(names)), ("已开始", started), ("有效评分", len(scores)),
@@ -220,7 +225,7 @@ th,td{{text-align:left;vertical-align:top;padding:.65rem;border-bottom:1px solid
 th,li{{overflow-wrap:anywhere}} thead{{background:#e7edf5}} ul{{padding-left:1.1rem}} li{{margin:.6rem 0}}
 </style>
 <main><h1>{title} 本地代表题评估</h1>
-<p>{escape(model)} · 通过线 {pass_threshold:g} · 满分 {scores.count(1)} 题。逐题采用最近一次产物齐全的有效评分。</p>
+<p>{profile} · 通过线 {pass_threshold:g} · 满分 {scores.count(1)} 题。逐题采用最近一次产物齐全的有效评分。</p>
 <section class="figures" aria-label="结果汇总">{figures}</section>
 <div class="table"><table><thead><tr><th scope="col">题目</th><th scope="col">状态</th>
 <th scope="col">得分</th><th scope="col">尝试与证据</th></tr></thead>
@@ -238,11 +243,12 @@ def main():
     parser.add_argument("registry", type=Path)
     parser.add_argument("--runs", type=Path, default=Path("output/talos-bench"))
     parser.add_argument("--model", required=True)
+    parser.add_argument("--reasoning-effort", help="Limit the report to an exact recorded reasoning effort")
     parser.add_argument("--notes", type=Path)
     parser.add_argument("--task", action="append", default=[])
     args = parser.parse_args()
     render(args.output, args.registry, args.runs, args.model,
-           read_json(args.notes) if args.notes else {}, args.task)
+           read_json(args.notes) if args.notes else {}, args.task, reasoning_effort=args.reasoning_effort)
 
 
 if __name__ == "__main__":
