@@ -1050,13 +1050,45 @@ async fn child_admission_is_atomic_per_tree_and_releases_at_settlement() {
         }),
     )
     .await;
+    let (settled, previous_turn_id) =
+        create_running_child_named(&services, parent.clone(), "child-settled").await;
+    settle_canonical_turn(
+        &services.store,
+        &services.timeline,
+        &settled.session_id,
+        &previous_turn_id,
+        CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    )
+    .await;
     let next = spawn(parent.clone(), "next").await.unwrap();
-    assert!(services
-        .store
-        .get_agent_active_turn(&next.subagent.session_id)
+    let resumed = services
+        .subagents
+        .follow_up(FollowUpSubagentRequest {
+            caller: parent.clone(),
+            target: target(&settled),
+            prompt: "Continue the completed work".to_string(),
+        })
         .await
-        .unwrap()
-        .is_some());
+        .unwrap();
+    let SubagentOutcome::Running { turn_id } = resumed.outcome else {
+        panic!("follow-up must be active at capacity");
+    };
+    assert_ne!(turn_id, previous_turn_id);
+
+    settle_canonical_turn(
+        &services.store,
+        &services.timeline,
+        &next.subagent.session_id,
+        &next.turn.turn_id,
+        CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    )
+    .await;
+    let blocked = spawn(parent, "blocked_by_follow_up").await.unwrap_err();
+    assert!(blocked.is_code(talos_error::ErrorCode::SessionBudgetExceeded));
 }
 
 #[tokio::test]

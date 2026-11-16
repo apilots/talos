@@ -18,21 +18,22 @@ METRICS_PREFIX = "TALOS_EXEC_METRICS "
 PROVIDER = "chat-protocol-default"
 
 
-DEPTH_CASES = ("admission-root", "admission-child", "admission-grandchild")
+DEPTH_CASES = ("admission-root", "admission-child", "admission-grandchild", "admission-great-grandchild")
 
 
 def admission_chunks(case, history):
     level = DEPTH_CASES.index(case)
-    target = ("child", "grandchild", "too_deep")[level]
+    at_limit = level == len(DEPTH_CASES) - 1
+    target = ("child", "grandchild", "great_grandchild", "too_deep")[level]
     next_prompt = (*DEPTH_CASES[1:], "unexpected-beyond-admission")[level]
     results = [message for message in history if message["role"] == "tool"]
-    if level == 2 and results:
+    if at_limit and results:
         response = json.loads(results[-1]["content"])
-        assert response["ok"] is False and "2 child levels" in response["error"]["message"], response
-    if level < 2 and len(results) == 2:
+        assert response["ok"] is False and "3 child levels" in response["error"]["message"], response
+    if not at_limit and len(results) == 2:
         outcome = json.loads(results[-1]["content"])["result"]["result"]["outcome"]
         assert outcome["status"] == "completed" and outcome["output"] == f"PROTOCOL_OK:call_{next_prompt}", outcome
-    done = len(results) == (1 if level == 2 else 2)
+    done = len(results) == (1 if at_limit else 2)
     chunks = chat_chunks("call_" + case, "off", done)
     if not done:
         name, args = ("spawn_agent", {"taskName": target, "prompt": next_prompt}) if not results else (
@@ -180,7 +181,7 @@ def exercise(root, work, report):
             run("delegate", 0, str(uuid4()), "--dangerously-skip-permissions")
             assert (workspace / "child").read_text() == "tool-ran"
             run(DEPTH_CASES[0], 0, str(uuid4()))
-            print("CASE subagent_admission PASS default depth=2 nested result delivered")
+            print("CASE subagent_admission PASS default depth=3 nested result delivered")
             assert config.read_bytes() == original
             print("CASE exec_unattended PASS waiting=3 failure=1 completion=0 usage=stderr permission=session-and-child")
         finally:

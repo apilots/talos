@@ -31,15 +31,15 @@ fn default_command_idempotency_ttl_hours() -> u32 {
 pub struct SubagentAdmissionConfig {
     /// Maximum number of child segments below the primary Agent.
     pub max_depth: NonZeroUsize,
-    /// Maximum number of admitted nonterminal child Turns in one tree.
+    /// Active child Turn count at which a new child can no longer start.
     pub max_active_turns: NonZeroU32,
 }
 
 impl Default for SubagentAdmissionConfig {
     fn default() -> Self {
         Self {
-            max_depth: NonZeroUsize::new(2).unwrap(),
-            max_active_turns: NonZeroU32::new(4).unwrap(),
+            max_depth: NonZeroUsize::new(3).unwrap(),
+            max_active_turns: NonZeroU32::new(20).unwrap(),
         }
     }
 }
