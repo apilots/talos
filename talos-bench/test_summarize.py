@@ -2,10 +2,49 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from summarize import read_json, root_cache_read, summarize, trial_summary, write_json
+from summarize import estimate_cost, read_json, root_cache_read, summarize, trial_summary, workload_usage, write_json
 
 
 class CompletionTest(unittest.TestCase):
+    def test_estimate_cost_uses_reported_zero_values_and_requires_known_counters(self):
+        rates = {"input": 2, "output": 3, "cache_read": 1, "cache_write": 4}
+        usage = {"input_tokens": 50, "output_tokens": 4, "cache_read_input_tokens": 0,
+                 "cache_creation_input_tokens": 5}
+        self.assertAlmostEqual(estimate_cost(usage, rates), 122 / 1_000_000)
+        self.assertIsNone(estimate_cost({**usage, "cache_read_input_tokens": None}, rates))
+
+    def test_workload_only_reports_aggregate_when_all_child_turns_reconcile(self):
+        root_cache = {"status": "verified", "coveredInputTokens": 100, "observedCacheReadTokens": 50}
+        root = {"model": "test:selected", "exit_code": 0,
+                "prices_per_million": {"input": 2, "output": 3, "cache_read": 1, "cache_write": 4}}
+        child = {"path": "/root/check", "turnId": "child"}
+        child_usage = {"input_tokens": 50, "output_tokens": 4, "cache_read_input_tokens": 20,
+                       "cache_creation_input_tokens": 5}
+        snapshot = {
+            "fields": ["path", "turnId", "event"],
+            "events": [[None, "root", "turnStarted"], [child["path"], "child", "turnStarted"]],
+            "activeTurns": [],
+            "observedTurnMetrics": [{**child, "modelRounds": 1, "usage": child_usage}],
+            "childUsage": [{**child, "reportedInputTokens": 50, "reportedCacheReadTokens": 20,
+                            "observedCalls": 1, "callsWithReportedCacheRead": 1,
+                            "coveredInputTokens": 50, "observedCacheReadTokens": 20}],
+        }
+        whole = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertEqual(whole["observedDescendantUsage"], child_usage)
+        self.assertEqual(whole["descendantTurnsReconciled"], 1)
+        self.assertAlmostEqual(whole["cacheReadRatio"], 70 / 150)
+        self.assertAlmostEqual(whole["estimatedCostUsd"], 0.001 + 102 / 1_000_000)
+
+        # A child may settle before its usage becomes available, such as on cancellation.
+        snapshot["events"].append(["/root/cancelled", "cancelled", "turnStarted"])
+        partial = workload_usage(snapshot, "root", root_cache, 0.001, root)
+        self.assertEqual(partial["descendantTurnsObserved"], 2)
+        self.assertEqual(partial["descendantTurnsWithUsage"], 1)
+        self.assertEqual(partial["descendantTurnsReconciled"], 1)
+        self.assertAlmostEqual(partial["reconciledDescendantEstimatedCostUsd"], 102 / 1_000_000)
+        self.assertIsNone(partial["cacheReadRatio"])
+        self.assertIsNone(partial["estimatedCostUsd"])
+
     def test_root_cache_share_requires_matching_input_coverage_and_counters(self):
         calls = [
             {"metrics": {"usage": {"input_tokens": 90, "cache_read_input_tokens": 0}}},

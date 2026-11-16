@@ -4,11 +4,15 @@ import argparse
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
 
 from runtime.payload import cli_log_lines, run_metrics
+
+
+USAGE_COUNTERS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
 def read_json(path):
@@ -100,15 +104,21 @@ def observed_seconds(metrics, field):
 
 
 def estimate_cost(usage, prices):
-    if not usage or not prices or not all(field in prices for field in ("input", "output", "cache_read", "cache_write")):
+    if not usage or not prices:
         return None
-    cached = usage.get("cache_read_input_tokens") or 0
-    written = usage.get("cache_creation_input_tokens") or 0
-    uncached = usage["input_tokens"] - cached - written
+    inputs, outputs, cached, written = (usage.get(key) for key in USAGE_COUNTERS)
+    if any(type(count) is not int or count < 0 for count in (inputs, outputs, cached, written)):
+        return None
+    input_rate, output_rate, read_rate, write_rate = (
+        prices.get(key) for key in ("input", "output", "cache_read", "cache_write")
+    )
+    if any(type(rate) not in (int, float) or not math.isfinite(rate) or rate < 0
+           for rate in (input_rate, output_rate, read_rate, write_rate)):
+        return None
+    uncached = inputs - cached - written
     if uncached < 0:
         return None
-    return (uncached * prices["input"] + cached * prices["cache_read"]
-            + written * prices["cache_write"] + usage["output_tokens"] * prices["output"]) / 1_000_000
+    return (uncached * input_rate + cached * read_rate + written * write_rate + outputs * output_rate) / 1_000_000
 
 
 def root_cache_read(calls, metrics, observed_requests):
@@ -156,6 +166,72 @@ def root_cache_read(calls, metrics, observed_requests):
     }
 
 
+def workload_usage(snapshot, root_turn, root_cache, root_cost, cli):
+    """Reconcile captured descendant Turns before reporting whole-workload metrics."""
+    if not snapshot and cli.get("collaboration_tools") is not False:
+        return None
+
+    starts = set()
+    root_starts = set()
+    fields = snapshot.get("fields", ())
+    for event in snapshot.get("events", ()):
+        row = dict(zip(fields, event))
+        if row.get("event") == "turnStarted":
+            if row.get("path"):
+                starts.add((row["path"], row["turnId"]))
+            else:
+                root_starts.add(row["turnId"])
+
+    metrics = {(row["path"], row["turnId"]): row
+               for row in snapshot.get("observedTurnMetrics", ()) if row["path"] and row["usage"]}
+    calls = {(row["path"], row["turnId"]): row for row in snapshot.get("childUsage", ())}
+    descendants = starts | metrics.keys() | calls.keys()
+    reconciled = {}
+    for key in metrics.keys() & calls.keys():
+        reported, evidence = metrics[key], calls[key]
+        usage = reported["usage"]
+        inputs, reads = usage.get("input_tokens"), usage.get("cache_read_input_tokens")
+        if (type(inputs) is int and type(reads) is int and 0 <= reads <= inputs
+                and type(reported.get("modelRounds")) is int
+                and evidence["observedCalls"] >= reported["modelRounds"]
+                and evidence["observedCalls"] == evidence["callsWithReportedCacheRead"]
+                and inputs == evidence["coveredInputTokens"] == evidence["reportedInputTokens"]
+                and reads == evidence["observedCacheReadTokens"] == evidence["reportedCacheReadTokens"]):
+            reconciled[key] = usage
+
+    # Spawn and follow-up inherit the selected root model in an isolated Bench trial.
+    rates = cli.get("prices_per_million") if cli.get("model") else None
+    priced = [cost for usage in reconciled.values() if (cost := estimate_cost(usage, rates)) is not None]
+    observed = {
+        key: sum(values) if values and all(type(value) is int and value >= 0 for value in values) else None
+        for key in USAGE_COUNTERS
+        if (values := [metric["usage"].get(key) for metric in metrics.values()])
+    }
+    descendants_complete = (cli.get("collaboration_tools") is False or (
+        "childUsage" in snapshot and root_turn is not None and root_starts == {root_turn}
+        and snapshot.get("activeTurns") == [] and descendants == starts
+        and reconciled.keys() == descendants
+    ))
+    settled = cli.get("exit_code") == 0 and descendants_complete
+    cache_complete = settled and (root_cache or {}).get("status") == "verified"
+    cache_ratio = None
+    if cache_complete:
+        inputs = root_cache["coveredInputTokens"] + sum(usage["input_tokens"] for usage in reconciled.values())
+        reads = root_cache["observedCacheReadTokens"] + sum(usage["cache_read_input_tokens"] for usage in reconciled.values())
+        cache_ratio = reads / inputs
+    return {
+        "descendantTurnsObserved": len(descendants),
+        "descendantTurnsWithUsage": len(metrics),
+        "descendantTurnsReconciled": len(reconciled),
+        "observedDescendantUsage": observed or None,
+        "pricedDescendantTurns": len(priced),
+        "reconciledDescendantEstimatedCostUsd": sum(priced) if priced else None,
+        "cacheReadRatio": cache_ratio,
+        "estimatedCostUsd": root_cost + sum(priced)
+        if settled and root_cost is not None and len(priced) == len(descendants) else None,
+    }
+
+
 def trial_summary(run, directory, entries):
     result = read_json(directory / "result.json")
     task = read_json(directory / "lock.json").get("task", {})
@@ -195,6 +271,7 @@ def trial_summary(run, directory, entries):
     if exception is None and "exit_code" in cli and cli["exit_code"] is None:
         exception = "TalosCliTerminationUnrecorded"
     watch_path = agent / "talos-delegation.jsonl"
+    delegation_events = agent / "talos-delegation-events.json"
     watch_samples = watch_path.read_text().splitlines() if watch_path.is_file() else []
     stop_reason = next((reason for line in reversed(watch_samples)
                         if (reason := json.loads(line).get("stopReason"))), None)
@@ -206,7 +283,7 @@ def trial_summary(run, directory, entries):
     if task_name and task_name not in entries:
         task_name = task_name.rsplit("/", 1)[-1]
     entry = entries.get(task_name, {})
-    atlas_provenance = read_json(run / "provenance" / f"{task_name}.json") if "revision" in entry else {}
+    provenance = read_json(run / "provenance" / f"{task_name}.json")
     archive = directory / "artifacts"
     manifest = read_json(archive / "manifest.json")
     captured = {artifact_identity(item): item for item in manifest}
@@ -233,16 +310,20 @@ def trial_summary(run, directory, entries):
         "atif": agent / "trajectory.json",
         "usage": agent / "usage.json",
         "delegationWatch": agent / "talos-delegation.jsonl",
-        "delegationEvents": agent / "talos-delegation-events.json",
+        "delegationEvents": delegation_events,
         "stdout": agent / "talos.stdout.txt",
         "stderr": agent / "talos.stderr.txt",
         "verifier": directory / "verifier",
         "submissionManifest": archive / "manifest.json",
     }
+    cache = root_cache_read(calls, metrics, len(requests)) if usage is not None or calls else None
+    root_cost = estimate_cost(usage, cli.get("prices_per_million"))
+    workload = workload_usage(read_json(delegation_events), (trace.get("identity") or {}).get("turnId"),
+                              cache, root_cost, cli)
     return {
         "trial": directory.name,
         "task": task_name,
-        "taskRevision": task.get("git_commit_id") or entry.get("git_commit_id") or atlas_provenance.get("datasetRevision"),
+        "taskRevision": task.get("git_commit_id") or entry.get("git_commit_id") or provenance.get("datasetRevision"),
         "taskDigest": task.get("digest") or result.get("task_checksum"),
         "model": cli.get("model"),
         "reasoningEffort": cli.get("reasoning_effort"),
@@ -260,8 +341,9 @@ def trial_summary(run, directory, entries):
         "exception": exception,
         "stopReason": stop_reason,
         "usage": usage,
-        "rootCacheRead": root_cache_read(calls, metrics, len(requests)) if usage is not None or calls else None,
-        "estimatedCostUsd": estimate_cost(usage, cli.get("prices_per_million")),
+        "rootCacheRead": cache,
+        "estimatedCostUsd": root_cost,
+        "workloadUsage": workload,
         "modelRounds": metrics.get("modelRounds"),
         "modelCallsObserved": len(calls) if trace.get("data") is not None else None,
         "observedModelSeconds": observed_seconds(model_timings, "executionDurationMs"),
@@ -309,6 +391,9 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
     passed = sum(trial["score"] >= threshold for trial in scored)
     costs = [trial["estimatedCostUsd"] for trial in trials if trial["estimatedCostUsd"] is not None]
     total_cost = sum(costs) if len(costs) == expected else None
+    workload_costs = [cost for trial in trials
+                      if (cost := (trial["workloadUsage"] or {}).get("estimatedCostUsd")) is not None]
+    workload_total = sum(workload_costs) if len(workload_costs) == expected else None
     cases = []
     for task in selected:
         attempts = [trial for trial in trials if trial["task"] == task]
@@ -353,6 +438,9 @@ def summarize(run, mode, repeats, runner_exit, require_trace, require_atif,
         "passRate": passed / len(scored) if scored else None,
         "meanEstimatedCostUsd": total_cost / expected if total_cost is not None else None,
         "estimatedCostPerPassUsd": total_cost / passed if total_cost is not None and passed else None,
+        "workloadCostCoveredTrials": len(workload_costs),
+        "meanWorkloadEstimatedCostUsd": workload_total / expected if workload_total is not None else None,
+        "workloadEstimatedCostPerPassUsd": workload_total / passed if workload_total is not None and passed else None,
         "complete": failure is None,
         "failure": failure,
         "tracedTrials": traced,

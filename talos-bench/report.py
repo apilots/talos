@@ -145,6 +145,28 @@ def render_attempt(attempt, target, evidence_root, notes, require_atif):
             metrics += " · 根 Turn 缓存读计数不一致"
         else:
             metrics += " · 根 Turn 缓存读占比不可用"
+    if (cost := trial.get("estimatedCostUsd")) is not None:
+        metrics += f" · 根 Turn 估算成本 ${cost:.4f}"
+    if workload := trial.get("workloadUsage"):
+        total = workload["descendantTurnsObserved"]
+        usage = workload["observedDescendantUsage"] or {}
+        if total:
+            metrics += (f" · 子 Turn 用量已观测 {workload['descendantTurnsWithUsage']}/{total} 个，"
+                        f"缓存对账 {workload['descendantTurnsReconciled']}/{total} 个")
+            values = [
+                f"{label} {usage[key]:,}" for label, key in (
+                    ("子 Turn 输入", "input_tokens"), ("输出", "output_tokens"),
+                    ("缓存读", "cache_read_input_tokens"), ("缓存写", "cache_creation_input_tokens"),
+                ) if usage.get(key) is not None
+            ]
+            if values:
+                metrics += " · " + " · ".join(values)
+        if (ratio := workload["cacheReadRatio"]) is not None:
+            metrics += f" · Agent Turn 合计缓存读占比 {ratio:.2%}（已对账）"
+        if (cost := workload["estimatedCostUsd"]) is not None:
+            metrics += f" · Agent Turn 合计估算成本 ${cost:.4f}"
+        elif (cost := workload["reconciledDescendantEstimatedCostUsd"]) is not None:
+            metrics += f" · {workload['pricedDescendantTurns']}/{total} 个子 Turn 估算成本 ${cost:.4f}"
     collaboration = "单 Agent 诊断" if trial.get("collaborationTools") is False else None
     label = " · ".join(str(x) for x in (
         run.name, trial.get("model"), trial.get("reasoningEffort"), trial.get("taskDigest"), collaboration,

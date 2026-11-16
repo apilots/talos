@@ -260,6 +260,15 @@ def result_row(task, status, reward, outcome, case, run, destination, exclusion,
     cache = trial.get("rootCacheRead") or {}
     if cache.get("status") == "verified":
         tokens += f'<div class="reason">缓存读占比 {cache["ratio"]:.2%}（已对账）</div>'
+    cost = trial.get("estimatedCostUsd")
+    if finite_number(cost):
+        tokens += f'<div class="reason">根 Turn 估算成本 ${cost:.4f}</div>'
+    workload = trial.get("workloadUsage") or {}
+    if finite_number(workload.get("estimatedCostUsd")):
+        tokens += f'<div class="reason">Agent Turn 合计估算成本 ${workload["estimatedCostUsd"]:.4f}</div>'
+    elif workload.get("descendantTurnsObserved"):
+        tokens += (f'<div class="reason">子 Turn 对账 {workload["descendantTurnsReconciled"]}'
+                   f'/{workload["descendantTurnsObserved"]}</div>')
     seconds = outcome.get("elapsedSeconds")
     elapsed = f"{seconds:,.1f} 秒" if finite_number(seconds) and seconds >= 0 else "—"
     observed = " · ".join(
@@ -280,6 +289,8 @@ def result_row(task, status, reward, outcome, case, run, destination, exclusion,
     digest = escape(task["digest"])
     row = {"task": name, "digest": task["digest"], "status": status, "reasons": reasons,
            "score": reward if status == "scored" else None, "localScore": reward, **evidence}
+    row.update({key: trial[key] for key in ("usage", "rootCacheRead", "estimatedCostUsd", "workloadUsage")
+                if trial.get(key) is not None})
     profile = " · ".join(str(item) for item in (model, effort) if item)
     if model:
         row.update(model=model, reasoningEffort=effort)
