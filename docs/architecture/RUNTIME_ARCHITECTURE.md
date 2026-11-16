@@ -270,6 +270,9 @@ and release the slot. Parent Turns and existing message delivery, waiting, and
 interruption need no child slot. Separate primary Session trees admit
 independently.
 
+See [Subagent Turn admission](../../spec/fix-013-subagent-admission/design.md)
+for the policy and verification contract.
+
 ## Tool capability flow
 
 ```text
