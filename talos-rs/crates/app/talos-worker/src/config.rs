@@ -24,6 +24,7 @@ pub(crate) fn service(
     ));
     let gate = plugins.execution_gate();
     let hook: ConfigReloadHook = Arc::new(move |trigger| {
+        let publication = plugins.try_begin_publication()?;
         let current = active.read().expect("Worker config lock poisoned").clone();
         let mut candidate = current.reload()?;
         match trigger {
@@ -85,6 +86,7 @@ pub(crate) fn service(
         let plugins = plugins.clone();
         let output_logs_changed = output_logs_changed.clone();
         Ok(ConfigReloadPlan::new(move || {
+            let _publication = publication;
             let interval = std::time::Duration::from_secs(
                 candidate
                     .agent

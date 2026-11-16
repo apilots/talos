@@ -38,6 +38,8 @@ For a stdio server with bundled resources, put `mcp.json` and those resources to
 
 The Worker validates the requested package type before publishing a contained snapshot into the existing Marketplace cache. It installs the selected candidate through the existing transaction and records the source identity in the managed installation. Importing identical bytes reuses the registered snapshot. Source refresh and update cannot fetch changes for a local package. The user supplies a replacement explicitly. Built-in Browser identity and privileges remain governed by the existing official-source checks.
 
+Plugin publication can proceed while a Turn runs on the Worker. The existing Plugin transaction protects installation state. A change that invalidates a running tool call is reported through its normal tool or Turn error.
+
 ## Verification
 
 Exercise Marketplace discovery, Skill and MCP ZIP installation, direct canonical MCP JSON, replacement, filtering, enablement, removal, and old manifest reads. Verify archive containment and that a failed import does not change installed state. Run scoped Rust checks and generated-protocol validation. Exercise Worker-local paths, kind rejection, and replacement through the outbound Worker CLI scenario. Actual results belong under `output/`.

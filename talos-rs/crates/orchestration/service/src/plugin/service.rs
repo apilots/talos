@@ -12,12 +12,14 @@ use talos_types::{
     PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
     PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
 #[derive(Clone)]
 pub struct PluginManagerService {
     pub(super) manager: PluginManager,
     pub(crate) execution_gate: Arc<RwLock<()>>,
+    // Serialize publication and credential recovery across management calls.
+    publication: Arc<Mutex<()>>,
     pub(super) mcp: Option<McpContext>,
     pub(super) browser: Option<Arc<talos_browser::BrowserRuntime>>,
     pub(super) preparation_slots: Arc<tokio::sync::Semaphore>,
@@ -40,6 +42,7 @@ impl PluginManagerService {
         Self {
             manager: PluginManager::new(config).with_max_skill_md_bytes(skills.max_skill_md_bytes),
             execution_gate: Arc::default(),
+            publication: Arc::default(),
             mcp: None,
             browser: None,
             preparations: Arc::default(),
@@ -51,6 +54,7 @@ impl PluginManagerService {
         Self {
             manager,
             execution_gate: Arc::default(),
+            publication: Arc::default(),
             mcp: None,
             browser: None,
             preparations: Arc::default(),
@@ -115,7 +119,7 @@ impl PluginManagerService {
         installation: talos_types::PluginInstall,
         prepared: talos_browser::PreparedBrowserEnvironment,
     ) -> TalosResult<()> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.try_begin_publication()?;
         if self
             .manager
             .installed_browser_requirements()?
@@ -130,7 +134,7 @@ impl PluginManagerService {
         self.activate_prepared_browser(Some(prepared)).await
     }
 
-    /// The node-local gate shared by actual execution and environment commits.
+    /// The node-local gate shared by execution and Worker YAML reload.
     pub fn execution_gate(&self) -> Arc<RwLock<()>> {
         self.execution_gate.clone()
     }
@@ -153,12 +157,14 @@ impl PluginManagerService {
 
     /// Serializes terminal connection shutdown with plugin/configuration commits.
     pub async fn shutdown_mcp(&self) -> TalosResult<()> {
-        let _guard = self.execution_gate.write().await;
+        let execution = self.execution_gate.write().await;
+        let publication = self.publication.lock().await;
         match &self.mcp {
             Some(context) => {
                 let finishing = context.oauth.stop();
                 let result = context.runtime.shutdown().await;
-                drop(_guard);
+                drop(publication);
+                drop(execution);
                 for finished in finishing {
                     finished.cancelled().await;
                 }
@@ -264,7 +270,7 @@ impl PluginManagerService {
         mut request: PluginInstallRequest,
         prepared: super::preparation::PreparedServiceChange,
     ) -> TalosResult<PluginInstallResponse> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.try_begin_publication()?;
         self.prepare_install_credentials(&mut request)?;
         let result = self
             .manager
@@ -292,7 +298,7 @@ impl PluginManagerService {
         request: PluginUpdateRequest,
         prepared: super::preparation::PreparedServiceChange,
     ) -> TalosResult<PluginUpdateResponse> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.try_begin_publication()?;
         let result = self
             .manager
             .update_prepared(request, prepared.plugin)
@@ -311,14 +317,14 @@ impl PluginManagerService {
         &self,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.try_begin_publication()?;
         let result = self.manager.uninstall(request);
         self.recover_credentials();
         result
     }
 
     pub async fn enable(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.try_begin_publication()?;
         let mut response = self.manager.enable(request)?;
         if response.plugin.id.0 == talos_types::OFFICIAL_BROWSER_PLUGIN_ID {
             if let Some(browser) = &self.browser {
@@ -333,7 +339,7 @@ impl PluginManagerService {
         &self,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        let _guard = self.commit_guard()?;
+        let _guard = self.try_begin_publication()?;
         let result = self.manager.disable(request).map(|mut response| {
             super::redaction::plugin(&mut response.plugin);
             response
@@ -348,11 +354,12 @@ impl PluginManagerService {
         Ok(response)
     }
 
-    pub(super) fn commit_guard(&self) -> TalosResult<tokio::sync::RwLockWriteGuard<'_, ()>> {
-        self.execution_gate.try_write().map_err(|_| {
+    /// Keeps credential staging, manifest publication and recovery in one mutation.
+    pub fn try_begin_publication(&self) -> TalosResult<OwnedMutexGuard<()>> {
+        self.publication.clone().try_lock_owned().map_err(|_| {
             talos_error::TalosError::new(
                 talos_error::ErrorCode::Conflict,
-                "Worker environment cannot change while execution is active",
+                "Another Worker environment change is already being published",
             )
         })
     }

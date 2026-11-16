@@ -2,7 +2,7 @@ use super::*;
 use talos_types::*;
 
 #[tokio::test]
-async fn rejected_install_and_update_release_worker_preparations() {
+async fn publication_conflicts_release_preparations_and_running_turns_allow_retries() {
     for updating in [false, true] {
         let root = tempfile::tempdir().unwrap();
         let skill = root.path().join("catalog/skills/writer");
@@ -50,6 +50,7 @@ async fn rejected_install_and_update_release_worker_preparations() {
         } else {
             None
         };
+        let publication = plugins.try_begin_publication().unwrap();
         let config = configured_test_config();
         let environment = Arc::new(
             crate::WorkerEnvironmentService::new(
@@ -100,8 +101,7 @@ async fn rejected_install_and_update_release_worker_preparations() {
                 talos_error::ErrorCode::Conflict
             );
         }
-        // Remove only the synthetic blocking Session; management must work immediately.
-        store.delete_session_record("blocked").await.unwrap();
+        drop(publication);
         match update {
             Some(request) => {
                 service.update_plugin(&actor, request).await.unwrap();
