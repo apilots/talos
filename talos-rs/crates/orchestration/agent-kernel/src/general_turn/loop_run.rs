@@ -80,7 +80,8 @@ pub async fn execute_general_turn_loop_with_policy(
                 StopReason::EndTurn
             };
             emit_turn_metrics_stream_event(&prepared, &state, stop_reason).await;
-            if state.pending_user_action.is_some() {
+            if let Some(pending) = &mut state.pending_user_action {
+                defer_running_messages(pending, take_running_messages(&prepared)?);
                 return Ok((String::new(), stop_reason));
             }
         }
@@ -263,11 +264,7 @@ pub async fn execute_general_turn_loop_with_policy(
 
             if let Some(pending) = &mut state.pending_user_action {
                 // Keep the tool exchange open. Replay admitted input after its results.
-                pending.deferred_inputs.extend(
-                    pending_messages
-                        .into_iter()
-                        .map(|delivery| delivery.acknowledge().input),
-                );
+                defer_running_messages(pending, pending_messages);
                 break policy_stop.map_or((String::new(), StopReason::WaitingUserAction), |stop| {
                     (stop.output_text, stop.stop_reason)
                 });
@@ -315,6 +312,17 @@ fn take_running_messages(
         messages.push(message);
     }
     Ok(messages)
+}
+
+fn defer_running_messages(
+    pending: &mut PendingUserActionRequest,
+    messages: Vec<crate::ActiveTurnInputDelivery>,
+) {
+    pending.deferred_inputs.extend(
+        messages
+            .into_iter()
+            .map(|delivery| delivery.acknowledge().input),
+    );
 }
 
 async fn apply_running_messages(

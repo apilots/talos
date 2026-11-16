@@ -21,6 +21,8 @@ enum QuestionProviderMode {
     Resume,
 }
 
+const REPLAY_STEER: &str = "Keep this second instruction after the first.";
+
 struct QuestionProvider {
     mode: QuestionProviderMode,
     round: AtomicUsize,
@@ -229,6 +231,7 @@ impl LlmProvider for QuestionProvider {
                     request.messages[last_tool + 1].content,
                     "Keep this instruction after the answers."
                 );
+                assert_eq!(request.messages[last_tool + 2].content, REPLAY_STEER);
                 let assistant_message = request
                     .messages
                     .iter()
@@ -1088,8 +1091,23 @@ async fn live_input_waits_for_the_original_tool_batch_across_user_actions() {
     pending.tool_calls.extend(deferred_calls.clone());
     pending.deferred_tool_calls = deferred_calls;
     initial_metrics.tool_calls = 3;
+    let replay_steer = crate::UserInput {
+        text: REPLAY_STEER.to_string(),
+        file_ids: Vec::new(),
+    };
+    let (sender, receiver) = mpsc::channel(1);
+    let (ack_tx, mut ack_rx) = tokio::sync::oneshot::channel();
+    sender
+        .try_send(crate::ActiveTurnInputDelivery::new(
+            test_active_input(replay_steer.clone()),
+            ack_tx,
+        ))
+        .unwrap();
     let result = execute_general_turn_loop_with_resume(
-        prepared.clone(),
+        PreparedGeneralTurn {
+            message_rx: Some(Arc::new(Mutex::new(receiver))),
+            ..prepared.clone()
+        },
         Arc::new(NoopLlmProvider),
         tool_registry,
         &config,
@@ -1102,7 +1120,11 @@ async fn live_input_waits_for_the_original_tool_batch_across_user_actions() {
         .pending_user_action
         .expect("second question should remain pending");
     assert_eq!(pending.call_id, second_call.id);
-    assert_eq!(pending.deferred_inputs, vec![steer.clone()]);
+    assert_eq!(ack_rx.try_recv(), Ok(()));
+    assert_eq!(
+        pending.deferred_inputs,
+        vec![steer.clone(), replay_steer.clone()]
+    );
     assert_eq!(pending.deferred_tool_calls, vec![third_call.clone()]);
     assert_eq!(
         pending.reasoning_continuation,
@@ -1130,7 +1152,7 @@ async fn live_input_waits_for_the_original_tool_batch_across_user_actions() {
         .pending_user_action
         .expect("third question should remain pending");
     assert_eq!(pending.call_id, third_call.id);
-    assert_eq!(pending.deferred_inputs, vec![steer]);
+    assert_eq!(pending.deferred_inputs, vec![steer, replay_steer]);
     assert!(pending.deferred_tool_calls.is_empty());
     assert_eq!(
         pending.reasoning_continuation,

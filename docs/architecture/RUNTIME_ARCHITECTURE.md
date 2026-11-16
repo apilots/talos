@@ -180,9 +180,11 @@ transcript or result JSON. Provider artifacts remain private execution material.
 
 The Kernel keeps live text and File IDs in the pending tool continuation until
 the original tool batch finishes. Another user action carries the same input
-forward without reading attachments. The Provider resolves and authorizes the
-files when the Kernel is ready to apply the input. An unavailable file fails the
-Turn with the typed attachment error after the tool result, before a model call.
+forward without reading attachments and retains live input queued during the
+replay. The Provider resolves and authorizes the files when the Kernel is ready
+to apply the input. Before the next model call, the budget guard protects the
+latest live input. An unavailable file or exhausted budget fails the Turn with
+the corresponding typed error after the tool result.
 
 Natural completion and cancellation converge through the durable terminal
 commit boundary. Cancellation does not automatically dispatch queued work.
